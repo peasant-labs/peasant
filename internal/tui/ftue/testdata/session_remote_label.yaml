@@ -1,0 +1,57 @@
+cases:
+  - name: https_with_git_suffix
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-tui-cli-label-divergence}
+    mutation: {description: remove the .git suffix so the trim-suffix branch is not exercised}
+    input: {remote: "https://github.com/user/repo.git", projectName: "repo"}
+    expected: {label: "github:user/repo"}
+
+  - name: https_without_git_suffix
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-tui-cli-label-divergence}
+    mutation: {description: add the .git suffix so the no-suffix shape is not exercised}
+    input: {remote: "https://github.com/user/repo", projectName: "repo"}
+    expected: {label: "github:user/repo"}
+
+  - name: ssh_with_git_suffix
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-tui-cli-label-divergence}
+    mutation: {description: remove the .git suffix so the no-suffix SSH shape is not exercised}
+    input: {remote: "git@github.com:user/repo.git", projectName: "repo"}
+    expected: {label: "github:user/repo"}
+
+  - name: ssh_without_git_suffix
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-tui-cli-label-divergence}
+    mutation: {description: add the .git suffix so the no-suffix SSH shape is not exercised}
+    input: {remote: "git@github.com:user/repo", projectName: "repo"}
+    expected: {label: "github:user/repo"}
+
+  - name: bare_unparseable_remote_falls_back_to_project_name
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-166-tui-malformed-remote-falls-back}
+    mutation: {description: give the remote a real host/path shape so it parses instead of falling back}
+    input: {remote: "repo-name", projectName: "fallback-project"}
+    expected: {label: "fallback-project"}
+
+  - name: https_deep_gitlab_subgroup_path_is_not_truncated
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-tui-subgroup-truncation}
+    mutation: {description: drop the subgroup segment so the path collapses to two segments}
+    input: {remote: "https://gitlab.com/org/group/repo.git", projectName: "repo"}
+    expected: {label: "gitlab:org/group/repo"}
+
+  # Credential-embedded URLs must NOT expose the PAT in the display name.
+  - name: https_with_pat_credential_does_not_leak
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-credential-leak-in-display-label}
+    mutation: {description: remove the userinfo so the credential-stripping branch is not exercised}
+    input: {remote: "https://kjhy:glpat-SomeSecretToken123456@gitlab.com/sfurs/sw-analytics-hub", projectName: "sw-analytics-hub"}
+    expected: {label: "gitlab:sfurs/sw-analytics-hub"}
+
+  - name: https_with_userpass_credential_does_not_leak
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-credential-leak-in-display-label}
+    mutation: {description: remove the password so the userinfo takes a different shape}
+    input: {remote: "https://user:password123@github.com/org/repo.git", projectName: "repo"}
+    expected: {label: "github:org/repo"}

@@ -1,0 +1,18 @@
+expectedCaseCount: 2
+cases:
+  - selectedSessionID: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+    retainedSessionID: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+    selectedCommitHash: cli-prune-selected-commit
+    retainedCommitHash: cli-prune-retained-commit
+    selectedValue: selected-association
+    retainedValue: retained-association
+    annotatorName: outcome-classifier
+    expectedCount: 1
+  - selectedSessionID: cccccccc-cccc-cccc-cccc-cccccccccccc
+    retainedSessionID: dddddddd-dddd-dddd-dddd-dddddddddddd
+    selectedCommitHash: second-selected-commit
+    retainedCommitHash: second-retained-commit
+    selectedValue: second-selected-association
+    retainedValue: second-retained-association
+    annotatorName: outcome-classifier
+    expectedCount: 1

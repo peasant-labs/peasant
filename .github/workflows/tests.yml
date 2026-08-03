@@ -1,0 +1,271 @@
+name: Tests
+
+# Runs the peasant quality gate (`make check`: gofmt + go vet + ast-grep +
+# `go test -race`, incl. the versioned back-compat golden corpus consumed from
+# the schema module) on PRs and pushes to the long-lived branches. Uses the
+# project's own nix dev shell so the toolchain (Go, ast-grep, …) matches local
+# exactly.
+#
+# This is kept light and path-filtered. The `check` job does NOT build the web frontend
+# — `make lint` stubs `web/out` to satisfy the `//go:embed all:web/out`
+# directive, and the frontend is not under test in that Go job. The contract
+# now lives in the public `github.com/peasant-labs/schema` module, fetched as a
+# normal public dependency.
+#
+# The web/ jobs (`web-lockfiles-in-sync`, `web-pnpm-build`,
+# `web-lockfiles-in-sync`) DO build the frontend — they guard the pnpm-only
+# web build: pnpm-lock.yaml drift and a broken real pnpm build. Web is pnpm-only.
+# They only run when web/**, the Makefile, or this workflow change
+# (see the path filters below).
+on:
+  pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "sgconfig.yml"
+      - "ast-grep/**"
+      - "flake.nix"
+      - "flake.lock"
+      - ".gitignore"
+      - "web/.gitignore"
+      - "web/out/**"
+      - "web/**"
+      # Every workflow can affect the CI/release gate graph. Keep policy and
+      # release-tool inputs in the ordinary PR gate as well, so drift is caught
+      # before a release-only event exercises it.
+      - ".github/workflows/**"
+      - ".github/workflows/e2e.yml"
+      - ".github/workflows/release-e2e.yml"
+      - ".github/release-guard.policy.yml"
+      - ".goreleaser.yml"
+      - "scripts/install-goreleaser"
+      - "scripts/goreleaser-v2.17.1-homebrew.patch"
+      - "scripts/update-nix-vendor-hash.sh"
+      - "scripts/release-e2e/**"
+  push:
+    branches: [develop, main]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "sgconfig.yml"
+      - "ast-grep/**"
+      - "flake.nix"
+      - "flake.lock"
+      - ".gitignore"
+      - "web/.gitignore"
+      - "web/out/**"
+      - "web/**"
+      # Mirror the PR inputs exactly: post-merge CI must exercise every workflow
+      # and release-policy/tooling change that can alter a gate or artifact.
+      - ".github/workflows/**"
+      - ".github/workflows/e2e.yml"
+      - ".github/workflows/release-e2e.yml"
+      - ".github/release-guard.policy.yml"
+      - ".goreleaser.yml"
+      - "scripts/install-goreleaser"
+      - "scripts/goreleaser-v2.17.1-homebrew.patch"
+      - "scripts/update-nix-vendor-hash.sh"
+      - "scripts/release-e2e/**"
+  # Reusable entry point: release-pr.yml calls this on a release(...) PR so the
+  # quality gate runs even when the release marker commit touches none of the
+  # path-filtered files above. Also handy for on-demand reruns.
+  workflow_call:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: make check
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30  # fail fast instead of wedging if the run hangs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      # Cache the Go build + module dirs (the dominant cost is the `go test -race`
+      # suite). The old DeterminateSystems/magic-nix-cache-action was REMOVED: it
+      # was retired in favour of FlakeHub Cache, which requires a FlakeHub account
+      # and now fails ("Unable to authenticate to FlakeHub") on a plain repo.
+      - name: Cache Go build + modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: make check
+        run: nix develop -c make check
+
+  # CGO=0 build mode gate. The release binaries are built CGO_ENABLED=0 (static,
+  # portable) — that is the mode the goreleaser/nix/distro builds ship. This job
+  # proves Peasant's public-module redaction seam compiles AND behaves correctly without cgo:
+  # `NewRedactor(Maximum)` must HARD-ERROR actionably (never silently weaker
+  # redaction) when tree-sitter is not linked. The redact + e2e suites carry the
+  # build-tag-gated negative assertions (TestMaximumAvailability_NoCGO,
+  # TestFixture_MaximumDifferential branch on redact.MaximumAvailable). Runs
+  # WITHOUT -race: the data-race detector requires cgo, so -race under
+  # CGO_ENABLED=0 is a contradiction.
+  cgo0:
+    name: CGO=0 consumer/e2e + module-zip proxy
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      - name: Cache Go build + modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-cgo0-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-cgo0-
+
+      # Satisfy the `//go:embed all:web/out` directive for `go build ./...`. The
+      # committed web/out/.gitkeep placeholder already satisfies the embed on a
+      # fresh checkout; `make web-stub` (idempotent + non-destructive)
+      # is the single shared source for the stub and additionally writes a real
+      # index.html stub when one is absent. Belt-and-suspenders in case `make
+      # clean` ever runs first.
+      - name: Stub web/out embed
+        run: nix develop -c make web-stub
+
+      - name: CGO=0 build + targeted tests
+        run: |
+          nix develop -c bash -c '
+            set -euo pipefail
+            CGO_ENABLED=0 go build ./...
+            CGO_ENABLED=0 go test ./internal/config/ ./internal/ingest/ ./internal/e2e/
+          '
+
+      # Module-zip proxy gate. A Go module
+      # zip (what `go install module@version` fetches) contains ONLY git-tracked
+      # files. `git archive HEAD` reproduces exactly that set, so building
+      # ./cmd/peasant from a clean extraction proves the binary does NOT depend
+      # on any gitignored file — specifically that the committed
+      # web/out/.gitkeep placeholder satisfies `//go:embed all:web/out` without
+      # a local `make web`. This is the honest pre-flip proxy: a live `go install`
+      # from the registry is covered separately after a release is published.
+      # It uses HEAD (committed tree), NOT the working dir, so the defensive
+      # web/out stub above does not leak into the test.
+      - name: Module-zip go-install proxy (git archive HEAD -> build)
+        run: |
+          # shellcheck disable=SC2016
+          # The script is single-quoted ON PURPOSE: $tmp / $(mktemp) must expand
+          # in the INNER `bash -c`, not the outer run shell. Single quotes pass it
+          # through literally. SC2016 ("expressions don't expand in single
+          # quotes") is therefore a false positive here.
+          nix develop -c bash -c '
+            set -euo pipefail
+            tmp="$(mktemp -d)"
+            trap "rm -rf \"$tmp\"" EXIT
+            git archive --format=tar HEAD | tar -x -C "$tmp"
+            cd "$tmp"
+            test -f web/out/.gitkeep || { echo "FAIL: web/out/.gitkeep not in HEAD (go:embed will break go install)"; exit 1; }
+            CGO_ENABLED=0 go build -buildvcs=false ./cmd/peasant
+            echo "module-zip proxy OK: ./cmd/peasant builds from tracked files only"
+          '
+
+  # ---------------------------------------------------------------------------
+  # web/ package-manager gates. web/ carries one dependency graph in
+  # web/pnpm-lock.yaml. Before these jobs nothing
+  # mechanically asserted that (1) the lockfile tracks web/package.json, or
+  # (2) the real pnpm build produces a non-stub dashboard.
+  # The two jobs below close those gaps.
+  # They set pnpm/node up the same way release.yml / release-validate.yml do
+  # (pnpm/action-setup@v4 with package_json_file: web/package.json; setup-node@v4
+  # node 24).
+  # ---------------------------------------------------------------------------
+
+  # Lockfile drift: assert web/pnpm-lock.yaml is in sync with
+  # web/package.json: `pnpm install --frozen-lockfile` fails if it drifted.
+  # Catches the common mistake of bumping web/package.json without
+  # regenerating the lockfile.
+  web-lockfiles-in-sync:
+    name: web lockfiles in sync
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: pnpm-lock.yaml in sync with web/package.json
+        run: cd web && pnpm install --frozen-lockfile
+
+  # Run the real pnpm `make web` with no stub fallback so a broken pnpm/Next build fails
+  # this job, then assert web/out/index.html exists AND is the real dashboard
+  # (not the web-stub notice). Artifact workflows enforce the same invariant.
+  web-pnpm-build:
+    name: web real pnpm build (no stub fallback)
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # NO `|| make web-stub`: a failing real build must fail the job, not fall
+      # through to a stub dashboard that lets the job pass green.
+      - name: make web (real pnpm build)
+        run: make web
+
+      - name: Assert real (non-stub) dashboard was built
+        run: |
+          set -euo pipefail
+          test -f web/out/index.html || { echo "FAIL: web/out/index.html missing after make web"; exit 1; }
+          if grep -qF "is not bundled in this build" web/out/index.html; then
+            echo "FAIL: web/out/index.html is the web-stub notice, not a real pnpm build"
+            exit 1
+          fi
+          echo "OK: real pnpm-built dashboard present at web/out/index.html"

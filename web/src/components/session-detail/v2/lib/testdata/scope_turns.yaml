@@ -1,0 +1,77 @@
+expectedCounts:
+  taskScopes: 5
+  fileScopes: 4
+  changeScopes: 5
+  relativizePaths: 5
+  pathMatches: 6
+  touchKinds: 6
+  originCrumbs: 6
+  scopeChipLabels: 4
+taskScopes:
+  - {name: task range stops at next top-level user turn, scopeVal: "0", wantIndexes: [0, 1, 2, 3]}
+  - {name: last task runs to session end, scopeVal: "4", wantIndexes: [4, 5]}
+  - {name: non-user anchor stops at next top-level user turn, scopeVal: "1", wantIndexes: [1, 2, 3]}
+  - {name: unknown anchor uses whole session, scopeVal: "99", wantIndexes: [0, 1, 2, 3, 4, 5]}
+  - {name: non-numeric anchor uses whole session, scopeVal: abc, wantIndexes: [0, 1, 2, 3, 4, 5]}
+
+fileScopes:
+  - {name: edits and reads are included, scopeVal: web/src/lib/api.ts, wantIndexes: [1, 2]}
+  - {name: other file is isolated, scopeVal: internal/ingest/pipeline.go, wantIndexes: [3]}
+  - {name: unknown file is empty, scopeVal: does/not/exist.ts, wantIndexes: []}
+  - {name: empty path uses whole session, scopeVal: "", wantIndexes: [0, 1, 2, 3, 4]}
+
+changeScopes:
+  - {name: one task index scopes one task, scopeVal: "4", wantIndexes: [4, 5]}
+  - {name: multiple task indexes union in session order, scopeVal: "0,4", wantIndexes: [0, 1, 2, 3, 4, 5]}
+  - {name: duplicate indexes deduplicate, scopeVal: "0,0", wantIndexes: [0, 1, 2, 3]}
+  - {name: empty value uses whole session, scopeVal: "", wantIndexes: [0, 1, 2, 3, 4, 5]}
+  - {name: stale branch value uses whole session, scopeVal: feat/x, wantIndexes: [0, 1, 2, 3, 4, 5]}
+
+relativizePaths:
+  - {name: working-directory prefix is stripped, path: /Users/dev/proj/web/src/lib/api.ts, workingDirectory: /Users/dev/proj, want: web/src/lib/api.ts}
+  - {name: trailing working-directory slash is tolerated, path: /Users/dev/proj/web/src/lib/api.ts, workingDirectory: /Users/dev/proj/, want: web/src/lib/api.ts}
+  - {name: outside path is unchanged, path: /elsewhere/web/src/lib/api.ts, workingDirectory: /Users/dev/proj, want: /elsewhere/web/src/lib/api.ts}
+  - {name: absent working directory leaves path unchanged, path: /Users/dev/proj/web/src/lib/api.ts, workingDirectory: "", want: /Users/dev/proj/web/src/lib/api.ts}
+  - {name: relative path is unchanged, path: web/src/lib/api.ts, workingDirectory: /Users/dev/proj, want: web/src/lib/api.ts}
+
+pathMatches:
+  - {name: exact equality, left: web/src/lib/api.ts, right: web/src/lib/api.ts, want: true}
+  - {name: absolute matches relative, left: /Users/dev/proj/web/src/lib/api.ts, right: web/src/lib/api.ts, want: true}
+  - {name: relative matches absolute, left: web/src/lib/api.ts, right: /Users/dev/proj/web/src/lib/api.ts, want: true}
+  - {name: suffix requires segment boundary, left: sugar/api.ts, right: bar/api.ts, want: false}
+  - {name: different files do not match, left: web/src/lib/api.ts, right: internal/ingest/pipeline.go, want: false}
+  - {name: empty path does not match, left: "", right: web/src/lib/api.ts, want: false}
+
+touchKinds:
+  - {name: edit kind with path, id: e, toolName: Edit, filePath: web/src/lib/api.ts, toolKind: edit, wantEdit: true, wantRead: false}
+  - {name: delete kind with path, id: d, toolName: Bash, filePath: web/src/lib/api.ts, toolKind: delete, wantEdit: true, wantRead: false}
+  - {name: move kind with path, id: m, toolName: Bash, filePath: web/src/lib/api.ts, toolKind: move, wantEdit: true, wantRead: false}
+  - {name: read kind with path, id: r, toolName: Read, filePath: web/src/lib/api.ts, toolKind: read, wantEdit: false, wantRead: true}
+  - {name: search kind with path, id: s, toolName: Glob, filePath: web/src/lib/api.ts, toolKind: search, wantEdit: false, wantRead: true}
+  - {name: edit without path, id: e2, toolName: Edit, filePath: "", toolKind: edit, wantEdit: false, wantRead: false}
+
+originCrumbs:
+  - name: Map node
+    params: {scope: null, scopeVal: "", origin: Map, originNode: internal/ingest, originBranch: "", returnTo: ""}
+    want: {label: map · internal/ingest, href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest}
+  - name: Map whole session
+    params: {scope: null, scopeVal: "", origin: Map, originNode: "", originBranch: "", returnTo: ""}
+    want: {label: map, href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  - name: Review branch
+    params: {scope: null, scopeVal: "", origin: Review, originNode: "", originBranch: feat/graph-cache, returnTo: ""}
+    want: {label: changes · feat/graph-cache, href: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Fgraph-cache}
+  - name: Review project
+    params: {scope: null, scopeVal: "", origin: Review, originNode: "", originBranch: "", returnTo: ""}
+    want: {label: changes, href: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  - name: no origin
+    params: {scope: null, scopeVal: "", origin: null, originNode: "", originBranch: "", returnTo: ""}
+    want: null
+  - name: exact Map return location
+    params: {scope: null, scopeVal: "", origin: Map, originNode: internal/ingest, originBranch: "", returnTo: ""}
+    want: {label: map · internal/ingest, href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest}
+
+scopeChipLabels:
+  - {name: task chip, scope: task, value: "5", want: "Showing one request (#5) — clear to see the whole conversation"}
+  - {name: file chip, scope: file, value: web/src/lib/api.ts, want: "Showing only what touched web/src/lib/api.ts — clear to see the whole conversation"}
+  - {name: change chip, scope: change, value: "0,4", want: "Showing only this change’s requests — clear to see the whole conversation"}
+  - {name: task chip without value, scope: task, value: "", want: "Showing one request — clear to see the whole conversation"}

@@ -1,0 +1,12 @@
+expectedCaseCount: 2
+cases:
+  - name: pending retry stays closed until selected replacement succeeds
+    hiddenProject: hidden-project
+    replacementProjects:
+      - {project: alpha-project, projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+      - {project: beta-project, projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+    retryOutcome: success
+  - name: failed retry stays closed and actionable
+    hiddenProject: hidden-project
+    replacementProjects: []
+    retryOutcome: failure

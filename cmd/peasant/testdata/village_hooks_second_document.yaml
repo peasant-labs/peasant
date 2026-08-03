@@ -1,0 +1,10 @@
+expectedCaseCount: 1
+cases:
+  - name: first-document
+    event: post-commit
+    gitOperation: commit
+    uploadExitCode: 0
+    expectWarning: false
+---
+expectedCaseCount: 0
+cases: []

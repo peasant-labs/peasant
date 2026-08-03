@@ -1,0 +1,7 @@
+expectedCaseCount: 9
+cases:
+  - name: only-one-case
+    event: post-commit
+    gitOperation: commit
+    uploadExitCode: 0
+    expectWarning: false

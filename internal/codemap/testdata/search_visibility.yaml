@@ -1,0 +1,134 @@
+cases:
+  - name: hidden_best_visible_next_limit_1
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-limit}
+    mutation: {description: hide the highest-ranked row while requesting one visible result}
+    input:
+      query: needle
+      limit: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions: [22222222-2222-2222-2222-222222222222]
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "needle needle needle needle needle"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "needle"}
+    expected:
+      session_ids: [22222222-2222-2222-2222-222222222222]
+      results_non_null: true
+
+  - name: hidden_prefix_pages_until_visible_limit
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-paging}
+    mutation: {description: place three hidden rows before two selected rows so raw paging must continue}
+    input:
+      query: pagingneedle
+      limit: 2
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions:
+              - 44444444-4444-4444-4444-444444444444
+              - 55555555-5555-5555-5555-555555555555
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "pagingneedle pagingneedle pagingneedle pagingneedle pagingneedle"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "pagingneedle pagingneedle pagingneedle pagingneedle"}
+        - {id: 33333333-3333-3333-3333-333333333333, content: "pagingneedle pagingneedle pagingneedle"}
+        - {id: 44444444-4444-4444-4444-444444444444, content: "pagingneedle pagingneedle"}
+        - {id: 55555555-5555-5555-5555-555555555555, content: "pagingneedle"}
+    expected:
+      session_ids:
+        - 44444444-4444-4444-4444-444444444444
+        - 55555555-5555-5555-5555-555555555555
+      results_non_null: true
+
+  - name: all_mode_preserves_global_rank
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-all-mode}
+    mutation: {description: use all mode with distinct term frequencies and a limit below the raw match count}
+    input:
+      query: globalneedle
+      limit: 2
+      selection: {mode: all}
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "globalneedle globalneedle globalneedle globalneedle globalneedle"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "globalneedle globalneedle globalneedle"}
+        - {id: 33333333-3333-3333-3333-333333333333, content: "globalneedle"}
+    expected:
+      session_ids:
+        - 11111111-1111-1111-1111-111111111111
+        - 22222222-2222-2222-2222-222222222222
+      results_non_null: true
+
+  - name: hidden_only_empty_non_null
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-hidden-only}
+    mutation: {description: make every matching raw row a sibling outside the explicit session selection}
+    input:
+      query: hiddenneedle
+      limit: 2
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions: [99999999-9999-9999-9999-999999999999]
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "hiddenneedle hiddenneedle"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "hiddenneedle"}
+    expected: {session_ids: [], results_non_null: true}
+
+  - name: explicit_session_no_sibling
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-explicit-session}
+    mutation: {description: rank a sibling above the explicitly selected session in the same project}
+    input:
+      query: siblingneedle
+      limit: 2
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions: [22222222-2222-2222-2222-222222222222]
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: "siblingneedle siblingneedle siblingneedle"}
+        - {id: 22222222-2222-2222-2222-222222222222, content: "siblingneedle"}
+    expected:
+      session_ids: [22222222-2222-2222-2222-222222222222]
+      results_non_null: true
+
+  - name: conflict_fails_closed
+    classification: must-fail
+    provenance: {source: requirement, ref: selection-visible-search-conflict}
+    mutation: {description: give one project conflicting remote and name branch selections}
+    input:
+      query: conflictneedle
+      limit: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {gitRemote: "example.test/org/repo", branches: [main]}
+              - {name: /repo, branches: [dev]}
+      sessions:
+        - id: 11111111-1111-1111-1111-111111111111
+          content: conflictneedle
+          git_remote: "git@example.test:org/repo.git"
+          project_name: repo
+          git_branch: main
+    expected:
+      error_contains: conflicting project branch rules
+
+  - name: selected_empty_returns_empty
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-selected-empty}
+    mutation: {description: select no sessions while matching raw rows exist}
+    input:
+      query: emptyneedle
+      limit: 2
+      selection: {mode: selected}
+      sessions:
+        - {id: 11111111-1111-1111-1111-111111111111, content: emptyneedle}
+    expected: {session_ids: [], results_non_null: true}

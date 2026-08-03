@@ -1,0 +1,51 @@
+# What ingest stores for each configured redaction level, and whether the three
+# records of a session's host slug still agree afterwards.
+#
+# A session's slug is recorded in THREE places: the directory ingest writes, the
+# database row, and the metadata file. Push resolves the metadata path from the
+# database row, so the three have to be identical or that session can never
+# publish again. They stopped being identical whenever a redactor ran while
+# ingest wrote: the directory was built from the real slug and the other two from
+# the redacted one.
+#
+# recordedDirectoryBasename is the basename of the directory the session was
+# recorded in. For a repository with no origin remote the slug is derived from
+# that path, so the basename decides whether the slug trips entropy detection.
+# The hex-shaped basenames below are ENTROPY-PINNED: the test proves, against the
+# real engine, that a maximum redactor really would replace such a slug with a
+# placeholder. That proof is what makes these rows non-vacuous - without it a case
+# could pass because nothing was ever at risk rather than because the fix works.
+#
+# Only the pinned direction is asserted. An ordinary basename cannot be pinned the
+# other way: the eight-hex segment of an untracked slug is HMAC(per-install salt,
+# path), so an ordinary name trips on its own for a large minority of installs.
+# That unpredictability is the reason this defect was never a single unlucky path,
+# and it is why the pinned rows carry the proof instead of the recorded hash.
+#
+# level                      the configured redaction level. Only supported levels
+#                            appear: an unsupported one refuses before any
+#                            transcript is read, which redaction_refusals.yaml
+#                            drives.
+# entropyPinned              this slug is proven redactable by a maximum redactor.
+# ingestRedacts              whether ingest is expected to redact while writing.
+#                            No level this version can apply does, which is the
+#                            fix: the corrupting write is unreachable.
+expectedCaseCount: 3
+cases:
+  - name: standard-config-over-an-ordinary-directory-keeps-all-three-records-equal
+    level: standard
+    recordedDirectoryBasename: ledger-service
+    entropyPinned: false
+    ingestRedacts: false
+
+  - name: standard-config-over-an-entropy-pinned-directory-was-never-at-risk
+    level: standard
+    recordedDirectoryBasename: 7f3a9c1e5b8d2604af71
+    entropyPinned: true
+    ingestRedacts: false
+
+  - name: minimal-config-over-an-entropy-pinned-directory-was-never-at-risk
+    level: minimal
+    recordedDirectoryBasename: 3c8e5a1f7b9d2e64
+    entropyPinned: true
+    ingestRedacts: false

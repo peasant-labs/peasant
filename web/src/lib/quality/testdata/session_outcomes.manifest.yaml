@@ -1,0 +1,65 @@
+expectedRootFields: [baseSession, cases, emptyOutcomeCases, outcomeLabelCases, labelCases]
+expectedCaseCount: 4
+expectedEmptyOutcomeCaseCount: 1
+expectedOutcomeLabelCount: 4
+expectedLabelCount: 10
+validOutcomes: [resolved, partial, failed]
+invalidOutcomes: [abandoned]
+requiredOutcomeNames:
+  - resolved outcome is accepted
+  - partial outcome is accepted
+  - failed outcome is accepted
+  - unknown outcome fails closed
+requiredEmptyOutcomeNames:
+  - empty outcome is treated as not yet computed
+requiredOutcomeLabelNames:
+  - resolved maps positive
+  - legacy not resolved maps negative
+  - unknown outcome label is absent
+  - empty outcome label is absent
+requiredLabelNames:
+  - undefined annotations produce no labels
+  - empty annotations produce no labels
+  - human resolved annotation populates human label
+  - agent unresolved annotation populates agent label
+  - rule resolved annotation populates rules label
+  - all annotation kinds remain distinct
+  - unrelated type is ignored
+  - unknown annotation value is ignored
+  - first annotation per kind wins
+  - rule and agent labels remain distinct
+expectedLoaderMutationCount: 5
+loaderMutations:
+  - {name: outcome count drift is rejected, target: manifest, find: "expectedCaseCount: 4\nexpectedEmptyOutcomeCaseCount:", replace: "expectedCaseCount: 3\nexpectedEmptyOutcomeCaseCount:", expectedError: independent manifest}
+  - {name: duplicate outcome names are rejected, target: cases, find: "  - {name: partial outcome is accepted, outcome: partial, valid: true}\n  - {name: failed", replace: "  - {name: resolved outcome is accepted, outcome: partial, valid: true}\n  - {name: failed", expectedError: duplicates}
+  - {name: missing outcome validity is rejected, target: cases, find: "  - {name: unknown outcome fails closed, outcome: abandoned, valid: false}\n#", replace: "  - {name: unknown outcome fails closed, outcome: abandoned}\n#", expectedError: required fields}
+  - {name: invalid validity scalar is rejected, target: cases, find: "  - {name: failed outcome is accepted, outcome: failed, valid: true}\n  - {name: unknown", replace: "  - {name: failed outcome is accepted, outcome: failed, valid: accepted}\n  - {name: unknown", expectedError: invalid fields}
+  - {name: malformed outcome YAML is rejected, target: cases, find: "baseSession:\n  id:", replace: "baseSession: [\n  id:", expectedError: invalid YAML}
+expectedMutationCount: 3
+mutations:
+  - name: refined outcome cannot be dropped
+    target: /src/lib/quality/types.ts
+    find: 'return { ...session, outcome: session.outcome };'
+    replace: 'return { ...session, outcome: undefined as never };'
+    expectedTestFile: src/lib/quality/types.test.ts
+    expectedFailedTestNames:
+      - resolved outcome is accepted
+      - partial outcome is accepted
+      - failed outcome is accepted
+    expectedFailurePattern: 'outcome|deeply equal'
+  - name: unknown outcomes cannot fail open
+    target: /src/lib/quality/types.ts
+    find: 'if (!isSessionOutcome(session.outcome)) {'
+    replace: 'if (false && !isSessionOutcome(session.outcome)) {'
+    expectedTestFile: src/lib/quality/types.test.ts
+    expectedFailedTestNames:
+      - unknown outcome fails closed
+    expectedFailurePattern: 'function did not throw|expected.*to throw'
+  - name: empty outcome cannot regress to a throw
+    target: /src/lib/quality/types.ts
+    find: "if (session.outcome === '') {"
+    replace: "if (false && session.outcome === '') {"
+    expectedTestFile: src/lib/quality/types.test.ts
+    expectedFailedTestNames:
+      - empty outcome is treated as not yet computed
+    expectedFailurePattern: 'unknown outcome[\s\S]*adaptQualitySessions'

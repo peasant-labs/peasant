@@ -1,0 +1,42 @@
+# A corpus with a row for every level the engine defines, and none for the UNSET
+# one.
+#
+# This corpus is exactly what deleting one row from the real one produced, and for
+# a while nothing noticed: "" is not a member of redact.AllRedactionLevels, so the
+# closed-set walk never asked for it, and the disposition-coverage guard was
+# already satisfied by the standard row.
+#
+# What goes uncovered is not decorative. RedactionLevelDispositionOf answers the
+# unset value in its own branch, and that answer decides whether a zero-value
+# configuration may run at all - flip it to a refusal and `peasant village push`
+# stops for every such install. internal/api cannot stand in for it either: its
+# omitted-level path resolves "" through IsValid() before any disposition is
+# asked for, so the mutated branch is never reached from there.
+
+expectedRedactionCaseCount: 3
+redaction:
+  - name: standard
+    configured: standard
+    disposition: offered
+    effective: standard
+  - name: minimal
+    configured: minimal
+    disposition: raised
+    effective: standard
+  - name: maximum
+    configured: maximum
+    disposition: refused
+
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

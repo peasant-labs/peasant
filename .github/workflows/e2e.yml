@@ -1,0 +1,167 @@
+name: E2E
+
+# Heavy full-stack push smoke test: `make e2e` provisions an ephemeral stack with
+# podman (Postgres + MinIO + the real village ./cmd/server) and drives the real
+# peasant CLI through ingest → village push (skip-gate + retraction) → the village
+# secret-scan. It is expensive, so it runs on relevant PRs to develop, pushes to
+# the long-lived branches (post-merge integration check), reusable workflow calls,
+# and on-demand runs.
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - internal/e2e/**
+      - internal/ingest/**
+      - internal/pull/**
+      - internal/push/**
+      - cmd/**
+      - go.mod
+      - go.sum
+      - Makefile
+      - .github/workflows/e2e.yml
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VILLAGE_REF: 2fe5db70fe7e2d3e19624bf35f6b2a73cf76b1bf
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: full-stack push e2e (podman)
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 45
+    steps:
+      - name: Checkout peasant
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Checkout village (for ./cmd/server + ./cmd/village-setup-demo)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: peasant-labs/village
+          ref: ${{ env.VILLAGE_REF }}
+          path: _village
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify schema module pin parity
+        env:
+          VILLAGE_REPO: ${{ github.workspace }}/_village
+        run: make e2e-schema-parity
+
+      # Pin/assert the CI podman version for local<->CI parity. ubuntu-24.04 ships
+      # podman 4.9.x (apt). The stderr object-count regression and the
+      # status=dead filter break are both 4.9.x-shaped, and local podman 5.x does
+      # NOT reproduce them — so a runner-image bump that changes podman must fail
+      # loudly here and force a lockstep update of docs/e2e.md's local repro.
+      - name: Verify and pin podman version (local<->CI parity)
+        env:
+          EXPECTED_PODMAN_MAJOR_MINOR: "4.9"
+        run: |
+          set -euo pipefail
+          podman --version
+          actual="$(podman version --format '{{.Client.Version}}')"
+          case "$actual" in
+            "${EXPECTED_PODMAN_MAJOR_MINOR}".*)
+              echo "podman $actual matches the pinned ${EXPECTED_PODMAN_MAJOR_MINOR}.x parity floor" ;;
+            *)
+              echo "::error::podman $actual does not match the pinned ${EXPECTED_PODMAN_MAJOR_MINOR}.x parity floor; update .github/workflows/e2e.yml and docs/e2e.md (local repro) in lockstep"
+              exit 1 ;;
+          esac
+
+      # Status set is TERMINAL + NON-RACY: `exited` + `stopped` are the podman
+      # terminal states a finished sibling lands in. `created` (a sibling's brief
+      # created-window) and `running` (a live sibling) are deliberately EXCLUDED.
+      # NB: do NOT use `status=dead` — it is a Docker state that podman 4.9.3
+      # REJECTS ("unknown container state: dead"), which broke this cleanup step
+      # (the piped command erred → no-op → stale containers were never reaped).
+      - name: Clean up stale e2e podman containers
+        run: |
+          mapfile -t containers < <(
+            {
+              podman ps -aq --filter name=peasant-e2e- --filter status=exited
+              podman ps -aq --filter name=peasant-e2e- --filter status=stopped
+            } | sort -u
+          )
+          if [ "${#containers[@]}" -gt 0 ]; then
+            podman rm -fv "${containers[@]}"
+          fi
+
+      # The harness builds the peasant CLI, whose binary embeds web/out
+      # (//go:embed all:web/out). The frontend is not under test here, so use the
+      # shared `make web-stub` target — the single source for the
+      # placeholder. It is idempotent and non-destructive: it writes an
+      # index.html stub when absent (the tracked placeholder is web/out/.gitkeep;
+      # the written index.html is gitignored). This job uses setup-go (no nix
+      # dev shell), so `make` is invoked directly from the runner's PATH.
+      - name: Stub web/out for the //go:embed
+        run: make web-stub
+
+      # The village backend lives at <VILLAGE_REPO>/backend; the harness appends it.
+      - name: make e2e
+        id: e2e
+        env:
+          VILLAGE_REPO: ${{ github.workspace }}/_village
+        run: |
+          set -o pipefail
+          go test -race -tags=e2e -count=1 -v ./internal/e2e/... 2>&1 | tee /tmp/e2e.log
+
+      # The harness t.Skip()s (podman/village/image-pull issues) rather than
+      # failing — which would pass the job with NO real coverage. Fail loudly
+      # unless the asserted e2e produced a positive PASS line, so a misconfigured
+      # runner or empty test match is visible.
+      - name: Assert asserted e2e tests ran and passed
+        if: always()
+        run: |
+          if grep -qi 'no tests to run' /tmp/e2e.log; then
+            echo "::error::go test reported no tests to run; asserted e2e tests did not execute."
+            exit 1
+          fi
+          if grep -qE '^--- SKIP: TestSkipGateE2E' /tmp/e2e.log; then
+            echo "::error::TestSkipGateE2E was SKIPPED — podman/village/network setup is incomplete; no e2e coverage ran."
+            exit 1
+          fi
+          if ! grep -qE '^--- PASS: TestSkipGateE2E' /tmp/e2e.log; then
+            echo "::error::TestSkipGateE2E did not produce a positive PASS line; no asserted e2e coverage was proven."
+            exit 1
+          fi
+          if grep -qE '^--- SKIP: TestPullRoundTripE2E' /tmp/e2e.log; then
+            echo "::error::TestPullRoundTripE2E was SKIPPED — pull regression coverage did not run."
+            exit 1
+          fi
+          if ! grep -qE '^--- PASS: TestPullRoundTripE2E' /tmp/e2e.log; then
+            echo "::error::TestPullRoundTripE2E did not produce a positive PASS line; pull regression coverage was not proven."
+            exit 1
+          fi
+          if grep -qE '^--- SKIP: TestHarnessRefreshE2E' /tmp/e2e.log; then
+            echo "::error::TestHarnessRefreshE2E was SKIPPED — warm-stack refresh coverage did not run."
+            exit 1
+          fi
+          if ! grep -qE '^--- PASS: TestHarnessRefreshE2E' /tmp/e2e.log; then
+            echo "::error::TestHarnessRefreshE2E did not produce a positive PASS line; refresh regression coverage was not proven."
+            exit 1
+          fi
+          if grep -qE '^--- SKIP: TestPublicationConvergenceE2E' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPublicationConvergenceE2E' /tmp/e2e.log; then
+            echo "::error::TestPublicationConvergenceE2E did not run and pass."
+            exit 1
+          fi
+          if grep -qE '^--- SKIP: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' /tmp/e2e.log; then
+            echo "::error::joined post-commit publication evidence did not run and pass."
+            exit 1
+          fi
+          if grep -qE '^--- SKIP: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush' /tmp/e2e.log; then
+            echo "::error::joined pre-push refusal evidence did not run and pass."
+            exit 1
+          fi

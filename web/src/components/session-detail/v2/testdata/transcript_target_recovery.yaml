@@ -1,0 +1,46 @@
+cases:
+  - name: absent target opens top and offers stale-link removal
+    family: absent
+    search: turn=42
+    turns: [0, 7]
+    targetRole: user
+    targetDepth: 0
+    expectedInitialKind: top
+    expectedInitialTurn: -1
+    expectedInitialRequestKey: missing-turn:42
+    expectedFeedback: linked turn is no longer available
+    action: remove stale turn target
+    expectedReplace: /projects/alpha-project/sess-12345678
+    expectedAfterActionKind: top
+    expectedAfterActionTurn: -1
+    expectedAfterActionRequestKey: none
+  - name: scope-hidden target waits for reveal
+    family: scope-filtered
+    search: turn=42&scope=task&scopeVal=0&origin=Map
+    turns: [0, 7, 42]
+    targetRole: user
+    targetDepth: 0
+    expectedInitialKind: none
+    expectedInitialTurn: -1
+    expectedInitialRequestKey: none
+    expectedFeedback: linked turn is hidden by the current view
+    action: reveal linked turn
+    expectedReplace: /projects/alpha-project/sess-12345678?turn=42&origin=Map
+    expectedAfterActionKind: turn
+    expectedAfterActionTurn: 42
+    expectedAfterActionRequestKey: none
+  - name: visible sparse target positions by identity
+    family: visible-sparse
+    search: turn=42
+    turns: [0, 7, 42]
+    targetRole: user
+    targetDepth: 0
+    expectedInitialKind: turn
+    expectedInitialTurn: 42
+    expectedInitialRequestKey: none
+    expectedFeedback: none
+    action: none
+    expectedReplace: none
+    expectedAfterActionKind: turn
+    expectedAfterActionTurn: 42
+    expectedAfterActionRequestKey: none

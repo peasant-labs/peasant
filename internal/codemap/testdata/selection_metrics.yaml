@@ -1,0 +1,47 @@
+expectedCaseCount: 1
+requiredNames:
+  - selected_hidden_extreme_baseline
+cases:
+  - id: selected-hidden-extreme-baseline
+    name: selected_hidden_extreme_baseline
+    project:
+      hash: abcdef1234abcdef1234abcdef1234abcdef1234abcdef1234abcdef12345678
+      name: repo
+      cwd: /repo
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          sessions:
+            - 11111111-1111-1111-1111-111111111111
+            - 22222222-2222-2222-2222-222222222222
+            - 33333333-3333-3333-3333-333333333333
+    sessions:
+      - id: 11111111-1111-1111-1111-111111111111
+        name: elevated change one
+        harness: claude-code
+        retryLoops: 5
+      - id: 22222222-2222-2222-2222-222222222222
+        name: elevated change two
+        harness: claude-code
+        retryLoops: 4
+      - id: 33333333-3333-3333-3333-333333333333
+        name: visible baseline
+        harness: claude-code
+        retryLoops: 0
+      - id: 44444444-4444-4444-4444-444444444444
+        name: hidden extreme
+        harness: claude-code
+        retryLoops: 9000
+    boundSessionIDs:
+      - 11111111-1111-1111-1111-111111111111
+      - 22222222-2222-2222-2222-222222222222
+    promoteSessionID: 44444444-4444-4444-4444-444444444444
+    expected:
+      visibleMetricCount: 3
+      initialSignalCount: 1
+      promotedSignalCount: 0
+      signalKind: retryLoops
+      initialPerChange: 4.5
+      initialPerProject: 3
+      hiddenRetryLoops: 9000

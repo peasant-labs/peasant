@@ -1,0 +1,7 @@
+declaredRows: 4
+requiredArms: [interrupt, quit, back, restart]
+cases:
+  - {name: ctrl-c waits, arm: interrupt, key: ctrl-c}
+  - {name: quit waits, arm: quit, key: q}
+  - {name: back waits, arm: back, key: b}
+  - {name: restart waits, arm: restart, key: r}

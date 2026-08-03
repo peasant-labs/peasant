@@ -1,0 +1,31 @@
+# A mutation window that does not exist. The driver applies the mutation at one
+# of two points; naming a third silently means neither.
+expectedCaseCount: 1
+cases:
+  - name: mutation-window-typo
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+        postPlanMutation:
+          window: before-the-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: "#!/bin/sh\n"
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

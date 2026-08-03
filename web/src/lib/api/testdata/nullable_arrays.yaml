@@ -1,0 +1,85 @@
+cases:
+  - name: project summaries null projects
+    operation: project-summaries
+    payload: {projects: null}
+    expected: {projects: [], selection: {active: false, hiddenProjects: 0, hiddenSessions: 0}}
+  - name: map graph null collections
+    operation: map-graph
+    payload: {nodes: null, parsedLanguages: null, structureEdges: null, activityEdges: null, violations: null}
+    expected: {nodes: [], parsedLanguages: [], structureEdges: [], activityEdges: [], violations: []}
+  - name: node detail null collections
+    operation: node-detail
+    payload: {kind: file, dependsOn: null, usedBy: null, shapedBy: null, recentCommits: null}
+    expected: {kind: file, dependsOn: [], usedBy: [], shapedBy: [], recentCommits: []}
+  - name: project tasks normalize nested task collections
+    operation: project-tasks
+    payload:
+      tasks:
+        - {sessionId: session-1, entryIndex: 1, title: task, editedFiles: null, readCount: 0, retryLoop: false, labels: null}
+    expected:
+      tasks:
+        - {sessionId: session-1, entryIndex: 1, title: task, editedFiles: [], readCount: 0, retryLoop: false, labels: []}
+  - name: change detail normalizes every nullable collection
+    operation: change-detail
+    payload:
+      files: null
+      frictions: null
+      newEdges: null
+      newNodes: null
+      removedEdges: null
+      removedNodes: null
+      slice: {nodes: null, structureEdges: null, activityEdges: null}
+      unrecordedCommits: null
+      unusual: null
+      violations: null
+      work:
+        - sessionId: session-1
+          title: task
+          harness: claude-code
+          binding: bound
+          tasks:
+            - {sessionId: session-1, entryIndex: 1, title: task, editedFiles: null, readCount: 0, retryLoop: false, labels: null}
+    expected:
+      files: []
+      frictions: []
+      newEdges: []
+      newNodes: []
+      removedEdges: []
+      removedNodes: []
+      slice: {nodes: [], structureEdges: [], activityEdges: []}
+      unrecordedCommits: []
+      unusual: []
+      violations: []
+      work:
+        - sessionId: session-1
+          title: task
+          harness: claude-code
+          binding: bound
+          tasks:
+            - {sessionId: session-1, entryIndex: 1, title: task, editedFiles: [], readCount: 0, retryLoop: false, labels: []}
+  - name: change diff null hunks
+    operation: change-diff
+    payload: {branch: feature, file: file.ts, status: M, binary: false, truncated: false, hunks: null}
+    expected: {branch: feature, file: file.ts, status: M, binary: false, truncated: false, hunks: []}
+  - name: change diff normalizes nested lines
+    operation: change-diff
+    payload:
+      branch: feature
+      file: file.ts
+      status: M
+      binary: false
+      truncated: false
+      hunks:
+        - {oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: null}
+    expected:
+      branch: feature
+      file: file.ts
+      status: M
+      binary: false
+      truncated: false
+      hunks:
+        - {oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: []}
+  - name: search null results
+    operation: search
+    payload: {results: null}
+    expected: {results: []}

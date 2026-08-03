@@ -1,0 +1,165 @@
+# Which surfaces refuse to run under a redaction level this version cannot apply,
+# and which ones must be entirely unaffected by that refusal.
+#
+# A configured maximum level is not honoured on ANY build. Its distinguishing
+# behaviour is anonymising code identifiers in transcript content, and the parser
+# that needs is linked in only when Peasant is built with cgo - so offering it
+# would make one configuration behave differently depending on how the binary was
+# compiled. Refusing everywhere is the decision. Every weaker level protects less,
+# so there is no safe substitute and no honest downgrade, and each surface stops
+# and names the change the user has to make.
+#
+# The refusal has to reach EVERY door, because they take the level from different
+# places: configuration, an explicit --level flag, and a request field. A check
+# applied at one of them leaves the others open.
+#
+# The rows with expectRefusal false matter as much as the others. A hard failure is
+# a blunt instrument, so the regression risk has moved from under-protecting to
+# OVER-refusing: a supported level must be completely unaffected.
+#
+# The corpus is a cross-product of surface and CONFIG DOOR. Both --config (a
+# file) and --config-dir (a directory) are supported, they resolve differently,
+# and a surface reading the raw --config flag honours only the first - so under
+# --config-dir it loaded a different configuration than the one it was pointed at
+# and ran to completion under a level this version refuses. This corpus could not
+# see that: every case passed BOTH flags, and --config wins when both are present,
+# so it was driving the door that already worked.
+#
+# surface        the production entry point driven.
+# configDoor     how the configuration is selected: flag (--config) or directory
+#                (--config-dir, with no --config at all). Blank means flag.
+# level          the configured redaction level, or the --level value for redact.
+# expectRefusal  whether the surface must refuse.
+expectedCaseCount: 22
+cases:
+  - name: push-refuses-a-configured-maximum-before-anything-is-uploaded
+    surface: push
+    level: maximum
+    expectRefusal: true
+
+  - name: push-is-unaffected-at-standard
+    surface: push
+    level: standard
+    expectRefusal: false
+
+  - name: push-is-unaffected-at-minimal
+    surface: push
+    level: minimal
+    expectRefusal: false
+
+  - name: harvest-refuses-a-configured-maximum-before-anything-is-imported
+    surface: harvest
+    level: maximum
+    expectRefusal: true
+
+  - name: harvest-is-unaffected-at-standard
+    surface: harvest
+    level: standard
+    expectRefusal: false
+
+  - name: redact-refuses-an-explicit-maximum-level-past-the-configuration
+    surface: redact-flag
+    level: maximum
+    expectRefusal: true
+
+  - name: redact-is-unaffected-by-an-explicit-minimal-level
+    surface: redact-flag
+    level: minimal
+    expectRefusal: false
+
+  - name: hooks-install-refuses-rather-than-creating-a-hook-that-always-fails
+    surface: hooks-install
+    level: maximum
+    expectRefusal: true
+
+  - name: hooks-status-reports-the-condition-without-failing
+    surface: hooks-status
+    level: maximum
+    expectRefusal: false
+
+  # The directory door, for every surface that refuses. Each of these was measured
+  # running to completion under a refused level before the surfaces were routed
+  # through the helper that honours --config-dir.
+  - name: push-refuses-through-the-directory-door-too
+    surface: push
+    configDoor: directory
+    level: maximum
+    expectRefusal: true
+
+  - name: harvest-refuses-through-the-directory-door-too
+    surface: harvest
+    configDoor: directory
+    level: maximum
+    expectRefusal: true
+
+  - name: redact-refuses-through-the-directory-door-too
+    surface: redact-flag
+    configDoor: directory
+    level: maximum
+    expectRefusal: true
+
+  - name: hooks-install-refuses-through-the-directory-door-too
+    surface: hooks-install
+    configDoor: directory
+    level: maximum
+    expectRefusal: true
+
+  # `peasant redact` with NO --level, so the level comes from the configuration.
+  # This is a different read from the --level flag above, and it is the one the
+  # --config-dir bypass lived in: with only the flag surface covered, reverting
+  # the config read was GREEN, because the flag refusal fires first and hides it.
+  - name: redact-refuses-a-configured-maximum-with-no-level-flag
+    surface: redact-config
+    level: maximum
+    expectRefusal: true
+
+  - name: redact-refuses-a-configured-maximum-through-the-directory-door
+    surface: redact-config
+    configDoor: directory
+    level: maximum
+    expectRefusal: true
+
+  - name: redact-is-unaffected-at-standard-with-no-level-flag
+    surface: redact-config
+    level: standard
+    expectRefusal: false
+
+  # Over-refusal, per surface and per supported level. A single unaffected case
+  # anywhere satisfied the old rule, so each of these was individually deletable -
+  # measured. The refusal is a hard failure, so a surface that starts refusing a
+  # level it must apply is the live regression, and it is per-surface by nature.
+  - name: harvest-is-unaffected-at-minimal
+    surface: harvest
+    level: minimal
+    expectRefusal: false
+
+  - name: redact-config-is-unaffected-at-minimal
+    surface: redact-config
+    level: minimal
+    expectRefusal: false
+
+  - name: hooks-install-is-unaffected-at-standard
+    surface: hooks-install
+    level: standard
+    expectRefusal: false
+
+  - name: hooks-install-is-unaffected-at-minimal
+    surface: hooks-install
+    level: minimal
+    expectRefusal: false
+
+  - name: redact-flag-is-unaffected-at-standard-asked-for-by-name
+    surface: redact-flag
+    level: standard
+    expectRefusal: false
+
+  # The read-only surface through the directory door. It does not refuse, so the
+  # refusal rules skip it - which left it skipped by every corpus-level rule and
+  # made it the one row that deleted green. It still loads a configuration, and
+  # under --config-dir the warning silently vanished while status went on telling
+  # the user to install a hook the install surface would refuse.
+  - name: hooks-status-reports-the-condition-through-the-directory-door
+    surface: hooks-status
+    configDoor: directory
+    level: maximum
+    expectRefusal: false

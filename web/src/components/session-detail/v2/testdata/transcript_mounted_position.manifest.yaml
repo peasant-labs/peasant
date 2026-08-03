@@ -1,0 +1,34 @@
+expectedCaseCount: 3
+requiredNames:
+  - visible sparse target reaches the real viewer
+  - absent target opens the real viewer at top
+  - applying scope reveal positions without remount
+expectedTransitionCount: 1
+requiredTransitionNames:
+  - changing absent target rearms top without remount
+expectedLoaderMutationCount: 4
+loaderMutations:
+  - {name: mounted manifest count drift is rejected, target: manifest, find: "expectedCaseCount: 3\nrequiredNames:", replace: "expectedCaseCount: 2\nrequiredNames:", expectedError: do not match}
+  - {name: mounted manifest duplicate names are rejected, target: manifest, find: "  - visible sparse target reaches the real viewer\n  - absent target opens the real viewer at top", replace: "  - visible sparse target reaches the real viewer\n  - visible sparse target reaches the real viewer", expectedError: unique}
+  - {name: mounted case unknown fields are rejected, target: cases, find: "  - name: visible sparse target reaches the real viewer\n    search: turn=42", replace: "  - name: visible sparse target reaches the real viewer\n    unknown: true\n    search: turn=42", expectedError: fields}
+  - {name: mounted multiple YAML documents are rejected, target: cases, find: "cases:", replace: "---\ncases:", expectedError: one YAML document}
+expectedMutationCount: 2
+mutations:
+  - name: host drops decoded initial position
+    find: "initialPosition={initialPosition}"
+    replace: "initialPosition={undefined}"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.realViewer.test.tsx
+    expectedFailedTestNames:
+      - visible sparse target reaches the real viewer
+      - absent target opens the real viewer at top
+      - applying scope reveal positions without remount
+      - changing absent target rearms top without remount
+    expectedFailurePattern: mounted positioning scroll invariant failed
+  - name: host marks the mounted transcript empty
+    find: "viewModel={vm!}"
+    replace: "viewModel={{ ...vm!, turns: [] }}"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.realViewer.test.tsx
+    expectedFailedTestNames:
+      - visible sparse target reaches the real viewer
+      - applying scope reveal positions without remount
+    expectedFailurePattern: mounted positioning scroll invariant failed

@@ -1,0 +1,103 @@
+name: Release E2E
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: release-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VILLAGE_REF: 2fe5db70fe7e2d3e19624bf35f6b2a73cf76b1bf
+
+permissions:
+  contents: read
+
+jobs:
+  release-e2e:
+    name: release e2e (installed packages)
+    # Arch's official warm-stack image is amd64-only, so the single warm-stack
+    # driver runs on the amd64 Blacksmith runner.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 90
+    steps:
+      - name: Checkout peasant
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Checkout village (for ./cmd/server + ./cmd/village-setup-demo)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: peasant-labs/village
+          ref: ${{ env.VILLAGE_REF }}
+          path: _village
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify schema module pin parity
+        env:
+          VILLAGE_REPO: ${{ github.workspace }}/_village
+        run: make e2e-schema-parity
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+      - name: Set up Node (embedded web dashboard)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Verify podman is available
+        run: podman --version
+
+      - name: Build real web dashboard
+        run: make web
+
+      - name: Assert real dashboard artifact
+        run: |
+          set -euo pipefail
+          test -s web/out/index.html || { echo "::error::web/out/index.html is missing or empty"; exit 1; }
+          if grep -qF "is not bundled in this build" web/out/index.html; then
+            echo "::error::release artifact contains the web-stub dashboard"
+            exit 1
+          fi
+
+      - name: Install patched GoReleaser v2.17.1
+        run: |
+          scripts/install-goreleaser "$RUNNER_TEMP/goreleaser-bin"
+          echo "$RUNNER_TEMP/goreleaser-bin" >> "$GITHUB_PATH"
+      - name: Build release snapshot artifacts
+        run: |
+          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --snapshot --clean
+        env:
+          AUR_KEY: "snapshot-unused"
+          TAP_GITHUB_TOKEN: "snapshot-unused"
+
+      - name: Run release per-distro e2e driver
+        env:
+          RELEASE_E2E_DIST: ${{ github.workspace }}/dist
+          VILLAGE_REPO: ${{ github.workspace }}/_village
+        run: |
+          set -o pipefail
+          go test -race -tags=e2e -count=1 ./internal/e2e -run '^TestReleasePerDistro$' -v 2>&1 | tee /tmp/release-e2e.log
+          if grep -qi 'no tests to run' /tmp/release-e2e.log; then
+            echo "::error::go test reported no tests to run; TestReleasePerDistro did not execute."
+            exit 1
+          fi
+          if grep -qE '(^|[[:space:]])--- SKIP: TestReleasePerDistro' /tmp/release-e2e.log; then
+            echo "::error::TestReleasePerDistro was SKIPPED; no installed-package e2e coverage ran."
+            exit 1
+          fi
+          if ! grep -qE '^--- PASS: TestReleasePerDistro' /tmp/release-e2e.log; then
+            echo "::error::TestReleasePerDistro did not produce a positive PASS line."
+            exit 1
+          fi

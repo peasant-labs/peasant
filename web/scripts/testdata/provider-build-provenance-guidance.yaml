@@ -1,0 +1,4 @@
+expected_guidance: install the exact @peasant-labs/schema@0.1.0 final contract and rebuild
+forbidden_fragments:
+  - rc10
+  - '@peasant-labs/schema@0.1.0-'

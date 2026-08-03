@@ -1,0 +1,17 @@
+expectedCaseCount: 1
+cases:
+  - name: arm-for-unrequested-event
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: pre-push
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

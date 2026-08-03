@@ -1,0 +1,23 @@
+# A corpus whose needle does not match its own sample.
+#
+# This is what a forbid-needle looks like when it is quietly wrong: the rule reads
+# as a rule, the suite is green, and the text it names could return tomorrow
+# without anything firing. The needle below says "by design" where the claim it is
+# meant to catch says "by construction". Nothing else in the corpus can notice
+# that, because a needle matching nothing is exactly what a corpus of banned text
+# expects to see.
+
+expectedPackageCount: 1
+packages:
+  - internal/push
+
+expectedClaimCount: 1
+claims:
+  - name: a-needle-that-does-not-match-the-claim-it-names
+    phrase: redaction-safe by design
+    packages:
+      - internal/push
+    matchesSample: "// DB session_entries are redaction-safe by construction, so no raw provider JSONL leaves the host."
+    why: >
+      Placeholder reason for a corpus that exists only to be rejected. The needle
+      above can never fire on the sentence it is written against.

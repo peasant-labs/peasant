@@ -1,0 +1,8 @@
+# A corpus with a key the typed schema does not declare.
+#
+# A mistyped key leaves the field it was meant to set at its ZERO value, and every
+# field here has a meaningful zero: a blank needle forbids nothing, a blank
+# package list is scoped nowhere, a blank sample proves nothing. Strict decoding is
+# what turns a typo into a load failure instead of a silently weakened rule.
+expectedClaimCount: 1
+somethingElse: true

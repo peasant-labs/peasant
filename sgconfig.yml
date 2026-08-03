@@ -1,0 +1,5 @@
+# ast-grep project configuration for Go type safety auditing.
+# Rule files under ast-grep/ are auto-loaded, including env literal guards.
+# Run: ast-grep scan --config sgconfig.yml .
+ruleDirs:
+  - ast-grep

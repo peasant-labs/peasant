@@ -1,0 +1,25 @@
+expectedCaseCount: 11
+requiredNames:
+  - canonical viewer uses resolved display label without hash copy
+  - legacy viewer preserves every typed navigation field
+  - malformed percent escape is rejected
+  - double encoded identity is rejected
+  - encoded slash identity is rejected
+  - extra transcript segment is rejected
+  - missing transcript session is rejected
+  - canonical project detail preserves map query
+  - missing project resolution is actionable
+  - transient project resolution can retry
+  - legacy project detail canonicalizes identity
+cases:
+  - {name: canonical viewer uses resolved display label without hash copy, scenario: canonical-viewer, pathname: /projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-1, search: 'turn=42&scope=file&scopeVal=src%2Fapi.ts', resolution: ready, expected: /work/alpha}
+  - {name: legacy viewer preserves every typed navigation field, scenario: legacy-viewer, pathname: /projects/team%20alpha/session-1, search: 'turn=12&origin=Map&originNode=src%2Fapi&originBranch=feat%2Fx&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dsrc%252Fapi', resolution: ready, expected: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-1?turn=12&origin=Map&originNode=src%2Fapi&originBranch=feat%2Fx&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dsrc%252Fapi'}
+  - {name: malformed percent escape is rejected, scenario: malformed, pathname: '/projects/%/session-1', search: '', resolution: none, expected: malformed percent escape}
+  - {name: double encoded identity is rejected, scenario: malformed, pathname: '/projects/%252E%252E/session-1', search: '', resolution: none, expected: still percent-encoded}
+  - {name: encoded slash identity is rejected, scenario: malformed, pathname: '/projects/team%2Falpha/session-1', search: '', resolution: none, expected: encoded slash}
+  - {name: extra transcript segment is rejected, scenario: malformed, pathname: '/projects/team/session/extra', search: '', resolution: none, expected: exactly one project and one session segment}
+  - {name: missing transcript session is rejected, scenario: malformed, pathname: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: '', resolution: none, expected: exactly one project and one session segment}
+  - {name: canonical project detail preserves map query, scenario: project-detail, pathname: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: 'node=src%2Fapi&mode=canvas&grain=file&expand=src&scale=1.25&panX=-8&panY=13', resolution: none, expected: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=src%2Fapi&mode=canvas&grain=file&expand=src&scale=1.25&panX=-8&panY=13'}
+  - {name: missing project resolution is actionable, scenario: missing, pathname: '/projects/absent/session-1', search: '', resolution: missing, expected: project was not found}
+  - {name: transient project resolution can retry, scenario: retry, pathname: '/projects/team/session-1', search: '', resolution: transient, expected: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-1'}
+  - {name: legacy project detail canonicalizes identity, scenario: project-detail-legacy, pathname: '/projects/team%20alpha', search: 'node=src%2Fapi', resolution: ready, expected: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=src%2Fapi&mode=navigator&grain=package'}

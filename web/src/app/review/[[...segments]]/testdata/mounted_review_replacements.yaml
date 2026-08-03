@@ -1,0 +1,25 @@
+expectedCaseCount: 2
+requiredNames:
+  - canonical project replacement clears the previous list
+  - canonical branch replacement clears the previous detail
+cases:
+  - name: canonical project replacement clears the previous list
+    kind: project
+    fromPath: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    fromSearch: ""
+    toPath: /review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    toSearch: ""
+    oldLabel: project alpha
+    oldAction: old project session
+    newLabel: project beta
+    newAction: new project session
+  - name: canonical branch replacement clears the previous detail
+    kind: branch
+    fromPath: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    fromSearch: branch=feat%2Fx
+    toPath: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    toSearch: branch=feat%2Fy
+    oldLabel: feat/x
+    oldAction: open feat/x
+    newLabel: feat/y
+    newAction: open feat/y

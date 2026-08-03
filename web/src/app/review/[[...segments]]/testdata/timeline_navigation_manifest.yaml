@@ -1,0 +1,35 @@
+expectedCaseCount: 15
+expectedFamilyCount: 6
+expectedMutationCount: 3
+cases:
+  - {name: open_change_named_branch, actionType: open-change, sourceKind: null, expectedKind: navigate, mounted: true}
+  - {name: open_change_preserves_review_return, actionType: open-change, sourceKind: null, expectedKind: navigate, mounted: true}
+  - {name: open_change_preserves_map_return, actionType: open-change, sourceKind: null, expectedKind: navigate, mounted: true}
+  - {name: open_change_default_branch_stays, actionType: open-change, sourceKind: null, expectedKind: stay, mounted: true}
+  - {name: open_change_legacy_null_branch_stays, actionType: open-change, sourceKind: null, expectedKind: stay, mounted: true}
+  - {name: open_linked_session, actionType: open-session, sourceKind: commit, expectedKind: navigate, mounted: true}
+  - {name: open_unlinked_session, actionType: open-session, sourceKind: unlinked, expectedKind: navigate, mounted: true}
+  - {name: open_outside_window_session, actionType: open-session, sourceKind: outside-window, expectedKind: navigate, mounted: true}
+  - {name: open_map_without_return, actionType: open-map, sourceKind: null, expectedKind: navigate, mounted: true}
+  - {name: open_map_ignores_review_return, actionType: open-map, sourceKind: null, expectedKind: navigate, mounted: true}
+  - {name: open_map_restores_map_return, actionType: open-map, sourceKind: null, expectedKind: navigate, mounted: true}
+  - {name: show_older_without_pagination, actionType: show-older, sourceKind: null, expectedKind: error, mounted: false}
+  - {name: show_older_with_cursor_only, actionType: show-older, sourceKind: null, expectedKind: error, mounted: false}
+  - {name: show_older_with_handler_only, actionType: show-older, sourceKind: null, expectedKind: error, mounted: false}
+  - {name: show_older_with_pagination, actionType: show-older, sourceKind: null, expectedKind: show-older, mounted: false}
+mutations:
+  - name: extra mounted router write
+    caseName: open_change_named_branch
+    operation: append-router-call
+    value: /map/wrong
+    diagnostic: expectedRouterCalls must exactly match
+  - name: duplicate mounted router write
+    caseName: open_change_named_branch
+    operation: append-router-call
+    value: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline
+    diagnostic: expectedRouterCalls must exactly match
+  - name: wrong mounted router href
+    caseName: open_change_named_branch
+    operation: replace-router-href
+    value: /review/wrong
+    diagnostic: expectedRouterCalls must exactly match

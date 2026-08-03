@@ -1,0 +1,48 @@
+payload:
+  repoFound: true
+  defaultBranch: develop
+  changes: []
+  recentCommits:
+    - hash: commit-a
+      subject: shared implementation
+      timeMs: 1782586800000
+      hasSession: true
+      sessionIds: [session-a, session-b, session-legacy]
+  rewrittenCommits: []
+  sessions:
+    - sessionId: session-a
+      title: first recorded session
+      harness: claude-code
+      startMs: 1782583200000
+      hasCommitBinding: true
+    - sessionId: session-b
+      title: second recorded session
+      harness: codex
+      startMs: 1782581400000
+      hasCommitBinding: true
+    - sessionId: session-legacy
+      title: legacy linked session
+      harness: opencode
+      startMs: 1782579600000
+    - sessionId: session-outside-window
+      title: bound outside visible history
+      harness: claude-code
+      startMs: 1782577800000
+      hasCommitBinding: true
+    - sessionId: session-unlinked
+      title: truly unlinked session
+      harness: codex
+      startMs: 1782576000000
+      hasCommitBinding: false
+expected:
+  linkedGroupLabel: sessions linked to shared implementation
+  overflowAction: 1 more sessions
+  linkedActions:
+    - {name: first recorded session, sessionId: session-a}
+    - {name: second recorded session, sessionId: session-b}
+    - {name: legacy linked session, sessionId: session-legacy}
+  unlinkedHeading: sessions not linked to a commit
+  unlinkedAction: {name: truly unlinked session, sessionId: session-unlinked}
+  absentFromUnlinked: bound outside visible history
+  outsideWindowHeading: sessions linked outside this visible commit window
+  outsideWindowAction: {name: bound outside visible history, sessionId: session-outside-window}

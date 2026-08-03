@@ -1,0 +1,24 @@
+id: no-bare-provider-literals
+language: Go
+severity: error
+message: >
+  Bare provider string literal. Use the typed constant instead:
+  ProviderClaude, ProviderOpenCode, ProviderGemini, ProviderCodex
+note: >
+  Bare string literals bypass the Provider type system and allow silent typos.
+  The only valid definition site is internal/defaults/provider.go.
+  Constructor tests (NewProvider("claude")) are excluded.
+rule:
+  any:
+    - pattern: '"claude"'
+    - pattern: '"opencode"'
+    - pattern: '"gemini"'
+    - pattern: '"codex"'
+  not:
+    inside:
+      kind: const_spec
+ignores:
+  - "vendor/**"
+  - "internal/defaults/provider.go"
+  - "internal/ingest/types_test.go"
+  - "internal/store/models_data.go"

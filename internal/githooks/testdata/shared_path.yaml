@@ -1,0 +1,122 @@
+# What Peasant tells a user when the hook file git would run is outside the
+# repository they asked about.
+#
+# Such a file is shared: every worktree of a repository runs its main worktree's
+# hooks directory, and an outside core.hooksPath is run by every repository
+# configured to use it. Peasant refuses to manage it, and the refusal must not
+# hand back a paste-this-here snippet - that snippet is pinned to one repository,
+# so pasting it into a file all of them run is the leak the refusal exists to
+# prevent. Each operation must also speak in its own terms: telling someone who
+# is removing a hook to add a section by hand is install wording in the wrong place.
+#
+# layout   linked-worktree     -> act from a linked worktree; the hooks directory
+#                                belongs to the main worktree.
+#          outside-hooks-path  -> core.hooksPath points outside the repository.
+# seed     absent  -> nothing occupies the slot.
+#          managed -> a Peasant hook installed from the repository that owns the
+#                     hooks directory. Only meaningful for linked-worktree.
+#
+# expectOwnerCommand is the second half of the story, and the two layouts differ
+# on it. "Run the command from the repository that owns the hooks directory" is a
+# real remedy for a linked worktree, whose hooks live in the main worktree's Git
+# directory. With a core.hooksPath pointing at a plain directory - the ordinary
+# way people share one hooks directory across their own repositories - NO
+# repository owns it, and following that line answers "is not inside a Git
+# worktree": a wrong entry standing beside two options that work.
+expectedCaseCount: 6
+cases:
+  - name: linked-worktree-install-refuses-without-offering-a-paste-here-snippet
+    layout: linked-worktree
+    seed: absent
+    operation: install
+    expectedOutcome: refused
+    expectManualSnippet: false
+    expectOwnerCommand: true
+    mustContain:
+      - "is outside"
+      - "every worktree and every repository"
+      - "core.hooksPath"
+      - "peasant village hooks install"
+    mustNotContain:
+      - "add the manual section below yourself"
+      - "use a hooks directory inside this repository"
+      - "# BEGIN peasant village upload"
+
+  - name: linked-worktree-status-reports-the-shared-file-not-a-refusal
+    layout: linked-worktree
+    seed: managed
+    operation: status
+    expectedOutcome: refused
+    expectManualSnippet: false
+    expectOwnerCommand: true
+    mustContain:
+      - "while inspecting the current state"
+      - "Peasant-generated hook, installed from"
+      - "every worktree and every repository"
+    mustNotContain:
+      - "before any hook file was created"
+      - "add this section"
+      - "# BEGIN peasant village upload"
+
+  - name: linked-worktree-uninstall-speaks-about-removal
+    layout: linked-worktree
+    seed: managed
+    operation: uninstall
+    expectedOutcome: refused
+    expectManualSnippet: false
+    expectOwnerCommand: true
+    mustContain:
+      - "while uninstalling"
+      - "nothing was removed"
+      - "peasant village hooks uninstall"
+    mustNotContain:
+      - "add this section"
+      - "before any hook file was created"
+      - "# BEGIN peasant village upload"
+
+  - name: outside-hooks-path-install-offers-only-the-two-options-that-work
+    layout: outside-hooks-path
+    seed: absent
+    operation: install
+    expectedOutcome: refused
+    expectManualSnippet: false
+    expectOwnerCommand: false
+    mustContain:
+      - "is outside"
+      - "every worktree and every repository"
+      - "core.hooksPath"
+      - "run the upload yourself when you want it"
+      - "point git at a hooks directory inside this worktree"
+    mustNotContain:
+      - "add the manual section below yourself"
+      - "use a hooks directory inside this repository"
+      - "# BEGIN peasant village upload"
+      - "which is the repository git really runs that file for"
+
+  - name: outside-hooks-path-status-reports-that-nothing-runs
+    layout: outside-hooks-path
+    seed: absent
+    operation: status
+    expectedOutcome: refused
+    expectManualSnippet: false
+    expectOwnerCommand: false
+    mustContain:
+      - "while inspecting the current state"
+      - "no file exists there"
+      - "no repository owns"
+    mustNotContain:
+      - "before any hook file was created"
+      - "# BEGIN peasant village upload"
+
+  - name: outside-hooks-path-uninstall-has-nothing-to-remove
+    layout: outside-hooks-path
+    seed: absent
+    operation: uninstall
+    expectedOutcome: not-present
+    expectManualSnippet: false
+    expectOwnerCommand: false
+    mustContain:
+      - "Nothing to remove"
+    mustNotContain:
+      - "add this section"
+      - "# BEGIN peasant village upload"

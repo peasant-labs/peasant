@@ -1,0 +1,82 @@
+# Which entry point the INDEX stage calls, for every source kind an indexer can
+# declare.
+#
+# This is a closed-set corpus: the loader requires one row for every member of
+# ingest.AllTranscriptSourceKinds, INCLUDING the zero value. A kind added to the
+# dispatch with no row here is a load failure, and so is an arm quietly folded
+# into another one - which is the specific way this contract broke before. The
+# pipeline used to choose an entry point by asking whether in-memory bytes
+# happened to be available, which is a question about the CALLER, and it got the
+# one directory-source harness wrong: bytes were always available, so the bytes
+# path was always taken, and the indexer discarded them and indexed nothing while
+# the import reported success.
+#
+# Both entry points return the same entries in these cases, so the pipeline
+# behaves identically either way. That is exactly why the dispatch needs its own
+# corpus: a contract with no observable consequence drifts back silently.
+#
+# sourceKind     what the indexer declares: unknown, file, or directory.
+# entryPoint     which method the pipeline calls: bytes, file, or none.
+# indexOutcome   what the run records for the session: indexed or error.
+# errorContains  a phrase the recorded error must carry. Required for an error
+#                outcome, and rejected for an indexed one, so a row cannot claim
+#                a refusal without saying what the refusal tells the user.
+
+# originalRoot     whether the discovered session carries its provider root.
+#                  Only a directory source reads it; for a file source the column
+#                  records the state the row runs under.
+# transcriptBytes  whether in-memory transcript bytes are available to the INDEX
+#                  stage. The reindex path passes none.
+#
+# COVERAGE IS PER EXIT, NOT PER KIND. The corpus used to require a row for every
+# member of AllTranscriptSourceKinds - three kinds, three rows - while this
+# function makes SIX decisions, and the two it did not reach were both deletable
+# with everything green: removing the missing-root refusal, and removing the file
+# arm's empty-bytes exit. Both are edits a maintainer makes while simplifying, and
+# both restore the signature failure this dispatch exists to prevent - an indexer
+# handed an argument that cannot work, indexing nothing, quietly. Kind coverage is
+# kept as a second layer.
+#
+# The unhandled-kind exit is deliberately absent and cannot be expressed: the
+# fixture's spelling table is exhaustive over AllTranscriptSourceKinds and the
+# loader rejects any other value, so that exit is unreachable while the loader
+# holds. It is named in the dispatch itself rather than left reading as untested.
+
+expectedCaseCount: 5
+cases:
+  - name: an-undeclared-source-kind-is-refused-rather-than-assumed-to-be-a-file
+    sourceKind: unknown
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: none
+    indexOutcome: error
+    errorContains: did not declare where its entries come from
+
+  - name: a-file-source-is-handed-the-bytes-so-the-second-read-is-really-avoided
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: bytes
+    indexOutcome: indexed
+
+  - name: a-file-source-with-no-bytes-in-hand-reads-what-was-written-instead
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: absent
+    entryPoint: file
+    indexOutcome: indexed
+
+  - name: a-directory-source-is-never-handed-bytes-it-would-have-to-discard
+    sourceKind: directory
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: file
+    indexOutcome: indexed
+
+  - name: a-directory-source-that-lost-its-provider-root-is-refused-not-guessed-at
+    sourceKind: directory
+    originalRoot: absent
+    transcriptBytes: present
+    entryPoint: none
+    indexOutcome: error
+    errorContains: enable opencode in your configuration

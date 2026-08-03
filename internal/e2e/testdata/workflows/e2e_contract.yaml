@@ -1,0 +1,72 @@
+expected_village_ref: 2fe5db70fe7e2d3e19624bf35f6b2a73cf76b1bf
+e2e:
+  required_triggers:
+    - push
+    - workflow_dispatch
+    - workflow_call
+  required_paths:
+    - internal/e2e/**
+    - internal/ingest/**
+    - internal/pull/**
+    - internal/push/**
+    - cmd/**
+    - go.mod
+    - go.sum
+    - Makefile
+    - .github/workflows/e2e.yml
+  parity_step: Verify schema module pin parity
+  parity_run_contains: make e2e-schema-parity
+  parity_env:
+    key: VILLAGE_REPO
+    value: '${{ github.workspace }}/_village'
+  driver_step: make e2e
+  driver_env:
+    key: VILLAGE_REPO
+    value: '${{ github.workspace }}/_village'
+  driver_contains:
+    - go test -race
+    - -tags=e2e
+    - -count=1
+  asserted_tests:
+    - TestSkipGateE2E
+    - TestPullRoundTripE2E
+    - TestHarnessRefreshE2E
+    - TestPublicationConvergenceE2E
+    - TestPostCommitHookPublishesConfiguredRepositoryToRealVillage
+    - TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush
+  cleanup_required_statuses:
+    - status=exited
+    - status=stopped
+  cleanup_forbidden_statuses:
+    - value: status=dead
+      reason: podman 4.9 rejects the Docker-only dead state
+    - value: status=created
+      reason: a newly created sibling stack may still be starting
+    - value: status=running
+      reason: a running sibling stack must never be removed
+release:
+  parity_step: Verify schema module pin parity
+  parity_run_contains: make e2e-schema-parity
+  parity_env:
+    key: VILLAGE_REPO
+    value: '${{ github.workspace }}/_village'
+  driver_step: Run release per-distro e2e driver
+  driver_env:
+    key: VILLAGE_REPO
+    value: '${{ github.workspace }}/_village'
+  driver_contains:
+    - go test -race
+    - -tags=e2e
+    - -count=1
+    - TestReleasePerDistro
+  output_guards:
+    - no tests to run
+    - "--- SKIP: TestReleasePerDistro"
+    - "--- PASS: TestReleasePerDistro"
+tests_workflow:
+  triggers:
+    - pull_request
+    - push
+  required_paths:
+    - .github/workflows/**
+    - .github/release-guard.policy.yml

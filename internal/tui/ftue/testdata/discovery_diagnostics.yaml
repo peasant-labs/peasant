@@ -1,0 +1,10 @@
+declaredRows: 2
+cases:
+  - name: failed discovery is visible and cannot be selected
+    state: failed
+    detail: permission denied while reading transcript directory
+    expected: "[!] Claude Code: permission denied"
+  - name: unavailable discovery is distinct from an honest empty result
+    state: unavailable
+    detail: no transcript paths are configured
+    expected: "[!] Claude Code: no transcript paths"

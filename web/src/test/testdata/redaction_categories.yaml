@@ -1,0 +1,54 @@
+cases:
+  - name: credential
+    kind: success
+    groupCategory: CREDENTIAL
+    itemCategory: CREDENTIAL
+    expectedCategory: CREDENTIAL
+  - name: pii
+    kind: success
+    groupCategory: PII
+    itemCategory: PII
+    expectedCategory: PII
+  - name: path
+    kind: success
+    groupCategory: PATH
+    itemCategory: PATH
+    expectedCategory: PATH
+  - name: internal
+    kind: success
+    groupCategory: INTERNAL
+    itemCategory: INTERNAL
+    expectedCategory: INTERNAL
+  - name: unknown_group
+    kind: unknown_group
+    groupCategory: LOCATION
+    itemCategory: CREDENTIAL
+    expectedError: |-
+      what: redaction preview category "LOCATION" is not recognized
+      why: the local API and UI must use the same canonical redaction category rendering
+      where: category field in the GET /api/v1/sync/redactions response
+      when: validating the local scan response before rendering redaction findings
+      means: the preview cannot safely classify this finding, so sharing remains blocked
+      fix: update the producer and consumer to use CREDENTIAL, PII, PATH, or INTERNAL, then re-scan
+  - name: unknown_item
+    kind: unknown_item
+    groupCategory: CREDENTIAL
+    itemCategory: LOCATION
+    expectedError: |-
+      what: redaction preview category "LOCATION" is not recognized
+      why: the local API and UI must use the same canonical redaction category rendering
+      where: category field in the GET /api/v1/sync/redactions response
+      when: validating the local scan response before rendering redaction findings
+      means: the preview cannot safely classify this finding, so sharing remains blocked
+      fix: update the producer and consumer to use CREDENTIAL, PII, PATH, or INTERNAL, then re-scan
+  - name: group_item_mismatch
+    kind: mismatch
+    groupCategory: CREDENTIAL
+    itemCategory: PII
+    expectedError: |-
+      what: redaction preview item category "PII" does not match enclosing category "CREDENTIAL"
+      why: every redaction item must use the same canonical category as its enclosing group
+      where: category fields in the GET /api/v1/sync/redactions response
+      when: validating the local scan response before rendering redaction findings
+      means: the preview cannot safely classify this finding, so sharing remains blocked
+      fix: correct the response producer so each item category matches its enclosing group, then re-scan

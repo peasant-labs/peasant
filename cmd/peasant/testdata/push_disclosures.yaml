@@ -1,0 +1,124 @@
+# What a push tells the user about the visibility it will actually publish at, and
+# whether it keeps the published-content record.
+#
+# Private and public are applied by authoritative publication and owner visibility
+# convergence without downgrade disclosure. Group is not a project/session
+# publication state yet, so only group falls back safely to private and discloses
+# that less was shared than requested.
+#
+# The redaction REFUSALS are deliberately not part of this corpus - a level this
+# version cannot apply stops the run outright, and those are driven in
+# redaction_refusals.yaml. What IS here is the level the record CLAIMS, because
+# that claim is a disclosure like any other and it is the one the report got wrong
+# for every push: it named a flag nothing sets instead of the protection being
+# applied.
+#
+# configuredLevel is the level in the config; the record must name the level the
+# resolver produces from it, which for a no-longer-offered level is a DIFFERENT
+# level. A case where the two coincide cannot tell a record wired to the applied
+# level from one wired to the configured level, so the loader requires at least
+# one case where they differ.
+#
+# The expected wording is NOT restated here. It is derived in the test from the
+# same resolver the command prints, because a copy of it in a fixture is one more
+# rendering that can drift - which is the defect this whole corpus exists for. What
+# IS pinned here is the shape (full statement, one line, or silence), whether the
+# record is kept, and the claims that must never come back.
+#
+# visibility        the configured push.visibility.
+# configuredLevel   the configured redaction.level.
+# quiet             whether the run passes --quiet, which is what a Git hook uses.
+# visibilityNotice  full | brief | none
+# redactionRecord   whether the published-content record is printed.
+# The corpus is the full cross-product of the two settings that decide what a
+# push says: the configured visibility (every member of schema.AllVisibilities)
+# and whether the run is quiet. Six cells, six rows, each the only occupant of
+# its cell - so deleting any one of them removes a combination the command was
+# never asked to handle, rather than leaving a sibling to cover for it.
+#
+# Covering the two axes SEPARATELY was not enough. Deleting the one quiet private
+# row left nothing proving that a quiet run with nothing to disclose says nothing
+# at all: another row still supplied `private`, another still supplied a quiet
+# run, and the corpus stayed green.
+expectedCaseCount: 6
+cases:
+  - name: private-not-quiet-discloses-nothing-and-names-the-level-applied-not-the-one-configured
+    visibility: private
+    configuredLevel: minimal
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: private-and-quiet-says-nothing-at-all
+    visibility: private
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+  - name: public-not-quiet-has-no-downgrade-and-the-record-is-kept
+    visibility: public
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: public-and-quiet-has-no-downgrade-and-drops-the-record
+    visibility: public
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+  - name: group-not-quiet-fully-discloses-private-fallback-and-keeps-the-record
+    visibility: group
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: full
+    redactionRecord: true
+
+  - name: group-and-quiet-briefly-discloses-private-fallback-and-drops-the-record
+    visibility: group
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: brief
+    redactionRecord: false
+
+# Claims that must never reappear on this surface, whatever the wording becomes.
+# Each one was actually printed at some point while being untrue.
+#
+# Every row carries matchesSample: output its needle must match. Without it a
+# forbid-list is green whether its needles work or not - the text is gone, so
+# `does not contain` is true for a correct needle, a misspelled one, and one
+# pinned to a form nothing can produce alike.
+#
+# Use pattern rather than phrase wherever the wording varies with the data. The
+# redaction-count claim below is why: as a literal it read "of 1 session(s)" and
+# only fired because the test seeds exactly one session, so the same defect
+# returning under any other count would have gone straight past it.
+#
+# Unlike cases, this list has no closed set behind it - a forbid-list is open by
+# nature - so expectedForbiddenClaimCount is cross-checked against a constant in
+# cmd_push_disclosures_test.go. That makes removing a permanent regression guard
+# take two edits in two files instead of one self-consistent edit here. It does
+# not make removal hard; it makes it visible.
+expectedForbiddenClaimCount: 6
+forbiddenClaims:
+  - name: no-run-may-print-the-retired-unimplemented-disclosure
+    phrase: "public visibility is not yet implemented"
+    matchesSample: "warning: public visibility is not yet implemented"
+  - name: no-run-may-claim-public-was-downgraded
+    pattern: '(?s)public visibility.*downgraded safely to private visibility'
+    matchesSample: "warning: public visibility is not yet implemented.\nMeans: your sessions are downgraded safely to private visibility"
+  - name: no-run-may-tell-the-user-to-change-a-configuration-that-is-already-correct
+    phrase: "set push.visibility to private"
+    matchesSample: "fix: set push.visibility to private and run again"
+  - name: no-run-may-claim-consent-was-answered-for-a-publish-that-cannot-happen
+    phrase: "without asking again"
+    matchesSample: "future pushes will proceed without asking again"
+  - name: no-run-may-claim-a-supported-level-protects-transcript-content
+    phrase: "transforms less of your content"
+    matchesSample: "minimal transforms less of your content than standard"
+  - name: no-record-may-report-a-redaction-count-derived-from-a-flag-nothing-sets
+    pattern: '[0-9]+ of [0-9]+ session\(s\)'
+    matchesSample: "  redacted:           0 of 37 session(s)"

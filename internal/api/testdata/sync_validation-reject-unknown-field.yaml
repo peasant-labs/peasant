@@ -1,0 +1,8 @@
+# A corpus with a key neither validation loader declares.
+#
+# Both endpoint corpora share this shape, so one fixture drives both. A mistyped
+# key leaves the field it was meant to set at its zero value, and the zero value
+# here is a blank expectedError - which matches nothing, so every case passes
+# whatever the endpoint answers.
+expectedCaseCount: 1
+somethingElse: true

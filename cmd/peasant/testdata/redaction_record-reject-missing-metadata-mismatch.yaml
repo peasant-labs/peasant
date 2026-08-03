@@ -1,0 +1,37 @@
+# Proves the loader rejects a case whose expectMissingMetadata cannot follow from
+# metadataPresent and sessionCount. A count that does not follow from the inputs
+# lets the assertion pass against a record that counted something else.
+expectedCaseCount: 4
+cases:
+  - name: metadata-is-present-yet-some-is-claimed-missing
+    sessionCount: 3
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 2
+  - name: the-shipped-state
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: missing-metadata-is-reported
+    sessionCount: 3
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 3
+  - name: a-stored-level-from-an-older-version
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: minimal
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0

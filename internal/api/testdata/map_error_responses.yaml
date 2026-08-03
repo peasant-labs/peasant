@@ -1,0 +1,107 @@
+expectedCaseCount: 13
+requiredNames:
+  - selection visibility fails closed
+  - missing project is stable
+  - ambiguous legacy project is stable
+  - malformed project identity is stable
+  - missing node is stable
+  - missing branch is stable
+  - missing repository is stable
+  - provider details are sanitized
+  - missing guard hash is actionable
+  - malformed guard hash is actionable
+  - unavailable guard provider is actionable
+  - search selection visibility is operation aware
+  - search provider failure is operation aware
+cases:
+  - name: selection visibility fails closed
+    errorKind: selection
+    endpoint: map
+    status: 500
+    code: map_selection_visibility
+    requiredFragments: [saved kickstart selection, No partial project data was returned, Run `peasant kickstart`]
+    forbiddenFragments: [not-a-selection-mode]
+  - name: missing project is stable
+    errorKind: project
+    endpoint: map
+    status: 404
+    code: map_project_not_found
+    requiredFragments: [canonical hash, No project data was returned, Refresh project discovery]
+    forbiddenFragments: [store-secret]
+  - name: ambiguous legacy project is stable
+    errorKind: ambiguous
+    endpoint: resolve
+    status: 409
+    code: map_project_ambiguous
+    requiredFragments: [legacy label, No project data was returned, project picker]
+    forbiddenFragments: [store-secret]
+  - name: malformed project identity is stable
+    errorKind: identity
+    endpoint: resolve
+    status: 400
+    code: map_project_identity_invalid
+    requiredFragments: [route identity is malformed, No project data was returned, canonical 64-character]
+    forbiddenFragments: [store-secret]
+  - name: missing node is stable
+    errorKind: node
+    endpoint: node
+    status: 404
+    code: map_node_not_found
+    requiredFragments: [absent from the current project graph, No node detail was returned, Refresh the map]
+    forbiddenFragments: [store-secret]
+  - name: missing branch is stable
+    errorKind: branch
+    endpoint: change
+    status: 404
+    code: map_branch_not_found
+    requiredFragments: [branch is absent, No change detail was returned, Refresh changes]
+    forbiddenFragments: [store-secret]
+  - name: missing repository is stable
+    errorKind: repository
+    endpoint: change
+    status: 404
+    code: map_repository_not_found
+    requiredFragments: [Git repository, No change data was returned, rerun kickstart]
+    forbiddenFragments: [store-secret]
+  - name: provider details are sanitized
+    errorKind: provider
+    endpoint: map
+    status: 500
+    code: map_provider_failure
+    requiredFragments: [local provider failed, No partial data was returned, inspect the Peasant server logs]
+    forbiddenFragments: [secret-database-password]
+  - name: missing guard hash is actionable
+    errorKind: guard-missing
+    endpoint: guard
+    status: 400
+    code: map_project_hash_missing
+    requiredFragments: [projectHash path value is missing, internal/api.exactRequestGuard, No provider call was made, Open the project from current discovery]
+    forbiddenFragments: [generic-error]
+  - name: malformed guard hash is actionable
+    errorKind: guard-invalid
+    endpoint: guard
+    status: 400
+    code: map_project_hash_invalid
+    requiredFragments: [projectHash path value is malformed, internal/api.exactRequestGuard, No provider call was made, canonical 64-character]
+    forbiddenFragments: [generic-error]
+  - name: unavailable guard provider is actionable
+    errorKind: guard-provider
+    endpoint: guard
+    status: 503
+    code: provider_unavailable
+    requiredFragments: [no data provider was configured, internal/api.exactRequestGuard, No provider call was made, Restart Peasant]
+    forbiddenFragments: [generic-error]
+  - name: search selection visibility is operation aware
+    errorKind: search-selection
+    endpoint: search
+    status: 500
+    code: search_selection_visibility
+    requiredFragments: [Search results could not be loaded, saved kickstart selection is invalid, No partial search results were returned, Run `peasant kickstart`]
+    forbiddenFragments: [Map or changes data, not-a-selection-mode]
+  - name: search provider failure is operation aware
+    errorKind: search-provider
+    endpoint: search
+    status: 500
+    code: search_provider_failure
+    requiredFragments: [Search results could not be loaded, local search provider failed, No partial search results were returned, inspect the Peasant server logs]
+    forbiddenFragments: [Map or changes data, secret-search-provider]

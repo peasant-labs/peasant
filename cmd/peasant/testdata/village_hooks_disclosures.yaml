@@ -1,0 +1,96 @@
+# What install must disclose about a hook it successfully wrote.
+#
+# Every disclosure here is about consent, not about failure. A hooks directory
+# inside the working tree is the convention for SHARING hooks through the
+# repository, so a hook written there is committable content that would run for
+# anyone who adopts it - and it carries this machine's absolute paths.
+#
+# The visibility one is a setting the user configured to a value this version
+# cannot apply. It is disclosed HERE, at install, and not only on the push path,
+# because install is the consent moment: it is the last point before publishing
+# starts happening on its own, and a downgrade first mentioned by the push output
+# is one the user learns about after the first commit already published at it.
+# Publishing privately when public was asked for is safe, so it proceeds and says so.
+#
+# The redaction level is NOT disclosed here, because it is not downgraded: a level
+# this version cannot apply makes the upload refuse, so install refuses to create a
+# hook that could only ever fail, and status reports the condition. Those are driven
+# in redaction_refusals.yaml. Every case below therefore runs at a SUPPORTED level -
+# an install under an unsupported one never gets as far as a disclosure.
+#
+# hooksPath   default-git-dir     -> git's own hooks directory, not tracked.
+#             inside-working-tree -> core.hooksPath points at a tracked directory.
+# visibility  the push.visibility the config resolves to.
+# level       the redaction.level the config resolves to.
+expectedCaseCount: 6
+cases:
+  - name: git-directory-hook-at-applied-settings-discloses-neither
+    hooksPath: default-git-dir
+    visibility: private
+    level: standard
+    mustContain:
+      - "created"
+    mustNotContain:
+      - "committable-hook"
+      - "push.visibility resolves to"
+      - "redaction.level"
+
+  - name: working-tree-hooks-path-discloses-that-the-hook-is-committable
+    hooksPath: inside-working-tree
+    visibility: private
+    level: standard
+    mustContain:
+      - "committable-hook"
+      - "is inside the working tree"
+      - "runs for everyone who checks the repository out"
+      - ".gitignore"
+    mustNotContain:
+      - "push.visibility resolves to"
+      - "redaction.level"
+
+  - name: public-visibility-needs-no-downgrade-disclosure
+    hooksPath: default-git-dir
+    visibility: public
+    level: standard
+    mustContain:
+      - "created"
+    mustNotContain:
+      - "committable-hook"
+      - "sessions publicly"
+      - "without asking again"
+      - "set push.visibility to private"
+      - "redaction.level"
+      - "visibility is not yet implemented"
+      - "downgraded safely"
+
+  - name: group-visibility-does-not-enter-project-level-receipts
+    hooksPath: default-git-dir
+    visibility: group
+    level: standard
+    mustContain:
+      - "created"
+    mustNotContain:
+      - "public visibility is not yet implemented"
+      - "sessions publicly"
+      - "downgraded safely"
+
+  - name: a-minimal-level-installs-and-says-nothing-about-redaction
+    hooksPath: default-git-dir
+    visibility: private
+    level: minimal
+    mustContain:
+      - "created"
+    mustNotContain:
+      - "push.visibility resolves to"
+      - "redaction.level"
+      - "not supported in this version"
+
+  - name: committable-hook-at-public-visibility-discloses-only-committable-state
+    hooksPath: inside-working-tree
+    visibility: public
+    level: standard
+    mustContain:
+      - "committable-hook"
+    mustNotContain:
+      - "redaction.level"
+      - "push.visibility resolves to"

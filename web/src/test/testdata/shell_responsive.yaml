@@ -1,0 +1,22 @@
+expectedCaseCount: 5
+cases:
+  - name: desktop
+    width: 1460
+    expectedHeaderHeight: 64
+    commandPaletteVisible: true
+  - name: tablet
+    width: 768
+    expectedHeaderHeight: 112
+    commandPaletteVisible: true
+  - name: compact_tablet
+    width: 540
+    expectedHeaderHeight: 112
+    commandPaletteVisible: false
+  - name: mobile_wide
+    width: 480
+    expectedHeaderHeight: 112
+    commandPaletteVisible: false
+  - name: mobile_narrow
+    width: 390
+    expectedHeaderHeight: 112
+    commandPaletteVisible: false

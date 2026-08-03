@@ -1,0 +1,43 @@
+cases:
+  - name: absent_uses_default_sentinel
+    classification: must-pass
+    provenance: {source: requirement, ref: search-limit-default}
+    mutation: {description: omit the optional limit parameter}
+    input: {raw_query: "q=pipeline"}
+    expected: {status: 200, provider_limit: 0, provider_called: true}
+  - name: positive_is_forwarded
+    classification: must-pass
+    provenance: {source: requirement, ref: search-limit-positive}
+    mutation: {description: provide one positive integer limit}
+    input: {raw_query: "q=pipeline&limit=5"}
+    expected: {status: 200, provider_limit: 5, provider_called: true}
+  - name: oversized_is_forwarded_for_service_clamp
+    classification: must-pass
+    provenance: {source: boundary, ref: search-limit-max-clamp}
+    mutation: {description: provide a valid integer above the documented service maximum}
+    input: {raw_query: "q=pipeline&limit=999"}
+    expected: {status: 200, provider_limit: 999, provider_called: true}
+  - name: malformed_is_bad_request
+    classification: must-fail
+    provenance: {source: requirement, ref: search-limit-malformed}
+    mutation: {description: replace the positive integer with non-numeric text}
+    input: {raw_query: "q=pipeline&limit=wat"}
+    expected: {status: 400, provider_limit: 0, provider_called: false, error_contains: "limit must be a positive integer"}
+  - name: zero_is_bad_request
+    classification: must-fail
+    provenance: {source: requirement, ref: search-limit-zero}
+    mutation: {description: replace the positive integer with zero}
+    input: {raw_query: "q=pipeline&limit=0"}
+    expected: {status: 400, provider_limit: 0, provider_called: false, error_contains: "limit must be a positive integer"}
+  - name: negative_is_bad_request
+    classification: must-fail
+    provenance: {source: requirement, ref: search-limit-negative}
+    mutation: {description: replace the positive integer with a negative value}
+    input: {raw_query: "q=pipeline&limit=-1"}
+    expected: {status: 400, provider_limit: 0, provider_called: false, error_contains: "limit must be a positive integer"}
+  - name: repeated_is_bad_request
+    classification: must-fail
+    provenance: {source: boundary, ref: search-limit-conflicting-values}
+    mutation: {description: repeat the singleton query parameter with conflicting values}
+    input: {raw_query: "q=pipeline&limit=1&limit=2"}
+    expected: {status: 400, provider_limit: 0, provider_called: false, error_contains: "limit must be a single positive integer"}

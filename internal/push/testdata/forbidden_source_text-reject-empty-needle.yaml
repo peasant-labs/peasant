@@ -1,0 +1,20 @@
+# A corpus whose row sets NEITHER a phrase nor a pattern.
+#
+# An empty needle is the worst kind of broken guard, because it is broken in both
+# directions at once depending on how it is matched: every file trivially fails to
+# contain one, so the row passes forever while reading as a rule. It is the exact
+# vacuity the whole matchesSample mechanism exists to prevent, arrived at by
+# omission rather than by a wrong needle.
+expectedPackageCount: 1
+packages:
+  - internal/push
+
+expectedClaimCount: 1
+claims:
+  - name: a-row-with-no-needle-at-all
+    packages:
+      - internal/push
+    matchesSample: anything at all
+    why: >
+      Placeholder reason for a corpus that exists only to be rejected. A row with
+      neither a phrase nor a pattern forbids nothing.

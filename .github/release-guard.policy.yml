@@ -1,0 +1,31 @@
+# release-guard policy for the peasant repo.
+#
+# Declares peasant's release pipeline's publication gates so the canonical
+# `release-guard check-workflow` (github.com/peasant-labs/schema/cmd/release-guard)
+# can validate .github/workflows/release.yml against it WITHOUT any repo-specific
+# job-shape knowledge baked into the shared tool. Unlike the schema repo, peasant
+# ships a binary (goreleaser) behind two REUSABLE-workflow gates — the full-stack
+# e2e and the installed-package release e2e — each of which must run on every
+# release tag (no `if:`), reuse its named workflow, and receive no repository
+# secrets because both gates build entirely from public inputs.
+#
+# This is a faithful, byte-equivalent projection of the assertions previously
+# hardcoded in peasant's internal/release/workflow_guard.go (now deleted).
+jobs:
+  # Full-stack e2e: a reusable-workflow gate behind guard + nix-vendor-hash.
+  - name: e2e
+    needs: [guard, nix-vendor-hash]
+    reusable:
+      uses: ./.github/workflows/e2e.yml
+      secretsInherit: false
+      forbidIf: true
+  # Installed-package release e2e: a reusable-workflow gate behind the same.
+  - name: release-e2e
+    needs: [guard, nix-vendor-hash]
+    reusable:
+      uses: ./.github/workflows/release-e2e.yml
+      secretsInherit: false
+      forbidIf: true
+  # The goreleaser publish job sits behind all four gates.
+  - name: release
+    needs: [guard, nix-vendor-hash, e2e, release-e2e]

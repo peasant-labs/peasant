@@ -1,0 +1,208 @@
+name: Release PR
+
+# Two-trigger release-PR gate (the "release(vX.Y.Z): …" ceremony).
+#
+# Trigger A — while a release PR is OPEN (opened/edited/synchronize/reopened):
+#   validate the title grammar (via the release-guard CLI, the single source of
+#   the grammar) and assert the PR author is a maintainer (admin/maintain
+#   collaborator). Failures surface at PR time, before merge.
+#
+# Trigger B — when a release PR MERGES (closed && merged):
+#   run make nix-vendor-hash on the merge commit, commit a flake.nix hash fix if
+#   needed, then push an annotated tag on the hash-current commit using a GitHub App
+#   token (the default GITHUB_TOKEN cannot push a tag that re-triggers release.yml —
+#   GitHub's recursive-workflow guard; the App token can). Hard-fail if the tag
+#   exists.
+#
+# The App token needs Contents:write on peasant (an App installation setting).
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, closed]
+    branches: [develop]
+
+concurrency:
+  group: release-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # Trigger A: validate an OPEN release PR (grammar + maintainer author).
+  validate:
+    name: validate release PR
+    if: >-
+      github.event.action != 'closed' &&
+      startsWith(github.event.pull_request.title, 'release(')
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Validate release PR title grammar
+        id: title
+        run: go run github.com/peasant-labs/schema/cmd/release-guard parse-title "$PR_TITLE"
+
+      # Maintainer predicate is single-sourced in release-guard
+      # (release.IsMaintainer); the workflow just consumes its exit code.
+      - name: Assert author is a maintainer (admin/maintain)
+        run: go run github.com/peasant-labs/schema/cmd/release-guard check-maintainer --user "$PR_AUTHOR"
+
+  # Full validation matrices on an OPEN release PR — REGARDLESS of files touched.
+  # tests.yml / e2e.yml / release-validate.yml are path-filtered on their own
+  # pull_request triggers, so a release marker commit that touches no .go /
+  # packaging / e2e paths would otherwise skip them entirely (zero pre-merge
+  # signal). Call them here as reusable workflows, gated on the same release(
+  # title as `validate`, so every release PR proves the full gate before merge.
+  # (On the bootstrap PR that EDITS tests.yml, tests also fires standalone via its
+  # own path filter; cancel-in-progress collapses the two — the called run, which
+  # starts after `validate`, is the survivor. Future release PRs run it once.)
+  tests:
+    name: tests (release PR)
+    needs: validate
+    if: >-
+      startsWith(github.event.pull_request.title, 'release(') &&
+      contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+    uses: ./.github/workflows/tests.yml
+
+  e2e:
+    name: e2e (release PR)
+    needs: validate
+    if: >-
+      startsWith(github.event.pull_request.title, 'release(') &&
+      contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+    uses: ./.github/workflows/e2e.yml
+
+  release-validate:
+    name: release-validate (release PR)
+    needs: validate
+    if: >-
+      startsWith(github.event.pull_request.title, 'release(') &&
+      contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+    uses: ./.github/workflows/release-validate.yml
+
+  # Trigger B: a release PR MERGED — assert maintainer approval, then tag.
+  tag:
+    name: tag merged release
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.title, 'release(')
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+    steps:
+      - name: Mint App token (Contents:write to push the tag)
+        id: tok
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.PEASANT_RELEASER_APP_ID }}
+          private-key: ${{ secrets.PEASANT_RELEASER_APP_PRIVATE_KEY }}
+          owner: peasant-labs
+          repositories: peasant
+
+      - name: Checkout repository (full history + tags)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ steps.tok.outputs.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      - name: Derive version + kind from the PR title
+        id: title
+        run: go run github.com/peasant-labs/schema/cmd/release-guard parse-title "$PR_TITLE"
+
+      # The maintainer-approval assertion is deliberately not enforced: with a
+      # single active maintainer, GitHub's no-self-approval rule makes it
+      # unsatisfiable. The subcommand + tests live in the shared
+      # github.com/peasant-labs/schema/cmd/release-guard for a future governance
+      # decision, but the current release flow must remain satisfiable.
+
+      - name: Update Nix vendor hash before tagging
+        id: nix_hash
+        run: |
+          set -euo pipefail
+          if [ -z "${MERGE_SHA}" ]; then
+            echo "::error::merge_commit_sha is empty; cannot update vendorHash before tagging. (Was the PR actually merged?)"
+            exit 1
+          fi
+          git checkout -B release-nix-hash "${MERGE_SHA}"
+          make nix-vendor-hash
+          if git diff --quiet -- flake.nix; then
+            tag_sha="$(git rev-parse HEAD)"
+            echo "tag_sha=${tag_sha}" >> "$GITHUB_OUTPUT"
+            echo "::notice::vendorHash already current at ${tag_sha}"
+            exit 0
+          fi
+          git config user.name "peasant-release-bot"
+          git config user.email "noreply@peasantlabs.org"
+          git add flake.nix
+          git commit -m "chore: update nix vendor hash"
+          max_push_attempts=3
+          for attempt in $(seq 1 "$max_push_attempts"); do
+            git fetch origin develop
+            if ! git rebase origin/develop; then
+              echo "::error::failed to rebase nix vendor hash commit onto origin/develop on attempt ${attempt}/${max_push_attempts}. Resolve the flake.nix conflict on develop and rerun the release PR."
+              git rebase --abort || true
+              exit 1
+            fi
+            if git push origin "HEAD:develop"; then
+              tag_sha="$(git rev-parse HEAD)"
+              echo "tag_sha=${tag_sha}" >> "$GITHUB_OUTPUT"
+              echo "::notice::updated vendorHash and will tag ${tag_sha}"
+              exit 0
+            fi
+            echo "::warning::push to develop failed on attempt ${attempt}/${max_push_attempts}; fetching and rebasing before retry."
+          done
+          echo "::error::failed to push nix vendor hash commit to develop after ${max_push_attempts} attempts. Check for a protected-branch rejection or repeated concurrent updates, then rerun the release PR."
+          exit 1
+
+      - name: Push annotated tag (hard-fail if it exists)
+        env:
+          VERSION: ${{ steps.title.outputs.version }}
+          TAG_SHA: ${{ steps.nix_hash.outputs.tag_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG_SHA}" ]; then
+            echo "::error::tag_sha is empty; cannot tag."
+            exit 1
+          fi
+          # Refuse to move an existing tag — a duplicate/mistyped release PR.
+          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "::error::tag ${VERSION} already exists; refusing to move a published tag. Bump the version in a new release PR."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "::error::tag ${VERSION} already exists on origin; refusing to overwrite. Bump the version in a new release PR."
+            exit 1
+          fi
+          git config user.name "peasant-release-bot"
+          git config user.email "noreply@peasantlabs.org"
+          git tag -a "${VERSION}" "${TAG_SHA}" -m "${PR_TITLE}"
+          git push origin "refs/tags/${VERSION}"
+          echo "::notice::pushed annotated tag ${VERSION} on ${TAG_SHA}"

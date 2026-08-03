@@ -1,0 +1,30 @@
+# foreign-bytes without the bytes. The guarantee under test is that these exact
+# bytes and this exact mode survive, so a row that does not state them has no
+# guarantee to check.
+expectedCaseCount: 1
+cases:
+  - name: mutation-without-bytes
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

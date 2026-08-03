@@ -1,0 +1,64 @@
+expectedFamilyCount: 8
+expectedMutationCount: 3
+mutations:
+  - {name: second scope parser, find: "export function scopeTurns(", replace: "export function parseScopeParams() {}\nexport function scopeTurns(", expectedError: second scope parser}
+  - {name: duplicate scope params type, find: "export interface CrumbItem", replace: "type ScopeParams = {};\nexport interface CrumbItem", expectedError: duplicate scope type}
+  - {name: duplicate scope origin type, find: "export interface CrumbItem", replace: "type ScopeOrigin = 'Map' | 'Review';\nexport interface CrumbItem", expectedError: duplicate scope type}
+families:
+  - name: taskScopes
+    requiredNames:
+      - task range stops at next top-level user turn
+      - last task runs to session end
+      - non-user anchor stops at next top-level user turn
+      - unknown anchor uses whole session
+      - non-numeric anchor uses whole session
+  - name: fileScopes
+    requiredNames:
+      - edits and reads are included
+      - other file is isolated
+      - unknown file is empty
+      - empty path uses whole session
+  - name: changeScopes
+    requiredNames:
+      - one task index scopes one task
+      - multiple task indexes union in session order
+      - duplicate indexes deduplicate
+      - empty value uses whole session
+      - stale branch value uses whole session
+  - name: relativizePaths
+    requiredNames:
+      - working-directory prefix is stripped
+      - trailing working-directory slash is tolerated
+      - outside path is unchanged
+      - absent working directory leaves path unchanged
+      - relative path is unchanged
+  - name: pathMatches
+    requiredNames:
+      - exact equality
+      - absolute matches relative
+      - relative matches absolute
+      - suffix requires segment boundary
+      - different files do not match
+      - empty path does not match
+  - name: touchKinds
+    requiredNames:
+      - edit kind with path
+      - delete kind with path
+      - move kind with path
+      - read kind with path
+      - search kind with path
+      - edit without path
+  - name: originCrumbs
+    requiredNames:
+      - Map node
+      - Map whole session
+      - Review branch
+      - Review project
+      - no origin
+      - exact Map return location
+  - name: scopeChipLabels
+    requiredNames:
+      - task chip
+      - file chip
+      - change chip
+      - task chip without value

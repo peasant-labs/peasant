@@ -1,0 +1,100 @@
+.direnv/
+.envrc.local
+
+ralph-plans/
+finesse-plans/
+.claude/
+bin/
+# Ignore built web assets, but keep a committed `.gitkeep` placeholder so the
+# `//go:embed all:web/out` directive (embed.go) is satisfied for `go install`
+# / `go build` of a fresh checkout that never ran `make web` (and for the
+# module-zip + nix builds, which see tracked files only).
+# ORDER MATTERS: a directory ignore (`web/out/`) cannot be re-included per-file,
+# so we ignore the CONTENTS (`web/out/*`) and THEN negate the placeholder.
+# The placeholder is `.gitkeep` (NOT index.html): `make web` overwrites
+# index.html + _next/** (all ignored) but NEVER touches `.gitkeep`, so the
+# worktree stays clean and `goreleaser release` (which refuses a dirty tree)
+# succeeds. The runtime SPA-fallback (internal/api spaHandler) serves a
+# "not bundled" notice when only `.gitkeep` is embedded.
+web/out/*
+!web/out/.gitkeep
+web/.next/
+web/node_modules/
+node_modules/
+# Vitest/Vite cache (results.json etc.) — can land at the worktree root
+# depending on invocation cwd, not just under web/.
+.vite/
+web/.vite/
+
+# the binary itself
+/peasant
+/schema-gen
+/release-guard
+.peasant/
+
+# goreleaser build output (release.yml / release-validate.yml produce this in CI)
+/dist/
+
+# Agent stuff
+.worktrees/
+
+# Local-only raw Cursor bytes for fixture scrubbing (never commit)
+
+# Internal design docs (not for public release)
+llm/
+
+# ------ Go.gitignore
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+.env.local
+# Per-tool local overrides (.env.development.local, .env.production.local,
+# .env.test.local, …). These hold real credentials and must never be committed;
+# .env.example stays tracked.
+.env.*.local
+
+# Editor/IDE
+.idea/
+.vscode/
+
+# Generated API documentation
+docs/api/*.html
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+annotation-batch/
+
+# Eval results, cloned repos, and venv
+eval/results/
+eval/repos/
+eval/logs/
+eval/uv.lock
+eval/.venv/
+.venv/

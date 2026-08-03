@@ -1,0 +1,19 @@
+expectedCaseCount: 8
+requiredNames:
+  - canonical route resolves label and loads canonical project
+  - legacy route preserves branch and typed return
+  - malformed percent escape is rejected
+  - double encoded identity is rejected
+  - extra review segment is rejected
+  - missing review identity renders picker guidance
+  - missing legacy resolution is actionable
+  - transient legacy resolution can retry
+cases:
+  - {name: canonical route resolves label and loads canonical project, scenario: canonical, pathname: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, search: '', resolution: ready, expected: team alpha}
+  - {name: legacy route preserves branch and typed return, scenario: legacy, pathname: /review/team%20alpha, search: 'branch=feat%2Fidentity&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dsrc%252Fapi', resolution: ready, expected: '/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Fidentity&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dsrc%252Fapi'}
+  - {name: malformed percent escape is rejected, scenario: malformed, pathname: '/review/%', search: '', resolution: none, expected: malformed percent escape}
+  - {name: double encoded identity is rejected, scenario: malformed, pathname: '/review/%252E%252E', search: '', resolution: none, expected: still percent-encoded}
+  - {name: extra review segment is rejected, scenario: malformed, pathname: '/review/team/extra', search: '', resolution: none, expected: exactly one project segment}
+  - {name: missing review identity renders picker guidance, scenario: route-missing, pathname: '/review', search: '', resolution: none, expected: pick a project from Home to see its changes.}
+  - {name: missing legacy resolution is actionable, scenario: missing, pathname: '/review/absent', search: '', resolution: missing, expected: project was not found}
+  - {name: transient legacy resolution can retry, scenario: retry, pathname: '/review/team', search: 'branch=feat%2Fx', resolution: transient, expected: '/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Fx'}

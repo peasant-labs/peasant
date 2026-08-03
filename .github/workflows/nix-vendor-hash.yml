@@ -1,0 +1,66 @@
+name: Nix Vendor Hash
+
+# Keep flake.nix's buildGoModule vendorHash in sync after dependency-bearing
+# changes land on develop. Release PR tagging also runs the same script before
+# creating a tag, because tagged release source cannot be repaired in-place.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - "flake.nix"
+      - "flake.lock"
+      - "Makefile"
+      - "scripts/update-nix-vendor-hash.sh"
+      - ".github/workflows/nix-vendor-hash.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: nix-vendor-hash-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: update vendorHash
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    steps:
+      - name: Mint App token (Contents:write to commit hash drift)
+        id: tok
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.PEASANT_RELEASER_APP_ID }}
+          private-key: ${{ secrets.PEASANT_RELEASER_APP_PRIVATE_KEY }}
+          owner: peasant-labs
+          repositories: peasant
+
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          token: ${{ steps.tok.outputs.token }}
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      - name: Update vendorHash
+        run: make nix-vendor-hash
+
+      - name: Commit updated vendorHash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- flake.nix; then
+            echo "vendorHash already current"
+            exit 0
+          fi
+          git config user.name "peasant-release-bot"
+          git config user.email "noreply@peasantlabs.org"
+          git add flake.nix
+          git commit -m "chore: update nix vendor hash"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

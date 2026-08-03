@@ -1,0 +1,54 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+# Ignore built dashboard assets, but keep a committed `.gitkeep` placeholder so
+# the `//go:embed all:web/out` directive (../embed.go) is satisfied for a fresh
+# `go install` / `go build` that never ran `npm run build`. ORDER MATTERS: a
+# bare `/out/` directory ignore cannot be re-included per-file, so ignore the
+# CONTENTS (`/out/*`) and THEN negate the placeholder. The placeholder is
+# `.gitkeep` (NOT index.html): `npm run build`/`make web` overwrites index.html
+# + _next/** (all ignored) but NEVER touches `.gitkeep`, so the worktree stays
+# clean for `goreleaser release` (which refuses a dirty tree).
+/out/*
+!/out/.gitkeep
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# This repository is pnpm-only. Ignore npm lockfiles so a second dependency
+# graph cannot be mistaken for supported build input.
+package-lock.json

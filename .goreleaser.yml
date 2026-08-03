@@ -1,0 +1,159 @@
+# GoReleaser configuration for peasant.
+#
+# One config drives the whole fan-out from a single tag: cross-compiled static
+# binaries (CGO_ENABLED=0, pure-Go SQLite — no C toolchain), tar.gz archives,
+# checksums.txt, deb + rpm (nfpm), an AUR -bin package, and a Homebrew cask.
+#
+# Pre-public-flip safety: the AUR and Homebrew publishers carry skip_upload: true
+# so NOTHING is pushed to any external registry while the repo is private. The
+# public flip changes these to "auto" (a one-line runbook step), which also keeps
+# prereleases off the package repos forever.
+#
+# The real web dashboard (//go:embed all:web/out) must be built before Goreleaser
+# runs its `go build`. Artifact-producing workflows fail if that build is absent
+# or replaced by the compile-only stub.
+version: 2
+
+project_name: peasant
+
+builds:
+  - id: peasant
+    main: ./cmd/peasant
+    binary: peasant
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X github.com/peasant-labs/peasant/internal/defaults.version={{ .Version }}
+
+archives:
+  - id: peasant
+    ids:
+      - peasant
+    # FROZEN archive-name contract — consumed by the AUR PKGBUILD source_* URLs,
+    # the Homebrew cask url, the install docs, and any future curl-install
+    # script. Do NOT change without updating every consumer (S4/S6).
+    name_template: "peasant_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+# Snapshot (no-tag) builds drive the packaging-validation CI (release-validate.yml
+# on PRs / rc workflow_call). Pin a clean, slash-free, hyphen-free version so the
+# archive names, deb/rpm versions, and the AUR pkgver are deterministic and valid.
+snapshot:
+  version_template: "0.0.0"
+
+release:
+  # rc tags (vX.Y.Z-rcN) publish as GitHub prereleases; finals as full releases.
+  prerelease: auto
+
+nfpms:
+  - id: packages
+    ids:
+      - peasant
+    package_name: peasant
+    # Pin the package naming explicitly so the
+    # release-validate.yml deb/rpm install globs (peasant_*_linux_*.{deb,rpm})
+    # depend on this shape. Previously it was goreleaser's implicit default —
+    # a future goreleaser bump switching the nfpms default (e.g. to nfpm's
+    # ConventionalFileName: peasant_0.1.0_amd64.deb / peasant-0.1.0-1.x86_64.rpm)
+    # would have silently broken those globs. goreleaser appends .deb/.rpm.
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - deb
+      - rpm
+    vendor: peasant-labs
+    homepage: https://github.com/peasant-labs/peasant
+    maintainer: "Peasant Labs <admin@peasantlabs.org>"
+    description: >-
+      Local-first coding-agent session analytics: ingests Claude Code and
+      OpenCode transcripts, redacts, indexes, and serves a dashboard.
+    # Stock SPDX id, matching the committed LICENSE (verbatim Apache-2.0) and
+    # flake.nix `meta.license = licenses.asl20`. All three must agree.
+    license: "Apache-2.0"
+    section: utils
+    priority: optional
+    bindir: /usr/bin
+    # Empty: CGO_ENABLED=0 static binary has no shared-library Depends.
+    dependencies: []
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/peasant/copyright
+        packager: deb
+      - src: ./LICENSE
+        dst: /usr/share/licenses/peasant/LICENSE
+        packager: rpm
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+        - changelog-file-missing-in-native-package
+
+aurs:
+  - name: peasant-bin
+    ids:
+      - peasant
+    homepage: https://github.com/peasant-labs/peasant
+    description: "Local-first coding-agent transcript analytics, annotation, and publishing CLI"
+    license: "Apache-2.0"
+    # AUR accepts multiple maintainers (each becomes a "# Maintainer:" line in the
+    # generated PKGBUILD); the deb/rpm nfpm `maintainer:` above is single-valued.
+    # Addresses are obfuscated per AUR convention.
+    maintainers:
+      - "Peasant Labs <admin at peasantlabs dot org>"
+    git_url: "ssh://aur@aur.archlinux.org/peasant-bin.git"
+    private_key: "{{ .Env.AUR_KEY }}"
+    # Pre-flip safety: never push to the AUR. Flip to "auto" at public launch
+    # (auto also skips the hyphenated -rcN ladder forever).
+    skip_upload: "true"
+    # Bot identity for automated pushes — the same one every release automation
+    # commits under (the cask publisher and the release workflows). Deliberately a
+    # no-reply address, NOT a maintainer contact: it keeps bot commits distinct from
+    # human ones and off any person's GitHub contribution graph.
+    commit_author:
+      name: peasant-release-bot
+      email: noreply@peasantlabs.org
+    package: |-
+      install -Dm755 ./peasant "${pkgdir}/usr/bin/peasant"
+      install -Dm644 ./LICENSE "${pkgdir}/usr/share/licenses/peasant-bin/LICENSE"
+
+homebrew_casks:
+  - name: peasant
+    ids:
+      - peasant
+    repository:
+      owner: peasant-labs
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: peasant-release-bot
+      email: noreply@peasantlabs.org
+    directory: Casks
+    homepage: "https://github.com/peasant-labs/peasant"
+    description: "Agent-session ingest, analytics, and publishing CLI"
+    license: "Apache-2.0"
+    # Pre-flip safety: never push to the tap. Flip to "auto" at public launch.
+    skip_upload: "true"
+    # Two thin per-arch darwin binaries (no universal_binaries) — goreleaser emits
+    # per-arch url/sha256 stanzas when both darwin archives exist.
+    hooks:
+      post:
+        # Single modifier-if line keeps the GENERATED cask brew-style-clean:
+        # a block-if with a one-line body trips Style/IfUnlessModifier, a
+        # two-line system_command trips Layout/ArgumentAlignment at
+        # goreleaser's nesting depth, and a kept final newline (|) trips
+        # Layout/EmptyLinesAroundBlockBody.
+        install: |-
+          system_command("/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/peasant"]) if OS.mac?

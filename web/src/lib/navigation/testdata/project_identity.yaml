@@ -1,0 +1,52 @@
+expectedCaseCount: 7
+requiredNames:
+  - resolves a canonical project hash
+  - reports a missing project
+  - rejects a malformed resolved hash
+  - retries a transient failure
+  - ignores a stale earlier response
+  - hides a previously ready identity during replacement resolution
+  - ignores a response after unmount
+cases:
+  - name: resolves a canonical project hash
+    scenario: ready
+    requested: alpha
+    replacement: ''
+    expectedPhase: ready
+    expectedHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - name: reports a missing project
+    scenario: missing
+    requested: absent
+    replacement: ''
+    expectedPhase: missing
+    expectedHash: ''
+  - name: rejects a malformed resolved hash
+    scenario: malformed
+    requested: alpha
+    replacement: ''
+    expectedPhase: error
+    expectedHash: ''
+  - name: retries a transient failure
+    scenario: retry
+    requested: alpha
+    replacement: ''
+    expectedPhase: ready
+    expectedHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - name: ignores a stale earlier response
+    scenario: stale
+    requested: alpha
+    replacement: beta
+    expectedPhase: ready
+    expectedHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - name: hides a previously ready identity during replacement resolution
+    scenario: ready-then-replace
+    requested: alpha
+    replacement: beta
+    expectedPhase: resolving
+    expectedHash: ''
+  - name: ignores a response after unmount
+    scenario: unmount
+    requested: alpha
+    replacement: ''
+    expectedPhase: resolving
+    expectedHash: ''

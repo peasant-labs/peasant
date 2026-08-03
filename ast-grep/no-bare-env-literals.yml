@@ -1,0 +1,27 @@
+id: no-bare-env-literals
+language: Go
+severity: error
+message: >
+  Bare environment-variable string literal. Use defaults.EnvVar constants and
+  the package-local env helpers instead.
+note: >
+  Bare env-name literals bypass the EnvVar type and allow drift between harness
+  seams, wrappers, and production defaults. Definition sites are excluded.
+rule:
+  all:
+    - kind: interpreted_string_literal
+    - regex: >-
+        ^"(?:PEASANT_BIN|DATABASE_URL|S3_ENDPOINT|VILLAGE_URL|VILLAGE_BIN|SETUP_DEMO_BIN|VILLAGE_REPO|VILLAGE_BACKEND_DIR|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_STATE_HOME|GOPRIVATE|RELEASE_E2E_DIST|PEASANT_PODMAN_CONTAINER|PEASANT_BIN_FATAL_HELPER|BASELINE_FATAL_HELPER|REFRESH_EXTERNAL_FATAL_HELPER)(?:=.*)?"$
+  not:
+    inside:
+      kind: const_spec
+ignores:
+  - "vendor/**"
+  - "internal/e2e/env.go"
+  - "internal/defaults/env.go"
+  - "internal/auth/credentials.go"
+  - "internal/auth/credentials_test.go"
+  - "internal/config/config_test.go"
+  - "internal/tui/ftue/config_test.go"
+  - "cmd/peasant/main_test.go"
+  - "cmd/peasant/cmd_harvest_test.go"

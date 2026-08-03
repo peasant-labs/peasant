@@ -1,0 +1,20 @@
+harness: cursor
+source_path: "."
+sessions:
+  - id: "6f4a7c29-3150-4719-a562-b9d28d84f199"
+    kind: "cursor-root"
+    path: "home-user-projects-peasant-e2e/agent-transcripts/6f4a7c29-3150-4719-a562-b9d28d84f199/6f4a7c29-3150-4719-a562-b9d28d84f199.jsonl"
+  - id: "6db3c729-3f6b-46cb-92b5-121db7a20da9"
+    kind: "cursor-aborted"
+    path: "home-user-projects-peasant-e2e/agent-transcripts/6db3c729-3f6b-46cb-92b5-121db7a20da9/6db3c729-3f6b-46cb-92b5-121db7a20da9.jsonl"
+slug:
+  workspace: "home-user-projects-peasant-e2e"
+  decoded_dir: "/home/user/projects/peasant-e2e"
+  dir_tree:
+    - "/home"
+    - "/home/user"
+    - "/home/user/projects"
+    - "/home/user/projects/peasant-e2e"
+pinned:
+  scrubbed_home: "/home/user"
+  synthetic_remote: false

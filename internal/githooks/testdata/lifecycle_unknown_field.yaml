@@ -1,0 +1,18 @@
+expectedCaseCount: 1
+cases:
+  - name: unknown-field
+    requestedEvents: [post-commit]
+    unexpectedEvidence: true
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

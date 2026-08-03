@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logged in — Peasant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "DM Sans", system-ui, sans-serif;
+  color: #2a2521;
+  background-color: #faf9f7;
+  background-image:
+    linear-gradient(rgba(0,51,48,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,51,48,0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: #90ffe6; color: #003330; }
+.card {
+  background: white;
+  border: 1px solid #e8e4dd;
+  border-radius: 12px;
+  padding: 52px 56px;
+  max-width: 480px;
+  width: 100%;
+  margin: 24px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(4,200,165,0.06);
+  animation: fade-up 0.5s ease-out both;
+}
+.icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+.icon svg { width: 28px; height: 28px; }
+.icon-success { background: #effefa; border: 1px solid #c7fff2; color: #00a288; }
+.icon-error { background: #fff5f3; border: 1px solid #fb7f6a; color: #df3f27; }
+h1 {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.875rem;
+  line-height: 1.25;
+  font-weight: normal;
+  font-style: normal;
+  color: #2a2521;
+  margin-bottom: 10px;
+}
+.username {
+  color: #00a288;
+  font-weight: 500;
+}
+.subtitle {
+  color: #857a6b;
+  font-size: 15px;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #effefa;
+  color: #00816e;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #c7fff2;
+}
+.badge-error {
+  background: #fff5f3;
+  color: #df3f27;
+  border-color: #fb7f6a;
+}
+.badge-test {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.hint {
+  color: #b8b0a1;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 24px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 36px;
+  animation: fade-up 0.5s ease-out 0.15s both;
+}
+.brand-text {
+  color: #d5cfc4;
+  font-size: 16px;
+  font-family: "Instrument Serif", Georgia, serif;
+  letter-spacing: 0.5px;
+}
+.brand-logo {
+  position: relative;
+  width: 22px;
+  height: 22px;
+}
+.logo-circle {
+  position: absolute;
+  border-radius: 50%;
+}
+.logo-c1 { width: 28px; height: 28px; top: 0; left: 0; background: rgba(29,228,190,0.6); }
+.logo-c2 { width: 24px; height: 24px; top: 10px; left: 10px; background: rgba(0,162,136,0.5); }
+.logo-c3 { width: 22px; height: 22px; top: 4px; left: 20px; background: rgba(80,245,212,0.45); }
+.brand-logo .logo-circle { opacity: 0.4; }
+.brand-logo .logo-c1 { width: 13px; height: 13px; top: 0; left: 0; }
+.brand-logo .logo-c2 { width: 11px; height: 11px; top: 5px; left: 5px; }
+.brand-logo .logo-c3 { width: 10px; height: 10px; top: 2px; left: 10px; }
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head><body>
+<div class="card">
+  <div class="icon icon-success">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+    </svg>
+  </div>
+  <h1>Welcome to Peasant</h1>
+  <p class="subtitle">Logged in as <span class="username">sample-user</span></p>
+  <span class="badge badge-test"><span class="badge-dot"></span>Test env &middot; localhost:8443</span>
+  <p class="hint">You can close this tab and return to your terminal</p>
+  <div class="brand">
+    <div class="brand-logo">
+      <div class="logo-circle logo-c1"></div>
+      <div class="logo-circle logo-c2"></div>
+      <div class="logo-circle logo-c3"></div>
+    </div>
+    <span class="brand-text">peasant</span>
+  </div>
+</div>
+</body></html>

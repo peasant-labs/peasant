@@ -1,0 +1,58 @@
+# A corpus covering every visibility-and-quietness cell, and never the ONE-LINE
+# form of a disclosure.
+#
+# This is what deleting the single --quiet public row produced before the cells
+# were required, and it is still the failure worth refusing: `brief` becomes
+# wholly unexercised on the mounted command. The text itself survives - the
+# one-line renderer has its own unit test - so what vanishes is the only proof
+# that the real push SELECTS it. That is the form a Git hook prints on every
+# commit, which is the surface nearly every user sees.
+expectedCaseCount: 6
+cases:
+  - name: private-not-quiet
+    visibility: private
+    configuredLevel: minimal
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: private-quiet
+    visibility: private
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+  - name: public-not-quiet
+    visibility: public
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: full
+    redactionRecord: true
+
+  - name: public-quiet
+    visibility: public
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+  - name: group-not-quiet
+    visibility: group
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: full
+    redactionRecord: true
+
+  - name: group-quiet
+    visibility: group
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+expectedForbiddenClaimCount: 1
+forbiddenClaims:
+  - name: no-public-claim
+    phrase: "session(s) publicly"
+    matchesSample: "publish 2 session(s) publicly"

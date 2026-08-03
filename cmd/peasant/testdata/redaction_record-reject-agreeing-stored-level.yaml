@@ -1,0 +1,38 @@
+# Proves the loader rejects a case whose stored level EQUALS the level the push
+# applies. Such a case passes identically whether the record is derived from the
+# push policy or from the metadata file, so it cannot detect the defect the corpus
+# exists to detect - it is a case that looks like coverage and is not.
+expectedCaseCount: 4
+cases:
+  - name: stored-and-applied-agree-so-nothing-is-distinguished
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: standard
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: the-shipped-state
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: missing-metadata-is-reported
+    sessionCount: 3
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 3
+  - name: a-second-shipped-state-row
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0

@@ -1,0 +1,7 @@
+expectedCaseCount: 5
+requiredNames:
+  - selected_session_newer_hidden_sibling
+  - hidden_only
+  - all_mode_baseline
+  - policy_error
+  - selected_session_survives_hidden_trail_cap

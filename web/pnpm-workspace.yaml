@@ -1,0 +1,5 @@
+# Single-package workspace. Shared design-system packages resolve from the
+# registry at the exact versions in package.json and pnpm-lock.yaml, so a plain
+# `pnpm install --frozen-lockfile` works without sibling repositories.
+packages:
+  - '.'

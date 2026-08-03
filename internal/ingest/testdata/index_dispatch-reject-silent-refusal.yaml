@@ -1,0 +1,31 @@
+# A dispatch corpus whose refusal row says nothing about what the refusal tells
+# the user.
+#
+# A row that pins "this kind is refused" without pinning any of the refusal's
+# text asserts only that indexing stopped. Stopping silently is the failure this
+# whole dispatch exists to prevent - the defect it replaced also stopped, and
+# reported success. So the loader requires an error row to name a phrase the
+# recorded message must carry.
+
+expectedCaseCount: 3
+cases:
+  - name: an-undeclared-source-kind-is-refused-but-nothing-pins-what-it-says
+    sourceKind: unknown
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: none
+    indexOutcome: error
+
+  - name: a-file-source-is-handed-the-bytes
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: bytes
+    indexOutcome: indexed
+
+  - name: a-directory-source-is-never-handed-bytes
+    sourceKind: directory
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: file
+    indexOutcome: indexed

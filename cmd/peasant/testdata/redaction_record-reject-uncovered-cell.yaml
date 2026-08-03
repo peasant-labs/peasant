@@ -1,0 +1,56 @@
+# Proves the loader rejects a corpus that satisfies every per-axis and per-row
+# rule while leaving one CROSS-PRODUCT cell empty.
+#
+# Every axis is still covered here: both metadata states, both session-count
+# shapes, both stored-claim states, a disagreeing stored level, and a
+# missing-metadata case. What is absent is the combination of a present metadata
+# file, a single-session push, and a stored claim to be ignored - one cell.
+#
+# This fixture is what ends the regress that a size constant could not. It is
+# falsified by the ABSENCE of rejection: delete the cross-product loop, shrink the
+# required set, or empty it, and this corpus stops being rejected and its test
+# goes red. It restates no number, so there is no constant for a later edit to
+# decrement in the same commit - which is how the previous guard was defeated by
+# the very edit its own failure message instructed.
+expectedCaseCount: 5
+cases:
+  - name: present-plural-with-a-stored-claim
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: "maximum"
+    storedRuleSetVersion: "1.0.0"
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: present-plural-no-stored-claim
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: present-single-no-stored-claim
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: absent-plural
+    sessionCount: 3
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 3
+  - name: absent-single
+    sessionCount: 1
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 1

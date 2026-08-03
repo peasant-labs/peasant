@@ -1,0 +1,80 @@
+expectedCaseCount: 13
+cases:
+  - name: bare navigator default
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: ''
+    accepted: true
+    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package
+    state: {version: 1, presentation: navigator, selectedId: null, grain: package, expandedIds: [], navigatorFilter: '', navigatorFocusedId: null, viewport: null, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance, scentFilter: null}
+  - name: complete canvas state
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?node=internal%2Fingest%2Fpipeline.go&mode=canvas&grain=file&expand=internal&expand=internal%2Fingest&filter=pipe&focus=internal%2Fingest%2Fpipeline.go&scale=1.25&panX=32&panY=-18'
+    accepted: true
+    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest%2Fpipeline.go&mode=canvas&grain=file&expand=internal&expand=internal%2Fingest&filter=pipe&focus=internal%2Fingest%2Fpipeline.go&scale=1.25&panX=32&panY=-18
+    state: {version: 1, presentation: canvas, selectedId: internal/ingest/pipeline.go, grain: file, expandedIds: [internal, internal/ingest], navigatorFilter: pipe, navigatorFocusedId: internal/ingest/pipeline.go, viewport: {scale: 1.25, panX: 32, panY: -18}, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance, scentFilter: null}
+  - name: expansion order canonicalized
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=navigator&grain=file&expand=web&expand=internal&expand=web'
+    accepted: true
+    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=file&expand=internal&expand=web
+    state: {version: 1, presentation: navigator, selectedId: null, grain: file, expandedIds: [internal, web], navigatorFilter: '', navigatorFocusedId: null, viewport: null, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance, scentFilter: null}
+  - name: empty expansion rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=navigator&grain=package&expand='
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: whitespace expansion rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=navigator&grain=package&expand=%20%20'
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: mixed valid and blank expansions rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=navigator&grain=package&expand=internal&expand=%C2%A0'
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: minimum viewport endpoint
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=canvas&grain=package&scale=0.35&panX=0&panY=0'
+    accepted: true
+    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=canvas&grain=package&scale=0.35&panX=0&panY=0
+    state: {version: 1, presentation: canvas, selectedId: null, grain: package, expandedIds: [], navigatorFilter: '', navigatorFocusedId: null, viewport: {scale: 0.35, panX: 0, panY: 0}, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance, scentFilter: null}
+  - name: maximum viewport endpoint
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=canvas&grain=package&scale=2.4&panX=-9&panY=12'
+    accepted: true
+    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=canvas&grain=package&scale=2.4&panX=-9&panY=12
+    state: {version: 1, presentation: canvas, selectedId: null, grain: package, expandedIds: [], navigatorFilter: '', navigatorFocusedId: null, viewport: {scale: 2.4, panX: -9, panY: 12}, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance, scentFilter: null}
+  - name: viewport below shared minimum rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=canvas&scale=0.349&panX=0&panY=0'
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: viewport above shared maximum rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=canvas&scale=2.401&panX=0&panY=0'
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: partial viewport rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=canvas&scale=1.2&panX=0'
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: unknown route field rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=navigator&grain=package&surprise=true'
+    accepted: false
+    expectedHref: ''
+    state: null
+  - name: unsupported presentation rejected
+    pathname: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    search: '?mode=diagram&grain=package'
+    accepted: false
+    expectedHref: ''
+    state: null

@@ -1,0 +1,7 @@
+expectedRootFields: [reviewList, emptyReviewList, longCommitCount, detail, filesChanged, diffCases]
+expectedDiffCount: 3
+requiredDiffNames:
+  - normal text diff preserves per-hunk attribution
+  - binary file has no hunks
+  - truncated large diff remains marked
+expectedReviewListCounts: {changes: 1, recentCommits: 2, sessions: 1}

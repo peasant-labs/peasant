@@ -1,0 +1,15 @@
+# A push-validation corpus whose case pins NO expected error text.
+#
+# The case still asserts a 400, so it reads as coverage. What it cannot do is
+# distinguish the refusal it names from any other 400 the endpoint might produce -
+# a blank needle is contained in every message. The endpoint has three distinct
+# rejection arms with different reasons and different remedies, so a case that
+# cannot tell them apart is a case that would pass while the wrong one fired.
+expectedCaseCount: 1
+cases:
+  - name: blank
+    sessionIds: [99d59925-36bc-424c-a789-8be54d9702ba]
+    redactionLevel: maximum
+    visibility: private
+    expectedStatus: 400
+    expectedError: ""

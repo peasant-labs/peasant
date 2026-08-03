@@ -1,0 +1,16 @@
+id: no-untyped-string-const
+language: Go
+severity: warning
+message: >
+  Untyped string constant "$NAME". If this represents a provider, format,
+  channel, message type, role, or redaction level, give it a typed definition
+  (e.g., const X Provider = "...").
+note: >
+  Untyped string constants can be accidentally mixed with other string values.
+  If this is a format template or error message, it may be left as-is.
+rule:
+  all:
+    - pattern: const $NAME = "$VALUE"
+    - regex: "(Provider|Format|Channel|Message|Role|Redact|Level|Status)"
+ignores:
+  - "vendor/**"

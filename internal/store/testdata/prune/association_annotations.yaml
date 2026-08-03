@@ -1,0 +1,15 @@
+cases:
+  - name: selected_association_and_meta_annotation
+    selectedSessionID: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+    retainedSessionID: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+    selectedProjectHash: 1111111111111111111111111111111111111111111111111111111111111111
+    retainedProjectHash: 2222222222222222222222222222222222222222222222222222222222222222
+    selectedCommitHash: prune-selected-association-commit
+    retainedCommitHash: prune-retained-association-commit
+    selectedAnnotationValue: selected-association
+    retainedAnnotationValue: retained-association
+    selectedMetaValue: selected-meta
+    selectedNestedMetaValue: selected-nested-meta
+    retainedMetaValue: retained-meta
+    retainedNestedMetaValue: retained-nested-meta
+    expectedDeleted: 1

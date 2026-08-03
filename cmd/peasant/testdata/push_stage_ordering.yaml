@@ -1,0 +1,52 @@
+cases:
+  - name: association_success
+    transcript: success
+    annotation: association_success
+    expected:
+      event_order: [transcript-start, transcript-end, annotation-start, annotation-end]
+      annotation_ran: true
+      transcript_result: true
+      annotation_summary: true
+      annotation_total: 1
+      transcript_error: none
+      annotation_error: none
+      returned_error: none
+
+  - name: no_association
+    transcript: success
+    annotation: no_association
+    expected:
+      event_order: [transcript-start, transcript-end, annotation-start, annotation-end]
+      annotation_ran: true
+      transcript_result: true
+      annotation_summary: true
+      annotation_total: 0
+      transcript_error: none
+      annotation_error: none
+      returned_error: none
+
+  - name: transcript_failure_annotation_still_runs
+    transcript: failure
+    annotation: association_success
+    expected:
+      event_order: [transcript-start, transcript-end, annotation-start, annotation-end]
+      annotation_ran: true
+      transcript_result: true
+      annotation_summary: true
+      annotation_total: 1
+      transcript_error: failure
+      annotation_error: none
+      returned_error: transcript
+
+  - name: cancellation_same_context_reaches_annotation
+    transcript: cancel
+    annotation: observe_cancellation
+    expected:
+      event_order: [transcript-start, transcript-end, annotation-start, annotation-end]
+      annotation_ran: true
+      transcript_result: true
+      annotation_summary: false
+      annotation_total: 0
+      transcript_error: canceled
+      annotation_error: canceled
+      returned_error: transcript

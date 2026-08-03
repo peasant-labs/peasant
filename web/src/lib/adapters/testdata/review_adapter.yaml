@@ -1,0 +1,71 @@
+reviewList:
+  projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  repoFound: true
+  defaultBranch: develop
+  changes:
+    - {branch: feat/x, aheadCount: 3, behindCount: 0, filesChanged: 12, sessionCount: 2, taskCount: 5, newEdges: 1, removedEdges: 0, violations: 0, merged: false, baseHash: abc, tipCommitMs: 1700000000000}
+  recentCommits:
+    - {hash: abc, subject: init, timeMs: 1, hasSession: true, sessionIds: [session-1]}
+    - {hash: def, subject: next, hasSession: false, sessionIds: []}
+  sessions:
+    - {sessionId: session-1, title: Build the adapter, harness: codex, startMs: 1, hasCommitBinding: true}
+  rewrittenCommits: []
+emptyReviewList:
+  projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  repoFound: false
+  changes: []
+  recentCommits: []
+  sessions: []
+  rewrittenCommits: []
+longCommitCount: 200
+detail:
+  branch: feat/x
+  baseRef: abc
+  defaultBranch: develop
+  files:
+    - {path: a.go, status: A, linesAdded: 5, linesRemoved: 0}
+    - {path: b.go, status: M, linesAdded: 3, linesRemoved: 1}
+  slice: {nodes: [], structureEdges: [], activityEdges: []}
+  newEdges: [{from: a, to: b, count: 1}]
+  removedEdges: []
+  newNodes: []
+  removedNodes: []
+  violations: []
+  work:
+    - {sessionId: s1, title: conv, harness: claude-code, binding: bound, tasks: []}
+  unrecordedCommits: []
+  unusual: []
+  frictions: [{kind: retryLoop, label: retry loop, file: a.go, count: 4, sessions: 2}]
+  insights: []
+  linesAdded: 8
+  linesRemoved: 1
+  outputTokens: 12400
+  costUsd: 4.81
+filesChanged: 136
+diffCases:
+  - name: normal text diff preserves per-hunk attribution
+    payload:
+      branch: feat/x
+      file: a.go
+      status: M
+      binary: false
+      truncated: false
+      hunks:
+        - oldStart: 1
+          oldLines: 1
+          newStart: 1
+          newLines: 2
+          sessionId: s1
+          sessionTitle: Refactor
+          lines: [{kind: context, text: package a}, {kind: add, text: 'func A() {}'}]
+  - name: binary file has no hunks
+    payload: {branch: b, file: img.png, status: A, binary: true, truncated: false, hunks: []}
+  - name: truncated large diff remains marked
+    payload:
+      branch: b
+      file: big.go
+      status: M
+      binary: false
+      truncated: true
+      hunks:
+        - {oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{kind: context, text: x}]}

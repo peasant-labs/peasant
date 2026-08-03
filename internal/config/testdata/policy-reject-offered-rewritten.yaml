@@ -1,0 +1,33 @@
+# Proves the loader rejects an offered row that also claims the run applies a
+# different level. An offered level runs exactly as chosen; a row saying otherwise
+# would let a silent substitution pass as intended behaviour.
+expectedRedactionCaseCount: 4
+redaction:
+  - name: standard-claims-to-run-as-something-else
+    configured: standard
+    disposition: offered
+    effective: maximum
+  - name: minimal-is-raised
+    configured: minimal
+    disposition: raised
+    effective: standard
+  - name: maximum-is-refused
+    configured: maximum
+    disposition: refused
+  - name: unset-resolves-to-the-default
+    configured: ""
+    disposition: offered
+    effective: standard
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

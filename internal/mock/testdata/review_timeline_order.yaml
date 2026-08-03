@@ -1,0 +1,33 @@
+expectedCaseCount: 1
+requiredNames:
+  - noncanonical sessions and bindings normalize together
+cases:
+  - name: noncanonical sessions and bindings normalize together
+    input:
+      projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repofound: true
+      defaultbranch: main
+      changes: []
+      recentcommits:
+        - hash: deadbeef
+          subject: noncanonical binding order
+          hasSession: true
+          sessionIds: [session-missing, session-older, session-tie-b, session-newer, session-tie-a]
+          associations:
+            - {id: fixture-deadbeef-session-missing, sessionId: session-missing, conclusion: confirmed, confidence: high, evidence: [{kind: recorded_commit, recordedCommitHash: deadbeef}]}
+            - {id: fixture-deadbeef-session-older, sessionId: session-older, conclusion: confirmed, confidence: high, evidence: [{kind: recorded_commit, recordedCommitHash: deadbeef}]}
+            - {id: fixture-deadbeef-session-tie-b, sessionId: session-tie-b, conclusion: confirmed, confidence: high, evidence: [{kind: recorded_commit, recordedCommitHash: deadbeef}]}
+            - {id: fixture-deadbeef-session-newer, sessionId: session-newer, conclusion: confirmed, confidence: high, evidence: [{kind: recorded_commit, recordedCommitHash: deadbeef}]}
+            - {id: fixture-deadbeef-session-tie-a, sessionId: session-tie-a, conclusion: confirmed, confidence: high, evidence: [{kind: recorded_commit, recordedCommitHash: deadbeef}]}
+      sessions:
+        - {sessionId: session-missing, title: missing time, harness: claude-code, hasCommitBinding: true}
+        - {sessionId: session-older, title: older, harness: claude-code, startMs: 100, hasCommitBinding: true}
+        - {sessionId: session-tie-b, title: tie b, harness: claude-code, startMs: 200, hasCommitBinding: true}
+        - {sessionId: session-newer, title: newer, harness: claude-code, startMs: 300, hasCommitBinding: true}
+        - {sessionId: session-tie-a, title: tie a, harness: claude-code, startMs: 200, hasCommitBinding: true}
+      rewrittencommits: []
+    expected:
+      sessionCount: 5
+      commitCount: 1
+      sessionOrder: [session-newer, session-tie-a, session-tie-b, session-older, session-missing]
+      commitBindingOrder: [session-newer, session-tie-a, session-tie-b, session-older, session-missing]

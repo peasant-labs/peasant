@@ -1,0 +1,45 @@
+# Which repository topologies own the hook file git runs for them.
+#
+# The refusal exists to stop a choice made for one repository landing in a file
+# other repositories also run. Deciding that on the WORKTREE alone is wrong: git
+# runs a submodule's hooks from <parent>/.git/modules/<sub>/hooks, which is
+# outside the submodule's worktree and is nevertheless that submodule's own
+# private git directory — nothing else runs it. Refusing it told the user to run
+# the command "from the repository that owns it", which is the repository they
+# were already standing in.
+#
+# The discriminator is the repository's own git directory, which git reports and
+# the lifecycle already resolves:
+#
+#   topology         own git dir                    hook git runs                       private?
+#   plain            <repo>/.git                    <repo>/.git/hooks/...               yes
+#   submodule        <parent>/.git/modules/<sub>    <parent>/.git/modules/<sub>/hooks   yes
+#   linked-worktree  <main>/.git/worktrees/<name>   <main>/.git/hooks/...               NO, shared
+#   worktree-hooks   <repo>/.git                    <repo>/.githooks/...                yes (committable)
+#   outside-hooks    <repo>/.git                    <elsewhere>/...                     NO, shared
+expectedCaseCount: 5
+cases:
+  - name: a plain repository owns its own git directory
+    topology: plain
+    expectedOutcome: created
+    expectCommittableWarning: false
+
+  - name: a submodule owns its private git directory under the parent
+    topology: submodule
+    expectedOutcome: created
+    expectCommittableWarning: false
+
+  - name: a repository-local hooks path in the working tree is committable but owned
+    topology: worktree-hooks
+    expectedOutcome: created
+    expectCommittableWarning: true
+
+  - name: a linked worktree runs its main worktree's shared hooks
+    topology: linked-worktree
+    expectedOutcome: refused
+    expectCommittableWarning: false
+
+  - name: a hooks path outside the repository is shared by every repository pointed at it
+    topology: outside-hooks
+    expectedOutcome: refused
+    expectCommittableWarning: false

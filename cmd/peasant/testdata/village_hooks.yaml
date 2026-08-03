@@ -1,0 +1,33 @@
+# Git-execution cases for the hooks the `peasant village hooks` CLI installs.
+#
+# Each case installs one event through the production command tree in a
+# disposable repository, then runs the real git operation with a stub peasant on
+# PATH. Git must always succeed; a failed upload must only warn.
+#
+# gitOperation is the command git actually runs: commit for post-commit,
+# push for pre-push.
+expectedCaseCount: 4
+cases:
+  - name: post-commit-records-a-successful-upload
+    event: post-commit
+    gitOperation: commit
+    uploadExitCode: 0
+    expectWarning: false
+
+  - name: post-commit-warns-and-keeps-the-commit-when-the-upload-fails
+    event: post-commit
+    gitOperation: commit
+    uploadExitCode: 4
+    expectWarning: true
+
+  - name: pre-push-records-a-successful-upload
+    event: pre-push
+    gitOperation: push
+    uploadExitCode: 0
+    expectWarning: false
+
+  - name: pre-push-warns-and-lets-the-push-continue-when-the-upload-fails
+    event: pre-push
+    gitOperation: push
+    uploadExitCode: 7
+    expectWarning: true

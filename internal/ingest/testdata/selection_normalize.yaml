@@ -1,0 +1,61 @@
+# NormalizeRemoteForMatch / NormalizeProjectNameForMatch fixture.
+#
+# remoteCases model config/stored form pairs from a selection regression:
+# kickstart persisted SSH/SCP remotes, but
+# the projects table stores the bare normalized "host/owner/repo" form (no
+# scheme). Both a raw config-form input AND an already-normalized stored-form
+# input must reduce to the SAME canonical output, or gitRemote rules can never
+# match.
+remoteCases:
+  - name: scp_form_garden_app
+    input: "git@github.com:example-org/garden-app.git"
+    want: "github.com/example-org/garden-app"
+  - name: scp_form_sample_project_gitlab
+    input: "git@gitlab.com:example-team/sample-project.git"
+    want: "gitlab.com/example-team/sample-project"
+  - name: scp_form_inventory_service
+    input: "git@github.com:example-org/inventory-service.git"
+    want: "github.com/example-org/inventory-service"
+  - name: https_form_with_git_suffix
+    input: "https://github.com/example-org/garden-app.git"
+    want: "github.com/example-org/garden-app"
+  - name: ssh_url_form
+    input: "ssh://git@github.com/example-org/garden-app.git"
+    want: "github.com/example-org/garden-app"
+  - name: already_bare_stored_form_passthrough
+    input: "github.com/example-org/garden-app"
+    want: "github.com/example-org/garden-app"
+  - name: already_bare_stored_form_uppercase_host_lowercased
+    input: "GitHub.com/example-org/garden-app"
+    want: "github.com/example-org/garden-app"
+  - name: bare_form_trailing_slash_trimmed
+    input: "github.com/example-org/garden-app/"
+    want: "github.com/example-org/garden-app"
+  - name: bare_form_trailing_git_suffix_trimmed
+    input: "github.com/example-org/garden-app.git"
+    want: "github.com/example-org/garden-app"
+  - name: empty_input_stays_empty
+    input: ""
+    want: ""
+
+# nameCases: the config's `name` rule is a short human-typed project name
+# (e.g. "sample-project"), but several store-side readers populate
+# their row's project-name field as the session's full working-directory PATH
+# (COALESCE(canonical_cwd, project_hash) — the projects table has no separate
+# short-name column). A path must reduce to its basename to match a short name.
+nameCases:
+  - name: short_name_passthrough
+    input: "sample-project"
+    want: "sample-project"
+  - name: full_path_reduces_to_basename
+    input: "/home/developer/work/sample-project"
+    want: "sample-project"
+  - name: full_path_trailing_slash_reduces_to_basename
+    input: "/home/developer/work/sample-project/"
+    want: "sample-project"
+  - name: relative_path_reduces_to_basename
+    input: "work/sample-project"
+    want: "sample-project"
+  - name: empty_name_stays_empty
+    input: ""
+    want: ""

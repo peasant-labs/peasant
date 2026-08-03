@@ -1,0 +1,107 @@
+# What the published-content record says, for every combination of what the
+# metadata on disk claims and what the push is actually about to apply.
+#
+# THE DEFECT THIS CORPUS EXISTS TO PIN. The record used to be derived from the
+# RedactionInfo stamped into each session's metadata file, described in its own
+# doc comment as "the ground truth". Nothing on the import path stamps that field
+# any more - no level this version offers redacts while ingest writes - so every
+# session on disk carries applied=false and the record printed:
+#
+#     redacted:          0 of 2 session(s)
+#     level:             (mixed or unknown)
+#     rule set version:  (mixed or unknown; current: v3.0.0)
+#
+# on every push, directly under "You are about to publish 2 session(s)". It was
+# reporting a field nobody sets rather than the protection being applied. The
+# error under-claimed, so nothing was ever over-shared, but a record that always
+# says zero is worse than no record: it invites the conclusion that nothing is
+# redacted at all.
+#
+# HOW THESE CASES CATCH A REGRESSION, and why none of them is a negated
+# substring check. Each case writes a metadata file whose stored redaction state
+# DISAGREES with the level the push applies - stored maximum at an ancient rule
+# set, stored applied=false, stored nothing at all - and then requires the record
+# to name the level and rule set the push will actually use. Re-deriving the
+# record from stored metadata does not merely fail to add something; it makes the
+# rendered level equal storedLevel, and the equality assertion fails on a value it
+# can print. A "must not contain 0 of" guard would pass for the wrong reason the
+# moment the wording changed.
+#
+# columns
+#   metadataPresent        whether the session's metadata file exists on disk. A
+#                          push needs it, so its absence is reported as an early
+#                          warning rather than as a redaction fact.
+#   storedApplied          what the metadata file claims about import-time
+#                          redaction. Deliberately set to values that contradict
+#                          appliedLevel.
+#   storedLevel            the level the metadata file claims. Must differ from
+#                          appliedLevel wherever it is set, or the case cannot
+#                          distinguish the two sources.
+#   storedRuleSetVersion   the rule set the metadata file claims. Same reasoning.
+#   appliedLevel           the level the push applies to metadata on the way out.
+#   expectMissingMetadata  how many sessions the record must report as missing.
+#
+# The cases are the CROSS-PRODUCT of the three inputs the record's wording
+# depends on: whether the metadata file is there, whether the count reads as one
+# session or several, and whether there is a stored claim to be ignored. Six
+# cells, six rows, each the only occupant of its cell. Covering the three axes
+# separately was not enough - two rows differed only in session count, so either
+# could be deleted with the other still supplying every axis, and this corpus
+# stayed green. storedApplied is absent from the metadata-missing cells because
+# there is no file there to carry a claim.
+
+expectedCaseCount: 6
+cases:
+  - name: the-shipped-state-stored-applied-false-still-reports-the-level-being-applied
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+
+  - name: a-stored-level-from-an-older-version-does-not-become-the-reported-level
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: maximum
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0
+
+  - name: unreadable-metadata-is-an-early-warning-and-not-an-unknown-redaction-state
+    sessionCount: 3
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 3
+
+  - name: a-single-session-push-reports-that-one-session-rather-than-a-plural-guess
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+
+  - name: an-older-versions-stamp-is-ignored-across-a-multi-session-push-too
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: maximum
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0
+
+  - name: a-single-session-with-unreadable-metadata-still-warns-about-that-one
+    sessionCount: 1
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 1

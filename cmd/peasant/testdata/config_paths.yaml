@@ -1,0 +1,9 @@
+declared_rows: 2
+cases:
+  - name: config-dir-derives-peasant-config
+    config_dir: /tmp/peasant-config-home
+    expected: /tmp/peasant-config-home/peasant/config.yaml
+  - name: explicit-config-wins
+    config_dir: /tmp/ignored-config-home
+    config: /tmp/exact/user-choice.yaml
+    expected: /tmp/exact/user-choice.yaml

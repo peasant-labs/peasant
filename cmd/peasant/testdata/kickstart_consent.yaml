@@ -1,0 +1,35 @@
+declaredRows: 5
+requiredArms: [logged-out-local, authenticated-private, authenticated-public, branch-scope, session-scope]
+cases:
+  - id: logged out local consent
+    arm: logged-out-local
+    existingUser: ""
+    destination: local
+    consentContains: ["Destination:  local", "Claude Code/remote:github.com/acme/tool: all eligible sessions in project"]
+    consentExcludes: ["[session-consent]"]
+  - id: authenticated private consent
+    arm: authenticated-private
+    existingUser: alice
+    destination: private
+    consentContains: ["Destination:  village", "requested private; effective private", "Claude Code/remote:github.com/acme/tool: all eligible sessions in project"]
+    consentExcludes: ["[session-consent]"]
+  - id: authenticated public warning and consent
+    arm: authenticated-public
+    existingUser: alice
+    destination: public
+    warningContains: ["anyone may download and retain copies", "cannot recall downloaded copies", "Commons grants remain irrevocable"]
+    consentContains: ["Destination:  village", "requested public; effective public", "Claude Code/remote:github.com/acme/tool: all eligible sessions in project"]
+    consentExcludes: ["[session-consent]"]
+  - id: branch scope consent
+    arm: branch-scope
+    existingUser: ""
+    destination: local
+    scope: branch
+    consentContains: ["Claude Code/remote:github.com/acme/tool/main: all eligible sessions in branch"]
+    consentExcludes: ["[session-consent]"]
+  - id: session scope consent
+    arm: session-scope
+    existingUser: ""
+    destination: local
+    scope: session
+    consentContains: ["Claude Code/remote:github.com/acme/tool/main: consent session [session-consent]"]

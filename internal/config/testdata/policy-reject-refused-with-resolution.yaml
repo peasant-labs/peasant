@@ -1,0 +1,34 @@
+# Proves the loader rejects a refused row that also pins a resolution. A refused
+# level stops the caller before any level is resolved, so such a row describes a
+# run that cannot happen and would quietly bless resolving one.
+expectedRedactionCaseCount: 4
+redaction:
+  - name: standard-is-offered
+    configured: standard
+    disposition: offered
+    effective: standard
+  - name: minimal-is-raised
+    configured: minimal
+    disposition: raised
+    effective: standard
+  - name: maximum-refuses-but-also-resolves
+    configured: maximum
+    disposition: refused
+    effective: standard
+  - name: unset-resolves-to-the-default
+    configured: ""
+    disposition: offered
+    effective: standard
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

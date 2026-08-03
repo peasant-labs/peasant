@@ -1,0 +1,41 @@
+# Two mutations in one case. Only one point in one call is instrumented, so the
+# second could never be applied - and a row declaring a mutation that never runs
+# is exactly the silent vacuity this corpus exists to end.
+expectedCaseCount: 1
+cases:
+  - name: two-mutations-one-window
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: "#!/bin/sh\n# the user's own hook\n"
+        reasonMustContain:
+          - "is no longer the file Peasant planned to replace"
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: "#!/bin/sh\n# another hook of the user's own\n"
+        reasonMustContain:
+          - "is no longer the file Peasant planned to replace"

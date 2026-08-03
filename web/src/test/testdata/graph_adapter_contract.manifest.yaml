@@ -1,0 +1,26 @@
+expectedMutationCount: 3
+mutations:
+  - name: map comprehension fields must survive the datum boundary
+    target: /src/app/map/lib/mapData.ts
+    find: 'agentEditedCount: node.agentEditedCount'
+    replace: 'agentEditedCount: 0'
+    expectedTestFile: src/app/map/lib/mapData.test.ts
+    expectedFailedTestNames:
+      - retains every non-default comprehension field from the shared contract fixture
+    expectedFailurePattern: agentEditedCount
+  - name: rewrite evidence must survive the review adapter
+    target: /src/lib/adapters/changes.ts
+    find: 'rewrittenCommits: wire.rewrittenCommits'
+    replace: 'rewrittenCommits: []'
+    expectedTestFile: src/lib/adapters/changes.test.ts
+    expectedFailedTestNames:
+      - forwards non-empty rewrite evidence from the shared contract fixture unchanged
+    expectedFailurePattern: deeply equal
+  - name: insight evidence must survive the change-detail adapter
+    target: /src/lib/adapters/changes.ts
+    find: 'insights: wire.insights'
+    replace: 'insights: []'
+    expectedTestFile: src/lib/adapters/changes.test.ts
+    expectedFailedTestNames:
+      - forwards non-empty insight evidence from the shared contract fixture unchanged
+    expectedFailurePattern: deeply equal

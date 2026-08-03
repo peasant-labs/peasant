@@ -1,0 +1,52 @@
+# What --repository admits, over one seeded world of recorded sessions.
+#
+# Scope is a canonical project identity, not a path comparison. A repository with
+# an origin remote is identified by that remote; a repository WITHOUT one is
+# identified by the directory each session was recorded in, so work done in a
+# subdirectory carries an identity the worktree root never derives. Scoping only
+# by the root's identity would upload nothing, forever, with no error.
+#
+# The seeded world (all repositories are remote-less, and two of them share a
+# basename so a name comparison could not tell them apart):
+#
+#   root       a session recorded at the repository root, on main
+#   subdir     a session recorded in a plain subdirectory of it, on main
+#   nested     a session recorded in a directory that is its own git repository
+#   other      a session recorded in a different repository, on main
+#   branch     a session recorded at the repository root, on feature
+#
+# nested must never be admitted: it is a separate repository that happens to sit
+# inside this one, exactly like a submodule, and a clone-identified scope would
+# not admit it either.
+expectedCaseCount: 4
+cases:
+  - name: all mode admits the root and its subdirectories
+    mode: all
+    expectedSessions:
+      - root
+      - subdir
+      - branch
+
+  # The configured selection matches a project by NAME, and a name is compared
+  # against the basename of the directory a session was recorded in. The
+  # subdirectory session's basename is its own, so this rule does not name it.
+  # That is the selection's pre-existing semantics, unchanged here: the scope
+  # only ever narrows what selection already allowed.
+  - name: selected branch intersects the repository scope
+    mode: selected
+    selectedBranches:
+      - main
+    expectedSessions:
+      - root
+
+  - name: selected branch that matches nothing reports the narrowing
+    mode: selected
+    selectedBranches:
+      - release
+    expectedSessions: []
+    expectNarrowedEmptyReason: true
+
+  - name: unselected project narrows the repository scope to nothing
+    mode: selected-other-project
+    expectedSessions: []
+    expectNarrowedEmptyReason: true

@@ -1,0 +1,36 @@
+declaredRows: 4
+requiredArms: [logged-out-local, private-default, public-warning, back-preserves]
+reusedFixtures:
+  - testdata/project_select.yaml
+  - testdata/persistence.yaml
+  - testdata/discovery_diagnostics.yaml
+cases:
+  - id: logged out continues locally
+    arm: logged-out-local
+    connected: false
+    keys: [enter]
+    destination: local
+    authentication: skipped
+  - id: authenticated private is default
+    arm: private-default
+    connected: true
+    keys: [enter]
+    destination: village
+    authentication: authenticated
+    requestedVisibility: private
+    effectiveVisibility: private
+  - id: public shows legal warning
+    arm: public-warning
+    connected: true
+    keys: [down]
+    destination: village
+    authentication: authenticated
+    requestedVisibility: public
+    effectiveVisibility: public
+    contains: ["anyone may download and retain copies", "cannot recall downloaded copies", "Creative Commons grants remain irrevocable"]
+  - id: moving back preserves local choice
+    arm: back-preserves
+    connected: true
+    keys: [up, enter]
+    destination: local
+    authentication: skipped

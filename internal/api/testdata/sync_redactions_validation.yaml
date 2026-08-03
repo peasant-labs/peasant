@@ -1,0 +1,45 @@
+# Request-validation cases for GET /api/v1/sync/redactions, one per way a redaction
+# level can be rejected. Same three arms as the push endpoint, and the same reason
+# for covering all three: the level arrives through a different door here, so a
+# check applied only at the other one leaves this one open.
+#
+# A preview is worth rejecting for its own reason as well as the push's: a preview
+# built at a level no run of Peasant will use shows a caller findings that describe
+# nothing they can act on.
+expectedCaseCount: 3
+cases:
+  - name: invalid_preview_redaction_level
+    sessionId: 99d59925-36bc-424c-a789-8be54d9702ba
+    level: unsupported
+    expectedStatus: 400
+    expectedError: |-
+      what: redaction level "unsupported" is invalid
+      why: the level this version offers is standard
+      where: query field "level" on GET /api/v1/sync/redactions
+      when: validating the request before transcript lookup, redactor construction, or scanning
+      means: no scan was started and no transcript content was classified
+      fix: set level to standard and retry
+
+  - name: unoffered_preview_redaction_level
+    sessionId: 99d59925-36bc-424c-a789-8be54d9702ba
+    level: minimal
+    expectedStatus: 400
+    expectedError: |-
+      what: redaction level "minimal" is not a level this version offers
+      why: minimal redacts less than standard, and standard is now the single level this version offers, so a preview at that level would not describe any run Peasant can perform
+      where: query field "level" on GET /api/v1/sync/redactions
+      when: validating the request before transcript lookup, redactor construction, or scanning
+      means: no scan was started and no transcript content was classified
+      fix: set level to standard and retry
+
+  - name: refused_preview_redaction_level
+    sessionId: 99d59925-36bc-424c-a789-8be54d9702ba
+    level: maximum
+    expectedStatus: 400
+    expectedError: |-
+      what: redaction level "maximum" is not a level this version offers
+      why: maximum redaction anonymises code identifiers in transcript content, and this version applies the same redaction on every build of Peasant rather than one that depends on how the binary was compiled, so a preview at that level would not describe any run Peasant can perform
+      where: query field "level" on GET /api/v1/sync/redactions
+      when: validating the request before transcript lookup, redactor construction, or scanning
+      means: no scan was started and no transcript content was classified
+      fix: set level to standard and retry

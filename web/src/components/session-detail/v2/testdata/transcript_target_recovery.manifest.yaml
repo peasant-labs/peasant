@@ -1,0 +1,33 @@
+expectedCaseCount: 3
+requiredFamilies: [absent, scope-filtered, visible-sparse]
+requiredNames:
+  - absent target opens top and offers stale-link removal
+  - scope-hidden target waits for reveal
+  - visible sparse target positions by identity
+expectedLoaderMutationCount: 9
+loaderMutations:
+  - {name: recovery manifest count drift is rejected, target: manifest, find: "expectedCaseCount: 3\nrequiredFamilies:", replace: "expectedCaseCount: 2\nrequiredFamilies:", expectedError: count}
+  - {name: recovery manifest duplicate families are rejected, target: manifest, find: "requiredFamilies: [absent, scope-filtered, visible-sparse]\nrequiredNames:", replace: "requiredFamilies: [scope-filtered, scope-filtered, visible-sparse]\nrequiredNames:", expectedError: unique}
+  - {name: recovery case unknown fields are rejected, target: cases, find: "    family: absent", replace: "    unknown: true\n    family: absent", expectedError: fields}
+  - {name: recovery multiple YAML documents are rejected, target: cases, find: "cases:", replace: "---\ncases:", expectedError: one YAML document}
+  - {name: negative target depth is rejected, target: cases, find: "    targetRole: user\n    targetDepth: 0\n    expectedInitialKind: top", replace: "    targetRole: user\n    targetDepth: -1\n    expectedInitialKind: top", expectedError: "role, depth, or index"}
+  - {name: unknown route query is rejected, target: cases, find: "    search: turn=42&scope=task&scopeVal=0&origin=Map", replace: "    search: turn=42&scope=branch&scopeVal=main&origin=Map", expectedError: search is outside}
+  - {name: unknown request key is rejected, target: cases, find: "    expectedInitialRequestKey: missing-turn:42", replace: "    expectedInitialRequestKey: stale:42", expectedError: requestKey is outside}
+  - {name: unknown feedback token is rejected, target: cases, find: "    expectedFeedback: linked turn is no longer available", replace: "    expectedFeedback: maybe unavailable", expectedError: feedback is outside}
+  - {name: visible target action contradiction is rejected, target: cases, find: "    expectedFeedback: none\n    action: none\n    expectedReplace: none", replace: "    expectedFeedback: none\n    action: reveal linked turn\n    expectedReplace: none", expectedError: visible-target cross-relations}
+expectedMutationCount: 2
+mutations:
+  - name: missing target loses identity key
+    find: "return { kind: 'top', requestKey: `missing-turn:${requestedTurn}` };"
+    replace: "return { kind: 'top' };"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.test.tsx
+    expectedFailedTestNames:
+      - absent target opens top and offers stale-link removal
+    expectedFailurePattern: absent initial position invariant failed
+  - name: hidden target positions before reveal
+    find: "if (!requestedTurnVisible) return undefined;"
+    replace: "if (!requestedTurnVisible) return { kind: 'turn', turnIndex: requestedTurn };"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.test.tsx
+    expectedFailedTestNames:
+      - scope-hidden target waits for reveal
+    expectedFailurePattern: scope-filtered initial position invariant failed

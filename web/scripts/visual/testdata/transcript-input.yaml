@@ -1,0 +1,20 @@
+# `project` here must be one of the mock server's two resolvable projects — `fortuna` or
+# `docs-site` (`internal/mock/provider_map.go`'s ProjectSummaries()) — INDEPENDENT of the pinned
+# `session`'s own canonical `projectName` in the schema module's shared session fixture
+# (`testdata/sync/sessions.yaml`). SessionDetailV2 never cross-validates the URL's project segment
+# against the session's own `project` field, so any resolvable project works for this gate's actual
+# purpose (rendering a long transcript to scroll-test) — it does NOT need to match the session's
+# canonical project. Do NOT "correct" the sess-c3d4e5f6-... rows below to that session's canonical
+# an unrelated sample project — that project is not in the mock's resolvable set and would silently
+# reintroduce the original 404 this fixture was fixed to avoid. Validated live before every run by
+# validate-mock-coordinates.mjs's assertKnownProjects() (see transcript-input-gate.mjs).
+expectedCaseCount: 8
+cases:
+  - {name: long desktop dark wheel, width: 1460, height: 900, theme: dark, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, action: wheel, expectScrollable: true}
+  - {name: long desktop light trackpad equivalent, width: 1280, height: 800, theme: light, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, action: trackpad, expectScrollable: true}
+  - {name: long tablet dark page down, width: 900, height: 760, theme: dark, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, action: pageDown, expectScrollable: true}
+  - {name: long mobile light end, width: 390, height: 780, theme: light, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, action: end, expectScrollable: true}
+  - {name: long desktop dark home, width: 1460, height: 900, theme: dark, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, action: home, expectScrollable: true}
+  - {name: focused control does not trap wheel, width: 1280, height: 800, theme: dark, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, action: focusedControlWheel, expectScrollable: true}
+  - {name: deep linked turn is positioned, width: 1280, height: 800, theme: light, project: fortuna, session: sess-c3d4e5f6-a7b8-9012-cdef-123456789012, turn: 40, action: deepLink, expectScrollable: true}
+  - {name: short tall viewport transcript does not need scrolling, width: 1460, height: 1800, theme: dark, project: docs-site, session: sess-b8c9d0e1-f2a3-4567-bcde-678901234567, action: pageDown, expectScrollable: false}

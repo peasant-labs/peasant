@@ -1,0 +1,116 @@
+declaredRows: 8
+cases:
+  - name: cross-harness-project-is-one-row
+    pwd: /work/acme/tool
+    sessions:
+      - harness: claude-code
+        projectName: tool
+        gitRemote: git@github.com:acme/tool.git
+        branch: main
+        workingDir: /work/acme/tool
+        sessionId: 11111111-1111-1111-1111-111111111111
+      - harness: opencode
+        projectName: tool
+        gitRemote: https://github.com/acme/tool.git
+        branch: feature
+        workingDir: /work/acme/tool/subdir
+        sessionId: 22222222-2222-2222-2222-222222222222
+    wantProjects: 1
+    wantFocused: tool
+    wantScopeProjects: 1
+    wantScopeSessions: 2
+    terminalWidth: 80
+  - name: unknown-projects-stay-distinct
+    sessions:
+      - harness: claude-code
+        sessionId: 33333333-3333-3333-3333-333333333333
+      - harness: claude-code
+        sessionId: 44444444-4444-4444-4444-444444444444
+    wantProjects: 2
+  - name: tracked-and-untracked-panes
+    trackedRemote: https://github.com/acme/tracked.git
+    sessions:
+      - harness: claude-code
+        projectName: tracked
+        gitRemote: git@github.com:acme/tracked.git
+        sessionId: 55555555-5555-5555-5555-555555555555
+      - harness: opencode
+        projectName: new
+        gitRemote: https://github.com/acme/new.git
+        sessionId: 66666666-6666-6666-6666-666666666666
+    wantProjects: 2
+    wantTracked: 1
+  - name: pwd-no-match-starts-at-top
+    pwd: /elsewhere
+    sessions:
+      - harness: claude-code
+        projectName: alpha
+        gitRemote: https://github.com/acme/alpha.git
+        workingDir: /work/alpha
+        sessionId: 77777777-7777-7777-7777-777777777777
+      - harness: opencode
+        projectName: beta
+        gitRemote: https://github.com/acme/beta.git
+        workingDir: /work/beta
+        sessionId: 88888888-8888-8888-8888-888888888888
+    wantProjects: 2
+  - name: explicit-session-does-not-widen-to-sibling
+    sessions:
+      - harness: claude-code
+        projectName: tool
+        gitRemote: https://github.com/acme/tool.git
+        branch: main
+        sessionId: 99999999-9999-9999-9999-999999999991
+      - harness: claude-code
+        projectName: tool
+        gitRemote: https://github.com/acme/tool.git
+        branch: main
+        sessionId: 99999999-9999-9999-9999-999999999992
+    wantProjects: 1
+    wantScopeProjects: 1
+    wantScopeSessions: 2
+  - name: unchecked-harness-is-not-persisted
+    sessions:
+      - harness: claude-code
+        projectName: shared
+        gitRemote: https://github.com/acme/shared.git
+        branch: main
+        sessionId: 99999999-9999-9999-9999-999999999993
+      - harness: opencode
+        projectName: shared
+        gitRemote: https://github.com/acme/shared.git
+        branch: main
+        sessionId: 99999999-9999-9999-9999-999999999994
+    wantProjects: 1
+    wantScopeProjects: 1
+    wantScopeSessions: 2
+  - name: long-project-and-session-labels-fit-mounted-frame
+    sessions:
+      - harness: claude-code
+        projectName: this-project-name-is-longer-than-the-project-pane
+        gitRemote: https://github.com/acme/this-project-name-is-longer-than-the-project-pane-and-must-be-truncated.git
+        branch: feature/long-session-label
+        title: this session title is deliberately long enough to cross the project pane separator
+        sessionId: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+      - harness: opencode
+        projectName: this-project-name-is-longer-than-the-project-pane
+        gitRemote: https://github.com/acme/this-project-name-is-longer-than-the-project-pane-and-must-be-truncated.git
+        branch: feature/long-session-label
+        title: another deliberately long session title that must remain inside the left pane
+        sessionId: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+    wantProjects: 1
+    wantScopeProjects: 1
+    wantScopeSessions: 2
+    terminalWidth: 80
+    mountedWidths: [60, 79, 80, 101]
+  - name: explicit-stop-all-persists-empty-allowlist
+    trackedRemote: https://github.com/acme/stop-all.git
+    userEmail: preserved@example.test
+    sessions:
+      - harness: claude-code
+        projectName: stop-all
+        gitRemote: https://github.com/acme/stop-all.git
+        branch: main
+        sessionId: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+    wantProjects: 1
+    wantTracked: 1

@@ -1,0 +1,14 @@
+variable: --app-header-height
+breakpoints:
+  mobile: 7rem
+  desktop: 4rem
+consumers:
+  - path: src/components/TopNavbar.tsx
+    token: h-[var(--app-header-height)]
+  - path: src/app/layout.tsx
+    token: pt-[var(--app-header-height)]
+  - path: src/components/session-detail/v2/SessionDetailV2.tsx
+    token: h-[calc(100dvh-var(--app-header-height))]
+forbidden:
+  - calc(100vh - 64px)
+  - calc(100dvh - 64px)

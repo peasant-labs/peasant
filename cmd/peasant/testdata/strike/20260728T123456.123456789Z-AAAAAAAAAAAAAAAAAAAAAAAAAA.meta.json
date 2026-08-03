@@ -1,0 +1,10 @@
+{
+  "sessionId": "20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "projectKey": "strike-fixture",
+  "worktreePath": "/tmp/strike-fixture",
+  "branch": "fixture/strike-ingestion",
+  "createdAt": "2026-07-28T12:34:56.123456789Z",
+  "title": "sidecar root title",
+  "model": "gpt-5.6-sol",
+  "version": "0.1.0"
+}

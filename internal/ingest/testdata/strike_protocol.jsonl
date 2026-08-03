@@ -1,0 +1,15 @@
+{"type":"model.selected","time":"2026-07-28T14:00:00Z","data":{"provider":"openai","model":"gpt-5.6-sol"}}
+{"type":"user.message","time":"2026-07-28T14:00:01Z","data":{"sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","turnId":"turn-canonical","text":"Exercise the canonical Strike protocol."}}
+{"type":"turn.started","time":"2026-07-28T14:00:02Z","data":{"sessionId":"99d59925-36bc-424c-a789-8be54d9702ba","turnId":"turn-canonical"}}
+{"type":"reasoning.delta","time":"2026-07-28T14:00:03Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","text":"internal thought"}}
+{"type":"text.delta","time":"2026-07-28T14:00:04Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","text":"answer"}}
+{"type":"tool.begin","time":"2026-07-28T14:00:05Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","callId":"call-canonical","name":"read","args":{"path":"README.md","content":"replacement"}}}
+{"type":"tool.output","time":"2026-07-28T14:00:06Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","callId":"call-canonical","data":"stream chunk"}}
+{"type":"process.started","time":"2026-07-28T14:00:07Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","processId":"process-canonical","callId":"call-canonical","argv":["read","README.md"]}}
+{"type":"process.output","time":"2026-07-28T14:00:08Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","processId":"process-canonical","stream":"stdout","data":"process chunk"}}
+{"type":"process.exited","time":"2026-07-28T14:00:09Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","processId":"process-canonical","exitCode":0,"status":"timeout"}}
+{"type":"tool.end","time":"2026-07-28T14:00:10Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","callId":"call-canonical","title":"read README.md","output":"final output"}}
+{"type":"usage.reported","time":"2026-07-28T14:00:11Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","input":{"known":true},"output":{"n":3,"known":true},"cacheRead":{"known":false},"cacheCreation":{"known":false},"used":{"known":false},"source":"actual"}}
+{"type":"turn.completed","time":"2026-07-28T14:00:12Z","data":{"turnId":"turn-canonical","providerRequestId":"request-canonical","stopReason":"end_turn"}}
+{"type":"usage.reported","time":"2026-07-28T14:00:12.500Z","data":{"turnId":"turn-canonical","inputTokens":"invalid"}}
+{"type":"session.titled","time":"2026-07-28T14:00:13Z","data":{"title":"canonical protocol title"}}

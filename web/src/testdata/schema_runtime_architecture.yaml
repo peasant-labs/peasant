@@ -1,0 +1,63 @@
+cases:
+  - name: local map wire mirror stays deleted
+    scope: absent-file
+    path: src/types/map.ts
+    required: []
+    forbidden: []
+  - name: production source imports generated map contracts
+    scope: tree
+    path: src
+    required: []
+    forbidden:
+      - "@/types/map"
+  - name: annotation policy uses schema runtime values
+    scope: file
+    path: src/lib/api/annotations.ts
+    required:
+      - TargetKind.Entry
+      - ValueDomainKind.Enumerated
+      - AnnotationStatus.Active
+    forbidden:
+      - "=== 'entry'"
+      - "=== \"entry\""
+      - "!== 'enumerated'"
+      - "!== \"enumerated\""
+  - name: quality policy uses schema runtime values
+    scope: file
+    path: src/lib/quality/types.ts
+    required:
+      - AnnotatorKind.Human
+      - AnnotatorKind.Agent
+      - AnnotatorKind.Rule
+      - SessionOutcome.Resolved
+      - isSessionOutcome
+    forbidden:
+      - "=== 'human'"
+      - "=== \"human\""
+      - "=== 'agent'"
+      - "=== \"agent\""
+      - "=== 'rule'"
+      - "=== \"rule\""
+      - "=== 'resolved'"
+      - "=== \"resolved\""
+  - name: changes adapter separates generated and cooked contracts
+    scope: file
+    path: src/lib/adapters/changes.ts
+    required:
+      - "from '@peasant-labs/fairtrade/graph'"
+      - DecodedChangeDetailPayload
+      - DecodedChangeDiffPayload
+    forbidden:
+      - interface ChangeDetailPayload
+      - interface ChangeDiffPayload
+  - name: provider icon mirror stays deleted
+    scope: absent-file
+    path: src/components/ProviderIcon.tsx
+    required: []
+    forbidden: []
+  - name: provider label mirror stays deleted
+    scope: file
+    path: src/lib/sessions/columns.tsx
+    required: []
+    forbidden:
+      - PROVIDER_LABEL

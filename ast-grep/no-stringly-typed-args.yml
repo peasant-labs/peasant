@@ -1,0 +1,19 @@
+id: no-stringly-typed-args
+language: Go
+severity: error
+message: >
+  A string literal is used in a WorkflowDecision or SendDecisionInput field that
+  requires a typed enum. Use DecisionStatus for Status and DenialReason for Reason.
+  String literals at these API boundaries bypass the type system.
+note: >
+  WorkflowDecision.Status must be DecisionStatus (DecisionAllowed, DecisionDenied, DecisionError).
+  WorkflowDecision.Reason must be DenialReason (ReasonAuthenticationFailed, ReasonAuthorizationDenied, etc).
+  SendDecisionInput.Status and .Reason have the same constraints.
+rule:
+  any:
+    - pattern: 'WorkflowDecision{$$$, Status: "$VAL"}'
+    - pattern: 'WorkflowDecision{$$$, Reason: "$VAL"}'
+    - pattern: 'SendDecisionInput{$$$, Status: "$VAL"}'
+    - pattern: 'SendDecisionInput{$$$, Reason: "$VAL"}'
+ignore:
+  - "**/vendor/**"

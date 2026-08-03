@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+container=${PEASANT_PODMAN_CONTAINER:-}
+if [ -z "$container" ]; then
+  echo "podman-peasant: PEASANT_PODMAN_CONTAINER is required" >&2
+  exit 2
+fi
+
+peasant_xdg_config=${XDG_CONFIG_HOME:-}
+peasant_xdg_data=${XDG_DATA_HOME:-}
+peasant_xdg_state=${XDG_STATE_HOME:-}
+
+unset XDG_CONFIG_HOME
+unset XDG_DATA_HOME
+unset XDG_STATE_HOME
+
+exec podman exec -i \
+  -e "XDG_CONFIG_HOME=$peasant_xdg_config" \
+  -e "XDG_DATA_HOME=$peasant_xdg_data" \
+  -e "XDG_STATE_HOME=$peasant_xdg_state" \
+  "$container" /usr/bin/peasant "$@"

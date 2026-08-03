@@ -1,0 +1,34 @@
+# Proves the loader rejects a raised row whose effective level redacts LESS than
+# the configured one. Raising is only safe because it adds protection; a corpus
+# asserting a downward transition would make the unsafe direction look supported.
+expectedRedactionCaseCount: 4
+redaction:
+  - name: standard-is-offered
+    configured: standard
+    disposition: offered
+    effective: standard
+  - name: maximum-quietly-weakened-to-standard
+    configured: maximum
+    disposition: raised
+    effective: standard
+  - name: minimal-is-raised
+    configured: minimal
+    disposition: raised
+    effective: standard
+  - name: unset-resolves-to-the-default
+    configured: ""
+    disposition: offered
+    effective: standard
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

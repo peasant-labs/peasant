@@ -1,0 +1,661 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+
+/* ============================================
+   LIGHT THEME — clean, high-contrast
+   ============================================ */
+
+:root {
+  --app-header-height: 7rem;
+
+  /* ─── v2 semantic palette — app-supplementary tokens (dark default) ───── */
+  /* Fairtrade owns: canvas, surface-*, ink-*, rule-*, danger-*, warning-*,
+     success-*, focus-ring — consumed from @peasant-labs/fairtrade/components.css.
+     Only app-specific supplementary tokens live here. */
+  --rail:        25 5% 22%;          /* timeline rail */
+  --mark:    30 14% 98%;             /* CTA fill (dark: white) */
+  --mark-fg: 24 10% 6%;             /* CTA text (dark: near-black) */
+  --diff-add:        140 55% 18%;
+  --diff-add-text:   138 65% 82%;
+  --diff-add-gutter: 140 50% 30%;
+  --diff-add-accent: 142 60% 50%;
+  --diff-del:        0 55% 20%;
+  --diff-del-text:   0 70% 82%;
+  --diff-del-gutter: 0 50% 32%;
+  --diff-del-accent: 358 75% 58%;
+
+  /* Role accents — dark defaults (cool-warm on dark backgrounds) */
+  --role-user:           216 55% 68%;   /* cool slate — bar + glyph */
+  --role-user-soft:      216 28% 14%;   /* faint row tint */
+  --role-assistant:      16 62% 64%;    /* warm clay — bar + glyph */
+  --role-assistant-soft: 20 34% 14%;    /* faint row tint */
+
+  /* Provider brand marks — dark defaults */
+  --provider-claude:     16 64% 64%;    /* Anthropic clay */
+  --provider-gemini:     217 85% 70%;   /* Google blue */
+  --provider-opencode:   174 52% 52%;   /* terminal teal */
+  --provider-codex:      25 5% 78%;     /* neutral ink */
+
+  /* Intensity ramp — dark defaults (5-step, brighter = higher intensity) */
+  --intensity-0: 25 5% 14%;          /* = surface-hover */
+  --intensity-1: 25 5% 18%;          /* = rule */
+  --intensity-2: 25 5% 28%;          /* = rule-strong */
+  --intensity-3: 25 5% 58%;          /* = ink-3 — text-safe (≈6.5:1) */
+  --intensity-4: 30 14% 98%;         /* = ink — full intensity */
+
+  /* Graph edges — dark defaults */
+  --edge:        25 5% 26%;          /* default structure/activity edge */
+  --edge-strong: 25 5% 42%;          /* emphasis / aggregate edge */
+
+  --code-bg: 25 5% 14%;              /* inline code background — dark */
+
+  /* Grid background */
+  --grid-line: rgba(255, 255, 255, 0.04);
+
+  /* Canvas tile backgrounds — dark defaults (kept for legacy components) */
+  --tile-bg-user: #171717;
+  --tile-bg-assistant: #171717;
+  --tile-bg-tool: #171717;
+  --tile-bg-system: #171717;
+  --tile-bg-error: #171717;
+  --tile-border-user: #2a2a2a;
+  --tile-border-assistant: #2a2a2a;
+  --tile-border-tool: #2a2a2a;
+  --tile-border-system: #2a2a2a;
+  --tile-border-error: #2a2a2a;
+
+  /* Charts paint from fairtrade's own --chart-* tokens (components.css);
+     nothing app-side overrides them anymore. */
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --app-header-height: 4rem;
+  }
+}
+
+/* ============================================
+   SELF-HOSTED FONTS — override fairtrade's --font-body/--font-display/--font-mono
+   ============================================
+   fairtrade's own tokens (components.css, loaded before this file) declare
+   --font-body/--font-display/--font-mono as literal `"Atkinson Hyperlegible"` /
+   `"Atkinson Hyperlegible Mono"` family names, expecting the CONSUMING app to
+   actually load those families (fairtrade ships them as an opt-in fonts.css
+   with a remote @import, deliberately NOT auto-loaded — see
+   src/test/font-import-guard.test.ts for why that exact @import form is
+   forbidden here).
+   next/font/local (src/app/fonts/index.ts) self-hosts the identical woff2
+   files and exposes them as the --font-atkinson-hyperlegible(-mono) custom
+   properties (via the `.variable` className applied to <html> in layout.tsx).
+   Redeclare fairtrade's tokens here, AFTER components.css in import order, so
+   this rule wins the cascade and the self-hosted family is what every
+   `var(--font-body)`/`var(--font-display)`/`var(--font-mono)` consumer
+   (fairtrade's own CSS included) actually renders — no external font request,
+   no display:swap flash-of-fallback while a Google Fonts round-trip resolves.
+   Keeps the exact same fallback stack fairtrade declares, so if a variable is
+   ever unset for some reason this degrades exactly like before. */
+:root,
+[data-theme='light'] {
+  --font-body: var(--font-atkinson-hyperlegible), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-atkinson-hyperlegible-mono), ui-monospace, Menlo, Consolas, monospace;
+  --font-mono: var(--font-atkinson-hyperlegible-mono), ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* ============================================
+   LIGHT THEME — clean, high-contrast overrides
+   Fairtrade handles canvas/surface/ink/rule/etc. via [data-theme="light"].
+   This block carries shadcn-compat names + app-unique tokens for light mode.
+   ============================================ */
+
+[data-theme="light"] {
+  /* Native browser controls (scrollbars, inputs, selects) render light when
+     toggled to light mode — even on an OS-dark system. Mirrors the dark block's
+     color-scheme: dark; (village sets both). */
+  color-scheme: light;
+
+  /* App-unique supplementary tokens — light values */
+  --rail:        30 6% 84%;
+  --mark:    24 10% 6%;
+  --mark-fg: 0 0% 100%;
+  --diff-add:        140 70% 88%;
+  --diff-add-text:   140 75% 22%;
+  --diff-add-gutter: 140 55% 70%;
+  --diff-add-accent: 142 60% 45%;
+  --diff-del:        2 90% 91%;
+  --diff-del-text:   358 75% 36%;
+  --diff-del-gutter: 0 60% 78%;
+  --diff-del-accent: 358 80% 56%;
+
+  /* Role accents — light */
+  --role-user:           216 45% 46%;
+  --role-user-soft:      216 44% 96%;
+  --role-assistant:      16 58% 52%;
+  --role-assistant-soft: 22 60% 96%;
+
+  /* Provider brand marks — light */
+  --provider-claude:     16 60% 56%;
+  --provider-gemini:     217 89% 61%;
+  --provider-opencode:   174 60% 38%;
+  --provider-codex:      25 6% 30%;
+
+  /* Intensity ramp — light */
+  --intensity-0: 30 9% 96%;
+  --intensity-1: 30 8% 88%;
+  --intensity-2: 30 8% 76%;
+  --intensity-3: 25 5% 44%;
+  --intensity-4: 24 10% 6%;
+
+  /* Graph edges — light */
+  --edge:        30 8% 82%;
+  --edge-strong: 30 8% 64%;
+
+  --code-bg: 30 9% 96%;
+  --grid-line: rgba(0, 0, 0, 0.045);
+
+  /* Canvas tile backgrounds — light */
+  --tile-bg-user: #ffffff;
+  --tile-bg-assistant: #ffffff;
+  --tile-bg-tool: #ffffff;
+  --tile-bg-system: #ffffff;
+  --tile-bg-error: #ffffff;
+  --tile-border-user: #d4d4d4;
+  --tile-border-assistant: #d4d4d4;
+  --tile-border-tool: #d4d4d4;
+  --tile-border-system: #d4d4d4;
+  --tile-border-error: #d4d4d4;
+
+}
+
+/* ============================================
+   TAILWIND v4 THEME TOKENS
+   ============================================ */
+
+@theme inline {
+  /* Aquamarine scale — brand accent */
+  --color-aqua-50:  #ecfdf8;
+  --color-aqua-100: #d1faf0;
+  --color-aqua-200: #a7f3e2;
+  --color-aqua-300: #6ee7c8;
+  --color-aqua-400: #34d3ab;
+  --color-aqua-500: #10b98f;
+  --color-aqua-600: #059674;
+  --color-aqua-700: #04785f;
+  --color-aqua-800: #065f4c;
+  --color-aqua-900: #064e40;
+  --color-aqua-950: #022c25;
+
+  /* Neutral scale (backward-compat; still valid fixed hex) */
+  --color-stone-50:  #fafafa;
+  --color-stone-100: #f5f5f5;
+  --color-stone-200: #e5e5e5;
+  --color-stone-300: #d4d4d4;
+  --color-stone-400: #a3a3a3;
+  --color-stone-500: #737373;
+  --color-stone-600: #525252;
+  --color-stone-700: #404040;
+  --color-stone-800: #262626;
+  --color-stone-900: #171717;
+  --color-stone-950: #0a0a0a;
+
+  /* Coral accent — destructive/negative */
+  --color-coral-400: #f87171;
+  --color-coral-500: #ef4444;
+  --color-coral-600: #dc2626;
+
+  /* Font families — delegate to fairtrade's runtime tokens (defined in the
+     imported components.css). @theme inline keeps these as var() refs to the
+     live fairtrade values rather than re-emitting them, so the family stays a
+     single source of truth. Non-circular: inline substitutes into utilities, it
+     does not redefine --font-* in :root. */
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  /* Radii — all square */
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+
+  /* ── fairtrade semantic palette — bare var (HEX tokens, no hsl wrapper) ── */
+  --color-canvas:        var(--canvas);
+  --color-surface:       var(--surface);
+  --color-surface-2:     var(--surface-2);
+  --color-surface-elev:  var(--surface-elev);
+  --color-surface-hover: var(--surface-hover);
+  --color-ink:           var(--ink);
+  --color-ink-2:         var(--ink-2);
+  --color-ink-3:         var(--ink-3);
+  --color-ink-4:         var(--ink-4);
+  --color-rule:          var(--rule);
+  --color-rule-strong:   var(--rule-strong);
+  --color-danger:        var(--danger);
+  --color-danger-fg:     var(--danger-fg);
+  --color-danger-soft:   var(--danger-soft);
+  --color-warning:       var(--warning);
+  --color-warning-fg:    var(--warning-fg);
+  --color-warning-soft:  var(--warning-soft);
+  --color-success:       var(--success);
+  --color-success-fg:    var(--success-fg);
+  --color-success-soft:  var(--success-soft);
+  --color-focus-ring:    var(--focus-ring);
+  --color-amber:         var(--amber);
+  --color-on-amber:      var(--on-amber);
+  --color-teal:          var(--teal);
+  --color-olive:         var(--olive);
+  --color-clay:          var(--clay);
+
+  /* ── app-supplementary tokens — HSL, hsl() wrapper still valid ── */
+  --color-rail:          hsl(var(--rail));
+  --color-mark:          hsl(var(--mark));
+  --color-mark-fg:       hsl(var(--mark-fg));
+  --color-diff-add:        hsl(var(--diff-add));
+  --color-diff-add-text:   hsl(var(--diff-add-text));
+  --color-diff-add-gutter: hsl(var(--diff-add-gutter));
+  --color-diff-add-accent: hsl(var(--diff-add-accent));
+  --color-diff-del:        hsl(var(--diff-del));
+  --color-diff-del-text:   hsl(var(--diff-del-text));
+  --color-diff-del-gutter: hsl(var(--diff-del-gutter));
+  --color-diff-del-accent: hsl(var(--diff-del-accent));
+  --color-role-user:           hsl(var(--role-user));
+  --color-role-user-soft:      hsl(var(--role-user-soft));
+  --color-role-assistant:      hsl(var(--role-assistant));
+  --color-role-assistant-soft: hsl(var(--role-assistant-soft));
+  --color-provider-claude:     hsl(var(--provider-claude));
+  --color-provider-gemini:     hsl(var(--provider-gemini));
+  --color-provider-opencode:   hsl(var(--provider-opencode));
+  --color-provider-codex:      hsl(var(--provider-codex));
+  --color-intensity-0:   hsl(var(--intensity-0));
+  --color-intensity-1:   hsl(var(--intensity-1));
+  --color-intensity-2:   hsl(var(--intensity-2));
+  --color-intensity-3:   hsl(var(--intensity-3));
+  --color-intensity-4:   hsl(var(--intensity-4));
+  --color-edge:          hsl(var(--edge));
+  --color-edge-strong:   hsl(var(--edge-strong));
+  --color-code-bg:       hsl(var(--code-bg));
+}
+
+/* ============================================
+   BASE
+   ============================================ */
+
+@layer base {
+  * {
+    border-color: var(--rule);
+    outline-color: color-mix(in srgb, var(--focus-ring) 50%, transparent);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 400;
+  color: var(--ink);
+  background-color: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================
+   GRID BACKGROUND — both themes
+   ============================================ */
+
+.bg-grid {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Snap content width to the 32px grid so card edges hit grid lines on both sides. */
+.grid-snap {
+  max-width: calc(round(down, 100vw, 32px));
+  margin-inline: auto;
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--rule) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+}
+
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }
+
+/* The Explainer "?" box slides+fades in on open; height isn't animated (content
+   is variable) — a short translate/opacity reads as "appeared" without layout
+   thrash. Paired with prefers-reduced-motion below. */
+@keyframes explainer-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-explainer-in {
+  animation: explainer-in 0.22s ease-out both;
+}
+
+/* Honor the OS "reduce motion" setting: freeze the shimmer to a static fill and
+   drop the entrance translates/fades to instant. The skeletons stay visible
+   (just not pulsing), so loading is still legible. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+    background: var(--surface-2);
+  }
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-explainer-in {
+    animation: none;
+  }
+}
+
+/* ============================================
+   FORM ELEMENTS
+   ============================================ */
+
+input[type="text"],
+input[type="email"],
+textarea,
+select {
+  font-family: var(--font-body);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--ink-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 12%, transparent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-3);
+}
+
+/* ============================================
+   SCROLLBAR & SELECTION
+   ============================================ */
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-stone-300); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-stone-400); }
+
+::selection {
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  color: var(--ink);
+}
+
+/* Dark overrides */
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--color-stone-700);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-stone-600);
+}
+
+[data-theme="dark"] ::selection {
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  color: var(--ink);
+}
+
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+/* ============================================
+   REACT FLOW — theme overrides
+   ============================================ */
+
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-stroke: var(--color-stone-400);
+  --xy-edge-stroke-width: 1.5px;
+  --xy-minimap-background: var(--surface);
+  --xy-minimap-mask: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] .react-flow {
+  --xy-edge-stroke: var(--color-stone-600);
+  --xy-minimap-mask: rgba(0, 0, 0, 0.3);
+}
+
+@keyframes edge-flow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+.react-flow .animated-edge path {
+  stroke-dasharray: 8 8;
+  animation: edge-flow 0.6s linear infinite;
+}
+
+/* Smooth node transitions for filter dimming */
+.react-flow .react-flow__node {
+  transition: opacity 0.25s ease;
+}
+
+/* Filtered-out (dimmed) canvas nodes — pure opacity, no color distortion. */
+.canvas-dimmed {
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+[data-theme="dark"] .canvas-dimmed {
+  opacity: 0.22;
+}
+
+/* Controls styling */
+.react-flow .react-flow__controls {
+  border-radius: 0;
+}
+
+.react-flow .react-flow__controls button {
+  border-radius: 0;
+  border-color: var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.react-flow .react-flow__controls button:hover {
+  background: var(--surface-2);
+}
+
+/* MiniMap styling */
+.react-flow .react-flow__minimap {
+  border-radius: 0;
+}
+
+/* ============================================
+   V2 — utilities used by the new transcript viewer
+   ============================================ */
+
+/* Tabular figures — for token counts, durations, line numbers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Subtle focus ring matching the monochrome accent */
+.focus-mono:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Vertical rail line used in the transcript canvas */
+.v2-rail {
+  background: hsl(var(--rail));
+}
+
+/* Hairline divider (1px in both DPI scales) */
+.v2-hairline {
+  border-color: var(--rule);
+}
+.v2-hairline-strong {
+  border-color: var(--rule-strong);
+}
+
+/* Small caps section header — uppercase, letter-spaced */
+.v2-eyebrow {
+  /* Pin the typeface: without this the label inherits the parent's font,
+     so an eyebrow inside a font-mono row (tool-call rows) renders in
+     Atkinson Mono while the same eyebrow in a sans row renders in Atkinson —
+     same size, but reads as a different font. Eyebrows are always sans. */
+  font-family: var(--font-body);
+  /* The transform used to force UPPERCASE, silently overriding the lowercase
+     chrome convention for every label wearing this class — sources are
+     lowercase now and render as written. */
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* Inline code (inside markdown) */
+.v2-prose code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  padding: 0.1em 0.35em;
+  background: hsl(var(--code-bg));
+  border: 1px solid var(--rule);
+  border-radius: 0;
+}
+
+/* Markdown prose styling — used inside TurnContent */
+.v2-prose {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.v2-prose p { margin: 0 0 0.75em; }
+.v2-prose p:last-child { margin-bottom: 0; }
+.v2-prose strong {
+  font-weight: 500;
+  color: var(--ink);
+  /* Slight negative tracking so semibold doesn't optically expand. */
+  letter-spacing: -0.005em;
+}
+.v2-prose em { font-style: italic; }
+.v2-prose a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--ink-3);
+}
+.v2-prose a:hover { text-decoration-color: var(--ink); }
+.v2-prose ul,
+.v2-prose ol { margin: 0 0 0.75em 1.25em; padding: 0; }
+.v2-prose li { margin: 0.1em 0; }
+.v2-prose ul > li { list-style: disc; }
+.v2-prose ol > li { list-style: decimal; }
+.v2-prose blockquote {
+  border-left: 2px solid var(--rule-strong);
+  padding-left: 0.85em;
+  margin: 0.5em 0;
+  color: var(--ink-2);
+  font-style: italic;
+}
+.v2-prose h1, .v2-prose h2, .v2-prose h3, .v2-prose h4 {
+  font-weight: 600;
+  margin: 0.85em 0 0.35em;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.v2-prose h1 { font-size: 1.25em; }
+.v2-prose h2 { font-size: 1.15em; }
+.v2-prose h3 { font-size: 1.05em; }
+.v2-prose h4 { font-size: 1em; }
+.v2-prose hr { border: 0; border-top: 1px solid var(--rule); margin: 1em 0; }
+.v2-prose pre {
+  background: hsl(var(--code-bg));
+  border: 1px solid var(--rule);
+  padding: 0.75em 0.9em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.v2-prose pre code { font-size: inherit; }
+.v2-prose table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 13px;
+}
+.v2-prose th, .v2-prose td {
+  border: 1px solid var(--rule);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.v2-prose th {
+  background: var(--surface-hover);
+  font-weight: 600;
+}
+
+/* Diff blocks — used only inside EditRenderer / DiffView */
+.v2-diff-add {
+  background: hsl(var(--diff-add));
+  color: hsl(var(--diff-add-text));
+}
+.v2-diff-del {
+  background: hsl(var(--diff-del));
+  color: hsl(var(--diff-del-text));
+}

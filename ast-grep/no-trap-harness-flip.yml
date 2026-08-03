@@ -1,0 +1,23 @@
+id: no-trap-harness-flip
+language: Go
+severity: error
+message: >
+  TRAP: ProviderKey is the model-VENDOR credential, NOT the coding-tool harness.
+  Do not give a `ProviderKey` field the `json:"harness"` tag.
+note: >
+  ProviderKey / json:"providerKey" (schema.AnnotationSummary and
+  internal/ingest/models_bestiary.go) identifies the model-provider credential
+  (e.g. "anthropic"), which is a DIFFERENT axis from the Harness coding tool
+  ("claude-code", "opencode"). The harness terminology change renamed the
+  content/metadata wire keys provider/modelHarness -> harness, but the
+  ProviderKey credential keys were deliberately LEFT as json:"providerKey".
+  This rule fires if a future change conflates them by flipping a ProviderKey
+  field to json:"harness". If you genuinely need a harness on this struct, add a
+  SEPARATE Harness field — do not repurpose the credential key.
+rule:
+  kind: field_declaration
+  all:
+    - regex: 'ProviderKey'
+    - regex: 'json:"harness'
+ignores:
+  - "vendor/**"

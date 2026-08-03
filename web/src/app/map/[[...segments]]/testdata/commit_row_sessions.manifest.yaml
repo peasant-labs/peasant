@@ -1,0 +1,31 @@
+# Independent row-count guard for commit_row_sessions.yaml. The separately
+# maintained count/name inventory makes a silently dropped case fail loudly.
+expectedCount: 4
+requiredNames:
+  - multi-session-commit-renders-name-and-harness-per-session
+  - zero-session-commit-falls-back-to-the-existing-boolean-copy
+  - session-id-absent-from-the-sessions-channel-renders-name-only
+  - session-with-no-preview-falls-back-to-the-short-session-id
+classification:
+  surface: map
+  scope: commit row links
+  behavior: resolved provider identity and honest fallback
+provenance:
+  source: web/src/app/map/[[...segments]]/MapRail.tsx
+  test: web/src/app/map/[[...segments]]/MapRail.test.tsx
+  fixture: web/src/app/map/[[...segments]]/testdata/commit_row_sessions.yaml
+expectedMutationCount: 2
+requiredMutationNames:
+  - resolved provider identity mismatch reddens
+  - unresolved fallback mismatch reddens
+mutations:
+  - name: resolved provider identity mismatch reddens
+    caseName: multi-session-commit-renders-name-and-harness-per-session
+    sessionId: sess-alpha
+    find: '        expectedHarness: claude-code'
+    replace: '        expectedHarness: openai'
+  - name: unresolved fallback mismatch reddens
+    caseName: session-id-absent-from-the-sessions-channel-renders-name-only
+    sessionId: sess-not-yet-loaded
+    find: '        expectedHarness: null'
+    replace: '        expectedHarness: claude-code'

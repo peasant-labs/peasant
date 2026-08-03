@@ -1,0 +1,32 @@
+# A mutation before the write with no assertion on the explanation. Any failure
+# would satisfy the row, including one from an unrelated cause, so it would stop
+# being evidence that the no-clobber guard is what refused.
+expectedCaseCount: 1
+cases:
+  - name: mutation-without-explanation
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: "#!/bin/sh\n# the user's own hook\n"
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

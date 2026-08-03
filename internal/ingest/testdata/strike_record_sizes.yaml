@@ -1,0 +1,10 @@
+cases:
+  - name: below-limit
+    sizeDelta: -1
+    omitted: false
+  - name: at-limit
+    sizeDelta: 0
+    omitted: true
+  - name: above-limit
+    sizeDelta: 1
+    omitted: true

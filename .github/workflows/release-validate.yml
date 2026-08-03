@@ -1,0 +1,365 @@
+name: Release Validate
+
+# Packaging-validation CI. Builds a goreleaser SNAPSHOT (no tag, no publish,
+# synthetic 0.0.0 version) and installs every package format in a clean
+# environment to prove the .goreleaser.yml + flake packaging actually work —
+# WITHOUT touching any external registry (everything stays local).
+#
+# Two entry points:
+#   - pull_request to develop touching packaging-relevant files (validate on PR).
+#   - workflow_call from release.yml on the rc path (validate the rc).
+#
+# This workflow has one purpose: packaging validation
+# only. The plain linux binary smoke (ldd-static + version==tag) is owned by
+# release.yml's `smoke` job and is NOT duplicated here. The macOS cask install is
+# the darwin smoke release.yml deliberately omits, and runs ONLY on rc.
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - ".goreleaser.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-e2e.yml"
+      - ".github/workflows/release-pr.yml"
+      - ".github/workflows/release-validate.yml"
+      - "scripts/install-goreleaser"
+      - "scripts/goreleaser-v2.17.1-homebrew.patch"
+      - "flake.nix"
+      - "flake.lock"
+      - "go.mod"
+      - "go.sum"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - "**.go"
+      - "Makefile"
+  workflow_call:
+
+concurrency:
+  group: release-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Decide whether this is a release CANDIDATE, from whichever signal the entry
+  # point provides (PR title grammar, or the tag's -rc suffix on workflow_call).
+  # Drives the rc-only macOS cask job from both supported entry points.
+  classify:
+    name: classify rc
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    outputs:
+      is_rc: ${{ steps.c.outputs.is_rc }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Classify
+        id: c
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            # rc only if the PR title parses AND its kind is rc; a non-release PR
+            # simply yields is_rc=false (never fails this job).
+            if out=$(go run github.com/peasant-labs/schema/cmd/release-guard parse-title "$PR_TITLE" 2>/dev/null); then
+              kind=$(printf '%s\n' "$out" | sed -n 's/^kind=//p')
+              [ "$kind" = "rc" ] && echo "is_rc=true" >> "$GITHUB_OUTPUT" || echo "is_rc=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "is_rc=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            case "$REF_NAME" in
+              *-rc*) echo "is_rc=true" >> "$GITHUB_OUTPUT" ;;
+              *)     echo "is_rc=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+
+  # Build the snapshot artifacts once; every install job consumes them.
+  snapshot:
+    name: goreleaser snapshot
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+      - name: Set up Node (embedded web dashboard)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build real web dashboard
+        run: make web
+      - name: Assert real dashboard artifact
+        run: |
+          set -euo pipefail
+          test -s web/out/index.html || { echo "::error::web/out/index.html is missing or empty"; exit 1; }
+          if grep -qF "is not bundled in this build" web/out/index.html; then
+            echo "::error::release artifact contains the web-stub dashboard"
+            exit 1
+          fi
+      # Dirty-tree guard. `goreleaser release --snapshot` (next step) skips
+      # the git-dirty check that the REAL `goreleaser release` enforces at tag
+      # time — so a `make web` that dirties the tree (e.g. overwriting or deleting
+      # a tracked web/out placeholder) is invisible on PRs and only fails the
+      # actual release. Assert a clean tree here so that class is caught pre-tag
+      # without cutting a tag. This catches both a modified index and a deleted
+      # tracked placeholder.
+      - name: Assert make web left a clean tree (real-release dirty-check, no tag)
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::make web left the working tree dirty — the real 'goreleaser release' will abort at tag time. Offending paths:"
+            git status --porcelain
+            git --no-pager diff --stat
+            exit 1
+          fi
+          echo "clean tree after make web ✓"
+      - name: Install patched GoReleaser v2.17.1
+        run: |
+          scripts/install-goreleaser "$RUNNER_TEMP/goreleaser-bin"
+          echo "$RUNNER_TEMP/goreleaser-bin" >> "$GITHUB_PATH"
+      - name: goreleaser release --snapshot
+        run: |
+          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --snapshot --clean
+        env:
+          # Snapshot never publishes, but the aur/cask templates must resolve.
+          AUR_KEY: "snapshot-unused"
+          TAP_GITHUB_TOKEN: "snapshot-unused"
+      - name: Upload dist/
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+          retention-days: 1
+          if-no-files-found: error
+
+  # 2x2: ubuntu 22.04/24.04 x native amd64/arm64. Clean containers prove the
+  # static binary pulls ZERO extra packages and the .deb installs/removes.
+  deb:
+    name: deb (${{ matrix.image }} / ${{ matrix.target.debarch }})
+    needs: snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        # Docker Hub multi-platform indexes, pinned 2026-08-03. These indexes
+        # include both linux/amd64 and linux/arm64 for the native runner matrix.
+        image:
+          - "ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982" # ubuntu:22.04
+          - "ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90" # ubuntu:24.04
+        target:
+          - { runs-on: blacksmith-2vcpu-ubuntu-2404, debarch: amd64 }
+          - { runs-on: blacksmith-2vcpu-ubuntu-2404-arm, debarch: arm64 }
+    runs-on: ${{ matrix.target.runs-on }}
+    timeout-minutes: 15
+    steps:
+      - name: Download dist/
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: goreleaser-dist
+          path: dist
+      - name: Install + smoke + remove the .deb in a clean container
+        run: |
+          set -euxo pipefail
+          docker run --rm -v "$PWD/dist:/dist:ro" "${{ matrix.image }}" bash -euxc '
+            deb=$(ls /dist/peasant_*_linux_'"${{ matrix.target.debarch }}"'.deb)
+            # Directly assert EMPTY Depends — a static CGO_ENABLED=0 binary must
+            # pull zero shared-lib deps; this fails loudly on an nfpm
+            # dependencies regression (independent of what the clean image lacks).
+            deps=$(dpkg-deb -f "$deb" Depends || true)
+            if [ -n "$deps" ]; then
+              echo "::error::expected empty Depends for the static binary, got: $deps"
+              exit 1
+            fi
+            apt-get update -q
+            apt-get install -qy "$deb"
+            peasant version
+            dpkg -s peasant | grep -i "^Architecture:"
+            apt-get remove -qy peasant
+          '
+
+  # rpm: Fedora (dnf) + openSUSE Leap (zypper --allow-unsigned-rpm). amd64 only.
+  rpm:
+    name: rpm (${{ matrix.image }})
+    needs: snapshot
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: "fedora@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814" # fedora:42
+            install: "dnf install -y"
+          - image: "opensuse/leap@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421" # opensuse/leap:15.6
+            # --no-refresh: the rpm is local with empty Depends, so repo metadata
+            # is never needed — and the SLE update-repo fetch has hung this job
+            # until the timeout killed it in CI.
+            install: "zypper --non-interactive --no-refresh install --allow-unsigned-rpm"
+    steps:
+      - name: Download dist/
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: goreleaser-dist
+          path: dist
+      - name: Install + smoke the .rpm in a clean container
+        run: |
+          set -euxo pipefail
+          docker run --rm -v "$PWD/dist:/dist:ro" "${{ matrix.image }}" bash -euxc '
+            ${{ matrix.install }} /dist/peasant_*_linux_amd64.rpm
+            peasant version
+            rpm -q peasant
+          '
+
+  # AUR: makepkg the goreleaser-generated PKGBUILD in archlinux:base-devel. Must
+  # run on an x86_64 runner (the official Arch image is amd64-only). The local
+  # tarball is pre-placed under the source filename so makepkg verifies the real
+  # sha256 (NO --skipinteg) without any network/public URL.
+  makepkg:
+    name: makepkg (archlinux x86_64)
+    needs: snapshot
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    container:
+      # archlinux:base-devel is amd64-only, matching this explicit amd64 runner.
+      image: archlinux@sha256:40d14ac9db5af04f695eacd82a53181ad685fecc2534a66e05a51182a077cbd5 # archlinux:base-devel
+    steps:
+      - name: Download dist/
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: goreleaser-dist
+          path: dist
+      - name: Prepare a non-root builder (makepkg refuses to run as root)
+        run: |
+          set -euxo pipefail
+          pacman -Syu --noconfirm git pacman-contrib
+          useradd -m builduser
+          echo 'builduser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builduser
+      - name: Stage PKGBUILD + pre-place the local tarball
+        run: |
+          set -euxo pipefail
+          mkdir -p /build
+          cp dist/aur/peasant-bin.pkgbuild /build/PKGBUILD
+          ver=$(sed -n "s/^pkgver=//p" /build/PKGBUILD)
+          # The source_x86_64 filename part is ${pkgname}_${pkgver}_x86_64.tar.gz;
+          # its CONTENT is the linux/amd64 release archive. Pre-placing it (with
+          # the matching sha256 already in the PKGBUILD) makes makepkg verify
+          # locally and avoid a network download.
+          cp dist/peasant_"${ver}"_linux_amd64.tar.gz "/build/peasant-bin_${ver}_x86_64.tar.gz"
+          chown -R builduser /build
+      - name: makepkg (offline, full integrity check)
+        run: cd /build && sudo -u builduser makepkg --noconfirm
+      - name: Install + smoke the built package
+        run: |
+          set -euxo pipefail
+          pacman -U --noconfirm /build/peasant-bin-*.pkg.tar.zst
+          peasant version
+          pacman -Qlp /build/peasant-bin-*.pkg.tar.zst
+
+  # Homebrew: lint the generated cask on Linux (brew style is the Linux-safe
+  # subset; brew audit --cask is known-broken for macOS casks on Linux).
+  brew-style:
+    name: brew style (linux)
+    needs: snapshot
+    # GitHub-hosted, NOT Blacksmith: setup-homebrew needs the preinstalled
+    # /home/linuxbrew tree owned by the job user; on Blacksmith it retry-looped
+    # on "could not lock config file .git/config: Permission denied" until the
+    # timeout killed it in CI.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download dist/
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: goreleaser-dist
+          path: dist
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@5037c6f1012cc5ea0b9f03fedbaf9955ed9e51e0 # main
+      - name: brew style the generated cask
+        # Run Homebrew's complete current style suite. The pinned release-tool
+        # patch must keep generated output valid without cop exceptions.
+        run: brew style dist/homebrew/Casks/peasant.rb
+
+  # Nix: build the flake package (S5). Standalone — does not need the snapshot.
+  nix-build:
+    name: nix build .#peasant
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+      - name: nix build .#peasant
+        run: nix build .#peasant -L
+      - name: Smoke the nix-built binary
+        run: ./result/bin/peasant version
+
+  # macOS: install the cask from a locally-served dist/ (no private-repo auth) and
+  # assert it runs + the quarantine hook fired. rc-only (minimize macOS minutes).
+  macos-cask:
+    name: macos cask install (rc only)
+    needs: [classify, snapshot]
+    if: needs.classify.outputs.is_rc == 'true'
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Download dist/
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: goreleaser-dist
+          path: dist
+      - name: Rewrite the cask to install from local dist/
+        run: |
+          set -euxo pipefail
+          # Point both darwin urls at the local archives so brew never needs the
+          # published GitHub release. The sha256s already match dist/.
+          dist_abs="$PWD/dist"
+          sed -E "s#url \"https://github.com/[^\"]*/(peasant_[^\"/]*_darwin_[^\"/]*\.tar\.gz)\"#url \"file://${dist_abs}/\1\"#g" \
+            dist/homebrew/Casks/peasant.rb > peasant.rb
+          cat peasant.rb
+      - name: Install the cask + smoke
+        run: |
+          set -euxo pipefail
+          # Homebrew refuses `brew install --cask <path>` from a bare file path —
+          # a cask must live in a tap. Stage the generated cask into a throwaway
+          # local tap and install from there.
+          tap="peasant-labs/cask-test"
+          brew tap-new "$tap"
+          tap_dir="$(brew --repository "$tap")"
+          mkdir -p "$tap_dir/Casks"
+          cp peasant.rb "$tap_dir/Casks/peasant.rb"
+          brew install --cask "$tap/peasant"
+          peasant version
+      - name: Assert the quarantine hook removed the xattr
+        run: |
+          set -uo pipefail
+          bin="$(command -v peasant)"
+          attrs="$(xattr -l "$bin" || true)"
+          echo "xattr on ${bin}: '${attrs}'"
+          if printf '%s' "$attrs" | grep -q "com.apple.quarantine"; then
+            echo "::error::com.apple.quarantine still present — the cask post-install xattr hook did not run"
+            exit 1
+          fi

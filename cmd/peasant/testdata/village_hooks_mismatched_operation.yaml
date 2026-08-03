@@ -1,0 +1,7 @@
+expectedCaseCount: 1
+cases:
+  - name: push-operation-for-a-commit-event
+    event: post-commit
+    gitOperation: push
+    uploadExitCode: 0
+    expectWarning: false

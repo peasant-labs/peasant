@@ -1,0 +1,9 @@
+expectedCaseCount: 7
+requiredNames:
+  - hidden_best_visible_next_limit_1
+  - hidden_prefix_pages_until_visible_limit
+  - all_mode_preserves_global_rank
+  - hidden_only_empty_non_null
+  - explicit_session_no_sibling
+  - conflict_fails_closed
+  - selected_empty_returns_empty

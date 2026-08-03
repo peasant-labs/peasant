@@ -1,0 +1,163 @@
+# What Peasant decides about a hook slot git reaches through a SYMLINK.
+#
+# A symlinked hook is ordinary — dotfile managers, stow, a tracked team hooks/
+# directory, any version-controlled hooks setup — and it is the one shape where
+# "what occupies the slot" and "what git executes" are different files. Both
+# safety gates read the second one:
+#
+#   the interpreter gate  decides whether the POSIX shell section may be offered
+#                         at all. Offered for a hook another interpreter runs, it
+#                         does not fail to help: it makes that file a syntax
+#                         error, so a pre-push policy gate dies and no push ever
+#                         succeeds again.
+#   the activity check    decides whether an upload already runs from the slot.
+#                         Answered wrongly, a live upload hook is reported as
+#                         absent, uninstall reports nothing to remove, and the
+#                         next commit publishes anyway.
+#
+# target      what the link points AT.
+#   shell-script         a user's own POSIX shell hook
+#   non-shell-script     '#!/usr/bin/env python3', the pre-commit framework shape
+#   generated-hook       a complete, unmodified Peasant-generated hook
+#   generated-hook-not-executable
+#                         the same bytes without a mode Git will execute
+#   hand-added-section   a shell hook carrying the by-hand upload section
+#   binary               not a text script at all
+#   named-pipe           a FIFO that a blocking read would wait on forever
+#   missing              nothing — a dangling link
+#   directory            a directory, so there are no bytes to classify
+# location    where that target lives, relative to the directory git runs hooks
+#             from: inside-hooks-dir or outside-hooks-dir (in the worktree).
+#
+# expectedLanguage            what git runs the target as. Unclassified is the
+#                             fail-closed value: nothing was read, so nothing is
+#                             known, and nothing content-dependent may be offered.
+# expectedCarriesUpload        whether generated/by-hand upload bytes are present.
+# expectedUploads             whether Git actively runs those bytes today.
+# expectedOffersShellSection  whether the by-hand POSIX shell section is offered.
+# expectedUninstallOutcome    what 'hooks uninstall' does. refused means Peasant
+#                             found something it may not remove and said so;
+#                             not-present means there is genuinely nothing of
+#                             Peasant's here.
+#
+# Every case additionally asserts that the target file and the link are
+# byte-identical after status, install, and uninstall have all run: Peasant never
+# follows a link to change anything.
+expectedCaseCount: 14
+cases:
+  - name: shell-script-linked-inside-the-hooks-directory
+    target: shell-script
+    location: inside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedUploads: false
+    expectedOffersShellSection: true
+    expectedUninstallOutcome: not-present
+
+  - name: shell-script-linked-outside-the-hooks-directory
+    target: shell-script
+    location: outside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: not-present
+
+  - name: non-shell-script-linked-outside-the-hooks-directory
+    target: non-shell-script
+    location: outside-hooks-dir
+    expectedLanguage: other
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: not-present
+
+  - name: non-shell-script-linked-inside-the-hooks-directory
+    target: non-shell-script
+    location: inside-hooks-dir
+    expectedLanguage: other
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: not-present
+
+  - name: generated-hook-linked-outside-the-hooks-directory
+    target: generated-hook
+    location: outside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedCarriesUpload: true
+    expectedUploads: true
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: generated-hook-linked-inside-the-hooks-directory
+    target: generated-hook
+    location: inside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedCarriesUpload: true
+    expectedUploads: true
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: generated-hook-linked-inside-but-not-executable
+    target: generated-hook-not-executable
+    location: inside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedCarriesUpload: true
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: hand-added-section-linked-outside-the-hooks-directory
+    target: hand-added-section
+    location: outside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedCarriesUpload: true
+    expectedUploads: true
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: hand-added-section-linked-inside-the-hooks-directory
+    target: hand-added-section
+    location: inside-hooks-dir
+    expectedLanguage: posix-shell
+    expectedCarriesUpload: true
+    expectedUploads: true
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: binary-linked-inside-the-hooks-directory
+    target: binary
+    location: inside-hooks-dir
+    expectedLanguage: binary
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: not-present
+
+  - name: binary-linked-outside-the-hooks-directory
+    target: binary
+    location: outside-hooks-dir
+    expectedLanguage: binary
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: not-present
+
+  - name: named-pipe-target-fails-closed-without-blocking
+    target: named-pipe
+    location: inside-hooks-dir
+    expectedLanguage: ""
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: dangling-link
+    target: missing
+    location: inside-hooks-dir
+    expectedLanguage: ""
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused
+
+  - name: link-to-a-directory
+    target: directory
+    location: inside-hooks-dir
+    expectedLanguage: ""
+    expectedUploads: false
+    expectedOffersShellSection: false
+    expectedUninstallOutcome: refused

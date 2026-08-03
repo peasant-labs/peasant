@@ -1,0 +1,12 @@
+# actionlint configuration.
+#
+# Declare the Blacksmith self-hosted runner labels used across the workflows so
+# actionlint's runner-label check does not flag them as unknown (they are not in
+# actionlint's built-in GitHub-hosted label list). See:
+# https://github.com/rhysd/actionlint/blob/main/docs/config.md
+self-hosted-runner:
+  labels:
+    - blacksmith-2vcpu-ubuntu-2404
+    - blacksmith-2vcpu-ubuntu-2404-arm
+    - blacksmith-4vcpu-ubuntu-2404
+    - blacksmith-4vcpu-ubuntu-2404-arm

@@ -1,0 +1,34 @@
+deep_link:
+  url: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest%2Fpipeline.go&mode=canvas&grain=file&expand=internal&expand=internal%2Fingest&filter=pipe&focus=internal%2Fingest%2Fpipeline.go&scale=1.25&panX=32&panY=-18
+  selectedNode: internal/ingest/pipeline.go
+  grain: files
+  filter: pipe
+  focus: internal/ingest/pipeline.go
+  viewport: {scale: 1.25, panX: 32, panY: -18}
+navigator_interaction:
+  url: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package
+  selectedNode: internal
+  filter: ingest
+canvas_interaction:
+  url: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=canvas&grain=package
+  disclosureLabel: show children for ingest
+stale_selection:
+  url: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&node=missing%2Farea&grain=package&focus=missing%2Farea
+  selectedNode: missing/area
+invalid_viewport:
+  url: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=canvas&grain=file&scale=0.2&panX=12&panY=-8
+history:
+  canonicalUrl: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest%2Fpipeline.go&mode=canvas&grain=file&expand=internal&expand=internal%2Fingest&filter=pipe&focus=internal%2Fingest%2Fpipeline.go&scale=1.25&panX=32&panY=-18
+  noncanonicalUrl: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?grain=package&mode=navigator
+  canonicalTarget: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package
+  malformedInitialUrl: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package&expand=
+  malformedPopstateUrl: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package&expand=internal&expand=%20
+  malformedTarget: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package
+  oracleMutations:
+    - name: extra canonical write
+      writes:
+        - /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package
+        - /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=navigator&grain=package
+    - name: wrong canonical target
+      writes:
+        - /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?mode=canvas&grain=package

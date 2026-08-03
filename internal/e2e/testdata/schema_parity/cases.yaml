@@ -1,0 +1,29 @@
+cases:
+  - name: matching-rc3
+    peasant_go_mod: |
+      module github.com/peasant-labs/peasant
+
+      go 1.25.5
+
+      require (
+        github.com/peasant-labs/schema v0.1.0-rc3
+      )
+    village_go_mod: |
+      module github.com/peasant-labs/village/backend
+
+      go 1.25.5
+
+      require github.com/peasant-labs/schema v0.1.0-rc3
+    want_version: v0.1.0-rc3
+  - name: mismatched-rc4
+    peasant_go_mod: |
+      module github.com/peasant-labs/peasant
+
+      require github.com/peasant-labs/schema v0.1.0-rc3
+    village_go_mod: |
+      module github.com/peasant-labs/village/backend
+
+      require (
+        github.com/peasant-labs/schema v0.1.0-rc4 // indirect
+      )
+    want_error_contains: "schema module mismatch: peasant uses v0.1.0-rc3 while village uses v0.1.0-rc4"

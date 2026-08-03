@@ -1,0 +1,33 @@
+mapNode:
+  agentEditedCount: 11
+  readCount: 7
+  readAttribution: complete
+  readState: reviewed_in_detail
+  changedRegionCount: 9
+  attributedRegionCount: 8
+  reviewedRegionCount: 6
+rewrittenCommits:
+  - ghostHash: ghost-rewrite-001
+    subject: preserve timeline rewrite evidence
+    authorTimeMs: 1700000000100
+    sessionIds: [session-rewrite]
+    associations:
+      - id: assoc-ghost-rewrite-001
+        sessionId: session-rewrite
+        conclusion: confirmed
+        confidence: high
+        evidence:
+          - {kind: recorded_commit, recordedCommitHash: ghost-rewrite-001}
+    successorHash: successor-rewrite-001
+    resolution: rewritten
+    method: patch_id
+    confidence: high
+insights:
+  - kind: retry_loop
+    provenance: mechanical
+    confidence: high
+    title: repeated adapter retry
+    summary: the same adapter operation retried before completion
+    subjects: [web/src/lib/adapters/changes.ts]
+    evidence:
+      - {sessionId: session-rewrite, entryIndex: 7, file: web/src/lib/adapters/changes.ts}

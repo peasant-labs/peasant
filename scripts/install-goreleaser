@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly version="2.17.1"
+readonly commit="83f4c19a5c5c0b9efef6bf2aedc6805bbcb9dfe2"
+readonly output_dir="${1:-${HOME}/.local/bin}"
+readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+work_dir="$(mktemp -d)"
+trap 'rm -rf "${work_dir}"' EXIT
+
+git clone --quiet --depth 1 --branch "v${version}" https://github.com/goreleaser/goreleaser.git "${work_dir}/goreleaser"
+
+actual_commit="$(git -C "${work_dir}/goreleaser" rev-parse HEAD)"
+if [[ "${actual_commit}" != "${commit}" ]]; then
+  printf 'GoReleaser v%s resolved to %s, expected %s; refusing to build an unverified release tool.\n' \
+    "${version}" "${actual_commit}" "${commit}" >&2
+  exit 1
+fi
+
+patch --directory="${work_dir}/goreleaser" --strip=1 --forward --batch \
+  < "${script_dir}/goreleaser-v2.17.1-homebrew.patch"
+mkdir -p "${output_dir}"
+(
+  cd "${work_dir}/goreleaser"
+  GOWORK=off go build -trimpath \
+    -ldflags "-s -w -X main.version=${version} -X main.commit=${commit} -X main.treeState=patched -X main.builtBy=peasant-release" \
+    -o "${output_dir}/goreleaser" .
+)
+"${output_dir}/goreleaser" --version

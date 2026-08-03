@@ -1,0 +1,89 @@
+# What this version actually applies for every value the user can configure.
+#
+# The two corpora below are closed-set corpora: the loader requires one redaction
+# row for every level in redact.AllRedactionLevels and one visibility row for every
+# member of schema.AllVisibilities. Adding a level or a visibility to the contract
+# turns these tests red instead of silently shipping a value nobody handled.
+#
+# The two settings are handled DIFFERENTLY, on purpose, and the corpora encode
+# that difference rather than smoothing it over:
+#
+#   visibility  a value that cannot be applied publishes PRIVATELY - towards more
+#               privacy, so proceeding is safe and it is disclosed.
+#   redaction   a value that cannot be applied REFUSES the run; a value that is
+#               merely no longer OFFERED is raised to the offered level, which
+#               redacts more. Both directions are safe; neither is silent.
+#
+# WHY DISPOSITION IS THE COLUMN, and not a boolean. There used to be a `supported`
+# boolean here, which could express only "runs" and "refuses". Standard is now the
+# single level a user may choose, and minimal fits neither arm: the engine applies
+# it perfectly well, so refusing a configuration carrying it would dead-end its
+# owner, and running it as written would protect less than the one level onboarding
+# describes. It is a third answer - raise it and say so - and a boolean cannot hold
+# three answers. The loader requires every disposition to appear, so an arm that
+# stops being exercised is a load failure rather than a quiet gap.
+#
+# redaction rows
+#   configured   the level in the user's configuration. "" is the UNSET level,
+#                which a zero-value config.Config carries - not a file with no
+#                redaction block, since Parse starts from BaseConfig and validate
+#                refuses an invalid level, so a LOADED configuration is never
+#                unset. It is a real input all the same, and the row for it is
+#                required: the loader walks every engine level PLUS this one,
+#                because "" is not a member of redact.AllRedactionLevels and the
+#                row was therefore deletable in silence.
+#   disposition  what this version does with it: offered, raised, or refused.
+#   effective    the level a run actually applies. Omitted for a refused level,
+#                which never resolves because the caller stopped first.
+#
+# The loader enforces the coherence between disposition and effective, INCLUDING
+# the direction: a raised row whose effective level redacts LESS than the
+# configured one is rejected. That guard is the whole safety argument for raising
+# rather than refusing, so a corpus is not allowed to assert the opposite.
+#
+# visibility rows
+#   configured  the visibility resolved from the flag, then the config, then the
+#               default.
+#   effective   the visibility the village is actually asked to store.
+#   downgraded  true when the two differ, which is what has to be disclosed.
+
+expectedRedactionCaseCount: 4
+redaction:
+  - name: standard-is-offered-and-applies-exactly-as-configured
+    configured: standard
+    disposition: offered
+    effective: standard
+
+  - name: a-configuration-still-set-to-minimal-runs-at-standard-and-is-told-so
+    configured: minimal
+    disposition: raised
+    effective: standard
+
+  - name: maximum-is-refused-and-every-surface-stops
+    configured: maximum
+    disposition: refused
+
+  - name: an-unset-level-is-offered-and-resolves-to-the-default
+    # The only cover for the branch that decides whether a zero-value
+    # configuration may run at all. Break it and `peasant village push` refuses
+    # outright for every such install.
+    configured: ""
+    disposition: offered
+    effective: standard
+
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private-is-the-one-visibility-this-version-can-apply
+    configured: private
+    effective: private
+    downgraded: false
+
+  - name: public-is-applied-through-owner-update
+    configured: public
+    effective: public
+    downgraded: false
+
+  - name: group-is-published-private-and-disclosed-just-like-public
+    configured: group
+    effective: private
+    downgraded: true

@@ -1,0 +1,43 @@
+# A dispatch corpus covering every SOURCE KIND while leaving one EXIT unreached.
+#
+# All three kinds appear, so the closed-set walk over AllTranscriptSourceKinds is
+# satisfied - and this is exactly the shape the corpus had before exits were
+# counted. What is missing is the directory arm's refusal when the provider root
+# was lost between discovery and indexing.
+#
+# That arm is not decorative. Deleting it lets a directory-source indexer be
+# called with no root, resolve nothing, and return zero entries and NO error -
+# which is verbatim the silent failure this whole dispatch exists to prevent, in
+# the function that exists to prevent it. Measured before this fixture existed:
+# deleting the guard was GREEN.
+
+expectedCaseCount: 4
+cases:
+  - name: an-undeclared-source-kind-is-refused
+    sourceKind: unknown
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: none
+    indexOutcome: error
+    errorContains: did not declare where its entries come from
+
+  - name: a-file-source-is-handed-the-bytes
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: bytes
+    indexOutcome: indexed
+
+  - name: a-file-source-with-no-bytes-reads-what-was-written
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: absent
+    entryPoint: file
+    indexOutcome: indexed
+
+  - name: a-directory-source-is-never-handed-bytes
+    sourceKind: directory
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: file
+    indexOutcome: indexed

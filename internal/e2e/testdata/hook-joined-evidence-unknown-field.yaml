@@ -1,0 +1,86 @@
+# Rejection fixture: success_result is mistyped. A loader that accepts it leaves
+# the field blank, and the assertion it drives passes on every run.
+expectedCaseCount: 2
+cases:
+  - name: post_commit_publishes_the_configured_repository_to_a_real_village
+    outcome: publishes
+    # Sessions the configured repository publishes, and sessions a second
+    # repository records that must never leave it.
+    expected_transcripts: 2
+    excluded_transcripts: 2
+    # The identifiers the second repository's copy of the committed Claude
+    # fixture is renamed onto, so both copies coexist in one store and the
+    # exclusion assertion can name the sessions that must stay unpublished.
+    second_root_session_id: 7b57cde9-c476-5719-cf8e-6712f3eea916
+    second_subagent_session_id: agent-b194171
+    # Configured values the real hook run applies. Public is verified from
+    # authoritative Village state; unsupported redaction still refuses.
+    redaction_level: standard
+    visibility: public
+    identity_basis: worktree-path
+    # Published content redaction is asserted by
+    # TestPipeline_PublishedBodyIsRedacted, which drives the production pipeline
+    # and inspects every part the publisher receives. This joined fixture focuses
+    # on installation, execution, and persisted publication evidence.
+    install_disclosure_contains:
+      - "visibility update failed"
+      - "published privately"
+      - 'notice: push.visibility resolves to "public"; the post-commit hook publishes this repository''s sessions on every post-commit without asking, at the visibility stated above.'
+    # The hook runs with --quiet, so the per-commit form is one line.
+    disclosure_contains:
+      - "pushed 2 session(s), 0 error(s)"
+    forbidden_contains:
+      - "sessions publicly"
+      - "without asking again"
+      - "set push.visibility to private"
+    warning_contains:
+      - "peasant: village upload did not complete"
+      - "retry by hand with this exact bound command"
+    success_resul: "pushed 2 session(s), 0 error(s)"
+
+  - name: pre_push_refuses_an_unsupported_level_without_blocking_the_push
+    outcome: refuses
+    # pre-push, NOT post-commit, and this is the whole point of the case.
+    #
+    # Git IGNORES the exit status of post-commit: the commit is already made, so
+    # a hook that fails there cannot break anything, and an assertion that "git
+    # still succeeded" after a post-commit hook can never fail. Proven by
+    # mutation - making the generated hook propagate the upload's exit status
+    # left a post-commit version of this case green.
+    #
+    # Git HONOURS the exit status of pre-push: a non-zero pre-push aborts the
+    # push. So pre-push is the only event where "a Peasant failure must not block
+    # ordinary Git work" is both at risk and testable.
+    event: pre-push
+    # The level the hook is installed under, then the level the configuration is
+    # edited to afterwards. Installing at an unsupported level is refused
+    # outright, so the only way to reach this state is to change the setting
+    # after the hook exists - which is exactly what a user does.
+    installed_redaction_level: standard
+    redaction_level: maximum
+    # The refusal must be actionable on a path the user never asked to read: it
+    # names the setting to edit AND the value to use, as one contiguous remedy.
+    #
+    # Checking "redaction.level" and "standard" separately was VACUOUS and is the
+    # reason this is one phrase. Measured in the real push output: "standard"
+    # occurs 3 times and "minimal" twice, because the message also lists the
+    # supported levels. Blanking the recommended value would degrade the remedy to
+    # "set redaction.level to  " while leaving both tokens findable elsewhere on
+    # the same line, and both separate checks would still pass. Contiguity, not
+    # presence, is the property that matters.
+    refusal_contains:
+      - "redaction level is not supported in this version"
+      - "set redaction.level to standard"
+      # A correct exit code carrying a false message is the real hazard here. The
+      # hook branches on the upload's status, and its generic-failure text claims
+      # whatever finished "is on the village and is recorded as published" - which
+      # is a lie for a refusal that contacted nothing. This pins the truthful
+      # framing; the matching lie is forbidden below.
+      - "nothing reached the village"
+    # A refusal reaches this surface once per commit, forever, until the setting
+    # is fixed. Cobra prints the flag listing on error by default, and a usage
+    # dump on every commit is a user-facing defect even when the exit status is
+    # right.
+    forbidden_contains:
+      - "Usage:"
+      - "is on the village and is recorded as published"

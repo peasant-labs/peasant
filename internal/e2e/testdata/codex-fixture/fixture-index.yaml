@@ -1,0 +1,15 @@
+harness: codex
+source_path: "sessions"
+index_path: "session_index.jsonl"
+sessions:
+  - id: "019e7724-38f5-7660-b2d7-2eda237d4a7d"
+    model: "gpt-5.5"
+    kind: "tool-free"
+    path: "sessions/2026/05/29/rollout-2026-05-29T21-28-43-019e7724-38f5-7660-b2d7-2eda237d4a7d.jsonl"
+  - id: "019e7724-8abb-7851-adac-69a30b4bc1bb"
+    model: "gpt-5.5"
+    kind: "tool-using"
+    path: "sessions/2026/05/29/rollout-2026-05-29T21-29-04-019e7724-8abb-7851-adac-69a30b4bc1bb.jsonl"
+pinned:
+  scrubbed_home: "/home/user"
+  synthetic_remote: true

@@ -1,0 +1,21 @@
+id: no-raw-newtype-cast
+language: Go
+severity: error
+message: >
+  Direct string-to-newtype cast bypasses validation. Use the constructor
+  instead: NewSessionID(), NewModelID(), NewProjectHash(), NewHostSlug().
+note: >
+  Newtype constructors validate format via regex and reject path traversal.
+  Direct casts skip these checks and can introduce invalid identifiers.
+rule:
+  any:
+    - pattern: SessionID("$VAL")
+    - pattern: ModelID("$VAL")
+    - pattern: ProjectHash("$VAL")
+    - pattern: HostSlug("$VAL")
+ignores:
+  - "vendor/**"
+  - "internal/ingest/types.go"
+  - "internal/ingest/types_test.go"
+  - "internal/testutil/**"
+  - "**/*_test.go"

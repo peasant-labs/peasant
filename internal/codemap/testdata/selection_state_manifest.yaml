@@ -1,0 +1,5 @@
+expectedCaseCount: 3
+requiredNames:
+  - all_mode_selection_inactive_nothing_hidden
+  - selected_mode_hides_one_project_entirely
+  - selected_mode_hides_some_sessions_without_hiding_the_project_row

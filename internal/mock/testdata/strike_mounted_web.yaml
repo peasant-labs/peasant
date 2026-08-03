@@ -1,0 +1,73 @@
+project:
+  hash: eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b
+  name: fortuna
+sessionDetail:
+  id: 20260729T010203.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+  project: fortuna
+  harness: strike
+  model: strike-agent
+  startTime: 2026-07-29T01:02:03Z
+  endTime: 2026-07-29T01:03:03Z
+  durationMins: 1
+  totalTokens: 34
+  tokensIn: 13
+  tokensOut: 21
+  turnCount: 2
+  toolCallCount: 0
+  turns:
+    - index: 0
+      role: user
+      depth: 0
+      content: Render deferred Strike sessions in Peasant
+      timestamp: 2026-07-29T01:02:03Z
+      toolCalls: []
+    - index: 1
+      role: assistant
+      depth: 0
+      content: The Strike transcript is mounted through the shared viewer.
+      timestamp: 2026-07-29T01:03:03Z
+      stopReason: end_turn
+      toolCalls: []
+mapSession:
+  id: 20260729T010203.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+  harness: strike
+  startTime: 2026-07-29T01:02:03Z
+  durationMins: 1
+  totalTokens: 34
+  turnCount: 2
+  toolCallCount: 0
+  project: fortuna
+  projectHash: eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b
+  preview: Render deferred Strike sessions in Peasant
+mapCommit:
+  hash: 1845abcdef0123456789
+  subject: Render Strike sessions in the local web app
+  timeMs: 1785286983000
+reviewList:
+  projectHash: eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b
+  repoFound: true
+  defaultBranch: main
+  changes:
+    - branch: feat/queue-retry
+      aheadCount: 1
+      behindCount: 0
+      filesChanged: 4
+      sessionCount: 1
+      taskCount: 2
+      newEdges: 0
+      removedEdges: 0
+      violations: 0
+      merged: false
+      tipCommitMs: 1785286983000
+  recentCommits: []
+  sessions:
+    - sessionId: 20260729T010203.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+      title: Render deferred Strike sessions
+      harness: strike
+      startMs: 1785286923000
+      hasCommitBinding: true
+  rewrittenCommits: []
+expected:
+  assistantContent: The Strike transcript is mounted through the shared viewer.
+  mapConversationTitle: Render deferred Strike sessions in Peasant
+  reviewSessionTitle: Render deferred Strike sessions

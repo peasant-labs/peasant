@@ -1,0 +1,36 @@
+# A corpus covering every disposition a level can actually HAVE, and not the one
+# it can be MISSING.
+#
+# Offered, raised and refused are all here. Unknown is not, because no input
+# reaches it: a level with no entry in the policy table would first have to pass
+# redact.RedactionLevel.IsValid, and none does. That is exactly why a corpus has
+# to hold it - measured, dropping the unknown arm from the command's switch left
+# every test in cmd/peasant green - and why the loader walks
+# config.AllRedactionLevelDispositions rather than the rows.
+expectedCaseCount: 4
+cases:
+  - name: an-offered-level-runs
+    level: standard
+    askedByFlag: false
+    disposition: offered
+    refusal: none
+
+  - name: a-no-longer-offered-level-asked-for-by-name-is-refused-as-a-request
+    level: minimal
+    askedByFlag: true
+    disposition: raised
+    refusal: unoffered
+    sourceNames: the --level flag
+
+  - name: the-same-level-sitting-in-a-configuration-is-raised-not-refused
+    level: minimal
+    askedByFlag: false
+    disposition: raised
+    refusal: none
+
+  - name: a-level-this-version-cannot-apply-stops-the-run
+    level: maximum
+    askedByFlag: false
+    disposition: refused
+    refusal: unsupported
+    sourceNames: config

@@ -1,0 +1,40 @@
+expectedCaseCount: 13
+viewportEndpointCases:
+  minimum: minimum viewport endpoint
+  maximum: maximum viewport endpoint
+requiredCases:
+  - {name: bare navigator default, accepted: true}
+  - {name: complete canvas state, accepted: true}
+  - {name: expansion order canonicalized, accepted: true}
+  - {name: empty expansion rejected, accepted: false}
+  - {name: whitespace expansion rejected, accepted: false}
+  - {name: mixed valid and blank expansions rejected, accepted: false}
+  - {name: minimum viewport endpoint, accepted: true}
+  - {name: maximum viewport endpoint, accepted: true}
+  - {name: viewport below shared minimum rejected, accepted: false}
+  - {name: viewport above shared maximum rejected, accepted: false}
+  - {name: partial viewport rejected, accepted: false}
+  - {name: unknown route field rejected, accepted: false}
+  - {name: unsupported presentation rejected, accepted: false}
+expectedMutationCount: 5
+mutations:
+  - name: fixture count drift
+    search: 'expectedCaseCount: 13'
+    replacement: 'expectedCaseCount: 12'
+    diagnostic: exactly 13 cases
+  - name: required semantic case renamed
+    search: 'name: bare navigator default'
+    replacement: 'name: renamed default'
+    diagnostic: missing required case
+  - name: unknown fixture field
+    search: "    search: ''\n    accepted: true"
+    replacement: "    search: ''\n    unexpected: true\n    accepted: true"
+    diagnostic: unknown fields
+  - name: complete state field removed
+    search: "state: {version: 1, presentation: navigator, selectedId: null, grain: package, expandedIds: [], navigatorFilter: '', navigatorFocusedId: null, viewport: null, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance, scentFilter: null}"
+    replacement: "state: {version: 1, presentation: navigator, selectedId: null, grain: package, expandedIds: [], navigatorFilter: '', navigatorFocusedId: null, viewport: null, hoveredSessionId: null, selectedSessionId: null, expandedCommitSessions: [], expandedGhostGroups: [], rankMode: relevance}"
+    diagnostic: missing required fields
+  - name: rejected expansion outcome flipped
+    search: "    search: '?mode=navigator&grain=package&expand='\n    accepted: false"
+    replacement: "    search: '?mode=navigator&grain=package&expand='\n    accepted: true"
+    diagnostic: must be an object

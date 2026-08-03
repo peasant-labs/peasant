@@ -1,0 +1,26 @@
+declaredRows: 4
+requiredArms: [resume, downstream-filter, exact-hook, multiple-targets]
+cases:
+  - name: resume-publication-through-hooks
+    arm: resume
+    retryStage: publication
+    sessionIds: [session-one]
+    expectedStages: [publication, receipt, hooks]
+  - name: resume-receipt-through-hooks
+    arm: downstream-filter
+    retryStage: receipt
+    sessionIds: [session-two]
+    expectedStages: [receipt, hooks]
+  - name: retry-one-hook-target
+    arm: exact-hook
+    retryStage: hooks
+    repository: /tmp/retry-repository
+    events: [pre-push]
+    expectedStages: [hooks]
+  - name: retry-two-publication-targets
+    arm: multiple-targets
+    retryStage: publication
+    sessionIds: [session-three, session-four]
+    additionalRetryStage: receipt
+    additionalSessionIds: [session-five]
+    expectedStages: [publication, receipt, hooks]

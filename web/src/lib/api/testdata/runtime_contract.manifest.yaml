@@ -1,0 +1,87 @@
+expectedValidFamilies: [mapNodeKinds, edgeViolationKinds, fileChangeStatuses, diffLineKinds, changeBindings, harnesses]
+expectedInvalidCount: 11
+requiredInvalidFields:
+  - nodes[].kind
+  - violations[].kind
+  - kind
+  - files[].status
+  - slice.nodes[].kind
+  - violations[].kind
+  - work[].harness
+  - work[].binding
+  - status
+  - hunks[].lines[].kind
+  - sessions[].harness
+requiredInvalidNames:
+  - map graph rejects unknown node kind
+  - map graph rejects unknown violation kind
+  - node detail rejects unknown node kind
+  - change detail rejects unknown file status
+  - change detail rejects unknown slice node kind
+  - change detail rejects unknown violation kind
+  - change detail rejects unknown work harness
+  - change detail rejects unknown work binding
+  - change diff rejects unknown file status
+  - change diff rejects unknown line kind
+  - review list rejects unknown harness
+expectedMutationCount: 6
+mutations:
+  - name: top-level projects normalization is required
+    target: /src/lib/api/map.ts
+    find: 'projects: wire.projects ?? []'
+    replace: 'projects: wire.projects as never'
+    expectedTestFile: src/lib/api/map.test.ts
+    expectedFailedTestNames:
+      - project summaries null projects
+    expectedFailurePattern: 'projects: null.*projects: \[\]'
+  - name: nested task collections normalization is required
+    target: /src/lib/api/map.ts
+    find: 'editedFiles: task.editedFiles ?? []'
+    replace: 'editedFiles: task.editedFiles as never'
+    expectedTestFile: src/lib/api/map.test.ts
+    expectedFailedTestNames:
+      - project tasks normalize nested task collections
+      - change detail normalizes every nullable collection
+    expectedFailurePattern: 'editedFiles|deeply equal'
+  - name: change slice collections normalization is required
+    target: /src/lib/api/map.ts
+    find: 'nodes: (wire.slice.nodes ?? []).map'
+    replace: 'nodes: (wire.slice.nodes as never[]).map'
+    expectedTestFile: src/lib/api/map.test.ts
+    expectedFailedTestNames:
+      - change detail normalizes every nullable collection
+    expectedFailurePattern: 'null|map'
+  - name: canonical enum member deletion is detected
+    target: /src/lib/api/map.ts
+    find: "kind: contractValue(node.kind, `${field}.kind`, operation, isMapNodeKind)"
+    replace: "kind: contractValue(node.kind, `${field}.kind`, operation, (value): value is MapNodeKind => value !== 'file' && isMapNodeKind(value))"
+    expectedTestFile: src/lib/api/map.test.ts
+    expectedFailedTestNames:
+      - accepts every canonical runtime enum value at its REST trust boundary
+    expectedFailurePattern: 'nodes\[\]\.kind.*unknown value "file"'
+  - name: canonical Strike harness deletion is detected
+    target: /src/lib/api/map.ts
+    find: "harness: contractValue(session.harness, 'sessions[].harness', 'decodeReviewList', isHarness),"
+    replace: "harness: contractValue(session.harness, 'sessions[].harness', 'decodeReviewList', (value): value is Harness => value !== 'strike' && isHarness(value)),"
+    expectedTestFile: src/lib/api/map.test.ts
+    expectedFailedTestNames:
+      - accepts every canonical runtime enum value at its REST trust boundary
+    expectedFailurePattern: 'sessions\[\]\.harness.*unknown value "strike"'
+  - name: permissive string fallback is detected
+    target: /src/lib/api/map.ts
+    find: 'if (predicate(value)) return value;'
+    replace: "if (predicate(value) || typeof value === 'string') return value as T;"
+    expectedTestFile: src/lib/api/map.test.ts
+    expectedFailedTestNames:
+      - map graph rejects unknown node kind
+      - map graph rejects unknown violation kind
+      - node detail rejects unknown node kind
+      - change detail rejects unknown file status
+      - change detail rejects unknown slice node kind
+      - change detail rejects unknown violation kind
+      - change detail rejects unknown work harness
+      - change detail rejects unknown work binding
+      - change diff rejects unknown file status
+      - change diff rejects unknown line kind
+      - review list rejects unknown harness
+    expectedFailurePattern: 'promise resolved'

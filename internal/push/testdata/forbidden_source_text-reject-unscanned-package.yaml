@@ -1,0 +1,20 @@
+# A corpus whose row is scoped to a package the corpus never scans.
+#
+# It is the scope failure this guard was rebuilt for, in miniature: the claim was
+# corrected in the package that inherited it and left standing in internal/ingest,
+# which the guard never read. A row naming a directory outside the scanned set
+# reads as coverage and provides none, so the loader must refuse it.
+
+expectedPackageCount: 1
+packages:
+  - internal/push
+
+expectedClaimCount: 1
+claims:
+  - name: a-row-scoped-to-a-directory-nothing-reads
+    phrase: redaction-safe by construction
+    packages:
+      - internal/ingest
+    matchesSample: "// DB session_entries are redaction-safe by construction."
+    why: >
+      Placeholder reason for a corpus that exists only to be rejected.

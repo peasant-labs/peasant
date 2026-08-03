@@ -1,0 +1,159 @@
+cases:
+  - name: all_mode
+    mode: all
+    candidate: {harness: claude-code, session_id: session-all, project_name: alpha, git_branch: main}
+    result: visible
+  - name: selected_empty
+    mode: selected
+    candidate: {harness: claude-code, session_id: session-empty, project_name: alpha, git_branch: main}
+    result: hidden
+  - name: unrestricted_named_harness
+    mode: selected
+    harnesses:
+      claude-code: {}
+    candidate: {harness: claude-code, session_id: session-harness, project_name: alpha, git_branch: main}
+    result: visible
+  - name: explicit_session_does_not_widen_siblings
+    mode: selected
+    harnesses:
+      claude-code:
+        sessions: [session-explicit]
+    candidate: {harness: claude-code, session_id: session-sibling, project_name: alpha, git_branch: main}
+    result: hidden
+  - name: explicit_session_positive
+    mode: selected
+    harnesses:
+      claude-code:
+        sessions: [session-explicit]
+    candidate: {harness: claude-code, session_id: session-explicit, project_name: alpha, git_branch: dev}
+    result: visible
+  - name: git_remote_identity_fallback
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: git@example.test:org/alpha.git}
+    candidate: {harness: claude-code, session_id: session-remote, git_remote: git@example.test:org/alpha.git, git_branch: dev}
+    result: visible
+  - name: project_name_identity_fallback
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha}
+    candidate: {harness: claude-code, session_id: session-name, project_name: alpha, git_branch: dev}
+    result: visible
+  - name: absent_branch_is_admitted_for_selected_project
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha, branches: [main]}
+    candidate: {harness: claude-code, session_id: session-unknown-branch, project_name: alpha}
+    result: visible
+  - name: mixed_harness_does_not_cross_select
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha}
+      codex:
+        sessions: [session-codex]
+    candidate: {harness: opencode, session_id: session-other, project_name: alpha, git_branch: main}
+    result: hidden
+  - name: selected_branch
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha, branches: [main]}
+    candidate: {harness: claude-code, session_id: session-main, project_name: alpha, git_branch: main}
+    result: visible
+  - name: excluded_branch
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha, branches: [main]}
+    candidate: {harness: claude-code, session_id: session-dev, project_name: alpha, git_branch: dev}
+    result: hidden
+  - name: conflicting_branch_rules
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: git@example.test:org/alpha.git, branches: [main]}
+          - {name: alpha, branches: [dev]}
+    candidate:
+      harness: claude-code
+      session_id: session-conflict
+      project_name: alpha
+      git_remote: git@example.test:org/alpha.git
+      git_branch: main
+    error_contains: conflicting project branch rules
+    result: error
+  # Kickstart persists a git remote in the form reported by `git remote -v`
+  # (SSH/SCP here), while the projects table stores the normalized bare
+  # "host/owner/repo" form used by Candidate.GitRemote. Both forms must match
+  # so selected mode does not hide the selected project's sessions.
+  - name: git_remote_scp_config_matches_normalized_stored_form
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "git@github.com:example-org/garden-app.git"}
+    candidate: {harness: claude-code, session_id: session-garden-app-scp, git_remote: "github.com/example-org/garden-app", git_branch: main}
+    result: visible
+  - name: git_remote_https_config_matches_normalized_stored_form
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "https://gitlab.com/example-team/sample-project.git"}
+    candidate: {harness: claude-code, session_id: session-sample-project, git_remote: "gitlab.com/example-team/sample-project", git_branch: main}
+    result: visible
+  - name: git_remote_ssh_url_config_matches_normalized_stored_form
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "ssh://git@github.com/example-org/garden-app.git"}
+    candidate: {harness: claude-code, session_id: session-garden-app, git_remote: "github.com/example-org/garden-app", git_branch: main}
+    result: visible
+  # A config `name` rule is a short project name, but the store
+  # reader that feeds Candidate.ProjectName populates it as the session's full
+  # working-directory PATH (no separate short-name column in the projects
+  # table) — a real config name can never equal a real stored path unmodified.
+  - name: project_name_config_matches_path_shaped_stored_name
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: "sample-project"}
+    candidate: {harness: claude-code, session_id: session-sample-project-name, project_name: "/home/developer/work/sample-project", git_branch: main}
+    result: visible
+  # Negative control: a project that genuinely is NOT selected — same real
+  # forms as above, but naming a different repo/path — must stay hidden. The
+  # fix must not turn the matcher into one that matches everything.
+  - name: unselected_project_with_real_forms_stays_hidden
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "git@github.com:example-org/garden-app.git"}
+          - {name: "sample-project"}
+    candidate: {harness: claude-code, session_id: session-unrelated, git_remote: "github.com/another-org/unrelated-repo", project_name: "/home/developer/work/other-project", git_branch: main}
+    result: hidden
+  # Explicit session-ID rules must keep working unchanged alongside the fixed
+  # gitRemote/name rules (they never depended on normalization to begin with,
+  # but this proves the fix didn't regress the allowlist path in a config that
+  # also carries real-form project rules).
+  - name: explicit_session_still_works_alongside_real_form_project_rules
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {gitRemote: "git@github.com:example-org/garden-app.git"}
+        sessions: [session-explicit-forms]
+    candidate: {harness: claude-code, session_id: session-explicit-forms, project_name: "/home/developer/work/other-project", git_branch: main}
+    result: visible

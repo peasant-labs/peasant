@@ -1,0 +1,22 @@
+config: |-
+  version: 1
+  redaction:
+    level: standard
+    custom_patterns:
+      - id: private-project-alias
+        category: project
+        pattern: 'PRIVATE-PROJECT-[0-9]{4}'
+        replacement: '<PROJECT_ALIAS>'
+  sources:
+    claude-code:
+      enabled: true
+      paths:
+        - ~/.claude/projects
+expected:
+  id: private-project-alias
+  configCategory: project
+  engineCategory: project
+  defaultLevel: standard
+  input: 'working on PRIVATE-PROJECT-2048'
+  minimalOutput: 'working on PRIVATE-PROJECT-2048'
+  standardOutput: 'working on <PROJECT_ALIAS>'

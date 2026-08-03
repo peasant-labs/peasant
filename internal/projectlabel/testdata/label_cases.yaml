@@ -1,0 +1,89 @@
+cases:
+  - name: github_bare_normalized_form
+    classification: must-pass
+    provenance: {source: requirement, ref: github-remote-label}
+    mutation: {description: change the stored owner/repo path so the expected label no longer matches}
+    input: {remote: "github.com/example-org/garden-app", fallback: "/home/developer/work/garden-app"}
+    expected: {label: "github:example-org/garden-app"}
+
+  - name: gitlab_bare_normalized_form
+    classification: must-pass
+    provenance: {source: requirement, ref: gitlab-remote-label}
+    mutation: {description: change gitlab.com to an unrecognized host so the short prefix would not apply}
+    input: {remote: "gitlab.com/example-team/sample-project", fallback: "/home/developer/work/sample-project"}
+    expected: {label: "gitlab:example-team/sample-project"}
+
+  - name: peasant_labs_org_repo_github
+    classification: must-pass
+    provenance: {source: requirement, ref: public-product-remote-example}
+    mutation: {description: drop the org segment so the owner/repo path collapses to one segment}
+    input: {remote: "github.com/peasant-labs/peasant", fallback: "peasant"}
+    expected: {label: "github:peasant-labs/peasant"}
+
+  - name: unknown_host_keeps_full_hostname_prefix
+    classification: must-pass
+    provenance: {source: boundary, ref: unrecognized-remote-host-not-hardcoded-list}
+    mutation: {description: change the host to github.com so it would map to the short prefix instead}
+    input: {remote: "git.example.com/acme/widgets", fallback: "widgets"}
+    expected: {label: "git.example.com:acme/widgets"}
+
+  - name: https_url_with_git_suffix_is_normalized
+    classification: must-pass
+    provenance: {source: boundary, ref: defensive-unnormalized-https-remote}
+    mutation: {description: remove the .git suffix so the trim-suffix branch is not exercised}
+    input: {remote: "https://github.com/example-org/garden-app.git", fallback: "garden-app"}
+    expected: {label: "github:example-org/garden-app"}
+
+  - name: ssh_scp_form_is_normalized
+    classification: must-pass
+    provenance: {source: boundary, ref: defensive-unnormalized-ssh-remote}
+    mutation: {description: remove the @ sign so the SSH branch detection no longer fires}
+    input: {remote: "git@github.com:example-org/garden-app.git", fallback: "garden-app"}
+    expected: {label: "github:example-org/garden-app"}
+
+  - name: empty_remote_falls_back
+    classification: must-pass
+    provenance: {source: requirement, ref: path-fallback-when-no-remote}
+    mutation: {description: populate the remote so the fallback branch is no longer taken}
+    input: {remote: "", fallback: "/home/developer/.codex/sessions/2026/06/12"}
+    expected: {label: "/home/developer/.codex/sessions/2026/06/12"}
+
+  - name: host_only_remote_with_no_path_falls_back
+    classification: must-pass
+    provenance: {source: boundary, ref: malformed-remote-missing-owner-repo-path}
+    mutation: {description: add a path segment after the host so it becomes a valid remote}
+    input: {remote: "github.com", fallback: "12"}
+    expected: {label: "12"}
+
+  - name: whitespace_only_remote_falls_back
+    classification: must-pass
+    provenance: {source: boundary, ref: malformed-remote-whitespace-only}
+    mutation: {description: replace the whitespace with a real remote value}
+    input: {remote: "   ", fallback: "12"}
+    expected: {label: "12"}
+
+  # A credential-leak defect caught in cross-surface review: an HTTPS remote
+  # with embedded userinfo (a PAT baked into a
+  # CI/CD or git-credential-store remote) must never surface the credential
+  # in the display label. The TUI's own displayRemoteName already stripped
+  # this; FromRemote did not until this case caught it.
+  - name: https_url_with_embedded_credentials_strips_userinfo
+    classification: must-pass
+    provenance: {source: bug, ref: credential-leak-in-display-label}
+    mutation: {description: remove the userinfo so the credential-stripping branch is not exercised}
+    input: {remote: "https://user:glpat-TOKEN@gitlab.com/org/repo", fallback: "repo"}
+    expected: {label: "gitlab:org/repo"}
+
+  - name: https_url_with_plain_userpass_credentials_strips_userinfo
+    classification: must-pass
+    provenance: {source: boundary, ref: credential-leak-userpass-form}
+    mutation: {description: remove the password segment so the userinfo takes a different shape}
+    input: {remote: "https://user:pass@github.com/example-org/garden-app.git", fallback: "garden-app"}
+    expected: {label: "github:example-org/garden-app"}
+
+  - name: https_url_with_plain_username_only_no_password_strips_userinfo
+    classification: must-pass
+    provenance: {source: boundary, ref: credential-leak-username-only-form}
+    mutation: {description: remove the "user@" prefix so the userinfo-stripping branch is not exercised}
+    input: {remote: "https://user@gitlab.com/org/repo", fallback: "repo"}
+    expected: {label: "gitlab:org/repo"}

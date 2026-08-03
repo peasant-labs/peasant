@@ -1,0 +1,35 @@
+cases:
+  - name: github_remote_uses_shared_formatter
+    classification: must-pass
+    provenance: {source: bug, ref: cli-tui-label-divergence}
+    mutation: {description: clear the remote so the basename fallback is taken instead}
+    input: {remote: "github.com/example-org/garden-app", cwd: /home/developer/work/garden-app}
+    expected: {project: "github:example-org/garden-app"}
+
+  - name: gitlab_remote_uses_shared_formatter
+    classification: must-pass
+    provenance: {source: bug, ref: cli-tui-label-divergence}
+    mutation: {description: change gitlab.com to an unrecognized host so the short prefix would not apply}
+    input: {remote: "gitlab.com/example-team/sample-project", cwd: /home/developer/work/sample-project}
+    expected: {project: "gitlab:example-team/sample-project"}
+
+  - name: gitlab_subgroup_path_is_not_truncated
+    classification: must-pass
+    provenance: {source: bug, ref: cli-owner-repo-truncation}
+    mutation: {description: drop the subgroup segment so the path collapses to two segments}
+    input: {remote: "gitlab.com/group/subgroup/repo", cwd: /home/developer/work/repo}
+    expected: {project: "gitlab:group/subgroup/repo"}
+
+  - name: no_remote_falls_back_to_cli_basename
+    classification: must-pass
+    provenance: {source: requirement, ref: cli-basename-fallback-is-deliberate}
+    mutation: {description: configure a remote so the basename fallback branch is no longer taken}
+    input: {remote: "", cwd: "/home/developer/.codex/sessions/2026/06/12"}
+    expected: {project: "12"}
+
+  - name: empty_cwd_falls_back_to_unknown
+    classification: must-pass
+    provenance: {source: boundary, ref: cli-basename-empty-cwd}
+    mutation: {description: populate the cwd so the "unknown" sentinel is not returned}
+    input: {remote: "", cwd: ""}
+    expected: {project: "unknown"}

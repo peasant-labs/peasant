@@ -1,0 +1,28 @@
+expectedCaseCount: 1
+cases:
+  - name: receipt-write-failure-restarts-with-project-scoped-retry
+    controlRootSessionID: 7b57cde9-c476-5719-cf8e-6712f3eea916
+    controlSubagentSessionID: agent-b194171
+    targetSessionID: 6a46bcd8-b365-4608-be7d-5601e2fdd805
+    initialLicense: CC-BY-4.0
+    changedLicense: CC-BY-SA-4.0
+    visibility: public
+    originalContent: "Please include a test for an empty list."
+    changedContent: "Please include a test for a negative widget value."
+    originalMetadata: "Please add a small function that totals widget values."
+    changedMetadata: "Please add a durable function that totals widget values."
+    expectedProjects: 2
+    expectedSessionsPerProject: 2
+    expectedFailureStage: persist
+    expectedAssociations:
+      - id: assoc-convergence-target-1
+        observedCommitHash: 0123456789abcdef0123456789abcdef01234567
+      - id: assoc-convergence-target-2
+        observedCommitHash: fedcba9876543210fedcba9876543210fedcba98
+    failureOutputContains:
+      - "terminal receipt could not be persisted"
+      - "local applied state remains non-current"
+      - "retry this session"
+    diagnosticContains:
+      - "Village accepted the publication"
+      - "publication cursor was not advanced"

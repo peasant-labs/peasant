@@ -1,0 +1,28 @@
+# Mounted MapShell cases for resolving commit associations through the real
+# CodeMap selection path and the project-scoped live sessions channel.
+cases:
+  - name: mounted-code-map-selection-resolves-only-the-project-session
+    selectedNode: internal/ingest
+    commit:
+      hash: cafe1234deadbeef
+      subject: preserve mounted session identity
+      timeMs: 1780934400000
+      sessionIds: [sess-map-live, sess-other-project]
+    liveSessions:
+      - id: sess-map-live
+        harness: claude-code
+        preview: "trace the mounted map session"
+        project: alpha-project
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - id: sess-other-project
+        harness: codex
+        preview: "this conversation belongs to another project"
+        project: beta-project
+        projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    expectedRows:
+      - sessionId: sess-map-live
+        expectedName: "Trace the mounted map session"
+        expectedHarness: claude-code
+      - sessionId: sess-other-project
+        expectedName: "sess-oth"
+        expectedHarness: null

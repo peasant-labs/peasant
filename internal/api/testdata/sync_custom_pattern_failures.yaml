@@ -1,0 +1,18 @@
+expectedCaseCount: 2
+cases:
+  - name: unknown-category
+    kind: category
+    pattern:
+      id: private-project
+      category: unknown
+      pattern: PRIVATE-[A-Z]+
+      replacement: <PRIVATE_PROJECT>
+    expectedErrorContains: 'custom pattern "private-project": unknown category "unknown"'
+  - name: invalid-regex
+    kind: regex
+    pattern:
+      id: private-token
+      category: secrets
+      pattern: '[unterminated'
+      replacement: <PRIVATE_TOKEN>
+    expectedErrorContains: 'custom pattern "private-token": invalid regex'

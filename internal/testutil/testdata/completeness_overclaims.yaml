@@ -1,0 +1,62 @@
+# Phrases that claim a redaction category is FULLY handled.
+#
+# Pattern matching finds KNOWN patterns and cannot promise it found every one, so
+# any sentence asserting completeness is false however well it reads. That is not
+# a style rule: a user who believes their data is fully removed shares things they
+# would otherwise withhold, which is the one direction a privacy control must
+# never be wrong in.
+#
+# ONE LIST, TWO SURFACES. These needles were written out twice - once for the
+# scope sentence in internal/config, once for the refusal and wizard copy in
+# cmd/peasant - and the two copies drifted on the single detail that decides
+# whether the guard fires. One lower-cased the text before comparing and the other
+# did not, so `Removes personal data.` at the start of a sentence, which is how an
+# author would actually write it, was invisible to the cmd/peasant copy while the
+# same words mid-sentence were caught. The duplication is what made that possible,
+# so the list lives here and both surfaces read it.
+#
+# Every needle is lower case, because matching lower-cases the text first.
+#
+# EVERY NEEDLE CARRIES A SAMPLE IT MUST MATCH. Without one, a corpus with a floor
+# is protected against DELETING a row and not against neutering it: a typo in a
+# needle leaves the count unchanged, fires on nothing, and reads as a rule. The
+# floor catches the honest edit and misses the one that retires the guard. The
+# forbidden-source-text corpus one directory over has carried this proof since it
+# was written, for exactly this reason.
+#
+# needle         the phrase that must not appear.
+# matchesSample  text the needle MUST match, so a needle that can never fire is a
+#                load failure rather than a permanent pass. Write it as a sentence
+#                a surface could really print.
+# why            the shape of edit that produces it, so a later reader can tell
+#                whether a new needle belongs beside it.
+
+expectedNeedleCount: 9
+needles:
+  - needle: removes secrets, personal data
+    matchesSample: "Peasant removes secrets, personal data and identifying paths before upload."
+    why: a summary sentence listing the categories as though each were complete
+  - needle: removes personal data
+    matchesSample: "Peasant removes personal data from every transcript it publishes."
+    why: the same claim about one category, which is the form a user found shipped
+  - needle: removes all
+    matchesSample: "Redaction removes all sensitive values before anything leaves your machine."
+    why: the bluntest form, and the easiest to write while tightening prose
+  - needle: redacts all
+    matchesSample: "Peasant redacts all secrets in the sessions you selected."
+    why: as above, with the verb this product actually uses
+  - needle: every piece of personal data is
+    matchesSample: "Every piece of personal data is removed before the transcript is published."
+    why: an emphatic rewording that reads as reassurance
+  - needle: personally identifiable information.
+    matchesSample: "Redaction strips personally identifiable information."
+    why: the formal register, which invites an absolute reading
+  - needle: only detected secrets
+    matchesSample: "Only detected secrets remain a risk, so the rest of the transcript is safe to share."
+    why: inverts the hedge - it claims the UNdetected ones are not there
+  - needle: all personal
+    matchesSample: "All personal data is redacted in both metadata and transcript content."
+    why: the scope sentence's form of the same over-claim
+  - needle: every secret
+    matchesSample: "Peasant finds every secret in your transcripts before they are published."
+    why: as above, for the category where confidence is most tempting

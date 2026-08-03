@@ -1,0 +1,97 @@
+# How the by-hand upload section behaves inside a hook the user composed, when
+# the section is placed exactly where its own instructions say to place it.
+#
+# The section must be exit-status neutral in BOTH placements. A trailing `exit`
+# inside it would satisfy the appended cases while silently making every line
+# below it unreachable, which turns a pre-push policy gate's own `exit 1` into a
+# no-op for anyone who follows the instruction literally.
+#
+# hostLines   the lines of the hook the user wrote, after the shebang.
+# placement   append            -> the section goes after every host line.
+#             before-final-exit -> the section goes directly above the last host
+#                                  line, which must itself be an exit.
+# uploadExitCode  what the stub peasant exits with.
+# expectWarning   whether the section's own failure warning must be printed.
+# expectedExit    the status the composed hook must report to git.
+#
+# Every case also asserts the upload actually ran: a section that is never
+# reached would otherwise pass the exit-status assertions trivially.
+expectedCaseCount: 8
+cases:
+  - name: appended-preserves-a-failing-hooks-implicit-status
+    event: post-commit
+    hostLines:
+      - "false"
+    placement: append
+    uploadExitCode: 0
+    expectWarning: false
+    expectedExit: 1
+
+  - name: appended-preserves-a-succeeding-hooks-implicit-status
+    event: post-commit
+    hostLines:
+      - "true"
+    placement: append
+    uploadExitCode: 0
+    expectWarning: false
+    expectedExit: 0
+
+  - name: appended-failed-upload-does-not-fail-a-succeeding-hook
+    event: post-commit
+    hostLines:
+      - "true"
+    placement: append
+    uploadExitCode: 9
+    expectWarning: true
+    expectedExit: 0
+
+  - name: appended-failed-upload-does-not-mask-a-failing-hook
+    event: post-commit
+    hostLines:
+      - "false"
+    placement: append
+    uploadExitCode: 9
+    expectWarning: true
+    expectedExit: 1
+
+  - name: before-final-exit-preserves-a-non-zero-policy-gate
+    event: pre-push
+    hostLines:
+      - "cat >/dev/null"
+      - "echo 'policy check failed' >&2"
+      - "exit 1"
+    placement: before-final-exit
+    uploadExitCode: 0
+    expectWarning: false
+    expectedExit: 1
+
+  - name: before-final-exit-preserves-a-non-zero-policy-gate-when-the-upload-fails
+    event: pre-push
+    hostLines:
+      - "cat >/dev/null"
+      - "echo 'policy check failed' >&2"
+      - "exit 1"
+    placement: before-final-exit
+    uploadExitCode: 9
+    expectWarning: true
+    expectedExit: 1
+
+  - name: before-final-exit-preserves-an-unusual-non-zero-status
+    event: post-commit
+    hostLines:
+      - "echo 'refusing'"
+      - "exit 42"
+    placement: before-final-exit
+    uploadExitCode: 0
+    expectWarning: false
+    expectedExit: 42
+
+  - name: before-final-exit-preserves-a-zero-exit-when-the-upload-fails
+    event: post-commit
+    hostLines:
+      - "echo 'all good'"
+      - "exit 0"
+    placement: before-final-exit
+    uploadExitCode: 9
+    expectWarning: true
+    expectedExit: 0

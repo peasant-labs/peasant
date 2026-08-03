@@ -1,0 +1,14 @@
+# A corpus that only ever renders the menu at the size the product ships today.
+#
+# It is the state the hand-written sentences were in: correct for one member,
+# untested for any other, and the widening the disposition table exists to support
+# is exactly the change that would make them read wrong. A corpus that cannot see
+# a second level is a corpus that will report green through that change.
+
+expectedCaseCount: 1
+cases:
+  - name: one-offered-level-reads-in-the-singular
+    levels: [standard]
+    choicePhrase: standard
+    offeredSentence: the level this version offers is standard
+    offeredClause: standard is now the single level this version offers

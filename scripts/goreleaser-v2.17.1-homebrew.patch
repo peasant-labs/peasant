@@ -1,0 +1,27 @@
+diff --git a/internal/pipe/cask/cask.go b/internal/pipe/cask/cask.go
+index d49e42c..4c504d8 100644
+--- a/internal/pipe/cask/cask.go
++++ b/internal/pipe/cask/cask.go
+@@ -465,2 +465,9 @@ func compareByArch(a, b releasePackage) int {
+-	return cmp.Compare(a.Arch, b.Arch)
+-}
++	return cmp.Compare(archOrder(a.Arch), archOrder(b.Arch))
++}
++
++func archOrder(arch string) int {
++	if arch == "arm64" {
++		return 0
++	}
++	return 1
++}
+diff --git a/internal/pipe/cask/templates/cask.rb b/internal/pipe/cask/templates/cask.rb
+index e586be4..f0e7c4d 100644
+--- a/internal/pipe/cask/templates/cask.rb
++++ b/internal/pipe/cask/templates/cask.rb
+@@ -16,2 +16 @@ cask "{{ .Name }}" do
+-  {{ end }}
+-
++  {{- end -}}
+@@ -108 +107 @@ cask "{{ .Name }}" do
+-  {{ with .Caveats -}}
++  {{- with .Caveats -}}

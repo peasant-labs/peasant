@@ -1,0 +1,11 @@
+expectedCaseCount: 1
+unexpectedEvidence: ignored-without-known-fields
+cases:
+  - selectedSessionID: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+    retainedSessionID: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+    selectedCommitHash: cli-prune-selected-commit
+    retainedCommitHash: cli-prune-retained-commit
+    selectedValue: selected-association
+    retainedValue: retained-association
+    annotatorName: outcome-classifier
+    expectedCount: 1

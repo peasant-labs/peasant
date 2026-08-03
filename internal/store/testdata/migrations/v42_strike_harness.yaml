@@ -1,0 +1,16 @@
+cases:
+  - name: preserve-v41-relations-and-closed-checks
+    sessionId: "42000000-0000-0000-0000-000000000001"
+    projectHash: "4242424242424242424242424242424242424242424242424242424242424242"
+    opaqueHostId: "4343434343434343434343434343434343434343434343434343434343434343"
+    hostSlug: "fixture-v42-host"
+    associationId: "assoc-42000000-0000-0000-0000-000000000001"
+    commitHash: "v42-observed-commit"
+    annotationId: "42000000-0000-0000-0000-000000000002"
+    annotationType: "quality.session_outcome"
+    annotator: "outcome-classifier"
+    villageHost: "https://village.example.test"
+    transcriptId: "42000000-0000-0000-0000-000000000003"
+    validLicense: "CC-BY-4.0"
+    invalidLicense: "INVALID-LICENSE"
+    strikeSessionId: "20260728T123456.123456789Z-VVVVVVVVVVVVVVVVVVVVVVVVVV"

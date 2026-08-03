@@ -1,0 +1,6 @@
+{"type":"user.message","time":"2026-07-28T12:36:01Z","data":{"turnId":"child-turn","content":"Run the child tool-only turn."}}
+{"type":"turn.started","time":"2026-07-28T12:36:02Z","data":{"turnId":"child-turn"}}
+{"type":"tool.begin","time":"2026-07-28T12:36:03Z","data":{"turnId":"child-turn","callId":"child-call","name":"plugin_custom","input":{"value":1}}}
+{"type":"tool.end","time":"2026-07-28T12:36:04Z","data":{"turnId":"child-turn","callId":"child-call","name":"plugin_custom","output":"child-result"}}
+{"type":"tool.end","time":"2026-07-28T12:36:05Z","data":{"turnId":"child-turn","callId":"orphan-call","title":"orphan_tool","output":"orphan-result"}}
+{"type":"turn.completed","time":"2026-07-28T12:36:06Z","data":{"turnId":"child-turn","stopReason":"end_turn"}}

@@ -1,0 +1,19 @@
+expectedCaseCount: 4
+requiredNames:
+  - dashboard channel recovers from a selection-visibility failure
+  - sessions channel recovers from a selection-visibility failure
+  - trends channel recovers from a selection-visibility failure
+  - an unrelated provider failure is not tagged selection_visibility
+cases:
+  - name: dashboard channel recovers from a selection-visibility failure
+    topic: dashboard
+    errorKind: selection
+  - name: sessions channel recovers from a selection-visibility failure
+    topic: sessions
+    errorKind: selection
+  - name: trends channel recovers from a selection-visibility failure
+    topic: trends
+    errorKind: selection
+  - name: an unrelated provider failure is not tagged selection_visibility
+    topic: dashboard
+    errorKind: generic

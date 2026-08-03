@@ -1,0 +1,64 @@
+{
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "models": {
+      "claude-opus-4-6": {
+        "id": "claude-opus-4-6",
+        "name": "Claude Opus 4.6",
+        "family": "claude-opus",
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2025-05-14",
+        "cost": { "input": 15.0, "output": 75.0, "reasoning": 75.0, "cache_read": 1.5, "cache_write": 7.5 },
+        "limit": { "context": 200000, "output": 8192 }
+      },
+      "claude-sonnet-4-6": {
+        "id": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6",
+        "family": "claude-sonnet",
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2025-05-14",
+        "cost": { "input": 3.0, "output": 15.0, "reasoning": 15.0, "cache_read": 0.3, "cache_write": 1.5 },
+        "limit": { "context": 200000, "output": 8192 }
+      },
+      "claude-haiku-3-5": {
+        "id": "claude-haiku-3-5",
+        "name": "Claude Haiku 3.5",
+        "family": "claude-haiku",
+        "reasoning": false,
+        "tool_call": true,
+        "release_date": "2024-10-22",
+        "cost": { "input": 0.8, "output": 4.0, "cache_read": 0.08, "cache_write": 0.4 },
+        "limit": { "context": 200000, "output": 8192 }
+      }
+    }
+  },
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "models": {
+      "gpt-5": {
+        "id": "gpt-5",
+        "name": "GPT-5",
+        "family": "gpt",
+        "reasoning": true,
+        "tool_call": true,
+        "release_date": "2025-01-15",
+        "cost": { "input": 10.0, "output": 30.0 },
+        "limit": { "context": 400000, "output": 16384 }
+      },
+      "gpt-5-mini": {
+        "id": "gpt-5-mini",
+        "name": "GPT-5 Mini",
+        "family": "gpt",
+        "reasoning": false,
+        "tool_call": true,
+        "release_date": "2025-01-15",
+        "cost": { "input": 0.5, "output": 1.5 },
+        "limit": { "context": 200000, "output": 16384 }
+      }
+    }
+  }
+}

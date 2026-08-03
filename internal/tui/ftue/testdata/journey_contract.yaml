@@ -1,0 +1,90 @@
+declaredRows: 12
+requiredArms: [local, private, public, partial, retry, cancelled, invalid, failed-claim, unknown-stage, hook-session-only, invalid-hook-event, cross-stage]
+cases:
+  - id: local completion
+    arm: local
+    destination: local
+    effects: [{stage: config, status: persisted}, {stage: ingest, status: persisted}, {stage: publication, status: skipped}, {stage: hooks, status: skipped}]
+    valid: true
+  - id: private village receipt
+    arm: private
+    destination: village
+    requestedVisibility: private
+    effects:
+      - stage: receipt
+        status: persisted
+        sessionId: session-private
+        villageOrigin: https://village.test
+        ownerUserId: owner-private
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        url: "https://village.test/transcripts/99d59925-36bc-424c-a789-8be54d9702ba"
+        visibility: private
+        receipt: {transcriptid: 99d59925-36bc-424c-a789-8be54d9702ba, transcripturl: "https://village.test/transcripts/99d59925-36bc-424c-a789-8be54d9702ba", visibility: private, contenthash: a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a, requestoperationfingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, applied: {license: null, associations: [], normalizedvalues: {rootharness: claude-code, entryharnesses: [], derivedtitle: null, visibility: private, schemaversion: "9"}}, blobkey: transcripts/x, blobsizebytes: 0, publishedat: 1, updatedat: 1, created: true}
+    valid: true
+  - id: public village receipt
+    arm: public
+    destination: village
+    requestedVisibility: public
+    effects:
+      - stage: receipt
+        status: persisted
+        sessionId: session-public
+        villageOrigin: https://village.test
+        ownerUserId: owner-public
+        projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        url: "https://village.test/transcripts/88d59925-36bc-424c-a789-8be54d9702bb"
+        visibility: public
+        receipt: {transcriptid: 88d59925-36bc-424c-a789-8be54d9702bb, transcripturl: "https://village.test/transcripts/88d59925-36bc-424c-a789-8be54d9702bb", visibility: public, contenthash: a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a, requestoperationfingerprint: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, applied: {license: null, associations: [], normalizedvalues: {rootharness: claude-code, entryharnesses: [], derivedtitle: null, visibility: public, schemaversion: "9"}}, blobkey: transcripts/y, blobsizebytes: 0, publishedat: 2, updatedat: 2, created: true}
+    valid: true
+  - id: partial publication retains local state
+    arm: partial
+    destination: village
+    effects: [{stage: config, status: persisted}, {stage: ingest, status: persisted}, {stage: publication, status: failed, sessionId: session-failed}]
+    retry: [{stage: publication, sessionIds: [session-failed]}]
+    valid: true
+  - id: targeted hook retry
+    arm: retry
+    destination: village
+    effects: [{stage: hooks, status: failed, repository: /tmp/project}]
+    retry: [{stage: hooks, repository: /tmp/project, events: [post-commit]}]
+    valid: true
+  - id: cancelled before remote work
+    arm: cancelled
+    destination: village
+    effects: [{stage: config, status: persisted}, {stage: ingest, status: cancelled}, {stage: publication, status: skipped}, {stage: hooks, status: skipped}]
+    valid: true
+  - id: non-authoritative visibility claim
+    arm: invalid
+    destination: village
+    effects: [{stage: receipt, status: failed, url: "https://village.test/transcripts/false", visibility: public}]
+    valid: false
+  - id: failed operation cannot return authoritative claims
+    arm: failed-claim
+    destination: village
+    operationError: upload failed
+    effects: [{stage: publication, status: failed, sessionId: session-failed-claim, url: "https://village.test/transcripts/false", visibility: public}]
+    valid: false
+  - id: unknown retry stage
+    arm: unknown-stage
+    destination: local
+    effects: [{stage: config, status: persisted}]
+    retry: [{stage: mystery}]
+    valid: false
+  - id: hook retry with session only
+    arm: hook-session-only
+    destination: village
+    effects: [{stage: hooks, status: failed}]
+    retry: [{stage: hooks, sessionIds: [session-wrong]}]
+    valid: false
+  - id: hook retry with invalid event
+    arm: invalid-hook-event
+    destination: village
+    effects: [{stage: hooks, status: failed, repository: /tmp/project}]
+    retry: [{stage: hooks, repository: /tmp/project, events: [post-merge]}]
+    valid: false
+  - id: config retry rejects hook fields
+    arm: cross-stage
+    destination: local
+    effects: [{stage: config, status: failed}]
+    retry: [{stage: config, repository: /tmp/project, events: [post-commit]}]
+    valid: false

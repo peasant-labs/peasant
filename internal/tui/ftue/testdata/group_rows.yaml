@@ -1,0 +1,232 @@
+# group_rows pins the boxes the kickstart tree draws on its PROVIDER, REMOTE and
+# BRANCH rows — the rows that are on screen in the frame the wizard opens with,
+# before the user expands anything.
+#
+# A group row stands for every session under it, so its box makes a claim about
+# all of them:
+#
+#   [ ]  none of these is selected
+#   [~]  some of these are selected
+#   [✓]  all of these are selected, and they will be ingested
+#   [!]  something under here is selected but cannot be decided, so it will NOT
+#        be ingested — open this row to see which
+#
+# [!] takes precedence over both [✓] and [~], because those two are the claims
+# that are false when a conflicted session is hiding underneath: the choice is
+# between a row that over-claims and a row that says "open me". It does not take
+# precedence over [ ]: a session whose box the user explicitly cleared is their
+# own answer, contributes nothing on confirm, and is not re-raised here.
+#
+# Each session states expected_match (what the canonical matcher answers, which
+# is asserted against the real matcher, so a case cannot claim a conflict its
+# configuration does not produce) and expected_precheck (the box its own row
+# draws). The group glyphs are stated per row rather than derived, because
+# deriving them would let the propagation rule be restated by whatever the code
+# does — which is the defect this corpus exists to catch.
+#
+# Branch names are unique within a case, so a branch row identifies one group.
+declared_rows: 8
+cases:
+  - name: a-fully-selected-remote-draws-a-plain-tick
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/tool
+    sessions:
+      - branch: main
+        session_id: 11111111-1111-4111-8111-111111111111
+        expected_match: "selected"
+        expected_precheck: "ticked"
+      - branch: release
+        session_id: 22222222-2222-4222-8222-222222222222
+        expected_match: "selected"
+        expected_precheck: "ticked"
+    expected_provider_glyph: "[✓]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[✓]"
+    expected_worktree_glyphs:
+      main: "[✓]"
+      release: "[✓]"
+
+  - name: a-remote-no-entry-identifies-draws-an-empty-box
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/elsewhere
+    sessions:
+      - branch: main
+        session_id: 33333333-3333-4333-8333-333333333333
+        expected_match: "rejected"
+        expected_precheck: "unticked"
+      - branch: release
+        session_id: 44444444-4444-4444-8444-444444444444
+        expected_match: "rejected"
+        expected_precheck: "unticked"
+    expected_provider_glyph: "[ ]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[ ]"
+    expected_worktree_glyphs:
+      main: "[ ]"
+      release: "[ ]"
+
+  # One branch, one session on it selected by name and one not selected at all:
+  # the branch row is the level where [~] has to be produced by aggregating
+  # sessions rather than by aggregating other groups.
+  - name: a-branch-holding-one-selected-and-one-unselected-session-draws-the-partial-mark
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/elsewhere
+    configured_sessions:
+      - 0a0a0a0a-0a0a-4a0a-8a0a-0a0a0a0a0a0a
+    sessions:
+      - branch: main
+        session_id: 0a0a0a0a-0a0a-4a0a-8a0a-0a0a0a0a0a0a
+        expected_match: "selected"
+        expected_precheck: "ticked"
+      - branch: main
+        session_id: 0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b0b
+        expected_match: "rejected"
+        expected_precheck: "unticked"
+    expected_provider_glyph: "[~]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[~]"
+    expected_worktree_glyphs:
+      main: "[~]"
+
+  # The remote box here is a value NEITHER branch under it draws, so that row is
+  # aggregated rather than copied from a child.
+  - name: a-partly-selected-remote-draws-the-partial-mark
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/tool
+        branches: [main]
+    sessions:
+      - branch: main
+        session_id: 55555555-5555-4555-8555-555555555555
+        expected_match: "selected"
+        expected_precheck: "ticked"
+      - branch: topic
+        session_id: 66666666-6666-4666-8666-666666666666
+        expected_match: "rejected"
+        expected_precheck: "unticked"
+    expected_provider_glyph: "[~]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[~]"
+    expected_worktree_glyphs:
+      main: "[✓]"
+      topic: "[ ]"
+
+  # Two sessions on ONE branch: one named explicitly and therefore genuinely
+  # selected, one the configuration cannot decide. Without the marker the branch
+  # row would draw [✓] and promise both. The undecidable one is SECOND, so a
+  # rule that only inspected a branch's first session would miss it.
+  - name: a-conflicted-session-marks-the-branch-that-would-otherwise-tick
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/tool
+        branches: [main]
+      - name: tool
+        branches: [other]
+    configured_sessions:
+      - 88888888-8888-4888-8888-888888888888
+    sessions:
+      - branch: main
+        session_id: 88888888-8888-4888-8888-888888888888
+        expected_match: "selected"
+        expected_precheck: "ticked"
+      - branch: main
+        session_id: 77777777-7777-4777-8777-777777777777
+        expected_match: "withheld"
+        expected_precheck: "flagged"
+    expected_provider_glyph: "[!]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[!]"
+    expected_worktree_glyphs:
+      main: "[!]"
+
+  # The remote's tick state here is partial, so without the marker it would draw
+  # [~] — still a claim that something under it ingests, when nothing does.
+  - name: a-conflicted-session-marks-a-remote-that-would-otherwise-read-partial
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/tool
+        branches: [main]
+      - name: tool
+        branches: [other]
+    sessions:
+      - branch: main
+        session_id: 99999999-9999-4999-8999-999999999999
+        expected_match: "withheld"
+        expected_precheck: "flagged"
+      - branch: topic
+        session_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        expected_match: "rejected"
+        expected_precheck: "unticked"
+    expected_provider_glyph: "[!]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[!]"
+    expected_worktree_glyphs:
+      main: "[!]"
+      topic: "[ ]"
+
+  # The marker travels UP to the remote without smearing SIDEWAYS: the sibling
+  # branch, whose session really will be ingested, keeps its honest tick. The
+  # conflicted branch is the SECOND one, so a rule that only inspected a
+  # remote's first branch would leave the remote row over-claiming.
+  - name: a-conflict-under-the-second-branch-leaves-the-first-branch-ticked
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/tool
+      - name: tool
+        branches: [other]
+    sessions:
+      - branch: other
+        session_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+        expected_match: "selected"
+        expected_precheck: "ticked"
+      - branch: main
+        session_id: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+        expected_match: "withheld"
+        expected_precheck: "flagged"
+    expected_provider_glyph: "[!]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[!]"
+    expected_worktree_glyphs:
+      other: "[✓]"
+      main: "[!]"
+
+  # Two projects. The conflict is under the SECOND remote, so the provider row —
+  # the one row that is always on screen — must reach past a clean first remote
+  # to find it, and the clean remote must keep its own honest tick.
+  - name: a-conflict-under-the-second-remote-still-marks-the-provider-row
+    git_remote: https://github.com/acme/tool.git
+    project_name: tool
+    configured_entries:
+      - git_remote: https://github.com/acme/tool
+      - git_remote: https://github.com/acme/web
+        branches: [trunk]
+      - name: web
+        branches: [staging]
+    sessions:
+      - branch: main
+        session_id: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+        expected_match: "selected"
+        expected_precheck: "ticked"
+      - git_remote: https://github.com/acme/web.git
+        project_name: web
+        branch: trunk
+        session_id: eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee
+        expected_match: "withheld"
+        expected_precheck: "flagged"
+    expected_provider_glyph: "[!]"
+    expected_remote_glyphs:
+      https://github.com/acme/tool.git: "[✓]"
+      https://github.com/acme/web.git: "[!]"
+    expected_worktree_glyphs:
+      main: "[✓]"
+      trunk: "[!]"

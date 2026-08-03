@@ -1,0 +1,25 @@
+# A corpus of hypothetical sets with no row for the one this version offers.
+#
+# Every row renders correctly and none of them is the text a user will read. A
+# corpus can drift away from the product this way without a single assertion
+# changing, so the loader requires one row to be the offered set itself.
+
+expectedCaseCount: 3
+cases:
+  - name: one-offered-level-reads-in-the-singular
+    levels: [minimal]
+    choicePhrase: minimal
+    offeredSentence: the level this version offers is minimal
+    offeredClause: minimal is now the single level this version offers
+
+  - name: two-offered-levels-read-in-the-plural
+    levels: [minimal, standard]
+    choicePhrase: one of minimal, standard
+    offeredSentence: the levels this version offers are minimal and standard
+    offeredClause: minimal and standard are now the levels this version offers
+
+  - name: every-level-at-once
+    levels: [minimal, standard, maximum]
+    choicePhrase: one of minimal, standard, maximum
+    offeredSentence: the levels this version offers are minimal, standard and maximum
+    offeredClause: minimal, standard and maximum are now the levels this version offers

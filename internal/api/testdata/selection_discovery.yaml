@@ -1,0 +1,28 @@
+harness: claude-code
+selectedSession: 11111111-1111-1111-1111-111111111111
+hiddenSession: 22222222-2222-2222-2222-222222222222
+sessions:
+  - id: 11111111-1111-1111-1111-111111111111
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    hostSlug: github.com-test
+    startMs: 1705276800000
+    tokensIn: 1000
+    tokensOut: 500
+    project: test-project
+    turnCount: 10
+    toolCallCount: 5
+    durationMs: 60000
+  - id: 22222222-2222-2222-2222-222222222222
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    hostSlug: github.com-test
+    startMs: 1705276801000
+    tokensIn: 2000
+    tokensOut: 800
+    project: test-project
+    turnCount: 20
+    toolCallCount: 8
+    durationMs: 120000
+expected:
+  visibleSessions: 1
+  visibleProjects: 1
+  visibleTokens: 1500

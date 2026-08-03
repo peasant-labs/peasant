@@ -1,0 +1,310 @@
+expectedCaseCount: 15
+cases:
+  - name: open_change_named_branch
+    action:
+      type: open-change
+      change: {id: 'tip:feat/timeline', branch: feat/timeline}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: navigate
+      href: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline
+    controlName: feat/timeline tip feat/timeline
+    expectedRouterCalls:
+      - [/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes:
+        - {branch: feat/timeline, aheadCount: 2, behindCount: 0, filesChanged: 3, sessionCount: 0, taskCount: 2, newEdges: 0, removedEdges: 0, violations: 0, merged: false}
+      recentCommits: []
+      sessions: []
+  - name: open_change_preserves_review_return
+    action:
+      type: open-change
+      change: {id: 'tip:feat/timeline', branch: feat/timeline}
+    context:
+      defaultBranch: develop
+      returnLocation:
+        version: 1
+        origin: Review
+        href: /review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?branch=feat%2Forigin
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: navigate
+      href: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline&returnTo=v1.%2Freview%2Fbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb%3Fbranch%3Dfeat%252Forigin
+    controlName: feat/timeline tip feat/timeline
+    expectedRouterCalls:
+      - [/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline&returnTo=v1.%2Freview%2Fbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb%3Fbranch%3Dfeat%252Forigin]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes:
+        - {branch: feat/timeline, aheadCount: 2, behindCount: 0, filesChanged: 3, sessionCount: 0, taskCount: 2, newEdges: 0, removedEdges: 0, violations: 0, merged: false}
+      recentCommits: []
+      sessions: []
+  - name: open_change_preserves_map_return
+    action:
+      type: open-change
+      change: {id: 'tip:feat/timeline', branch: feat/timeline}
+    context:
+      defaultBranch: develop
+      returnLocation:
+        version: 1
+        origin: Map
+        href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest&mode=canvas
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: navigate
+      href: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dinternal%252Fingest%26mode%3Dcanvas
+    controlName: feat/timeline tip feat/timeline
+    expectedRouterCalls:
+      - [/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?branch=feat%2Ftimeline&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dinternal%252Fingest%26mode%3Dcanvas]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes:
+        - {branch: feat/timeline, aheadCount: 2, behindCount: 0, filesChanged: 3, sessionCount: 0, taskCount: 2, newEdges: 0, removedEdges: 0, violations: 0, merged: false}
+      recentCommits: []
+      sessions: []
+  - name: open_change_default_branch_stays
+    action:
+      type: open-change
+      change: {id: commit-default, branch: develop}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected: {kind: stay}
+    controlName: default branch stay commit develop
+    expectedRouterCalls: []
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits:
+        - {hash: commit-default, subject: default branch stay commit, hasSession: false, sessionIds: []}
+      sessions: []
+  - name: open_change_legacy_null_branch_stays
+    action:
+      type: open-change
+      change: {id: commit-legacy, branch: null}
+    context:
+      defaultBranch: null
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected: {kind: stay}
+    controlName: legacy null branch stay commit
+    expectedRouterCalls: []
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      changes: []
+      recentCommits:
+        - {hash: commit-legacy, subject: legacy null branch stay commit, hasSession: false, sessionIds: []}
+      sessions: []
+  - name: open_linked_session
+    action:
+      type: open-session
+      sessionId: session-linked
+      source:
+        kind: commit
+        commit: {id: commit-linked, branch: develop}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: navigate
+      href: /projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-linked?origin=Review&originBranch=develop&returnTo=v1.%2Freview%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    controlName: codex Linked route session
+    expectedRouterCalls:
+      - [/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-linked?origin=Review&originBranch=develop&returnTo=v1.%2Freview%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits:
+        - {hash: commit-linked, subject: linked route commit, hasSession: true, sessionIds: [session-linked]}
+      sessions:
+        - {sessionId: session-linked, title: Linked route session, harness: codex, hasCommitBinding: true}
+  - name: open_unlinked_session
+    action:
+      type: open-session
+      sessionId: session with spaces
+      source: {kind: unlinked}
+    context:
+      defaultBranch: develop
+      returnLocation:
+        version: 1
+        origin: Map
+        href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: navigate
+      href: /projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session%20with%20spaces?origin=Map&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dinternal%252Fingest
+    controlName: claude-code Unlinked route session
+    expectedRouterCalls:
+      - [/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session%20with%20spaces?origin=Map&returnTo=v1.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%3Fnode%3Dinternal%252Fingest]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits: []
+      sessions:
+        - {sessionId: session with spaces, title: Unlinked route session, harness: claude-code, hasCommitBinding: false}
+  - name: open_outside_window_session
+    action:
+      type: open-session
+      sessionId: session-outside
+      source: {kind: outside-window}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: navigate
+      href: /projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-outside?origin=Review&returnTo=v1.%2Freview%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    controlName: gemini-cli Outside route session
+    expectedRouterCalls:
+      - [/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-outside?origin=Review&returnTo=v1.%2Freview%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits: []
+      sessions:
+        - {sessionId: session-outside, title: Outside route session, harness: gemini-cli, hasCommitBinding: true}
+  - name: open_map_without_return
+    action: {type: open-map}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected: {kind: navigate, href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+    controlName: open the map
+    expectedRouterCalls:
+      - [/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits: []
+      sessions: []
+  - name: open_map_ignores_review_return
+    action: {type: open-map}
+    context:
+      defaultBranch: develop
+      returnLocation:
+        version: 1
+        origin: Review
+        href: /review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?branch=feat%2Forigin
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected: {kind: navigate, href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+    controlName: open the map
+    expectedRouterCalls:
+      - [/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits: []
+      sessions: []
+  - name: open_map_restores_map_return
+    action: {type: open-map}
+    context:
+      defaultBranch: develop
+      returnLocation:
+        version: 1
+        origin: Map
+        href: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest&mode=canvas
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected: {kind: navigate, href: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest&mode=canvas'}
+    controlName: open the map
+    expectedRouterCalls:
+      - ['/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest&mode=canvas']
+    mountedReview:
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      repoFound: true
+      defaultBranch: develop
+      changes: []
+      recentCommits: []
+      sessions: []
+  - name: show_older_without_pagination
+    action: {type: show-older}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: false}
+    expected:
+      kind: error
+      message: |-
+        Older timeline entries are unavailable.
+        What went wrong: Fairtrade requested timeline pagination, but this Peasant route has no complete older-page capability.
+        Why it happened: a real review API cursor and its host handler must both be available before show-older can run.
+        Where: resolveTimelineNavigation, the Peasant timeline host boundary.
+        When: while resolving a show-older user gesture.
+        What it means: the current visible timeline remains unchanged and no route is written.
+        How to fix: provide both a review-list pagination cursor and its handler before setting Changes.hasMore.
+    controlName: null
+    expectedRouterCalls: null
+    mountedReview: null
+  - name: show_older_with_cursor_only
+    action: {type: show-older}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: true, handlerAvailable: false}
+    expected:
+      kind: error
+      message: |-
+        Older timeline entries are unavailable.
+        What went wrong: Fairtrade requested timeline pagination, but this Peasant route has no complete older-page capability.
+        Why it happened: a real review API cursor and its host handler must both be available before show-older can run.
+        Where: resolveTimelineNavigation, the Peasant timeline host boundary.
+        When: while resolving a show-older user gesture.
+        What it means: the current visible timeline remains unchanged and no route is written.
+        How to fix: provide both a review-list pagination cursor and its handler before setting Changes.hasMore.
+    controlName: null
+    expectedRouterCalls: null
+    mountedReview: null
+  - name: show_older_with_handler_only
+    action: {type: show-older}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: false, handlerAvailable: true}
+    expected:
+      kind: error
+      message: |-
+        Older timeline entries are unavailable.
+        What went wrong: Fairtrade requested timeline pagination, but this Peasant route has no complete older-page capability.
+        Why it happened: a real review API cursor and its host handler must both be available before show-older can run.
+        Where: resolveTimelineNavigation, the Peasant timeline host boundary.
+        When: while resolving a show-older user gesture.
+        What it means: the current visible timeline remains unchanged and no route is written.
+        How to fix: provide both a review-list pagination cursor and its handler before setting Changes.hasMore.
+    controlName: null
+    expectedRouterCalls: null
+    mountedReview: null
+  - name: show_older_with_pagination
+    action: {type: show-older}
+    context:
+      defaultBranch: develop
+      returnLocation: null
+      pagination: {cursorAvailable: true, handlerAvailable: true}
+    expected: {kind: show-older}
+    controlName: null
+    expectedRouterCalls: null
+    mountedReview: null

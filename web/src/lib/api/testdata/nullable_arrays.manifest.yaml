@@ -1,0 +1,55 @@
+expectedCount: 8
+requiredNames:
+  - project summaries null projects
+  - map graph null collections
+  - node detail null collections
+  - project tasks normalize nested task collections
+  - change detail normalizes every nullable collection
+  - change diff null hunks
+  - change diff normalizes nested lines
+  - search null results
+requiredOperations:
+  - project-summaries
+  - map-graph
+  - node-detail
+  - project-tasks
+  - change-detail
+  - change-diff
+  - change-diff
+  - search
+expectedNormalizedPaths:
+  - projects
+  - nodes
+  - parsedLanguages
+  - structureEdges
+  - activityEdges
+  - violations
+  - dependsOn
+  - usedBy
+  - shapedBy
+  - recentCommits
+  - tasks[].editedFiles
+  - tasks[].labels
+  - files
+  - frictions
+  - newEdges
+  - newNodes
+  - removedEdges
+  - removedNodes
+  - slice.nodes
+  - slice.structureEdges
+  - slice.activityEdges
+  - unrecordedCommits
+  - unusual
+  - work[].tasks[].editedFiles
+  - work[].tasks[].labels
+  - hunks
+  - hunks[].lines
+  - results
+expectedLoaderMutationCount: 5
+loaderMutations:
+  - {name: nullable count drift is rejected, target: manifest, find: "expectedCount: 8\nrequiredNames:", replace: "expectedCount: 7\nrequiredNames:", expectedError: independent manifest}
+  - {name: nullable duplicate case names are rejected, target: cases, find: "  - name: map graph null collections\n    operation: map-graph", replace: "  - name: project summaries null projects\n    operation: map-graph", expectedError: duplicates}
+  - {name: nullable wrong operation is rejected, target: cases, find: "  - name: node detail null collections\n    operation: node-detail", replace: "  - name: node detail null collections\n    operation: unknown-detail", expectedError: invalid scalar}
+  - {name: nullable missing expected field is rejected, target: cases, find: "    payload: {results: null}\n    expected: {results: []}", replace: "    payload: {results: null}\n    omitted: {results: []}", expectedError: unknown fields}
+  - {name: nullable malformed YAML is rejected, target: cases, find: "cases:\n  - name:", replace: "cases: [\n  - name:", expectedError: invalid YAML}

@@ -1,0 +1,40 @@
+# Visual-capture artifacts are EPHEMERAL — never tracked. The harness writes
+# capture PNGs + composites + manifests/logs into a caller-chosen output dir
+# (demo/, shell-demo/, peasant/, shell/, smoke/, sxs/, sxs-smoke/, sxs-shell/, MANIFEST*, *.log);
+# defaults land in /tmp, but if a run points its output dir inside this folder these patterns keep
+# them out of git. sxs-smoke/ (smoke-surface SxS) and sxs-shell/ (shell/nav-surface SxS) are kept
+# as DISTINCT subdirs from the legacy sxs/ (transcript/changes) so reviewers never confuse smoke
+# evidence for shell evidence (see stitch-sxs.mjs SXS_OUT_SUBDIR).
+#
+# Allowlist: only the tracked harness scripts + docs live here. Add a new
+# `!path` line to track any future script.
+*
+!.gitignore
+!README.md
+!probe-peasant.mjs
+!peasant-shoot.mjs
+!boot-peasant.mjs
+!shell-nav-gate.mjs
+!surface-gate.mjs
+!stitch-sxs.mjs
+!changes-shoot.mjs
+!demo-shoot.mjs
+!full-app-smoke.mjs
+!smoke-surfaces.mjs
+!png-diff.mjs
+!determinism.mjs
+!transcript-input-gate.mjs
+!validate-mock-coordinates.mjs
+!strike-smoke-fixture.mjs
+!testdata/
+!testdata/transcript-input.yaml
+# baseline/ holds the committed golden references (not ephemeral captures) so the
+# gates are self-contained — no /tmp dependency.
+!baseline/
+!baseline/**
+# Retired baselines are dead artifacts and must not be re-added: the shell
+# baseline, and the pre-composite-migration transcript-browser golden.
+baseline/shell-baseline/
+baseline/tb/
+# Generated smoke captures and SxS composites are local review artifacts. Keep them
+# ignored so visual runs do not dirty the repository; record durable evidence in Beads.

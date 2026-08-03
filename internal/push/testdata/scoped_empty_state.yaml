@@ -1,0 +1,121 @@
+# What a repository-scoped push says when it sent nothing.
+#
+# This is the state a per-commit hook lives in almost all the time, and under
+# --quiet the message is the ENTIRE output of the commit, so every word of it is
+# load-bearing.
+#
+# The wording used to be decided by how many candidates OTHER projects had, which
+# says nothing about this repository. On any machine with a second repository
+# doing work — the normal case — a scope holding 150 recorded, already-published
+# sessions was told its candidates were "all recorded for other projects", that
+# running 'peasant ingest' would make its sessions "recorded", and that it could
+# push without --repository, which is the containment the flag exists to provide.
+#
+# The three states are read off the scope's OWN recorded sessions instead:
+#
+#   world             what the scope actually holds
+#   ------------      -------------------------------------------------------
+#   nothing-recorded  no session carries this repository's identity
+#   all-published     sessions are recorded here and none changed since publish
+#   selection-excluded  sessions are recorded here and the selection removed them
+#
+# otherPending seeds unrelated pending work, which is what used to change the
+# answer. Every case sets it so the message can no longer depend on it.
+#
+# staleIdentity seeds work recorded INSIDE this repository, in a directory that
+# still exists, whose sessions carry an identity the scope does not admit. It is
+# the gate on the re-ingest recommendation, and the gate is the point:
+#
+#   with it     the sessions are recoverable, and the ONLY safe command is the
+#               single-session form. The unscoped 'peasant ingest --force'
+#               re-ingests every project on the machine and clears every
+#               already-published marker, so the next push re-uploads the whole
+#               corpus - from a hook, on every commit.
+#   without it  nothing may be recommended. The same empty state is produced by a
+#               repository that was MOVED, where the recorded directory is gone;
+#               re-ingesting there re-derives the identity from a dead path and
+#               the sessions stop being reachable from any scope at all, with no
+#               command that brings them back.
+#
+# The diagnosis lives in the SUMMARY line rather than the detail, because a hook
+# runs with --quiet and the summary is the only line it can show.
+expectedCaseCount: 5
+cases:
+  - name: a scope with nothing recorded says so and points at ingest
+    world: nothing-recorded
+    otherPending: true
+    mustContain:
+      - "No sessions are recorded for scope"
+      - "has no recorded sessions at all"
+      - "--data-dir '/tmp/bound data' ingest"
+    mustNotContain:
+      - "recorded for other projects"
+      - "without --repository"
+      - "already pushed"
+      - "--force to re-push"
+      # ingest is not directory-scoped: it imports every configured source no
+      # matter where it runs, so "run it inside <root>" is an instruction that
+      # changes nothing and prints again on the next push, forever.
+      - "'peasant ingest' inside"
+
+  - name: an empty scope holding unreachable work names it and the one safe command
+    world: nothing-recorded
+    otherPending: true
+    staleIdentity: true
+    mustContain:
+      - "No sessions are recorded for scope"
+      - "carry a project identity this scope does not admit"
+      - "--data-dir '/tmp/bound data' ingest --force --session"
+      - "clears every already-published marker"
+    mustNotContain:
+      - "recorded for other projects"
+      - "without --repository"
+      - "'peasant ingest' inside"
+
+  # The state a hooked repository reaches on every single commit. A published,
+  # unchanged scope with nothing unreachable in it has nothing to re-ingest, so
+  # the destructive command must not be printed here at all.
+  - name: a published scope with nothing unreachable never mentions re-ingesting
+    world: all-published
+    otherPending: true
+    staleIdentity: false
+    mustContain:
+      - "No new sessions to push for scope"
+      - "--repository"
+      - "--force"
+      - "--data-dir '/tmp/bound data'"
+      - "--data-dir '/tmp/bound data' ingest"
+    mustNotContain:
+      - "ingest --force"
+      - "recorded for other projects"
+      - "'peasant ingest' inside"
+
+  - name: a scope whose sessions are all published says they are published
+    world: all-published
+    otherPending: true
+    mustContain:
+      - "No new sessions to push for scope"
+      - "1 session(s) are recorded for it"
+      - "--repository"
+      - "--force"
+      - "--data-dir '/tmp/bound data'"
+      - "--data-dir '/tmp/bound data' ingest"
+    mustNotContain:
+      - "recorded for other projects"
+      - "without --repository"
+      - "All sessions already pushed"
+      - "no recorded sessions at all"
+
+  - name: a scope narrowed further by the selection blames the selection
+    world: selection-excluded
+    otherPending: true
+    mustContain:
+      - "No sessions match the configured selection"
+      - "1 session(s) are recorded for this repository"
+      - "cannot widen"
+      - "kickstart"
+    mustNotContain:
+      - "recorded for other projects"
+      - "without --repository"
+      - "no recorded sessions at all"
+      - "already pushed"

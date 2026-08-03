@@ -1,0 +1,55 @@
+# A corpus whose forbidden claim is pinned to a form nothing can produce.
+#
+# The needle below says "session(s) publically", which is not how the sentence it
+# forbids was ever spelled. Nothing else in a forbid-list can notice that: a
+# needle matching nothing is precisely what a list of banned text expects to see,
+# so the row reads as a permanent guard and is a permanent pass.
+expectedCaseCount: 6
+cases:
+  - name: private-not-quiet
+    visibility: private
+    configuredLevel: minimal
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: private-quiet
+    visibility: private
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+  - name: public-not-quiet
+    visibility: public
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: public-quiet
+    visibility: public
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: false
+
+  - name: group-not-quiet
+    visibility: group
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: full
+    redactionRecord: true
+
+  - name: group-quiet
+    visibility: group
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: brief
+    redactionRecord: false
+
+expectedForbiddenClaimCount: 1
+forbiddenClaims:
+  - name: a-needle-spelled-in-a-way-the-output-never-was
+    phrase: "session(s) publically"
+    matchesSample: "publish 2 session(s) publicly"

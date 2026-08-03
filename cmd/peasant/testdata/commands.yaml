@@ -1,0 +1,183 @@
+# commands.yaml — YAML fixture defining the expected command structure.
+# Tests validate BuildXxxCommand() builders against this fixture to catch
+# silent regressions in flag definitions, subcommand trees, and exit behavior.
+#
+# Schema:
+#   commands[].name        — builder function suffix (e.g. "Ingest" → BuildIngestCommand)
+#   commands[].use         — cobra Use field (top-level command name)
+#   commands[].aliases     — cobra Aliases (optional)
+#   commands[].flags[]     — flags on the command itself
+#   commands[].subcommands — nested subcommand tree (recursive)
+#   commands[].exit_cases  — expected exit behavior given specific args
+
+commands:
+  - name: Harvest
+    use: harvest
+    aliases: [ingest]
+    flags:
+      - { name: source-provider, type: string, default: "" }
+      - { name: source-path, type: string, default: "" }
+      - { name: output, type: string, default: "" }
+      - { name: dry-run, type: bool, default: "false" }
+      - { name: force, type: bool, default: "false" }
+      - { name: all, type: bool, default: "false" }
+      - { name: include-active, type: bool, default: "false" }
+      - { name: verbose, type: bool, default: "false" }
+      - { name: debug, type: bool, default: "false", hidden: true }
+      - { name: json, type: bool, default: "false" }
+      - { name: detect-commits, type: bool, default: "false" }
+      - { name: session, type: stringSlice, default: "[]" }
+      - { name: since, type: string, default: "" }
+    subcommands:
+      - use: logs
+      - use: index
+      - use: verify
+        flags:
+          - { name: verbose, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["harvest"]
+      - args: ["--source-provider=nosuchprovider"]
+        expect_error: true
+        error_contains: ["--source-provider requires --source-path"]
+
+  - name: Web
+    use: web
+    subcommands:
+      - use: start
+        flags:
+          - { name: port, type: int, default: "8690" }
+          - { name: dev, type: bool, default: "false" }
+          - { name: foreground, type: bool, default: "false" }
+          - { name: no-browser, type: bool, default: "false" }
+          - { name: mock-data-store, type: string, default: "" }
+      - use: stop
+        flags:
+          - { name: port, type: int, default: "8690" }
+
+  - name: Push
+    use: push
+    flags:
+      - { name: dry-run, type: bool, default: "false" }
+      - { name: force, type: bool, default: "false" }
+      - { name: source-provider, type: string, default: "" }
+      - { name: visibility, type: string, default: "" }
+      - { name: json, type: bool, default: "false" }
+      - { name: verbose, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["push", "--force"]
+
+  - name: Metrics
+    use: metrics
+    subcommands:
+      - use: compute
+        flags:
+          - { name: session, type: string, default: "" }
+          - { name: force, type: bool, default: "false" }
+          - { name: verbose, type: bool, default: "false" }
+          - { name: dry-run, type: bool, default: "false" }
+
+  - name: Models
+    use: models
+    subcommands:
+      - use: sync
+        flags:
+          - { name: provider, type: string, default: "" }
+          - { name: dry-run, type: bool, default: "false" }
+
+  - name: Sessions
+    use: sessions
+    subcommands:
+      - use: tag
+        subcommands:
+          - use: add
+          - use: remove
+          - use: list
+          - use: set
+
+  - name: TUI
+    use: tui
+    flags:
+      - { name: mock-data-store, type: string, default: "" }
+
+  - name: Version
+    use: version
+
+  - name: Kickstart
+    use: kickstart
+    aliases: ["ftue"]
+    flags:
+      - name: reset
+        type: bool
+        default: "false"
+
+  - name: Login
+    use: login
+
+  - name: Logout
+    use: logout
+
+  - name: Annotate
+    use: annotate
+    aliases: ["react"]
+    subcommands:
+      - use: list
+      - use: create
+      - use: list-project
+      - use: create-project
+      - use: sample
+        flags:
+          - { name: count, type: int, default: "15" }
+          - { name: min-user-turns, type: int, default: "3" }
+          - { name: max-total-turns, type: int, default: "2000" }
+          - { name: only-parent-sessions, type: bool, default: "true" }
+          - { name: project, type: string, default: "" }
+          - { name: unannotated, type: bool, default: "false" }
+          - { name: seed, type: int64, default: "0" }
+      - use: import
+        flags:
+          - { name: from-file, type: string, default: "" }
+          - { name: from-dir, type: string, default: "" }
+          - { name: model-id, type: string, default: "" }
+          - { name: provider, type: string, default: "" }
+      - use: prune
+        flags:
+          - { name: session, type: string, default: "" }
+          - { name: session-from-file, type: string, default: "" }
+          - { name: dry-run, type: bool, default: "false" }
+        exit_cases:
+          - args: ["prune"]
+            expect_error: true
+            error_contains: ["accepts 1 arg"]
+          - args: ["prune", "some-annotator", "--session", "x", "--session-from-file", "y"]
+            expect_error: true
+            error_contains: ["both --session and --session-from-file"]
+
+  - name: Export
+    use: export
+    subcommands:
+      - use: sessions
+        flags:
+          - { name: session, type: string, default: "" }
+          - { name: session-from-file, type: string, default: "" }
+          - { name: output-dir, type: string, default: "." }
+      - use: annotations
+        flags:
+          - { name: session, type: string, default: "" }
+          - { name: session-from-file, type: string, default: "" }
+          - { name: output-dir, type: string, default: "." }
+      - use: schema
+        flags:
+          - { name: json, type: bool, default: "false" }
+          - { name: status, type: string, default: "" }
+          - { name: all, type: bool, default: "false" }
+          - { name: shape, type: string, default: "eee" }
+      - use: friction
+        flags:
+          - { name: json, type: bool, default: "false" }
+          - { name: annotator, type: string, default: "" }
+          - { name: session, type: string, default: "" }
+          - { name: paired, type: bool, default: "false" }

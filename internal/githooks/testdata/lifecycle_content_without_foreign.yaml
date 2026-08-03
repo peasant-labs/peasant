@@ -1,0 +1,20 @@
+expectedCaseCount: 1
+cases:
+  - name: content-on-a-non-foreign-seed
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: absent
+        mode: "0755"
+        content: |
+          #!/bin/sh
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

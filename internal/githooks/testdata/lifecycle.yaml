@@ -1,0 +1,545 @@
+# Hook lifecycle cases, driven end to end against a disposable git repository.
+#
+# seed.kind is what already occupies the slot before the lifecycle runs:
+#   absent          no file at all
+#   managed         a hook a real install wrote
+#   foreign         a file Peasant did not write (content + mode are required)
+#   hand-added      a foreign hook that already carries the by-hand upload section
+#   edited-managed  a hook a real install wrote, with a line appended afterwards:
+#                   the framing is broken so it is foreign, but the upload command
+#                   is still in the file and still runs
+#
+# Every case seeds BOTH events and expects exactly the events it requests.
+#
+# reasonMustContain / reasonMustNotContain assert what install TELLS the user.
+# An outcome alone cannot show that: a refusal can be correct and still hand back
+# a remedy that destroys the hook it refused, or one that loops straight back to
+# the command that refused.
+#
+# postPlanMutation changes a slot AFTER Peasant decided what to do with it and
+# BEFORE it acts. That window is the only thing standing between a plan and a
+# user's file, and it is not reachable by seeding: Install and Uninstall each
+# re-plan internally, so a slot changed beforehand is simply re-inspected and
+# refused at plan time, leaving the write and delete guards unexercised. The
+# shapes are:
+#   foreign-bytes              a file the user wrote appears in that instant
+#   symlink-to-named-pipe      the slot becomes a link to a FIFO: an unguarded
+#                              read blocks forever instead of refusing
+#   symlink-to-generated-hook  the slot becomes a link to a byte-perfect
+#                              generated hook: an ownership test that follows the
+#                              link recognises the content and acts on the LINK,
+#                              which Peasant does not own
+# Every such row asserts the exact bytes and mode survive, not merely that the
+# outcome was a failure - the guarantee is the file, not the classification.
+expectedCaseCount: 18
+cases:
+  - name: absent-slot-post-commit-only
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  - name: absent-slot-pre-push-only
+    requestedEvents: [pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: pre-push
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  - name: absent-slots-both-events
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+      - event: pre-push
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  - name: repeated-install-rewrites-own-hook
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  - name: managed-both-events-uninstall-removes-both
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  - name: foreign-executable-hook-is-refused
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: foreign
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # a hook the user composed themselves
+          make lint || exit 1
+          exit 0
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        offersManualSection: true
+
+  - name: foreign-non-executable-hook-is-refused
+    requestedEvents: [pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: foreign
+        mode: "0644"
+        content: |
+          #!/bin/sh
+          echo "left here by another tool"
+    expected:
+      - event: pre-push
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        offersManualSection: true
+
+  - name: refused-event-does-not-block-the-other
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: foreign
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          ./scripts/verify-refs.sh
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+      - event: pre-push
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        offersManualSection: true
+
+  - name: managed-and-foreign-events-are-independent
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: foreign
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          exit 0
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+      - event: pre-push
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        offersManualSection: true
+
+  # An appended line breaks the framing but not the upload. Reporting "nothing of
+  # Peasant's to remove" here would be false while the hook keeps uploading on
+  # every commit, so uninstall refuses and says how to take it out by hand. No
+  # by-hand section is offered: this file already uploads, and a second section
+  # is the last thing it needs.
+  #
+  # The remedy for what is LEFT after the user deletes the section has to depend
+  # on what is left. "Delete the section, then run install" is right only when
+  # the file is gone; with the user's own hook still in it, install refuses that
+  # file again - correctly, it is not Peasant's - and hands back the by-hand
+  # section, which is where the advice must point.
+  - name: edited-managed-hook-still-uploads-so-uninstall-refuses
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: edited-managed
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: refused
+        presentAfterUninstall: true
+        offersManualSection: false
+        reasonMustContain:
+          - "BEGIN GENERATED FROM peasant village hooks"
+          - "If that empties the file, delete it too and run"
+          - "If the file still holds hooks of your own"
+          - "prints the by-hand section to paste into what remains"
+
+  # The pre-commit framework installs a '#!/usr/bin/env python3' hook, and it is
+  # the single most likely file to be found occupying a slot. Peasant's by-hand
+  # section is POSIX shell: pasted into that file it is a SyntaxError, so every
+  # pre-push is blocked and every post-commit dies silently. The shebang is
+  # already read while classifying ownership, so the section is withheld and the
+  # two remedies that do work are named instead.
+  - name: python-hook-is-refused-without-a-shell-section-to-paste
+    requestedEvents: [pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: foreign
+        mode: "0755"
+        content: |
+          #!/usr/bin/env python3
+          import sys
+          sys.exit(0)
+    expected:
+      - event: pre-push
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        offersManualSection: false
+        reasonMustContain:
+          - "with python3, not a POSIX shell"
+          - "must not be pasted in"
+          - "move that file aside yourself and re-run"
+          # The alternative has to be usable BY python. An argv-form invocation
+          # passes each element through literally, so the shell rendering's
+          # quotes would arrive as part of the path and resolve nothing.
+          - "as an argument list, with no shell quoting on any element"
+          - '["peasant", "village", "push", "--non-interactive", "--quiet", "--timeout", "5s", "--repository", '
+        reasonMustNotContain:
+          - "add the section below"
+          # A shell-quoted path inside an example addressed to a non-shell.
+          - "--repository '"
+
+  # A compiled hook takes no section in any language, so only moving it aside is
+  # offered. Nothing may be described as pasteable into it.
+  - name: binary-hook-is-refused-with-nothing-to-paste
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: foreign
+        mode: "0755"
+        content: "\x7fELF\x02\x01\x01\0compiled hook\0"
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        offersManualSection: false
+        reasonMustContain:
+          - "is not a text script"
+          - "move that file aside yourself and re-run"
+        reasonMustNotContain:
+          - "add the section below"
+
+  - name: hand-added-section-is-reported-not-removed
+    requestedEvents: [pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: hand-added
+    expected:
+      - event: pre-push
+        ownershipBefore: foreign
+        plannedAction: refuse
+        installOutcome: refused
+        managedAfterInstall: false
+        uninstallOutcome: refused
+        presentAfterUninstall: true
+        offersManualSection: false
+
+  # --- the decide-then-act window -------------------------------------------
+  #
+  # Each of these four rows kills a mutation that left the whole suite green.
+  # Every one requests both events: post-commit is the slot under attack, and
+  # pre-push is the innocent event whose planning provides the instant the
+  # mutation lands in. The pre-push arm is not filler - it proves the documented
+  # promise that a refusal on one event never suppresses the real outcome of
+  # another.
+
+  # The exclusive create. Peasant planned to write into an empty slot; a file
+  # appeared there first. O_EXCL is the only thing that stops the write, and the
+  # ErrExist branch of the recovery advice is reachable through nothing else, so
+  # both are proven here. Swapping O_EXCL for O_TRUNC destroys these bytes.
+  - name: a-file-that-appears-after-the-plan-is-never-clobbered
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: |
+            #!/bin/sh
+            # written by another tool in the instant after peasant looked
+            ./scripts/secret-scan.sh || exit 1
+        reasonMustContain:
+          - "cannot create the hook at"
+          - "the file appeared after Peasant checked"
+          - "after Peasant checked the slot"
+          - "to see what is there now"
+      - event: pre-push
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  # The pre-write ownership re-check. Peasant planned to rewrite its own hook;
+  # the user's own hook is there by the time it writes. Deleting the re-check
+  # replaces their file with a generated one.
+  - name: a-hook-replaced-after-the-plan-is-never-rewritten
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: |
+            #!/bin/sh
+            # the user replaced peasant's hook with their own
+            make lint || exit 1
+        reasonMustContain:
+          - "is no longer the file Peasant planned to replace"
+          - "the file on disk is exactly as you left it"
+      - event: pre-push
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  # The pre-delete ownership re-check. Peasant planned to remove its own hook;
+  # the user's own hook is there by the time it deletes. Deleting the re-check
+  # destroys their file outright, and there is nothing to restore it from.
+  - name: a-hook-replaced-after-the-plan-is-never-deleted
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: failed
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-remove
+          shape: foreign-bytes
+          mode: "0755"
+          content: |
+            #!/bin/sh
+            # the user's pre-push policy gate, written after peasant planned
+            ./scripts/verify-refs.sh || exit 1
+        uninstallReasonMustContain:
+          - "is no longer the file Peasant planned to remove"
+          - "the file on disk is exactly as you left it"
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  # The slot becomes a symlink pointing at a byte-perfect generated hook. This is
+  # the shape that defeats an ownership re-check WITHOUT looking suspicious: read
+  # through the link, the content is recognisably Peasant's own, so an unguarded
+  # check approves and deletes the user's LINK - a file Peasant does not own, and
+  # the package's absolute rule says it never edits, renames, or deletes one.
+  # A link to a FIFO is the same hazard at its worst: an unguarded read of it
+  # never returns at all, so the refusal becomes a git command that hangs. Both
+  # are the same missing guard, and this row pins the link case; the shape is a
+  # link rather than a bare FIFO because inspection already refuses a bare one at
+  # plan time, which is why only the post-plan swap reaches this code.
+  - name: a-slot-that-becomes-a-symlink-is-never-acted-on-through-the-link
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: failed
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-remove
+          shape: symlink-to-generated-hook
+        uninstallReasonMustContain:
+          - "is no longer a plain file Peasant can re-read before the remove"
+          - "It does not follow a symlink to do either"
+          - "exactly as you left them"
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+
+  # The same missing guard at its worst: the slot becomes a link to a FIFO. An
+  # unguarded read of it does not return a wrong answer, it never returns at all -
+  # opening a FIFO read-only waits for a writer that is never coming - so the
+  # refusal becomes a git command that hangs, which is strictly worse than the
+  # actionable error the re-check exists to produce. Measured at nine minutes
+  # before an outer timeout killed it. The stage is bounded, so a regression here
+  # fails instead of hanging.
+  - name: a-slot-that-becomes-a-pipe-refuses-instead-of-blocking
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: failed
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-remove
+          shape: symlink-to-named-pipe
+        uninstallReasonMustContain:
+          - "is no longer a plain file Peasant can re-read before the remove"
+          - "a symlink, a pipe, a device"
+          - "nothing was changed"
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

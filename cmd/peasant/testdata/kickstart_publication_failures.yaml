@@ -1,0 +1,64 @@
+declaredRows: 4
+cases:
+  - name: per-session-error-with-nil-run-error
+    selectedSessionIds:
+      - 11111111-1111-1111-1111-111111111111
+      - 22222222-2222-2222-2222-222222222222
+    persistedSessionIds:
+      - 11111111-1111-1111-1111-111111111111
+    failedSessions:
+      - sessionId: 22222222-2222-2222-2222-222222222222
+        error: authoritative receipt did not match the requested publication
+    expectedPersistedSessionIds:
+      - 11111111-1111-1111-1111-111111111111
+    expectedRetrySessionIds:
+      - 22222222-2222-2222-2222-222222222222
+    expectedErrorContains:
+      - 'session "22222222-2222-2222-2222-222222222222": authoritative receipt did not match the requested publication'
+      - successful uploads remain published
+    expectedErrorExcludes:
+      - <nil>
+  - name: run-error-before-session-results
+    selectedSessionIds:
+      - 33333333-3333-3333-3333-333333333333
+      - 44444444-4444-4444-4444-444444444444
+    runError: schema-version preflight rejected the CLI contract
+    expectedRetrySessionIds:
+      - 33333333-3333-3333-3333-333333333333
+      - 44444444-4444-4444-4444-444444444444
+    expectedErrorContains:
+      - schema-version preflight rejected the CLI contract
+    expectedErrorExcludes:
+      - <nil>
+  - name: mixed-abort-preserves-success-and-retries-unattempted
+    selectedSessionIds:
+      - 66666666-6666-6666-6666-666666666666
+      - 77777777-7777-7777-7777-777777777777
+      - 88888888-8888-8888-8888-888888888888
+    persistedSessionIds:
+      - 66666666-6666-6666-6666-666666666666
+    failedSessions:
+      - sessionId: 77777777-7777-7777-7777-777777777777
+        error: connection failed before an authoritative receipt was returned
+    runError: aborting after repeated Village connection failures
+    expectedPersistedSessionIds:
+      - 66666666-6666-6666-6666-666666666666
+    expectedRetrySessionIds:
+      - 77777777-7777-7777-7777-777777777777
+      - 88888888-8888-8888-8888-888888888888
+    expectedErrorContains:
+      - aborting after repeated Village connection failures
+      - 'session "77777777-7777-7777-7777-777777777777": connection failed before an authoritative receipt was returned'
+    expectedErrorExcludes:
+      - <nil>
+  - name: failed-status-without-detail
+    selectedSessionIds:
+      - 55555555-5555-5555-5555-555555555555
+    failedSessions:
+      - sessionId: 55555555-5555-5555-5555-555555555555
+    expectedRetrySessionIds:
+      - 55555555-5555-5555-5555-555555555555
+    expectedErrorContains:
+      - 'session "55555555-5555-5555-5555-555555555555" reported a failed publication without an error detail'
+    expectedErrorExcludes:
+      - <nil>

@@ -1,0 +1,13 @@
+expectedCaseCount: 11
+requiredNames:
+  - exact_hash_resolves_directly
+  - unique_legacy_label_resolves_to_hash
+  - duplicate_legacy_label_is_ambiguous
+  - missing_identity_is_not_found
+  - malformed_identity_fails_closed
+  - hidden_explicit_hash_still_resolves
+  - hidden_legacy_label_does_not_resolve
+  - remote_derived_display_name_github
+  - remote_derived_display_name_gitlab
+  - no_remote_falls_back_to_cwd_path
+  - old_path_based_legacy_link_no_longer_resolves_once_remote_is_known

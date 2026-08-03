@@ -1,0 +1,9 @@
+expectedCount: 7
+requiredNames:
+  - local map wire mirror stays deleted
+  - production source imports generated map contracts
+  - annotation policy uses schema runtime values
+  - quality policy uses schema runtime values
+  - changes adapter separates generated and cooked contracts
+  - provider icon mirror stays deleted
+  - provider label mirror stays deleted

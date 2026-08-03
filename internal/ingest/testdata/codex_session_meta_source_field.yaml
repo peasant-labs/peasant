@@ -1,0 +1,35 @@
+cases:
+  - name: subagent_thread_spawn_object_source
+    description: >-
+      A synthetic representative Codex CLI subagent/thread-spawn
+      session_meta.payload: source is a nested object
+      ({"subagent":{"thread_spawn":{...}}}), not a string. Before the fix,
+      json.Unmarshal returned a type-mismatch error for this one field, and
+      the caller discarded the WHOLE session_meta (including the correctly
+      populated cwd), silently falling back to the rollout file's own
+      containing directory as the project.
+    sessionMetaPayloadJSON: '{"id":"00000000-0000-4000-8000-000000000011","forked_from_id":"00000000-0000-4000-8000-000000000010","timestamp":"2024-01-02T03:10:00Z","cwd":"/home/user/projects/widget-demo/sample-branch","originator":"codex-tui","cli_version":"0.1.0-synthetic","source":{"subagent":{"thread_spawn":{"parent_thread_id":"00000000-0000-4000-8000-000000000010","depth":1,"agent_path":null,"agent_nickname":"SampleScout","agent_role":"explorer"}}},"thread_source":"subagent","agent_nickname":"SampleScout","agent_role":"explorer","model_provider":"sample-provider"}'
+    expectedCWD: /home/user/projects/widget-demo/sample-branch
+    expectedVersion: "0.1.0-synthetic"
+    expectSessionMetaParsed: true
+
+  - name: plain_string_source_cli
+    description: >-
+      A synthetic top-level (non-subagent) CLI session: source is the plain
+      string "cli". Must keep working
+      identically after the fix — this is the common-case regression check.
+    sessionMetaPayloadJSON: '{"id":"00000000-0000-4000-8000-000000000010","timestamp":"2024-01-02T03:09:00Z","cwd":"/home/user/projects/widget-demo","originator":"codex-tui","cli_version":"0.1.0-synthetic","source":"cli","thread_source":"user","model_provider":"sample-provider"}'
+    expectedCWD: /home/user/projects/widget-demo
+    expectedVersion: "0.1.0-synthetic"
+    expectSessionMetaParsed: true
+
+  - name: plain_string_source_vscode
+    description: >-
+      The codex_vscode originator's session_meta shape (source:"vscode"),
+      matching the existing happy-path fixture builder elsewhere in this
+      package — included so this suite alone proves both known plain-string
+      source values keep parsing correctly, not just "cli".
+    sessionMetaPayloadJSON: '{"id":"00000000-0000-4000-8000-000000000012","timestamp":"2024-01-02T03:11:00Z","cwd":"/home/user/projects/widget-editor-demo","originator":"codex_vscode","cli_version":"0.1.0-synthetic","source":"vscode","thread_source":"user","model_provider":"sample-provider"}'
+    expectedCWD: /home/user/projects/widget-editor-demo
+    expectedVersion: "0.1.0-synthetic"
+    expectSessionMetaParsed: true

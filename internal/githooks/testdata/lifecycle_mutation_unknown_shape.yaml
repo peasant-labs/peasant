@@ -1,0 +1,29 @@
+# A shape the driver has no implementation for. Each shape defeats a specific
+# guard, so an unmodelled one proves nothing about any of them.
+expectedCaseCount: 1
+cases:
+  - name: mutation-shape-typo
+    requestedEvents: [post-commit, pre-push]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: managed
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+        postPlanMutation:
+          window: before-write
+          shape: hard-link-to-pipe
+      - event: pre-push
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: replaced
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

@@ -1,0 +1,29 @@
+expectedCaseCount: 13
+requiredNames:
+  - malformed percent encoding is rejected
+  - unknown map query field is rejected
+  - duplicate commit is rejected
+  - duplicate empty commit is rejected
+  - missing node path is rejected
+  - empty node path is rejected
+  - duplicate resolution name is rejected
+  - unknown changes query field is rejected
+  - missing diff file is rejected
+  - unavailable summaries provider is rejected
+  - invalid search limit is rejected
+  - short search query is rejected
+  - duplicate search query is rejected
+cases:
+  - {name: malformed percent encoding is rejected, handler: map, rawQuery: "commit=%zz", pathHash: valid, provider: true, status: 400, code: request_query_malformed, requiredFragments: [query string is malformed, internal/api.exactRequestGuard, No provider call was made, Correct the percent encoding]}
+  - {name: unknown map query field is rejected, handler: map, rawQuery: "branch=main", pathHash: valid, provider: true, status: 400, code: request_query_unknown, requiredFragments: [query field "branch" is not supported, internal/api.exactRequestGuard, No provider call was made, Remove the unknown field]}
+  - {name: duplicate commit is rejected, handler: map, rawQuery: "commit=a&commit=b", pathHash: valid, provider: true, status: 400, code: request_query_duplicate, requiredFragments: [query field "commit" was provided more than once, internal/api.exactRequestGuard, No provider call was made, Provide exactly one value]}
+  - {name: duplicate empty commit is rejected, handler: map, rawQuery: "commit=&commit=", pathHash: valid, provider: true, status: 400, code: request_query_duplicate, requiredFragments: [query field "commit" was provided more than once, internal/api.exactRequestGuard, No provider call was made, Provide exactly one value]}
+  - {name: missing node path is rejected, handler: node, rawQuery: "", pathHash: valid, provider: true, status: 400, code: request_query_required, requiredFragments: [required query field "path" is missing or empty, internal/api.exactRequestGuard, No provider call was made, Provide one nonempty value]}
+  - {name: empty node path is rejected, handler: node, rawQuery: "path=", pathHash: valid, provider: true, status: 400, code: request_query_required, requiredFragments: [required query field "path" is missing or empty, internal/api.exactRequestGuard, No provider call was made, Provide one nonempty value]}
+  - {name: duplicate resolution name is rejected, handler: resolve, rawQuery: "name=one&name=two", pathHash: none, provider: true, status: 400, code: request_query_duplicate, requiredFragments: [query field "name" was provided more than once, internal/api.exactRequestGuard, No provider call was made, Provide exactly one value]}
+  - {name: unknown changes query field is rejected, handler: changes, rawQuery: "extra=true", pathHash: valid, provider: true, status: 400, code: request_query_unknown, requiredFragments: [query field "extra" is not supported, internal/api.exactRequestGuard, No provider call was made, Remove the unknown field]}
+  - {name: missing diff file is rejected, handler: diff, rawQuery: "branch=feat%2Fx", pathHash: valid, provider: true, status: 400, code: request_query_required, requiredFragments: [required query field "file" is missing or empty, internal/api.exactRequestGuard, No provider call was made, Provide one nonempty value]}
+  - {name: unavailable summaries provider is rejected, handler: summaries, rawQuery: "", pathHash: none, provider: false, status: 503, code: provider_unavailable, requiredFragments: [no data provider was configured, internal/api.exactRequestGuard, No provider call was made, Restart Peasant]}
+  - {name: invalid search limit is rejected, handler: search, rawQuery: "q=timeline&limit=nope", pathHash: none, provider: true, status: 400, code: search_limit_invalid, requiredFragments: [limit must be a positive integer, internal/api.handleSearch, No provider call was made, Provide one positive integer]}
+  - {name: short search query is rejected, handler: search, rawQuery: "q=a", pathHash: none, provider: true, status: 400, code: search_query_too_short, requiredFragments: [fewer than two non-whitespace characters, internal/api.handleSearch, No provider call was made, Enter at least two characters]}
+  - {name: duplicate search query is rejected, handler: search, rawQuery: "q=one&q=two", pathHash: none, provider: true, status: 400, code: request_query_duplicate, requiredFragments: [query field "q" was provided more than once, internal/api.exactRequestGuard, No provider call was made, Provide exactly one value]}

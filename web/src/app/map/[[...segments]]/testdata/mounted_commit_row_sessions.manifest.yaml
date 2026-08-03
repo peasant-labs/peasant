@@ -1,0 +1,28 @@
+# Independent inventory: deleting or silently skipping a mounted production
+# path case must fail the loader before assertions run.
+expectedCount: 1
+requiredNames:
+  - mounted-code-map-selection-resolves-only-the-project-session
+classification:
+  surface: map
+  scope: mounted commit row links
+  behavior: project-scoped resolution and honest fallback
+provenance:
+  source: web/src/app/map/[[...segments]]/MapRail.tsx
+  test: web/src/app/map/[[...segments]]/MapShell.realCodeMap.test.tsx
+  fixture: web/src/app/map/[[...segments]]/testdata/mounted_commit_row_sessions.yaml
+expectedMutationCount: 2
+requiredMutationNames:
+  - mounted resolved provider identity mismatch reddens
+  - mounted fallback identity mismatch reddens
+mutations:
+  - name: mounted resolved provider identity mismatch reddens
+    caseName: mounted-code-map-selection-resolves-only-the-project-session
+    sessionId: sess-map-live
+    find: '        expectedHarness: claude-code'
+    replace: '        expectedHarness: openai'
+  - name: mounted fallback identity mismatch reddens
+    caseName: mounted-code-map-selection-resolves-only-the-project-session
+    sessionId: sess-other-project
+    find: '        expectedHarness: null'
+    replace: '        expectedHarness: claude-code'

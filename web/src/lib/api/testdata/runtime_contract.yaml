@@ -1,0 +1,19 @@
+validValues:
+  mapNodeKinds: [module, package, file]
+  edgeViolationKinds: [cycle, wrong_way]
+  fileChangeStatuses: [M, A, D, R]
+  diffLineKinds: [context, add, del]
+  changeBindings: [bound, candidate]
+  harnesses: [claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike]
+invalidCases:
+  - {name: map graph rejects unknown node kind, operation: map-graph, field: 'nodes[].kind', value: subsystem, expectedError: 'nodes\[\]\.kind.*decodeMapGraph'}
+  - {name: map graph rejects unknown violation kind, operation: map-graph, field: 'violations[].kind', value: sideways, expectedError: 'violations\[\]\.kind.*decodeMapGraph'}
+  - {name: node detail rejects unknown node kind, operation: node-detail, field: kind, value: subsystem, expectedError: 'kind.*decodeMapNodeDetail'}
+  - {name: change detail rejects unknown file status, operation: change-detail, field: 'files[].status', value: X, expectedError: 'files\[\]\.status.*decodeChangeDetail'}
+  - {name: change detail rejects unknown slice node kind, operation: change-detail, field: 'slice.nodes[].kind', value: subsystem, expectedError: 'slice\.nodes\[\]\.kind.*decodeChangeDetail'}
+  - {name: change detail rejects unknown violation kind, operation: change-detail, field: 'violations[].kind', value: sideways, expectedError: 'violations\[\]\.kind.*decodeChangeDetail'}
+  - {name: change detail rejects unknown work harness, operation: change-detail, field: 'work[].harness', value: mystery-cli, expectedError: 'work\[\]\.harness.*decodeChangeDetail'}
+  - {name: change detail rejects unknown work binding, operation: change-detail, field: 'work[].binding', value: guessed, expectedError: 'work\[\]\.binding.*decodeChangeDetail'}
+  - {name: change diff rejects unknown file status, operation: change-diff, field: status, value: X, expectedError: 'status.*decodeChangeDiff'}
+  - {name: change diff rejects unknown line kind, operation: change-diff, field: 'hunks[].lines[].kind', value: marker, expectedError: 'hunks\[\]\.lines\[\]\.kind.*decodeChangeDiff'}
+  - {name: review list rejects unknown harness, operation: review-list, field: 'sessions[].harness', value: mystery-cli, expectedError: 'sessions\[\]\.harness.*decodeReviewList'}

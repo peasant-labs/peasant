@@ -1,0 +1,15 @@
+expectedCaseCount: 3
+cases:
+  - name: content-hash-mismatch
+    mismatch: content
+    replacement: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    errorContains: authoritative receipt mismatch
+  - name: operation-fingerprint-mismatch
+    mismatch: fingerprint
+    replacement: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    errorContains: authoritative receipt mismatch
+  - name: parent-bearing-operation-fingerprint-mismatch
+    mismatch: parent-fingerprint
+    replacement: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    errorContains: authoritative receipt mismatch
+    parentSessionID: 99d59925-36bc-424c-a789-8be54d9702ba

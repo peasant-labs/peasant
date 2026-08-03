@@ -1,0 +1,17 @@
+id: no-bare-signal-literals
+language: Go
+severity: error
+message: >
+  Temporal signal name is a bare string literal. Use a typed SignalName constant instead.
+  Define: const MySignal SignalName = "my_signal"
+  Use:    workflow.GetSignalChannel(ctx, string(MySignal))
+note: >
+  String literals as signal names create a split-brain risk: the sender and receiver
+  can diverge silently (typo, rename). A typed constant enforces a single source of truth
+  and makes the compiler catch mismatches.
+rule:
+  any:
+    - pattern: workflow.GetSignalChannel($CTX, "$SIGNAL")
+    - pattern: $_.SignalWorkflow($$$, "$SIGNAL", $_)
+ignore:
+  - "**/vendor/**"

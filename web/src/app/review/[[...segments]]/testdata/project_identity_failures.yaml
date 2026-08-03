@@ -1,0 +1,11 @@
+expectedCaseCount: 4
+requiredNames:
+  - canonical list renders a missing project
+  - canonical detail renders a missing project
+  - canonical list retries a transient resolution failure
+  - canonical detail retries a transient resolution failure
+cases:
+  - {name: canonical list renders a missing project, view: list, outcome: missing, message: project is no longer indexed}
+  - {name: canonical detail renders a missing project, view: detail, outcome: missing, message: project is no longer indexed}
+  - {name: canonical list retries a transient resolution failure, view: list, outcome: transient, message: project resolution temporarily failed}
+  - {name: canonical detail retries a transient resolution failure, view: detail, outcome: transient, message: project resolution temporarily failed}

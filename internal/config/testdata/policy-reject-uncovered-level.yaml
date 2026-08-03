@@ -1,0 +1,31 @@
+# A corpus that leaves a redaction level the ENGINE defines uncovered.
+#
+# Minimal is missing. It is the level whose disposition is neither "runs" nor
+# "refuses" but "raise it and say so", and an uncovered level is a level whose
+# resolution nobody checks: it could start refusing, or start running as written,
+# and this corpus would stay green either way.
+
+expectedRedactionCaseCount: 2
+redaction:
+  - name: standard
+    configured: standard
+    disposition: offered
+    effective: standard
+  - name: unset
+    configured: ""
+    disposition: offered
+    effective: standard
+
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

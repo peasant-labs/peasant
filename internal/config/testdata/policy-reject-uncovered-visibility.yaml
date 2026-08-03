@@ -1,0 +1,35 @@
+# A corpus that leaves a contract visibility uncovered.
+#
+# Group is missing. A resolution written against one named visibility passes for
+# the one it names and says nothing about the rest, which is how a configured
+# group visibility kept being announced as applied while the publish went out
+# private. A corpus that no longer covers the whole contract cannot detect that,
+# so a missing row is a load failure rather than a gap.
+
+expectedRedactionCaseCount: 4
+redaction:
+  - name: minimal
+    configured: minimal
+    disposition: raised
+    effective: standard
+  - name: standard
+    configured: standard
+    disposition: offered
+    effective: standard
+  - name: maximum
+    configured: maximum
+    disposition: refused
+  - name: unset
+    configured: ""
+    disposition: offered
+    effective: standard
+
+expectedVisibilityCaseCount: 2
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

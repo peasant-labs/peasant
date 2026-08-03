@@ -1,0 +1,9 @@
+expectedCaseCount: 7
+requiredNames:
+  - absent_uses_default_sentinel
+  - positive_is_forwarded
+  - oversized_is_forwarded_for_service_clamp
+  - malformed_is_bad_request
+  - zero_is_bad_request
+  - negative_is_bad_request
+  - repeated_is_bad_request

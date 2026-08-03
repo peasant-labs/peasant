@@ -1,0 +1,59 @@
+expectedCaseCount: 28
+requiredNames:
+  - canonical map trailing slash
+  - canonical transcript trailing slash
+  - canonical map round trip
+  - review branch slash round trip
+  - transcript session round trip
+  - scoped transcript round trip
+  - ascii legacy label
+  - reserved legacy label
+  - unicode legacy label
+  - forged absolute return
+  - protocol relative return
+  - unknown return version
+  - double encoded return
+  - canonical map return
+  - legacy raw return conversion
+  - popstate map reconciliation
+  - uppercase project hash
+  - short project hash
+  - long project hash
+  - nonhex project hash
+  - malformed percent escape
+  - encoded slash segment
+  - double encoded segment
+  - extra map segment
+  - missing transcript session
+  - extra transcript segment
+  - legacy project detail redirect identity
+  - canonical project detail redirect identity
+cases:
+  - {name: canonical map round trip, operation: map, pathname: '', search: '', projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, sessionId: '', branch: '', rawReturn: '', expected: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=internal%2Fingest&mode=navigator&grain=file'}
+  - {name: review branch slash round trip, operation: review, pathname: '', search: '', projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, sessionId: '', branch: 'feat/identity-route', rawReturn: '', expected: '/review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?branch=feat%2Fidentity-route'}
+  - {name: transcript session round trip, operation: transcript, pathname: '', search: '', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: 'session with space', branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/session%20with%20space?turn=12&origin=Review'}
+  - {name: scoped transcript round trip, operation: transcript-scoped, pathname: '', search: '?turn=42&scope=file&scopeVal=src%2Fapi.ts&origin=Map&originNode=src%2Fapi.ts', projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, sessionId: sparse-session, branch: '', rawReturn: '', expected: '/projects/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/sparse-session?turn=42&scope=file&scopeVal=src%2Fapi.ts&origin=Map&originNode=src%2Fapi.ts'}
+  - {name: ascii legacy label, operation: legacy, pathname: '/map/alpha-project', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: alpha-project}
+  - {name: reserved legacy label, operation: legacy, pathname: '/review/team%20alpha%3Fcopy', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 'team alpha?copy'}
+  - {name: unicode legacy label, operation: legacy, pathname: '/projects/%E9%9B%AA%E5%B1%B1/session', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 雪山}
+  - {name: forged absolute return, operation: return-reject, pathname: '', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: 'https://attacker.test/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', expected: rejected}
+  - {name: protocol relative return, operation: return-reject, pathname: '', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '//attacker.test/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', expected: rejected}
+  - {name: unknown return version, operation: return-reject, pathname: '', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: 'v2.%2Fmap%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', expected: rejected}
+  - {name: double encoded return, operation: return-reject, pathname: '', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: 'v1.%252Fmap%252Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', expected: rejected}
+  - {name: canonical map return, operation: return-accept, pathname: '', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: 'v1./map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=pkg%2Ffile', expected: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=pkg%2Ffile'}
+  - {name: legacy raw return conversion, operation: return-accept, pathname: '', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '/review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?branch=feat%2Fx', expected: '/review/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?branch=feat%2Fx'}
+  - {name: popstate map reconciliation, operation: popstate, pathname: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: '?node=src%2Fapi&mode=canvas&grain=package&scale=1.25&panX=-8&panY=13', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?node=src%2Fapi&mode=canvas&grain=package&scale=1.25&panX=-8&panY=13'}
+  - {name: uppercase project hash, operation: route-reject, pathname: '/map/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: malformed_project_hash}
+  - {name: short project hash, operation: route-reject, pathname: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: malformed_project_hash}
+  - {name: long project hash, operation: route-reject, pathname: '/review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: malformed_project_hash}
+  - {name: nonhex project hash, operation: route-reject, pathname: '/map/gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: malformed_project_hash}
+  - {name: malformed percent escape, operation: route-reject, pathname: '/map/%', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: malformed_escape}
+  - {name: encoded slash segment, operation: route-reject, pathname: '/map/team%2Falpha', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: encoded_separator}
+  - {name: double encoded segment, operation: route-reject, pathname: '/map/%252E%252E', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: double_encoded_segment}
+  - {name: extra map segment, operation: route-reject, pathname: '/map/alpha/extra', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: wrong_route_shape}
+  - {name: missing transcript session, operation: route-reject, pathname: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: wrong_route_shape}
+  - {name: extra transcript segment, operation: route-reject, pathname: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session/extra', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: wrong_route_shape}
+  - {name: legacy project detail redirect identity, operation: project-detail, pathname: '/projects/team%20alpha', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: 'team alpha'}
+  - {name: canonical project detail redirect identity, operation: project-detail, pathname: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  - {name: canonical map trailing slash, operation: route-reject, pathname: '/map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: canonical}
+  - {name: canonical transcript trailing slash, operation: route-reject, pathname: '/projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/session-x/', search: '', projectHash: '', sessionId: '', branch: '', rawReturn: '', expected: canonical}

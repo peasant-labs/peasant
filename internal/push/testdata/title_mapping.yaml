@@ -1,0 +1,9 @@
+name: runtime_rules_apply_after_canonical_title_policy
+canonical_title: Review private-config in /srv/team/alice/config/settings.yaml
+custom_match: private-config
+custom_replacement: <INTERNAL>
+xdg_config_home: /srv/team/alice/config
+expected_title: Review <INTERNAL> in /srv/<USER>/alice/config/settings.yaml
+expected_non_title_fragments:
+  - <INTERNAL>
+  - <USER>

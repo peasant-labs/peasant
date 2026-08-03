@@ -1,0 +1,56 @@
+# A corpus in which the published-content record is ALWAYS expected.
+#
+# A corpus that only ever expects one answer cannot tell a command that decides
+# from one that always does the same thing. The record's history is exactly that
+# failure in the other direction: it lived inside a branch gated on a visibility
+# no input could reach, so no push printed it at all, and every case that never
+# asked for its absence was consistent with that.
+expectedCaseCount: 6
+cases:
+  - name: private-not-quiet
+    visibility: private
+    configuredLevel: minimal
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: private-quiet
+    visibility: private
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: public-not-quiet
+    visibility: public
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: public-quiet
+    visibility: public
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: none
+    redactionRecord: true
+
+  - name: group-not-quiet
+    visibility: group
+    configuredLevel: standard
+    quiet: false
+    visibilityNotice: full
+    redactionRecord: true
+
+  - name: group-quiet
+    visibility: group
+    configuredLevel: standard
+    quiet: true
+    visibilityNotice: brief
+    redactionRecord: true
+
+expectedForbiddenClaimCount: 1
+forbiddenClaims:
+  - name: no-public-claim
+    phrase: "session(s) publicly"
+    matchesSample: "publish 2 session(s) publicly"

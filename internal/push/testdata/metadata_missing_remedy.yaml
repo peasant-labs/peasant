@@ -1,0 +1,53 @@
+# What a session whose metadata cannot be read is told to do about it.
+#
+# A missing metadata file has more than one cause and they do not share a remedy.
+# ONE of them is invisible from the path: a version that redacted while ingest
+# wrote rewrote the host slug it recorded while the directory it had already
+# created kept the real one, so push resolves a directory that was never written
+# and that session can never publish again. Only a forced re-ingest of that one
+# session re-derives it.
+#
+# Every other cause - a deleted output tree, a moved output.basePath - is NOT
+# repaired by a forced re-ingest, and recommending one anyway is wrong advice
+# printed confidently. So the remedy is gated on the placeholder being in the
+# recorded slug, and these rows are what holds that gate in place.
+#
+# hostSlug        the slug recorded in the database, which push resolves the
+#                 metadata path from. Angle brackets appear in a slug only
+#                 because redaction put them there.
+# expectRemedy    whether the forced-re-ingest repair may be recommended.
+# mustContain     phrases the failure has to carry.
+# mustNotContain  phrases it must not carry.
+expectedCaseCount: 4
+cases:
+  - name: entropy-redacted-slug-names-the-scoped-re-ingest
+    hostSlug: "<HIGH_ENTROPY>"
+    expectRemedy: true
+    mustContain:
+      - "metadata file missing or unreadable"
+      - "contains the redaction placeholder <HIGH_ENTROPY>"
+      - "names a directory that was never written"
+      - "nothing was published for this session"
+    mustNotContain:
+      - "no such file"
+
+  - name: partially-redacted-untracked-slug-is-still-the-same-defect
+    hostSlug: "__peasant-untracked__--<HIGH_ENTROPY>"
+    expectRemedy: true
+    mustContain:
+      - "contains the redaction placeholder <HIGH_ENTROPY>"
+
+  - name: a-slug-carrying-any-other-placeholder-is-the-same-defect
+    hostSlug: "github.com--<PROJECT_URL>--app"
+    expectRemedy: true
+    mustContain:
+      - "contains the redaction placeholder <PROJECT_URL>"
+
+  - name: an-intact-slug-is-a-different-cause-and-gets-no-re-ingest-advice
+    hostSlug: "github.com--user--app"
+    expectRemedy: false
+    mustContain:
+      - "metadata file missing or unreadable"
+    mustNotContain:
+      - "redaction placeholder"
+      - "was never written"

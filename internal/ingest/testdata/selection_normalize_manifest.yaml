@@ -1,0 +1,19 @@
+expectedRemoteCaseCount: 10
+requiredRemoteNames:
+  - scp_form_garden_app
+  - scp_form_sample_project_gitlab
+  - scp_form_inventory_service
+  - https_form_with_git_suffix
+  - ssh_url_form
+  - already_bare_stored_form_passthrough
+  - already_bare_stored_form_uppercase_host_lowercased
+  - bare_form_trailing_slash_trimmed
+  - bare_form_trailing_git_suffix_trimmed
+  - empty_input_stays_empty
+expectedNameCaseCount: 5
+requiredNameNames:
+  - short_name_passthrough
+  - full_path_reduces_to_basename
+  - full_path_trailing_slash_reduces_to_basename
+  - relative_path_reduces_to_basename
+  - empty_name_stays_empty

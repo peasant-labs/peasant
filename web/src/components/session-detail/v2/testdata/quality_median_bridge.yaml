@@ -1,0 +1,30 @@
+# SessionDetailV2's bridge from the adapter's optional `outcome` back to
+# computePersonalMedians' required (possibly-empty) wire string had zero
+# coverage — every existing test mocks
+# computePersonalMedians and ignores its arguments, so a session with an
+# undefined outcome silently reaching the package as `outcome: undefined`
+# would pass every prior test. These cases render the real component with a
+# real quality-channel payload and assert the argument shape that
+# reaches computePersonalMedians (a real capturing mock, not one that ignores
+# its args).
+cases:
+  - name: a resolved outcome reaches computePersonalMedians unchanged
+    outcome: resolved
+    expectedBridgedOutcome: resolved
+  - name: an empty (not-yet-computed) outcome bridges to an empty string, never undefined
+    outcome: ''
+    expectedBridgedOutcome: ''
+  - name: an association-target annotation stays out of computePersonalMedians
+    outcome: resolved
+    expectedBridgedOutcome: resolved
+    effectiveAnnotations:
+      - id: ann-median-association-0001
+        targetKind: association
+        targetAssociationId: assoc-session-median:commit-1
+        isPrimary: true
+        annotatorKind: rule
+        annotatorName: association-review
+        typeId: quality.association_evidence
+        typeName: Association Evidence
+        value: confirmed
+        createdAt: 1700000020000

@@ -1,0 +1,32 @@
+expectedCaseCount: 2
+cases:
+  - name: same-name
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false
+  - name: same-name
+    requestedEvents: [pre-push]
+    seed:
+      - event: post-commit
+        kind: absent
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: pre-push
+        ownershipBefore: absent
+        plannedAction: create
+        installOutcome: created
+        managedAfterInstall: true
+        uninstallOutcome: removed
+        presentAfterUninstall: false

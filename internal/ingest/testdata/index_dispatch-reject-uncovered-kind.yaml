@@ -1,0 +1,39 @@
+# A dispatch corpus with no row for the UNDECLARED source kind.
+#
+# It is the state the corpus was in before the zero value had an arm of its own:
+# the two declared kinds are covered - both of their exits each - and the one an
+# indexer reaches by FORGETTING to declare anything is not. That is the likelier
+# mistake, because forgetting is easier than mis-declaring, and it is the one
+# whose old behaviour - assume a file source - reproduced the silent zero-entry
+# import.
+
+expectedCaseCount: 4
+cases:
+  - name: a-file-source-is-handed-the-bytes
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: bytes
+    indexOutcome: indexed
+
+  - name: a-file-source-with-no-bytes-reads-what-was-written
+    sourceKind: file
+    originalRoot: present
+    transcriptBytes: absent
+    entryPoint: file
+    indexOutcome: indexed
+
+  - name: a-directory-source-is-never-handed-bytes
+    sourceKind: directory
+    originalRoot: present
+    transcriptBytes: present
+    entryPoint: file
+    indexOutcome: indexed
+
+  - name: a-directory-source-that-lost-its-root-is-refused
+    sourceKind: directory
+    originalRoot: absent
+    transcriptBytes: present
+    entryPoint: none
+    indexOutcome: error
+    errorContains: enable opencode in your configuration

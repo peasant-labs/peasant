@@ -1,0 +1,43 @@
+cases:
+  - name: visible sparse target reaches the real viewer
+    search: turn=42
+    turns: [0, 7, 42]
+    targetRole: user
+    targetDepth: 0
+    action: none
+    applyRouterResult: false
+    expectedScrolls: [turn:42]
+    expectedRouter: []
+    expectedCallbacks: []
+    expectedHistory: []
+  - name: absent target opens the real viewer at top
+    search: turn=42
+    turns: [0, 7]
+    targetRole: user
+    targetDepth: 0
+    action: none
+    applyRouterResult: false
+    expectedScrolls: [top]
+    expectedRouter: []
+    expectedCallbacks: []
+    expectedHistory: []
+  - name: applying scope reveal positions without remount
+    search: turn=42&scope=task&scopeVal=0&origin=Map
+    turns: [0, 7, 42]
+    targetRole: user
+    targetDepth: 0
+    action: reveal linked turn
+    applyRouterResult: true
+    expectedScrolls: [turn:42]
+    expectedRouter: [/projects/alpha-project/sess-12345678?turn=42&origin=Map]
+    expectedCallbacks: []
+    expectedHistory: []
+transitions:
+  - name: changing absent target rearms top without remount
+    initialSearch: turn=42
+    rerenderSearch: turn=84
+    turns: [0, 7]
+    expectedScrolls: [top, top]
+    expectedRouter: []
+    expectedCallbacks: []
+    expectedHistory: []

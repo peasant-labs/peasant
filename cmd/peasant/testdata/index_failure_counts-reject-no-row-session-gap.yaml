@@ -1,0 +1,39 @@
+# A corpus where every WARNING case holds exactly as many log rows as the number
+# it warns about.
+#
+# Every other requirement is met: all five outcomes appear, one session records
+# several rows, a recovery is present, and one case expects a count above 1. The
+# multi-row cases are all recoveries, though, so no case that PRINTS a warning
+# has more rows than sessions - and over such a corpus the rendered warning shows
+# the same digit whether the summary counts log rows or sessions. That is the
+# exact blindness the counter's own nine-row corpus had at the surface: the
+# function was covered, and the number a user reads was not.
+
+expectedCaseCount: 5
+cases:
+  - name: a-clean-run-reports-nothing
+    rows:
+      - {session: s1, outcome: indexed}
+    wantCount: 0
+
+  - name: a-session-the-sweep-recovers-is-not-a-failure
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: reindexed}
+    wantCount: 0
+
+  - name: a-fallback-indexed-session-is-not-a-failure-either
+    rows:
+      - {session: s1, outcome: fallback}
+    wantCount: 0
+
+  - name: a-skipped-session-is-not-a-failure
+    rows:
+      - {session: s1, outcome: skipped}
+    wantCount: 0
+
+  - name: two-failing-sessions-across-exactly-two-rows
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s2, outcome: error}
+    wantCount: 2

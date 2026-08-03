@@ -1,0 +1,17 @@
+cases:
+  - name: selected_association_scope
+    selectedSessionID: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+    retainedSessionID: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+    selectedProjectHash: 1111111111111111111111111111111111111111111111111111111111111111
+    retainedProjectHash: 2222222222222222222222222222222222222222222222222222222222222222
+    selectedCommitHash: annotation-prune-selected-association-commit
+    retainedCommitHash: annotation-prune-retained-association-commit
+    selectedAnnotationValue: selected-association
+    retainedAnnotationValue: retained-association
+    selectedSessionValue: selected-session
+    selectedEntryValue: selected-entry
+    selectedMetaValue: selected-meta
+    selectedNestedMetaValue: selected-nested-meta
+    retainedMetaValue: retained-meta
+    retainedNestedMetaValue: retained-nested-meta
+    expectedCount: 3

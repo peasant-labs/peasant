@@ -1,0 +1,60 @@
+# Fixtures for the "Conversations that built this" commit-row session list
+# (MapRail.tsx NodeRail): a commit's `sessionIds` (schema.CommitRef) resolved
+# against the live `sessions` channel into a per-session harness + display
+# name + transcript link. See MapRail.test.tsx.
+#
+# Each case supplies:
+#   - commitSessionIds: the commit row's `sessionIds` (wire order preserved)
+#   - knownSessions: the subset of the project's `sessions` channel rows that
+#     resolve a commitSessionIds entry (id/harness/preview only; the fields
+#     NodeRail actually reads)
+#   - expectedFallbackText: non-null only when the row has no session list
+#     (mirrors the existing "no AI conversation captured" line)
+#   - expectedRows: one entry per commitSessionIds id, in the same order,
+#     naming what should render: the resolved display name and, only when
+#     the session resolves, the harness slug the DS ProviderName label shows
+cases:
+  - name: multi-session-commit-renders-name-and-harness-per-session
+    commitSessionIds: [sess-alpha, sess-beta]
+    knownSessions:
+      - id: sess-alpha
+        harness: claude-code
+        preview: "fix the ingest retry loop"
+      - id: sess-beta
+        harness: codex
+        preview: "add regression coverage"
+    expectedFallbackText: null
+    expectedRows:
+      - sessionId: sess-alpha
+        expectedName: "Fix the ingest retry loop"
+        expectedHarness: claude-code
+      - sessionId: sess-beta
+        expectedName: "Add regression coverage"
+        expectedHarness: codex
+
+  - name: zero-session-commit-falls-back-to-the-existing-boolean-copy
+    commitSessionIds: []
+    knownSessions: []
+    expectedFallbackText: "no AI conversation captured"
+    expectedRows: []
+
+  - name: session-id-absent-from-the-sessions-channel-renders-name-only
+    commitSessionIds: [sess-not-yet-loaded]
+    knownSessions: []
+    expectedFallbackText: null
+    expectedRows:
+      - sessionId: sess-not-yet-loaded
+        expectedName: "sess-not"
+        expectedHarness: null
+
+  - name: session-with-no-preview-falls-back-to-the-short-session-id
+    commitSessionIds: [sess-blank-preview]
+    knownSessions:
+      - id: sess-blank-preview
+        harness: opencode
+        preview: ""
+    expectedFallbackText: null
+    expectedRows:
+      - sessionId: sess-blank-preview
+        expectedName: "sess-bla"
+        expectedHarness: opencode

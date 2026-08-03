@@ -1,0 +1,33 @@
+# Proves the loader rejects a disposition string the policy does not define,
+# rather than letting it decode to the zero value, which is Unknown and would
+# silently exercise the fail-closed arm under a name that reads deliberate.
+expectedRedactionCaseCount: 4
+redaction:
+  - name: standard-with-an-invented-disposition
+    configured: standard
+    disposition: tolerated
+    effective: standard
+  - name: minimal-is-raised
+    configured: minimal
+    disposition: raised
+    effective: standard
+  - name: maximum-is-refused
+    configured: maximum
+    disposition: refused
+  - name: unset-resolves-to-the-default
+    configured: ""
+    disposition: offered
+    effective: standard
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

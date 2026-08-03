@@ -1,0 +1,4 @@
+# 1. Rename this file to .envrc.local
+# 2. Put sensitive secrets here
+#
+#export SOME_SECRET="hello"

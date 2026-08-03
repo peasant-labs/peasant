@@ -1,0 +1,242 @@
+name: Release
+
+# Tag-triggered binary release pipeline. The tag is pushed by release-pr.yml's
+# App token (the default GITHUB_TOKEN cannot push a tag that re-triggers a
+# workflow), so this runs automatically when a release PR merges.
+#
+# The `v*` filter matches Peasant release tags (v0.1.0, v0.1.0-rc1).
+# release-guard parse-tag is the defense-in-depth re-check inside the guard job.
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # Gate the build: reject non-peasant tags, and for FINAL releases require a
+  # same-version rc that is green AND an ancestor of the final commit.
+  guard:
+    name: guard
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # release-guard check-final reads rc release-run conclusions
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository (full history + tags)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify annotated tag is reachable from protected develop
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/develop:refs/remotes/origin/develop"
+
+          tag_ref="refs/tags/${TAG}"
+          object_type="$(git cat-file -t "${tag_ref}" 2>/dev/null || true)"
+          if [ "${object_type}" != "tag" ]; then
+            echo "::error::release tag ${TAG} is not an annotated tag (found '${object_type:-missing}'). Publication requires an annotated v* tag created by the release ceremony; recreate the release through a merged release PR."
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse --verify "${tag_ref}^{commit}")"
+          if ! git merge-base --is-ancestor "${tag_commit}" refs/remotes/origin/develop; then
+            echo "::error::release tag ${TAG} peels to ${tag_commit}, which is not reachable from protected branch origin/develop. Move no existing tag; create a new release through a release PR merged into develop."
+            exit 1
+          fi
+          echo "::notice::annotated release tag ${TAG} peels to develop commit ${tag_commit}"
+
+      - name: Parse + classify the tag
+        id: parse
+        run: go run github.com/peasant-labs/schema/cmd/release-guard parse-tag "$TAG"
+
+      - name: Final-release guard (green same-version rc + ancestor)
+        if: steps.parse.outputs.kind == 'final'
+        run: go run github.com/peasant-labs/schema/cmd/release-guard check-final --tag "$TAG"
+
+  nix-vendor-hash:
+    name: assert nix vendorHash current
+    needs: guard
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      - name: Check Nix vendor hash freshness
+        run: |
+          set -euo pipefail
+          make nix-vendor-hash
+          if ! git diff --quiet -- flake.nix; then
+            echo "::error::flake.nix vendorHash is stale on ${GITHUB_REF_NAME}. Create the release tag from a commit that has run make nix-vendor-hash."
+            git diff -- flake.nix
+            exit 1
+          fi
+
+  e2e:
+    name: full-stack e2e
+    needs: [guard, nix-vendor-hash]
+    uses: ./.github/workflows/e2e.yml
+
+  release-e2e:
+    name: release e2e (installed packages)
+    needs: [guard, nix-vendor-hash]
+    uses: ./.github/workflows/release-e2e.yml
+
+  # Build + publish: one Linux runner cross-compiles all four targets (pure-Go,
+  # CGO_ENABLED=0), then goreleaser produces archives + checksums + deb/rpm and
+  # creates the GitHub (pre)release. AUR/tap pushes are skip_upload:true (no-op).
+  release:
+    name: release (goreleaser)
+    needs: [guard, nix-vendor-hash, e2e, release-e2e]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: write # create the GitHub Release and upload assets
+    steps:
+      - name: Checkout repository (full history for changelog)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+      - name: Set up Node (for the embedded web dashboard build)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build real web dashboard
+        run: make web
+
+      - name: Assert real dashboard artifact
+        run: |
+          set -euo pipefail
+          test -s web/out/index.html || { echo "::error::web/out/index.html is missing or empty"; exit 1; }
+          if grep -qF "is not bundled in this build" web/out/index.html; then
+            echo "::error::release artifact contains the web-stub dashboard"
+            exit 1
+          fi
+
+      - name: Mint App token for Homebrew tap
+        id: tap_tok
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.PEASANT_RELEASER_APP_ID }}
+          private-key: ${{ secrets.PEASANT_RELEASER_APP_PRIVATE_KEY }}
+          owner: peasant-labs
+          repositories: homebrew-tap
+
+      - name: Install patched GoReleaser v2.17.1
+        run: |
+          scripts/install-goreleaser "$RUNNER_TEMP/goreleaser-bin"
+          echo "$RUNNER_TEMP/goreleaser-bin" >> "$GITHUB_PATH"
+      - name: Run goreleaser
+        run: |
+          "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Pre-flip dummies: skip_upload:true means these are never USED, but the
+          # goreleaser templates must resolve. AUR_KEY lands at the flip; the tap
+          # token is minted from the GitHub App installation above.
+          AUR_KEY: ${{ secrets.AUR_KEY || 'unset-pre-flip' }}
+          TAP_GITHUB_TOKEN: ${{ steps.tap_tok.outputs.token }}
+
+  # Post-publish smoke: download the released linux archives on NATIVE runners
+  # (no QEMU) and assert the binary is static and reports the tag version.
+  smoke:
+    name: smoke (${{ matrix.arch }})
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: blacksmith-2vcpu-ubuntu-2404
+            arch: amd64
+          - runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+            arch: arm64
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Download the released archive
+        run: |
+          set -euxo pipefail
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "peasant_*_linux_${ARCH}.tar.gz" \
+            --dir .
+          tar xzf peasant_*_linux_"${ARCH}".tar.gz
+
+      - name: Assert the binary is statically linked
+        run: |
+          set -uo pipefail
+          if ldd ./peasant 2>&1 | grep -q "not a dynamic executable"; then
+            echo "static OK (ldd: not a dynamic executable)"
+          elif file ./peasant | grep -q "statically linked"; then
+            echo "static OK (file: statically linked)"
+          else
+            echo "::error::peasant is not statically linked (CGO_ENABLED=0 expected)"
+            ldd ./peasant || true
+            file ./peasant
+            exit 1
+          fi
+
+      - name: Assert version matches the tag
+        run: |
+          set -euo pipefail
+          expected="${TAG#v}"
+          got="$(./peasant version)"
+          echo "peasant version output: '${got}' (must contain '${expected}')"
+          if ! printf '%s' "$got" | grep -qF "$expected"; then
+            echo "::error::peasant version '${got}' does not match tag '${TAG}'"
+            exit 1
+          fi
+
+  # On the rc path only, also run the full packaging-validation matrix
+  # (deb/rpm/makepkg/brew/nix/macos) against a snapshot build. This is the darwin
+  # + distro coverage the linux-only `smoke` job deliberately omits; it does NOT
+  # re-run the linux ldd/version smoke, which remains a separate focused gate.
+  validate-packaging:
+    name: validate packaging (rc)
+    needs: guard
+    if: contains(github.ref_name, '-rc')
+    uses: ./.github/workflows/release-validate.yml

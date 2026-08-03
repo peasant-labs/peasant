@@ -1,0 +1,21 @@
+id: no-bare-format-literals
+language: Go
+severity: error
+message: >
+  Bare source format string literal. Use the typed constant instead:
+  SourceFormatJSONL ("jsonl"), SourceFormatJSON ("json")
+note: >
+  Bare string literals bypass the SourceFormat type system.
+  The only valid definition site is internal/ingest/metadata.go.
+rule:
+  any:
+    - pattern: '"jsonl"'
+    - pattern: '"json"'
+  not:
+    inside:
+      kind: const_spec
+ignores:
+  - "vendor/**"
+  - "internal/ingest/metadata.go"
+  - "internal/ingest/metadata_test.go"
+  - "web/**"

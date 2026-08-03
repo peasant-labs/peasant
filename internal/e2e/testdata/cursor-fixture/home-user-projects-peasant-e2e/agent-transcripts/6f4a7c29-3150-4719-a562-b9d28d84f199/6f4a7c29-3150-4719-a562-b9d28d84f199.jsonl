@@ -1,0 +1,3 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>Inspect the synthetic widget package and summarize its files.</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I will inspect the synthetic package."},{"type":"tool_use","name":"Glob","input":{"glob_pattern":"**/*.go","target_directory":"/home/user/projects/peasant-e2e/widget"}},{"type":"tool_use","name":"Read","input":{"path":"/home/user/projects/peasant-e2e/widget/widget.go","limit":80}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The package contains a small widget total helper and its test."}]}}

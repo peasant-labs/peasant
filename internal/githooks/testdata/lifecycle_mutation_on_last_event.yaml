@@ -1,0 +1,28 @@
+# A mutation on the last requested event. The window it has to land in is inside
+# one lifecycle call, and the only deterministic way in is the planning of a
+# LATER event in that same call - so behind the last event there is no window,
+# and the mutation would either never fire or fire too early to prove anything.
+expectedCaseCount: 1
+cases:
+  - name: mutation-with-no-window-behind-it
+    requestedEvents: [post-commit]
+    seed:
+      - event: post-commit
+        kind: managed
+      - event: pre-push
+        kind: absent
+    expected:
+      - event: post-commit
+        ownershipBefore: peasant
+        plannedAction: replace
+        installOutcome: failed
+        managedAfterInstall: false
+        uninstallOutcome: not-present
+        presentAfterUninstall: true
+        postPlanMutation:
+          window: before-write
+          shape: foreign-bytes
+          mode: "0755"
+          content: "#!/bin/sh\n# the user's own hook\n"
+        reasonMustContain:
+          - "is no longer the file Peasant planned to replace"

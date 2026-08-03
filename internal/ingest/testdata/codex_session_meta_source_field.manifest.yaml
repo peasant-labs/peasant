@@ -1,0 +1,5 @@
+expectedCaseCount: 3
+requiredNames:
+  - subagent_thread_spawn_object_source
+  - plain_string_source_cli
+  - plain_string_source_vscode

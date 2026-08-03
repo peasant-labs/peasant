@@ -1,0 +1,26 @@
+records:
+  - name: terminal-private-receipt
+    origin: https://api.village.example
+    owner: owner-1
+    session_id: 99d59925-36bc-424c-a789-8be54d9702ba
+    project_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    receipt_json: '{"transcriptId":"99d59925-36bc-424c-a789-8be54d9702ba","transcriptUrl":"https://village.example/transcripts/99d59925-36bc-424c-a789-8be54d9702ba","visibility":"private","contentHash":"a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a","requestOperationFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","applied":{"license":null,"associations":[],"normalizedValues":{"rootHarness":"claude-code","entryHarnesses":[],"derivedTitle":null,"visibility":"private","schemaVersion":"9"}},"blobKey":"transcripts/x","blobSizeBytes":0,"publishedAt":1,"updatedAt":1,"created":true}'
+  - name: wrong-project-receipt
+    origin: https://api.village.example
+    owner: owner-1
+    session_id: 99d59925-36bc-424c-a789-8be54d9702ba
+    project_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    receipt_json: '{"transcriptId":"88d59925-36bc-424c-a789-8be54d9702bb","transcriptUrl":"https://village.example/transcripts/88d59925-36bc-424c-a789-8be54d9702bb","visibility":"private","contentHash":"a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a","requestOperationFingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","applied":{"license":null,"associations":[],"normalizedValues":{"rootHarness":"claude-code","entryHarnesses":[],"derivedTitle":null,"visibility":"private","schemaVersion":"9"}},"blobKey":"transcripts/y","blobSizeBytes":0,"publishedAt":2,"updatedAt":2,"created":true}'
+attempts:
+  - {name: publish-failure, stage: publish, message: "Village rejected the authoritative request; retry after correcting the request"}
+  - {name: validation-failure, stage: validate, message: "Village returned mismatched authoritative state; retry after verifying Village health"}
+  - {name: visibility-failure, stage: visibility, message: "content succeeded but visibility convergence failed; retry this session"}
+  - {name: persistence-failure, stage: persist, message: "Village accepted the publication but the local terminal receipt failed; retry this session"}
+rejections:
+  - {name: unknown-stage, stage: unknown, error_contains: "not supported", sqlite_error_contains: "CHECK constraint failed"}
+rollback:
+  name: cursor-update-failure-rolls-back-receipt
+  initial_pushed_at: 41
+  initial_license: CC-BY-4.0
+  expected_pushed_at: 41
+  expected_license: CC-BY-4.0

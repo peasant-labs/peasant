@@ -1,0 +1,34 @@
+harness: claude-code
+source_path: "."
+sessions:
+  - id: "6a46bcd8-b365-4608-be7d-5601e2fdd805"
+    kind: "claude-root"
+    path: "-home-user-projects-peasant-e2e/6a46bcd8-b365-4608-be7d-5601e2fdd805.jsonl"
+  - id: "6a46bcd8-b365-4608-be7d-5601e2fdd805"
+    kind: "claude-subagent"
+    parent_id: "6a46bcd8-b365-4608-be7d-5601e2fdd805"
+    path: "-home-user-projects-peasant-e2e/6a46bcd8-b365-4608-be7d-5601e2fdd805/subagents/agent-a083060.jsonl"
+slug:
+  workspace: "-home-user-projects-peasant-e2e"
+  decoded_dir: "/home/user/projects/peasant-e2e"
+  dir_tree:
+    - "/home"
+    - "/home/user"
+    - "/home/user/projects"
+    - "/home/user/projects/peasant-e2e"
+pinned:
+  scrubbed_home: "/home/user"
+  synthetic_remote: false
+  code_identifier: "computeWidgetTotal"
+association_roundtrip:
+  session_id: "6a46bcd8-b365-4608-be7d-5601e2fdd805"
+  observed_commit_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  subject: "association annotation round trip"
+  author_time: 1700000000000
+  pushed_at: 1700000100000
+  annotation:
+    type_id: "quality.session_outcome"
+    value: "resolved"
+    annotator: "outcome-classifier"
+    primary: true
+  expected_annotation_count: 1

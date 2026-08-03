@@ -1,0 +1,33 @@
+cases:
+  - name: replay only pushed sessions with backfilled associations
+    expectedAssociationCount: 2
+    expectedReplayCount: 1
+    replayAcknowledgedAt: 1700001000000
+    sessions:
+      - sessionID: "11111111-1111-1111-1111-111111111111"
+        projectHash: "1111111111111111111111111111111111111111111111111111111111111111"
+        hostSlug: "github.com-user-associated"
+        startMs: 1700000000000
+        pushed: true
+        association:
+          commitHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          subject: "backfill the already-pushed association"
+          authorTime: 1699999999000
+        expectedCandidate: true
+        expectedReplay: true
+      - sessionID: "22222222-2222-2222-2222-222222222222"
+        projectHash: "2222222222222222222222222222222222222222222222222222222222222222"
+        hostSlug: "github.com-user-no-association"
+        startMs: 1700000100000
+        pushed: true
+        expectedCandidate: false
+      - sessionID: "33333333-3333-3333-3333-333333333333"
+        projectHash: "3333333333333333333333333333333333333333333333333333333333333333"
+        hostSlug: "github.com-user-unpushed"
+        startMs: 1700000200000
+        pushed: false
+        association:
+          commitHash: "cccccccccccccccccccccccccccccccccccccccc"
+          subject: "retain an unpushed association"
+          authorTime: 1700000199000
+        expectedCandidate: true

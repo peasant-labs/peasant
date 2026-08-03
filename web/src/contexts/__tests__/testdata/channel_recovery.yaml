@@ -1,0 +1,23 @@
+cases:
+  - name: dashboard failure clears only dashboard data and later recovers
+    topic: dashboard
+    initialData:
+      totalSessions: 42
+    errorMessage: "Dashboard data could not be refreshed. Run `peasant kickstart` and retry."
+    errorCode: selection_visibility
+    recoveryData:
+      totalSessions: 43
+  - name: session detail failure clears only the matching session and later recovers
+    topic: session_detail
+    id: abc
+    initialData:
+      id: abc
+      harness: claude-code
+      turns: []
+      turnCount: 3
+    errorMessage: "Session abc could not be refreshed because the database is unavailable. Retry after restoring the database."
+    recoveryData:
+      id: abc
+      harness: claude-code
+      turns: []
+      turnCount: 4

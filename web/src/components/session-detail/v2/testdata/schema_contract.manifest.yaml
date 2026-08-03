@@ -1,0 +1,52 @@
+expectedCaseCount: 5
+requiredFamilies:
+  - flat-git-fields
+  - nullable-turns
+  - expanded-stop-reasons
+  - nullable-scorecard-members
+  - legacy-git-context-isolation
+requiredNames:
+  - flat git context drives file navigation
+  - null turns normalize at the mounted boundary
+  - refusal survives canonical transcript adaptation
+  - nullable scorecard members reach analytics unchanged
+  - legacy working directory cannot authorize map navigation
+expectedLoaderMutationCount: 2
+loaderMutations:
+  - name: missing required turn depth is rejected
+    target: cases
+    find: "    depth: 3\n    stopReason: max_turn_requests"
+    replace: '    stopReason: max_turn_requests'
+    expectedError: 'missing required fields: depth'
+  - name: unknown case field is rejected
+    target: cases
+    find: '    expectedScorecardState: nullable-member'
+    replace: "    expectedScorecardState: nullable-member\n    nestedFallback: true"
+    expectedError: 'unknown fields: nestedFallback'
+expectedMutationCount: 3
+mutations:
+  - name: nullable turn normalization is executable
+    find: 'const turns = useMemo(() => detail?.turns ?? [], [detail?.turns]);'
+    replace: "const turns = useMemo(() => detail?.turns ?? [{ index: 999, role: 'user' as const, depth: 0, content: 'mutated fallback', timestamp: '2026-07-16T00:00:00Z', toolCalls: [] }], [detail?.turns]);"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx
+    expectedFailedTestNames:
+      - null turns normalize at the mounted boundary
+    expectedFailurePattern: data-turn-count
+  - name: nullable quality normalization is executable
+    find: 'adaptQualitySessions(quality?.sessions ?? []).map((session) => {'
+    replace: "adaptQualitySessions(quality?.sessions ?? []).concat([{ id: 'mutated-quality-fallback' }]).map((session) => {"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx
+    expectedFailedTestNames:
+      - flat git context drives file navigation
+      - null turns normalize at the mounted boundary
+      - refusal survives canonical transcript adaptation
+      - nullable scorecard members reach analytics unchanged
+      - legacy working directory cannot authorize map navigation
+    expectedFailurePattern: 'expected \[ \{.*\} \] to deeply equal \[\]'
+  - name: nested git fallback is executable
+    find: 'const workingDirectory = detail.workingDirectory;'
+    replace: "const workingDirectory = detail.workingDirectory ?? (detail as SessionDetailPayload & { gitContext?: { workingDirectory?: string } }).gitContext?.workingDirectory;"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.schemaContract.test.tsx
+    expectedFailedTestNames:
+      - legacy working directory cannot authorize map navigation
+    expectedFailurePattern: 'Open src/legacy\.ts on the Map'

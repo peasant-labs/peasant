@@ -1,0 +1,51 @@
+expectedCaseCount: 8
+requiredNames:
+  - dotted timestamp session serves projects HTML
+  - dotted timestamp session serves projects flight data
+  - dotted project name serves Map HTML
+  - dotted project name serves Map flight data
+  - dotted project name serves Review HTML
+  - dotted project name serves Review flight data
+  - missing Next static chunk stays not found
+  - unrelated file extension stays not found
+cases:
+  - name: dotted timestamp session serves projects HTML
+    path: /projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/20260729T010203.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    expectedStatus: 200
+    expectedContentType: text/html
+    expectedBody: PROJECT HTML
+  - name: dotted timestamp session serves projects flight data
+    path: /projects/eb162ff109780837cd029d2aa990cb3b3f81ad566e678429099debed9ec0514b/20260729T010203.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA.txt?origin=Map
+    expectedStatus: 200
+    expectedContentType: text/plain
+    expectedBody: PROJECT FLIGHT
+  - name: dotted project name serves Map HTML
+    path: /map/strike.local
+    expectedStatus: 200
+    expectedContentType: text/html
+    expectedBody: MAP HTML
+  - name: dotted project name serves Map flight data
+    path: /map/strike.local.txt
+    expectedStatus: 200
+    expectedContentType: text/plain
+    expectedBody: MAP FLIGHT
+  - name: dotted project name serves Review HTML
+    path: /review/strike.local
+    expectedStatus: 200
+    expectedContentType: text/html
+    expectedBody: REVIEW HTML
+  - name: dotted project name serves Review flight data
+    path: /review/strike.local.txt
+    expectedStatus: 200
+    expectedContentType: text/plain
+    expectedBody: REVIEW FLIGHT
+  - name: missing Next static chunk stays not found
+    path: /_next/static/chunks/missing.js
+    expectedStatus: 404
+    expectedContentType: text/plain
+    expectedBody: page not found
+  - name: unrelated file extension stays not found
+    path: /downloads/archive.zip
+    expectedStatus: 404
+    expectedContentType: text/plain
+    expectedBody: page not found

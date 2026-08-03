@@ -1,0 +1,164 @@
+# Text that must never appear in the source of the packages on the record ->
+# publish path.
+#
+# Every row is a sentence or a shape that WAS in this repository, was false or
+# unsafe, and cost something. They are collected in one corpus rather than left as
+# literals in test bodies because a forbid-guard is the one kind of assertion that
+# passes for free: the text is gone, so `!contains` is true, and it stays true if
+# the needle is misspelled, if the scan reads no files, or if the phrase comes back
+# in a form the needle cannot see. Each row therefore carries a SAMPLE it must
+# match, and the loader proves the needle fires against that sample and against
+# every line-wrapped rendering of it.
+#
+# Matching is done on NORMALISED text: comment markers removed, hyphens treated as
+# spaces, runs of whitespace collapsed to one, compared case-insensitively. All
+# four of those are evasions that happened or could happen for free - the first
+# copy of the redaction-safety claim was invisible to a contiguous needle purely
+# because gofmt had wrapped it across two comment lines.
+#
+# WHAT THE RULE IS ABOUT: PRODUCTION PROSE - the sentences a reader meets as a
+# statement of how the product behaves NOW. A banned phrase inside such a
+# sentence is still a claim and is still banned, however it is framed; describe
+# what is true instead.
+#
+# Dated corrections and test explanations are OUT OF SCOPE rather than exempted,
+# and the difference matters: an exception gets re-litigated by whoever reads the
+# rule next and does not know why it exists. A record that says "it used to say
+# X; that was false because Y" asserts nothing about current behaviour, and
+# deleting it to satisfy a needle destroys the only artifact explaining why the
+# design is what it is. Two of those records exist here deliberately - the
+# history block in internal/push/content.go and the dated note in
+# docs/research - and a guard whose only satisfaction is deleting them is
+# mis-specified, not under-enforced.
+#
+# This wording replaces "a banned phrase is banned in EXPLANATIONS too". That
+# version was unenforceable exactly where explanations live (see the scope note
+# below) and it read as an argument for deleting the records above.
+#
+# WHAT THE SCAN REACHES, and what it does not. Both are stated because a guard
+# whose coverage is narrower than its declared scope is trusted for the part it
+# never reads.
+#
+#   - Every declared directory is walked RECURSIVELY. It was read one level deep
+#     for its whole life, which was 76 files of the 158 these directories hold -
+#     so roughly half of the declared scope was never scanned, silently, while
+#     this corpus said it covered those directories. It cost a real miss: a
+#     sentence in docs/research describing the removed code-block masking as
+#     current behaviour, found by hand rather than by the guard that names docs
+#     among its packages.
+#   - WITHIN those directories it reads non-test .go and .md, and nothing else.
+#     No _test.go, no .yaml, no .ts/.tsx, no JSON - so this corpus, and every
+#     testdata/ file beside it, are unreadable to the scan. No directory is
+#     excluded (generated files under docs/cli are scanned, since a forbidden
+#     claim reaching generated reference means it is in a command's help text);
+#     the limit is the file type. An earlier version of this header said "there
+#     are no exclusions" full stop, which overstated the reach of a guard whose
+#     whole premise is that overstated reach is worse than none.
+#
+#     Do NOT widen the scan to close that. A scan wide enough to read the file
+#     types where explanations live would fail on THIS file, which carries every
+#     banned sentence verbatim in its own phrase:, matchesSample: and why:
+#     fields. The rule is about production prose precisely so that this is not a
+#     contradiction.
+#   - It matches WORDINGS, not claims. That same sentence would still not be
+#     caught by the widened walk, because no needle here matches the form it
+#     took. A forbid-list catches a sentence coming BACK; it cannot find a false
+#     statement nobody has written a needle for, and sweeping for the claim
+#     after a behaviour change remains a person's job.
+#
+# packages        the repository-relative package directories scanned, walked
+#                 recursively. Declared once here so a row cannot silently name
+#                 a directory nothing reads.
+# claims
+#   phrase        literal text, matched after normalisation. Exactly one of
+#                 phrase or pattern.
+#   pattern       a regular expression, matched case-insensitively after
+#                 normalisation, for a SHAPE rather than a sentence.
+#   packages      where this row applies. Every entry must be a declared package.
+#   matchesSample text the needle must match, so a needle that can never fire is
+#                 a load failure rather than a permanent green.
+#   why           what this text cost, in the words of whoever paid.
+
+expectedPackageCount: 4
+packages:
+  - internal/ingest
+  - internal/push
+  - internal/api
+  - docs
+
+expectedClaimCount: 5
+claims:
+  - name: indexed-entries-are-not-redaction-safe-by-construction
+    phrase: redaction-safe by construction
+    packages:
+      - internal/ingest
+      - internal/push
+      - internal/api
+    matchesSample: "// DB session_entries are redaction-safe by construction, so no raw provider JSONL leaves the host."
+    why: >
+      The construction this named was the ingest pipeline redacting before
+      indexing, and no level a user can choose does that. The claim was not inert:
+      the raw-transcript read and the safety-net re-redaction on the outward path
+      were DELETED on the strength of it. It stood in two files in internal/push
+      and in four more in internal/ingest, which is where the belief started - push
+      believed its input was redacted because ingest said it redacted. Either make
+      it true and say how, or describe what actually protects a publish: metadata
+      redaction on the push path, plus the village's server-side secret scan.
+
+  - name: ingest-writes-the-transcript-as-recorded-not-an-already-redacted-copy
+    phrase: already-redacted
+    packages:
+      - internal/ingest
+    matchesSample: "// transcriptData holds the already-redacted bytes in memory."
+    why: >
+      Four comments in internal/ingest described the bytes it writes and indexes as
+      already redacted. WithRedactor has no production caller, so nothing an ingest
+      run writes is redacted at all, and the phrase asserted the opposite as
+      settled fact at the exact layer whose behaviour the deleted safety net was
+      compensating for. If a production caller is ever wired, this row is the place
+      to argue the phrase back in.
+
+  - name: no-sync-door-may-name-its-own-default-redaction-level
+    pattern: \w*level\s*:?=\s*redact\.(Minimal|Standard|Maximum)\b
+    packages:
+      - internal/api
+    matchesSample: "requestedLevel := redact.Standard"
+    why: >
+      The two web sync doors each filled in an omitted redaction level themselves.
+      One was later derived from the policy and the other was left as a literal, so
+      the same missing setting could mean different protection at
+      GET /sync/redactions and at POST /sync/push - the identical defect the
+      removal of the per-operation floor was meant to end, one layer out. Neither
+      door names a level now: an absent level is passed through and resolved once,
+      in internal/config, which is the only place that knows what an unset level
+      means. A door that names a level again is that defect returning.
+
+  - name: the-push-body-may-not-be-marshalled-without-a-redactor
+    pattern: marshalTranscriptContent\([^)]*,\s*nil\)
+    packages:
+      - internal/push
+    matchesSample: "transcriptBytes, err := marshalTranscriptContent(&meta, entries, emit, nil)"
+    why: >
+      Push redacts transcript content by passing the pipeline's redactor to
+      marshalTranscriptContent. The nil case exists so a caller must choose
+      explicitly, and it is exactly one character of edit away from the production
+      call site - measured: swapping p.redactor for nil at that site publishes
+      content unredacted again and every test in internal/push stays green,
+      because the content test drives the function directly and cannot see which
+      argument the pipeline passes. This is the wiring, and the wiring is what a
+      user asked to be fixed: the redact command and pushing must not disagree.
+
+  - name: no-surface-may-say-code-blocks-are-removed-at-the-offered-levels
+    phrase: removes whole code blocks
+    packages:
+      - docs
+      - internal/push
+    matchesSample: "every weaker level removes whole code blocks, which would make a shared transcript useless"
+    why: >
+      True until the inverted gate was fixed, and the sentence outlived it. AST
+      anonymisation was gated to Maximum, so the offered levels fell through to v1
+      masking and every fenced block became a placeholder - and it ran BEFORE the
+      rules, so a key inside a block was never scanned. Below Maximum the rules
+      now run over code: structure survives and matched tokens are replaced. A doc
+      still describing removal tells a user their code will not survive a publish,
+      which is the reverse of what happens and the reason they would not publish.

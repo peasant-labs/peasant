@@ -1,0 +1,79 @@
+changesPayload:
+  projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  repoFound: true
+  defaultBranch: develop
+  recentCommits:
+    - {hash: c1, subject: first commit, timeMs: 1782586800000, hasSession: true}
+    - {hash: c2, subject: second commit, timeMs: 1782583200000, hasSession: false}
+  changes:
+    - branch: feat/candidate
+      merged: false
+      baseHash: c2
+      tipCommitMs: 1782588600000
+      sessionCount: 1
+      aheadCount: 2
+      behindCount: 0
+      filesChanged: 3
+      taskCount: 2
+      newEdges: 1
+      removedEdges: 0
+      violations: 0
+    - branch: feat/merged
+      merged: true
+      mergedAtMs: 1782589500000
+      mergeCommitHash: c1
+      sessionCount: 1
+      aheadCount: 1
+      behindCount: 0
+      filesChanged: 1
+      taskCount: 1
+      newEdges: 0
+      removedEdges: 0
+      violations: 0
+  sessions: []
+detailPayload:
+  branch: feat/candidate
+  baseRef: c2
+  defaultBranch: develop
+  files:
+    - {path: a.go, status: M, linesAdded: 2, linesRemoved: 1}
+  slice: {nodes: [], structureEdges: [], activityEdges: []}
+  newEdges:
+    - {from: a, to: b, count: 1}
+  removedEdges: []
+  newNodes: []
+  removedNodes: []
+  violations: []
+  work:
+    - {sessionId: s1, title: conv, harness: claude-code, binding: bound, tasks: []}
+  unrecordedCommits: []
+  unusual: []
+  frictions:
+    - {kind: retryLoop, label: retry loop, file: a.go, count: 3, sessions: 1}
+  filesChanged: 42
+  linesAdded: 2
+  linesRemoved: 1
+  outputTokens: 5000
+  costUsd: 1.23
+textDiff:
+  branch: feat/candidate
+  file: a.go
+  status: M
+  binary: false
+  truncated: false
+  hunks:
+    - oldStart: 1
+      oldLines: 1
+      newStart: 1
+      newLines: 2
+      sessionId: sess-abc
+      sessionTitle: Refactor it
+      lines:
+        - {kind: context, text: package a}
+        - {kind: add, text: 'func A() {}'}
+expected:
+  candidateBranch: feat/candidate
+  mergedBranch: feat/merged
+  file: a.go
+  sessionTitle: Refactor it
+  addedLine: 'func A() {}'

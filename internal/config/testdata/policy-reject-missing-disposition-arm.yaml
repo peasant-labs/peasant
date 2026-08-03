@@ -1,0 +1,32 @@
+# Proves the loader rejects a corpus that exercises only some dispositions. With
+# no raised row nothing checks that an existing minimal configuration keeps
+# working, and the transition could be replaced by a refusal unnoticed.
+expectedRedactionCaseCount: 4
+redaction:
+  - name: standard-is-offered
+    configured: standard
+    disposition: offered
+    effective: standard
+  - name: minimal-is-refused-too
+    configured: minimal
+    disposition: refused
+  - name: maximum-is-refused
+    configured: maximum
+    disposition: refused
+  - name: an-unset-level-still-resolves-to-the-default
+    configured: ""
+    disposition: offered
+    effective: standard
+expectedVisibilityCaseCount: 3
+visibility:
+  - name: private
+    configured: private
+    effective: private
+  - name: group
+    configured: group
+    effective: private
+    downgraded: true
+  - name: public
+    configured: public
+    effective: private
+    downgraded: true

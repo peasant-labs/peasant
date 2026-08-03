@@ -1,0 +1,35 @@
+expectedCaseCount: 3
+requiredNames:
+  - a resolved outcome reaches computePersonalMedians unchanged
+  - an empty (not-yet-computed) outcome bridges to an empty string, never undefined
+  - an association-target annotation stays out of computePersonalMedians
+expectedLoaderMutationCount: 2
+loaderMutations:
+  - name: median bridge case count drift is rejected
+    target: manifest
+    find: "expectedCaseCount: 3\nrequiredNames:"
+    replace: "expectedCaseCount: 2\nrequiredNames:"
+    expectedError: independent manifest
+  - name: median bridge duplicate names are rejected
+    target: cases
+    find: "an empty (not-yet-computed) outcome bridges to an empty string, never undefined"
+    replace: "a resolved outcome reaches computePersonalMedians unchanged"
+    expectedError: duplicate
+expectedMutationCount: 2
+mutations:
+  - name: quality median bridge cannot regress to passing outcome through unbridged
+    target: /src/components/session-detail/v2/SessionDetailV2.tsx
+    find: "outcome: session.outcome ?? '',"
+    replace: "outcome: session.outcome,"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx
+    expectedFailedTestNames:
+      - an empty (not-yet-computed) outcome bridges to an empty string, never undefined
+    expectedFailurePattern: "expected 'undefined' to be 'string'"
+  - name: quality median bridge cannot restore association-target annotations
+    target: /src/components/session-detail/v2/SessionDetailV2.tsx
+    find: "            ...medianSession,\n            outcome: session.outcome ?? '',"
+    replace: "            ...medianSession,\n            effectiveAnnotations: session.effectiveAnnotations,\n            outcome: session.outcome ?? '',"
+    expectedTestFile: src/components/session-detail/v2/SessionDetailV2.qualityMedianBridge.test.tsx
+    expectedFailedTestNames:
+      - an association-target annotation stays out of computePersonalMedians
+    expectedFailurePattern: 'to not have property "effectiveAnnotations"'

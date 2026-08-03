@@ -1,0 +1,8 @@
+expectedCaseCount: 1
+cases:
+  - name: unknown-field
+    event: post-commit
+    gitOperation: commit
+    uploadExitCode: 0
+    expectWarning: false
+    unexpectedEvidence: true

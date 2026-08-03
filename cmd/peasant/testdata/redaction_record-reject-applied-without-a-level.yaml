@@ -1,0 +1,64 @@
+# Proves the loader rejects a case claiming the metadata file recorded a redaction
+# while naming no level for it.
+#
+# This rule is LOAD-BEARING for the corpus's cross-product coverage, which is why
+# it needs a fixture of its own. The cell guard requires cases where a stored
+# claim exists, and the subsumption of the old disagreeing-level rule rests on
+# every such case carrying a level that DIFFERS from the applied one. A row that
+# claims a redaction with a blank level satisfies "has a stored claim" while
+# carrying nothing to disagree - so without this rule the cell could be filled by
+# a row that distinguishes nothing, and the deleted rule's work would silently
+# stop being done.
+#
+# It is also not a state the writer produces: an applied-but-level-less metadata
+# file does not exist, so the case would pin an impossible input.
+expectedCaseCount: 6
+cases:
+  - name: claims-a-redaction-with-no-level-to-name
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: ""
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: present-plural-no-stored-claim
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: present-single-with-a-stored-claim
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: maximum
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: present-single-no-stored-claim
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: absent-plural
+    sessionCount: 3
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 3
+  - name: absent-single
+    sessionCount: 1
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 1

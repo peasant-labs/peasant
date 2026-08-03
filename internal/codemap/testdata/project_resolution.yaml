@@ -1,0 +1,152 @@
+cases:
+  - name: exact_hash_resolves_directly
+    classification: must-pass
+    provenance: {source: requirement, ref: canonical-project-hash-resolution}
+    mutation: {description: replace the canonical hash with an unknown hash}
+    input:
+      identity: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      selection: {mode: all}
+      projects:
+        - {hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, cwd: /work/alpha, session_id: 11111111-1111-1111-1111-111111111111}
+    expected: {project: /work/alpha, hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+
+  - name: unique_legacy_label_resolves_to_hash
+    classification: must-pass
+    provenance: {source: requirement, ref: unique-legacy-project-label}
+    mutation: {description: add a second project with the same legacy label}
+    input:
+      identity: /work/legacy label
+      selection: {mode: all}
+      projects:
+        - {hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, cwd: /work/legacy label, session_id: 22222222-2222-2222-2222-222222222222}
+    expected: {project: /work/legacy label, hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+
+  - name: duplicate_legacy_label_is_ambiguous
+    classification: must-fail
+    provenance: {source: requirement, ref: ambiguous-legacy-project-label}
+    mutation: {description: remove either duplicate project}
+    input:
+      identity: /work/shared
+      selection: {mode: all}
+      projects:
+        - {hash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc, cwd: /work/shared, session_id: 33333333-3333-3333-3333-333333333333}
+        - {hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd, cwd: /work/shared, session_id: 44444444-4444-4444-4444-444444444444}
+    expected: {error_kind: ambiguous, error_contains: matches 2 stored projects}
+
+  # NOTE: this case's error is byte-identical to
+  # hidden_legacy_label_does_not_resolve's below, by design -- both
+  # zero-match ("no such label") and hidden-single-match ("label exists,
+  # visibility denies it") legacy-label failures must return the SAME text
+  # AND perform the SAME projectHasVisibleSession query/visibility-loop
+  # work (see summary.go ResolveProject case 0's comment and
+  # TestResolveProject_NotFoundPathsShareVisibilityQueryShape in
+  # resolve_project_timing_internal_test.go), so a caller can't
+  # distinguish "no such project" from "hidden project" by response body
+  # OR by response latency. A future refactor that special-cases either
+  # branch back to an early return reintroduces that timing side-channel
+  # even if this fixture case keeps passing -- the query-count parity is
+  # covered by the internal test, not by this black-box case alone.
+  - name: missing_identity_is_not_found
+    classification: must-fail
+    provenance: {source: requirement, ref: missing-project-identity}
+    mutation: {description: change the requested label to the stored cwd}
+    input:
+      identity: /work/missing
+      selection: {mode: all}
+      projects:
+        - {hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, cwd: /work/present, session_id: 55555555-5555-5555-5555-555555555555}
+    expected: {error_kind: missing, error_contains: does not identify a stored project}
+
+  - name: malformed_identity_fails_closed
+    classification: must-fail
+    provenance: {source: boundary, ref: malformed-project-identity}
+    mutation: {description: replace the control-only label with the stored cwd}
+    input:
+      identity: "\u0001"
+      selection: {mode: all}
+      projects:
+        - {hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, cwd: /work/present, session_id: 66666666-6666-6666-6666-666666666666}
+    expected: {error_kind: malformed, error_contains: contains control characters}
+
+  - name: hidden_explicit_hash_still_resolves
+    classification: must-pass
+    provenance: {source: requirement, ref: explicit-route-is-not-discovery-authorization}
+    mutation: {description: resolve through the selection-filtered project summary instead of the direct hash path}
+    input:
+      identity: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      selection: {mode: selected}
+      projects:
+        - {hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /work/hidden, session_id: 77777777-7777-7777-7777-777777777777}
+    expected: {project: /work/hidden, hash: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+
+  - name: hidden_legacy_label_does_not_resolve
+    classification: must-fail
+    provenance: {source: requirement, ref: legacy-label-resolution-is-not-discovery-authorization}
+    mutation: {description: skip the visibility check and resolve the label directly like the hash branch}
+    input:
+      identity: /work/hidden-by-label
+      selection: {mode: selected}
+      projects:
+        - {hash: 1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /work/hidden-by-label, session_id: 88888888-8888-8888-8888-888888888888}
+    expected: {error_kind: missing, error_contains: does not identify a stored project}
+
+  # Usability requirement: "We also should be using the Git repo remote
+  # to display them, not the path. e.g. github:example-org/garden-app, ...".
+  # Resolving by the canonical hash must display the git-remote-derived
+  # label, not the recorded canonical_cwd path, whenever a remote is known.
+  - name: remote_derived_display_name_github
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-github-remote-display-name}
+    mutation: {description: clear the remote so the fixture falls back to the raw cwd path instead}
+    input:
+      identity: 2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      selection: {mode: all}
+      projects:
+        - {hash: 2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /home/developer/work/garden-app, remote: "https://github.com/example-org/garden-app.git", session_id: 99999999-9999-9999-9999-999999999999}
+    expected: {project: "github:example-org/garden-app", hash: 2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+
+  - name: remote_derived_display_name_gitlab
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-gitlab-remote-display-name}
+    mutation: {description: change the SSH remote form to an HTTPS one so the SCP-parsing branch is no longer exercised}
+    input:
+      identity: 3323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      selection: {mode: all}
+      projects:
+        - {hash: 3323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /home/developer/work/sample-project, remote: "git@gitlab.com:example-team/sample-project.git", session_id: aaaaaaaa-1111-1111-1111-111111111111}
+    expected: {project: "gitlab:example-team/sample-project", hash: 3323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+
+  # The exact regression the user hit: a project with NO configured remote
+  # (e.g. a bare Codex session directory) must fall back to the path, never
+  # to a bare trailing path segment like "12".
+  - name: no_remote_falls_back_to_cwd_path
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-166-path-fallback-when-no-remote}
+    mutation: {description: configure a remote so the fallback path branch is no longer taken}
+    input:
+      identity: 4423456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      selection: {mode: all}
+      projects:
+        - {hash: 4423456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: "/home/developer/.codex/sessions/2026/06/12", session_id: bbbbbbbb-2222-2222-2222-222222222222}
+    expected: {project: "/home/developer/.codex/sessions/2026/06/12", hash: 4423456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+
+  # Deliberate deep-link format behavior: once a project has a configured git
+  # remote, its legacy label is the remote-derived display name, not the raw
+  # canonical_cwd path. An old saved link that embedded the previous
+  # path-based label therefore no longer resolves by legacy label (the
+  # CANONICAL-HASH link for the same project is unaffected — see
+  # remote_derived_display_name_github above). This case locks that in as an
+  # intentional consequence, not a silent regression: the identity below is
+  # exactly what a pre-fix "legacy label" deep link would have saved (the raw
+  # cwd path), against a project that now has a remote, and it must NOT
+  # resolve.
+  - name: old_path_based_legacy_link_no_longer_resolves_once_remote_is_known
+    classification: must-fail
+    provenance: {source: bug, ref: peasant-166-deep-link-format-change}
+    mutation: {description: clear the remote so the legacy path-based label resolves again}
+    input:
+      identity: /home/developer/work/garden-app
+      selection: {mode: all}
+      projects:
+        - {hash: 5523456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /home/developer/work/garden-app, remote: "https://github.com/example-org/garden-app.git", session_id: cccccccc-3333-3333-3333-333333333333}
+    expected: {error_kind: missing, error_contains: does not identify a stored project}

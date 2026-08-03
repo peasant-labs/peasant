@@ -1,0 +1,61 @@
+# Request-validation cases for POST /api/v1/sync/push, one per way a redaction
+# level can be rejected.
+#
+# THREE arms have to be covered, and they are genuinely different rejections. Two
+# of them used to be one:
+#
+#   invalid    not a redaction level at all - a typo or a client bug.
+#   unoffered  a real level this version still applies for a stored configuration
+#              but will not accept as a REQUEST, because a caller who names a level
+#              must not be handed a different one. This arm is new: minimal used to
+#              be accepted here and silently honoured, so the web push published at
+#              a weaker level than the CLI push would have from the same setting.
+#   refused    a real level this version cannot apply at all.
+#
+# A check written for one arm leaves the others open, which is exactly how minimal
+# stayed live at this endpoint after being removed from the wizard. expectedError
+# is the WHOLE body, so a message that loses its remedy or its reason fails here
+# rather than being noticed by a user.
+expectedCaseCount: 3
+cases:
+  - name: invalid_redaction_level
+    sessionIds:
+      - 99d59925-36bc-424c-a789-8be54d9702ba
+    redactionLevel: unsupported
+    visibility: private
+    expectedStatus: 400
+    expectedError: |-
+      what: redaction level "unsupported" is invalid
+      why: the level this version offers is standard
+      where: JSON field "redactionLevel" on POST /api/v1/sync/push
+      when: validating the request before credential access, redactor construction, or push setup
+      means: no scan or push was started and no content left the machine
+      fix: set redactionLevel to standard and retry
+
+  - name: unoffered_push_redaction_level
+    sessionIds:
+      - 99d59925-36bc-424c-a789-8be54d9702ba
+    redactionLevel: minimal
+    visibility: private
+    expectedStatus: 400
+    expectedError: |-
+      what: redaction level "minimal" is not a level this version offers
+      why: minimal redacts less than standard, and standard is now the single level this version offers, so publishing at it would not apply the protection the request named
+      where: JSON field "redactionLevel" on POST /api/v1/sync/push
+      when: validating the request before credential access, redactor construction, or push setup
+      means: no scan or push was started and no content left the machine
+      fix: set redactionLevel to standard and retry
+
+  - name: refused_push_redaction_level
+    sessionIds:
+      - 99d59925-36bc-424c-a789-8be54d9702ba
+    redactionLevel: maximum
+    visibility: private
+    expectedStatus: 400
+    expectedError: |-
+      what: redaction level "maximum" is not a level this version offers
+      why: maximum redaction anonymises code identifiers in transcript content, and this version applies the same redaction on every build of Peasant rather than one that depends on how the binary was compiled, so publishing at it would not apply the protection the request named
+      where: JSON field "redactionLevel" on POST /api/v1/sync/push
+      when: validating the request before credential access, redactor construction, or push setup
+      means: no scan or push was started and no content left the machine
+      fix: set redactionLevel to standard and retry

@@ -1,0 +1,43 @@
+# How the offered set reads in prose, at every size it can be.
+#
+# Collapsing the menu to one member left four live messages saying "fix: set
+# redactionLevel to one of standard", which is not English, on the one line of an
+# actionable error whose whole job is to be read and followed. The neighbouring
+# "why:" line WAS corrected for the singular at the time - by hand, to the
+# singular - which set the same trap facing the other way: prose tuned to a
+# one-member set reads wrong the day a second level is offered, and widening the
+# menu is the explicit design intent of the disposition table.
+#
+# So the renderers derive their grammar from the set, and this corpus exercises
+# them at sizes the product does not currently ship. That is the point: a helper
+# only ever run against the set of the day is a helper whose widening behaviour
+# nobody has seen, which is exactly the state the hand-tuned sentences were in.
+#
+# The loader requires a row of size one, a row of size more than one, and a row
+# rendering the set this version ACTUALLY offers - the last so the corpus tracks
+# the product rather than describing hypothetical sets beside it.
+#
+# levels           the offered set to render.
+# choicePhrase     the object of an instruction: "set redaction.level to X".
+# offeredSentence  a statement of what is offered, used after "why:".
+# offeredClause    the same fact as a clause inside a longer sentence.
+
+expectedCaseCount: 3
+cases:
+  - name: one-offered-level-reads-in-the-singular
+    levels: [standard]
+    choicePhrase: standard
+    offeredSentence: the level this version offers is standard
+    offeredClause: standard is now the single level this version offers
+
+  - name: two-offered-levels-read-in-the-plural
+    levels: [minimal, standard]
+    choicePhrase: one of minimal, standard
+    offeredSentence: the levels this version offers are minimal and standard
+    offeredClause: minimal and standard are now the levels this version offers
+
+  - name: a-set-of-three-spells-out-its-final-separator
+    levels: [minimal, standard, maximum]
+    choicePhrase: one of minimal, standard, maximum
+    offeredSentence: the levels this version offers are minimal, standard and maximum
+    offeredClause: minimal, standard and maximum are now the levels this version offers

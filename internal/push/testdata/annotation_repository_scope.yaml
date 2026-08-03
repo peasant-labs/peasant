@@ -1,0 +1,35 @@
+# Which annotations a push publishes when a session selection is active, with
+# and without a repository scope on top of it.
+#
+# The session gate alone has a hole: an annotation with no target session passes
+# it unconditionally. That is correct for a selection, which is about sessions,
+# but wrong for a repository scope: a hook installed in one repository would
+# publish annotations belonging to every other one, on every commit.
+#
+# Under a repository scope an unattributable annotation is withheld, and a
+# project-targeted one is published only when the project it names is the one in
+# scope. Without a repository scope, behaviour is exactly what it was.
+#
+# Every case must account for all five candidates: leaving one unlisted would let
+# a silent publish pass unnoticed.
+expectedCaseCount: 2
+cases:
+  - name: a selection alone publishes everything it cannot attribute to a session
+    scope: selection-only
+    published:
+      - selected-session
+      - scoped-project
+      - other-project
+      - unattributable
+    withheld:
+      - other-session
+
+  - name: a repository scope publishes only what it can attribute to that repository
+    scope: repository-scoped
+    published:
+      - selected-session
+      - scoped-project
+    withheld:
+      - other-session
+      - other-project
+      - unattributable

@@ -1,0 +1,78 @@
+baseSession:
+  id: session-outcome-contract
+  project: project
+  title: quality fixture
+  date: '2026-07-16'
+  durationMinutes: 1
+  totalTokens: 1
+  inputTokens: 1
+  outputTokens: 0
+  turnCount: 1
+  toolCalls: 0
+  filesTouched: 0
+  linesChanged: 0
+  retryLoops: 0
+  retryTokensWasted: 0
+  withinSessionReverts: 0
+  explorationRatio: 0
+  discoveryTurns: 0
+  scope: focused
+  scopeBreadth: 0
+  signalDensity: 0
+  specQualityScore: 0
+cases:
+  - {name: resolved outcome is accepted, outcome: resolved, valid: true}
+  - {name: partial outcome is accepted, outcome: partial, valid: true}
+  - {name: failed outcome is accepted, outcome: failed, valid: true}
+  - {name: unknown outcome fails closed, outcome: abandoned, valid: false}
+# Local stores can contain sessions whose quality metrics never reached a
+# resolution verdict, wired as
+# an EMPTY outcome string — a normal "not yet computed" state, not a decode
+# failure. adaptQualitySessions must pass these through as `outcome:
+# undefined` (matching AnalyticsSessionRecord's own optional outcome + its
+# "unknown" bucket), not throw and crash the whole analytics/transcript
+# surface. Kept as its own case list (not folded into `cases` above) because
+# `cases`'s `valid` flag is tied 1:1 to the real SessionOutcome enum
+# inventory (see the "keeps the fixture valid-outcome inventory..." test) —
+# an empty outcome is neither a valid enum member nor a throwing case.
+emptyOutcomeCases:
+  - {name: empty outcome is treated as not yet computed, outcome: ''}
+outcomeLabelCases:
+  - {name: resolved maps positive, value: resolved, expected: positive}
+  - {name: legacy not resolved maps negative, value: not_resolved, expected: negative}
+  - {name: unknown outcome label is absent, value: unknown_value, expected: null}
+  - {name: empty outcome label is absent, value: '', expected: null}
+labelCases:
+  - {name: undefined annotations produce no labels, annotations: null, expected: {}}
+  - {name: empty annotations produce no labels, annotations: [], expected: {}}
+  - name: human resolved annotation populates human label
+    annotations: [{typeId: quality.session_outcome, annotatorKind: human, value: resolved}]
+    expected: {humanLabel: positive}
+  - name: agent unresolved annotation populates agent label
+    annotations: [{typeId: quality.session_outcome, annotatorKind: agent, value: not_resolved}]
+    expected: {agentLabel: negative}
+  - name: rule resolved annotation populates rules label
+    annotations: [{typeId: quality.session_outcome, annotatorKind: rule, value: resolved}]
+    expected: {rulesLabel: positive}
+  - name: all annotation kinds remain distinct
+    annotations:
+      - {typeId: quality.session_outcome, annotatorKind: human, value: resolved}
+      - {typeId: quality.session_outcome, annotatorKind: agent, value: not_resolved}
+      - {typeId: quality.session_outcome, annotatorKind: rule, value: resolved}
+    expected: {humanLabel: positive, agentLabel: negative, rulesLabel: positive}
+  - name: unrelated type is ignored
+    annotations: [{typeId: quality.other, annotatorKind: human, value: resolved}]
+    expected: {}
+  - name: unknown annotation value is ignored
+    annotations: [{typeId: quality.session_outcome, annotatorKind: human, value: unknown}]
+    expected: {}
+  - name: first annotation per kind wins
+    annotations:
+      - {typeId: quality.session_outcome, annotatorKind: human, value: resolved}
+      - {typeId: quality.session_outcome, annotatorKind: human, value: not_resolved}
+    expected: {humanLabel: positive}
+  - name: rule and agent labels remain distinct
+    annotations:
+      - {typeId: quality.session_outcome, annotatorKind: rule, value: not_resolved}
+      - {typeId: quality.session_outcome, annotatorKind: agent, value: resolved}
+    expected: {rulesLabel: negative, agentLabel: positive}

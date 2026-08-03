@@ -1,0 +1,116 @@
+# How many sessions a run reports as imported-but-not-indexed, for every shape an
+# index log can take.
+#
+# THE DEFECT THIS PINS. The count was over LOG ROWS, and one session produces
+# several rows in one run: the drain loop and the stale-index sweep each record
+# an attempt. Without deduplication, one session can produce contradictory output:
+#
+#     peasant harvest: 1 sessions (1 new, 0 updated, 0 unchanged, 0 errors)
+#     warning: 2 session(s) were imported but NOT indexed
+#
+# - a warning falsifiable against the line directly above it. A line added to
+# make a silent failure visible must not itself be wrong; that is the same class
+# as an onboarding screen describing output the product never produces.
+#
+# The second rule is that a later SUCCESS clears an earlier error for the same
+# session. A session the drain loop failed and the sweep then indexed is not a
+# failure, and that sequence is reachable rather than hypothetical.
+#
+# THIS CORPUS DRIVES TWO CONSUMERS: the counter, and the warning the summary
+# PRINTS. For a while it drove only the counter, and the rendered number - the
+# very value the defect above got wrong - was asserted nowhere: the surface test
+# checked that the words "NOT indexed" appeared, over a log holding one failing
+# session, which reads the same whether the summary counts rows or sessions. A
+# correct function behind a rendering nothing reads is the same silence as a
+# wrong one. Cases where a session records SEVERAL rows are what separate the two
+# numbers at the surface, so at least one warning case must hold more rows than
+# the count it warns about.
+#
+# Measured by deleting each row with expectedCaseCount decremented in the same
+# edit: every row is caught. With the row-count floor relaxed so the LOADER's
+# requirements are what is under test, the count drops sharply - most rows are
+# held by the floor alone. The per-row figures are deliberately not repeated
+# here: they went stale the moment a row was added, which is the same staleness
+# this corpus exists to catch elsewhere. Re-measure rather than trust a number.
+#
+# What each row is the SOLE carrier of, which is the part worth stating: the
+# reindexed, fallback and skipped outcomes have one row each; one row expects a
+# count above 1; and one row is a skipped session with no error beside it. A
+# corpus that only says "N rows" reads as N independent proofs and is not.
+#
+# rows        the index log, in order: sessionId and outcome.
+# wantCount   sessions the summary must report as not indexed.
+
+expectedCaseCount: 10
+cases:
+  - name: a-clean-run-reports-nothing
+    rows:
+      - {session: s1, outcome: indexed}
+    wantCount: 0
+
+  - name: one-session-failing-once-is-one-session
+    rows:
+      - {session: s1, outcome: error}
+    wantCount: 1
+
+  - name: one-session-failing-twice-is-still-ONE-session
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: error}
+    wantCount: 1
+
+  - name: a-session-the-sweep-recovers-is-not-a-failure
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: indexed}
+    wantCount: 0
+
+  - name: recovery-counts-whichever-order-the-rows-arrive-in
+    rows:
+      - {session: s1, outcome: indexed}
+      - {session: s1, outcome: error}
+    wantCount: 0
+
+  - name: distinct-failing-sessions-are-counted-separately
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: error}
+      - {session: s2, outcome: error}
+    wantCount: 2
+
+  # The outcomes --reindex records. Both are successes, and both arms were
+  # deletable green while the corpus used only indexed and error.
+  - name: a-reindexed-session-is-not-a-failure
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: reindexed}
+    wantCount: 0
+
+  - name: a-fallback-indexed-session-is-not-a-failure-either
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: fallback}
+    wantCount: 0
+
+  # Skipped is NOT a success: the session ended without entries, it simply ended
+  # that way without an error. It must not clear a failure.
+  - name: a-skip-does-not-clear-an-error
+    rows:
+      - {session: s1, outcome: error}
+      - {session: s1, outcome: skipped}
+    wantCount: 1
+
+  # And it is not a FAILURE either, which the row above cannot show: s1 is
+  # already failed there by its error row, so counting skipped as a failure
+  # leaves that answer at 1 and the corpus green. Reclassifying skipped was
+  # measured green against every other row here.
+  #
+  # The pipeline records skipped ALONE, unpaired with any error, for sessions
+  # that ended without entries (four sites in internal/ingest/pipeline.go). Under
+  # that reclassification such a run prints "N session(s) were imported but NOT
+  # indexed" for sessions that failed at nothing - the same over-reporting this
+  # counter exists to end.
+  - name: a-skipped-only-session-is-not-a-failure-at-all
+    rows:
+      - {session: s1, outcome: skipped}
+    wantCount: 0

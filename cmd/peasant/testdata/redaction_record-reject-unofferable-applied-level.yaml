@@ -1,0 +1,38 @@
+# Proves the loader rejects a case whose appliedLevel is not a level this version
+# offers. The record has to describe a push that can actually run; a case pinning
+# the record's wording for a level every surface refuses would assert the format
+# of output no user will ever see.
+expectedCaseCount: 4
+cases:
+  - name: the-record-is-pinned-for-a-level-no-push-can-use
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: maximum
+    expectMissingMetadata: 0
+  - name: the-shipped-state
+    sessionCount: 2
+    metadataPresent: true
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 0
+  - name: missing-metadata-is-reported
+    sessionCount: 3
+    metadataPresent: false
+    storedApplied: false
+    storedLevel: ""
+    storedRuleSetVersion: ""
+    appliedLevel: standard
+    expectMissingMetadata: 3
+  - name: a-stored-level-from-an-older-version
+    sessionCount: 1
+    metadataPresent: true
+    storedApplied: true
+    storedLevel: minimal
+    storedRuleSetVersion: 1.0.0
+    appliedLevel: standard
+    expectMissingMetadata: 0

@@ -1,0 +1,19 @@
+expectedCaseCount: 3
+requiredNames:
+  - explicit hidden project resolves without enumerating discovery rows
+  - unknown explicit project returns not found
+  - missing exact project name is actionable
+cases:
+  - name: explicit hidden project resolves without enumerating discovery rows
+    project: github.com/peasant-labs/private-project
+    expectedStatus: 200
+    expectedProject: github.com/peasant-labs/private-project
+    expectedHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - name: unknown explicit project returns not found
+    project: github.com/peasant-labs/missing-project
+    providerError: not_found
+    expectedStatus: 404
+    expectedError: canonical hash is not in the local index
+  - name: missing exact project name is actionable
+    expectedStatus: 400
+    expectedError: required query field "name" is missing or empty

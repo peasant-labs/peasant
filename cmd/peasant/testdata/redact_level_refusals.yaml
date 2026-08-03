@@ -1,0 +1,63 @@
+# What `peasant redact` does with a level before it opens anything.
+#
+# The command asks the policy ONE question - the level's disposition - and this
+# corpus drives every answer that question can give, walked from
+# config.AllRedactionLevelDispositions rather than from the rows.
+#
+# The unknown arm is why the walk includes the zero value. No input reaches it
+# today: a level with no entry in the policy table would first have to pass
+# redact.RedactionLevel.IsValid, and none does. An arm nobody can exercise is an
+# arm that can be deleted without anything going red, and this is the fail-closed
+# one - deleting it lets a level nobody classified run at full strength. Measured:
+# dropping RedactionLevelDispositionUnknown from the switch left every test in
+# cmd/peasant green until this corpus existed.
+#
+# The other axis is where the level came from, which changes the outcome for
+# exactly one disposition. A level typed at the flag is a REQUEST and is refused
+# by name, because a caller who names a level must not be handed a different one.
+# The same level sitting in a configuration is raised and disclosed instead, there
+# being nobody at the keyboard to tell at the moment it is read. Both rows for
+# `raised` are here because a corpus carrying one of them cannot tell a command
+# that distinguishes them from one that does not.
+#
+# level         the level the command resolved, from the flag or the config.
+# askedByFlag   whether it came from --level.
+# disposition   the answer the policy gives for it: offered, raised, refused, or
+#               unknown.
+# refusal       what the command must return: none, unsupported, or unoffered.
+# sourceNames   text the refusal must name, so the user knows what to edit.
+
+expectedCaseCount: 5
+cases:
+  - name: an-offered-level-runs
+    level: standard
+    askedByFlag: false
+    disposition: offered
+    refusal: none
+
+  - name: a-no-longer-offered-level-asked-for-by-name-is-refused-as-a-request
+    level: minimal
+    askedByFlag: true
+    disposition: raised
+    refusal: unoffered
+    sourceNames: the --level flag
+
+  - name: the-same-level-sitting-in-a-configuration-is-raised-not-refused
+    level: minimal
+    askedByFlag: false
+    disposition: raised
+    refusal: none
+
+  - name: a-level-this-version-cannot-apply-stops-the-run-wherever-it-came-from
+    level: maximum
+    askedByFlag: false
+    disposition: refused
+    refusal: unsupported
+    sourceNames: config
+
+  - name: a-level-nobody-classified-is-refused-rather-than-run
+    level: a-level-with-no-entry-in-the-policy-table
+    askedByFlag: true
+    disposition: unknown
+    refusal: unsupported
+    sourceNames: the --level flag

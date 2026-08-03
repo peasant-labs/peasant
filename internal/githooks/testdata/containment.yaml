@@ -1,0 +1,45 @@
+# Whether the hook Peasant is about to write really lands inside the repository
+# it was asked about, once symlinks are taken into account.
+#
+# Git answers the two halves of that question in different terms: the repository
+# root comes back physical, while the effective hook path stays anchored to the
+# directory the caller named. Comparing those two as text is wrong in both
+# directions - it refuses a repository reached through a symlinked path even
+# though the hook is genuinely inside it, and it accepts a symlinked hooks
+# directory that puts the write outside the repository entirely.
+#
+# repositoryPath  direct     -> the repository is addressed by its real path.
+#                 symlinked  -> the repository is addressed through a symlink,
+#                               the way /tmp works on macOS and a symlinked
+#                               projects directory works anywhere.
+# hooksDirectory  default            -> git's own .git/hooks.
+#                 symlinked-inside   -> .git/hooks is a symlink to another
+#                                       directory inside the repository.
+#                 symlinked-outside  -> .git/hooks is a symlink to a directory
+#                                       outside the repository.
+expectedCaseCount: 5
+cases:
+  - name: repository-addressed-directly-installs
+    repositoryPath: direct
+    hooksDirectory: default
+    expectedOutcome: created
+
+  - name: repository-reached-through-a-symlinked-path-installs
+    repositoryPath: symlinked
+    hooksDirectory: default
+    expectedOutcome: created
+
+  - name: hooks-directory-symlinked-inside-the-repository-installs
+    repositoryPath: direct
+    hooksDirectory: symlinked-inside
+    expectedOutcome: created
+
+  - name: hooks-directory-symlinked-outside-the-repository-is-refused
+    repositoryPath: direct
+    hooksDirectory: symlinked-outside
+    expectedOutcome: refused
+
+  - name: symlinked-repository-with-a-hooks-directory-symlinked-outside-is-refused
+    repositoryPath: symlinked
+    hooksDirectory: symlinked-outside
+    expectedOutcome: refused
