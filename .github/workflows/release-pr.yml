@@ -77,6 +77,8 @@ jobs:
     if: >-
       startsWith(github.event.pull_request.title, 'release(') &&
       contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+    permissions:
+      contents: read
     uses: ./.github/workflows/tests.yml
 
   e2e:
@@ -85,6 +87,8 @@ jobs:
     if: >-
       startsWith(github.event.pull_request.title, 'release(') &&
       contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+    permissions:
+      contents: read
     uses: ./.github/workflows/e2e.yml
 
   release-validate:
@@ -93,6 +97,8 @@ jobs:
     if: >-
       startsWith(github.event.pull_request.title, 'release(') &&
       contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
+    permissions:
+      contents: read
     uses: ./.github/workflows/release-validate.yml
 
   # Trigger B: a release PR MERGED — assert maintainer approval, then tag.
