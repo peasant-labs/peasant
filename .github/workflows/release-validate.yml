@@ -19,6 +19,7 @@ on:
     paths:
       - ".goreleaser.yml"
       - ".github/workflows/release.yml"
+      - ".github/workflows/release-recovery.yml"
       - ".github/workflows/release-e2e.yml"
       - ".github/workflows/release-pr.yml"
       - ".github/workflows/release-validate.yml"

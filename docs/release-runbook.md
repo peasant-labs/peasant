@@ -168,6 +168,52 @@ history.
 
 Current `skip_upload: true` settings keep AUR and Homebrew untouched by this final.
 
+### One-time `v0.1.0` startup recovery
+
+The App-created `v0.1.0` tag points to commit
+`807a1b68c8ec1952db6c289f383f42cbb0701db9`, but its first Release run
+(`30946834984`) ended with `startup_failure` before GitHub created any jobs. The
+cause was missing caller permissions for reusable workflows. PR #20 fixed that
+graph for future tags, but GitHub reruns retain the workflow stored at the
+original tag and therefore cannot consume the fix.
+
+`.github/workflows/release-recovery.yml` is a reviewed, one-time publication path
+for this exact incident. It expires at `2026-08-08T00:00:00Z` and accepts only the
+fixed tag, commit, repository, original failure, App/ruleset identities, approved
+operator, and two fresh first-attempt gate receipts. The reviewed verifier runs
+from `develop`; every build and GoReleaser command runs from a separate checkout
+of `refs/tags/v0.1.0`.
+
+The exact-tag evidence runs are:
+
+- E2E: `30948998607`
+- Release E2E: `30948998662`
+
+After the recovery PR is merged, the approved operator dispatches exactly:
+
+```bash
+recovery_commit="$(gh api repos/peasant-labs/peasant/branches/develop --jq .commit.sha)"
+# Before dispatch, verify recovery_commit is the reviewed recovery PR's merge commit.
+gh workflow run release-recovery.yml \
+  --repo peasant-labs/peasant \
+  --ref develop \
+  -f e2e_run_id=30948998607 \
+  -f release_e2e_run_id=30948998662 \
+  -f confirm_tag=v0.1.0 \
+  -f confirm_commit=807a1b68c8ec1952db6c289f383f42cbb0701db9 \
+  -f confirm_recovery_commit="$recovery_commit"
+```
+
+The recovery checks Release absence twice, including immediately before the only
+`contents: write` job publishes. That final check also re-verifies the remote annotated
+tag object, peeled commit, App-only ruleset, and that this run is the sole recovery
+dispatch. It never receives App credentials, a PAT, an AUR key, or a Homebrew token.
+Any existing draft, partial asset set, release conflict, or failed
+post-publication smoke requires inspection; never redispatch publication, append,
+overwrite, delete, or recreate automatically. After both native smoke jobs pass,
+remove the recovery workflow, verifier command/package, and recovery-only fixtures
+through a reviewed PR while retaining this incident record and the final run URL.
+
 ### Later release candidates
 
 1. Ensure `develop` is green and contains everything the rc should include.

@@ -157,13 +157,13 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
 		len(fixture.Release.DriverContains) != 4 || len(fixture.Release.OutputGuards) != 3 ||
-		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 4 || fixture.ReleaseGuard.Step == "" || fixture.ReleaseGuard.IfCondition == "" ||
+		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 5 || fixture.ReleaseGuard.Step == "" || fixture.ReleaseGuard.IfCondition == "" ||
 		!regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(fixture.ReleaseGuard.InitialFinal) ||
 		fixture.ReleaseGuard.ExpectedRun == "" || strings.Count(fixture.ReleaseGuard.ExpectedRun, "--initial-final "+fixture.ReleaseGuard.InitialFinal) != 1 ||
 		len(fixture.ReleaseGuard.RequiredJobPermissions) != 2 || len(fixture.ReleaseGuard.RequiredJobEnv) != 2 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
-		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredPaths) != 15 ||
+		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredPaths) != 16 ||
 		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
 	}

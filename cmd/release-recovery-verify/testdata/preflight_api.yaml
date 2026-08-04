@@ -1,0 +1,69 @@
+responses:
+  - path: /repos/peasant-labs/peasant
+    status: 200
+    body: '{"id":1321556788,"full_name":"peasant-labs/peasant","default_branch":"develop"}'
+  - path: /repos/peasant-labs/peasant/actions/runs/91001
+    status: 200
+    body: '{"id":91001,"event":"workflow_dispatch","status":"in_progress","conclusion":"","head_branch":"develop","head_sha":"1111111111111111111111111111111111111111","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T20:59:00Z"}'
+  - path: /repos/peasant-labs/peasant/actions/workflows/release-recovery.yml/runs
+    query: event=workflow_dispatch&per_page=100
+    status: 200
+    body: '{"total_count":1,"workflow_runs":[{"id":91001,"event":"workflow_dispatch","status":"in_progress","conclusion":"","head_branch":"develop","head_sha":"1111111111111111111111111111111111111111","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T20:59:00Z"}]}'
+  - path: /repos/peasant-labs/peasant/collaborators/dayvidpham/permission
+    status: 200
+    body: '{"permission":"admin","user":{"login":"dayvidpham","id":22456875}}'
+  - path: /repos/peasant-labs/peasant/git/ref/heads/v0.1.0
+    status: 404
+    body: '{"message":"Not Found"}'
+  - path: /repos/peasant-labs/peasant/git/ref/tags/v0.1.0
+    status: 200
+    body: '{"ref":"refs/tags/v0.1.0","object":{"type":"tag","sha":"b1f8fe4b9a40ac32c1d7e1a8748cb11575595c4f"}}'
+  - path: /repos/peasant-labs/peasant/git/tags/b1f8fe4b9a40ac32c1d7e1a8748cb11575595c4f
+    status: 200
+    body: '{"tag":"v0.1.0","object":{"type":"commit","sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9"},"tagger":{"name":"peasant-release-bot","email":"noreply@peasantlabs.org","date":"2026-08-04T20:12:49Z"}}'
+  - path: /repos/peasant-labs/peasant/compare/807a1b68c8ec1952db6c289f383f42cbb0701db9...develop
+    status: 200
+    body: '{"status":"ahead","merge_base_commit":{"sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9"}}'
+  - path: /repos/peasant-labs/peasant/rulesets/20343024
+    status: 200
+    body: '{"id":20343024,"name":"Protect release tags","target":"tag","source_type":"Repository","source":"peasant-labs/peasant","enforcement":"active","conditions":{"ref_name":{"exclude":[],"include":["refs/tags/v*"]}},"rules":[{"type":"creation"},{"type":"update"},{"type":"deletion"},{"type":"non_fast_forward"}],"bypass_actors":[{"actor_id":3988034,"actor_type":"Integration","bypass_mode":"always"}],"current_user_can_bypass":"never"}'
+  - path: /repos/peasant-labs/peasant/actions/runs/30946834984
+    status: 200
+    body: '{"id":30946834984,"workflow_id":326590528,"event":"push","status":"completed","conclusion":"startup_failure","head_branch":"v0.1.0","head_sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9","path":".github/workflows/release.yml","run_attempt":1,"actor":{"login":"peasant-labs-releaser[bot]","id":291504229},"triggering_actor":{"login":"peasant-labs-releaser[bot]","id":291504229},"created_at":"2026-08-04T20:12:59Z"}'
+  - path: /repos/peasant-labs/peasant/actions/runs/30946834984/jobs
+    query: filter=latest
+    status: 200
+    body: '{"total_count":0,"jobs":[]}'
+  - path: /repos/peasant-labs/peasant/actions/runs/91002
+    status: 200
+    body: '{"id":91002,"workflow_id":326590523,"event":"workflow_dispatch","status":"completed","conclusion":"success","head_branch":"v0.1.0","head_sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9","path":".github/workflows/e2e.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T20:50:00Z"}'
+  - path: /repos/peasant-labs/peasant/actions/runs/91002/jobs
+    query: filter=latest
+    status: 200
+    body: '{"total_count":1,"jobs":[{"name":"full-stack push e2e (podman)","status":"completed","conclusion":"success","run_attempt":1,"steps":[{"name":"Verify schema module pin parity","status":"completed","conclusion":"success"},{"name":"make e2e","status":"completed","conclusion":"success"},{"name":"Assert asserted e2e tests ran and passed","status":"completed","conclusion":"success"}]}]}'
+  - path: /repos/peasant-labs/peasant/actions/runs/91003
+    status: 200
+    body: '{"id":91003,"workflow_id":326590525,"event":"workflow_dispatch","status":"completed","conclusion":"success","head_branch":"v0.1.0","head_sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9","path":".github/workflows/release-e2e.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T20:50:00Z"}'
+  - path: /repos/peasant-labs/peasant/actions/runs/91003/jobs
+    query: filter=latest
+    status: 200
+    body: '{"total_count":1,"jobs":[{"name":"release e2e (installed packages)","status":"completed","conclusion":"success","run_attempt":1,"steps":[{"name":"Verify schema module pin parity","status":"completed","conclusion":"success"},{"name":"Assert real dashboard artifact","status":"completed","conclusion":"success"},{"name":"Build release snapshot artifacts","status":"completed","conclusion":"success"},{"name":"Run release per-distro e2e driver","status":"completed","conclusion":"success"}]}]}'
+  - path: /repos/peasant-labs/peasant/releases
+    query: per_page=100
+    status: 200
+    body: '[]'
+  - path: /repos/peasant-labs/peasant/releases/tags/v0.1.0
+    status: 404
+    body: '{"message":"Not Found"}'
+command_cases:
+  - name: accepts_workflow_environment
+    mutation: none
+  - name: rejects_missing_token
+    mutation: missing_token
+    want_error: GitHub token is missing
+  - name: rejects_swapped_gate_receipts
+    mutation: swapped_gate_receipts
+    want_error: supplied gate run is stale or differs
+  - name: rejects_missing_recovery_confirmation
+    mutation: missing_recovery_confirmation
+    want_error: executing recovery commit is missing, malformed, or differs
