@@ -146,29 +146,17 @@ workflow assertion, fixture, and this runbook together.
 
 ## 3. Cutting the initial final or a release candidate
 
-### Initial `v0.1.0` bootstrap
+### Initial `v0.1.0` bootstrap record
 
-The public-root repository deliberately has no inherited product tags. Its first release
-is the exact final `v0.1.0`, without manufacturing an rc for already validated private
-history.
+The public-root repository began without inherited product tags, so release PR #18
+used the exact `--initial-final v0.1.0` exception instead of manufacturing an rc for
+already validated private history. The guard proved the complete `v*` namespace was
+empty and no `v0.1.0` Release existed before the releaser App created the annotated
+tag. The published GitHub Release is now the durable evidence that self-disables this
+bootstrap. Every later final follows the normal same-version ancestor-rc flow. The
+`skip_upload: true` settings kept AUR and Homebrew untouched by this final.
 
-1. Confirm the public repository has no `v*` tag, no published `v0.1.0` GitHub
-   Release, and an active `v*` ruleset whose sole bypass actor is GitHub App ID
-   `3988034` (`peasant-labs-releaser`).
-2. Open a PR into `develop` titled `release(v0.1.0): initial public release`.
-3. The final guard runs with `--initial-final v0.1.0`. It scans the complete `v*` tag
-   namespace and queries the GitHub Release for `v0.1.0`; missing or ambiguous evidence
-   blocks publication.
-4. Merge through the protected release-PR path. The releaser App updates the Nix vendor
-   hash if required, creates the annotated tag, and triggers the ordinary Nix, E2E,
-   installed-package, Goreleaser, and smoke gates.
-5. Once the GitHub Release exists, that durable record self-disables the bootstrap.
-   Every later final follows the normal same-version ancestor-rc rule even while the
-   exact policy remains configured.
-
-Current `skip_upload: true` settings keep AUR and Homebrew untouched by this final.
-
-### One-time `v0.1.0` startup recovery
+### `v0.1.0` startup recovery record
 
 The App-created `v0.1.0` tag points to commit
 `807a1b68c8ec1952db6c289f383f42cbb0701db9`, but its first Release run
@@ -177,54 +165,29 @@ cause was missing caller permissions for reusable workflows. PR #20 fixed that
 graph for future tags, but GitHub reruns retain the workflow stored at the
 original tag and therefore cannot consume the fix.
 
-`.github/workflows/release-recovery.yml` is a reviewed, one-time publication path
-for this exact incident. It expires at `2026-08-08T00:00:00Z` and accepts only the
-fixed tag, commit, repository, original failure, App/ruleset identities, approved
-operator, and two fresh first-attempt gate receipts. The reviewed verifier runs
-from `develop`; every build and GoReleaser command runs from a separate checkout
-of `refs/tags/v0.1.0`.
+PR #21 added a reviewed, expiring recovery path for this exact incident. Its first
+dispatch, run [`30952716604`](https://github.com/peasant-labs/peasant/actions/runs/30952716604),
+failed closed in the GitHub-evidence step because the repository `GITHUB_TOKEN`
+redacted `bypass_actors` from the ruleset response. Nix, publication, and smoke were
+all empty and skipped, and no Release was created.
 
-Recovery run `30952716604` from PR #21 failed closed in the GitHub-evidence step:
-the repository `GITHUB_TOKEN` sees the active ruleset and its protections but
-GitHub redacts `bypass_actors` from that token's response. Nix, publication, and
-smoke were all skipped, and no Release exists. The corrected verifier binds the
-redacted response to the admin-verified ruleset node and exact creation/update
-timestamps, while still requiring `current_user_can_bypass: never`. It authorizes
-exactly one reviewed replacement by requiring the workflow history to contain
-only failed run `30952716604` at commit `583eb0d2e9776142c8d3f868b67f233f27089432`
-plus the active replacement, and by proving every mutable job in the failed run
-was empty and skipped.
+PR #22 bound the redacted response to the admin-verified ruleset node and exact
+creation/update timestamps, required `current_user_can_bypass: never`, and proved
+the failed attempt never reached mutable work. Replacement run
+[`30954397604`](https://github.com/peasant-labs/peasant/actions/runs/30954397604)
+executed at recovery commit `73ea8eeb40904e439df9d939569c17959c8edca5`, using
+exact-tag E2E run `30948998607` and Release E2E run `30948998662`. Preflight, Nix
+vendor-hash freshness, publication, and native amd64/arm64 smoke all passed on the
+first attempt.
 
-The exact-tag evidence runs are:
-
-- E2E: `30948998607`
-- Release E2E: `30948998662`
-
-After the recovery PR is merged, the approved operator dispatches exactly:
-
-```bash
-recovery_commit="$(gh api repos/peasant-labs/peasant/branches/develop --jq .commit.sha)"
-# Before dispatch, verify recovery_commit is the reviewed recovery PR's merge commit.
-gh workflow run release-recovery.yml \
-  --repo peasant-labs/peasant \
-  --ref develop \
-  -f e2e_run_id=30948998607 \
-  -f release_e2e_run_id=30948998662 \
-  -f confirm_tag=v0.1.0 \
-  -f confirm_commit=807a1b68c8ec1952db6c289f383f42cbb0701db9 \
-  -f confirm_recovery_commit="$recovery_commit"
-```
-
-The recovery checks Release absence twice, including immediately before the only
-`contents: write` job publishes. That final check also re-verifies the remote annotated
-tag object, peeled commit, App-only ruleset, and that this run is the sole recovery
-replacement after the fixed failed preflight. It never receives App credentials, a
-PAT, an AUR key, or a Homebrew token.
-Any existing draft, partial asset set, release conflict, or failed
-post-publication smoke requires inspection; never issue another dispatch, append,
-overwrite, delete, or recreate automatically. After both native smoke jobs pass,
-remove the recovery workflow, verifier command/package, and recovery-only fixtures
-through a reviewed PR while retaining this incident record and the final run URL.
+The resulting full [v0.1.0 Release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0)
+contains four archives, two `.deb` packages, two `.rpm` packages, and
+`checksums.txt`. All eight artifact checksums verify; the checksum manifest's
+SHA-256 digest is `aad6b68481d61691b0f30a92c80301895210da049185d87878cad37f89d94dbd`.
+The annotated tag object remains `b1f8fe4b9a40ac32c1d7e1a8748cb11575595c4f`
+and still peels to `807a1b68c8ec1952db6c289f383f42cbb0701db9`. AUR and
+Homebrew remained disabled. The one-time workflow and verifier were removed after
+success, so this incident record is not an executable redispatch procedure.
 
 ### Later release candidates
 
