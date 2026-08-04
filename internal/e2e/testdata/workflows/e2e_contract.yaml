@@ -66,6 +66,14 @@ release:
 release_guard:
   workflow: .github/workflows/release.yml
   job: guard
+  job_if_condition: github.event_name == 'push'
+  required_pr_branches:
+    - develop
+  required_pr_paths:
+    - .github/workflows/release.yml
+    - .github/workflows/e2e.yml
+    - .github/workflows/release-e2e.yml
+    - .github/workflows/release-validate.yml
   step: Final-release guard (initial final or green same-version rc)
   if_condition: steps.parse.outputs.kind == 'final'
   initial_final: v0.1.0
@@ -99,6 +107,35 @@ release_guard:
   parse_step: Parse + classify the tag
   checkout_fetch_depth: "0"
   checkout_fetch_tags: "true"
+reusable_callers:
+  - workflow: .github/workflows/release.yml
+    jobs:
+      - job: e2e
+        permissions:
+          - key: contents
+            value: read
+      - job: release-e2e
+        permissions:
+          - key: contents
+            value: read
+      - job: validate-packaging
+        permissions:
+          - key: contents
+            value: read
+  - workflow: .github/workflows/release-pr.yml
+    jobs:
+      - job: tests
+        permissions:
+          - key: contents
+            value: read
+      - job: e2e
+        permissions:
+          - key: contents
+            value: read
+      - job: release-validate
+        permissions:
+          - key: contents
+            value: read
 release_validate:
   workflow: .github/workflows/release-validate.yml
   required_paths:

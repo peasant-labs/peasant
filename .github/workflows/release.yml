@@ -7,6 +7,16 @@ name: Release
 # The `v*` filter matches Peasant release tags (v0.1.0, v0.1.0-rc1).
 # release-guard parse-tag is the defense-in-depth re-check inside the guard job.
 on:
+  # Instantiate the complete caller/reusable-workflow graph on relevant PRs so
+  # GitHub validates permission propagation before an immutable tag exists. The
+  # guard job is push-only, so every production job skips after static validation.
+  pull_request:
+    branches: [develop]
+    paths:
+      - ".github/workflows/release.yml"
+      - ".github/workflows/e2e.yml"
+      - ".github/workflows/release-e2e.yml"
+      - ".github/workflows/release-validate.yml"
   push:
     tags:
       - "v*"
@@ -23,6 +33,7 @@ jobs:
   # rc that is green AND an ancestor of the final commit.
   guard:
     name: guard
+    if: github.event_name == 'push'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
@@ -112,11 +123,15 @@ jobs:
   e2e:
     name: full-stack e2e
     needs: [guard, nix-vendor-hash]
+    permissions:
+      contents: read
     uses: ./.github/workflows/e2e.yml
 
   release-e2e:
     name: release e2e (installed packages)
     needs: [guard, nix-vendor-hash]
+    permissions:
+      contents: read
     uses: ./.github/workflows/release-e2e.yml
 
   # Build + publish: one Linux runner cross-compiles all four targets (pure-Go,
@@ -253,4 +268,6 @@ jobs:
     name: validate packaging (rc)
     needs: guard
     if: contains(github.ref_name, '-rc')
+    permissions:
+      contents: read
     uses: ./.github/workflows/release-validate.yml
