@@ -10,8 +10,9 @@ package consumers, and why the Nix hash gate sits before tag publication — see
 [Release Architecture](release-architecture.md).
 
 > **Status:** the release pipeline is configured and locally validated. The first
-> public-root tag remains a bootstrap operation. Downstream AUR and Homebrew
-> publication stays disabled until the publication checklist is complete (`skip_upload: true`).
+> public-root tag uses the exact `v0.1.0` initial-final bootstrap. Downstream AUR and
+> Homebrew publication stays disabled until the publication checklist is complete
+> (`skip_upload: true`).
 
 ---
 
@@ -23,7 +24,7 @@ frozen artifacts.
 
 ```
 release PR (title: "release(vX.Y.Z[-rcN]): …")
-   │  merged by a maintainer (approval gate deferred to the public flip)
+   │  merged by a maintainer (approval assertion deferred while only one maintainer is active)
    ▼
 release-pr.yml  ──▶ runs make nix-vendor-hash
    │                 commits "chore: update nix vendor hash" if flake.nix changed
@@ -37,7 +38,7 @@ release.yml     ──▶ guard → nix vendorHash freshness gate → full-stack
    │                                                     ▼
    │                                                  goreleaser → smoke
    │                 builds 4 static targets, archives, checksums,
-   │                 .deb/.rpm, and (post-flip) AUR + cask
+   │                 .deb/.rpm, and (after separate publisher enablement) AUR + cask
    ▼
 GitHub Release (prerelease for -rcN; full release for final)
 ```
@@ -50,7 +51,8 @@ testable instead of buried in workflow bash:
   typed `ReleaseKind` grammar (`KindRC` / `KindFinal` / `KindInvalid`), the `Version`
   newtype, and the `ParseReleaseTitle` / `ParseTag` / guard functions. The workflows invoke
   it via `go run github.com/peasant-labs/schema/cmd/release-guard …`
-  (`… parse-title`, `… check-final --tag vX.Y.Z`).
+  (`… parse-title`, `… check-final --tag vX.Y.Z`; exact initial final `v0.1.0`
+  additionally passes `--initial-final v0.1.0`).
 - **`.github/release-guard.policy.yml`** — peasant's per-repo policy file. It declares this
   repo's release-pipeline publication gates (the `e2e` / `release-e2e` reusable-workflow
   gates and the goreleaser `release` job graph) so the shared `release-guard check-workflow`
@@ -67,8 +69,10 @@ and on the rc path).
 `release.yml` treats the Goreleaser `release` job as the publisher. It must stay behind
 every source-level publication gate:
 
-- `guard` rejects malformed/non-Peasant tags and blocks final releases without a green,
-  same-version ancestor rc.
+- `guard` rejects tags whose push actor is not `peasant-labs-releaser[bot]`
+  (actor ID `291504229`) and malformed/non-Peasant tags. It permits the exact first
+  final `v0.1.0` only while no other `v*` tag or published `v0.1.0` Release exists;
+  later finals require a green, same-version ancestor rc.
 - `nix-vendor-hash` proves the tag points at a source tree with a current `flake.nix`
   vendor hash.
 - `e2e` calls the reusable `.github/workflows/e2e.yml` full-stack harness on every
@@ -105,9 +109,10 @@ workflows via `go run`.
 
 | Secret / setting | Where | Purpose | Set when |
 |------------------|-------|---------|----------|
-| `PEASANT_RELEASER_APP_ID` / `PEASANT_RELEASER_APP_PRIVATE_KEY` for GitHub App `peasant-labs-releaser` (`Contents: write`) | Repo secrets for release/write workflows | Push release-PR hash-fix commits and annotated tags, update the standalone Nix vendor hash, and mint the Homebrew tap token | Before the first real tag |
+| `PEASANT_RELEASER_APP_ID` / `PEASANT_RELEASER_APP_PRIVATE_KEY` for GitHub App ID `3988034` (`peasant-labs-releaser`, `Contents: write`) | Repo secrets for release/write workflows | Push release-PR hash-fix commits and annotated tags, update the standalone Nix vendor hash, and mint the Homebrew tap token | Before the first real tag |
 | `GITHUB_TOKEN` (default) | Per-workflow, automatic | Maintainer permission lookup (`gh api repos/{repo}/collaborators/{user}/permission`); read collaborators (needs push, which the workflow token has) | Already present |
-| `AUR_KEY` | Repo secret | Unencrypted ed25519 **private** key for `ssh://aur@aur.archlinux.org/peasant-bin.git`; goreleaser `aurs` writes it to a temp file and sets `GIT_SSH_COMMAND` | At public flip (AUR enabled) |
+| `AUR_KEY` | Repo secret | Unencrypted ed25519 **private** key for `ssh://aur@aur.archlinux.org/peasant-bin.git`; goreleaser `aurs` writes it to a temp file and sets `GIT_SSH_COMMAND` | When AUR publication is separately approved |
+| `v*` tag ruleset | Repository settings | Rejects tag creation, update, deletion, and non-fast-forward changes from every actor except GitHub App ID `3988034` (`peasant-labs-releaser`) | Before the first real tag |
 
 **Manual, one-time, UI-only step:** reconfirm that the
 `peasant-labs-releaser` installation has `Contents: write` reach for both
@@ -132,15 +137,42 @@ checked-in `MAINTAINERS` file:
   GitHub's no-self-approval rule makes it unsatisfiable. `release-guard check-approval` remains
   implemented + tested, but is not part of the current release workflow.
 
-Branch protection on `develop` is defense-in-depth and configured separately in GitHub.
+Branch protection on `develop` and the App-only `v*` tag ruleset are defense-in-depth
+configured separately in GitHub. `release.yml` also checks the App's stable login and
+actor ID before processing a tag. If the App identity changes, update the ruleset,
+workflow assertion, fixture, and this runbook together.
 
 ---
 
-## 3. Cutting a release candidate (rc)
+## 3. Cutting the initial final or a release candidate
+
+### Initial `v0.1.0` bootstrap
+
+The public-root repository deliberately has no inherited product tags. Its first release
+is the exact final `v0.1.0`, without manufacturing an rc for already validated private
+history.
+
+1. Confirm the public repository has no `v*` tag, no published `v0.1.0` GitHub
+   Release, and an active `v*` ruleset whose sole bypass actor is GitHub App ID
+   `3988034` (`peasant-labs-releaser`).
+2. Open a PR into `develop` titled `release(v0.1.0): initial public release`.
+3. The final guard runs with `--initial-final v0.1.0`. It scans the complete `v*` tag
+   namespace and queries the GitHub Release for `v0.1.0`; missing or ambiguous evidence
+   blocks publication.
+4. Merge through the protected release-PR path. The releaser App updates the Nix vendor
+   hash if required, creates the annotated tag, and triggers the ordinary Nix, E2E,
+   installed-package, Goreleaser, and smoke gates.
+5. Once the GitHub Release exists, that durable record self-disables the bootstrap.
+   Every later final follows the normal same-version ancestor-rc rule even while the
+   exact policy remains configured.
+
+Current `skip_upload: true` settings keep AUR and Homebrew untouched by this final.
+
+### Later release candidates
 
 1. Ensure `develop` is green and contains everything the rc should include.
 2. Open a PR into `develop` titled exactly:
-   `release(v0.1.0-rc1): <summary>` (bump `rcN` for subsequent candidates).
+   `release(vX.Y.Z-rc1): <summary>` (bump `rcN` for subsequent candidates).
    - `release-pr.yml` (open/edit trigger) validates the title grammar and that **you**
      are an `admin`/`maintain` collaborator. Fix the title or authorship if it fails.
    - `release-validate.yml` (path-filtered to packaging-relevant files — `**.go`,
@@ -150,17 +182,19 @@ Branch protection on `develop` is defense-in-depth and configured separately in 
      amd64/arm64), rpm (fedora `dnf` + leap `zypper --allow-unsigned-rpm`), Arch
      `makepkg` (x86_64), `brew style`, the **rc-only** macOS cask install, and
      `nix build .#peasant`.
-3. **Merge** (the approval assertion is deferred to the public flip — §2).
+3. **Merge** (the approval assertion is deferred during the single-maintainer
+   period - §2).
    - `release-pr.yml` (merge trigger) checks out the merge
      commit, runs `make nix-vendor-hash`, and mints the annotated tag using the App
      token. If `flake.nix` changes, it first commits
      `chore: update nix vendor hash` to `develop` and tags that hash-fix commit. It
      **hard-fails if the tag already exists**.
 4. The tag push triggers `release.yml`:
-   - **guard** job: for an rc, proceeds.
+   - **guard** job: verifies the tag push actor is `peasant-labs-releaser[bot]`
+     (actor ID `291504229`); for an rc, it then proceeds after parsing the tag.
    - **nix-vendor-hash** job: re-runs `make nix-vendor-hash` and fails if `flake.nix`
-     would change. This catches manual tags or any tag not created from a
-     hash-current commit.
+      would change. This catches any release-ceremony tag not created from a
+      hash-current commit.
    - **full-stack e2e** job: calls `.github/workflows/e2e.yml` and must produce a
      positive `--- PASS: TestSkipGateE2E` line. A skipped harness or `[no tests to
      run]` blocks publication because no product e2e coverage was proven.
@@ -179,20 +213,23 @@ Branch protection on `develop` is defense-in-depth and configured separately in 
 
 ## 4. Promoting to a final release
 
-1. There **must** already be a green, same-version rc (e.g. `v0.1.0-rc1` with a
+This section describes finals after the exact initial `v0.1.0` bootstrap.
+
+1. There **must** already be a green, same-version rc (e.g. `v0.2.0-rc1` with a
    successful `release.yml` run) whose tag is an **ancestor** of the final commit.
-2. Open a PR into `develop` titled `release(v0.1.0): <summary>`. Same validation as an
+2. Open a PR into `develop` titled `release(vX.Y.Z): <summary>`. Same validation as an
    rc, plus `release-validate.yml` skips the macOS cask install (rc-only).
-3. Merge (approval assertion deferred to the public flip — §2). `release-pr.yml` updates the Nix vendor hash if
-   needed and mints the annotated `v0.1.0` tag on the hash-current commit.
+3. Merge (approval assertion deferred during the single-maintainer period - §2).
+   `release-pr.yml` updates the Nix vendor hash if
+   needed and mints the annotated final tag on the hash-current commit.
 4. `release.yml` runs; the **guard** job now enforces the final-requires-rc rule
    (§5), followed by the tag-time **nix-vendor-hash** freshness gate and the full-stack
    e2e and installed-package release e2e publication gates. On success goreleaser
-   publishes a **full** (non-prerelease) Release, and — **after the public flip** —
-   pushes the AUR `peasant-bin` package and the Homebrew cask. The smoke job
-   re-checks static linkage + `peasant version`.
-5. Verify: full Release with the complete artifact set; AUR `peasant-bin` bumped; tap
-   cask updated; (post-nixpkgs) bump PR opened by the update bot.
+   publishes a **full** (non-prerelease) Release. AUR and Homebrew remain untouched
+   while their explicit `skip_upload: true` safety settings remain in force. The smoke
+   job re-checks static linkage + `peasant version`.
+5. Verify the full Release and complete artifact set. Verify AUR, the tap, and nixpkgs
+   only after their separate publication checklist items are approved and enabled.
 
 ---
 
@@ -200,6 +237,12 @@ Branch protection on `develop` is defense-in-depth and configured separately in 
 
 The `release.yml` **guard** job (via `release-guard check-final`) enforces, for a
 final tag `vX.Y.Z`:
+
+For exact initial final `v0.1.0`, a complete product-tag scan must show no other `v*`
+tag and the GitHub Release lookup must prove that `v0.1.0` publication has not already
+completed. Only that exact version can use the bootstrap.
+
+For every later final:
 
 1. A same-version rc tag (`vX.Y.Z-rc*`) exists **and** had a successful `release.yml`
    run.
@@ -267,22 +310,31 @@ Run these, in order, when enabling external package publication.
         and uses the same project role address, obfuscated per AUR convention.
 
       The role address must remain reachable for users and downstream packagers.
-- [x] **BOT IDENTITY.** Automated commits use the neutral GitHub App identity
-      `github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`.
-      That is `aurs.commit_author`,
-      `homebrew_casks.commit_author`, and the `git config user.email` in
-      `release-pr.yml` (both tag and hash-fix steps) and `nix-vendor-hash.yml`. It is a
-      no-reply identity and **not** a maintainer contact. If any of the five sites
-      changes, all five do.
+- [x] **RELEASE IDENTITIES.** Keep these three roles distinct:
+      - Tag provenance is the GitHub event actor `peasant-labs-releaser[bot]`
+        (actor ID `291504229`), enforced by the App-only tag ruleset and
+        `release.yml`.
+      - Automated Git commits use
+        `peasant-release-bot <noreply@peasantlabs.org>`. This exact author appears
+        in both `release-pr.yml` commit/tag sites, `nix-vendor-hash.yml`, and the
+        AUR and Homebrew `commit_author` blocks in `.goreleaser.yml`. If one of
+        these five sites changes, update all five.
+      - Package maintainer metadata uses the project contact
+        `Peasant Labs <admin@peasantlabs.org>` (obfuscated where AUR requires it).
+        Neither bot identity is a maintainer contact.
 - [x] Make the repository **public**.
 - [ ] Confirm the GitHub App has `Contents: write` on `peasant-labs/peasant` and
       `peasant-labs/homebrew-tap` (§2).
-- [ ] Configure branch protection on `develop` as defense-in-depth. Do not add the
+- [x] Configure branch protection on `develop` as defense-in-depth. Do not add the
       self-approval gate while the single-maintainer constraint remains.
+- [x] Configure the `v*` tag ruleset so only GitHub App ID `3988034`
+      (`peasant-labs-releaser`) can bypass tag creation/update/deletion protection.
+      Administrators must not bypass it.
 - [ ] **AUR:** create the `aur.archlinux.org` account, register a **dedicated** ed25519
       public key, and add `AUR_KEY` (the private key) as a repo secret. The first
       `goreleaser` push to `ssh://aur@aur.archlinux.org/peasant-bin.git` **creates**
-      the package (no web form). First AUR push = the first **final** `v0.1.0`.
+      the package (no web form). The first AUR push must use a separately approved
+      later final release; `v0.1.0` keeps uploads disabled.
 - [ ] **Homebrew tap:** create the `peasant-labs/homebrew-tap` repository and grant
       the App `Contents: write` on it. `release.yml` mints the short-lived tap token
       at release time; there is no long-lived `TAP_GITHUB_TOKEN` secret.
@@ -292,7 +344,7 @@ Run these, in order, when enabling external package publication.
 - [ ] **nixpkgs:** open the `pkgs/by-name/pe/peasant/package.nix` PR (requires public
       repo + finalized license + a tagged release). Add yourself to the maintainer
       list; use `versionCheckHook` + `nix-update-script`.
-- [ ] **Live verification (post-flip):**
+- [ ] **Live verification (after external publishers are enabled):**
       - `go install github.com/peasant-labs/peasant/cmd/peasant@v0.1.0` compiles and
         `peasant version` reports `v0.1.0` (the `ReadBuildInfo` fallback).
       - From a clean machine: `brew tap peasant-labs/tap && brew install --cask peasant`.
@@ -308,7 +360,8 @@ documentation are part of the current release contract rather than this list.
 
 1. **macOS native install** — Developer ID signing + notarization (quill-from-Linux is
    feasible, ~1–2 days once the Apple account + $99/yr entity exist) and a notarized
-   `.pkg`. Until then the cask's `xattr` quarantine hook is the mechanism.
+   `.pkg`. Raw browser downloads currently require the manual `xattr` step in the
+   macOS install guide; the cask hook takes over only after Homebrew publication.
 2. **SBOM** generation for release artifacts.
 3. **Build provenance / artifact attestations**.
 4. **cosign** signing of artifacts.
@@ -321,7 +374,7 @@ documentation are part of the current release contract rather than this list.
 7. **Hosted apt repo / PPA** — only path to `apt upgrade`; permanent GPG + metadata
    ops. Demand-triggered; prefer aptly → object storage over SaaS. PPA is structurally
    impossible (no-network builders vs the pnpm web embed).
-8. **homebrew-core** formula — 6–12+ months post-flip (notability + source-build rule).
+8. **homebrew-core** formula — 6–12+ months after stable launch (notability + source-build rule).
 
 ---
 

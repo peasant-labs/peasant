@@ -168,7 +168,7 @@ jobs:
       # ./cmd/peasant from a clean extraction proves the binary does NOT depend
       # on any gitignored file — specifically that the committed
       # web/out/.gitkeep placeholder satisfies `//go:embed all:web/out` without
-      # a local `make web`. This is the honest pre-flip proxy: a live `go install`
+      # a local `make web`. This is the honest pre-tag proxy: a live `go install`
       # from the registry is covered separately after a release is published.
       # It uses HEAD (committed tree), NOT the working dir, so the defensive
       # web/out stub above does not leak into the test.

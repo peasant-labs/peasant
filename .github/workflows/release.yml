@@ -18,8 +18,9 @@ concurrency:
 permissions: {}
 
 jobs:
-  # Gate the build: reject non-peasant tags, and for FINAL releases require a
-  # same-version rc that is green AND an ancestor of the final commit.
+  # Gate the build: reject non-peasant tags. The exact first final v0.1.0 may
+  # bootstrap a tag-free repository; every later final requires a same-version
+  # rc that is green AND an ancestor of the final commit.
   guard:
     name: guard
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
@@ -31,6 +32,18 @@ jobs:
       TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Verify release tag actor
+        env:
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_ACTOR_ID: ${{ github.actor_id }}
+          EXPECTED_RELEASE_ACTOR: peasant-labs-releaser[bot]
+          EXPECTED_RELEASE_ACTOR_ID: "291504229"
+        run: |
+          if [ "$RELEASE_ACTOR" != "$EXPECTED_RELEASE_ACTOR" ] || [ "$RELEASE_ACTOR_ID" != "$EXPECTED_RELEASE_ACTOR_ID" ]; then
+            echo "::error::release tag ${TAG} was pushed by ${RELEASE_ACTOR} (${RELEASE_ACTOR_ID}), not the peasant-labs-releaser App. Create releases only by merging a protected release PR."
+            exit 1
+          fi
+
       - name: Checkout repository (full history + tags)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -66,9 +79,9 @@ jobs:
         id: parse
         run: go run github.com/peasant-labs/schema/cmd/release-guard parse-tag "$TAG"
 
-      - name: Final-release guard (green same-version rc + ancestor)
+      - name: Final-release guard (initial final or green same-version rc)
         if: steps.parse.outputs.kind == 'final'
-        run: go run github.com/peasant-labs/schema/cmd/release-guard check-final --tag "$TAG"
+        run: go run github.com/peasant-labs/schema/cmd/release-guard check-final --tag "$TAG" --initial-final v0.1.0
 
   nix-vendor-hash:
     name: assert nix vendorHash current
@@ -169,10 +182,11 @@ jobs:
           "$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # Pre-flip dummies: skip_upload:true means these are never USED, but the
-          # goreleaser templates must resolve. AUR_KEY lands at the flip; the tap
-          # token is minted from the GitHub App installation above.
-          AUR_KEY: ${{ secrets.AUR_KEY || 'unset-pre-flip' }}
+          # Publisher-disabled placeholders: skip_upload:true means these are never
+          # used for v0.1.0, but the Goreleaser templates must resolve. AUR_KEY is
+          # set only after separate AUR approval; the tap token is minted from the
+          # GitHub App installation above.
+          AUR_KEY: ${{ secrets.AUR_KEY || 'unset-publisher-disabled' }}
           TAP_GITHUB_TOKEN: ${{ steps.tap_tok.outputs.token }}
 
   # Post-publish smoke: download the released linux archives on NATIVE runners

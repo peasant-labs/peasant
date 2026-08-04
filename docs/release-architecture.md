@@ -45,7 +45,9 @@ flowchart TD
   J --> L[Push annotated tag]
   K --> L
   L --> M[release.yml on tag]
-  M --> N[Guard: parse tag and final requires green ancestor rc]
+  M --> V{Tag actor is the releaser App?}
+  V -- no --> X
+  V -- yes --> N[Guard: parse tag and enforce initial-final or green ancestor rc]
   N --> O[Tag-time Nix vendorHash freshness gate]
   O --> E2[e2e gate: TestSkipGateE2E PASS]
   E2 --> RE[release-e2e gate: TestReleasePerDistro PASS]
@@ -79,11 +81,18 @@ before creating the tag. If `flake.nix` changes, the release bot commits
 matters because a release tag is immutable source: a stale `vendorHash` cannot be
 repaired after the tag has already published without moving the tag.
 
-RC tags publish GitHub prereleases. Final tags publish full releases, but only if a
-same-version rc tag exists, that rc's `release.yml` run succeeded, and the rc tag is
-an ancestor of the final commit. Manual tags can still trigger `release.yml`, but
-they must pass the same final guard and the tag-time Nix freshness gate; stale manual
-tags fail before Goreleaser publishes.
+RC tags publish GitHub prereleases. The exact first final `v0.1.0` may bootstrap only
+while a complete tag scan proves no other `v*` tag exists and the GitHub Release lookup
+proves that `v0.1.0` has not already published. That durable Release self-disables the
+exception. Later final tags publish full releases only if a same-version rc tag exists,
+that rc's `release.yml` run succeeded, and the rc tag is an ancestor of the final commit.
+
+An active repository ruleset permits only GitHub App ID `3988034`
+(`peasant-labs-releaser`) to create or mutate `v*` tags. `release.yml` independently
+verifies the stable bot login `peasant-labs-releaser[bot]` and bot actor ID
+`291504229` before processing a tag. GitHub therefore rejects manual tags at the ref
+boundary; if the repository policy drifts, the workflow actor guard still stops
+publication.
 
 ```mermaid
 sequenceDiagram
@@ -103,7 +112,8 @@ sequenceDiagram
     PR->>Tag: Tag merge commit
   end
   Tag->>Rel: Push v* tag
-  Rel->>Rel: Parse tag and enforce final rc lineage
+  Rel->>Rel: Verify releaser App actor login and ID
+  Rel->>Rel: Parse tag and enforce initial-final or rc lineage policy
   Rel->>Rel: make nix-vendor-hash must be clean
   Rel->>Rel: e2e gate (TestSkipGateE2E PASS)
   Rel->>Rel: release-e2e gate (TestReleasePerDistro PASS)
@@ -118,7 +128,7 @@ sequenceDiagram
 | `nix-vendor-hash.yml` | Pushes to `develop` touching `go.mod`, `go.sum`, `web/package.json`, `web/pnpm-lock.yaml`, flake files, `Makefile`, hash script, or the workflow; manual dispatch | Keeps `flake.nix` `vendorHash` current on `develop` | Yes, commits `chore: update nix vendor hash` when needed | GitHub App token with `Contents: write` |
 | `release-pr.yml` | PR open/edit/synchronize/reopen/close into `develop` | Validates release PR title/author; on merge updates Nix hash and pushes an immutable annotated tag | Yes, possibly commits hash fix and pushes tag | `GITHUB_TOKEN` read for collaborator checks; GitHub App token with `Contents: write` |
 | `release-validate.yml` | PRs to `develop` touching packaging-relevant files; `workflow_call` from rc releases | Builds a Goreleaser snapshot and validates deb, rpm, AUR PKGBUILD, Homebrew cask style/install, and `nix build .#peasant` | No | `GITHUB_TOKEN` read |
-| `release.yml` | Push tags matching `v*` | Guards tag, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), publishes via Goreleaser, smokes released archives; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes GitHub Release; post-flip may push AUR/tap | `GITHUB_TOKEN` contents write/actions read; GitHub App token for `homebrew-tap`; `AUR_KEY` after public flip |
+| `release.yml` | Push tags matching `v*` | Verifies the releaser App actor, guards tag lineage, checks Nix hash freshness, runs the **`e2e` + `release-e2e` publication gates** (both must PASS before publish), publishes via Goreleaser, smokes released archives; also fans out `release-validate.yml` on rc tags (non-blocking) | Publishes GitHub Release; may push AUR/tap only after separate publisher approval | `GITHUB_TOKEN` contents write/actions read; GitHub App token for `homebrew-tap`; `AUR_KEY` after AUR approval |
 | `e2e.yml` | PRs to `develop` on relevant paths; `workflow_call`; pushes to `develop`/`main`; manual dispatch | Full-stack push skip-gate (podman Postgres + MinIO + real village server + peasant CLI); asserts a positive `--- PASS: TestSkipGateE2E` — a SKIP or `no tests to run` fails the job | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 | `release-e2e.yml` | `workflow_call`; manual dispatch | Installed-binary / per-distro release gate; asserts a positive `--- PASS: TestReleasePerDistro` | No | Read-only `GITHUB_TOKEN`; Village and schema are public |
 
@@ -176,10 +186,10 @@ Homebrew style exceptions.
 | `.tar.gz` archives | Linux amd64/arm64, Darwin amd64/arm64 | Goreleaser `archives` | `release.yml` smoke for Linux amd64/arm64; macOS cask install on rc | GitHub Release | Names are frozen; binary is `peasant`; version injected by ldflags |
 | `.deb` | Ubuntu/Debian amd64/arm64 | Goreleaser `nfpms` | `release-validate.yml` deb matrix on Ubuntu 22.04/24.04 | GitHub Release | Empty `Depends`; static binary installed to `/usr/bin/peasant` |
 | `.rpm` | Fedora/openSUSE; **produced** amd64+arm64, **validated** amd64 | Goreleaser `nfpms` | `release-validate.yml` Fedora `dnf` and openSUSE `zypper --allow-unsigned-rpm` (amd64) | GitHub Release | Unsigned local rpm install in validation; artifact name `peasant_{version}_linux_{amd64\|arm64}.rpm` (goreleaser `file_name_template`, not the conventional `name-version-release.arch`) |
-| AUR `peasant-bin` | Arch Linux x86_64 | Goreleaser `aurs` | Offline `makepkg` with local release tarball and full checksum verification | Disabled pre-flip via `skip_upload: true`; flip to `auto` | Requires public repo and `AUR_KEY`; prereleases remain skipped with `auto` |
-| Homebrew cask | macOS amd64/arm64 | Goreleaser `homebrew_casks` | `brew style` on Linux; cask install on macOS for rc tags | Disabled pre-flip via `skip_upload: true`; flip to `auto` | Requires tap repo and GitHub App `Contents: write`; unsigned binary uses quarantine-removal hook |
+| AUR `peasant-bin` | Arch Linux x86_64 | Goreleaser `aurs` | Offline `makepkg` with local release tarball and full checksum verification | Disabled for `v0.1.0` via `skip_upload: true`; separate approval changes it to `auto` for a later final | Requires public repo and `AUR_KEY`; prereleases remain skipped with `auto` |
+| Homebrew cask | macOS amd64/arm64 | Goreleaser `homebrew_casks` | `brew style` on Linux; cask install on macOS for rc tags | Disabled for `v0.1.0` via `skip_upload: true`; separate approval changes it to `auto` for a later final | Requires tap repo and GitHub App `Contents: write`; unsigned binary uses quarantine-removal hook |
 | In-repo Nix flake | Nix systems supported by the flake | `flake.nix` `buildGoModule` | `release-validate.yml` `nix build .#peasant`; `release.yml` hash freshness | Available from source checkout/GitHub flake | Requires current `vendorHash`; stubs `web/out` until frontend derivation exists |
-| Future nixpkgs | nixpkgs-supported systems | nixpkgs expression | Future nixpkgs CI plus local update checks | Deferred until public flip | Requires public repo, tagged release, maintainer metadata; the license requirement is met (Apache-2.0, free) |
+| Future nixpkgs | nixpkgs-supported systems | nixpkgs expression | Future nixpkgs CI plus local update checks | Deferred until a stable GitHub release exists | Requires public repo, tagged release, maintainer metadata; the license requirement is met (Apache-2.0, free) |
 
 ```mermaid
 flowchart TD
@@ -224,19 +234,23 @@ The project is licensed Apache-2.0. Publication still requires branch protection
 App installation; there is no long-lived tap token secret. Until then, Goreleaser
 keeps AUR and Homebrew cask upload disabled.
 
-macOS binaries are not signed or notarized yet. The cask uses a post-install
-`xattr -dr com.apple.quarantine` hook as the interim mechanism. Signing, SBOMs,
-cosign signatures, and provenance attestations are deferred release-hardening work.
+macOS binaries are not signed or notarized yet. For `v0.1.0`, browser-downloaded raw
+tarballs require the manual `xattr -dr com.apple.quarantine ./peasant` step documented
+in the macOS install guide. The planned Homebrew cask includes a post-install
+quarantine-removal hook, but it applies only after Homebrew publication is separately
+approved and enabled. Signing, SBOMs, cosign signatures, and provenance attestations
+are deferred release-hardening work.
 
 ## Failure Modes
 
 | Failure | Owner | What happens | Operator response |
 |---------|-------|--------------|-------------------|
 | Stale Nix `vendorHash` on release PR merge | `release-pr.yml` | Bot commits `chore: update nix vendor hash` and tags that commit | Verify the extra commit on `develop`; no manual action if the workflow succeeds |
-| Stale Nix `vendorHash` on manual tag | `release.yml` | `nix-vendor-hash` job fails before Goreleaser | Do not move the tag; update `develop` with `make nix-vendor-hash` and cut a new tag/version |
+| Manual/non-App `v*` tag attempt | GitHub tag ruleset / `release.yml` | GitHub rejects the ref mutation; if policy drift lets an event reach Actions, the actor guard fails before checkout | Do not bypass or weaken the rule; create releases only by merging a protected release PR |
+| Stale Nix `vendorHash` on a release tag | `release.yml` | `nix-vendor-hash` job fails before Goreleaser | Do not move the tag; update `develop` with `make nix-vendor-hash` and cut a new tag/version through a release PR |
 | Existing release tag | `release-pr.yml` | Tag step hard-fails and refuses to move it | Bump to a new version or rc number |
 | Invalid release PR title | `release-pr.yml` | Open-PR validation fails | Rename the PR to the exact title grammar |
-| Missing maintainer approval | `release-pr.yml` (step disabled pre-flip) | n/a until the public flip re-enables the step | Get an `admin`/`maintain` approval and rerun if appropriate |
+| Missing maintainer approval | `release-pr.yml` (step disabled during the single-maintainer period) | n/a while independent approval is unsatisfiable | Re-enable the assertion once another active maintainer can approve, then get an `admin`/`maintain` approval and rerun |
 | Final tag without green ancestor rc | `release.yml` guard | Release stops before publication | Cut and validate an rc first, or ensure the final descends from the validated rc |
 | Web dashboard build failure | `release.yml` / `release-e2e.yml` / `release-validate.yml` | Artifact production stops before Goreleaser; no stub dashboard is publishable | Fix the frontend build or dependency pin and rerun the gate |
 | `e2e` / `release-e2e` gate SKIP or failure | `release.yml` | Publication blocked — no positive `--- PASS: TestSkipGateE2E` / `TestReleasePerDistro` line means no asserted product / installed-package e2e coverage. A SKIP (`no tests to run`, missing podman/runner) is treated as **failure**, never green | Fix the harness/runner so the gate actually runs and passes; never bypass — a green publish requires proven e2e coverage |

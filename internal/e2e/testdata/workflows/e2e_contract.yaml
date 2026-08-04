@@ -63,6 +63,60 @@ release:
     - no tests to run
     - "--- SKIP: TestReleasePerDistro"
     - "--- PASS: TestReleasePerDistro"
+release_guard:
+  workflow: .github/workflows/release.yml
+  job: guard
+  step: Final-release guard (initial final or green same-version rc)
+  if_condition: steps.parse.outputs.kind == 'final'
+  initial_final: v0.1.0
+  expected_run: 'go run github.com/peasant-labs/schema/cmd/release-guard check-final --tag "$TAG" --initial-final v0.1.0'
+  required_job_permissions:
+    - key: contents
+      value: read
+    - key: actions
+      value: read
+  required_job_env:
+    - key: TAG
+      value: '${{ github.ref_name }}'
+    - key: GH_TOKEN
+      value: '${{ github.token }}'
+  actor_step: Verify release tag actor
+  actor_env:
+    - key: RELEASE_ACTOR
+      value: '${{ github.actor }}'
+    - key: RELEASE_ACTOR_ID
+      value: '${{ github.actor_id }}'
+    - key: EXPECTED_RELEASE_ACTOR
+      value: peasant-labs-releaser[bot]
+    - key: EXPECTED_RELEASE_ACTOR_ID
+      value: "291504229"
+  actor_run: |-
+    if [ "$RELEASE_ACTOR" != "$EXPECTED_RELEASE_ACTOR" ] || [ "$RELEASE_ACTOR_ID" != "$EXPECTED_RELEASE_ACTOR_ID" ]; then
+      echo "::error::release tag ${TAG} was pushed by ${RELEASE_ACTOR} (${RELEASE_ACTOR_ID}), not the peasant-labs-releaser App. Create releases only by merging a protected release PR."
+      exit 1
+    fi
+  checkout_step: Checkout repository (full history + tags)
+  parse_step: Parse + classify the tag
+  checkout_fetch_depth: "0"
+  checkout_fetch_tags: "true"
+release_validate:
+  workflow: .github/workflows/release-validate.yml
+  required_paths:
+    - .goreleaser.yml
+    - .github/workflows/release.yml
+    - .github/workflows/release-e2e.yml
+    - .github/workflows/release-pr.yml
+    - .github/workflows/release-validate.yml
+    - scripts/install-goreleaser
+    - scripts/goreleaser-v2.17.1-homebrew.patch
+    - flake.nix
+    - flake.lock
+    - go.mod
+    - go.sum
+    - web/package.json
+    - web/pnpm-lock.yaml
+    - "**.go"
+    - Makefile
 tests_workflow:
   triggers:
     - pull_request

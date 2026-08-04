@@ -30,7 +30,7 @@ sha256sum --ignore-missing -c checksums.txt
 # Install (apt resolves the local file; works on apt >= 1.1, i.e. every supported release)
 sudo apt install "./peasant_${VERSION}_linux_${ARCH}.deb"
 
-peasant --version    # should print v${VERSION}
+peasant version    # should include ${VERSION}
 ```
 
 `dpkg -i ./peasant_*.deb` works identically if you prefer.
@@ -62,7 +62,7 @@ sha256sum --ignore-missing -c checksums.txt
 tar xzf "peasant_${VERSION}_linux_${ARCH}.tar.gz"
 sudo install -m755 peasant /usr/local/bin/peasant
 
-peasant --version
+peasant version
 ```
 
 ## Notes
