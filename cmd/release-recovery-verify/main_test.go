@@ -61,7 +61,7 @@ func TestRunPreflightUsesMountedWorkflowEnvironment(t *testing.T) {
 			var output bytes.Buffer
 			err := run([]string{"preflight"}, func(config *runConfig) {
 				config.httpClient = server.Client()
-				config.now = func() time.Time { return time.Date(2026, time.August, 4, 21, 0, 0, 0, time.UTC) }
+				config.now = func() time.Time { return time.Date(2026, time.August, 4, 22, 0, 0, 0, time.UTC) }
 				config.stdout = &output
 			})
 			assertCommandError(t, err, testCase.WantError)
@@ -83,7 +83,7 @@ func TestRunPrePublishRevalidatesRemoteState(t *testing.T) {
 	var output bytes.Buffer
 	err := run([]string{"pre-publish"}, func(config *runConfig) {
 		config.httpClient = server.Client()
-		config.now = func() time.Time { return time.Date(2026, time.August, 4, 21, 0, 0, 0, time.UTC) }
+		config.now = func() time.Time { return time.Date(2026, time.August, 4, 22, 0, 0, 0, time.UTC) }
 		config.stdout = &output
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func loadCommandFixture(t *testing.T) commandFixture {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("release recovery command: API fixture must have exact EOF: %v", err)
 	}
-	if len(fixture.Responses) != 17 || len(fixture.CommandCases) != 4 {
+	if len(fixture.Responses) != 18 || len(fixture.CommandCases) != 4 {
 		t.Fatalf("release recovery command: fixture row-count guard failed: %+v", fixture)
 	}
 	seenRequests := make(map[string]struct{}, len(fixture.Responses))

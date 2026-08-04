@@ -123,9 +123,27 @@ preflight_cases:
   - name: rejects_missing_recovery_confirmation
     mutation: missing_recovery_confirmation
     want_error: executing recovery commit is missing, malformed, or differs
-  - name: rejects_prior_recovery_dispatch
-    mutation: prior_recovery_dispatch
-    want_error: current run is not the only recovery workflow dispatch
+  - name: rejects_unexpected_third_recovery_dispatch
+    mutation: unexpected_recovery_dispatch
+    want_error: workflow history is not exactly the failed preflight plus the current replacement
+  - name: rejects_missing_failed_recovery_dispatch
+    mutation: missing_failed_recovery_dispatch
+    want_error: workflow history is not exactly the failed preflight plus the current replacement
+  - name: rejects_wrong_failed_recovery_commit
+    mutation: wrong_failed_recovery_commit
+    want_error: prior dispatch differs from the fixed fail-closed attempt
+  - name: rejects_failed_recovery_release_job_not_skipped
+    mutation: failed_recovery_publication_not_skipped
+    failed_job: release
+    want_error: downstream mutable or smoke job was not empty and skipped
+  - name: rejects_failed_recovery_nix_job_not_skipped
+    mutation: failed_recovery_publication_not_skipped
+    failed_job: nix_vendor_hash
+    want_error: downstream mutable or smoke job was not empty and skipped
+  - name: rejects_failed_recovery_smoke_job_not_skipped
+    mutation: failed_recovery_publication_not_skipped
+    failed_job: smoke
+    want_error: downstream mutable or smoke job was not empty and skipped
   - name: rejects_stale_operator_permission
     mutation: stale_operator_permission
     want_error: no longer has admin or maintain permission
@@ -137,7 +155,10 @@ preflight_cases:
     want_error: no longer points to the reviewed annotated tag object
   - name: rejects_changed_ruleset
     mutation: changed_ruleset
-    want_error: differs from the reviewed App-only policy
+    want_error: differs from the admin-verified App-only snapshot
+  - name: rejects_unexpected_visible_ruleset_bypass
+    mutation: unexpected_visible_ruleset_bypass
+    want_error: differs from the admin-verified App-only snapshot
   - name: rejects_wrong_original_workflow
     mutation: wrong_original_workflow
     want_error: differs from the reviewed App-created startup failure
@@ -224,8 +245,8 @@ pre_publish_cases:
     mutation: moved_tag_object
     want_error: no longer points to the reviewed annotated tag object
   - name: rejects_concurrent_redispatch_after_preflight
-    mutation: prior_recovery_dispatch
-    want_error: current run is not the only recovery workflow dispatch
+    mutation: unexpected_recovery_dispatch
+    want_error: workflow history is not exactly the failed preflight plus the current replacement
   - name: rejects_partial_release_after_preflight
     mutation: partial_release
     want_error: release record already exists

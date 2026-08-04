@@ -26,38 +26,46 @@ var recoveryContractFixtureBytes []byte
 
 type recoveryMutation string
 type recoveryGate string
+type recoveryFailedJob string
 
 const (
-	recoveryMutationNone                     recoveryMutation = "none"
-	recoveryMutationWrongRepositoryID        recoveryMutation = "wrong_repository_id"
-	recoveryMutationWrongDispatchActor       recoveryMutation = "wrong_dispatch_actor"
-	recoveryMutationMismatchedRecoveryHead   recoveryMutation = "mismatched_recovery_head"
-	recoveryMutationRecoveryRunHeadDrift     recoveryMutation = "recovery_run_head_drift"
-	recoveryMutationMissingRecoveryConfirm   recoveryMutation = "missing_recovery_confirmation"
-	recoveryMutationPriorRecoveryDispatch    recoveryMutation = "prior_recovery_dispatch"
-	recoveryMutationStaleOperatorPermission  recoveryMutation = "stale_operator_permission"
-	recoveryMutationSameNamedBranch          recoveryMutation = "same_named_branch"
-	recoveryMutationMovedTagObject           recoveryMutation = "moved_tag_object"
-	recoveryMutationChangedRuleset           recoveryMutation = "changed_ruleset"
-	recoveryMutationWrongOriginalWorkflow    recoveryMutation = "wrong_original_workflow"
-	recoveryMutationOriginalHasJob           recoveryMutation = "original_has_job"
-	recoveryMutationWrongGateSHA             recoveryMutation = "wrong_gate_sha"
-	recoveryMutationWrongGateActor           recoveryMutation = "wrong_gate_actor"
-	recoveryMutationWrongGateWorkflow        recoveryMutation = "wrong_gate_workflow"
-	recoveryMutationSecondGateAttempt        recoveryMutation = "second_gate_attempt"
-	recoveryMutationZeroGateJobs             recoveryMutation = "zero_gate_jobs"
-	recoveryMutationFailedCriticalStep       recoveryMutation = "failed_critical_step"
-	recoveryMutationStaleGate                recoveryMutation = "stale_gate"
-	recoveryMutationExpiredRecovery          recoveryMutation = "expired_recovery"
-	recoveryMutationDraftRelease             recoveryMutation = "draft_release"
-	recoveryMutationPartialRelease           recoveryMutation = "partial_release"
-	recoveryMutationPublishedReleaseEndpoint recoveryMutation = "published_release_endpoint"
-	recoveryMutationFullReleasePage          recoveryMutation = "full_release_page"
-	recoveryMutationEnabledAUR               recoveryMutation = "enabled_aur"
-	recoveryMutationEnabledHomebrew          recoveryMutation = "enabled_homebrew"
-	recoveryMutationUnquotedAURBoolean       recoveryMutation = "unquoted_aur_boolean"
-	recoveryGateE2E                          recoveryGate     = "e2e"
-	recoveryGateReleaseE2E                   recoveryGate     = "release_e2e"
+	recoveryMutationNone                                recoveryMutation  = "none"
+	recoveryMutationWrongRepositoryID                   recoveryMutation  = "wrong_repository_id"
+	recoveryMutationWrongDispatchActor                  recoveryMutation  = "wrong_dispatch_actor"
+	recoveryMutationMismatchedRecoveryHead              recoveryMutation  = "mismatched_recovery_head"
+	recoveryMutationRecoveryRunHeadDrift                recoveryMutation  = "recovery_run_head_drift"
+	recoveryMutationMissingRecoveryConfirm              recoveryMutation  = "missing_recovery_confirmation"
+	recoveryMutationUnexpectedRecoveryDispatch          recoveryMutation  = "unexpected_recovery_dispatch"
+	recoveryMutationMissingFailedRecoveryDispatch       recoveryMutation  = "missing_failed_recovery_dispatch"
+	recoveryMutationWrongFailedRecoveryCommit           recoveryMutation  = "wrong_failed_recovery_commit"
+	recoveryMutationFailedRecoveryPublicationNotSkipped recoveryMutation  = "failed_recovery_publication_not_skipped"
+	recoveryMutationStaleOperatorPermission             recoveryMutation  = "stale_operator_permission"
+	recoveryMutationSameNamedBranch                     recoveryMutation  = "same_named_branch"
+	recoveryMutationMovedTagObject                      recoveryMutation  = "moved_tag_object"
+	recoveryMutationChangedRuleset                      recoveryMutation  = "changed_ruleset"
+	recoveryMutationUnexpectedVisibleRulesetBypass      recoveryMutation  = "unexpected_visible_ruleset_bypass"
+	recoveryMutationWrongOriginalWorkflow               recoveryMutation  = "wrong_original_workflow"
+	recoveryMutationOriginalHasJob                      recoveryMutation  = "original_has_job"
+	recoveryMutationWrongGateSHA                        recoveryMutation  = "wrong_gate_sha"
+	recoveryMutationWrongGateActor                      recoveryMutation  = "wrong_gate_actor"
+	recoveryMutationWrongGateWorkflow                   recoveryMutation  = "wrong_gate_workflow"
+	recoveryMutationSecondGateAttempt                   recoveryMutation  = "second_gate_attempt"
+	recoveryMutationZeroGateJobs                        recoveryMutation  = "zero_gate_jobs"
+	recoveryMutationFailedCriticalStep                  recoveryMutation  = "failed_critical_step"
+	recoveryMutationStaleGate                           recoveryMutation  = "stale_gate"
+	recoveryMutationExpiredRecovery                     recoveryMutation  = "expired_recovery"
+	recoveryMutationDraftRelease                        recoveryMutation  = "draft_release"
+	recoveryMutationPartialRelease                      recoveryMutation  = "partial_release"
+	recoveryMutationPublishedReleaseEndpoint            recoveryMutation  = "published_release_endpoint"
+	recoveryMutationFullReleasePage                     recoveryMutation  = "full_release_page"
+	recoveryMutationEnabledAUR                          recoveryMutation  = "enabled_aur"
+	recoveryMutationEnabledHomebrew                     recoveryMutation  = "enabled_homebrew"
+	recoveryMutationUnquotedAURBoolean                  recoveryMutation  = "unquoted_aur_boolean"
+	recoveryGateE2E                                     recoveryGate      = "e2e"
+	recoveryGateReleaseE2E                              recoveryGate      = "release_e2e"
+	recoveryFailedJobRelease                            recoveryFailedJob = "release"
+	recoveryFailedJobNixVendorHash                      recoveryFailedJob = "nix_vendor_hash"
+	recoveryFailedJobSmoke                              recoveryFailedJob = "smoke"
 )
 
 type recoveryContractFixture struct {
@@ -87,10 +95,11 @@ type recoveryWorkflowEnvExpectation struct {
 }
 
 type recoveryCaseFixture struct {
-	Name      string           `yaml:"name"`
-	Mutation  recoveryMutation `yaml:"mutation"`
-	Gate      recoveryGate     `yaml:"gate"`
-	WantError string           `yaml:"want_error"`
+	Name      string            `yaml:"name"`
+	Mutation  recoveryMutation  `yaml:"mutation"`
+	Gate      recoveryGate      `yaml:"gate"`
+	FailedJob recoveryFailedJob `yaml:"failed_job"`
+	WantError string            `yaml:"want_error"`
 }
 
 func loadRecoveryContractFixture(t *testing.T) recoveryContractFixture {
@@ -105,7 +114,7 @@ func loadRecoveryContractFixture(t *testing.T) recoveryContractFixture {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("release recovery: fixture must have exact EOF: %v", err)
 	}
-	if fixture.Workflow.Path == "" || fixture.Workflow.Trigger == "" || len(fixture.Workflow.Inputs) != 5 || fixture.Workflow.ConcurrencyGroup == "" || fixture.Workflow.ConcurrencyCancelInProgress == "" || len(fixture.Workflow.TopEnv) != 4 || len(fixture.Workflow.PreflightEnv) != 14 || len(fixture.Workflow.Jobs) != 4 || len(fixture.Workflow.TagCheckoutJobs) != 3 || len(fixture.Workflow.RequiredSource) != 9 || len(fixture.Workflow.ForbiddenSource) != 8 || len(fixture.PreflightCases) != 28 || len(fixture.ReleaseAbsenceCases) != 5 || len(fixture.PrePublishCases) != 4 || len(fixture.PublisherCases) != 4 {
+	if fixture.Workflow.Path == "" || fixture.Workflow.Trigger == "" || len(fixture.Workflow.Inputs) != 5 || fixture.Workflow.ConcurrencyGroup == "" || fixture.Workflow.ConcurrencyCancelInProgress == "" || len(fixture.Workflow.TopEnv) != 4 || len(fixture.Workflow.PreflightEnv) != 14 || len(fixture.Workflow.Jobs) != 4 || len(fixture.Workflow.TagCheckoutJobs) != 3 || len(fixture.Workflow.RequiredSource) != 9 || len(fixture.Workflow.ForbiddenSource) != 8 || len(fixture.PreflightCases) != 34 || len(fixture.ReleaseAbsenceCases) != 5 || len(fixture.PrePublishCases) != 4 || len(fixture.PublisherCases) != 4 {
 		t.Fatalf("release recovery: fixture row-count guard failed: %+v", fixture)
 	}
 	for index, environment := range fixture.Workflow.PreflightEnv {
@@ -124,6 +133,10 @@ func loadRecoveryContractFixture(t *testing.T) recoveryContractFixture {
 			}
 			if isGateRecoveryMutation(testCase.Mutation) != (testCase.Gate == recoveryGateE2E || testCase.Gate == recoveryGateReleaseE2E) {
 				t.Fatalf("release recovery: case %q must bind gate mutations to exactly e2e or release_e2e: %+v", testCase.Name, testCase)
+			}
+			hasFailedJob := testCase.FailedJob == recoveryFailedJobRelease || testCase.FailedJob == recoveryFailedJobNixVendorHash || testCase.FailedJob == recoveryFailedJobSmoke
+			if (testCase.Mutation == recoveryMutationFailedRecoveryPublicationNotSkipped) != hasFailedJob {
+				t.Fatalf("release recovery: case %q must bind failed-job mutations to release, nix_vendor_hash, or smoke: %+v", testCase.Name, testCase)
 			}
 			if _, exists := seenNames[testCase.Name]; exists {
 				t.Fatalf("release recovery: duplicate fixture case name %q", testCase.Name)
@@ -151,11 +164,15 @@ func validRecoveryMutation(mutation recoveryMutation) bool {
 		recoveryMutationMismatchedRecoveryHead,
 		recoveryMutationRecoveryRunHeadDrift,
 		recoveryMutationMissingRecoveryConfirm,
-		recoveryMutationPriorRecoveryDispatch,
+		recoveryMutationUnexpectedRecoveryDispatch,
+		recoveryMutationMissingFailedRecoveryDispatch,
+		recoveryMutationWrongFailedRecoveryCommit,
+		recoveryMutationFailedRecoveryPublicationNotSkipped,
 		recoveryMutationStaleOperatorPermission,
 		recoveryMutationSameNamedBranch,
 		recoveryMutationMovedTagObject,
 		recoveryMutationChangedRuleset,
+		recoveryMutationUnexpectedVisibleRulesetBypass,
 		recoveryMutationWrongOriginalWorkflow,
 		recoveryMutationOriginalHasJob,
 		recoveryMutationWrongGateSHA,
@@ -301,7 +318,7 @@ func TestReleaseRecoveryPreflightEvidence(t *testing.T) {
 	for _, testCase := range fixture.PreflightCases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			state := newRecoveryAPIState()
-			applyRecoveryMutation(t, state, testCase.Mutation, testCase.Gate)
+			applyRecoveryMutation(t, state, testCase.Mutation, testCase.Gate, testCase.FailedJob)
 			server := httptest.NewServer(state)
 			defer server.Close()
 			verifier, err := releaserecovery.NewVerifier(releaserecovery.Config{
@@ -324,7 +341,7 @@ func TestReleaseRecoveryAuthoritativeAbsenceCheck(t *testing.T) {
 	for _, testCase := range fixture.ReleaseAbsenceCases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			state := newRecoveryAPIState()
-			applyRecoveryMutation(t, state, testCase.Mutation, testCase.Gate)
+			applyRecoveryMutation(t, state, testCase.Mutation, testCase.Gate, testCase.FailedJob)
 			server := httptest.NewServer(state)
 			defer server.Close()
 			verifier, err := releaserecovery.NewVerifier(releaserecovery.Config{
@@ -344,7 +361,7 @@ func TestReleaseRecoveryPrePublishRevalidation(t *testing.T) {
 	for _, testCase := range fixture.PrePublishCases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			state := newRecoveryAPIState()
-			applyRecoveryMutation(t, state, testCase.Mutation, testCase.Gate)
+			applyRecoveryMutation(t, state, testCase.Mutation, testCase.Gate, testCase.FailedJob)
 			server := httptest.NewServer(state)
 			defer server.Close()
 			verifier, err := releaserecovery.NewVerifier(releaserecovery.Config{
@@ -398,6 +415,8 @@ type recoveryAPIState struct {
 	branchExists          bool
 	tagObjectSHA          string
 	rulesetAppID          int64
+	rulesetBypassVisible  bool
+	rulesetUpdatedAt      time.Time
 	runs                  map[int64]*mockWorkflowRun
 	jobs                  map[int64]*mockWorkflowJobs
 	recoveryDispatches    []*mockWorkflowRun
@@ -463,15 +482,16 @@ const (
 )
 
 func newRecoveryAPIState() *recoveryAPIState {
-	now := time.Date(2026, time.August, 4, 21, 0, 0, 0, time.UTC)
+	now := time.Date(2026, time.August, 4, 22, 0, 0, 0, time.UTC)
 	operator := mockUser{Login: releaserecovery.OperatorLogin, ID: releaserecovery.OperatorID}
 	bot := mockUser{Login: releaserecovery.BotLogin, ID: releaserecovery.BotID}
 	state := &recoveryAPIState{
-		now:          now,
-		repositoryID: releaserecovery.RepositoryID,
-		permission:   "admin",
-		tagObjectSHA: releaserecovery.TagObjectSHA,
-		rulesetAppID: releaserecovery.ReleaserAppID,
+		now:              now,
+		repositoryID:     releaserecovery.RepositoryID,
+		permission:       "admin",
+		tagObjectSHA:     releaserecovery.TagObjectSHA,
+		rulesetAppID:     releaserecovery.ReleaserAppID,
+		rulesetUpdatedAt: time.Date(2026, time.August, 4, 9, 25, 11, 190000000, time.UTC),
 		input: releaserecovery.PreflightInput{
 			Repository:              releaserecovery.Repository,
 			EventName:               "workflow_dispatch",
@@ -489,7 +509,10 @@ func newRecoveryAPIState() *recoveryAPIState {
 		},
 		runs: map[int64]*mockWorkflowRun{
 			mockRecoveryRunID: {
-				ID: mockRecoveryRunID, Event: "workflow_dispatch", Status: "in_progress", HeadBranch: "develop", HeadSHA: mockRecoveryHeadSHA, Path: ".github/workflows/release-recovery.yml", RunAttempt: 1, Actor: operator, TriggeringActor: operator, CreatedAt: now.Add(-time.Minute),
+				ID: mockRecoveryRunID, WorkflowID: releaserecovery.RecoveryWorkflowID, Event: "workflow_dispatch", Status: "in_progress", HeadBranch: "develop", HeadSHA: mockRecoveryHeadSHA, Path: ".github/workflows/release-recovery.yml", RunAttempt: 1, Actor: operator, TriggeringActor: operator, CreatedAt: now.Add(-time.Minute),
+			},
+			releaserecovery.FailedRecoveryRunID: {
+				ID: releaserecovery.FailedRecoveryRunID, WorkflowID: releaserecovery.RecoveryWorkflowID, Event: "workflow_dispatch", Status: "completed", Conclusion: "failure", HeadBranch: "develop", HeadSHA: releaserecovery.FailedRecoveryCommitSHA, Path: ".github/workflows/release-recovery.yml", RunAttempt: 1, Actor: operator, TriggeringActor: operator, CreatedAt: time.Date(2026, time.August, 4, 21, 31, 52, 0, time.UTC),
 			},
 			releaserecovery.OriginalRunID: {
 				ID: releaserecovery.OriginalRunID, WorkflowID: releaserecovery.ReleaseWorkflowID, Event: "push", Status: "completed", Conclusion: "startup_failure", HeadBranch: releaserecovery.Tag, HeadSHA: releaserecovery.TagCommitSHA, Path: ".github/workflows/release.yml", RunAttempt: 1, Actor: bot, TriggeringActor: bot, CreatedAt: time.Date(2026, time.August, 4, 20, 12, 59, 0, time.UTC),
@@ -498,12 +521,13 @@ func newRecoveryAPIState() *recoveryAPIState {
 			mockReleaseE2ERunID: gateRun(mockReleaseE2ERunID, releaserecovery.ReleaseE2EID, ".github/workflows/release-e2e.yml", operator, now),
 		},
 		jobs: map[int64]*mockWorkflowJobs{
-			releaserecovery.OriginalRunID: {TotalCount: 0, Jobs: []mockWorkflowJob{}},
-			mockE2ERunID:                  successfulJob("full-stack push e2e (podman)", []string{"Verify schema module pin parity", "make e2e", "Assert asserted e2e tests ran and passed"}),
-			mockReleaseE2ERunID:           successfulJob("release e2e (installed packages)", []string{"Verify schema module pin parity", "Assert real dashboard artifact", "Build release snapshot artifacts", "Run release per-distro e2e driver"}),
+			releaserecovery.OriginalRunID:       {TotalCount: 0, Jobs: []mockWorkflowJob{}},
+			releaserecovery.FailedRecoveryRunID: failedRecoveryJobs(),
+			mockE2ERunID:                        successfulJob("full-stack push e2e (podman)", []string{"Verify schema module pin parity", "make e2e", "Assert asserted e2e tests ran and passed"}),
+			mockReleaseE2ERunID:                 successfulJob("release e2e (installed packages)", []string{"Verify schema module pin parity", "Assert real dashboard artifact", "Build release snapshot artifacts", "Run release per-distro e2e driver"}),
 		},
 	}
-	state.recoveryDispatches = []*mockWorkflowRun{state.runs[mockRecoveryRunID]}
+	state.recoveryDispatches = []*mockWorkflowRun{state.runs[releaserecovery.FailedRecoveryRunID], state.runs[mockRecoveryRunID]}
 	return state
 }
 
@@ -521,7 +545,27 @@ func successfulJob(name string, steps []string) *mockWorkflowJobs {
 	return &mockWorkflowJobs{TotalCount: 1, Jobs: []mockWorkflowJob{job}}
 }
 
-func applyRecoveryMutation(t *testing.T, state *recoveryAPIState, mutation recoveryMutation, gate recoveryGate) {
+func failedRecoveryJobs() *mockWorkflowJobs {
+	return &mockWorkflowJobs{
+		TotalCount: 4,
+		Jobs: []mockWorkflowJob{
+			{
+				Name: "verify immutable recovery evidence", Status: "completed", Conclusion: "failure", RunAttempt: 1,
+				Steps: []mockWorkflowStep{
+					{Name: "Verify GitHub recovery evidence", Status: "completed", Conclusion: "failure"},
+					{Name: "Verify local immutable tag and protected-branch reachability", Status: "completed", Conclusion: "skipped"},
+					{Name: "Re-run tagged release guards", Status: "completed", Conclusion: "skipped"},
+					{Name: "Verify tagged external publishers remain disabled", Status: "completed", Conclusion: "skipped"},
+				},
+			},
+			{Name: "publish immutable release (goreleaser)", Status: "completed", Conclusion: "skipped", RunAttempt: 1, Steps: []mockWorkflowStep{}},
+			{Name: "assert immutable Nix vendorHash current", Status: "completed", Conclusion: "skipped", RunAttempt: 1, Steps: []mockWorkflowStep{}},
+			{Name: "smoke immutable release (${{ matrix.arch }})", Status: "completed", Conclusion: "skipped", RunAttempt: 1, Steps: []mockWorkflowStep{}},
+		},
+	}
+}
+
+func applyRecoveryMutation(t *testing.T, state *recoveryAPIState, mutation recoveryMutation, gate recoveryGate, failedJob recoveryFailedJob) {
 	t.Helper()
 	gateRunID := mockE2ERunID
 	if gate == recoveryGateReleaseE2E {
@@ -539,10 +583,23 @@ func applyRecoveryMutation(t *testing.T, state *recoveryAPIState, mutation recov
 		state.runs[mockRecoveryRunID].HeadSHA = strings.Repeat("2", 40)
 	case recoveryMutationMissingRecoveryConfirm:
 		state.input.ConfirmationRecoverySHA = ""
-	case recoveryMutationPriorRecoveryDispatch:
+	case recoveryMutationUnexpectedRecoveryDispatch:
 		state.recoveryDispatches = append(state.recoveryDispatches, &mockWorkflowRun{
-			ID: 91004, Event: "workflow_dispatch", Status: "completed", Conclusion: "cancelled", HeadBranch: "develop", HeadSHA: mockRecoveryHeadSHA, Path: ".github/workflows/release-recovery.yml", RunAttempt: 1, Actor: state.runs[mockRecoveryRunID].Actor, TriggeringActor: state.runs[mockRecoveryRunID].TriggeringActor, CreatedAt: state.now.Add(-2 * time.Minute),
+			ID: 91004, WorkflowID: releaserecovery.RecoveryWorkflowID, Event: "workflow_dispatch", Status: "completed", Conclusion: "cancelled", HeadBranch: "develop", HeadSHA: mockRecoveryHeadSHA, Path: ".github/workflows/release-recovery.yml", RunAttempt: 1, Actor: state.runs[mockRecoveryRunID].Actor, TriggeringActor: state.runs[mockRecoveryRunID].TriggeringActor, CreatedAt: state.now.Add(-2 * time.Minute),
 		})
+	case recoveryMutationMissingFailedRecoveryDispatch:
+		state.recoveryDispatches = []*mockWorkflowRun{state.runs[mockRecoveryRunID]}
+	case recoveryMutationWrongFailedRecoveryCommit:
+		state.runs[releaserecovery.FailedRecoveryRunID].HeadSHA = strings.Repeat("3", 40)
+	case recoveryMutationFailedRecoveryPublicationNotSkipped:
+		target := failedRecoveryJobName(t, failedJob)
+		for index := range state.jobs[releaserecovery.FailedRecoveryRunID].Jobs {
+			job := &state.jobs[releaserecovery.FailedRecoveryRunID].Jobs[index]
+			if job.Name == target {
+				job.Conclusion = "success"
+				job.Steps = []mockWorkflowStep{{Name: "Unexpected downstream execution", Status: "completed", Conclusion: "success"}}
+			}
+		}
 	case recoveryMutationStaleOperatorPermission:
 		state.permission = "write"
 	case recoveryMutationSameNamedBranch:
@@ -550,6 +607,9 @@ func applyRecoveryMutation(t *testing.T, state *recoveryAPIState, mutation recov
 	case recoveryMutationMovedTagObject:
 		state.tagObjectSHA = strings.Repeat("a", 40)
 	case recoveryMutationChangedRuleset:
+		state.rulesetUpdatedAt = state.rulesetUpdatedAt.Add(time.Second)
+	case recoveryMutationUnexpectedVisibleRulesetBypass:
+		state.rulesetBypassVisible = true
 		state.rulesetAppID++
 	case recoveryMutationWrongOriginalWorkflow:
 		state.runs[releaserecovery.OriginalRunID].WorkflowID++
@@ -588,12 +648,31 @@ func applyRecoveryMutation(t *testing.T, state *recoveryAPIState, mutation recov
 	}
 }
 
+func failedRecoveryJobName(t *testing.T, job recoveryFailedJob) string {
+	t.Helper()
+	switch job {
+	case recoveryFailedJobRelease:
+		return "publish immutable release (goreleaser)"
+	case recoveryFailedJobNixVendorHash:
+		return "assert immutable Nix vendorHash current"
+	case recoveryFailedJobSmoke:
+		return "smoke immutable release (${{ matrix.arch }})"
+	default:
+		t.Fatalf("release recovery: unsupported failed downstream job %q", job)
+		return ""
+	}
+}
+
 func (state *recoveryAPIState) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet || request.Header.Get("Authorization") != "Bearer fixture-token" || request.Header.Get("X-GitHub-Api-Version") != "2022-11-28" {
 		writer.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 	base := "/repos/" + releaserecovery.Repository
+	bypassActors := []map[string]any{}
+	if state.rulesetBypassVisible {
+		bypassActors = []map[string]any{{"actor_id": state.rulesetAppID, "actor_type": "Integration", "bypass_mode": "always"}}
+	}
 	switch request.URL.Path {
 	case base:
 		writeRecoveryJSON(writer, http.StatusOK, map[string]any{"id": state.repositoryID, "full_name": releaserecovery.Repository, "default_branch": "develop"})
@@ -618,9 +697,10 @@ func (state *recoveryAPIState) ServeHTTP(writer http.ResponseWriter, request *ht
 	case fmt.Sprintf("%s/rulesets/%d", base, releaserecovery.TagRulesetID):
 		writeRecoveryJSON(writer, http.StatusOK, map[string]any{
 			"id": releaserecovery.TagRulesetID, "name": "Protect release tags", "target": "tag", "source_type": "Repository", "source": releaserecovery.Repository, "enforcement": "active",
+			"node_id": "RRS_lACqUmVwb3NpdG9yec5OxVs0zgE2aPA", "created_at": "2026-08-04T01:13:40.674Z", "updated_at": state.rulesetUpdatedAt.Format(time.RFC3339Nano),
 			"conditions":              map[string]any{"ref_name": map[string]any{"exclude": []string{}, "include": []string{"refs/tags/v*"}}},
 			"rules":                   []map[string]any{{"type": "creation"}, {"type": "update"}, {"type": "deletion"}, {"type": "non_fast_forward"}},
-			"bypass_actors":           []map[string]any{{"actor_id": state.rulesetAppID, "actor_type": "Integration", "bypass_mode": "always"}},
+			"bypass_actors":           bypassActors,
 			"current_user_can_bypass": "never",
 		})
 	case base + "/actions/workflows/release-recovery.yml/runs":

@@ -4,11 +4,15 @@ responses:
     body: '{"id":1321556788,"full_name":"peasant-labs/peasant","default_branch":"develop"}'
   - path: /repos/peasant-labs/peasant/actions/runs/91001
     status: 200
-    body: '{"id":91001,"event":"workflow_dispatch","status":"in_progress","conclusion":"","head_branch":"develop","head_sha":"1111111111111111111111111111111111111111","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T20:59:00Z"}'
+    body: '{"id":91001,"workflow_id":327365603,"event":"workflow_dispatch","status":"in_progress","conclusion":"","head_branch":"develop","head_sha":"1111111111111111111111111111111111111111","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T21:40:00Z"}'
   - path: /repos/peasant-labs/peasant/actions/workflows/release-recovery.yml/runs
     query: event=workflow_dispatch&per_page=100
     status: 200
-    body: '{"total_count":1,"workflow_runs":[{"id":91001,"event":"workflow_dispatch","status":"in_progress","conclusion":"","head_branch":"develop","head_sha":"1111111111111111111111111111111111111111","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T20:59:00Z"}]}'
+    body: '{"total_count":2,"workflow_runs":[{"id":30952716604,"workflow_id":327365603,"event":"workflow_dispatch","status":"completed","conclusion":"failure","head_branch":"develop","head_sha":"583eb0d2e9776142c8d3f868b67f233f27089432","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T21:31:52Z"},{"id":91001,"workflow_id":327365603,"event":"workflow_dispatch","status":"in_progress","conclusion":"","head_branch":"develop","head_sha":"1111111111111111111111111111111111111111","path":".github/workflows/release-recovery.yml","run_attempt":1,"actor":{"login":"dayvidpham","id":22456875},"triggering_actor":{"login":"dayvidpham","id":22456875},"created_at":"2026-08-04T21:40:00Z"}]}'
+  - path: /repos/peasant-labs/peasant/actions/runs/30952716604/jobs
+    query: filter=latest
+    status: 200
+    body: '{"total_count":4,"jobs":[{"name":"verify immutable recovery evidence","status":"completed","conclusion":"failure","run_attempt":1,"steps":[{"name":"Verify GitHub recovery evidence","status":"completed","conclusion":"failure"},{"name":"Verify local immutable tag and protected-branch reachability","status":"completed","conclusion":"skipped"},{"name":"Re-run tagged release guards","status":"completed","conclusion":"skipped"},{"name":"Verify tagged external publishers remain disabled","status":"completed","conclusion":"skipped"}]},{"name":"publish immutable release (goreleaser)","status":"completed","conclusion":"skipped","run_attempt":1,"steps":[]},{"name":"assert immutable Nix vendorHash current","status":"completed","conclusion":"skipped","run_attempt":1,"steps":[]},{"name":"smoke immutable release (${{ matrix.arch }})","status":"completed","conclusion":"skipped","run_attempt":1,"steps":[]}]}'
   - path: /repos/peasant-labs/peasant/collaborators/dayvidpham/permission
     status: 200
     body: '{"permission":"admin","user":{"login":"dayvidpham","id":22456875}}'
@@ -26,7 +30,7 @@ responses:
     body: '{"status":"ahead","merge_base_commit":{"sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9"}}'
   - path: /repos/peasant-labs/peasant/rulesets/20343024
     status: 200
-    body: '{"id":20343024,"name":"Protect release tags","target":"tag","source_type":"Repository","source":"peasant-labs/peasant","enforcement":"active","conditions":{"ref_name":{"exclude":[],"include":["refs/tags/v*"]}},"rules":[{"type":"creation"},{"type":"update"},{"type":"deletion"},{"type":"non_fast_forward"}],"bypass_actors":[{"actor_id":3988034,"actor_type":"Integration","bypass_mode":"always"}],"current_user_can_bypass":"never"}'
+    body: '{"id":20343024,"name":"Protect release tags","target":"tag","source_type":"Repository","source":"peasant-labs/peasant","enforcement":"active","node_id":"RRS_lACqUmVwb3NpdG9yec5OxVs0zgE2aPA","created_at":"2026-08-04T01:13:40.674Z","updated_at":"2026-08-04T09:25:11.190Z","conditions":{"ref_name":{"exclude":[],"include":["refs/tags/v*"]}},"rules":[{"type":"creation"},{"type":"update"},{"type":"deletion"},{"type":"non_fast_forward"}],"bypass_actors":[],"current_user_can_bypass":"never"}'
   - path: /repos/peasant-labs/peasant/actions/runs/30946834984
     status: 200
     body: '{"id":30946834984,"workflow_id":326590528,"event":"push","status":"completed","conclusion":"startup_failure","head_branch":"v0.1.0","head_sha":"807a1b68c8ec1952db6c289f383f42cbb0701db9","path":".github/workflows/release.yml","run_attempt":1,"actor":{"login":"peasant-labs-releaser[bot]","id":291504229},"triggering_actor":{"login":"peasant-labs-releaser[bot]","id":291504229},"created_at":"2026-08-04T20:12:59Z"}'

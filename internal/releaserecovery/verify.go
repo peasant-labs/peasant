@@ -18,22 +18,25 @@ import (
 )
 
 const (
-	Repository        = "peasant-labs/peasant"
-	RepositoryID      = int64(1321556788)
-	Tag               = "v0.1.0"
-	TagRef            = "refs/tags/v0.1.0"
-	TagObjectSHA      = "b1f8fe4b9a40ac32c1d7e1a8748cb11575595c4f"
-	TagCommitSHA      = "807a1b68c8ec1952db6c289f383f42cbb0701db9"
-	OriginalRunID     = int64(30946834984)
-	ReleaseWorkflowID = int64(326590528)
-	E2EWorkflowID     = int64(326590523)
-	ReleaseE2EID      = int64(326590525)
-	TagRulesetID      = int64(20343024)
-	ReleaserAppID     = int64(3988034)
-	BotLogin          = "peasant-labs-releaser[bot]"
-	BotID             = int64(291504229)
-	OperatorLogin     = "dayvidpham"
-	OperatorID        = int64(22456875)
+	Repository              = "peasant-labs/peasant"
+	RepositoryID            = int64(1321556788)
+	Tag                     = "v0.1.0"
+	TagRef                  = "refs/tags/v0.1.0"
+	TagObjectSHA            = "b1f8fe4b9a40ac32c1d7e1a8748cb11575595c4f"
+	TagCommitSHA            = "807a1b68c8ec1952db6c289f383f42cbb0701db9"
+	OriginalRunID           = int64(30946834984)
+	ReleaseWorkflowID       = int64(326590528)
+	E2EWorkflowID           = int64(326590523)
+	ReleaseE2EID            = int64(326590525)
+	TagRulesetID            = int64(20343024)
+	ReleaserAppID           = int64(3988034)
+	RecoveryWorkflowID      = int64(327365603)
+	FailedRecoveryRunID     = int64(30952716604)
+	FailedRecoveryCommitSHA = "583eb0d2e9776142c8d3f868b67f233f27089432"
+	BotLogin                = "peasant-labs-releaser[bot]"
+	BotID                   = int64(291504229)
+	OperatorLogin           = "dayvidpham"
+	OperatorID              = int64(22456875)
 
 	recoveryWorkflowPath = ".github/workflows/release-recovery.yml"
 	releaseWorkflowPath  = ".github/workflows/release.yml"
@@ -41,12 +44,16 @@ const (
 	releaseE2EPath       = ".github/workflows/release-e2e.yml"
 	maxEvidenceAge       = 24 * time.Hour
 	maxResponseBytes     = 4 << 20
+	tagRulesetNodeID     = "RRS_lACqUmVwb3NpdG9yec5OxVs0zgE2aPA"
 )
 
 var (
-	recoveryNotBefore = time.Date(2026, time.August, 4, 20, 40, 42, 0, time.UTC)
-	recoveryExpires   = time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)
-	fullCommitSHA     = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	recoveryNotBefore     = time.Date(2026, time.August, 4, 20, 40, 42, 0, time.UTC)
+	recoveryExpires       = time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)
+	fullCommitSHA         = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	tagRulesetCreated     = time.Date(2026, time.August, 4, 1, 13, 40, 674000000, time.UTC)
+	tagRulesetUpdated     = time.Date(2026, time.August, 4, 9, 25, 11, 190000000, time.UTC)
+	failedRecoveryCreated = time.Date(2026, time.August, 4, 21, 31, 52, 0, time.UTC)
 )
 
 type PreflightInput struct {
@@ -135,7 +142,7 @@ func (v *Verifier) VerifyPreflight(ctx context.Context, input PreflightInput) er
 	if err := v.verifyCurrentRun(ctx, input); err != nil {
 		return err
 	}
-	if err := v.verifyOnlyRecoveryDispatch(ctx, RecoveryRunInput{RunID: input.RunID, HeadSHA: input.RecoveryHeadSHA}); err != nil {
+	if err := v.verifyRecoveryDispatchHistory(ctx, RecoveryRunInput{RunID: input.RunID, HeadSHA: input.RecoveryHeadSHA}); err != nil {
 		return err
 	}
 	if err := v.verifyOperatorPermission(ctx); err != nil {
@@ -178,7 +185,7 @@ func (v *Verifier) VerifyPrePublish(ctx context.Context, input RecoveryRunInput)
 	if err := v.verifyRepository(ctx); err != nil {
 		return err
 	}
-	if err := v.verifyOnlyRecoveryDispatch(ctx, input); err != nil {
+	if err := v.verifyRecoveryDispatchHistory(ctx, input); err != nil {
 		return err
 	}
 	if err := v.VerifyImmutableTag(ctx); err != nil {
@@ -264,7 +271,7 @@ func (v *Verifier) verifyCurrentRun(ctx context.Context, input PreflightInput) e
 	if err != nil {
 		return err
 	}
-	if status != http.StatusOK || run.ID != input.RunID || run.Event != "workflow_dispatch" || run.HeadBranch != "develop" || run.HeadSHA != input.RecoveryHeadSHA || run.Path != recoveryWorkflowPath || run.RunAttempt != 1 || run.Status != "in_progress" || run.Actor.Login != OperatorLogin || run.Actor.ID != OperatorID || run.TriggeringActor.Login != OperatorLogin || run.TriggeringActor.ID != OperatorID {
+	if status != http.StatusOK || run.ID != input.RunID || run.WorkflowID != RecoveryWorkflowID || run.Event != "workflow_dispatch" || run.HeadBranch != "develop" || run.HeadSHA != input.RecoveryHeadSHA || run.Path != recoveryWorkflowPath || run.RunAttempt != 1 || run.Status != "in_progress" || run.Actor.Login != OperatorLogin || run.Actor.ID != OperatorID || run.TriggeringActor.Login != OperatorLogin || run.TriggeringActor.ID != OperatorID {
 		return failure("verifying the active recovery run", "GitHub run metadata differs from the fixed first-attempt develop dispatch", fmt.Sprintf("status=%d run=%+v", status, run), "the current run is not authorized to publish", "cancel this run and dispatch the reviewed workflow from develop as the approved operator")
 	}
 	if run.CreatedAt.Before(recoveryNotBefore) || !run.CreatedAt.Before(recoveryExpires) {
@@ -273,7 +280,7 @@ func (v *Verifier) verifyCurrentRun(ctx context.Context, input PreflightInput) e
 	return nil
 }
 
-func (v *Verifier) verifyOnlyRecoveryDispatch(ctx context.Context, input RecoveryRunInput) error {
+func (v *Verifier) verifyRecoveryDispatchHistory(ctx context.Context, input RecoveryRunInput) error {
 	var runs struct {
 		TotalCount   int           `json:"total_count"`
 		WorkflowRuns []workflowRun `json:"workflow_runs"`
@@ -282,12 +289,65 @@ func (v *Verifier) verifyOnlyRecoveryDispatch(ctx context.Context, input Recover
 	if err != nil {
 		return err
 	}
-	if status != http.StatusOK || runs.TotalCount != 1 || len(runs.WorkflowRuns) != 1 {
-		return failure("checking one-time recovery dispatch uniqueness", "the current run is not the only recovery workflow dispatch", fmt.Sprintf("status=%d total_count=%d returned_runs=%d current_run=%d", status, runs.TotalCount, len(runs.WorkflowRuns), input.RunID), "a redispatch or concurrent attempt could duplicate irreversible publication", "cancel all recovery runs and require a newly reviewed recovery change before any second dispatch")
+	if status != http.StatusOK || runs.TotalCount != 2 || len(runs.WorkflowRuns) != 2 {
+		return failure("checking reviewed recovery dispatch history", "the workflow history is not exactly the failed preflight plus the current replacement", fmt.Sprintf("status=%d total_count=%d returned_runs=%d current_run=%d", status, runs.TotalCount, len(runs.WorkflowRuns), input.RunID), "an unreviewed retry or concurrent attempt could duplicate irreversible publication", "cancel the current run and require a newly reviewed recovery change that binds the complete history")
 	}
-	run := runs.WorkflowRuns[0]
-	if run.ID != input.RunID || run.Event != "workflow_dispatch" || run.HeadBranch != "develop" || run.HeadSHA != input.HeadSHA || run.Path != recoveryWorkflowPath || run.RunAttempt != 1 || run.Status != "in_progress" || run.Actor.Login != OperatorLogin || run.Actor.ID != OperatorID || run.TriggeringActor.Login != OperatorLogin || run.TriggeringActor.ID != OperatorID || run.CreatedAt.Before(recoveryNotBefore) || !run.CreatedAt.Before(recoveryExpires) {
-		return failure("checking one-time recovery dispatch identity", "the sole recovery dispatch differs from the active reviewed run", fmt.Sprintf("run=%+v expected_id=%d expected_sha=%q", run, input.RunID, input.HeadSHA), "the write path cannot prove it is the one authorized attempt", "cancel the run and review the workflow history before proceeding")
+	var current, failed *workflowRun
+	for index := range runs.WorkflowRuns {
+		run := &runs.WorkflowRuns[index]
+		switch run.ID {
+		case input.RunID:
+			current = run
+		case FailedRecoveryRunID:
+			failed = run
+		default:
+			return failure("checking reviewed recovery dispatch history", "an unexpected recovery dispatch exists", fmt.Sprintf("unexpected_run=%+v", *run), "the replacement is no longer the only reviewed retry", "stop and create a new reviewed recovery that accounts for every dispatch")
+		}
+	}
+	if current == nil || current.WorkflowID != RecoveryWorkflowID || current.Event != "workflow_dispatch" || current.HeadBranch != "develop" || current.HeadSHA != input.HeadSHA || current.Path != recoveryWorkflowPath || current.RunAttempt != 1 || current.Status != "in_progress" || current.Actor.Login != OperatorLogin || current.Actor.ID != OperatorID || current.TriggeringActor.Login != OperatorLogin || current.TriggeringActor.ID != OperatorID || current.CreatedAt.Before(recoveryNotBefore) || !current.CreatedAt.Before(recoveryExpires) {
+		return failure("checking replacement recovery dispatch identity", "the active replacement differs from the reviewed run", fmt.Sprintf("run=%+v expected_id=%d expected_sha=%q", current, input.RunID, input.HeadSHA), "the write path cannot prove it is the authorized replacement", "cancel the run and review the workflow history before proceeding")
+	}
+	if failed == nil || failed.WorkflowID != RecoveryWorkflowID || failed.Event != "workflow_dispatch" || failed.HeadBranch != "develop" || failed.HeadSHA != FailedRecoveryCommitSHA || failed.Path != recoveryWorkflowPath || failed.RunAttempt != 1 || failed.Status != "completed" || failed.Conclusion != "failure" || failed.Actor.Login != OperatorLogin || failed.Actor.ID != OperatorID || failed.TriggeringActor.Login != OperatorLogin || failed.TriggeringActor.ID != OperatorID || !failed.CreatedAt.Equal(failedRecoveryCreated) {
+		return failure("checking the reviewed failed recovery dispatch", "the prior dispatch differs from the fixed fail-closed attempt", fmt.Sprintf("run=%+v", failed), "the exceptional replacement authorization is not proven", "stop and inspect the prior workflow before revising recovery again")
+	}
+	return v.verifyFailedRecoveryJobs(ctx)
+}
+
+func (v *Verifier) verifyFailedRecoveryJobs(ctx context.Context) error {
+	var jobs workflowJobs
+	status, err := v.get(ctx, fmt.Sprintf("/repos/%s/actions/runs/%d/jobs?filter=latest", Repository, FailedRecoveryRunID), &jobs)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK || jobs.TotalCount != 4 || len(jobs.Jobs) != 4 {
+		return failure("checking failed recovery jobs", "the prior attempt does not have the exact four-job fail-closed shape", fmt.Sprintf("status=%d total_count=%d jobs=%+v", status, jobs.TotalCount, jobs.Jobs), "the replacement could repeat unknown mutable work", "inspect the prior run and revise the fixed evidence through review")
+	}
+	byName := make(map[string]workflowJob, len(jobs.Jobs))
+	for _, job := range jobs.Jobs {
+		byName[job.Name] = job
+	}
+	preflight, ok := byName["verify immutable recovery evidence"]
+	if !ok || preflight.Status != "completed" || preflight.Conclusion != "failure" || preflight.RunAttempt != 1 {
+		return failure("checking failed recovery preflight", "the prior verifier job is missing or did not fail on its first attempt", fmt.Sprintf("job=%+v found=%t", preflight, ok), "the prior attempt may have progressed beyond the reviewed failure", "inspect the prior run and do not authorize replacement publication")
+	}
+	steps := make(map[string]workflowStep, len(preflight.Steps))
+	for _, step := range preflight.Steps {
+		steps[step.Name] = step
+	}
+	if step := steps["Verify GitHub recovery evidence"]; step.Status != "completed" || step.Conclusion != "failure" {
+		return failure("checking failed recovery verifier step", "the prior GitHub evidence step is not the recorded failure", fmt.Sprintf("step=%+v", step), "the replacement rationale is not proven", "inspect run 30952716604 and update evidence through review")
+	}
+	for _, name := range []string{"Verify local immutable tag and protected-branch reachability", "Re-run tagged release guards", "Verify tagged external publishers remain disabled"} {
+		step := steps[name]
+		if step.Status != "completed" || step.Conclusion != "skipped" {
+			return failure("checking failed recovery preflight containment", "a post-verifier preflight step was not skipped", fmt.Sprintf("step=%q value=%+v", name, step), "the prior attempt executed beyond the reviewed boundary", "stop replacement publication and inspect the prior job logs")
+		}
+	}
+	for _, name := range []string{"assert immutable Nix vendorHash current", "publish immutable release (goreleaser)", "smoke immutable release (${{ matrix.arch }})"} {
+		job, ok := byName[name]
+		if !ok || job.Status != "completed" || job.Conclusion != "skipped" || job.RunAttempt != 1 || len(job.Steps) != 0 {
+			return failure("checking failed recovery mutation containment", "a downstream mutable or smoke job was not empty and skipped", fmt.Sprintf("job=%q value=%+v found=%t", name, job, ok), "the prior attempt may have mutated release state", "stop replacement publication and inspect GitHub Releases and job logs")
+		}
 	}
 	return nil
 }
@@ -363,12 +423,15 @@ func (v *Verifier) VerifyImmutableTag(ctx context.Context) error {
 
 func (v *Verifier) verifyRuleset(ctx context.Context) error {
 	var ruleset struct {
-		ID          int64  `json:"id"`
-		Name        string `json:"name"`
-		Target      string `json:"target"`
-		SourceType  string `json:"source_type"`
-		Source      string `json:"source"`
-		Enforcement string `json:"enforcement"`
+		ID          int64     `json:"id"`
+		Name        string    `json:"name"`
+		Target      string    `json:"target"`
+		SourceType  string    `json:"source_type"`
+		Source      string    `json:"source"`
+		Enforcement string    `json:"enforcement"`
+		NodeID      string    `json:"node_id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
 		Conditions  struct {
 			RefName struct {
 				Exclude []string `json:"exclude"`
@@ -395,9 +458,11 @@ func (v *Verifier) verifyRuleset(ctx context.Context) error {
 	}
 	slices.Sort(ruleTypes)
 	expectedRules := []string{"creation", "deletion", "non_fast_forward", "update"}
-	validBypass := len(ruleset.BypassActors) == 1 && ruleset.BypassActors[0].ActorID == ReleaserAppID && ruleset.BypassActors[0].ActorType == "Integration" && ruleset.BypassActors[0].BypassMode == "always"
-	if status != http.StatusOK || ruleset.ID != TagRulesetID || ruleset.Name != "Protect release tags" || ruleset.Target != "tag" || ruleset.SourceType != "Repository" || ruleset.Source != Repository || ruleset.Enforcement != "active" || !slices.Equal(ruleset.Conditions.RefName.Include, []string{"refs/tags/v*"}) || len(ruleset.Conditions.RefName.Exclude) != 0 || !slices.Equal(ruleTypes, expectedRules) || !validBypass || ruleset.CurrentUserCanBypass != "never" {
-		return failure("verifying release-tag protection", "the active tag ruleset differs from the reviewed App-only policy", fmt.Sprintf("status=%d id=%d target=%q source=%s:%s enforcement=%q include=%v exclude=%v rules=%v bypass=%v current_user_can_bypass=%q", status, ruleset.ID, ruleset.Target, ruleset.SourceType, ruleset.Source, ruleset.Enforcement, ruleset.Conditions.RefName.Include, ruleset.Conditions.RefName.Exclude, ruleTypes, ruleset.BypassActors, ruleset.CurrentUserCanBypass), "tag immutability or App provenance is no longer guaranteed", "restore the reviewed ruleset before creating a new recovery authorization")
+	// GitHub redacts bypass_actors from a repository GITHUB_TOKEN. Exact immutable
+	// ruleset metadata binds that redacted view to the admin-verified App-only snapshot.
+	validVisibleBypass := len(ruleset.BypassActors) == 0 || (len(ruleset.BypassActors) == 1 && ruleset.BypassActors[0].ActorID == ReleaserAppID && ruleset.BypassActors[0].ActorType == "Integration" && ruleset.BypassActors[0].BypassMode == "always")
+	if status != http.StatusOK || ruleset.ID != TagRulesetID || ruleset.Name != "Protect release tags" || ruleset.Target != "tag" || ruleset.SourceType != "Repository" || ruleset.Source != Repository || ruleset.Enforcement != "active" || ruleset.NodeID != tagRulesetNodeID || !ruleset.CreatedAt.Equal(tagRulesetCreated) || !ruleset.UpdatedAt.Equal(tagRulesetUpdated) || !slices.Equal(ruleset.Conditions.RefName.Include, []string{"refs/tags/v*"}) || len(ruleset.Conditions.RefName.Exclude) != 0 || !slices.Equal(ruleTypes, expectedRules) || !validVisibleBypass || ruleset.CurrentUserCanBypass != "never" {
+		return failure("verifying release-tag protection", "the active tag ruleset differs from the admin-verified App-only snapshot", fmt.Sprintf("status=%d id=%d target=%q source=%s:%s enforcement=%q node=%q created=%s updated=%s include=%v exclude=%v rules=%v visible_bypass=%v current_user_can_bypass=%q", status, ruleset.ID, ruleset.Target, ruleset.SourceType, ruleset.Source, ruleset.Enforcement, ruleset.NodeID, ruleset.CreatedAt.Format(time.RFC3339Nano), ruleset.UpdatedAt.Format(time.RFC3339Nano), ruleset.Conditions.RefName.Include, ruleset.Conditions.RefName.Exclude, ruleTypes, ruleset.BypassActors, ruleset.CurrentUserCanBypass), "tag immutability or App provenance is no longer guaranteed", "restore the reviewed ruleset snapshot before creating another recovery authorization")
 	}
 	return nil
 }
