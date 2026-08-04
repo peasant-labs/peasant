@@ -9,7 +9,7 @@ native Linux, then read the WSL-specific caveats below.
 WSL2 distros are Linux, so follow the matching guide for your distro:
 
 - **Ubuntu/Debian-WSL** (the default) → [ubuntu.md](ubuntu.md) (`.deb` or tarball)
-- **Fedora-WSL** → `sudo dnf install ./peasant-<version>.x86_64.rpm`
+- **Fedora-WSL** → `sudo dnf install ./peasant_<version>_linux_<arch>.rpm`
 - **Arch-WSL** → [arch.md](arch.md)
 - Any distro → the raw `peasant_<version>_linux_<arch>.tar.gz` tarball
 

@@ -4,10 +4,9 @@
 # binaries (CGO_ENABLED=0, pure-Go SQLite — no C toolchain), tar.gz archives,
 # checksums.txt, deb + rpm (nfpm), an AUR -bin package, and a Homebrew cask.
 #
-# Pre-public-flip safety: the AUR and Homebrew publishers carry skip_upload: true
-# so NOTHING is pushed to any external registry while the repo is private. The
-# public flip changes these to "auto" (a one-line runbook step), which also keeps
-# prereleases off the package repos forever.
+# External publisher safety: AUR and Homebrew stay skip_upload: true for v0.1.0
+# and until a separately approved later final release. That approval changes these
+# settings to "auto", which also keeps prereleases off the package repos forever.
 #
 # The real web dashboard (//go:embed all:web/out) must be built before Goreleaser
 # runs its `go build`. Artifact-producing workflows fail if that build is absent
@@ -38,7 +37,7 @@ archives:
       - peasant
     # FROZEN archive-name contract — consumed by the AUR PKGBUILD source_* URLs,
     # the Homebrew cask url, the install docs, and any future curl-install
-    # script. Do NOT change without updating every consumer (S4/S6).
+    # script. Do NOT change without updating every consumer.
     name_template: "peasant_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
@@ -114,8 +113,8 @@ aurs:
       - "Peasant Labs <admin at peasantlabs dot org>"
     git_url: "ssh://aur@aur.archlinux.org/peasant-bin.git"
     private_key: "{{ .Env.AUR_KEY }}"
-    # Pre-flip safety: never push to the AUR. Flip to "auto" at public launch
-    # (auto also skips the hyphenated -rcN ladder forever).
+    # External publication stays disabled for v0.1.0. Change to "auto" only for a
+    # separately approved later final (auto also skips every -rcN forever).
     skip_upload: "true"
     # Bot identity for automated pushes — the same one every release automation
     # commits under (the cask publisher and the release workflows). Deliberately a
@@ -144,7 +143,8 @@ homebrew_casks:
     homepage: "https://github.com/peasant-labs/peasant"
     description: "Agent-session ingest, analytics, and publishing CLI"
     license: "Apache-2.0"
-    # Pre-flip safety: never push to the tap. Flip to "auto" at public launch.
+    # External publication stays disabled for v0.1.0. Change to "auto" only for a
+    # separately approved later final.
     skip_upload: "true"
     # Two thin per-arch darwin binaries (no universal_binaries) — goreleaser emits
     # per-arch url/sha256 stanzas when both darwin archives exist.

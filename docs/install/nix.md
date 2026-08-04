@@ -6,7 +6,7 @@ no-libc binary that runs unchanged on NixOS and non-NixOS hosts alike.
 ## Run without installing
 
 ```bash
-nix run github:peasant-labs/peasant -- --version
+nix run github:peasant-labs/peasant -- version
 nix run github:peasant-labs/peasant -- ingest
 ```
 
@@ -14,7 +14,7 @@ nix run github:peasant-labs/peasant -- ingest
 
 ```bash
 nix profile install github:peasant-labs/peasant#peasant
-peasant --version
+peasant version
 ```
 
 ## Use in a flake
@@ -38,7 +38,7 @@ The package is exposed as `packages.<system>.peasant` (also the flake's `default
 git clone https://github.com/peasant-labs/peasant.git
 cd peasant
 nix build .#peasant
-./result/bin/peasant --version
+./result/bin/peasant version
 ```
 
 ## Notes
@@ -55,10 +55,10 @@ nix build .#peasant
   sandbox yet). The CLI, ingest pipeline, analytics, and APIs all work; the embedded
   dashboard is a stub in Nix-built binaries. A real frontend derivation is a
   [deferred](../release-runbook.md#deferred-ladder) follow-up.
-- **`--version`:** between tagged releases the flake reports a `git`-rev-suffixed
-  version; tagged builds inject the exact version via ldflags.
+- **Version output:** `peasant version` reports a `git`-rev-suffixed version between
+  tagged releases; tagged builds inject the exact version via ldflags.
 - **nixpkgs:** upstreaming to `nixpkgs` (`nix profile install nixpkgs#peasant`) is a
-  [deferred](../release-runbook.md#deferred-ladder) post-public-flip task — it
+  [deferred](../release-runbook.md#deferred-ladder) post-release task — it
   requires a public repo and a tagged release. The licensing requirement is already
   met: Peasant is Apache-2.0, which nixpkgs treats as free, so the package would be
   installable without `allowUnfree`.

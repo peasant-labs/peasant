@@ -1,14 +1,32 @@
 # Installing Peasant on Arch Linux
 
-Peasant is distributed to Arch via the AUR package **`peasant-bin`** — a prebuilt
-package wrapping the official static release binary. (The `-bin` suffix is required
-by AUR policy for packages that ship prebuilt artifacts.)
+Peasant `v0.1.0` is distributed to Arch through the official static Linux release
+tarball. The planned AUR package **`peasant-bin`** remains disabled until a separately
+approved later final release. (The `-bin` suffix is required by AUR policy for
+packages that ship prebuilt artifacts.)
 
-> **Availability:** `peasant-bin` is published to the AUR starting with the first
-> public stable release (`v0.1.0`). Release candidates (`-rcN`) are intentionally
-> **not** pushed to the AUR. Until the AUR package is live, use [Option B](#option-b--raw-binary-tarball).
+> **Availability:** `peasant-bin` is not published for `v0.1.0`. Release candidates
+> (`-rcN`) will never be pushed to the AUR. Use the current tarball path below until
+> AUR publication is explicitly enabled for a later final release.
 
-## Option A — `peasant-bin` from the AUR
+## Current path: raw binary tarball
+
+```bash
+VERSION=0.1.0
+ARCH=amd64    # or arm64
+
+curl -fLO "https://github.com/peasant-labs/peasant/releases/download/v${VERSION}/peasant_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fLO "https://github.com/peasant-labs/peasant/releases/download/v${VERSION}/checksums.txt"
+sha256sum --ignore-missing -c checksums.txt
+
+tar xzf "peasant_${VERSION}_linux_${ARCH}.tar.gz"
+sudo install -m755 peasant /usr/local/bin/peasant
+peasant version
+```
+
+## Deferred path: `peasant-bin` from the AUR
+
+The following commands apply only after `peasant-bin` appears in the AUR.
 
 With an AUR helper (`yay`, `paru`, …):
 
@@ -24,7 +42,7 @@ Manually with `makepkg`:
 git clone https://aur.archlinux.org/peasant-bin.git
 cd peasant-bin
 makepkg -si        # downloads the release tarball, verifies sha256, installs
-peasant --version
+peasant version
 ```
 
 `peasant-bin` `provides`/`conflicts` the name `peasant`, so it will swap cleanly for
@@ -39,23 +57,6 @@ a future source or official package without manual intervention.
 `makepkg`, `git pull` then `makepkg -si` again.
 
 **Removing:** `sudo pacman -Rns peasant-bin`.
-
-## Option B — raw binary tarball
-
-Works today regardless of AUR availability:
-
-```bash
-VERSION=0.1.0
-ARCH=amd64    # or arm64
-
-curl -fLO "https://github.com/peasant-labs/peasant/releases/download/v${VERSION}/peasant_${VERSION}_linux_${ARCH}.tar.gz"
-curl -fLO "https://github.com/peasant-labs/peasant/releases/download/v${VERSION}/checksums.txt"
-sha256sum --ignore-missing -c checksums.txt
-
-tar xzf "peasant_${VERSION}_linux_${ARCH}.tar.gz"
-sudo install -m755 peasant /usr/local/bin/peasant
-peasant --version
-```
 
 ## Notes
 

@@ -15,18 +15,19 @@ Peasant ships a single statically linked binary (no runtime dependencies) for
 | Platform | Quickest path | Guide |
 |----------|---------------|-------|
 | Ubuntu / Debian | `sudo apt install ./peasant_<ver>_linux_<arch>.deb` | [docs/install/ubuntu.md](docs/install/ubuntu.md) |
-| Fedora / CentOS / openSUSE | `sudo dnf install ./peasant-<ver>.<arch>.rpm` | [docs/install/ubuntu.md](docs/install/ubuntu.md) (rpm notes) |
-| Arch Linux | `yay -S peasant-bin` | [docs/install/arch.md](docs/install/arch.md) |
-| macOS | `brew tap peasant-labs/tap && brew install --cask peasant` | [docs/install/macos.md](docs/install/macos.md) |
+| Fedora / CentOS | `sudo dnf install ./peasant_<ver>_linux_<arch>.rpm` | [GitHub Releases](https://github.com/peasant-labs/peasant/releases) |
+| openSUSE | `sudo zypper install --allow-unsigned-rpm ./peasant_<ver>_linux_<arch>.rpm` | [GitHub Releases](https://github.com/peasant-labs/peasant/releases) |
+| Arch Linux | GitHub release tarball (`linux`) | [docs/install/arch.md](docs/install/arch.md) |
+| macOS | GitHub release tarball (`darwin`) | [docs/install/macos.md](docs/install/macos.md) |
 | Nix | `nix profile install github:peasant-labs/peasant#peasant` | [docs/install/nix.md](docs/install/nix.md) |
 | WSL | install as the underlying distro, then read the caveats | [docs/install/wsl.md](docs/install/wsl.md) |
 
 Or download a `peasant_<version>_<os>_<arch>.tar.gz` archive, verify it against
 `checksums.txt`, and put the `peasant` binary on your `PATH`.
 
-> **Note:** the AUR package, Homebrew tap, and nixpkgs entry activate at/after the
-> first public release. Some distribution channels (hosted apt repo, macOS signing,
-> nixpkgs) are deferred — see the [release runbook](docs/release-runbook.md).
+> **Note:** `v0.1.0` publishes GitHub release archives plus `.deb` and `.rpm`
+> packages. AUR, Homebrew, nixpkgs, hosted apt, and macOS signing remain deferred
+> until separately approved; see the [release runbook](docs/release-runbook.md).
 
 ## Quick start
 
