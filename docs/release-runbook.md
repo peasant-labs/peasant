@@ -184,6 +184,17 @@ operator, and two fresh first-attempt gate receipts. The reviewed verifier runs
 from `develop`; every build and GoReleaser command runs from a separate checkout
 of `refs/tags/v0.1.0`.
 
+Recovery run `30952716604` from PR #21 failed closed in the GitHub-evidence step:
+the repository `GITHUB_TOKEN` sees the active ruleset and its protections but
+GitHub redacts `bypass_actors` from that token's response. Nix, publication, and
+smoke were all skipped, and no Release exists. The corrected verifier binds the
+redacted response to the admin-verified ruleset node and exact creation/update
+timestamps, while still requiring `current_user_can_bypass: never`. It authorizes
+exactly one reviewed replacement by requiring the workflow history to contain
+only failed run `30952716604` at commit `583eb0d2e9776142c8d3f868b67f233f27089432`
+plus the active replacement, and by proving every mutable job in the failed run
+was empty and skipped.
+
 The exact-tag evidence runs are:
 
 - E2E: `30948998607`
@@ -207,9 +218,10 @@ gh workflow run release-recovery.yml \
 The recovery checks Release absence twice, including immediately before the only
 `contents: write` job publishes. That final check also re-verifies the remote annotated
 tag object, peeled commit, App-only ruleset, and that this run is the sole recovery
-dispatch. It never receives App credentials, a PAT, an AUR key, or a Homebrew token.
+replacement after the fixed failed preflight. It never receives App credentials, a
+PAT, an AUR key, or a Homebrew token.
 Any existing draft, partial asset set, release conflict, or failed
-post-publication smoke requires inspection; never redispatch publication, append,
+post-publication smoke requires inspection; never issue another dispatch, append,
 overwrite, delete, or recreate automatically. After both native smoke jobs pass,
 remove the recovery workflow, verifier command/package, and recovery-only fixtures
 through a reviewed PR while retaining this incident record and the final run URL.

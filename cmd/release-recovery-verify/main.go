@@ -85,7 +85,7 @@ func run(args []string, options ...runOption) error {
 		if err := verifier.VerifyPrePublish(ctx, releaserecovery.RecoveryRunInput{RunID: runID, HeadSHA: config.getenv("RECOVERY_HEAD_SHA")}); err != nil {
 			return err
 		}
-		fmt.Fprintln(config.stdout, "::notice::immutable tag, sole dispatch, ruleset, and Release absence re-verified immediately before publication")
+		fmt.Fprintln(config.stdout, "::notice::immutable tag, reviewed dispatch history, ruleset snapshot, and Release absence re-verified immediately before publication")
 		return nil
 	case "preflight":
 		if len(args) != 1 {

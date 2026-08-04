@@ -3,7 +3,8 @@ name: Recover v0.1.0 Release
 # One-time recovery for the immutable v0.1.0 tag. Its original tag-triggered
 # Release run failed during workflow startup, before GitHub created any jobs.
 # This workflow is intentionally fixed to that tag, commit, incident, operator,
-# and a short expiry. Remove it after publication and native smoke both succeed.
+# the fixed failed preflight, one reviewed replacement, and a short expiry.
+# Remove it after publication and native smoke both succeed.
 on:
   workflow_dispatch:
     inputs:
