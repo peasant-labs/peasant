@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -86,7 +86,7 @@ func TestMountedDestinationJourney(t *testing.T) {
 				case "down":
 					key = tea.KeyDown
 				}
-				updated, _ := page.Update(tea.KeyMsg{Type: key})
+				updated, _ := page.Update(tea.KeyPressMsg{Code: key})
 				page = updated.(*DestinationPage)
 			}
 			if page.Destination() != row.Destination || page.Authentication() != row.Authentication || page.RequestedVisibility() != row.RequestedVisibility || page.EffectiveVisibility() != row.EffectiveVisibility {

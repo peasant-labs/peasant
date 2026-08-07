@@ -1,0 +1,49 @@
+# Flat provider discovery listings the real scanner adapter folds into the
+# project-first PROJECT -> BRANCH -> SESSION forest (no harness grouping axis).
+# This is the shape the legacy ftue discovery emits (ftue.SessionListing rows);
+# BuildForest groups it. The two harnesses record the same logical project under
+# different remote URLs, so they fold into two project roots. The expected*
+# counts are row-count guards so a fixture edit that adds or drops a row without
+# updating the counts fails loudly.
+name: two-harnesses-one-logical-project
+expectedListingCount: 6
+expectedProjectCount: 2
+expectedBranchCount: 4
+expectedSessionCount: 6
+listings:
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: cc main session one
+    sessionId: cc-main-1
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: cc main session two
+    sessionId: cc-main-2
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: feature/x
+    title: cc feature session one
+    sessionId: cc-featx-1
+  - harness: opencode
+    projectName: acme/tool
+    gitRemote: "https://github.com/acme/tool.git"
+    branch: main
+    title: oc main session one
+    sessionId: oc-main-1
+  - harness: opencode
+    projectName: acme/tool
+    gitRemote: "https://github.com/acme/tool.git"
+    branch: main
+    title: oc main session two
+    sessionId: oc-main-2
+  - harness: opencode
+    projectName: acme/tool
+    gitRemote: "https://github.com/acme/tool.git"
+    branch: feature/y
+    title: oc feature session one
+    sessionId: oc-featy-1

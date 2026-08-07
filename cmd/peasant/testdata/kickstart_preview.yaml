@@ -1,0 +1,97 @@
+# The kickstart preview's mounted wiring, driven against a REAL store.
+#
+# recorded is the conversation the store is seeded with, through the same
+# writer and indexer the ingest pipeline uses; the preview reads it back through
+# the same session read path the transcript viewer uses. The turns are shaped
+# like real data rather than like a rich markdown sample: the opening prompt is
+# plain prose with no markdown in it, and the code arrives later, in the agent's
+# reply. A fixture that put fenced code in the first turn would pass while the
+# mounted pane showed a wall of plain characters.
+#
+# truncated is a second seeded session standing in for the degraded read: its
+# stored body was cut at the database's content-preview limit and no source
+# transcript is on disk to recover the rest from. The pane must still show the
+# turn it has.
+#
+# expectedCaseCount is the row-count guard.
+expectedCaseCount: 5
+width: 72
+recorded:
+  - role: user
+    entryType: text
+    content: please refactor the ingest pipeline so a failed write leaves nothing behind.
+  - role: assistant
+    entryType: text
+    content: |
+      write to a temp directory first, then rename it into place.
+
+      ```go
+      func write(dst string) error {
+          return os.Rename(tmp, dst)
+      }
+      ```
+  - role: assistant
+    entryType: text
+    content: ""
+    toolCalls:
+      - name: Bash
+        arguments: '{"command":"go test ./internal/ingest/"}'
+        result: |
+          ok  github.com/peasant-labs/peasant/internal/ingest  0.412s
+cases:
+  - name: an-imported-session-shows-its-whole-recorded-transcript
+    highlight: 3f1c9a52-7b64-4e18-9a0d-2c5e8f7b1a44
+    wantContains:
+      # the pane's own header chrome
+      - "harness: claude code"
+      - "project: acme/tool"
+      - "branch: main"
+      # every voice in the conversation is tagged
+      - you
+      - assistant
+      - tool
+      # the opening prompt, the code in the LATER turn, and the tool step -
+      # none of which a first-message preview could have shown
+      - please refactor the ingest pipeline so a failed write
+      - write to a temp directory first
+      - func write
+      - tool Bash
+      - 0.412s
+    wantMissing:
+      - not imported yet
+      # The session title is not repeated above the transcript that produced it.
+      - imported session
+
+  - name: a-truncated-stored-body-with-no-overlay-still-renders
+    highlight: 8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68
+    wantContains:
+      - "harness: claude code"
+      - you
+      # the head of the stored body survives; only its tail was lost
+      - the store cut this body at its preview limit
+    wantMissing:
+      - not imported yet
+
+  - name: a-discovered-session-the-store-lacks-says-it-is-not-imported
+    highlight: b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05
+    wantContains:
+      - "harness: claude code"
+      - "project: acme/tool"
+      - not imported yet
+    wantMissing:
+      - please refactor the ingest pipeline
+      - fresh session
+
+  - name: a-project-row-explains-what-to-highlight
+    highlight: "git@github.com:acme/tool.git"
+    wantContains:
+      - select a session to preview it
+    wantMissing:
+      - "harness:"
+
+  - name: a-branch-row-explains-what-to-highlight
+    highlight: main
+    wantContains:
+      - select a session to preview it
+    wantMissing:
+      - "harness:"

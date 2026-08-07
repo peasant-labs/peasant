@@ -291,6 +291,68 @@ func (s *Store) AllSessionIDs(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// IngestedSessionRow is the store-recorded view of one ingested session: the
+// display values a re-scan can reuse instead of resolving them from git again,
+// plus the two columns the diff stage classifies a discovered source against.
+type IngestedSessionRow struct {
+	SessionID     string
+	GitRemote     string // host_slugs.git_remote as ingest resolved it ("" when the project has no remote)
+	Branch        string // sessions.git_branch ("" when unknown or non-git)
+	Title         string // session_metrics.title ("" when metrics have not been computed)
+	IngestedMs    int64
+	SchemaVersion int
+}
+
+// sqlAllIngestedSessions reads every session with the dimension values a
+// re-scan reuses. The metrics join is LEFT because a session can outlive its
+// metrics row (prune deletes the metrics row before the session row), and a
+// session dropped here is one a caller reading this as "everything the store
+// holds" would treat as new and pay to resolve again. The dimension joins are
+// LEFT to match the sibling session queries; a foreign key already guarantees
+// the host slug row exists.
+const sqlAllIngestedSessions = `SELECT
+    s.session_id,
+    COALESCE(h.git_remote, ''),
+    COALESCE(s.git_branch, ''),
+    COALESCE(m.title, ''),
+    s.ingested_ms,
+    s.schema_version
+FROM sessions s
+LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN session_metrics m ON s.session_id = m.session_id
+ORDER BY s.start_ms DESC`
+
+// AllIngestedSessions returns the recorded remote, branch, and title for every
+// session in the store, with the ingest timestamp and metadata schema version
+// the diff stage needs. It is the read a re-scan uses to answer "what do I
+// already know about this session" without walking git again.
+func (s *Store) AllIngestedSessions(ctx context.Context) ([]IngestedSessionRow, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: all ingested sessions take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	var rows []IngestedSessionRow
+	err = sqlitex.ExecuteTransient(conn, sqlAllIngestedSessions, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			rows = append(rows, IngestedSessionRow{
+				SessionID:     stmt.ColumnText(0),
+				GitRemote:     stmt.ColumnText(1),
+				Branch:        stmt.ColumnText(2),
+				Title:         stmt.ColumnText(3),
+				IngestedMs:    stmt.ColumnInt64(4),
+				SchemaVersion: int(stmt.ColumnInt64(5)),
+			})
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: all ingested sessions query: %w", err)
+	}
+	return rows, nil
+}
+
 // SessionByID returns a single session by ID, or nil if not found.
 func (s *Store) SessionByID(ctx context.Context, sessionID string) (*SessionRow, error) {
 	conn, err := s.pool.Take(ctx)

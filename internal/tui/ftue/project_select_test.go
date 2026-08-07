@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -192,7 +193,7 @@ func TestMountedProjectScopeFrameKeepsPanesAligned(t *testing.T) {
 	wizard.current = pageSessionSelect
 	updated, _ := wizard.Update(tea.WindowSizeMsg{Width: fixture.TerminalWidth, Height: 24})
 	wizard = updated.(WizardModel)
-	view := wizard.View()
+	view := wizard.View().Content
 
 	lines := strings.Split(strings.TrimSuffix(view, "\n"), "\n")
 	headingLine := -1
@@ -278,7 +279,7 @@ func TestMountedProjectScopeUsesMidpointBoundary(t *testing.T) {
 			wizard.preparePage(pageSessionSelect)
 			wizard.current = pageSessionSelect
 			updated, _ := wizard.Update(tea.WindowSizeMsg{Width: terminalWidth, Height: 24})
-			view := updated.(WizardModel).View()
+			view := updated.(WizardModel).View().Content
 
 			var header string
 			for _, line := range strings.Split(strings.TrimSuffix(view, "\n"), "\n") {
@@ -314,17 +315,21 @@ func mountedPaneSeparatorColumn(t *testing.T, line string) int {
 	return lipgloss.Width(line[:first+len("│")+second])
 }
 
+// mountedPaneLeftCell / mountedPaneRightCell return the VISIBLE cell text. The
+// color escape sequences that style a cell are stripped so a cell's text can be
+// compared directly: styled cells now carry per-line color resets, so the bytes
+// between two frame borders include escape codes as well as the label.
 func mountedPaneLeftCell(line string) string {
 	first := strings.Index(line, "│")
 	second := strings.Index(line[first+len("│"):], "│")
-	return line[first+len("│") : first+len("│")+second]
+	return ansi.Strip(line[first+len("│") : first+len("│")+second])
 }
 
 func mountedPaneRightCell(line string) string {
 	first := strings.Index(line, "│")
 	second := strings.Index(line[first+len("│"):], "│")
 	third := strings.Index(line[first+len("│")+second+len("│"):], "│")
-	return line[first+len("│")+second+len("│") : first+len("│")+second+len("│")+third]
+	return ansi.Strip(line[first+len("│")+second+len("│") : first+len("│")+second+len("│")+third])
 }
 
 func TestProjectScopeHarnessDefaultsAndRehydration(t *testing.T) {
@@ -479,7 +484,7 @@ func TestMountedProjectSelectionPersistsStopAllWithoutWidening(t *testing.T) {
 		WithConfigSnapshot(snapshot, true),
 	)
 	projectPage := wizard.pages[pageProjectSelect].(*ProjectSelectPage)
-	projectPage.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	projectPage.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	wizard.storeAnswer(pageProjectSelect)
 	if wizard.answers.WantImport {
 		t.Fatal("mounted project toggle did not record explicit stop-all intent")

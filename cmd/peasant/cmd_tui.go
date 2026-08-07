@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -77,7 +77,7 @@ func runTUI(cmd *cobra.Command, cfgPath string, mockDataStore string) error {
 		return fmt.Errorf("failed to fetch sessions: %w", err)
 	}
 
-	p := tea.NewProgram(tui.NewApp(sessions), tea.WithAltScreen())
+	p := tea.NewProgram(tui.NewApp(sessions))
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("failed to run TUI: %w", err)
 	}

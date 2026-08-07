@@ -1,0 +1,106 @@
+# Rule-behavior/regression fixtures for the ast-grep key-string rules
+# (internal/tui/gates/astrules/), driven by TestAstGrepRules_MatchExpectedCounts
+# (internal/tui/gates/keys_astgrep_test.go, `//go:build astgrep`). Each case's
+# source is written to <tempRoot>/<dir>/<name>.go and all cases are scanned
+# together in ONE ast-grep invocation, then matches are partitioned back to
+# their originating file - this also proves multiple files scanned together
+# don't cross-contaminate each other's counts.
+#
+# wantByRule is a rule-id -> count map; an omitted/empty map means the case
+# must produce ZERO matches from ANY rule (a false-positive-avoidance case).
+expectedCaseCount: 8
+cases:
+  - name: left_operand_equality_caught
+    dir: internal/tui
+    wantByRule:
+      no-raw-key-string-equality: 1
+    source: |
+      package p
+
+      func f() {
+      	if msg.String() == "q" {
+      		return
+      	}
+      }
+  - name: indirect_capture_then_compare_caught
+    dir: internal/tui
+    wantByRule:
+      no-raw-key-string-capture: 1
+      no-raw-key-string-equality: 2
+    source: |
+      package p
+
+      func f() {
+      	key := msg.String()
+      	if key == defaults.KeyQuit.String() || key == defaults.KeyInterrupt.String() {
+      		return
+      	}
+      }
+  - name: two_sided_equality_counts_once
+    dir: internal/tui
+    wantByRule:
+      no-raw-key-string-equality: 1
+    source: |
+      package p
+
+      func f() {
+      	if x.String() == y.String() {
+      		return
+      	}
+      }
+  - name: two_sided_chain_counts_per_comparison
+    dir: internal/tui
+    wantByRule:
+      no-raw-key-string-equality: 4
+    source: |
+      package p
+
+      func f() {
+      	if msg.String() == defaults.KeyInterrupt.String() || msg.String() == defaults.KeyQuit.String() || msg.String() == defaults.KeyBack.String() || msg.String() == defaults.KeyRestart.String() {
+      		return
+      	}
+      }
+  - name: switch_anchored_to_msg_ignores_other_types
+    dir: internal/tui
+    wantByRule: {}
+    source: |
+      package p
+
+      func f() {
+      	switch outcome.String() {
+      	case "resolved":
+      		return
+      	}
+      }
+  - name: capture_anchored_to_msg_ignores_other_types
+    dir: internal/tui
+    wantByRule: {}
+    source: |
+      package p
+
+      func f() {
+      	s := harness.String()
+      	_ = s
+      }
+  - name: indexed_capture_excluded
+    dir: internal/tui
+    wantByRule: {}
+    source: |
+      package p
+
+      func f() {
+      	ch := msg.String()[0]
+      	_ = ch
+      }
+  - name: keymap_package_excluded_by_ignores
+    dir: internal/tui/keymap
+    wantByRule: {}
+    source: |
+      package keymap
+
+      func f() {
+      	switch msg.String() {
+      	case "esc":
+      		return
+      	}
+      }

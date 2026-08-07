@@ -322,6 +322,40 @@ type DaemonConfig struct {
 	ProjectMode string `yaml:"projectMode"`
 }
 
+// Theme selects which terminal color mode the TUI renders in. Its two values
+// share their string representation with internal/tui/theme.Mode
+// ("dark"/"light"); theme.ModeFromConfig converts a validated Theme's string
+// into a theme.Mode at TUI mount.
+type Theme string
+
+const (
+	// ThemeDark selects dark terminal colors. This is the default.
+	ThemeDark Theme = "dark"
+	// ThemeLight selects light terminal colors.
+	ThemeLight Theme = "light"
+)
+
+// String implements fmt.Stringer.
+func (t Theme) String() string { return string(t) }
+
+// IsValid reports whether the Theme is a known value.
+func (t Theme) IsValid() bool {
+	switch t {
+	case ThemeDark, ThemeLight:
+		return true
+	}
+	return false
+}
+
+// DisplayConfig controls terminal rendering preferences for the TUI.
+type DisplayConfig struct {
+	// Theme selects dark or light terminal colors. Empty is accepted by
+	// validate() the same way Selection.Mode's empty is - BaseConfig already
+	// sets ThemeDark, so an explicit config.yaml only needs to name this key
+	// to override it, never to satisfy it.
+	Theme Theme `yaml:"theme"`
+}
+
 // SelectionMode controls how the ingest pipeline selects sessions.
 type SelectionMode string
 
@@ -403,6 +437,15 @@ type Config struct {
 	Daemon    DaemonConfig    `yaml:"daemon"`
 	Push      PushConfig      `yaml:"push"`
 	Selection SelectionConfig `yaml:"selection"`
+	Display   DisplayConfig   `yaml:"display"`
+
+	// ClaudeRetentionDays is the Claude Code cleanupPeriodDays value the
+	// onboarding flow lets the user choose. It is NOT a peasant setting: it is
+	// written to ~/.claude/settings.json by the retention writer, never to
+	// config.yaml. The yaml:"-" tag keeps it out of the persisted file while
+	// still letting the settings flow carry the choice through its draft to the
+	// commit, after which the program hands it to the existing retention writer.
+	ClaudeRetentionDays int `yaml:"-"`
 }
 
 // VillageConfig holds the village server connection settings.
@@ -571,6 +614,9 @@ func BaseConfig() *Config {
 		Selection: SelectionConfig{
 			Mode:                  SelectionModeAll,
 			AutoIngestNewBranches: true,
+		},
+		Display: DisplayConfig{
+			Theme: ThemeDark,
 		},
 	}
 }
@@ -807,6 +853,11 @@ func validate(cfg *Config) error {
 				"      harnesses:    # was 'providers'\n" +
 				"        claude-code:\n" +
 				"          projects: [...]")
+	}
+
+	// Validate display config.
+	if cfg.Display.Theme != "" && !cfg.Display.Theme.IsValid() {
+		return fmt.Errorf("config: unknown display.theme %q (valid: dark, light)", cfg.Display.Theme)
 	}
 	return nil
 }

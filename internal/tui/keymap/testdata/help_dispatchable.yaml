@@ -1,0 +1,18 @@
+# Availability scenarios for TestHelpEntries_EqualsDispatchableSet
+# (internal/tui/keymap/help_test.go): each names an ordered list of actions a
+# screen might report as available, deliberately avoiding any two actions
+# that share Default() keys (ActionExpand/ActionCollapse vs
+# ActionRight/ActionLeft - see those constants' doc comments: a real screen
+# never exposes both members of a shared-key pair at once), so the
+# help==dispatchable-set equivalence holds unambiguously for every entry.
+expectedScenarioCount: 4
+scenarios:
+  - name: list-page-scope
+    available: [up, down, page-up, page-down, toggle, confirm, back, help]
+  - name: form-page-scope
+    available: [next-field, prev-field, confirm, back, save, quit, help]
+  - name: filter-mode-scope
+    available: [filter, confirm, back]
+  - name: tree-page-scope
+    available:
+      [up, down, expand, collapse, select-all, toggle, confirm, back, help, filter]

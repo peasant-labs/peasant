@@ -1,0 +1,19 @@
+# Golden plain-text expectations for keymap.FooterView, driven by
+# TestFooterView_RendersBothThemes (internal/tui/keymap/footer_test.go).
+# wantPlainText is the ansi.Strip'd rendering, which must be IDENTICAL in
+# both theme.ModeDark and theme.ModeLight (only the embedded color escape
+# codes should differ by mode - the visible text never does); the test
+# separately asserts lipgloss.Width on the raw (still-escaped) rendering
+# equals lipgloss.Width on the stripped text, proving width is measured
+# ansi-aware rather than by raw byte/rune length.
+expectedCaseCount: 3
+cases:
+  - name: list-page-scope
+    available: [up, down, confirm, back, help]
+    wantPlainText: "↑/k: up  ↓/j: down  enter: confirm  esc: back  ?: help"
+  - name: form-page-scope
+    available: [next-field, prev-field, save, quit]
+    wantPlainText: "tab: next field  shift+tab: prev field  ctrl+s: save  q: quit"
+  - name: empty-availability-renders-empty
+    available: []
+    wantPlainText: ""

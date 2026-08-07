@@ -1,0 +1,32 @@
+id: no-raw-key-string-capture
+language: Go
+severity: error
+message: >
+  Raw key-string captured into a local for later comparison/switching.
+  Dispatch through keymap.Match against a named keymap.ActionID instead.
+note: >
+  Anchored to the LITERAL identifier "msg" for the same false-positive
+  reason as no-raw-key-string-switch.yml: a generic receiver metavariable
+  here would match ANY "X.String()" capture ("s := harness.String()",
+  "label := provider.String()"), an extremely common and entirely
+  legitimate Go idiom unrelated to key handling. "key := msg.String()"
+  (internal/tui/app.go's real shape) is the indirection this rule targets -
+  capturing the raw key string to compare/switch on it later, routing
+  around a literal "msg.String() ==" or "switch msg.String()" match.
+
+  This pattern structurally excludes the annotation-editor digit-shortcut
+  idiom "ch := msg.String()[0]" (extracting one byte to test a 1-9 range)
+  WITHOUT needing an explicit `not:` clause: ast-grep's pattern matching
+  requires the right-hand side to be the exact node kind the pattern
+  specifies (a bare call expression, "$MSG.String()"), and
+  "msg.String()[0]" is a DIFFERENT node kind - an index expression whose
+  operand happens to be that call - so the pattern simply does not match
+  it. Verified empirically (ast-grep 0.40.5 and 0.43.0).
+rule:
+  pattern: $K := msg.String()
+files:
+  - "internal/tui/**"
+  - "internal/push/wizard.go"
+ignores:
+  - "internal/tui/keymap/**"
+  - "internal/tui/gates/**"

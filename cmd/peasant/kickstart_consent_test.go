@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"gopkg.in/yaml.v3"
@@ -73,7 +73,7 @@ func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
 		t.Run(fixture.ID, func(t *testing.T) {
 			var warning, consent string
 			command := buildKickstartCommand(kickstartCommandDeps{
-				discover: func(context.Context, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+				discover: func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
 					return ftue.ProviderInventory{defaults.HarnessClaudeCode: {SessionCount: 1, Enabled: true}}, []ftue.SessionListing{{Harness: defaults.HarnessClaudeCode.String(), ProjectName: "tool", GitRemote: "https://github.com/acme/tool.git", Branch: "main", Title: "consent session", SessionID: "session-consent", WorkingDir: "/work/tool"}}
 				},
 				getwd:        func() (string, error) { return "/work/tool", nil },
@@ -82,43 +82,43 @@ func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
 					updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 					model = updated.(ftue.WizardModel)
 					if fixture.ExistingUser == "" {
-						updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+						updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 						model = updated.(ftue.WizardModel)
 					}
-					updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 					model = updated.(ftue.WizardModel)
-					if strings.Contains(model.View(), "[ ] tool") {
-						updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+					if strings.Contains(model.View().Content, "[ ] tool") {
+						updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 						model = updated.(ftue.WizardModel)
 					}
-					updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 					model = updated.(ftue.WizardModel)
 					switch fixture.Scope {
 					case "branch":
-						for _, key := range []tea.KeyType{tea.KeyDown, tea.KeySpace, tea.KeySpace} {
-							updated, _ = model.Update(tea.KeyMsg{Type: key})
+						for _, key := range []rune{tea.KeyDown, tea.KeySpace, tea.KeySpace} {
+							updated, _ = model.Update(tea.KeyPressMsg{Code: key})
 							model = updated.(ftue.WizardModel)
 						}
 					case "session":
-						for _, key := range []tea.KeyType{tea.KeyDown, tea.KeyRight, tea.KeyDown, tea.KeySpace, tea.KeySpace} {
-							updated, _ = model.Update(tea.KeyMsg{Type: key})
+						for _, key := range []rune{tea.KeyDown, tea.KeyRight, tea.KeyDown, tea.KeySpace, tea.KeySpace} {
+							updated, _ = model.Update(tea.KeyPressMsg{Code: key})
 							model = updated.(ftue.WizardModel)
 						}
 					}
-					updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 					model = updated.(ftue.WizardModel)
 					for range 4 {
-						updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+						updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 						model = updated.(ftue.WizardModel)
 					}
 					if fixture.Destination == "public" {
-						updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+						updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 						model = updated.(ftue.WizardModel)
 					}
-					warning = model.View()
-					updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+					warning = model.View().Content
+					updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 					model = updated.(ftue.WizardModel)
-					consent = model.View()
+					consent = model.View().Content
 					return nil
 				},
 			})

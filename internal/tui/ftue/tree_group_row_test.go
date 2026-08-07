@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -509,7 +509,7 @@ func requireGroupToggleStillReadsTickState(t *testing.T, page *TreeSelectPage, f
 			continue
 		}
 		page.cursor = i
-		page.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+		page.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 		pressed = true
 		break
 	}
@@ -562,7 +562,7 @@ func expandAllViaKeypresses(t *testing.T, page *TreeSelectPage) {
 				continue
 			}
 			page.cursor = i
-			page.Update(tea.KeyMsg{Type: tea.KeyRight})
+			page.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 			if !rowExpanded(page, item) {
 				t.Fatalf("the expand key left row %d (level %v) closed; the tree key handling must have changed", i, item.level)
 			}

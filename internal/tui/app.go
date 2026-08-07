@@ -1,8 +1,8 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
@@ -30,7 +30,7 @@ func NewApp(s []ingest.Session) AppModel {
 }
 
 func (m AppModel) Init() tea.Cmd {
-	return tea.WindowSize()
+	return tea.RequestWindowSize
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -44,7 +44,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.trends, _ = m.trends.Update(msg)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		key := msg.String()
 
 		// Quit is always handled
@@ -92,7 +92,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m AppModel) View() string {
+func (m AppModel) View() tea.View {
 	// Tab bar
 	var tabs []string
 	for i, name := range m.tabNames {
@@ -132,5 +132,7 @@ func (m AppModel) View() string {
 	helpBar := HelpStyle.Render(helpText)
 
 	result := lipgloss.JoinVertical(lipgloss.Left, tabBar, content, helpBar)
-	return FillBg(ContentBg.Width(m.width).Height(m.height).Render(result))
+	view := tea.NewView(FillBg(ContentBg.Width(m.width).Height(m.height).Render(result)))
+	view.AltScreen = true
+	return view
 }

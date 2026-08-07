@@ -927,6 +927,42 @@ func (p *Pipeline) diff(sessions []DiscoveredSession) DiffResult {
 	return result
 }
 
+// ClassifyAgainstStore returns the DiffStatus of a discovered session that the
+// store already holds a record for: it compares the source file against the
+// recorded ingest timestamp and metadata schema version, honouring the same
+// staleness threshold. It is the DB-first branch of classifySession, exported so
+// a caller that already knows what the store recorded (the kickstart re-scan)
+// asks the pipeline's own diff rule instead of writing a second one that can
+// drift from it.
+//
+// The caller supplies a location whose IngestedMs is set; a session with no
+// store record is DiffNew by definition and never reaches here.
+func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalenessThreshold time.Duration) DiffStatus {
+	isActive := stalenessThreshold > 0 && time.Since(session.ModTime) < stalenessThreshold
+
+	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
+		// Source modified more recently than DB ingested_ms: re-ingest.
+		if session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
+			if isActive {
+				return DiffActive
+			}
+			return DiffUpdated
+		}
+	}
+	// Schema version behind current (DB value): re-ingest.
+	if loc.SchemaVersion < CurrentSchemaVersion {
+		if isActive {
+			return DiffActive
+		}
+		return DiffUpdated
+	}
+	// Staleness check last.
+	if isActive {
+		return DiffActive
+	}
+	return DiffUnchanged
+}
+
 // classifySession determines the DiffStatus for a single session.
 //
 // The implementation uses a single staleness threshold check
@@ -958,28 +994,7 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	// use DB state to classify the session without reading metadata.json from disk.
 	// This is the primary code path for sessions already in the DB.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
-		ingestedMs := *loc.IngestedMs
-		if ingestedMs > 0 {
-			// Source modified more recently than DB ingested_ms: re-ingest.
-			if session.ModTime.After(time.UnixMilli(ingestedMs)) {
-				if isActive {
-					return DiffActive
-				}
-				return DiffUpdated
-			}
-		}
-		// Schema version behind current (DB value): re-ingest.
-		if loc.SchemaVersion < CurrentSchemaVersion {
-			if isActive {
-				return DiffActive
-			}
-			return DiffUpdated
-		}
-		// Staleness check last.
-		if isActive {
-			return DiffActive
-		}
-		return DiffUnchanged
+		return ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
 	}
 
 	// File fallback: DB has no record for this session (pre-migration data or first run).

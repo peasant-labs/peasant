@@ -1,0 +1,917 @@
+# A large scan result (3 providers x 3 remotes x 3 worktrees x 5 sessions)
+# exercising the tree's scroll windowing, deep indentation truncation, and
+# rollup over many nodes. Generated to a fixed shape so the row-count guard
+# pins it; every session alternates checked/unchecked so no interior node is
+# a trivial all-same rollup.
+name: large
+expectedNodeCount: 174
+roots:
+  - id: claude
+    label: claude
+    state: unchecked
+    meta:
+      kind: provider
+    children:
+      - id: claude/remote-0
+        label: remote-0
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: claude/remote-0/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-0/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: claude/remote-0/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-0/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: claude/remote-0/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-0/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-0/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+      - id: claude/remote-1
+        label: remote-1
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: claude/remote-1/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-1/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: claude/remote-1/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-1/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: claude/remote-1/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-1/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-1/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+      - id: claude/remote-2
+        label: remote-2
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: claude/remote-2/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-2/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: claude/remote-2/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-2/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: claude/remote-2/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: claude/remote-2/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: claude/remote-2/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+  - id: gemini
+    label: gemini
+    state: unchecked
+    meta:
+      kind: provider
+    children:
+      - id: gemini/remote-0
+        label: remote-0
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: gemini/remote-0/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-0/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: gemini/remote-0/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-0/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: gemini/remote-0/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-0/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-0/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+      - id: gemini/remote-1
+        label: remote-1
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: gemini/remote-1/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-1/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: gemini/remote-1/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-1/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: gemini/remote-1/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-1/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-1/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+      - id: gemini/remote-2
+        label: remote-2
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: gemini/remote-2/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-2/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: gemini/remote-2/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-2/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: gemini/remote-2/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: gemini/remote-2/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: gemini/remote-2/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+  - id: openai
+    label: openai
+    state: unchecked
+    meta:
+      kind: provider
+    children:
+      - id: openai/remote-0
+        label: remote-0
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: openai/remote-0/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-0/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: openai/remote-0/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-0/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: openai/remote-0/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-0/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-0/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+      - id: openai/remote-1
+        label: remote-1
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: openai/remote-1/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-1/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: openai/remote-1/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-1/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: openai/remote-1/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-1/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-1/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+      - id: openai/remote-2
+        label: remote-2
+        state: unchecked
+        meta:
+          kind: remote
+        children:
+          - id: openai/remote-2/wt-0
+            label: worktree-0-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-2/wt-0/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-0/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-0/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-0/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-0/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: openai/remote-2/wt-1
+            label: worktree-1-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-2/wt-1/sess-0
+                label: "session 0 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-1/sess-1
+                label: "session 1 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-1/sess-2
+                label: "session 2 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-1/sess-3
+                label: "session 3 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-1/sess-4
+                label: "session 4 recorded run"
+                state: checked
+                meta:
+                  kind: session
+          - id: openai/remote-2/wt-2
+            label: worktree-2-with-a-deliberately-long-branch-name
+            state: unchecked
+            meta:
+              kind: worktree
+            children:
+              - id: openai/remote-2/wt-2/sess-0
+                label: "session 0 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-2/sess-1
+                label: "session 1 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-2/sess-2
+                label: "session 2 recorded run"
+                state: unchecked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-2/sess-3
+                label: "session 3 recorded run"
+                state: checked
+                meta:
+                  kind: session
+              - id: openai/remote-2/wt-2/sess-4
+                label: "session 4 recorded run"
+                state: unchecked
+                meta:
+                  kind: session

@@ -1,0 +1,172 @@
+# Tri-state propagation cases for the kit Tree. Each case builds a forest from
+# leaf states (interior states are derived by the tree's rollup on load, so
+# only leaves are authoritative), applies an ordered list of actions, and
+# asserts the resulting TriState of EVERY node by id - an exhaustive expect map
+# so a case cannot silently ignore a node the action touched. Actions:
+#   toggle: <id>    move the cursor to the node and press select (space)
+#   selectAll: true press select-all (a)
+# The row-count guard pins expectedCaseCount to the number of cases.
+expectedCaseCount: 9
+cases:
+  # A parent toggle pushes Checked down to every child.
+  - name: parent-toggle-checks-children
+    forest:
+      - id: p
+        children:
+          - id: a
+            state: unchecked
+          - id: b
+            state: unchecked
+    actions:
+      - toggle: p
+    expect:
+      p: checked
+      a: checked
+      b: checked
+
+  # A parent toggle on an all-checked subtree clears it.
+  - name: parent-toggle-clears-checked-children
+    forest:
+      - id: p
+        children:
+          - id: a
+            state: checked
+          - id: b
+            state: checked
+    actions:
+      - toggle: p
+    expect:
+      p: unchecked
+      a: unchecked
+      b: unchecked
+
+  # One checked child among unchecked siblings rolls the parent up to Partial.
+  - name: one-child-checked-rolls-up-partial
+    forest:
+      - id: p
+        children:
+          - id: a
+            state: unchecked
+          - id: b
+            state: unchecked
+    actions:
+      - toggle: a
+    expect:
+      p: partial
+      a: checked
+      b: unchecked
+
+  # Checking every child individually rolls the parent up to fully Checked.
+  - name: all-children-checked-rolls-up-checked
+    forest:
+      - id: p
+        children:
+          - id: a
+            state: unchecked
+          - id: b
+            state: unchecked
+    actions:
+      - toggle: a
+      - toggle: b
+    expect:
+      p: checked
+      a: checked
+      b: checked
+
+  # Toggling a Partial parent (one child pre-checked) fills the subtree.
+  - name: toggle-partial-parent-fills-subtree
+    forest:
+      - id: p
+        children:
+          - id: a
+            state: checked
+          - id: b
+            state: unchecked
+    actions:
+      - toggle: p
+    expect:
+      p: checked
+      a: checked
+      b: checked
+
+  # Select-all checks the entire forest across providers.
+  - name: select-all-checks-forest
+    forest:
+      - id: p1
+        children:
+          - id: a
+            state: unchecked
+      - id: p2
+        children:
+          - id: b
+            state: unchecked
+    actions:
+      - selectAll: true
+    expect:
+      p1: checked
+      a: checked
+      p2: checked
+      b: checked
+
+  # Select-all on an already-fully-checked forest clears it.
+  - name: select-all-clears-when-all-checked
+    forest:
+      - id: p1
+        children:
+          - id: a
+            state: checked
+      - id: p2
+        children:
+          - id: b
+            state: checked
+    actions:
+      - selectAll: true
+    expect:
+      p1: unchecked
+      a: unchecked
+      p2: unchecked
+      b: unchecked
+
+  # A Conflict leaf renders/persists distinctly: it forces its parent to
+  # Partial and is NOT flipped by a parent toggle (a deleted worktree cannot be
+  # selected), while its normal sibling checks.
+  - name: conflict-forces-partial-and-is-not-selectable
+    forest:
+      - id: p
+        children:
+          - id: good
+            state: unchecked
+          - id: gone
+            state: conflict
+    actions:
+      - toggle: p
+    expect:
+      p: partial
+      good: checked
+      gone: conflict
+
+  # Mixed-depth: a mid-level toggle fills only its own subtree and rolls the
+  # grandparent up to Partial.
+  - name: mixed-depth-mid-toggle
+    forest:
+      - id: provider
+        children:
+          - id: remote-1
+            children:
+              - id: s1
+                state: unchecked
+              - id: s2
+                state: unchecked
+          - id: remote-2
+            children:
+              - id: s3
+                state: unchecked
+    actions:
+      - toggle: remote-1
+    expect:
+      provider: partial
+      remote-1: checked
+      s1: checked
+      s2: checked
+      remote-2: unchecked
+      s3: unchecked

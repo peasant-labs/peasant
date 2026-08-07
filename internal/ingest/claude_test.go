@@ -116,6 +116,41 @@ func TestClaudeAdapter_Discover(t *testing.T) {
 	}
 }
 
+// TestClaudeAdapter_Discover_TitleStripsMarkup proves the discovered title runs
+// through the shared redaction-free title pipeline: a first user turn that opens
+// with a <system-reminder> block yields a clean human title with the markup
+// removed, not the raw first line. Reverting the pipeline wiring (raw first-line
+// truncation) leaves the "<system-reminder>" markup in the title and fails this.
+func TestClaudeAdapter_Discover_TitleStripsMarkup(t *testing.T) {
+	const (
+		base        = "/home/test/.claude/projects"
+		projectSlug = "-home-test-myproject"
+		sessionUUID = testutil.TestSessionUUID
+	)
+	firstTurn := "<system-reminder>be concise</system-reminder>fix the commit detector"
+	line := fmt.Sprintf(
+		`{"sessionId":%q,"version":"2.1.14","cwd":"/home/test/myproject","gitBranch":"main","type":"user","message":{"role":"user","content":%q},"timestamp":"2024-02-19T00:00:00Z","uuid":"uuid-1"}`,
+		sessionUUID, firstTurn,
+	)
+
+	mfs := testutil.NewMemFS()
+	setupClaudeFS(t, mfs, base, projectSlug, sessionUUID, []byte(line+"\n"))
+
+	a := ingest.NewClaudeAdapter(mfs, testutil.DefaultGitResolver(), salt.Salt{})
+	cfg := ingest.SourceConfig{Paths: []ingest.ResolvedPath{ingest.ResolvedPath(base)}, Enabled: true}
+
+	sessions, err := a.Discover(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("Discover returned %d sessions, want 1", len(sessions))
+	}
+	if got, want := sessions[0].Title, "fix the commit detector"; got != want {
+		t.Fatalf("Title = %q, want %q (markup should be stripped by the title pipeline)", got, want)
+	}
+}
+
 func TestClaudeAdapter_Discover_EmptyDir(t *testing.T) {
 	const base = "/home/test/.claude/projects"
 

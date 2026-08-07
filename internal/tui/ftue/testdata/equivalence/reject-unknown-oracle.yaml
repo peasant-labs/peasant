@@ -1,0 +1,26 @@
+# Loader-guard fixture: a scenario naming an oracle the loader does not define.
+# The loader must reject it so a typo'd or invented oracle cannot silently change
+# how a scenario is read.
+expectedScenarioCount: 1
+scenarios:
+  - name: bogus-oracle
+    oracle: made-up
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"

@@ -1,0 +1,31 @@
+id: no-raw-key-string-equality
+language: Go
+severity: error
+message: >
+  Raw key-string equality comparison. Dispatch through keymap.Match against
+  a named keymap.ActionID instead.
+note: >
+  $MSG is a metavariable, not the literal identifier "msg" - it is
+  intentionally general on BOTH sides of "==" so this catches the indirect
+  form too: a variable captured from msg.String() earlier (see
+  no-raw-key-string-capture.yml) and then compared against some OTHER
+  .String() call, e.g. "key == defaults.KeyQuit.String()"
+  (internal/tui/app.go's real shape), not just a literal "msg.String() ==
+  ...". A single two-sided occurrence ("x.String() == y.String()") is
+  reported ONCE, not twice: ast-grep's `any` combinator matches a given AST
+  node if EITHER alternative matches it, and reports that node once per
+  rule - it does not double-report a node that happens to satisfy both
+  alternatives. This is what makes the equality direction (left operand,
+  right operand, or both) irrelevant to the count, unlike a regex-based
+  scanner, which had to reason carefully about left-to-right, non-overlapping
+  match consumption to avoid double-counting a two-sided line.
+rule:
+  any:
+    - pattern: $MSG.String() == $_
+    - pattern: $_ == $MSG.String()
+files:
+  - "internal/tui/**"
+  - "internal/push/wizard.go"
+ignores:
+  - "internal/tui/keymap/**"
+  - "internal/tui/gates/**"

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 )
@@ -43,11 +43,11 @@ func (m TrendsModel) Update(msg tea.Msg) (TrendsModel, tea.Cmd) {
 			contentHeight = 3
 		}
 		if !m.ready {
-			m.viewport = viewport.New(m.width, contentHeight)
+			m.viewport = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(contentHeight))
 			m.ready = true
 		} else {
-			m.viewport.Width = m.width
-			m.viewport.Height = contentHeight
+			m.viewport.SetWidth(m.width)
+			m.viewport.SetHeight(contentHeight)
 		}
 		m.viewport.SetContent(m.renderContent())
 		return m, nil

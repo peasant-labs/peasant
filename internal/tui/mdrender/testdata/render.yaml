@@ -1,0 +1,138 @@
+# What the markdown renderer must produce, driven by
+# internal/tui/mdrender/mdrender_test.go.
+#
+# Each case renders `source` at `width` in `theme`, then asserts:
+#   - wantVisible / wantMissing  : text that must (not) survive, styling removed
+#   - wantColored                : runs that must be styled with a NAMED palette
+#                                  token - this is what proves the output is
+#                                  really syntax-highlighted markdown and not
+#                                  the plain-text fallback wearing a coat of
+#                                  paint. The token NAME is the fixture's
+#                                  decision; the test resolves it against the
+#                                  same theme.Palette the renderer draws from.
+#   - wantPlain                  : true when the case must NOT be styled at all
+#
+# The token names are the closed set mdrender assigns meaning to; a name outside
+# it fails the fixture loader rather than silently asserting nothing.
+# concurrencyWidth is the column TestRender_ConcurrentColdRenders lays its
+# per-goroutine sources out at. It is separate from the per-case widths because
+# that test needs every marker to survive on one line: a one-cell case would
+# break the marker across rows and make the contamination check unreadable.
+concurrencyWidth: 48
+expectedCaseCount: 9
+expectedTokenNameCount: 6
+tokenNames: [ink, ink-strong, ink-3, mauve, teal, olive]
+cases:
+  - name: prose-is-rendered-with-emphasis-styled
+    theme: dark
+    width: 48
+    source: |
+      some **bold** prose that a person actually wrote.
+    wantVisible: ["some bold prose that a person actually wrote."]
+    wantColored:
+      - text: bold
+        token: ink-strong
+
+  - name: a-heading-reads-as-a-heading
+    theme: dark
+    width: 48
+    source: |
+      # plan of attack
+
+      then the body.
+    wantVisible: [plan of attack, then the body.]
+    wantColored:
+      # A single word, because glamour opens a fresh style run at each wrap
+      # point: the assertion is that THIS word carries the heading token, not
+      # that a whole line is one run.
+      - text: plan
+        token: ink-strong
+      - text: then
+        token: ink
+
+  - name: fenced-go-code-is-syntax-highlighted
+    theme: dark
+    width: 48
+    source: |
+      ```go
+      func main() {
+      	greeting := "hi"
+      	// say it
+      }
+      ```
+    wantVisible: [func main, greeting, "\"hi\"", "// say it"]
+    wantColored:
+      - text: func
+        token: mauve
+      - text: main
+        token: teal
+      - text: "\"hi\""
+        token: olive
+      - text: "// say it"
+        token: ink-3
+
+  - name: the-same-code-is-highlighted-in-the-light-palette
+    theme: light
+    width: 48
+    source: |
+      ```go
+      func main() {
+      	greeting := "hi"
+      	// say it
+      }
+      ```
+    wantVisible: [func main, greeting, "\"hi\""]
+    wantColored:
+      - text: func
+        token: mauve
+      - text: "\"hi\""
+        token: olive
+
+  - name: a-list-keeps-its-items-on-separate-lines
+    theme: dark
+    width: 48
+    source: |
+      - first thing
+      - second thing
+    wantVisible: [first thing, second thing]
+    wantColored:
+      - text: first
+        token: ink
+
+  # An escape sequence a transcript captured from a tool's colored output must
+  # never reach the terminal: it would repaint the screen from inside a pane.
+  - name: recorded-escape-sequences-are-stripped-before-rendering
+    theme: dark
+    width: 48
+    source: "before \x1b[31mred\x1b[0m after \x1b[2J\x1b]0;retitled\x07 end"
+    wantVisible: [before, red, after, end]
+    wantMissing: ["\x1b[31m", "\x1b[2J", "\x1b]0;", retitled]
+
+  - name: whitespace-only-source-renders-nothing
+    theme: dark
+    width: 48
+    source: "   \n\n  "
+    wantMissing: [" "]
+    wantPlain: true
+
+  # glamour word-wraps prose but leaves a fenced code line whole, however long
+  # it is. Without the hard wrap after it, this line would run past the pane and
+  # force the PANE to cut it - and cutting styled text by raw runes can land
+  # inside an escape sequence.
+  - name: an-over-long-code-line-is-hard-wrapped-to-the-pane
+    theme: dark
+    width: 20
+    source: |
+      ```
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      ```
+    wantVisible: [aaaaaaaaaa]
+
+  # A one-cell pane is degenerate but reachable while a window is being resized;
+  # it must still produce readable characters rather than an empty pane.
+  - name: a-one-cell-width-still-renders-the-words
+    theme: dark
+    width: 1
+    source: |
+      ab cd
+    wantVisible: [a, b, c, d]

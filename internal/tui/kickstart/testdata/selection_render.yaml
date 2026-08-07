@@ -1,0 +1,156 @@
+# The rendered "choose transcripts to import" step, captured as golden
+# snapshots. The listing is built to exercise every answer this step gives at
+# once: two harnesses (so the facet gutter has values to group and narrow by), a
+# parent session with a subagent chain (so a row carries a child count), and an
+# already-imported session (so the branch splits into not-yet then imported).
+#
+# stored names the sessions the local store already holds, keyed by session id;
+# their text is what the preview pane shows. Each case drives the step into one
+# state and captures the whole screen.
+#
+# States:
+#   default        - as the step opens: gutter shown, every harness visible
+#   narrowed       - one press of the filter key: narrowed to the first harness
+#   gutter-hidden  - the last press of the cycle: gutter and filter both off
+#   session-cursor   - cursor moved onto the already-imported session row
+#   preview-focused  - the same row, with input moved to the preview pane
+#   preview-scrolled - the preview focused and scrolled down
+#
+# previewAssertions names, per captured state, what the preview pane must show:
+# the palette token a highlighted code word carries, the text that must (or must
+# not) be visible, and which way the divider's focus marker points. The goldens
+# below would happily record a pane that stopped rendering markdown or stopped
+# indicating focus; these rows are what make that a failure instead.
+#
+# expectedCaseCount is the row-count guard; expectedHarnessCount pins how many
+# harnesses the listing carries, since the facet cycle length derives from it.
+expectedCaseCount: 11
+expectedHarnessCount: 2
+# The stored body is markdown, as a recorded first message from a person to a
+# coding agent usually is: the pane renders it rather than showing the raw
+# characters, so the fenced code below is syntax-highlighted in the capture.
+stored:
+  cc-imported: |
+    please refactor the ingest pipeline so a **failed write** cannot leave a
+    partial session behind.
+
+    ```go
+    func write(dst string) error {
+        // atomic: temp dir, then rename
+        return os.Rename(tmp, dst)
+    }
+    ```
+previewAssertions:
+  expectedRowCount: 3
+  rows:
+    - case: session-cursor-dark
+      wantVisible: [failed write, os.Rename]
+      wantColored:
+        - text: func
+          token: mauve
+        - text: "// atomic: temp dir, then rename"
+          token: ink-3
+      wantFocusMarker: left
+    - case: preview-focused-dark
+      wantVisible: [failed write, os.Rename]
+      wantColored:
+        - text: func
+          token: mauve
+      wantFocusMarker: right
+    # Scrolled past the prose at the top of the body, so the first words are no
+    # longer on screen and the code below them is.
+    - case: preview-scrolled-dark
+      wantVisible: [os.Rename]
+      wantMissing: [please refactor]
+      wantFocusMarker: right
+listings:
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: parent session
+    sessionId: cc-parent
+    subagentIds: [cc-child]
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: child subagent
+    sessionId: cc-child
+    subagentIds: [cc-grandchild]
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: grandchild subagent
+    sessionId: cc-grandchild
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: imported session
+    sessionId: cc-imported
+  - harness: cursor
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: cursor session
+    sessionId: cur-1
+ingested:
+  - cc-imported
+cases:
+  - name: default-dark
+    state: default
+    theme: dark
+    width: 120
+    height: 24
+  - name: default-light
+    state: default
+    theme: light
+    width: 120
+    height: 24
+  - name: narrowed-dark
+    state: narrowed
+    theme: dark
+    width: 120
+    height: 24
+  - name: narrowed-light
+    state: narrowed
+    theme: light
+    width: 120
+    height: 24
+  - name: gutter-hidden-dark
+    state: gutter-hidden
+    theme: dark
+    width: 120
+    height: 24
+  - name: gutter-hidden-light
+    state: gutter-hidden
+    theme: light
+    width: 120
+    height: 24
+  - name: session-cursor-dark
+    state: session-cursor
+    theme: dark
+    width: 120
+    height: 24
+  - name: session-cursor-narrow
+    state: session-cursor
+    theme: dark
+    width: 80
+    height: 20
+  - name: preview-focused-dark
+    state: preview-focused
+    theme: dark
+    width: 120
+    height: 24
+  - name: preview-focused-light
+    state: preview-focused
+    theme: light
+    width: 120
+    height: 24
+  - name: preview-scrolled-dark
+    state: preview-scrolled
+    theme: dark
+    width: 120
+    height: 24

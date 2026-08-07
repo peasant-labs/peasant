@@ -1,0 +1,19 @@
+# Table-driven cases for config.Theme.IsValid, driven by TestTheme_IsValid
+# (internal/config/display_test.go). Every recognized Theme and a sample of
+# unrecognized values (empty, and a plausible-looking but undefined one), so
+# a future third Theme added without updating IsValid's switch is caught here
+# rather than only by eyeballing the switch statement.
+expectedCaseCount: 4
+cases:
+  - name: dark-is-valid
+    theme: dark
+    want: true
+  - name: light-is-valid
+    theme: light
+    want: true
+  - name: empty-is-invalid
+    theme: ""
+    want: false
+  - name: unrecognized-value-is-invalid
+    theme: solarized
+    want: false

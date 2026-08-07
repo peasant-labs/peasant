@@ -1,6 +1,6 @@
 package ftue
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // PageKeyMap contains keybindings common to all wizard pages.
 type PageKeyMap struct {
@@ -23,7 +23,7 @@ var DefaultPageKeyMap = PageKeyMap{
 		key.WithHelp("↓", "down"),
 	),
 	Select: key.NewBinding(
-		key.WithKeys(" "),
+		key.WithKeys("space"),
 		key.WithHelp("space", "select"),
 	),
 	Confirm: key.NewBinding(

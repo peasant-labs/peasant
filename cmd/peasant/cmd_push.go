@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
 	"github.com/peasant-labs/peasant/internal/animation"
@@ -1611,7 +1611,7 @@ func runPushWizard(
 	}
 
 	model := push.NewPushWizard(wizSessions)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("push wizard: %w", err)

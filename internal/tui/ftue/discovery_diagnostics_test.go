@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"gopkg.in/yaml.v3"
 )
@@ -68,9 +68,9 @@ func TestProjectScopeShowsNonOperationalHarnessDiagnostics(t *testing.T) {
 			if len(page.ProviderSelections()) != 0 {
 				t.Fatalf("non-operational harness was selected: %+v", page.ProviderSelections())
 			}
-			updated, _ := page.Update(tea.KeyMsg{Type: tea.KeyTab})
+			updated, _ := page.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			page = updated.(*ProjectScopePage)
-			updated, _ = page.Update(tea.KeyMsg{Type: tea.KeySpace})
+			updated, _ = page.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 			page = updated.(*ProjectScopePage)
 			if len(page.ProviderSelections()) != 0 {
 				t.Fatalf("non-operational harness became selectable: %+v", page.ProviderSelections())

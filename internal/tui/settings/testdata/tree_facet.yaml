@@ -1,0 +1,71 @@
+# The facet gutter's cycle over the "faceted" scanner fixture, one case per
+# press of the filter key. The gutter groups the forest by the harness Meta key:
+# state 0 shows every value, states 1..n narrow to one value, and the last state
+# hides the gutter and its filter. wantRows are the session titles the tree must
+# show; wantMissingRows the ones it must not. The
+# row-count guards: expectedStateCount is the cycle length (the distinct values
+# plus the every-value row and the hidden state) and expectedCaseCount counts
+# the cases below, which run one press past the cycle to prove it wraps.
+fixture: faceted
+gutterLabel: harness
+expectedStateCount: 4
+expectedValueCount: 2
+expectedCaseCount: 5
+# The terminal width at which the region can no longer carry both the gutter and
+# a usable tree, so the gutter collapses.
+narrowWidth: 22
+gutterRows:
+  - "all 4"
+  - "claude code 2"
+  - "opencode 2"
+states:
+  - name: every-value-shows-the-whole-forest
+    presses: 0
+    gutterVisible: true
+    activeRow: "all 4"
+    wantRows:
+      - ingest pipeline refactor
+      - commit detector fix
+      - share bridge scan
+      - governance audit trigger
+
+  - name: first-value-narrows-to-claude-code
+    presses: 1
+    gutterVisible: true
+    activeRow: "claude code 2"
+    wantRows:
+      - ingest pipeline refactor
+      - share bridge scan
+    wantMissingRows:
+      - commit detector fix
+      - governance audit trigger
+
+  - name: second-value-narrows-to-opencode
+    presses: 2
+    gutterVisible: true
+    activeRow: "opencode 2"
+    wantRows:
+      - commit detector fix
+      - governance audit trigger
+    wantMissingRows:
+      - ingest pipeline refactor
+      - share bridge scan
+
+  - name: the-last-state-hides-the-gutter-and-its-filter
+    presses: 3
+    gutterVisible: false
+    wantRows:
+      - ingest pipeline refactor
+      - commit detector fix
+      - share bridge scan
+      - governance audit trigger
+
+  - name: the-cycle-returns-to-every-value
+    presses: 4
+    gutterVisible: true
+    activeRow: "all 4"
+    wantRows:
+      - ingest pipeline refactor
+      - commit detector fix
+      - share bridge scan
+      - governance audit trigger

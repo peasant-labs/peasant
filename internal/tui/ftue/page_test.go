@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -50,7 +50,7 @@ func TestOAuthPage_ExistingUser_ContinueCompletesImmediately(t *testing.T) {
 	}
 
 	// Press "1" → "Continue as alice" (index 0).
-	updated, cmd := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	updated, cmd := p.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
 	op := updated.(*OAuthPage)
 
 	if !op.IsComplete() {
@@ -68,7 +68,7 @@ func TestOAuthPage_ExistingUser_StayLocalCompletes(t *testing.T) {
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 
 	// Press "3" → "Stay local" (index 2).
-	updated, _ := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	updated, _ := p.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
 	op := updated.(*OAuthPage)
 
 	if !op.IsComplete() {
@@ -84,7 +84,7 @@ func TestOAuthPage_ExistingUser_NewAccountShowsLogoutStep(t *testing.T) {
 	p.openBrowser = func(string) error { return nil }
 
 	// Press "2" → "Log in with a different account" (index 1).
-	updated, cmd := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	updated, cmd := p.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
 	op := updated.(*OAuthPage)
 
 	if op.IsComplete() {
@@ -108,7 +108,7 @@ func TestOAuthPage_ExistingUser_BrowserFailureSurfaced(t *testing.T) {
 
 	// Press "2" → "Log in with a different account" → triggers the logout step,
 	// which opens the GitHub sign-out page in the browser.
-	updated, _ := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	updated, _ := p.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
 	op := updated.(*OAuthPage)
 
 	if op.browserErr == nil {
@@ -128,9 +128,9 @@ func TestOAuthPage_ExistingUser_NewAccountFiresOAuthAfterLogout(t *testing.T) {
 	p.openBrowser = func(string) error { return nil }
 
 	// Select "Log in with a different account".
-	updated, _ := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	updated, _ := p.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
 	// User pressed Enter after signing out of GitHub.
-	afterEnter, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	afterEnter, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	op := afterEnter.(*OAuthPage)
 
 	if !op.authInProgress {
@@ -149,8 +149,8 @@ func TestOAuthPage_ExistingUser_NewAccountCompletesAfterAuth(t *testing.T) {
 	p.openBrowser = func(string) error { return nil }
 
 	// Select "Log in with a different account", confirm logout, simulate OAuth success.
-	s1, _ := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	s2, _ := s1.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	s1, _ := p.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	s2, _ := s1.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	final, _ := s2.Update(loginResultMsg{username: "bob", err: nil})
 	fp := final.(*OAuthPage)
 
@@ -169,7 +169,7 @@ func TestOAuthPage_ExistingUser_NewAccountCompletesAfterAuth(t *testing.T) {
 func TestOAuthPage_Reset_PreservesExistingUser(t *testing.T) {
 	p := NewOAuthPage("title", "desc", nil, nil, "http://example.com", "alice")
 	// Make a selection, then reset.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}) //nolint
+	p.Update(tea.KeyPressMsg{Code: '1', Text: "1"}) //nolint
 	p.Reset()
 
 	if p.existingUser != "alice" {
@@ -433,12 +433,12 @@ func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
 	p := NewPrivacyPreferencePage("Privacy")
 
 	// Can't go above the first option.
-	p.Update(tea.KeyMsg{Type: tea.KeyUp})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if p.cursor < 0 {
 		t.Errorf("after up: cursor = %d, want a valid index", p.cursor)
 	}
 	for range privacyOptions {
-		p.Update(tea.KeyMsg{Type: tea.KeyUp})
+		p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 	if p.cursor != 0 {
 		t.Errorf("after walking up the whole list: cursor = %d, want 0", p.cursor)
@@ -449,7 +449,7 @@ func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
 	// product will actually run - maximum is not offered at all.
 	last := len(privacyOptions) - 1
 	for range privacyOptions {
-		p.Update(tea.KeyMsg{Type: tea.KeyDown})
+		p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if p.cursor != last {
 		t.Errorf("after walking down the whole list: cursor = %d, want %d", p.cursor, last)
@@ -459,7 +459,7 @@ func TestPrivacyPreferencePage_CursorNavigation(t *testing.T) {
 	}
 
 	// Can't go past the end.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != last {
 		t.Errorf("after one more down: cursor = %d, want %d", p.cursor, last)
 	}
@@ -471,7 +471,7 @@ func TestPrivacyPreferencePage_EnterConfirms(t *testing.T) {
 		t.Error("should not be complete before enter")
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Error("should be complete after enter")
 	}
@@ -488,7 +488,7 @@ func TestPrivacyPreferencePage_NumberKeySelectsAndConfirms(t *testing.T) {
 		key := rune('1' + index)
 		t.Run(string(key), func(t *testing.T) {
 			p := NewPrivacyPreferencePage("Privacy")
-			p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			p.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 			if !p.IsComplete() {
 				t.Errorf("pressing %q should complete the page", string(key))
 			}
@@ -507,7 +507,7 @@ func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
 	p := NewPrivacyPreferencePage("Privacy")
 	for index := range privacyOptions {
 		key := rune('1' + index)
-		p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		p.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 		if !config.RedactionLevelSupported(redact.RedactionLevel(p.SelectedLevel())) {
 			t.Errorf("pressing %q selects %q, which every command refuses to run", string(key), p.SelectedLevel())
 		}
@@ -516,7 +516,7 @@ func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
 	// level that is not offered.
 	p = NewPrivacyPreferencePage("Privacy")
 	past := rune('1' + len(privacyOptions))
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{past}})
+	p.Update(tea.KeyPressMsg{Code: past, Text: string(past)})
 	if p.IsComplete() {
 		t.Errorf("pressing %q, past the end of the list, must not confirm a selection", string(past))
 	}
@@ -527,7 +527,7 @@ func TestPrivacyPreferencePage_DoesNotOfferAnUnsupportedLevel(t *testing.T) {
 
 func TestPrivacyPreferencePage_Reset(t *testing.T) {
 	p := NewPrivacyPreferencePage("Privacy")
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Fatal("should be complete after enter")
 	}
@@ -755,7 +755,7 @@ func TestWizard_LicensePage_AlwaysShown(t *testing.T) {
 func TestLicensePage_NumberKeySelectsAndConfirms(t *testing.T) {
 	p := NewLicensePage("Content License")
 	// "2" selects the second option (CC BY 4.0 — index 1) and confirms.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	p.Update(tea.KeyPressMsg{Text: "2"})
 	if !p.IsComplete() {
 		t.Error("number key should confirm the page")
 	}
@@ -966,13 +966,13 @@ func TestProviderSelectPage_SpaceTogglesCheckbox(t *testing.T) {
 	p := NewProviderSelectPage("title", "desc", inventory)
 
 	// Toggle off.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if p.providers[0].checked {
 		t.Error("space should uncheck the provider")
 	}
 
 	// Toggle back on.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if !p.providers[0].checked {
 		t.Error("space should re-check the provider")
 	}
@@ -983,7 +983,7 @@ func TestProviderSelectPage_SpaceTogglesEnterConfirms(t *testing.T) {
 	p := NewProviderSelectPage("title", "desc", inventory)
 
 	// Space on a provider row should toggle the checkbox.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if p.providers[0].checked {
 		t.Error("space should uncheck the provider (toggle)")
 	}
@@ -992,8 +992,8 @@ func TestProviderSelectPage_SpaceTogglesEnterConfirms(t *testing.T) {
 	}
 
 	// Re-check and confirm with Enter.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Error("enter should complete the page when a provider is checked")
 	}
@@ -1005,15 +1005,15 @@ func TestProviderSelectPage_SubItemSelectsImportMode(t *testing.T) {
 
 	// Default: importAll = false (Select sessions). Cursor at row 0 (provider).
 	// Move to row 1 (Import all sub-item) and press Space to select.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if !p.providers[0].importAll {
 		t.Error("space on Import all sub-item should set importAll=true")
 	}
 
 	// Move to row 2 (Select sessions sub-item) and press Space.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if p.providers[0].importAll {
 		t.Error("space on Select sessions sub-item should set importAll=false")
 	}
@@ -1030,7 +1030,7 @@ func TestProviderSelectPage_SubItemsDisappearOnUncheck(t *testing.T) {
 	}
 
 	// Uncheck Claude at row 0.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// Now 1 row: Claude unchecked (no sub-items).
 	rows = p.flatRows()
@@ -1044,16 +1044,16 @@ func TestProviderSelectPage_CursorClampsOnUncheck(t *testing.T) {
 	p := NewProviderSelectPage("title", "desc", inventory)
 
 	// Move cursor to row 2 (Select sessions sub-item).
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 2 {
 		t.Fatalf("cursor = %d, want 2", p.cursor)
 	}
 
 	// Now move back to provider row (row 0) and uncheck it.
-	p.Update(tea.KeyMsg{Type: tea.KeyUp})
-	p.Update(tea.KeyMsg{Type: tea.KeyUp})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// After uncheck, flat rows = [provider]. Cursor should be at 0 (provider).
 	rows := p.flatRows()
@@ -1067,7 +1067,7 @@ func TestProviderSelectPage_EnterConfirmsFromAnyPosition(t *testing.T) {
 	p := NewProviderSelectPage("title", "desc", inventory)
 
 	// Enter from row 0 (provider) should complete when a provider is checked.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Error("enter should complete the page when a provider is checked")
 	}
@@ -1078,9 +1078,9 @@ func TestProviderSelectPage_EnterWithNoneCheckedSkipsImport(t *testing.T) {
 	p := NewProviderSelectPage("title", "desc", inventory)
 
 	// Uncheck the provider.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	// Enter should complete (skip import) even with no providers checked.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Error("enter should complete the page (skip import) when no providers are checked")
 	}
@@ -1105,13 +1105,13 @@ func TestProviderSelectPage_Selections(t *testing.T) {
 	//   5: Select sessions (OpenCode)
 
 	// Switch Claude to import-all: move to row 1 (Import all) and press Space.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}) // select Import all
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "}) // select Import all
 
 	// Navigate to OpenCode provider row (row 3) and uncheck it.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})                      // row 2
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})                      // row 3 (OpenCode)
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}) // uncheck OpenCode
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})    // row 2
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})    // row 3 (OpenCode)
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "}) // uncheck OpenCode
 
 	sels := p.Selections()
 	if len(sels) != 1 {
@@ -1130,7 +1130,7 @@ func TestProviderSelectPage_Reset(t *testing.T) {
 	p := NewProviderSelectPage("title", "desc", inventory)
 
 	// Complete the page: Enter confirms from any position.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Fatal("page should be complete")
 	}
@@ -1164,35 +1164,35 @@ func TestProviderSelectPage_CursorNavigation(t *testing.T) {
 		t.Errorf("initial cursor = %d, want 0", p.cursor)
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 1 {
 		t.Errorf("after 1x down: cursor = %d, want 1", p.cursor)
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 2 {
 		t.Errorf("after 2x down: cursor = %d, want 2", p.cursor)
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 3 {
 		t.Errorf("after 3x down: cursor = %d, want 3 (OpenCode)", p.cursor)
 	}
 
 	// Navigate to end.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 5 {
 		t.Errorf("after navigating to end: cursor = %d, want 5 (last row)", p.cursor)
 	}
 
 	// Can't go past last row.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 5 {
 		t.Errorf("cursor should be clamped at 5, got %d", p.cursor)
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyUp})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if p.cursor != 4 {
 		t.Errorf("after up: cursor = %d, want 4", p.cursor)
 	}
@@ -1242,14 +1242,14 @@ func TestTreeSelectPage_LExpandsProviderAndRemote(t *testing.T) {
 	}
 
 	// Press l to expand.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	p.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if !p.providers[0].expanded {
 		t.Error("l should expand provider")
 	}
 
 	// Move cursor to project row and press right arrow to expand project.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyRight})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	if !p.providers[0].remotes[0].expanded {
 		t.Error("right arrow should expand project")
 	}
@@ -1266,15 +1266,15 @@ func TestTreeSelectPage_HCollapsesProviderAndRemote(t *testing.T) {
 	p.providers[0].remotes[0].expanded = true
 
 	// Move to project row and press h to collapse.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if p.providers[0].remotes[0].expanded {
 		t.Error("h should collapse project")
 	}
 
 	// Move to provider row and press left to collapse.
-	p.Update(tea.KeyMsg{Type: tea.KeyUp})
-	p.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if p.providers[0].expanded {
 		t.Error("left should collapse provider")
 	}
@@ -1294,7 +1294,7 @@ func TestTreeSelectPage_HOnSessionCollapsesParentWorktree(t *testing.T) {
 
 	// Move cursor to a session row: provider(0) -> remote(1) -> worktree(2) -> session(3).
 	p.cursor = 3
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	p.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if p.providers[0].remotes[0].worktrees[0].expanded {
 		t.Error("h on session row should collapse parent worktree")
 	}
@@ -1313,7 +1313,7 @@ func TestTreeSelectPage_LOnSessionDoesNotToggleSelection(t *testing.T) {
 
 	// Move to session row: provider(0) -> remote(1) -> worktree(2) -> session(3).
 	p.cursor = 3
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	p.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if p.sessionSel[0][0][0][0] {
 		t.Error("l on session row should NOT toggle selection")
 	}
@@ -1328,7 +1328,7 @@ func TestTreeSelectPage_ExpandOnlyDoesNotToggle(t *testing.T) {
 	// Expand provider.
 	p.providers[0].expanded = true
 	// Press l on provider (already expanded) — should stay expanded, not toggle.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	p.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if !p.providers[0].expanded {
 		t.Error("l should only expand, never collapse (should stay expanded)")
 	}
@@ -1346,21 +1346,21 @@ func TestTreeSelectPage_BracketLeftJumpsToPreviousSibling(t *testing.T) {
 
 	// From OpenCode (provider, cursor=3), [ should jump to Claude (cursor=0).
 	p.cursor = 3
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 0 {
 		t.Errorf("after [ from OpenCode provider: cursor = %d, want 0 (Claude)", p.cursor)
 	}
 
 	// From proj-b (cursor=2), [ should jump to proj-a (cursor=1).
 	p.cursor = 2
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 1 {
 		t.Errorf("after [ from proj-b: cursor = %d, want 1 (proj-a)", p.cursor)
 	}
 
 	// From Claude (cursor=0), [ should be no-op.
 	p.cursor = 0
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 0 {
 		t.Errorf("after [ from first provider: cursor = %d, want 0 (no-op)", p.cursor)
 	}
@@ -1378,14 +1378,14 @@ func TestTreeSelectPage_BracketLeft_FirstProjectStaysOnProject(t *testing.T) {
 	// From proj-a (first project, cursor=1), [ should be no-op (stay on proj-a).
 	// It must NOT jump to the provider header at cursor=0.
 	p.cursor = 1
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 1 {
 		t.Errorf("after [ from first project: cursor = %d, want 1 (no-op, should not jump to provider header)", p.cursor)
 	}
 
 	// Sanity: from proj-b (cursor=2), [ should jump to proj-a (cursor=1).
 	p.cursor = 2
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 1 {
 		t.Errorf("after [ from proj-b: cursor = %d, want 1 (proj-a)", p.cursor)
 	}
@@ -1403,14 +1403,14 @@ func TestTreeSelectPage_BracketRightJumpsToNextSibling(t *testing.T) {
 
 	// From Claude (provider, cursor=0), ] should jump to OpenCode (cursor=3).
 	p.cursor = 0
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	p.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if p.cursor != 3 {
 		t.Errorf("after ] from Claude provider: cursor = %d, want 3 (OpenCode)", p.cursor)
 	}
 
 	// Go back. From proj-a (cursor=1), ] should jump to proj-b (cursor=2).
 	p.cursor = 1
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	p.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if p.cursor != 2 {
 		t.Errorf("after ] from proj-a: cursor = %d, want 2 (proj-b)", p.cursor)
 	}
@@ -1428,21 +1428,21 @@ func TestTreeSelectPage_AltK_PrevSibling(t *testing.T) {
 
 	// From OpenCode (provider, cursor=3), Alt+k should jump to Claude (cursor=0).
 	p.cursor = 3
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}, Alt: true})
+	p.Update(tea.KeyPressMsg{Code: 'k', Mod: tea.ModAlt})
 	if p.cursor != 0 {
 		t.Errorf("after Alt+k from OpenCode provider: cursor = %d, want 0 (Claude)", p.cursor)
 	}
 
 	// From proj-b (cursor=2), Alt+k should jump to proj-a (cursor=1).
 	p.cursor = 2
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}, Alt: true})
+	p.Update(tea.KeyPressMsg{Code: 'k', Mod: tea.ModAlt})
 	if p.cursor != 1 {
 		t.Errorf("after Alt+k from proj-b: cursor = %d, want 1 (proj-a)", p.cursor)
 	}
 
 	// From Claude (cursor=0), Alt+k should be no-op.
 	p.cursor = 0
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}, Alt: true})
+	p.Update(tea.KeyPressMsg{Code: 'k', Mod: tea.ModAlt})
 	if p.cursor != 0 {
 		t.Errorf("after Alt+k from first provider: cursor = %d, want 0 (no-op)", p.cursor)
 	}
@@ -1460,14 +1460,14 @@ func TestTreeSelectPage_AltJ_NextSibling(t *testing.T) {
 
 	// From Claude (provider, cursor=0), Alt+j should jump to OpenCode (cursor=3).
 	p.cursor = 0
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true})
+	p.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
 	if p.cursor != 3 {
 		t.Errorf("after Alt+j from Claude provider: cursor = %d, want 3 (OpenCode)", p.cursor)
 	}
 
 	// Go back. From proj-a (cursor=1), Alt+j should jump to proj-b (cursor=2).
 	p.cursor = 1
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}, Alt: true})
+	p.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
 	if p.cursor != 2 {
 		t.Errorf("after Alt+j from proj-a: cursor = %d, want 2 (proj-b)", p.cursor)
 	}
@@ -1698,13 +1698,13 @@ func TestTreeSelectPage_ShiftJ_PageDown(t *testing.T) {
 	p.viewHeight = 5
 
 	// Cursor starts at 0. Shift+J should jump by viewHeight (5).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	p.Update(tea.KeyPressMsg{Code: 'J', Text: "J"})
 	if p.cursor != 5 {
 		t.Errorf("after Shift+J: cursor = %d, want 5", p.cursor)
 	}
 
 	// Another Shift+J: 5 + 5 = 10.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	p.Update(tea.KeyPressMsg{Code: 'J', Text: "J"})
 	if p.cursor != 10 {
 		t.Errorf("after 2x Shift+J: cursor = %d, want 10", p.cursor)
 	}
@@ -1728,19 +1728,19 @@ func TestTreeSelectPage_ShiftK_PageUp(t *testing.T) {
 	p.clamp(len(p.flatItems()))
 
 	// Shift+K should jump up by viewHeight (5).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	p.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
 	if p.cursor != 10 {
 		t.Errorf("after Shift+K: cursor = %d, want 10", p.cursor)
 	}
 
 	// Shift+K again.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	p.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
 	if p.cursor != 5 {
 		t.Errorf("after 2x Shift+K: cursor = %d, want 5", p.cursor)
 	}
 
 	// Shift+K from 5 should clamp to 0.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	p.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
 	if p.cursor != 0 {
 		t.Errorf("after 3x Shift+K: cursor = %d, want 0 (clamped)", p.cursor)
 	}
@@ -1759,7 +1759,7 @@ func TestTreeSelectPage_ShiftJ_ClampsAtEnd(t *testing.T) {
 
 	// Items: provider(0), remote(1), worktree(2), s1(3), s2(4) = 5 items.
 	// Shift+J from 0 should clamp to 4 (last item).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	p.Update(tea.KeyPressMsg{Code: 'J', Text: "J"})
 	if p.cursor != 4 {
 		t.Errorf("after Shift+J past end: cursor = %d, want 4 (clamped)", p.cursor)
 	}
@@ -1775,7 +1775,7 @@ func TestTreeSelectPage_SearchMode_FKeyActivates(t *testing.T) {
 	}
 	p := NewTreeSelectPage("title", sessions)
 
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	if !p.filter.Active {
 		t.Error("pressing 'f' should activate search mode")
 	}
@@ -1791,10 +1791,10 @@ func TestTreeSelectPage_SearchMode_TypingFiltersItems(t *testing.T) {
 	p.providers[1].expanded = true
 
 	// Enter search mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	// Type "alpha" to filter.
 	for _, r := range "alpha" {
-		p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
 	if p.filter.Text != "alpha" {
@@ -1818,9 +1818,9 @@ func TestTreeSelectPage_SearchMode_EscapeClearsFilter(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Enter search, type, then Escape.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	if p.filter.Active {
 		t.Error("Escape should exit search mode")
@@ -1844,9 +1844,9 @@ func TestTreeSelectPage_SearchMode_EnterKeepsFilter(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Enter search, type, then Enter.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if p.filter.Active {
 		t.Error("Enter should exit search mode")
@@ -1863,10 +1863,10 @@ func TestTreeSelectPage_SearchMode_BlocksNormalKeys(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Enter search mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 
 	// Press space — in normal mode this toggles selection; in search mode it should be text input.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if p.filter.Text != " " {
 		t.Errorf("space in search mode should be text input, filterText = %q", p.filter.Text)
 	}
@@ -1885,16 +1885,16 @@ func TestTreeSelectPage_FilterActive_EscapeClearsFromNormalMode(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Search, type, Enter to keep filter, then Escape in normal mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	p.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	// Filter is active, not in search mode.
 	if p.filter.Text != "b" {
 		t.Fatalf("expected filterText = %q, got %q", "b", p.filter.Text)
 	}
 
 	// Escape should clear filter in normal mode too.
-	p.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if p.filter.Text != "" {
 		t.Errorf("Escape in normal mode should clear active filter, got %q", p.filter.Text)
 	}
@@ -1925,9 +1925,9 @@ func TestTreeSelectPage_SearchMode_NoMatches(t *testing.T) {
 	p.providers[1].expanded = true
 
 	// Enter search mode and type a string that matches nothing.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	for _, r := range "zzzzz" {
-		p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
 	items := p.flatItems()
@@ -1939,13 +1939,13 @@ func TestTreeSelectPage_SearchMode_NoMatches(t *testing.T) {
 	}
 
 	// Press down, up, space — should not panic.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}) // add to filter (still in search mode)
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})                     // exit search mode, keep filter
+	p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"}) // add to filter (still in search mode)
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})   // exit search mode, keep filter
 
 	// Now in normal mode with zero visible items — navigation must not panic.
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyUp})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 }
 
 // ---------------------------------------------------------------------------
@@ -1967,7 +1967,7 @@ func TestWizard_SearchMode_GlobalKeysPassedToPage(t *testing.T) {
 	tp := w.pages[3].(*TreeSelectPage)
 
 	// Enter search mode by pressing "f".
-	m, _ := w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m, _ := w.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	w = m.(WizardModel)
 	tp = w.pages[3].(*TreeSelectPage)
 
@@ -1977,7 +1977,7 @@ func TestWizard_SearchMode_GlobalKeysPassedToPage(t *testing.T) {
 
 	// Send "b", "r", "q" — they should be typed into the filter, not handled as global keys.
 	for _, ch := range []rune{'b', 'r', 'q'} {
-		m, _ = w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m, _ = w.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
 		w = m.(WizardModel)
 	}
 
@@ -2005,7 +2005,7 @@ func TestWizard_SearchMode_CtrlCStillQuits(t *testing.T) {
 	w.pages[3] = NewTreeSelectPage("title", sessions)
 
 	// Enter search mode.
-	m, _ := w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m, _ := w.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	w = m.(WizardModel)
 
 	tp := w.pages[3].(*TreeSelectPage)
@@ -2014,7 +2014,7 @@ func TestWizard_SearchMode_CtrlCStillQuits(t *testing.T) {
 	}
 
 	// ctrl+c must still quit even in search mode.
-	m, cmd := w.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m, cmd := w.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	w = m.(WizardModel)
 
 	if !w.quitting {
@@ -2038,9 +2038,9 @@ func TestWizard_ConfirmMode_BackKeyDoesNotNavigate(t *testing.T) {
 	tp := w.pages[3].(*TreeSelectPage)
 
 	// Select a session and enter confirm mode.
-	m, _ := w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m, _ := w.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	w = m.(WizardModel)
-	m, _ = w.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = w.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	w = m.(WizardModel)
 
 	tp = w.pages[3].(*TreeSelectPage)
@@ -2049,7 +2049,7 @@ func TestWizard_ConfirmMode_BackKeyDoesNotNavigate(t *testing.T) {
 	}
 
 	// Press 'b' — should cancel confirm overlay, NOT navigate wizard back.
-	m, _ = w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, _ = w.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	w = m.(WizardModel)
 
 	if w.current != 3 {
@@ -2319,7 +2319,7 @@ func TestTreeSelectPage_SpaceTogglesItem(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Provider starts collapsed; Space on provider should toggle (select all).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if p.providerState(0) != treeChecked {
 		t.Error("Space on provider should toggle all sessions to checked")
 	}
@@ -2329,14 +2329,14 @@ func TestTreeSelectPage_SpaceTogglesItem(t *testing.T) {
 	p.providers[0].remotes[0].expanded = true
 	p.providers[0].remotes[0].worktrees[0].expanded = true
 	p.cursor = 3 // session row: provider(0)->remote(1)->worktree(2)->session(3)
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	// Session was checked (from provider toggle above), Space should uncheck it.
 	if p.sessionSel[0][0][0][0] {
 		t.Error("Space on session should toggle it off")
 	}
 
 	// Toggle back on.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if !p.sessionSel[0][0][0][0] {
 		t.Error("Space on session should toggle it back on")
 	}
@@ -2355,10 +2355,10 @@ func TestTreeSelectPage_Enter_ShowsConfirmSummary(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select all sessions via provider toggle.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// Enter should enter confirm summary mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.confirmingSelection {
 		t.Error("Enter should set confirmingSelection to true")
 	}
@@ -2374,10 +2374,10 @@ func TestTreeSelectPage_CtrlS_DoesNotOpenConfirm(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select a session.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// Ctrl+S should not open confirm overlay.
-	p.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	p.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if p.confirmingSelection {
 		t.Error("Ctrl+S should not open confirm overlay")
 	}
@@ -2390,15 +2390,15 @@ func TestTreeSelectPage_ConfirmSummary_EnterConfirms(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select and enter confirm mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !p.confirmingSelection {
 		t.Fatal("expected confirmingSelection to be true")
 	}
 
 	// Enter in confirm mode should complete.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.IsComplete() {
 		t.Error("Enter in confirm summary mode should complete the page")
 	}
@@ -2411,11 +2411,11 @@ func TestTreeSelectPage_ConfirmSummary_EscapeCancels(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select and enter confirm mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// Escape should cancel confirm mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if p.confirmingSelection {
 		t.Error("Escape should clear confirmingSelection")
 	}
@@ -2431,15 +2431,15 @@ func TestTreeSelectPage_ConfirmSummary_BackCancels(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select and enter confirm mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if !p.confirmingSelection {
 		t.Fatal("expected confirmingSelection to be true")
 	}
 
 	// 'b' should cancel confirm mode (return to tree), not navigate back.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	p.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	if p.confirmingSelection {
 		t.Error("'b' should clear confirmingSelection")
 	}
@@ -2455,7 +2455,7 @@ func TestTreeSelectPage_Enter_AllowsZeroSelection(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// No sessions selected — Enter should still open confirm overlay.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.confirmingSelection {
 		t.Error("Enter with no selected sessions should still enter confirm mode")
 	}
@@ -2468,16 +2468,16 @@ func TestTreeSelectPage_ConfirmSummary_BlocksOtherKeys(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select and enter confirm mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// Navigation keys should be blocked.
 	p.cursor = 0
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if p.cursor != 0 {
 		t.Error("down key should be blocked in confirm summary mode")
 	}
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	// Should still be in confirm mode.
 	if !p.confirmingSelection {
 		t.Error("space should not exit confirm mode")
@@ -2493,10 +2493,10 @@ func TestTreeSelectPage_ConfirmSummary_ViewShowsSummary(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select all via provider toggles.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}) // select Claude
-	p.Update(tea.KeyMsg{Type: tea.KeyDown})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}) // select OpenCode
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "}) // select Claude
+	p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "}) // select OpenCode
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	view := p.View(80, 24)
 	if !strings.Contains(view, "3 sessions") {
@@ -2526,13 +2526,13 @@ func TestTreeSelectPage_PageUpPageDown_PhysicalKeys(t *testing.T) {
 	p.viewHeight = 5
 
 	// PgDown should jump by viewHeight.
-	p.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if p.cursor != 5 {
 		t.Errorf("after PgDown: cursor = %d, want 5", p.cursor)
 	}
 
 	// PgUp should jump back.
-	p.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if p.cursor != 0 {
 		t.Errorf("after PgUp: cursor = %d, want 0", p.cursor)
 	}
@@ -2545,8 +2545,8 @@ func TestTreeSelectPage_Reset_ClearsConfirmingSelection(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select, enter confirm mode.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.confirmingSelection {
 		t.Fatal("expected confirmingSelection to be true before reset")
 	}
@@ -2579,11 +2579,11 @@ func TestTreeSelectPage_SelectedSessions(t *testing.T) {
 	// Flat layout: provider(0) -> remote-a(1) -> wt-a(2) -> s1(3) -> s2(4) -> remote-b(5) -> wt-b(6) -> s3(7)
 	// Toggle s1 (cursor=3) via space.
 	p.cursor = 3
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// Toggle s3 (cursor=7) via space.
 	p.cursor = 7
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	selected := p.SelectedSessions()
 	if len(selected) != 2 {
@@ -2672,11 +2672,11 @@ func TestTreeSelectPage_ShiftEnter_DoesNotConfirm(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select a session so confirmation would be possible.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// Send a key msg that looks like "shift+enter" — bubbletea has no such key type,
 	// so it should be treated as literal rune input and NOT trigger confirm.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("shift+enter")})
+	p.Update(tea.KeyPressMsg{Text: "shift+enter"})
 	if p.confirmingSelection {
 		t.Error("shift+enter should NOT trigger confirm (not a valid terminal key)")
 	}
@@ -2704,25 +2704,25 @@ func TestTreeSelectPage_ExpandCollapseWorktree(t *testing.T) {
 
 	// Navigate to worktree row (cursor=2) and press l to expand.
 	p.cursor = 2
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	p.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	if !p.providers[0].remotes[0].worktrees[0].expanded {
 		t.Error("l on worktree row should expand it")
 	}
 
 	// Press h to collapse.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	p.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	if p.providers[0].remotes[0].worktrees[0].expanded {
 		t.Error("h on worktree row should collapse it")
 	}
 
 	// Press right arrow to expand.
-	p.Update(tea.KeyMsg{Type: tea.KeyRight})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	if !p.providers[0].remotes[0].worktrees[0].expanded {
 		t.Error("right arrow on worktree row should expand it")
 	}
 
 	// Press left arrow to collapse.
-	p.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if p.providers[0].remotes[0].worktrees[0].expanded {
 		t.Error("left arrow on worktree row should collapse it")
 	}
@@ -2746,7 +2746,7 @@ func TestTreeSelectPage_ToggleCascadesAtRemoteAndWorktree(t *testing.T) {
 
 	// Toggle the remote row (cursor=1) — all sessions under all worktrees should be selected.
 	p.cursor = 1
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	if p.remoteState(0, 0) != treeChecked {
 		t.Error("toggling remote should check all sessions under all its worktrees")
@@ -2762,7 +2762,7 @@ func TestTreeSelectPage_ToggleCascadesAtRemoteAndWorktree(t *testing.T) {
 	// Toggle worktree "feat" (cursor should be at worktree row).
 	// Flat: provider(0), remote(1), wt-main(2), wt-feat(3), [Confirm](4).
 	p.cursor = 3
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// feat worktree should now be unchecked.
 	if p.worktreeState(0, 0, 1) != treeUnchecked {
@@ -2799,37 +2799,37 @@ func TestTreeSelectPage_SiblingNavigation_WorktreeLevel(t *testing.T) {
 
 	// From wt-feat-b (cursor=4), [ should jump to wt-feat-a (cursor=3).
 	p.cursor = 4
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 3 {
 		t.Errorf("after [ from wt-feat-b: cursor = %d, want 3 (wt-feat-a)", p.cursor)
 	}
 
 	// From wt-feat-a (cursor=3), [ should jump to wt-main (cursor=2).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 2 {
 		t.Errorf("after [ from wt-feat-a: cursor = %d, want 2 (wt-main)", p.cursor)
 	}
 
 	// From wt-main (cursor=2), [ should be no-op (no previous worktree sibling).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	p.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if p.cursor != 2 {
 		t.Errorf("after [ from wt-main: cursor = %d, want 2 (no-op)", p.cursor)
 	}
 
 	// From wt-main (cursor=2), ] should jump to wt-feat-a (cursor=3).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	p.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if p.cursor != 3 {
 		t.Errorf("after ] from wt-main: cursor = %d, want 3 (wt-feat-a)", p.cursor)
 	}
 
 	// From wt-feat-a (cursor=3), ] should jump to wt-feat-b (cursor=4).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	p.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if p.cursor != 4 {
 		t.Errorf("after ] from wt-feat-a: cursor = %d, want 4 (wt-feat-b)", p.cursor)
 	}
 
 	// From wt-feat-b (cursor=4), ] should be no-op.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	p.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if p.cursor != 4 {
 		t.Errorf("after ] from wt-feat-b: cursor = %d, want 4 (no-op)", p.cursor)
 	}
@@ -2853,9 +2853,9 @@ func TestTreeSelectPage_SearchMode_FilterByBranchName(t *testing.T) {
 	}
 
 	// Enter search mode and type "feat-x".
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	p.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	for _, r := range "feat-x" {
-		p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
 	if p.filter.Text != "feat-x" {
@@ -2891,10 +2891,10 @@ func TestTreeSelectPage_EnterOpensConfirmOverlay(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Select a session first.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	// Press Enter from any position — should open confirm overlay.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.confirmingSelection {
 		t.Error("Enter should open the confirm overlay")
 	}
@@ -2907,7 +2907,7 @@ func TestTreeSelectPage_SpaceTogglesDoesNotConfirm(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Press Space — should toggle, not confirm.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if p.confirmingSelection {
 		t.Error("Space should toggle selection, not open confirm overlay")
 	}
@@ -2920,7 +2920,7 @@ func TestTreeSelectPage_EnterAllowsZeroSelection(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Enter without selecting anything — should still open confirm overlay.
-	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !p.confirmingSelection {
 		t.Error("Enter with no selections should open confirm overlay")
 	}
@@ -2953,13 +2953,13 @@ func TestTreeSelectPage_QuestionMarkTogglesHelpOverlay(t *testing.T) {
 	}
 
 	// Press ? to open help.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	p.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if !p.showingHelp {
 		t.Error("? should open help overlay")
 	}
 
 	// Press ? again to close.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	p.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if p.showingHelp {
 		t.Error("? should toggle help overlay off")
 	}
@@ -2971,12 +2971,12 @@ func TestTreeSelectPage_EscapeClosesHelpOverlay(t *testing.T) {
 	}
 	p := NewTreeSelectPage("title", sessions)
 
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	p.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if !p.showingHelp {
 		t.Fatal("? should open help overlay")
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if p.showingHelp {
 		t.Error("Escape should close help overlay")
 	}
@@ -2990,15 +2990,15 @@ func TestTreeSelectPage_NavigationBlockedWhileHelpShowing(t *testing.T) {
 	p := NewTreeSelectPage("title", sessions)
 
 	// Open help.
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	p.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 
 	// Record cursor before navigation attempts.
 	cursorBefore := p.cursor
 
 	// Try pressing j (down), l (expand), space (toggle).
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	p.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	p.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	p.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 
 	if p.cursor != cursorBefore {
 		t.Error("navigation keys should be blocked while help is showing")
@@ -3086,13 +3086,13 @@ func TestProviderSelectPage_QuestionMarkTogglesHelpOverlay(t *testing.T) {
 		t.Fatal("help should start hidden")
 	}
 
-	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	p.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if !p.showingHelp {
 		t.Error("? should open help overlay on ProviderSelectPage")
 	}
 
 	// Escape closes it.
-	p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if p.showingHelp {
 		t.Error("Escape should close help overlay on ProviderSelectPage")
 	}
@@ -3130,7 +3130,7 @@ func TestWizard_BKeyBlockedWhileHelpShowing(t *testing.T) {
 	projectPage.searching = true
 
 	// Press 'b' — should NOT navigate back.
-	m, _ := w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, _ := w.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	w = m.(WizardModel)
 	if w.current != pageProjectSelect {
 		t.Errorf("b key should not navigate back while help overlay is showing; current=%d", w.current)
@@ -3139,7 +3139,7 @@ func TestWizard_BKeyBlockedWhileHelpShowing(t *testing.T) {
 	// Close help and verify 'b' works again.
 	projectPage = w.pages[pageProjectSelect].(*ProjectSelectPage)
 	projectPage.searching = false
-	m, _ = w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, _ = w.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	w = m.(WizardModel)
 	if w.current >= pageProjectSelect {
 		t.Errorf("b key should navigate back when help overlay is closed; current=%d", w.current)
@@ -3159,7 +3159,7 @@ func TestWizard_QKeyBlockedWhileTreeHelpShowing(t *testing.T) {
 	treePage.showingHelp = true
 
 	// Press 'q' — should NOT quit.
-	result, cmd := w.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	result, cmd := w.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	wm := result.(WizardModel)
 	if wm.quitting {
 		t.Error("q key should not quit while help overlay is showing")

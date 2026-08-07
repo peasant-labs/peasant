@@ -1,0 +1,24 @@
+id: no-raw-key-string-switch
+language: Go
+severity: error
+message: >
+  Raw key-string switch. Dispatch through keymap.Match against a named
+  keymap.ActionID instead.
+note: >
+  Anchored to the LITERAL identifier "msg" (not a metavariable) on purpose:
+  this repository's own convention is typed enums with String() methods
+  (see CLAUDE.md/AGENTS.md "use typed constants everywhere"), so a switch
+  keyed on some OTHER value's .String() output (e.g. an outcome or harness
+  enum's dispatch switch) is a legitimate, common pattern - generalizing the
+  receiver here would false-positive on it. "msg" is the bubbletea
+  convention for the key-press message parameter
+  (func (m Model) Update(msg tea.Msg)), which is what every real occurrence
+  this rule targets actually uses.
+rule:
+  pattern: switch msg.String() { $$$ }
+files:
+  - "internal/tui/**"
+  - "internal/push/wizard.go"
+ignores:
+  - "internal/tui/keymap/**"
+  - "internal/tui/gates/**"

@@ -64,6 +64,12 @@ lint: web-stub
 
 check: fmt lint
 	ast-grep scan --config sgconfig.yml .
+	# The key grep gate (internal/tui/gates/astrules/, enforced by
+	# keys_astgrep_test.go) shells out to ast-grep too, but is gated behind
+	# the "astgrep" build tag so a plain `go test ./...` never depends on the
+	# binary - ast-grep is ALREADY a hard `make check` dependency via the
+	# untagged scan above, so this adds no new external requirement here.
+	go test -tags=astgrep -race ./internal/tui/gates/...
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml
 	go test -race ./...
 

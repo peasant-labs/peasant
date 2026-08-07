@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	schema "github.com/peasant-labs/schema"
 )
@@ -70,7 +70,7 @@ func (m AnnotationEditorModel) Update(msg tea.Msg) (AnnotationEditorModel, tea.C
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyEscape.String():
 			return m, func() tea.Msg { return AnnotationEditorCancelMsg{} }
@@ -89,7 +89,7 @@ func (m AnnotationEditorModel) Update(msg tea.Msg) (AnnotationEditorModel, tea.C
 }
 
 // updateTypeSelection handles 1-9 key presses to select an annotation type.
-func (m AnnotationEditorModel) updateTypeSelection(msg tea.KeyMsg) (AnnotationEditorModel, tea.Cmd) {
+func (m AnnotationEditorModel) updateTypeSelection(msg tea.KeyPressMsg) (AnnotationEditorModel, tea.Cmd) {
 	if len(msg.String()) == 1 {
 		ch := msg.String()[0]
 		if ch >= '1' && ch <= '9' {
@@ -124,7 +124,7 @@ func (m AnnotationEditorModel) updateTypeSelection(msg tea.KeyMsg) (AnnotationEd
 }
 
 // updateValueSelection handles 1-9 key presses to select an enumerated value.
-func (m AnnotationEditorModel) updateValueSelection(msg tea.KeyMsg) (AnnotationEditorModel, tea.Cmd) {
+func (m AnnotationEditorModel) updateValueSelection(msg tea.KeyPressMsg) (AnnotationEditorModel, tea.Cmd) {
 	if m.selectedType == nil {
 		return m, nil
 	}
@@ -142,8 +142,8 @@ func (m AnnotationEditorModel) updateValueSelection(msg tea.KeyMsg) (AnnotationE
 }
 
 // updateTextInput handles text input for described value domains.
-func (m AnnotationEditorModel) updateTextInput(msg tea.KeyMsg) (AnnotationEditorModel, tea.Cmd) {
-	if msg.Type == tea.KeyEnter {
+func (m AnnotationEditorModel) updateTextInput(msg tea.KeyPressMsg) (AnnotationEditorModel, tea.Cmd) {
+	if msg.Code == tea.KeyEnter {
 		value := strings.TrimSpace(m.textInput.Value())
 		if value != "" {
 			return m, m.emitPicked(value)
