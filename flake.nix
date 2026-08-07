@@ -62,8 +62,8 @@
         actionlint # lint GitHub Actions workflow YAML (.github/workflows/*.yml)
         nodejs_24 # Node.js runtime for the web build and validation scripts
         pnpm # required package manager for the web dependency graph
-        nodePackages.typescript
-        nodePackages.typescript-language-server
+        typescript
+        typescript-language-server
         # protobuf           # protoc
         # protoc-gen-go      # protobuf Go codegen
         # temporal-cli       # Temporal dev server
