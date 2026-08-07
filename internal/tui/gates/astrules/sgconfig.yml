@@ -1,0 +1,18 @@
+# ast-grep project configuration for the key-string structural rules, loaded
+# ONLY by the build-tag-gated key gate (internal/tui/gates/keys_astgrep_test.go,
+# `//go:build astgrep`) - deliberately NOT referenced by the repo-root
+# sgconfig.yml's ruleDirs, so the plain (untagged) `ast-grep scan --config
+# sgconfig.yml .` step in `make check` never sees these rules. These rules
+# have no per-occurrence count-pinning of their own (ast-grep's rule-level
+# `ignores`/`files` are file-granular booleans, not counts) - that lives in
+# the shared testdata/legacy_allowlist.yaml + allowlist.go, which the
+# build-tagged test enforces separately. Registering these rules in the
+# root sgconfig.yml would make the plain `ast-grep scan` step fail outright
+# on every pre-existing legacy hit, with no way to express "this file may
+# carry exactly N hits until it migrates."
+#
+# Validated against ast-grep 0.40.5 (this repo's flake.nix-pinned devShell/CI
+# version) AND 0.43.0 (a newer ambient version) - both produce identical
+# match counts and JSON shapes for these rules against this repository.
+ruleDirs:
+  - rules

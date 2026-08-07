@@ -1,7 +1,7 @@
 package ftue
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 )
 

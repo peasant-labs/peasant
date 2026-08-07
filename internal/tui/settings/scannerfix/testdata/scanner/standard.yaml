@@ -1,0 +1,79 @@
+# A representative provider -> remote -> worktree -> session scan result: two
+# providers, each with a git remote, worktrees off those remotes, and recorded
+# sessions under the worktrees. States mirror a realistic partial selection so
+# the tree's rollup has real work to do (some sessions checked, some not).
+name: standard
+expectedNodeCount: 12
+roots:
+  - id: claude
+    label: claude
+    state: unchecked
+    meta:
+      kind: provider
+    children:
+      - id: github.com/peasant-labs/peasant
+        label: peasant
+        state: unchecked
+        meta:
+          kind: remote
+          remote: git@github.com:peasant-labs/peasant.git
+        children:
+          - id: peasant/develop
+            label: develop
+            state: unchecked
+            meta:
+              kind: worktree
+              branch: develop
+            children:
+              - id: sess-p1
+                label: "ingest pipeline refactor"
+                state: checked
+                meta:
+                  kind: session
+              - id: sess-p2
+                label: "commit detector fix"
+                state: unchecked
+                meta:
+                  kind: session
+          - id: peasant/feature-x
+            label: feature-x
+            state: unchecked
+            meta:
+              kind: worktree
+              branch: feature-x
+            children:
+              - id: sess-p3
+                label: "share bridge scan"
+                state: unchecked
+                meta:
+                  kind: session
+  - id: gemini
+    label: gemini
+    state: unchecked
+    meta:
+      kind: provider
+    children:
+      - id: github.com/peasant-labs/village
+        label: village
+        state: unchecked
+        meta:
+          kind: remote
+          remote: git@github.com:peasant-labs/village.git
+        children:
+          - id: village/develop
+            label: develop
+            state: unchecked
+            meta:
+              kind: worktree
+              branch: develop
+            children:
+              - id: sess-v1
+                label: "governance audit trigger"
+                state: checked
+                meta:
+                  kind: session
+              - id: sess-v2
+                label: "license menu widening"
+                state: checked
+                meta:
+                  kind: session

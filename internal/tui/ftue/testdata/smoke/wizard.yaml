@@ -1,0 +1,22 @@
+# Scripted walks of the setup wizard (peasant kickstart), driven
+# message-by-message through the same Update loop the mounted program runs over
+# a fixture discovery inventory (no real scan). Each scenario advances past its
+# opening page so more than one page is exercised, and the smoke then interrupts
+# to prove a clean exit. sessions are the discovered inventory; the provider
+# inventory is derived from them.
+expectedScenarioCount: 1
+scenarios:
+  - name: advance-through-early-pages
+    sessions:
+      - harness: claude-code
+        projectName: tool
+        gitRemote: git@github.com:acme/tool.git
+        workingDir: /work/acme/tool
+        sessionId: 11111111-1111-1111-1111-111111111111
+      - harness: opencode
+        projectName: tool
+        gitRemote: https://github.com/acme/tool.git
+        workingDir: /work/acme/tool
+        sessionId: 22222222-2222-2222-2222-222222222222
+    keys: [down, enter, space, enter]
+    minPagesAdvanced: 2

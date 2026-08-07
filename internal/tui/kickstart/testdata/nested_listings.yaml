@@ -1,0 +1,39 @@
+# Flat discovery listings that carry parent/child (subagent) relationships, so
+# the scanner must (a) keep a child session out of the top-level branch grouping
+# and (b) nest it under its parent, recursing to a grandchild. All rows share one
+# project and branch; parentage is top-down via subagentIds. The ingested list
+# names the sessions the local store already holds, so the scanner marks them.
+# The expected* counts are row-count guards.
+name: parent-nests-subagents-recursively
+expectedListingCount: 4
+expectedTopSessionCount: 2
+ingested:
+  - sess-child
+  - sess-p2
+listings:
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: parent session
+    sessionId: sess-parent
+    subagentIds: [sess-child]
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: child subagent
+    sessionId: sess-child
+    subagentIds: [sess-grandchild]
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: grandchild subagent
+    sessionId: sess-grandchild
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    title: second parent session
+    sessionId: sess-p2

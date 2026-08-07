@@ -1,0 +1,29 @@
+# Loader-guard fixture: a legacy-captured golden that also carries a
+# ratifiedExpected target. The loader must reject it — a captured golden IS the
+# equivalence target, so a phantom divergence target must not leak beside it.
+expectedScenarioCount: 1
+scenarios:
+  - name: captured-golden-with-phantom-target
+    oracle: legacy-captured
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+    ratifiedExpected:
+      mode: all
+      autoIngestNewBranches: true

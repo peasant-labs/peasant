@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -170,8 +170,9 @@ func (m SessionModel) Update(msg tea.Msg) (SessionModel, tea.Cmd) {
 			contentHeight = 3
 		}
 		m.table.SetHeight(contentHeight)
-		m.viewport.Width = m.width
-		m.viewport.Height = contentHeight
+		m.table.SetWidth(m.width)
+		m.viewport.SetWidth(m.width)
+		m.viewport.SetHeight(contentHeight)
 		if m.inDetail {
 			m.viewport.SetContent(m.renderDetail())
 		}
@@ -218,7 +219,7 @@ func (m SessionModel) Update(msg tea.Msg) (SessionModel, tea.Cmd) {
 		m.viewport.SetContent(m.renderDetail())
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.editorOpen {
 			// Delegate all key events to the editor when open.
 			m.editor, cmd = m.editor.Update(msg)
@@ -362,7 +363,7 @@ func (m SessionModel) Update(msg tea.Msg) (SessionModel, tea.Cmd) {
 			if contentHeight < 3 {
 				contentHeight = 3
 			}
-			m.viewport = viewport.New(m.width, contentHeight)
+			m.viewport = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(contentHeight))
 			// Load pending for this session if store is available.
 			if m.pendingStore != nil && m.selectedIdx >= 0 && m.selectedIdx < len(m.sessions) {
 				sess := m.sessions[m.selectedIdx]

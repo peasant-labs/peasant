@@ -64,7 +64,7 @@ const (
 	KeyEnter     Key = "enter"
 	KeyEscape    Key = "esc"
 	KeyBackspace Key = "backspace"
-	KeySpace     Key = " "
+	KeySpace     Key = "space"
 	KeyUp        Key = "up"
 	KeyDown      Key = "down"
 	KeyVimUp     Key = "k"
@@ -93,15 +93,15 @@ const (
 
 // Annotation navigation keys (vim-inspired, session detail view).
 const (
-	KeyVimLeft       Key = "h"       // jump to previous depth=0 turn
-	KeyVimRight      Key = "l"       // jump to next depth=0 turn
-	KeyAnnotate      Key = "a"       // open annotation type picker
-	KeyDeletePending Key = "d"       // delete pending annotation from SQLite
-	KeyFind          Key = "f"       // find / filter turns
-	KeyCommitPending Key = "c"       // commit pending annotations via HTTP POST
-	KeyShiftSpace    Key = "shift+ " // begin/end range selection
-	KeyPageDown      Key = "ctrl+d"  // page down
-	KeyPageUp        Key = "ctrl+u"  // page up
+	KeyVimLeft       Key = "h"           // jump to previous depth=0 turn
+	KeyVimRight      Key = "l"           // jump to next depth=0 turn
+	KeyAnnotate      Key = "a"           // open annotation type picker
+	KeyDeletePending Key = "d"           // delete pending annotation from SQLite
+	KeyFind          Key = "f"           // find / filter turns
+	KeyCommitPending Key = "c"           // commit pending annotations via HTTP POST
+	KeyShiftSpace    Key = "shift+space" // begin/end range selection
+	KeyPageDown      Key = "ctrl+d"      // page down
+	KeyPageUp        Key = "ctrl+u"      // page up
 	// KeyAnnotateS ('s' key): unbound, reserved for future use
 )
 

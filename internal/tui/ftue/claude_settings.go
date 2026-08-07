@@ -25,6 +25,13 @@ func ReadClaudeCleanupDays() (int, bool) {
 		return 0, false
 	}
 
+	return ReadClaudeCleanupDaysAt(path)
+}
+
+// ReadClaudeCleanupDaysAt is ReadClaudeCleanupDays against an explicit settings
+// file path. It is the injected-path twin of the writer, so the round-trip can
+// be verified against a temporary file in tests.
+func ReadClaudeCleanupDaysAt(path string) (int, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, false
@@ -57,7 +64,16 @@ func WriteClaudeCleanupDays(days int) error {
 	if err != nil {
 		return err
 	}
+	return WriteClaudeCleanupDaysAt(path, days)
+}
 
+// WriteClaudeCleanupDaysAt is WriteClaudeCleanupDays against an explicit settings
+// file path. The path is injected so the write can be exercised against a
+// temporary file in tests without touching the caller's real ~/.claude
+// directory; the production wrapper resolves ClaudeSettingsPath and delegates
+// here. The merge semantics (preserve all other keys, create the file and its
+// parent directory when absent) are identical.
+func WriteClaudeCleanupDaysAt(path string, days int) error {
 	settings := make(map[string]any)
 
 	// Read existing settings if present.

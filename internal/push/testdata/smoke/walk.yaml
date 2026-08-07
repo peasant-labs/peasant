@@ -1,0 +1,27 @@
+# Scripted four-page walks of the push wizard, driven message-by-message through
+# the same Update loop the mounted program runs. The session inventory is the
+# shared testSessions() set (three sessions: current, stale, raw redaction
+# status), so wantSelectedIds names those IDs.
+#
+# keys are message tokens fed one per Update: enter/esc/space and single letters
+# map to the key events the wizard reads. A walk ends with the model confirmed
+# and the selected IDs it would hand back to the caller.
+expectedScenarioCount: 3
+scenarios:
+  - name: accept-every-session
+    # confirm start -> review -> redaction preview -> final -> confirm
+    keys: [enter, enter, enter, enter]
+    wantConfirmed: true
+    wantSelectedIds: [sess-aaa-111, sess-bbb-222, sess-ccc-333]
+
+  - name: exclude-first-session-on-review
+    # space on the review page toggles the cursor session (the first) to excluded
+    keys: [enter, space, enter, enter, enter]
+    wantConfirmed: true
+    wantSelectedIds: [sess-bbb-222, sess-ccc-333]
+
+  - name: exclude-all-then-reinclude-keeps-walk
+    # x excludes all, w re-includes the cursor session, then the walk completes
+    keys: [enter, x, w, enter, enter, enter]
+    wantConfirmed: true
+    wantSelectedIds: [sess-aaa-111]

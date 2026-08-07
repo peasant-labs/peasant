@@ -1,0 +1,162 @@
+# Discovery listings whose subagent relationships BuildForest folds into a
+# per-parent child-session COUNT, and whose import state groups the rows. Each
+# case is a whole listing; expectedRows are the session rows of the single
+# branch, IN RENDER ORDER, so the fixture pins both the count fold and the
+# not-yet-imported-first grouping. Every case shares one project and branch.
+# expectedCaseCount is the row-count guard.
+expectedCaseCount: 6
+cases:
+  - name: a-parent-counts-its-whole-descendant-chain
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: parent session
+        sessionId: p
+        subagentIds: [c1]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: child subagent
+        sessionId: c1
+        subagentIds: [c2]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: grandchild subagent
+        sessionId: c2
+    expectedRows:
+      - sessionId: p
+        childCount: "2"
+        ingested: false
+
+  - name: a-lone-subagent-counts-one
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: parent session
+        sessionId: p
+        subagentIds: [c1]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: child subagent
+        sessionId: c1
+    expectedRows:
+      - sessionId: p
+        childCount: "1"
+        ingested: false
+
+  - name: a-session-with-no-subagents-carries-no-count
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: plain session
+        sessionId: p
+    expectedRows:
+      - sessionId: p
+        childCount: ""
+        ingested: false
+
+  - name: an-undiscovered-subagent-id-is-not-counted
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: parent session
+        sessionId: p
+        subagentIds: [c1, missing-from-discovery]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: child subagent
+        sessionId: c1
+    expectedRows:
+      - sessionId: p
+        childCount: "1"
+        ingested: false
+
+  # c1 names itself (a cycle) and both p and c1 name c2 (two paths to one
+  # session): the walk must terminate and count c1 and c2 exactly once each.
+  - name: a-cyclic-or-shared-subagent-counts-once
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: parent session
+        sessionId: p
+        subagentIds: [c1, c2]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: child subagent
+        sessionId: c1
+        subagentIds: [c2, c1]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: shared subagent
+        sessionId: c2
+    expectedRows:
+      - sessionId: p
+        childCount: "2"
+        ingested: false
+
+  - name: not-yet-imported-sessions-group-before-imported-ones
+    ingested: [a, c]
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: session a
+        sessionId: a
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: session b
+        sessionId: b
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: session c
+        sessionId: c
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        title: session d
+        sessionId: d
+    expectedRows:
+      - sessionId: b
+        childCount: ""
+        ingested: false
+      - sessionId: d
+        childCount: ""
+        ingested: false
+      - sessionId: a
+        childCount: ""
+        ingested: true
+      - sessionId: c
+        childCount: ""
+        ingested: true

@@ -1,0 +1,157 @@
+# Selection-config equivalence oracle: captured goldens.
+#
+# Each scenario names the SEMANTIC inputs a user makes in the current onboarding
+# wizard (which providers, at which scope, over which sessions/branches, plus the
+# auto-ingest answer) and the SelectionConfig the wizard actually persists for
+# them. The goldens are produced by driving the wizard's real SaveAnswers path and
+# re-reading the written config.yaml, so they are what a user's file holds, not a
+# guess. The kickstart rebuild is driven over the same inputs and must reproduce
+# these goldens field-for-field.
+#
+# Select-everything / root-check is deliberately NOT here: it is a ratified
+# behaviour change and lives in ratified_divergence.yaml.
+#
+# Shared inventory used across scenarios:
+#   claude-code  git@github.com:acme/tool.git    branches: main, feature/x
+#   opencode     https://github.com/acme/tool.git branch:  main
+expectedScenarioCount: 5
+scenarios:
+  - name: partial-branch-subset
+    doc: >
+      User keeps one project but narrows it to a single branch (branch-level
+      scope). The wizard records the project with only that branch, so ingest is
+      pinned to it and other branches of the same project are excluded.
+    oracle: legacy-captured
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: branch
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: feature/x
+            sessionId: cc-featx-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+              branches: [feature/x]
+
+  - name: individual-sessions-only
+    doc: >
+      User picks a single session at session-level scope. Even though the session
+      has a git remote, session-level scope pins the exact session id rather than
+      its project, so the allowlist carries no project entry.
+    oracle: legacy-captured
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: session
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [cc-main-1]
+
+  - name: mixed-project-and-session
+    doc: >
+      Two harnesses, two scope grains at once: a whole project on one harness
+      (project-level, no branch restriction) and a single session on the other
+      (session-level). Proves the two grains coexist in one persisted selection.
+    oracle: legacy-captured
+    wantImport: true
+    autoIngestNewBranches: true
+    providers:
+      - harness: claude-code
+        importAll: false
+      - harness: opencode
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+      - level: session
+        sessions:
+          - harness: opencode
+            gitRemote: "https://github.com/acme/tool.git"
+            branch: main
+            sessionId: oc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+        opencode:
+          sessions: [oc-main-1]
+
+  - name: whole-project-auto-ingest-on
+    doc: >
+      A whole project at project-level scope with the auto-ingest-new-branches
+      answer set to yes. The project carries no branch restriction and
+      autoIngestNewBranches is persisted true.
+    oracle: legacy-captured
+    wantImport: true
+    autoIngestNewBranches: true
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+
+  - name: whole-project-auto-ingest-off
+    doc: >
+      Identical whole-project selection with the auto-ingest answer set to no.
+      Only autoIngestNewBranches differs from whole-project-auto-ingest-on, pinning
+      that the answer is what drives the persisted flag.
+    oracle: legacy-captured
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"

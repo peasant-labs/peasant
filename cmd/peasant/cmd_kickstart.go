@@ -9,9 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -25,9 +24,10 @@ import (
 )
 
 type kickstartCommandDeps struct {
-	discover     func(context.Context, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
+	discover     func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
 	getwd        func() (string, error)
 	run          func(ftue.WizardModel) error
+	runFlow      func(tea.Model) error
 	existingUser func(string) string
 }
 
@@ -36,7 +36,11 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 		discover: ftueDiscover,
 		getwd:    os.Getwd,
 		run: func(model ftue.WizardModel) error {
-			_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+			_, err := tea.NewProgram(model).Run()
+			return err
+		},
+		runFlow: func(model tea.Model) error {
+			_, err := tea.NewProgram(model).Run()
 			return err
 		},
 		existingUser: func(configDir string) string {
@@ -96,35 +100,76 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// Discover real transcript counts before entering the TUI alt-screen.
 			// Non-fatal: empty counts are displayed if config is missing or paths are empty.
 			// Show a progress spinner during discovery since git resolution can take several seconds.
+			// A database this build can reuse turns that resolution into a lookup
+			// for every session already recorded and unchanged since.
 			spinner := newDiscoverySpinner(os.Stderr)
-			inventory, sessions := deps.discover(ctx, configPath, spinner)
+			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+			inventory, sessions := deps.discover(ctx, configPath, dbPath, spinner)
 			spinner.Stop()
 
-			runner, progress := buildFTUEIngestRunner(cmd, configPath)
-			invocationPWD, _ := deps.getwd()
-
-			model := ftue.NewWizard(
-				ftue.WithExistingUser(existingUser),
-				ftue.WithProviderInventory(inventory),
-				ftue.WithSessions(sessions),
-				ftue.WithIngestRunner(runner),
-				ftue.WithProgress(progress),
-				ftue.WithExistingSelection(existingSelection),
-				ftue.WithConfigPersistence(configPath, loadedConfig),
-				ftue.WithConfigSnapshot(configSnapshot, configExisted),
-				ftue.WithInvocationPWD(invocationPWD),
-				ftue.WithJourneyRunner(buildKickstartJourneyRunner(cmd, configPath, loadedConfig, configSnapshot, configExisted, runner)),
-				ftue.WithJourneyContext(ctx),
-			)
-			if err := deps.run(model); err != nil {
-				return fmt.Errorf("setup wizard failed: %w", err)
+			// Mount the rebuilt onboarding: the declarative settings.Flow rendered
+			// on the kit, sequenced OAuth -> Flow -> Ingest. This is the default
+			// production entry point (deps.runFlow is wired). The legacy page-based
+			// FTUE wizard is retained as a deprecation candidate and is reached only
+			// when no flow runner is injected (its direct coverage drives
+			// runLegacyFTUEWizard); its view layer is retired in a separate,
+			// user-confirmed step.
+			if deps.runFlow != nil {
+				if err := runKickstartFlow(cmd, deps, configPath, inventory, sessions); err != nil {
+					return fmt.Errorf("setup flow failed: %w", err)
+				}
+				return nil
 			}
-			return nil
+			return runLegacyFTUEWizard(cmd, deps, ctx, configPath, existingUser,
+				inventory, sessions, existingSelection, loadedConfig, configSnapshot, configExisted)
 		},
 	}
 
 	cmd.Flags().BoolVar(&reset, "reset", false, "Remove config, credentials, database, ingested data, and state (full reset)")
 	return cmd
+}
+
+// runLegacyFTUEWizard builds and runs the original page-based FTUE wizard.
+//
+// Deprecated: the mounted onboarding entry point is now runKickstartFlow (the
+// settings.Flow rebuilt on the kit). This constructor is RETAINED as a
+// deprecation candidate so the legacy wizard, its journey runner, and its
+// still-shipping page code stay compiled and exercisable until the FTUE view
+// layer is retired in a separate, user-confirmed step; it is not called on the
+// default kickstart path. Do not delete without that confirmation.
+func runLegacyFTUEWizard(
+	cmd *cobra.Command,
+	deps kickstartCommandDeps,
+	ctx context.Context,
+	configPath string,
+	existingUser string,
+	inventory ftue.ProviderInventory,
+	sessions []ftue.SessionListing,
+	existingSelection *config.SelectionConfig,
+	loadedConfig *config.Config,
+	configSnapshot []byte,
+	configExisted bool,
+) error {
+	runner, progress := buildFTUEIngestRunner(cmd, configPath)
+	invocationPWD, _ := deps.getwd()
+
+	model := ftue.NewWizard(
+		ftue.WithExistingUser(existingUser),
+		ftue.WithProviderInventory(inventory),
+		ftue.WithSessions(sessions),
+		ftue.WithIngestRunner(runner),
+		ftue.WithProgress(progress),
+		ftue.WithExistingSelection(existingSelection),
+		ftue.WithConfigPersistence(configPath, loadedConfig),
+		ftue.WithConfigSnapshot(configSnapshot, configExisted),
+		ftue.WithInvocationPWD(invocationPWD),
+		ftue.WithJourneyRunner(buildKickstartJourneyRunner(cmd, configPath, loadedConfig, configSnapshot, configExisted, runner)),
+		ftue.WithJourneyContext(ctx),
+	)
+	if err := deps.run(model); err != nil {
+		return fmt.Errorf("setup wizard failed: %w", err)
+	}
+	return nil
 }
 
 // resetAll removes the config file, credentials, database, peasant-sync directory, and state directory.
@@ -194,17 +239,36 @@ func removeAllIfExists(path string) error {
 // typed provider inventory plus a flat session listing for display in the wizard.
 // Errors are silenced — the wizard shows zero counts instead of failing.
 // The optional spinner is updated with progress during discovery and git resolution.
-func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+//
+// dbPath names the local analytics database. When it already carries this
+// build's schema, the sessions it recorded are reused instead of being resolved
+// from git again (see loadKnownSessions); a missing or unusable database simply
+// resolves everything.
+func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return ftue.ProviderInventory{}, nil
+	}
+	return ftueDiscoverWith(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{},
+		loadKnownSessions(ctx, dbPath), spinner)
+}
+
+// ftueDiscoverWith is the discovery core, with the filesystem, the git resolver,
+// and the store-recorded session index injected. A non-empty index turns the
+// per-session git resolution — the multi-second part of a scan — into a lookup
+// for every session the store already holds and whose source has not changed.
+func ftueDiscoverWith(
+	ctx context.Context,
+	cfg *config.Config,
+	fs ingest.FileSystem,
+	git ingest.GitResolver,
+	known knownSessionIndex,
+	spinner *discoverySpinner,
+) (ftue.ProviderInventory, []ftue.SessionListing) {
 	inventory := ftue.ProviderInventory{}
 	var sessions []ftue.SessionListing
 
-	cfg, err := loadConfig(configPath)
-	if err != nil {
-		return inventory, nil
-	}
-
-	fs := &ingest.OSFileSystem{}
-	git := &ingest.ExecGitResolver{}
+	staleness := configStaleness(cfg)
 
 	for provider, factory := range ingest.DefaultAdapterRegistry {
 		src, _, ok := resolveConfiguredSource(cfg, provider)
@@ -245,18 +309,20 @@ func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpin
 				date = d.CreatedAt
 			}
 			projectName := d.ProjectName
-			var gitRemote string
+			title := d.Title
 			branchName := d.Branch // prefer per-session branch from session data
+			var gitRemote string
+			// claudeProjectDir is the decoded project directory for a Claude
+			// session, kept so the git resolution below can read its remote.
+			claudeProjectDir := ""
 
 			// Claude-specific: decode project slug to filesystem path for project name.
 			if provider == defaults.HarnessClaudeCode {
 				slug := filepath.Base(filepath.Dir(string(d.SourcePath)))
 				if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
+					claudeProjectDir = decoded
 					if projectName == "" {
 						projectName = shortenPath(decoded)
-					}
-					if remote, err := git.RemoteURL(ctx, decoded); err == nil && remote != "" {
-						gitRemote = remote
 					}
 				}
 				if projectName == "" {
@@ -264,40 +330,28 @@ func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpin
 				}
 			}
 
-			// For all providers: if we still need git remote, try to resolve
-			// from the session's CWD or project directory.
-			if gitRemote == "" {
-				// Try the session's working directory first (most accurate).
-				if d.CWD != "" {
-					if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
-						gitRemote = remote
-					}
+			if record, ok := known.reusable(d, staleness); ok {
+				// The store already resolved this session and its source has not
+				// moved since, so reuse what it recorded rather than paying for
+				// git again. Values discovery itself carries still win: they come
+				// from the source file, which is never staler than the record.
+				gitRemote = record.GitRemote
+				if branchName == "" {
+					branchName = record.Branch
 				}
-				// Fall back to OriginalRoot or source file directory.
-				if gitRemote == "" && d.ProjectName != "" {
-					dir := string(d.OriginalRoot)
-					if dir == "" {
-						dir = filepath.Dir(string(d.SourcePath))
-					}
-					if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
-						gitRemote = remote
-					}
+				if title == "" {
+					title = record.Title
 				}
+			} else {
+				gitRemote, branchName = resolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
 			}
 
-			// If we still don't have a branch, try resolving from CWD.
-			// This is a last resort — prefers session-recorded branch above.
-			if branchName == "" && d.CWD != "" {
-				if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
-					branchName = branch
-				}
-			}
 			sessions = append(sessions, ftue.SessionListing{
 				Harness:     provider.String(),
 				ProjectName: projectName,
 				GitRemote:   gitRemote,
 				Branch:      branchName,
-				Title:       d.Title,
+				Title:       title,
 				Date:        date,
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
@@ -308,6 +362,58 @@ func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpin
 		inventory[provider] = discovery
 	}
 	return inventory, sessions
+}
+
+// resolveSessionGit walks git for one discovered session's remote and branch.
+// This is the multi-second part of a scan: one process per lookup, per session.
+// claudeProjectDir is the decoded Claude project directory when there is one,
+// and branchName is the branch the session data already carries.
+func resolveSessionGit(
+	ctx context.Context,
+	git ingest.GitResolver,
+	d ingest.DiscoveredSession,
+	claudeProjectDir string,
+	branchName string,
+) (string, string) {
+	var gitRemote string
+
+	// Claude records the project directory in its path, which is the most
+	// precise place to ask.
+	if claudeProjectDir != "" {
+		if remote, err := git.RemoteURL(ctx, claudeProjectDir); err == nil && remote != "" {
+			gitRemote = remote
+		}
+	}
+
+	// For all providers: if we still need git remote, try to resolve
+	// from the session's CWD or project directory.
+	if gitRemote == "" {
+		// Try the session's working directory first (most accurate).
+		if d.CWD != "" {
+			if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
+				gitRemote = remote
+			}
+		}
+		// Fall back to OriginalRoot or source file directory.
+		if gitRemote == "" && d.ProjectName != "" {
+			dir := string(d.OriginalRoot)
+			if dir == "" {
+				dir = filepath.Dir(string(d.SourcePath))
+			}
+			if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
+				gitRemote = remote
+			}
+		}
+	}
+
+	// If we still don't have a branch, try resolving from CWD.
+	// This is a last resort — prefers session-recorded branch above.
+	if branchName == "" && d.CWD != "" {
+		if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
+			branchName = branch
+		}
+	}
+	return gitRemote, branchName
 }
 
 // filterRootSessions returns only root sessions (no subagents).
@@ -421,10 +527,7 @@ func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRu
 			return nil, fmt.Errorf("resolve output path: %w", err)
 		}
 
-		staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-		if staleness == 0 {
-			staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-		}
+		staleness := configStaleness(cfg)
 
 		// Map selected sessions to AllowedSessionIDs filter, expanding
 		// parent sessions to include their subagent children.

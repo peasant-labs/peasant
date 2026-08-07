@@ -257,17 +257,13 @@ func (a *ClaudeAdapter) extractClaudeHints(path string) claudeSessionHints {
 		if hints.cwd == "" && line.CWD != "" {
 			hints.cwd = line.CWD
 		}
-		// Extract title from first user message.
+		// Derive the display title from the first user message. The shared
+		// redaction-free pipeline strips Claude's own markup (system-reminder
+		// blocks, command/query wrappers) and caps the length, so the raw markup
+		// no longer leaks into the title.
 		if hints.title == "" && line.Type == "user" && line.Message.Role == "user" {
-			text := extractTextFromContent(line.Message.Content)
-			if text != "" {
-				if idx := strings.IndexByte(text, '\n'); idx >= 0 {
-					text = text[:idx]
-				}
-				if len(text) > 80 {
-					text = text[:77] + "..."
-				}
-				hints.title = text
+			if text := extractTextFromContent(line.Message.Content); text != "" {
+				hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
 			}
 		}
 		// Stop early if we have everything.

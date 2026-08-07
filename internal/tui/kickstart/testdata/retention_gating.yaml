@@ -1,0 +1,13 @@
+# Gating cases for the Claude retention section: it is offered only when Claude
+# Code sessions were discovered. Each case sets claudeSessionsPresent and asserts
+# whether the retention section is visible for the flow's draft.
+#
+# expectedCaseCount guards the table cannot silently lose a case.
+expectedCaseCount: 2
+cases:
+  - name: claude-present-shows-retention
+    claudeSessionsPresent: true
+    retentionVisible: true
+  - name: no-claude-hides-retention
+    claudeSessionsPresent: false
+    retentionVisible: false

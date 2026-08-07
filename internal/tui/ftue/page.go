@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/browser"
@@ -86,7 +86,7 @@ func (p *DestinationPage) EffectiveVisibility() schema.Visibility {
 }
 
 func (p *DestinationPage) Update(msg tea.Msg) (Page, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return p, nil
 	}
@@ -178,7 +178,7 @@ func (p *SingleSelectPage) Reset() {
 
 func (p *SingleSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 			if p.cursor > 0 {
@@ -362,7 +362,7 @@ func (p *ProviderSelectPage) providerHelpBarText() string {
 
 func (p *ProviderSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if p.showingHelp {
 			if key.Matches(msg, p.keymap.Help) || key.Matches(msg, p.keymap.Cancel) {
 				p.showingHelp = false
@@ -965,7 +965,7 @@ func (p *TreeSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 		}
 		return p, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if p.filter.Active {
 			return p.updateSearchMode(msg)
 		}
@@ -1145,7 +1145,7 @@ func (p *TreeSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	return p, nil
 }
 
-func (p *TreeSelectPage) updateSearchMode(msg tea.KeyMsg) (Page, tea.Cmd) {
+func (p *TreeSelectPage) updateSearchMode(msg tea.KeyPressMsg) (Page, tea.Cmd) {
 	switch {
 	case key.Matches(msg, p.keymap.Cancel):
 		p.filter.Clear()
@@ -1155,7 +1155,7 @@ func (p *TreeSelectPage) updateSearchMode(msg tea.KeyMsg) (Page, tea.Cmd) {
 	case key.Matches(msg, p.keymap.Confirm):
 		p.filter.Exit()
 		p.clamp(len(p.flatItems()))
-	case msg.Type == tea.KeyBackspace:
+	case msg.Code == tea.KeyBackspace:
 		if p.filter.HasFilter() {
 			p.filter.Backspace()
 			p.cursor = 0
@@ -1163,8 +1163,8 @@ func (p *TreeSelectPage) updateSearchMode(msg tea.KeyMsg) (Page, tea.Cmd) {
 			p.clamp(len(p.flatItems()))
 		}
 	default:
-		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
-			p.filter.Append(msg.Runes[0])
+		if runes := []rune(msg.Text); len(runes) == 1 {
+			p.filter.Append(runes[0])
 			p.cursor = 0
 			p.offset = 0
 			p.clamp(len(p.flatItems()))
@@ -1383,7 +1383,7 @@ func (p *MultiSelectPage) Reset() {
 
 func (p *MultiSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 			if p.cursor > 0 {
@@ -1462,7 +1462,7 @@ func (p *InfoPage) Reset() { p.confirmed = false }
 
 func (p *InfoPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == defaults.KeyEnter.String() {
 			p.confirmed = true
 		}
@@ -1580,7 +1580,7 @@ func (p *OAuthPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.selected = -1
 		}
 		return p, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if p.reAuthLogoutPending {
 			switch msg.String() {
 			case defaults.KeyEnter.String():
@@ -1812,7 +1812,7 @@ func (p *IngestPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			return p, p.tickCmd()
 		}
 		return p, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if !p.running && msg.String() == defaults.KeyEnter.String() {
 			p.done = true
 		}
@@ -1928,7 +1928,7 @@ func (p *RetentionPage) Reset() { p.confirmed = false }
 
 func (p *RetentionPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 			if p.cursor > 0 {
@@ -2127,7 +2127,7 @@ func (p *PrivacyPreferencePage) Reset() { p.confirmed = false }
 
 func (p *PrivacyPreferencePage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 			if p.cursor > 0 {
@@ -2304,7 +2304,7 @@ func (p *LicensePage) SelectedLicense() schema.License {
 
 func (p *LicensePage) Update(msg tea.Msg) (Page, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 			if p.cursor > 0 {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -323,7 +323,7 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.executing && (msg.String() == defaults.KeyInterrupt.String() || msg.String() == defaults.KeyQuit.String() || msg.String() == defaults.KeyBack.String() || msg.String() == defaults.KeyRestart.String()) {
 			if m.journeyCancel != nil {
 				m.journeyCancel()
@@ -409,7 +409,13 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m WizardModel) View() string {
+func (m WizardModel) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	return v
+}
+
+func (m WizardModel) viewString() string {
 	if m.quitting {
 		return HelpBar.Render("Setup cancelled.\n")
 	}

@@ -1,0 +1,59 @@
+# A project-first scan result - the shape the kickstart onboarding tree loads:
+# PROJECT -> BRANCH -> SESSION, with no harness grouping level, and each session
+# carrying the harness that recorded it in Meta. Two harnesses record sessions
+# in the same project, so a harness facet over this forest has real work to do:
+# it must reach across projects and branches to gather one harness's sessions.
+# Every session starts unchecked so a test drives the selection itself.
+name: faceted
+expectedNodeCount: 9
+roots:
+  - id: github.com/peasant-labs/peasant
+    label: "github:peasant-labs/peasant"
+    state: unchecked
+    meta:
+      remote: git@github.com:peasant-labs/peasant.git
+    children:
+      - id: develop
+        label: develop
+        state: unchecked
+        meta:
+          branch: develop
+        children:
+          - id: cc-1
+            label: "ingest pipeline refactor"
+            state: unchecked
+            meta:
+              harness: claude-code
+          - id: oc-1
+            label: "commit detector fix"
+            state: unchecked
+            meta:
+              harness: opencode
+      - id: feature-x
+        label: feature-x
+        state: unchecked
+        meta:
+          branch: feature-x
+        children:
+          - id: cc-2
+            label: "share bridge scan"
+            state: unchecked
+            meta:
+              harness: claude-code
+  - id: github.com/peasant-labs/village
+    label: "github:peasant-labs/village"
+    state: unchecked
+    meta:
+      remote: git@github.com:peasant-labs/village.git
+    children:
+      - id: develop
+        label: develop
+        state: unchecked
+        meta:
+          branch: develop
+        children:
+          - id: oc-2
+            label: "governance audit trigger"
+            state: unchecked
+            meta:
+              harness: opencode

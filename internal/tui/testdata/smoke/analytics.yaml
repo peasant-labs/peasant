@@ -1,0 +1,14 @@
+# Scripted walks of the analytics app (peasant tui), driven message-by-message
+# through the same Update loop the mounted program runs. Each scenario cycles
+# the tab bar and then quits; the smoke proves the program launches with a
+# non-empty frame, that switching tabs changes what is drawn, and that the quit
+# key returns a command (the program's exit).
+expectedScenarioCount: 2
+scenarios:
+  - name: tab-forward-then-quit
+    keys: [tab, tab, tab]
+    quitKey: q
+
+  - name: number-jump-then-interrupt
+    keys: ["1", "3", "2"]
+    quitKey: ctrl+c

@@ -1,0 +1,102 @@
+# Interaction fixture for the kit Tree navigation and bulk expand/collapse
+# gestures, driven by TestTree_Navigation (internal/tui/kit/tree_navigation_test.go).
+#
+# Each case builds the forest, sizes the tree to `height` visible rows, replays
+# the ordered `keys`, then asserts the OBSERVABLE result: the node under the
+# cursor, the ordered list of currently-visible row ids (an interior node whose
+# children are hidden collapses them out of this list), and - when
+# `checkSelection` is set - the exact set of checked node ids.
+#
+# The default forest is two projects, each with interior branches over session
+# leaves, so a project ancestor, a branch level, and leaves are all present.
+expectedCaseCount: 13
+cases:
+  - name: collapse-all-hides-every-descendant
+    height: 40
+    keys: ["ctrl+p", "ctrl+o"]
+    expectCursorID: projA
+    expectVisibleIDs: [projA, projB]
+
+  - name: expand-all-after-collapse-restores-every-row
+    height: 40
+    keys: ["ctrl+o", "ctrl+p"]
+    expectCursorID: projA
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: collapse-level-on-project-collapses-its-branches-only
+    height: 40
+    keys: ["H"]
+    expectCursorID: projA
+    expectVisibleIDs: [projA, projA/b1, projA/b2, projB, projB/b1, projB/b1/s1]
+
+  - name: collapse-level-from-a-branch-collapses-the-whole-project
+    height: 40
+    keys: ["down", "H"]
+    expectCursorID: projA/b1
+    expectVisibleIDs: [projA, projA/b1, projA/b2, projB, projB/b1, projB/b1/s1]
+
+  - name: expand-level-reexpands-collapsed-branches
+    height: 40
+    keys: ["H", "L"]
+    expectCursorID: projA
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: bottom-jumps-cursor-to-last-row
+    height: 40
+    keys: ["G"]
+    expectCursorID: projB/b1/s1
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: top-returns-cursor-to-first-row
+    height: 40
+    keys: ["G", "g"]
+    expectCursorID: projA
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: page-down-advances-cursor-by-one-page
+    height: 3
+    keys: ["pgdown"]
+    expectCursorID: projA/b1/s2
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: page-up-retreats-cursor-by-one-page
+    height: 3
+    keys: ["G", "pgup"]
+    expectCursorID: projA/b2/s1
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: next-project-jumps-from-first-to-second
+    height: 40
+    keys: ["J"]
+    expectCursorID: projB
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: prev-project-returns-from-second-to-first
+    height: 40
+    keys: ["J", "K"]
+    expectCursorID: projA
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: next-project-from-a-deep-node-still-jumps-to-the-next-project
+    height: 40
+    keys: ["down", "down", "J"]
+    expectCursorID: projB
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+
+  - name: select-under-project-checks-only-the-cursor-project
+    height: 40
+    keys: ["down", "down", "A"]
+    expectCursorID: projA/b1/s1
+    expectVisibleIDs:
+      [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1, projB, projB/b1, projB/b1/s1]
+    checkSelection: true
+    expectChecked: [projA, projA/b1, projA/b1/s1, projA/b1/s2, projA/b2, projA/b2/s1]

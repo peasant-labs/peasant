@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -225,7 +225,7 @@ func (m PushWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case defaults.KeyInterrupt.String():
 			m.quitting = true
@@ -246,7 +246,13 @@ func (m PushWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m PushWizardModel) View() string {
+func (m PushWizardModel) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	return v
+}
+
+func (m PushWizardModel) viewString() string {
 	if m.quitting {
 		return wizDim.Render("Push cancelled.\n")
 	}
@@ -273,7 +279,7 @@ func (m PushWizardModel) View() string {
 // Page 1: Initial Confirm
 // ---------------------------------------------------------------------------
 
-func (m PushWizardModel) updateInitialConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m PushWizardModel) updateInitialConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 		if m.confirmSel > 0 {
@@ -342,7 +348,7 @@ func (m PushWizardModel) viewportHeight() int {
 	return h
 }
 
-func (m PushWizardModel) updateSessionReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m PushWizardModel) updateSessionReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	vh := m.viewportHeight()
 	switch msg.String() {
 	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
@@ -628,7 +634,7 @@ func (m PushWizardModel) redactionPreviewContent() string {
 	return b.String()
 }
 
-func (m PushWizardModel) updateRedactionPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m PushWizardModel) updateRedactionPreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case defaults.KeyEnter.String():
 		// Only advance if there are sessions to push.
@@ -695,7 +701,7 @@ func (m PushWizardModel) viewRedactionPreview() string {
 // Page 4: Final Confirm
 // ---------------------------------------------------------------------------
 
-func (m PushWizardModel) updateFinalConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m PushWizardModel) updateFinalConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
 		if m.confirmSel > 0 {

@@ -1,0 +1,395 @@
+# Render fixture matrix for the kit components: every component is rendered in
+# BOTH themes (dark, light) at THREE constrained sizes - 80x10, 40x8, and the
+# component's own declared minimum - and its final frame is compared against a
+# banked .golden file. The row-count guards in render_matrix_test.go assert
+# this file stays exhaustive: exactly the ten components, each with exactly its
+# dark+light x three-size rows, and no size dropped.
+expectedCaseCount: 72
+expectedComponentCount: 12
+expectedSizesPerComponentTheme: 3
+components:
+  - frame
+  - overlay
+  - confirm
+  - spinner
+  - list
+  - textfield
+  - toggle
+  - radio
+  - multiselect
+  - statusbar
+  - tree
+  - previewsplit
+cases:
+  # frame
+  - name: frame/dark/80x10
+    component: frame
+    theme: dark
+    width: 80
+    height: 10
+  - name: frame/dark/40x8
+    component: frame
+    theme: dark
+    width: 40
+    height: 8
+  - name: frame/dark/min
+    component: frame
+    theme: dark
+    width: 4
+    height: 3
+  - name: frame/light/80x10
+    component: frame
+    theme: light
+    width: 80
+    height: 10
+  - name: frame/light/40x8
+    component: frame
+    theme: light
+    width: 40
+    height: 8
+  - name: frame/light/min
+    component: frame
+    theme: light
+    width: 4
+    height: 3
+  # overlay
+  - name: overlay/dark/80x10
+    component: overlay
+    theme: dark
+    width: 80
+    height: 10
+  - name: overlay/dark/40x8
+    component: overlay
+    theme: dark
+    width: 40
+    height: 8
+  - name: overlay/dark/min
+    component: overlay
+    theme: dark
+    width: 16
+    height: 5
+  - name: overlay/light/80x10
+    component: overlay
+    theme: light
+    width: 80
+    height: 10
+  - name: overlay/light/40x8
+    component: overlay
+    theme: light
+    width: 40
+    height: 8
+  - name: overlay/light/min
+    component: overlay
+    theme: light
+    width: 16
+    height: 5
+  # confirm
+  - name: confirm/dark/80x10
+    component: confirm
+    theme: dark
+    width: 80
+    height: 10
+  - name: confirm/dark/40x8
+    component: confirm
+    theme: dark
+    width: 40
+    height: 8
+  - name: confirm/dark/min
+    component: confirm
+    theme: dark
+    width: 15
+    height: 2
+  - name: confirm/light/80x10
+    component: confirm
+    theme: light
+    width: 80
+    height: 10
+  - name: confirm/light/40x8
+    component: confirm
+    theme: light
+    width: 40
+    height: 8
+  - name: confirm/light/min
+    component: confirm
+    theme: light
+    width: 15
+    height: 2
+  # spinner
+  - name: spinner/dark/80x10
+    component: spinner
+    theme: dark
+    width: 80
+    height: 10
+  - name: spinner/dark/40x8
+    component: spinner
+    theme: dark
+    width: 40
+    height: 8
+  - name: spinner/dark/min
+    component: spinner
+    theme: dark
+    width: 3
+    height: 1
+  - name: spinner/light/80x10
+    component: spinner
+    theme: light
+    width: 80
+    height: 10
+  - name: spinner/light/40x8
+    component: spinner
+    theme: light
+    width: 40
+    height: 8
+  - name: spinner/light/min
+    component: spinner
+    theme: light
+    width: 3
+    height: 1
+  # list
+  - name: list/dark/80x10
+    component: list
+    theme: dark
+    width: 80
+    height: 10
+  - name: list/dark/40x8
+    component: list
+    theme: dark
+    width: 40
+    height: 8
+  - name: list/dark/min
+    component: list
+    theme: dark
+    width: 6
+    height: 1
+  - name: list/light/80x10
+    component: list
+    theme: light
+    width: 80
+    height: 10
+  - name: list/light/40x8
+    component: list
+    theme: light
+    width: 40
+    height: 8
+  - name: list/light/min
+    component: list
+    theme: light
+    width: 6
+    height: 1
+  # textfield
+  - name: textfield/dark/80x10
+    component: textfield
+    theme: dark
+    width: 80
+    height: 10
+  - name: textfield/dark/40x8
+    component: textfield
+    theme: dark
+    width: 40
+    height: 8
+  - name: textfield/dark/min
+    component: textfield
+    theme: dark
+    width: 3
+    height: 1
+  - name: textfield/light/80x10
+    component: textfield
+    theme: light
+    width: 80
+    height: 10
+  - name: textfield/light/40x8
+    component: textfield
+    theme: light
+    width: 40
+    height: 8
+  - name: textfield/light/min
+    component: textfield
+    theme: light
+    width: 3
+    height: 1
+  # toggle
+  - name: toggle/dark/80x10
+    component: toggle
+    theme: dark
+    width: 80
+    height: 10
+  - name: toggle/dark/40x8
+    component: toggle
+    theme: dark
+    width: 40
+    height: 8
+  - name: toggle/dark/min
+    component: toggle
+    theme: dark
+    width: 6
+    height: 1
+  - name: toggle/light/80x10
+    component: toggle
+    theme: light
+    width: 80
+    height: 10
+  - name: toggle/light/40x8
+    component: toggle
+    theme: light
+    width: 40
+    height: 8
+  - name: toggle/light/min
+    component: toggle
+    theme: light
+    width: 6
+    height: 1
+  # radio
+  - name: radio/dark/80x10
+    component: radio
+    theme: dark
+    width: 80
+    height: 10
+  - name: radio/dark/40x8
+    component: radio
+    theme: dark
+    width: 40
+    height: 8
+  - name: radio/dark/min
+    component: radio
+    theme: dark
+    width: 8
+    height: 1
+  - name: radio/light/80x10
+    component: radio
+    theme: light
+    width: 80
+    height: 10
+  - name: radio/light/40x8
+    component: radio
+    theme: light
+    width: 40
+    height: 8
+  - name: radio/light/min
+    component: radio
+    theme: light
+    width: 8
+    height: 1
+  # multiselect
+  - name: multiselect/dark/80x10
+    component: multiselect
+    theme: dark
+    width: 80
+    height: 10
+  - name: multiselect/dark/40x8
+    component: multiselect
+    theme: dark
+    width: 40
+    height: 8
+  - name: multiselect/dark/min
+    component: multiselect
+    theme: dark
+    width: 8
+    height: 1
+  - name: multiselect/light/80x10
+    component: multiselect
+    theme: light
+    width: 80
+    height: 10
+  - name: multiselect/light/40x8
+    component: multiselect
+    theme: light
+    width: 40
+    height: 8
+  - name: multiselect/light/min
+    component: multiselect
+    theme: light
+    width: 8
+    height: 1
+  # statusbar
+  - name: statusbar/dark/80x10
+    component: statusbar
+    theme: dark
+    width: 80
+    height: 10
+  - name: statusbar/dark/40x8
+    component: statusbar
+    theme: dark
+    width: 40
+    height: 8
+  - name: statusbar/dark/min
+    component: statusbar
+    theme: dark
+    width: 4
+    height: 1
+  - name: statusbar/light/80x10
+    component: statusbar
+    theme: light
+    width: 80
+    height: 10
+  - name: statusbar/light/40x8
+    component: statusbar
+    theme: light
+    width: 40
+    height: 8
+  - name: statusbar/light/min
+    component: statusbar
+    theme: light
+    width: 4
+    height: 1
+  # tree
+  - name: tree/dark/80x10
+    component: tree
+    theme: dark
+    width: 80
+    height: 10
+  - name: tree/dark/40x8
+    component: tree
+    theme: dark
+    width: 40
+    height: 8
+  - name: tree/dark/min
+    component: tree
+    theme: dark
+    width: 6
+    height: 1
+  - name: tree/light/80x10
+    component: tree
+    theme: light
+    width: 80
+    height: 10
+  - name: tree/light/40x8
+    component: tree
+    theme: light
+    width: 40
+    height: 8
+  - name: tree/light/min
+    component: tree
+    theme: light
+    width: 6
+    height: 1
+  # previewsplit
+  - name: previewsplit/dark/80x10
+    component: previewsplit
+    theme: dark
+    width: 80
+    height: 10
+  - name: previewsplit/dark/40x8
+    component: previewsplit
+    theme: dark
+    width: 40
+    height: 8
+  - name: previewsplit/dark/min
+    component: previewsplit
+    theme: dark
+    width: 10
+    height: 1
+  - name: previewsplit/light/80x10
+    component: previewsplit
+    theme: light
+    width: 80
+    height: 10
+  - name: previewsplit/light/40x8
+    component: previewsplit
+    theme: light
+    width: 40
+    height: 8
+  - name: previewsplit/light/min
+    component: previewsplit
+    theme: light
+    width: 10
+    height: 1

@@ -1,0 +1,13 @@
+# The substrings an actionable in-pane ContentSource-error message must
+# contain: what went wrong, why, where, and how to recover. The error-render
+# test asserts every token below appears in the rendered right pane, so a
+# regression that drops any of the four actionable facets goes red. The
+# row-count guard pins the expected number of tokens so a silently-shortened
+# list cannot pass vacuously.
+expectedTokenCount: 5
+tokens:
+  - "preview unavailable"   # what: the operation that failed
+  - "why:"                  # why: the underlying error reason
+  - "disk on fire"          # why (payload): the source's error text is surfaced
+  - "where:"                # where: which item the failure is for
+  - "fix:"                  # fix: the recovery action

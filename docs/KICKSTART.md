@@ -98,6 +98,11 @@ Use arrow keys or `j`/`k` to move, space to toggle, enter to confirm, and tab to
 scope columns. `b` goes back, `r` restarts before execution, and `q` or Ctrl+C quits/cancels. The
 scope tree also supports left/right (or `h`/`l`) to collapse/expand and `f` to search.
 
+On the transcript-selection step, `Ctrl+l` moves input to the preview pane beside the tree
+and `Ctrl+h` moves it back; the divider marks which side is active. While the preview holds
+input, the movement keys scroll it instead of moving the tree cursor. The preview renders
+the session's first recorded message as markdown, with fenced code syntax-highlighted.
+
 See also:
 
 - [Kickstart CLI reference](cli/peasant_kickstart.md)

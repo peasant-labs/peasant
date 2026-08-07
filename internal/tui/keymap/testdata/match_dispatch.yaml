@@ -1,0 +1,199 @@
+# Dispatch-table fixture for keymap.Match, driven by TestMatch_DispatchTable
+# (internal/tui/keymap/keymap_test.go). Every row names an availability
+# (ordered list of action names - order matters, since Match resolves ties
+# in AvailableActions order), a pressed key label (resolved via
+# msgForKeyString in helpers_test.go), and the expected (action, ok) result.
+#
+# The first 18 rows (one per ActionID) are the full-enum-coverage guard: the
+# test asserts the union of every wantAction across wantOK=true rows equals
+# keymap.AllActions() exactly, so an ActionID added to the enum without a
+# passing dispatch row here fails that guard, not just this row count.
+expectedCaseCount: 35
+cases:
+  - name: dispatches-quit
+    available: [quit]
+    pressedKey: q
+    wantOK: true
+    wantAction: quit
+  - name: dispatches-confirm
+    available: [confirm]
+    pressedKey: enter
+    wantOK: true
+    wantAction: confirm
+  - name: dispatches-back
+    available: [back]
+    pressedKey: esc
+    wantOK: true
+    wantAction: back
+  - name: dispatches-up
+    available: [up]
+    pressedKey: up
+    wantOK: true
+    wantAction: up
+  - name: dispatches-down
+    available: [down]
+    pressedKey: down
+    wantOK: true
+    wantAction: down
+  - name: dispatches-left
+    available: [left]
+    pressedKey: left
+    wantOK: true
+    wantAction: left
+  - name: dispatches-right
+    available: [right]
+    pressedKey: right
+    wantOK: true
+    wantAction: right
+  - name: dispatches-page-up
+    available: [page-up]
+    pressedKey: pgup
+    wantOK: true
+    wantAction: page-up
+  - name: dispatches-page-down
+    available: [page-down]
+    pressedKey: pgdown
+    wantOK: true
+    wantAction: page-down
+  - name: dispatches-next-field
+    available: [next-field]
+    pressedKey: tab
+    wantOK: true
+    wantAction: next-field
+  - name: dispatches-prev-field
+    available: [prev-field]
+    pressedKey: shift+tab
+    wantOK: true
+    wantAction: prev-field
+  - name: dispatches-toggle
+    available: [toggle]
+    pressedKey: space
+    wantOK: true
+    wantAction: toggle
+  - name: dispatches-select-all
+    available: [select-all]
+    pressedKey: a
+    wantOK: true
+    wantAction: select-all
+  - name: dispatches-expand
+    available: [expand]
+    pressedKey: right
+    wantOK: true
+    wantAction: expand
+  - name: dispatches-collapse
+    available: [collapse]
+    pressedKey: left
+    wantOK: true
+    wantAction: collapse
+  - name: dispatches-top
+    available: [top]
+    pressedKey: g
+    wantOK: true
+    wantAction: top
+  - name: dispatches-bottom
+    available: [bottom]
+    pressedKey: G
+    wantOK: true
+    wantAction: bottom
+  - name: dispatches-select-under-project
+    available: [select-under-project]
+    pressedKey: A
+    wantOK: true
+    wantAction: select-under-project
+  - name: dispatches-expand-level
+    available: [expand-level]
+    pressedKey: L
+    wantOK: true
+    wantAction: expand-level
+  - name: dispatches-collapse-level
+    available: [collapse-level]
+    pressedKey: H
+    wantOK: true
+    wantAction: collapse-level
+  - name: dispatches-expand-all
+    available: [expand-all]
+    pressedKey: ctrl+p
+    wantOK: true
+    wantAction: expand-all
+  - name: dispatches-collapse-all
+    available: [collapse-all]
+    pressedKey: ctrl+o
+    wantOK: true
+    wantAction: collapse-all
+  - name: dispatches-next-project
+    available: [next-project]
+    pressedKey: J
+    wantOK: true
+    wantAction: next-project
+  - name: dispatches-prev-project
+    available: [prev-project]
+    pressedKey: K
+    wantOK: true
+    wantAction: prev-project
+  - name: dispatches-focus-pane-left
+    available: [focus-pane-left]
+    pressedKey: ctrl+h
+    wantOK: true
+    wantAction: focus-pane-left
+  - name: dispatches-focus-pane-right
+    available: [focus-pane-right]
+    pressedKey: ctrl+l
+    wantOK: true
+    wantAction: focus-pane-right
+  # ctrl+h sends 0x08 and backspace sends 0x7f: bubbletea decodes them as
+  # distinct keys, so the pane-focus binding must not answer to backspace.
+  - name: focus-pane-left-does-not-answer-to-backspace
+    available: [focus-pane-left]
+    pressedKey: backspace
+    wantOK: false
+    wantAction: ""
+  - name: dispatches-save
+    available: [save]
+    pressedKey: ctrl+s
+    wantOK: true
+    wantAction: save
+  - name: dispatches-help
+    available: [help]
+    pressedKey: "?"
+    wantOK: true
+    wantAction: help
+  - name: dispatches-filter
+    available: [filter]
+    pressedKey: f
+    wantOK: true
+    wantAction: filter
+  # Extra cases beyond one-per-action: unavailable keys, alias keys, and
+  # avail-order priority when two available actions share a physical key.
+  - name: no-match-when-action-unavailable
+    available: [quit]
+    pressedKey: enter
+    wantOK: false
+    wantAction: ""
+  - name: back-alias-key-also-matches
+    available: [back]
+    pressedKey: b
+    wantOK: true
+    wantAction: back
+  - name: expand-wins-when-listed-before-right
+    available: [expand, right]
+    pressedKey: right
+    wantOK: true
+    wantAction: expand
+  - name: right-wins-when-listed-before-expand
+    available: [right, expand]
+    pressedKey: right
+    wantOK: true
+    wantAction: right
+  - name: unbound-key-matches-nothing-even-with-everything-available
+    available:
+      [
+        quit, confirm, back, up, down, left, right, page-up, page-down,
+        focus-pane-left, focus-pane-right,
+        next-field, prev-field, toggle, select-all, expand, collapse,
+        save, help, filter, top, bottom, next-project, prev-project,
+        select-under-project, expand-level, collapse-level,
+        expand-all, collapse-all,
+      ]
+    pressedKey: z
+    wantOK: false
+    wantAction: ""

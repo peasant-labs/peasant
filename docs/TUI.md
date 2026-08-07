@@ -68,6 +68,33 @@ Includes all `PageKeyMap` bindings plus:
 | Search | `f` | Enter search/filter mode |
 | Confirm selection | `tab` | Open confirm overlay (requires at least one session selected) |
 
+### Split preview pane (rebuilt "choose transcripts to import" step)
+
+The rebuilt selection step shows the session tree on the left and a preview of the
+highlighted session on the right. The divider between them carries a focus marker
+(`<` while the tree takes input, `>` while the preview does), and the hint bar at the
+bottom always lists the keys the focused pane actually dispatches.
+
+| Action | Keys | Description |
+|--------|------|-------------|
+| Focus left pane | `Ctrl+h` | Send input to the session tree |
+| Focus right pane | `Ctrl+l` | Send input to the preview |
+| Scroll preview | `↑` `k` `↓` `j` | Move the preview one line (when the preview is focused) |
+| Page preview | `PgUp` `PgDn` `Ctrl+u` `Ctrl+d` | Move the preview one pane |
+| Preview to top/bottom | `g` `Shift+g` | Jump the preview to its first/last line |
+
+`Ctrl+h` is famously ambiguous, so it is worth stating what happens here: the keystroke
+sends the byte `0x08`, which some terminals also send for backspace. Bubble Tea decodes
+`0x08` as `Ctrl+h` and `0x7f` as backspace. On a terminal that sends `0x7f` for backspace,
+the two are distinct and this binding is live; that is the common case, and it is what
+kitty's and xterm's extended protocols encode unambiguously. On a terminal configured to
+send `0x08` for backspace they are one keystroke that no software can separate; there,
+backspace focuses the left pane, which is harmless because no split surface takes text
+input.
+
+The preview renders the recorded first user message as markdown, with fenced code
+syntax-highlighted in the app's own palette (`internal/tui/mdrender`).
+
 ### Search mode (inside session tree)
 
 When search is active (`f`), normal navigation keys are intercepted as text input.

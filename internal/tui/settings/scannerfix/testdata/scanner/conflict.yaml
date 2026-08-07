@@ -1,0 +1,40 @@
+# A scan whose persisted selection references a worktree that has since been
+# deleted: the worktree node carries a display-only Conflict state (with a
+# reason in Meta) that the tree renders distinctly and never persists. The
+# sibling worktree is a normal selection, so rollup at the remote must surface
+# the conflict as Partial rather than a clean Checked/Unchecked.
+name: conflict
+expectedNodeCount: 5
+roots:
+  - id: claude
+    label: claude
+    state: unchecked
+    meta:
+      kind: provider
+    children:
+      - id: github.com/peasant-labs/peasant
+        label: peasant
+        state: unchecked
+        meta:
+          kind: remote
+          remote: git@github.com:peasant-labs/peasant.git
+        children:
+          - id: peasant/develop
+            label: develop
+            state: checked
+            meta:
+              kind: worktree
+              branch: develop
+            children:
+              - id: sess-c1
+                label: "redaction category rename"
+                state: checked
+                meta:
+                  kind: session
+          - id: peasant/deleted-worktree
+            label: deleted-worktree
+            state: conflict
+            meta:
+              kind: worktree
+              branch: gone-branch
+              conflict: "selection references a worktree that no longer exists"

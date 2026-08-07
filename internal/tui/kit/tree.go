@@ -1,0 +1,999 @@
+package kit
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/peasant-labs/peasant/internal/tui/keymap"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
+)
+
+// TreeMinSize is the smallest region a Tree draws into: one row of content and
+// enough width for a cursor, an expand glyph, a checkbox, and a couple of
+// label cells. Below it the Tree renders a single truncation-safe line rather
+// than panicking or overlapping chrome.
+var TreeMinSize = Size{Width: 6, Height: 1}
+
+// TriState is the selection state of a [TreeNode] in the kit tree. It is a
+// closed, strongly-typed enum (never a bare string or bool) so every consumer
+// - the settings TreeField's TreeSelection, the render layer, the rollup
+// logic - compares against a named constant. Unchecked is the zero value so a
+// freshly-constructed node defaults to "not selected".
+type TriState int
+
+const (
+	// Unchecked is a node the user has not selected. It is the zero value.
+	Unchecked TriState = iota
+	// Partial is an interior node some but not all of whose descendants are
+	// Checked (or one of whose descendants is in Conflict): the parent cannot
+	// be a clean Checked/Unchecked, so it rolls up to Partial.
+	Partial
+	// Checked is a fully-selected node: a leaf the user selected, or an
+	// interior node all of whose selectable descendants are Checked.
+	Checked
+	// Conflict is a DISPLAY-ONLY state a [TreeSource] assigns to a node whose
+	// backing reality is inconsistent - e.g. a persisted selection that points
+	// at a git worktree that has since been deleted. It renders distinctly and
+	// is NEVER produced by user toggling and NEVER persisted: the settings
+	// slice's Validate/Commit inspects nodes for it and blocks, but a Conflict
+	// never round-trips back into stored selection state.
+	Conflict
+)
+
+// IsValid reports whether s is one of the four known TriState values.
+func (s TriState) IsValid() bool {
+	switch s {
+	case Unchecked, Partial, Checked, Conflict:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns a stable, lower-case name for s, or "unknown" for an
+// out-of-range value - mirroring the leading-sentinel String() convention the
+// keymap and ingest enums use.
+func (s TriState) String() string {
+	switch s {
+	case Unchecked:
+		return "unchecked"
+	case Partial:
+		return "partial"
+	case Checked:
+		return "checked"
+	case Conflict:
+		return "conflict"
+	default:
+		return "unknown"
+	}
+}
+
+// TreeNode is one node in the selection hierarchy the kit tree renders:
+// provider -> remote -> worktree -> session. A node owns its selection State,
+// its ordered Children, and a display-only Meta bag. The tree mutates State in
+// place through the Children pointers as the user toggles and as interior
+// nodes roll up, so a [TreeSource] hands back the *TreeNode graph it wants the
+// tree to own.
+type TreeNode struct {
+	// ID is a stable identifier for the node (a provider slug, a remote URL, a
+	// worktree path, a session id). It is display/lookup data, not rendered
+	// chrome; the settings TreeSelection keys off it.
+	ID string
+	// Label is the human-readable text drawn for the row.
+	Label string
+	// State is the node's current TriState. For a leaf it is the selection the
+	// user set (or a Conflict the source assigned); for an interior node it is
+	// recomputed by rollup from its Children.
+	State TriState
+	// Children are the node's ordered child nodes. A nil/empty slice marks a
+	// leaf.
+	Children []*TreeNode
+	// Meta is a display-only key/value bag (a branch name, a last-scanned
+	// timestamp, a conflict reason). It never affects selection, rollup, or
+	// dispatch - it exists so a source can attach context a future row
+	// renderer or the settings detail pane can surface.
+	Meta map[string]string
+}
+
+// Meta keys the tree ROW RENDERER understands. A [TreeSource] attaches them to
+// a node to annotate its row; like every other Meta entry they are display-only
+// and never affect selection, rollup, or dispatch. They live here, with the
+// renderer that reads them, and the settings layer re-exports them so a scanner
+// writes exactly the keys this renderer reads.
+const (
+	// MetaChildCount carries the number of child (subagent) sessions a parent
+	// session groups, in base 10. A parent session stays a LEAF row - its
+	// children are summarised on the row instead of nested - so the number of
+	// rows never depends on how many subagents a session spawned.
+	MetaChildCount = "childCount"
+	// MetaIngested marks a node whose transcript the local store already holds,
+	// so its row reads as already imported.
+	MetaIngested = "ingested"
+	// MetaIngestedValue is the value MetaIngested carries when set.
+	MetaIngestedValue = "true"
+)
+
+// isLeaf reports whether n has no children.
+func (n *TreeNode) isLeaf() bool { return len(n.Children) == 0 }
+
+// meta returns the value n carries for key, or "" when it carries none.
+func (n *TreeNode) meta(key string) string {
+	if n.Meta == nil {
+		return ""
+	}
+	return n.Meta[key]
+}
+
+// TreeSource loads the tree's node forest, potentially slowly (a real scan of
+// providers/remotes/worktrees/sessions). It is the ONLY asynchronous
+// field-data source in this component vocabulary: the kit tree renders a
+// spinner while Load is in flight and drops a late result whose generation no
+// longer matches (the stale guard). Load must honor ctx cancellation so a
+// re-source or teardown can abandon an in-flight scan.
+type TreeSource interface {
+	// Load returns the root nodes of the tree, or an error. It should return
+	// promptly once ctx is cancelled.
+	Load(ctx context.Context) ([]*TreeNode, error)
+}
+
+// treeLoadedMsg is the internal message a Tree's load command emits when a
+// [TreeSource.Load] returns. gen carries the load generation the command was
+// issued under so [Tree.Update] can drop a stale result (a load whose tree was
+// re-sourced or replaced before it returned) - the same generation-guard
+// pattern the preview slice uses.
+type treeLoadedMsg struct {
+	gen   uint64
+	nodes []*TreeNode
+	err   error
+}
+
+// Tree is the tri-state selection tree: it renders a provider -> remote ->
+// worktree -> session hierarchy with tri-state checkboxes, propagates a parent
+// toggle down to its descendants, rolls child state back up to Checked/Partial,
+// and renders a Conflict node distinctly. While its [TreeSource] is loading it
+// shows the kit [Spinner] AND keeps processing input (navigation across known
+// chrome, back, help) rather than blocking or drawing a blank frame; the
+// loaded forest replaces the spinner. A late load result is dropped by
+// generation (the stale guard) and an in-flight load is cancellable via
+// context.
+type Tree struct {
+	theme   theme.Theme
+	keymap  keymap.Keymap
+	src     TreeSource
+	spinner Spinner
+
+	roots    []*TreeNode
+	expanded map[*TreeNode]bool
+
+	loading bool
+	gen     uint64
+	cancel  context.CancelFunc
+	err     error
+
+	cursor  int
+	offset  int
+	width   int
+	height  int
+	focused bool
+}
+
+// NewTree builds a Tree over theme t that loads its forest from src. It starts
+// empty and not loading; call [Tree.Load] (batched with [Tree.Init] to start
+// the spinner) to begin a scan.
+func NewTree(t theme.Theme, src TreeSource) Tree {
+	return Tree{
+		theme:    t,
+		keymap:   keymap.Default(),
+		src:      src,
+		spinner:  NewSpinner(t, "scanning projects"),
+		expanded: map[*TreeNode]bool{},
+		width:    TreeMinSize.Width,
+		height:   TreeMinSize.Height,
+	}
+}
+
+// WithSource returns a copy of t re-pointed at src. It preserves the in-flight
+// generation and cancel func so a subsequent [Tree.Load] cancels any prior scan
+// and its result is dropped by the stale guard - the re-source path.
+func (t Tree) WithSource(src TreeSource) Tree {
+	t.src = src
+	return t
+}
+
+// Init returns the command that starts the spinner animation when the tree is
+// loading, or nil otherwise. A caller mounting the tree batches this with the
+// command from [Tree.Load] so the spinner ticks while the scan runs.
+func (t Tree) Init() tea.Cmd {
+	if t.loading {
+		return t.spinner.Tick()
+	}
+	return nil
+}
+
+// Load begins (or restarts) a scan: it cancels any in-flight load, opens a
+// fresh cancellable context, bumps the load generation, marks the tree
+// loading, and returns the command that runs [TreeSource.Load] and emits its
+// result tagged with this generation. A result whose generation no longer
+// matches when it arrives is dropped by [Tree.Update] (the stale guard). Batch
+// the returned command with [Tree.Init] to also start the spinner.
+func (t Tree) Load() (Tree, tea.Cmd) {
+	if t.cancel != nil {
+		t.cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.cancel = cancel
+	t.gen++
+	gen := t.gen
+	t.loading = true
+	t.err = nil
+	src := t.src
+	cmd := func() tea.Msg {
+		nodes, err := src.Load(ctx)
+		return treeLoadedMsg{gen: gen, nodes: nodes, err: err}
+	}
+	return t, cmd
+}
+
+// WithRoots returns a copy of t rendering the given forest instead of the one
+// its source last loaded, rolls the new forest's interior states up, and puts
+// the cursor back at the top. It is how a caller renders a FILTERED VIEW of a
+// loaded forest: the view shares the leaf pointers of the full forest, so a
+// selection made through it is a selection of the real nodes, and the caller
+// keeps the full forest for deriving what to persist. It does not re-run a
+// scan; use [Tree.Load] for that.
+func (t Tree) WithRoots(roots []*TreeNode) Tree {
+	t.roots = roots
+	t.cursor = 0
+	t.offset = 0
+	t.recompute()
+	t.clampWindow()
+	return t
+}
+
+// Focus gives the Tree keyboard focus.
+func (t *Tree) Focus() tea.Cmd { t.focused = true; return nil }
+
+// Blur removes keyboard focus.
+func (t *Tree) Blur() { t.focused = false }
+
+// Focused reports whether the Tree holds focus.
+func (t Tree) Focused() bool { return t.focused }
+
+var _ Focusable = (*Tree)(nil)
+
+// SetSize sets the inner region the Tree draws into (and the width the spinner
+// clips to), re-clamping the scroll window so the cursor stays visible.
+func (t *Tree) SetSize(width, height int) {
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
+	t.width = width
+	t.height = height
+	t.spinner.SetSize(width, 1)
+	t.clampWindow()
+}
+
+var _ Sizeable = (*Tree)(nil)
+
+// Loading reports whether a scan is currently in flight.
+func (t Tree) Loading() bool { return t.loading }
+
+// Err reports the error from the last completed load, or nil.
+func (t Tree) Err() error { return t.err }
+
+// Roots returns the tree's current root nodes (nil while loading or before the
+// first load completes).
+func (t Tree) Roots() []*TreeNode { return t.roots }
+
+// Cursor reports the current cursor index into the visible (expanded) rows.
+func (t Tree) Cursor() int { return t.cursor }
+
+// CurrentNode returns the node under the cursor and true, or nil and false
+// when there are no visible rows.
+func (t Tree) CurrentNode() (*TreeNode, bool) {
+	rows := t.visibleRows()
+	if t.cursor < 0 || t.cursor >= len(rows) {
+		return nil, false
+	}
+	return rows[t.cursor].node, true
+}
+
+// HasConflict reports whether any node in the forest is in Conflict - the
+// signal the settings slice's Validate/Commit consults to block on a
+// display-only conflict without persisting it.
+func (t Tree) HasConflict() bool {
+	var any bool
+	for _, r := range t.roots {
+		walk(r, func(n *TreeNode) {
+			if n.State == Conflict {
+				any = true
+			}
+		})
+	}
+	return any
+}
+
+// AvailableActions reports the actions the Tree dispatches in its current
+// state. While loading only Help/Back are live (navigation over an
+// as-yet-empty forest is a no-op but never blocks); once loaded the full
+// navigate/expand/collapse/toggle set is available.
+func (t Tree) AvailableActions() []keymap.ActionID {
+	if t.loading {
+		return []keymap.ActionID{keymap.ActionHelp, keymap.ActionBack}
+	}
+	return []keymap.ActionID{
+		keymap.ActionUp,
+		keymap.ActionDown,
+		keymap.ActionPageUp,
+		keymap.ActionPageDown,
+		keymap.ActionTop,
+		keymap.ActionBottom,
+		keymap.ActionNextProject,
+		keymap.ActionPrevProject,
+		keymap.ActionCollapse,
+		keymap.ActionExpand,
+		keymap.ActionCollapseLevel,
+		keymap.ActionExpandLevel,
+		keymap.ActionCollapseAll,
+		keymap.ActionExpandAll,
+		keymap.ActionToggle,
+		keymap.ActionSelectAll,
+		keymap.ActionSelectUnderProject,
+		keymap.ActionHelp,
+		keymap.ActionBack,
+	}
+}
+
+var _ keymap.Availability = Tree{}
+
+// Update advances the tree on a load result, a spinner tick, or a dispatched
+// key action, and returns the concrete Tree plus any follow-up command.
+func (t Tree) Update(msg tea.Msg) (Tree, tea.Cmd) {
+	switch m := msg.(type) {
+	case treeLoadedMsg:
+		// Stale guard: a result whose generation no longer matches was
+		// re-sourced or replaced before it returned - drop it.
+		if m.gen != t.gen {
+			return t, nil
+		}
+		t.loading = false
+		if m.err != nil {
+			t.err = m.err
+			t.roots = nil
+			return t, nil
+		}
+		t.roots = m.nodes
+		t.recompute()
+		t.cursor = 0
+		t.offset = 0
+		t.clampWindow()
+		return t, nil
+	case spinner.TickMsg:
+		if !t.loading {
+			return t, nil
+		}
+		var cmd tea.Cmd
+		t.spinner, cmd = t.spinner.Update(msg)
+		return t, cmd
+	case tea.KeyPressMsg:
+		return t.handleKey(m)
+	default:
+		return t, nil
+	}
+}
+
+// handleKey dispatches a key press through the keymap. Unmatched keys, and any
+// navigation while loading, leave the tree unchanged (input stays live but
+// there is nothing yet to move over).
+func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
+	action, ok := keymap.Match(t.keymap, msg, t)
+	if !ok {
+		return t, nil
+	}
+	if t.loading {
+		// Input is processed (never dropped/blocked) but there is no forest to
+		// navigate yet; Back/Help are handled by the parent.
+		return t, nil
+	}
+	rows := t.visibleRows()
+	page := t.height
+	if page < 1 {
+		page = 1
+	}
+	switch action {
+	case keymap.ActionUp:
+		t.moveCursor(-1, len(rows))
+	case keymap.ActionDown:
+		t.moveCursor(1, len(rows))
+	case keymap.ActionPageUp:
+		t.moveCursor(-page, len(rows))
+	case keymap.ActionPageDown:
+		t.moveCursor(page, len(rows))
+	case keymap.ActionTop:
+		t.moveCursor(-len(rows), len(rows))
+	case keymap.ActionBottom:
+		t.moveCursor(len(rows), len(rows))
+	case keymap.ActionNextProject:
+		t.moveToProject(1)
+	case keymap.ActionPrevProject:
+		t.moveToProject(-1)
+	case keymap.ActionExpand:
+		if node, okc := t.CurrentNode(); okc && !node.isLeaf() {
+			t.expanded[node] = true
+			t.clampWindow()
+		}
+	case keymap.ActionCollapse:
+		if node, okc := t.CurrentNode(); okc && !node.isLeaf() {
+			t.expanded[node] = false
+			t.clampWindow()
+		}
+	case keymap.ActionExpandLevel:
+		t.setLevelExpanded(true)
+	case keymap.ActionCollapseLevel:
+		t.setLevelExpanded(false)
+	case keymap.ActionExpandAll:
+		t.setAllExpanded(true)
+	case keymap.ActionCollapseAll:
+		t.setAllExpanded(false)
+	case keymap.ActionToggle:
+		if node, okc := t.CurrentNode(); okc {
+			t.toggle(node)
+		}
+	case keymap.ActionSelectAll:
+		t.toggleAll()
+	case keymap.ActionSelectUnderProject:
+		t.selectUnderProject()
+	}
+	return t, nil
+}
+
+// moveCursor moves the cursor by delta over count rows, clamped, then
+// re-clamps the scroll window.
+func (t *Tree) moveCursor(delta, count int) {
+	if count == 0 {
+		t.cursor = 0
+		t.offset = 0
+		return
+	}
+	t.cursor += delta
+	if t.cursor < 0 {
+		t.cursor = 0
+	}
+	if t.cursor >= count {
+		t.cursor = count - 1
+	}
+	t.clampWindow()
+}
+
+// toggle flips a node's selection and propagates: a node currently Checked
+// becomes Unchecked, anything else becomes Checked; the new state is pushed
+// down to every selectable descendant (Conflict leaves are left as-is - a
+// deleted-worktree selection cannot be selected), then interior states are
+// rolled back up.
+func (t *Tree) toggle(node *TreeNode) {
+	if node.isLeaf() && node.State == Conflict {
+		return
+	}
+	target := Checked
+	if node.State == Checked {
+		target = Unchecked
+	}
+	setSubtree(node, target)
+	t.recompute()
+}
+
+// toggleAll selects the whole forest, or clears it when everything selectable
+// is already Checked (a root-level select-all / clear-all toggle).
+func (t *Tree) toggleAll() {
+	target := Checked
+	if t.allChecked() {
+		target = Unchecked
+	}
+	for _, r := range t.roots {
+		setSubtree(r, target)
+	}
+	t.recompute()
+}
+
+// allChecked reports whether every non-Conflict node in the forest is Checked.
+// A forest containing a Conflict is never "all checked", so select-all keeps
+// selecting rather than flipping to clear.
+func (t Tree) allChecked() bool {
+	all := true
+	for _, r := range t.roots {
+		walk(r, func(n *TreeNode) {
+			if n.State != Checked {
+				all = false
+			}
+		})
+	}
+	return all && len(t.roots) > 0
+}
+
+// setAllExpanded expands (or collapses) every interior node in the whole
+// forest at once, then re-clamps the scroll window so the cursor stays visible.
+func (t *Tree) setAllExpanded(expand bool) {
+	for _, r := range t.roots {
+		walk(r, func(n *TreeNode) {
+			if !n.isLeaf() {
+				t.expanded[n] = expand
+			}
+		})
+	}
+	t.clampWindow()
+}
+
+// setLevelExpanded expands (or collapses) every branch of the project the
+// cursor sits in - the interior children of the cursor node's top-level
+// (project) ancestor. Whether the cursor is on the project itself or on one of
+// its branches, the whole branch level moves together.
+func (t *Tree) setLevelExpanded(expand bool) {
+	node, ok := t.CurrentNode()
+	if !ok {
+		return
+	}
+	root := t.rootAncestor(node)
+	for _, c := range root.Children {
+		if !c.isLeaf() {
+			t.expanded[c] = expand
+		}
+	}
+	t.clampWindow()
+}
+
+// selectUnderProject checks every selectable session under the project the
+// cursor sits in (the cursor node's top-level ancestor), then rolls interior
+// state back up. It always selects; it is not a clear toggle.
+func (t *Tree) selectUnderProject() {
+	node, ok := t.CurrentNode()
+	if !ok {
+		return
+	}
+	root := t.rootAncestor(node)
+	setSubtree(root, Checked)
+	t.recompute()
+}
+
+// moveToProject moves the cursor to the next (delta>0) or previous (delta<0)
+// top-level project root, then re-clamps the scroll window. It clamps at the
+// first and last project, so it is a no-op past either end.
+func (t *Tree) moveToProject(delta int) {
+	node, ok := t.CurrentNode()
+	if !ok {
+		return
+	}
+	root := t.rootAncestor(node)
+	idx := -1
+	for i, r := range t.roots {
+		if r == root {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	target := idx + delta
+	if target < 0 {
+		target = 0
+	}
+	if target >= len(t.roots) {
+		target = len(t.roots) - 1
+	}
+	targetRoot := t.roots[target]
+	for i, r := range t.visibleRows() {
+		if r.node == targetRoot {
+			t.cursor = i
+			break
+		}
+	}
+	t.clampWindow()
+}
+
+// rootAncestor returns the top-level forest root that node descends from
+// (node itself when it is already a root).
+func (t Tree) rootAncestor(node *TreeNode) *TreeNode {
+	parent := t.parentIndex()
+	for {
+		p, ok := parent[node]
+		if !ok || p == nil {
+			return node
+		}
+		node = p
+	}
+}
+
+// parentIndex maps each node to its parent across the whole forest. Roots are
+// absent from the map. The tree stores only child pointers, so this is rebuilt
+// on demand for the ancestor lookups the level and project operations need.
+func (t Tree) parentIndex() map[*TreeNode]*TreeNode {
+	parent := map[*TreeNode]*TreeNode{}
+	var visit func(n *TreeNode)
+	visit = func(n *TreeNode) {
+		for _, c := range n.Children {
+			parent[c] = n
+			visit(c)
+		}
+	}
+	for _, r := range t.roots {
+		visit(r)
+	}
+	return parent
+}
+
+// recompute rolls every interior node's state up from its children across the
+// whole forest.
+func (t *Tree) recompute() {
+	for _, r := range t.roots {
+		rollup(r)
+	}
+}
+
+// setSubtree sets state on node and every descendant, skipping Conflict leaves
+// (a display-only conflict is not user-selectable).
+func setSubtree(node *TreeNode, state TriState) {
+	if node.isLeaf() {
+		if node.State == Conflict {
+			return
+		}
+		node.State = state
+		return
+	}
+	for _, c := range node.Children {
+		setSubtree(c, state)
+	}
+}
+
+// rollup recomputes node.State from its children, bottom-up. A leaf keeps its
+// own state (including a Conflict the source assigned). An interior node is
+// Checked when every child is Checked, Unchecked when every child is
+// Unchecked, and Partial otherwise - and any Conflict or Partial among the
+// children forces at least Partial, so a conflict is never hidden behind a
+// clean parent.
+func rollup(node *TreeNode) TriState {
+	if node.isLeaf() {
+		return node.State
+	}
+	allChecked, allUnchecked := true, true
+	forcePartial := false
+	for _, c := range node.Children {
+		cs := rollup(c)
+		switch cs {
+		case Checked:
+			allUnchecked = false
+		case Unchecked:
+			allChecked = false
+		default: // Partial or Conflict
+			allChecked, allUnchecked = false, false
+			forcePartial = true
+		}
+	}
+	switch {
+	case forcePartial:
+		node.State = Partial
+	case allChecked:
+		node.State = Checked
+	case allUnchecked:
+		node.State = Unchecked
+	default:
+		node.State = Partial
+	}
+	return node.State
+}
+
+// walk visits node and every descendant in pre-order.
+func walk(node *TreeNode, fn func(*TreeNode)) {
+	fn(node)
+	for _, c := range node.Children {
+		walk(c, fn)
+	}
+}
+
+// treeRow is one visible (expanded-into) row: the node and its depth.
+type treeRow struct {
+	node  *TreeNode
+	depth int
+}
+
+// visibleRows flattens the forest into the ordered rows currently visible,
+// descending into a node's children only when it is expanded. A node is
+// expanded by default (absent from the expanded map); collapse records false.
+func (t Tree) visibleRows() []treeRow {
+	var rows []treeRow
+	var visit func(n *TreeNode, depth int)
+	visit = func(n *TreeNode, depth int) {
+		rows = append(rows, treeRow{node: n, depth: depth})
+		if n.isLeaf() {
+			return
+		}
+		if collapsed, ok := t.expanded[n]; ok && !collapsed {
+			return
+		}
+		for _, c := range n.Children {
+			visit(c, depth+1)
+		}
+	}
+	for _, r := range t.roots {
+		visit(r, 0)
+	}
+	return rows
+}
+
+// treeScrollMargin keeps this many rows visible above and below the cursor when
+// the forest is taller than the viewport, so the list scrolls before the cursor
+// reaches the very edge (like a "scrolloff"). It shrinks automatically when the
+// viewport is too short to honour it at both ends.
+const treeScrollMargin = 5
+
+// flattenLine collapses any newlines, carriage returns, and tabs in s into
+// single spaces, so a value that spans multiple lines still renders as exactly
+// one display line.
+func flattenLine(s string) string {
+	if !strings.ContainsAny(s, "\n\r\t") {
+		return s
+	}
+	replacer := strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\t", " ")
+	return replacer.Replace(s)
+}
+
+// clampWindow scrolls the visible window so the cursor stays inside it, keeping a
+// treeScrollMargin of context above and below where the forest allows.
+func (t *Tree) clampWindow() {
+	count := len(t.visibleRows())
+	if t.cursor >= count {
+		t.cursor = count - 1
+	}
+	if t.cursor < 0 {
+		t.cursor = 0
+	}
+	if t.height < 1 || count == 0 {
+		t.offset = 0
+		return
+	}
+	margin := treeScrollMargin
+	if half := t.height / 2; margin > half {
+		margin = half
+	}
+	if t.cursor < t.offset+margin {
+		t.offset = t.cursor - margin
+	}
+	if t.cursor+margin+1 > t.offset+t.height {
+		t.offset = t.cursor - t.height + margin + 1
+	}
+	// Never scroll past the ends: the window is [0, count-height].
+	maxOffset := count - t.height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if t.offset > maxOffset {
+		t.offset = maxOffset
+	}
+	if t.offset < 0 {
+		t.offset = 0
+	}
+}
+
+// View renders the tree. While loading it renders the spinner. Once loaded it
+// renders exactly height rows of the visible window; an empty forest renders a
+// muted placeholder; a load error renders it muted. Below TreeMinSize it
+// renders a single truncation-safe line.
+func (t Tree) View() string {
+	styles := t.theme.Styles()
+	if t.loading {
+		return t.spinner.View()
+	}
+	if !TreeMinSize.fitsWithin(t.width, t.height) {
+		return t.minFallback(styles)
+	}
+	if t.err != nil {
+		return fitLine(styles.Muted, "scan failed", t.width)
+	}
+	rows := t.visibleRows()
+	if len(rows) == 0 {
+		return fitLine(styles.Muted, "no projects", t.width)
+	}
+	end := t.offset + t.height
+	if end > len(rows) {
+		end = len(rows)
+	}
+	out := make([]string, 0, t.height)
+	for i := t.offset; i < end; i++ {
+		out = append(out, t.renderRow(styles, rows[i], i == t.cursor))
+	}
+	for len(out) < t.height {
+		out = append(out, fitLine(styles.Base, "", t.width))
+	}
+	return joinLines(out)
+}
+
+// minFallback renders one truncation-safe line when the region is below the
+// declared minimum: the cursor row's node if there is one, else a placeholder.
+func (t Tree) minFallback(styles theme.Styles) string {
+	if node, ok := t.CurrentNode(); ok {
+		return styles.Muted.Render(truncateLine(flattenLine(node.Label), t.width))
+	}
+	if t.loading {
+		return truncateLine(t.spinner.View(), t.width)
+	}
+	return truncateLine(styles.Muted.Render("no projects"), t.width)
+}
+
+// renderRow renders one visible row to exactly t.width cells: cursor, indent,
+// expand glyph, tri-state box, the label, then the row's muted annotations.
+// Segments are styled individually and the label is fit into the remaining
+// budget so the row fills the width exactly; when the fixed prefix cannot fit
+// (deep indent in a narrow region) it falls back to a single hard-truncated
+// line so the width invariant always holds.
+func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool) string {
+	node := row.node
+	// A label MUST render as exactly one display line: a newline in the label
+	// (e.g. a multi-line first-turn title) would otherwise split one row across
+	// several lines, breaking the row background and the cursor/scroll math that
+	// counts one row per line. The annotations are appended on the SAME line for
+	// the same reason.
+	label := flattenLine(node.Label)
+	cur := styledCursor(styles, active)
+	indent := spaces(row.depth * 2)
+	expand := expandGlyph(node, t.expanded)
+	box := stateBox(styles, node.State)
+	annotation := rowAnnotation(node)
+
+	prefixPlain := noCursorGlyph + indent + expand + " " + box + " "
+	prefixWidth := lipgloss.Width(prefixPlain)
+	labelBudget := t.width - prefixWidth
+	if labelBudget < 1 {
+		// Narrow region: styled segments would not fit, so hard-truncate the
+		// whole plain row and style it as a unit - never overflow the width.
+		plain := stripCursor(active) + indent + expand + " " + box + " " + label + annotation
+		style := styles.Base
+		if active {
+			style = styles.Selected
+		}
+		return style.Render(truncateLine(plain, t.width))
+	}
+
+	labelStyle := styles.Base
+	switch {
+	case active:
+		labelStyle = styles.Selected
+	case node.State == Conflict:
+		labelStyle = styles.Danger
+	}
+	return cur +
+		styles.Base.Render(indent) +
+		styles.Muted.Render(expand+" ") +
+		box +
+		styles.Base.Render(" ") +
+		t.renderLabel(styles, labelStyle, label, annotation, labelBudget, active)
+}
+
+// minAnnotatedLabelCells is the smallest label remainder an annotation may
+// leave. Below it the annotation is dropped so a narrow pane always shows the
+// session title rather than only its trailing count.
+const minAnnotatedLabelCells = 8
+
+// renderLabel fits the label and its trailing annotation into exactly budget
+// cells: the label first, the muted annotation right after it, and the leftover
+// padded in the label's own style so an active row's highlight still spans the
+// full width. An annotation that would squeeze the label below
+// minAnnotatedLabelCells is dropped entirely rather than crowding out the title.
+func (t Tree) renderLabel(styles theme.Styles, labelStyle lipgloss.Style, label, annotation string, budget int, active bool) string {
+	annWidth := lipgloss.Width(annotation)
+	if annWidth > 0 && budget-annWidth < minAnnotatedLabelCells {
+		annotation, annWidth = "", 0
+	}
+	if annWidth == 0 {
+		return fitLine(labelStyle, label, budget)
+	}
+	clipped := truncateLine(label, budget-annWidth)
+	// On the active row the annotation shares the highlight so the row reads as
+	// one selected band; elsewhere it stays muted next to the title.
+	annStyle := styles.Muted
+	if active {
+		annStyle = labelStyle
+	}
+	pad := budget - lipgloss.Width(clipped) - annWidth
+	return labelStyle.Render(clipped) + annStyle.Render(annotation) + labelStyle.Render(spaces(pad))
+}
+
+// rowAnnotation returns the muted text a node appends to its label: how many
+// child sessions it groups (a parent session summarises its subagents instead
+// of nesting them) and whether the local store already holds it. Both come from
+// display-only Meta a TreeSource attached; a node carrying neither annotates
+// nothing.
+func rowAnnotation(node *TreeNode) string {
+	var b strings.Builder
+	if n := childCountOf(node); n > 0 {
+		if n == 1 {
+			b.WriteString(" + 1 child session")
+		} else {
+			fmt.Fprintf(&b, " + %d child sessions", n)
+		}
+	}
+	if node.meta(MetaIngested) == MetaIngestedValue {
+		b.WriteString("  already imported")
+	}
+	return b.String()
+}
+
+// childCountOf reports the child-session count a node carries, or 0 when it
+// carries none or an unreadable one (a malformed count annotates nothing rather
+// than failing the render).
+func childCountOf(node *TreeNode) int {
+	raw := node.meta(MetaChildCount)
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// stripCursor returns the plain (unstyled) cursor prefix for the fallback row.
+func stripCursor(active bool) string {
+	if active {
+		return cursorGlyph
+	}
+	return noCursorGlyph
+}
+
+// expandGlyph returns the plain expand/collapse indicator for a node: a
+// down-pointing triangle when expanded, a right-pointing one when collapsed,
+// and a space for a leaf. Each is one cell wide.
+func expandGlyph(node *TreeNode, expanded map[*TreeNode]bool) string {
+	if node.isLeaf() {
+		return " "
+	}
+	if collapsed, ok := expanded[node]; ok && !collapsed {
+		return treeCollapsedGlyph
+	}
+	return treeExpandedGlyph
+}
+
+// stateBox returns the tri-state checkbox for a node, styled distinctly per
+// state so a Conflict reads differently from an Unchecked box at a glance.
+func stateBox(styles theme.Styles, state TriState) string {
+	switch state {
+	case Checked:
+		return styles.Success.Render(checkedBox)
+	case Partial:
+		return styles.Warning.Render(partialBox)
+	case Conflict:
+		return styles.Danger.Render(conflictBox)
+	default:
+		return styles.Muted.Render(uncheckedBox)
+	}
+}
+
+// joinLines joins rendered rows with newlines without importing strings for a
+// one-liner (kept local to the render helpers).
+func joinLines(lines []string) string {
+	out := ""
+	for i, l := range lines {
+		if i > 0 {
+			out += "\n"
+		}
+		out += l
+	}
+	return out
+}
+
+// Tree row glyph vocabulary. The boxes are all three cells wide so a column of
+// mixed states stays aligned; the expand glyphs are one cell wide.
+const (
+	treeExpandedGlyph  = "▾"
+	treeCollapsedGlyph = "▸"
+	partialBox         = "[~]"
+	conflictBox        = "[!]"
+)
