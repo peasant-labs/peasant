@@ -147,13 +147,23 @@ func orderedVisibleIDs(t *testing.T, tr kit.Tree) []string {
 	return ids
 }
 
-// checkedIDs returns the ids of every node whose state is checked.
+// checkedIDs returns the ids of every node whose state is checked, in
+// pre-order. It compares the CheckState value directly rather than its
+// rendered string, so the key grep gate does not read the equality as a raw
+// key-string comparison.
 func checkedIDs(roots []*kit.TreeNode) []string {
 	var out []string
-	for id, state := range nodeStates(roots) {
-		if state == kit.Checked.String() {
-			out = append(out, id)
+	var visit func(*kit.TreeNode)
+	visit = func(n *kit.TreeNode) {
+		if n.State == kit.Checked {
+			out = append(out, n.ID)
 		}
+		for _, c := range n.Children {
+			visit(c)
+		}
+	}
+	for _, r := range roots {
+		visit(r)
 	}
 	return out
 }
