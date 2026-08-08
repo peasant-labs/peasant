@@ -1,7 +1,7 @@
 # One canonical registry is mounted by both production presentations for every
 # row. The section contract and scenario counts prevent silent loss of a field,
 # conditional section, or parity behavior.
-expectedSectionCount: 7
+expectedSectionCount: 6
 sections:
   - key: selection
     title: choose transcripts to import
@@ -45,14 +45,6 @@ sections:
     fieldText: how long claude code keeps its transcripts
     guideIntro: choose how long claude keeps local transcripts.
     conditional: true
-  - key: receipt
-    title: review and save
-    fieldKey: summary
-    fieldKind: info
-    fieldText: 'transcripts:'
-    guideIntro: review settings before local import begins.
-    conditional: false
-
 forbiddenRegistryOptions:
   expectedNameCount: 5
   names: [presentation, configmode, hide, replace, screen]
@@ -65,7 +57,7 @@ rows:
     villageConnected: false
     claudeSessionsPresent: false
     initialRetention: 30
-    expectedVisibleSections: [selection, privacy, license, receipt]
+    expectedVisibleSections: [selection, privacy, license]
 
   - name: connected selected-mode visibility and framing
     operation: visibility
@@ -73,7 +65,7 @@ rows:
     villageConnected: true
     claudeSessionsPresent: true
     initialRetention: 30
-    expectedVisibleSections: [selection, auto-ingest, privacy, license, destination, retention, receipt]
+    expectedVisibleSections: [selection, auto-ingest, privacy, license, destination, retention]
 
   - name: transient retention accessor and dirty parity
     operation: transient-dirty
@@ -82,7 +74,7 @@ rows:
     claudeSessionsPresent: true
     initialRetention: 30
     selectedRetention: 90
-    expectedVisibleSections: [selection, privacy, license, retention, receipt]
+    expectedVisibleSections: [selection, privacy, license, retention]
 
   - name: yaml-backed accessor and persistence parity
     operation: persisted-edit
@@ -91,7 +83,7 @@ rows:
     claudeSessionsPresent: false
     initialRetention: 30
     selectedLicense: CC0-1.0
-    expectedVisibleSections: [selection, privacy, license, receipt]
+    expectedVisibleSections: [selection, privacy, license]
 
   - name: hidden section edit drop and persistence parity
     operation: hidden-drop
@@ -100,7 +92,7 @@ rows:
     claudeSessionsPresent: false
     initialRetention: 30
     expectedAutoIngest: true
-    expectedVisibleSections: [selection, auto-ingest, privacy, license, receipt]
+    expectedVisibleSections: [selection, auto-ingest, privacy, license]
 
   - name: external drift fails closed in both presentations
     operation: drift-failure
@@ -109,4 +101,4 @@ rows:
     claudeSessionsPresent: false
     initialRetention: 30
     selectedLicense: CC0-1.0
-    expectedVisibleSections: [selection, privacy, license, receipt]
+    expectedVisibleSections: [selection, privacy, license]

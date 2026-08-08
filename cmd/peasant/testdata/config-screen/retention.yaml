@@ -8,6 +8,9 @@ cases:
     expectScreenDirty: false
     expectDraftDirty: false
     expectWriterCalls: 0
+    viewScanSteps: 8
+    wantViewContains: [ctrl+s, save]
+    wantViewMissing: [press enter to save, review your changes]
   - name: retention-only edit is visible without changing yaml dirty state
     scenario: retention-only-dirty
     initialRetention: 30

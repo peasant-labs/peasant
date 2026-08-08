@@ -24,11 +24,19 @@ import (
 )
 
 type kickstartCommandDeps struct {
-	discover     func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
-	getwd        func() (string, error)
-	run          func(ftue.WizardModel) error
-	runFlow      func(tea.Model) error
-	existingUser func(string) string
+	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
+	getwd    func() (string, error)
+	// run is the retained legacy terminal boundary. Production selects runFlow;
+	// tests for still-shipping legacy behavior deliberately omit runFlow.
+	run func(ftue.WizardModel) error
+	// runFlow is the guided orchestration selected by the production builder.
+	// runModel is only its terminal execution boundary, so tests can inspect the
+	// real mounted Program without replacing the production path decision.
+	runFlow  func(*cobra.Command, kickstartCommandDeps, string, ftue.ProviderInventory, []ftue.SessionListing) error
+	runModel func(tea.Model) error
+	// readRetention is the external Claude settings read used before Flow mounts.
+	readRetention func() (int, bool)
+	existingUser  func(string) string
 }
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
@@ -39,10 +47,12 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			_, err := tea.NewProgram(model).Run()
 			return err
 		},
-		runFlow: func(model tea.Model) error {
+		runFlow: runKickstartFlow,
+		runModel: func(model tea.Model) error {
 			_, err := tea.NewProgram(model).Run()
 			return err
 		},
+		readRetention: ftue.ReadClaudeCleanupDays,
 		existingUser: func(configDir string) string {
 			if creds, err := auth.LoadCredentialsFrom(configDir); err == nil && creds != nil && creds.IsValid() {
 				return creds.Username
@@ -115,7 +125,7 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// runLegacyFTUEWizard); its view layer is retired in a separate,
 			// user-confirmed step.
 			if deps.runFlow != nil {
-				if err := runKickstartFlow(cmd, deps, configPath, inventory, sessions); err != nil {
+				if err := deps.runFlow(cmd, deps, configPath, inventory, sessions); err != nil {
 					return fmt.Errorf("setup flow failed: %w", err)
 				}
 				return nil

@@ -76,6 +76,9 @@ type configRetentionFixture struct {
 	ExpectScreenDirty bool                    `yaml:"expectScreenDirty"`
 	ExpectDraftDirty  bool                    `yaml:"expectDraftDirty"`
 	ExpectWriterCalls int                     `yaml:"expectWriterCalls"`
+	ViewScanSteps     int                     `yaml:"viewScanSteps"`
+	WantViewContains  []string                `yaml:"wantViewContains"`
+	WantViewMissing   []string                `yaml:"wantViewMissing"`
 }
 
 type configRetentionDocument struct {
@@ -233,6 +236,7 @@ func TestConfigCommand_RetentionFixtures(t *testing.T) {
 			world.selectedRetention = fixture.SelectedRetention
 			world.editLicense = fixture.EditLicense
 			world.sourceName = "standard"
+			world.viewScanSteps = fixture.ViewScanSteps
 			if fixture.Scenario == configRetentionValidation {
 				world.sourceName = "conflict"
 				world.useSelectedConfig(t)
@@ -429,6 +433,8 @@ type configScreenWorld struct {
 	observedDraftDirty  bool
 	observedScreenErr   error
 	writerSawCommitted  bool
+	observedViews       string
+	viewScanSteps       int
 }
 
 func newConfigScreenWorld(t *testing.T, retention int) *configScreenWorld {
@@ -512,31 +518,31 @@ func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
 
 	switch w.scenario {
 	case configRetentionClean:
-		w.observe(model)
+		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
 	case configRetentionDirty:
 		model = w.editRetention(model)
-		w.observe(model)
+		model = w.observe(model)
 	case configRetentionDiscard:
 		model = w.editRetention(model)
 		model = w.editLicenseFromRetention(model)
-		w.observe(model)
+		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("esc"))
 		model = configScreenUpdate(model, configScreenKey("left"))
 		model = configScreenUpdate(model, configScreenKey("enter"))
 	case configRetentionOrdered:
 		model = w.editRetention(model)
 		model = w.editLicenseFromRetention(model)
-		w.observe(model)
+		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
 	case configRetentionValidation:
-		w.observe(model)
+		model = w.observe(model)
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
-		w.observeError(model)
+		model = w.observeError(model)
 	case configRetentionDrift:
 		model = w.editRetention(model)
 		model = w.editLicenseFromRetention(model)
-		w.observe(model)
+		model = w.observe(model)
 		external := config.BaseConfig()
 		external.User.Email = "external-edit@example.test"
 		if err := config.SaveAtomic(w.configPath, external); err != nil {
@@ -548,7 +554,7 @@ func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
 			return model, err
 		}
 		model = configScreenUpdate(model, configScreenKey("ctrl+s"))
-		w.observeError(model)
+		model = w.observeError(model)
 	}
 	return model, nil
 }
@@ -587,20 +593,47 @@ func (w *configScreenWorld) initialRetention() int {
 	return days
 }
 
-func (w *configScreenWorld) observe(model tea.Model) {
+func (w *configScreenWorld) observe(model tea.Model) tea.Model {
 	if host, ok := model.(*configScreenModel); ok {
 		w.observedScreenDirty = host.screen.Dirty()
 		w.observedDraftDirty = host.draft.Dirty()
 		w.observedScreenErr = host.screen.Err()
+		model, w.observedViews = configScreenVisibleViews(model, w.viewScanSteps)
 	}
+	return model
 }
 
-func (w *configScreenWorld) observeError(model tea.Model) {
-	w.observe(model)
+func configScreenVisibleViews(model tea.Model, steps int) (tea.Model, string) {
+	if steps < 1 {
+		steps = 1
+	}
+	views := make([]string, 0, steps)
+	current := model
+	for step := 0; step < steps; step++ {
+		views = append(views, ansiPattern.ReplaceAllString(current.View().Content, ""))
+		if step+1 < steps {
+			current = configScreenUpdate(current, configScreenKey("down"))
+		}
+	}
+	return current, strings.Join(views, "\n")
+}
+
+func (w *configScreenWorld) observeError(model tea.Model) tea.Model {
+	return w.observe(model)
 }
 
 func (w *configScreenWorld) assertScenarioOutcome(t *testing.T, fixture configRetentionFixture, stdout string) {
 	t.Helper()
+	for _, want := range fixture.WantViewContains {
+		if !strings.Contains(w.observedViews, want) {
+			t.Errorf("config Screen views do not contain %q:\n%s", want, w.observedViews)
+		}
+	}
+	for _, missing := range fixture.WantViewMissing {
+		if strings.Contains(w.observedViews, missing) {
+			t.Errorf("config Screen views contain guided-only instruction %q:\n%s", missing, w.observedViews)
+		}
+	}
 	configAfter := mustReadConfigScreenFile(t, w.configPath)
 	claudeAfter := mustReadConfigScreenFile(t, w.claudePath)
 	switch fixture.Scenario {

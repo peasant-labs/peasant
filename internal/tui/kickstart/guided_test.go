@@ -23,7 +23,7 @@ import (
 
 const (
 	expectedGuidedFramingRows       = 12
-	expectedGuidedLifecycleRows     = 2
+	expectedGuidedLifecycleRows     = 3
 	expectedForbiddenAuthorityNames = 5
 )
 
@@ -33,11 +33,12 @@ const (
 	guidedSurfaceConnect         guidedSurface = "connect"
 	guidedSurfaceRegistrySection guidedSurface = "registry-section"
 	guidedSurfaceDerivedExample  guidedSurface = "derived-example"
+	guidedSurfaceSummary         guidedSurface = "guided-summary"
 )
 
 func (s guidedSurface) valid() bool {
 	switch s {
-	case guidedSurfaceConnect, guidedSurfaceRegistrySection, guidedSurfaceDerivedExample:
+	case guidedSurfaceConnect, guidedSurfaceRegistrySection, guidedSurfaceDerivedExample, guidedSurfaceSummary:
 		return true
 	default:
 		return false
@@ -93,15 +94,17 @@ type authorityGuardFixture struct {
 }
 
 type guidedLifecycleRow struct {
-	Name              string          `yaml:"name"`
-	Operation         guidedOperation `yaml:"operation"`
-	EditLicense       config.License  `yaml:"editLicense"`
-	RetentionDays     int             `yaml:"retentionDays"`
-	WantCommitted     bool            `yaml:"wantCommitted"`
-	WantExited        bool            `yaml:"wantExited"`
-	WantConfigChanged bool            `yaml:"wantConfigChanged"`
-	WantEffects       []string        `yaml:"wantEffects"`
-	WantIngestResult  bool            `yaml:"wantIngestResult"`
+	Name                   string          `yaml:"name"`
+	Operation              guidedOperation `yaml:"operation"`
+	EditLicense            config.License  `yaml:"editLicense"`
+	RetentionDays          int             `yaml:"retentionDays"`
+	ClaudeSessionsPresent  bool            `yaml:"claudeSessionsPresent"`
+	WantCommitted          bool            `yaml:"wantCommitted"`
+	WantExited             bool            `yaml:"wantExited"`
+	WantConfigChanged      bool            `yaml:"wantConfigChanged"`
+	WantEffects            []string        `yaml:"wantEffects"`
+	WantIngestResult       bool            `yaml:"wantIngestResult"`
+	WantRetentionSawCommit bool            `yaml:"wantRetentionSawCommit"`
 }
 
 type guidedLifecycleDoc struct {
@@ -150,6 +153,10 @@ func loadGuidedFramingDoc(t *testing.T) guidedFramingDoc {
 		case guidedSurfaceConnect:
 			if len(row.WantContains) == 0 {
 				t.Fatalf("guided framing row %q asserts no connect copy", row.Name)
+			}
+		case guidedSurfaceSummary:
+			if len(row.WantContains) == 0 {
+				t.Fatalf("guided framing row %q asserts no review summary", row.Name)
 			}
 		case guidedSurfaceRegistrySection, guidedSurfaceDerivedExample:
 			if row.SectionKey == "" || row.SectionTitle == "" || row.FieldKey == "" ||
@@ -363,6 +370,23 @@ func TestGuidedFramingFixture(t *testing.T) {
 				if !called {
 					t.Fatal("guided Flow did not invoke the section's optional Example")
 				}
+			case guidedSurfaceSummary:
+				draft.Working().Push.License = config.LicenseCC0
+				reg := kickstart.BuildRegistry(kickstart.Options{Source: scannerfix.NewFixtureTreeSource("standard")})
+				flow := settings.NewFlow(th, reg, draft)
+				flow.SetSize(120, 40)
+				for step := 0; step <= len(reg.Sections) && !flow.OnReceipt(); step++ {
+					flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+				}
+				if !flow.OnReceipt() {
+					t.Fatal("guided Flow did not reach its presentation-owned review summary")
+				}
+				view := stripRender(flow.View())
+				for _, want := range row.WantContains {
+					if !strings.Contains(view, want) {
+						t.Errorf("guided review summary does not contain %q:\n%s", want, view)
+					}
+				}
 			}
 		})
 	}
@@ -391,7 +415,7 @@ func TestGuidedLifecycleFixture(t *testing.T) {
 				Theme:                 theme.New(theme.ModeDark),
 				Draft:                 draft,
 				Source:                scannerfix.NewFixtureTreeSource("standard"),
-				ClaudeSessionsPresent: true,
+				ClaudeSessionsPresent: row.ClaudeSessionsPresent,
 				RetentionDays:         0,
 				Retention: kickstart.RetentionWriterFunc(func(int) error {
 					effects = append(effects, "retention")
@@ -433,8 +457,9 @@ func TestGuidedLifecycleFixture(t *testing.T) {
 			if !reflect.DeepEqual(effects, row.WantEffects) {
 				t.Errorf("effect order = %v, want %v", effects, row.WantEffects)
 			}
-			if row.WantCommitted && !retentionSawCommit {
-				t.Error("retention writer did not observe the already committed config edit")
+			if retentionSawCommit != row.WantRetentionSawCommit {
+				t.Errorf("retention writer observed committed config = %t, want %t",
+					retentionSawCommit, row.WantRetentionSawCommit)
 			}
 			if got := program.IngestResult() != nil; got != row.WantIngestResult {
 				t.Errorf("ingest result present = %t, want %t", got, row.WantIngestResult)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -51,7 +52,7 @@ func runKickstartFlow(
 	// cleanup setting so its cursor lands on the value already in force (or the
 	// recommended keep-forever when none is set). The value is transient (never
 	// written to config.yaml); the flow carries it to the retention writer.
-	if err := seedRetentionChoice(draft); err != nil {
+	if err := seedRetentionChoice(draft, deps.readRetention); err != nil {
 		return err
 	}
 
@@ -80,7 +81,18 @@ func runKickstartFlow(
 	}
 
 	model := kickstart.NewModel(kickstart.NewProgram(programDeps))
-	return deps.runFlow(model)
+	if deps.runModel == nil {
+		return fmt.Errorf(
+			"mount guided kickstart for %q: terminal runner is nil.\n"+
+				"what: the guided Program cannot be started.\n"+
+				"why: kickstartCommandDeps.runModel was assembled without its Bubble Tea boundary.\n"+
+				"where: runKickstartFlow after the Program and Flow were constructed.\n"+
+				"when: immediately before entering the interactive terminal session.\n"+
+				"means: the draft was not committed and local ingest did not run.\n"+
+				"fix: construct kickstart through BuildKickstartCommand or supply the terminal runner.",
+			configPath)
+	}
+	return deps.runModel(model)
 }
 
 // openKickstartStore opens the local store for the duration of the flow, plus
@@ -179,9 +191,19 @@ func themeModeFor(cfg *config.Config) theme.Mode {
 // ~/.claude/settings.json, so the retention field opens clean on the value in
 // force. When no value is set, it defaults to the recommended keep-forever
 // choice. The value is never persisted to config.yaml (yaml:"-").
-func seedRetentionChoice(draft *settings.Draft) error {
+func seedRetentionChoice(draft *settings.Draft, read func() (int, bool)) error {
+	if read == nil {
+		return fmt.Errorf(
+			"seed guided retention: Claude settings reader is nil.\n" +
+				"what: the retention field cannot be initialized from the value currently in force.\n" +
+				"why: kickstartCommandDeps.readRetention was assembled without its read boundary.\n" +
+				"where: seedRetentionChoice before settings.Flow mounts.\n" +
+				"when: after opening the Draft and before any interactive field is shown.\n" +
+				"means: the flow was not mounted and no configuration or Claude setting was written.\n" +
+				"fix: construct kickstart through BuildKickstartCommand or supply the Claude retention reader.")
+	}
 	days := kickstart.RecommendedRetentionDays
-	if current, ok := ftue.ReadClaudeCleanupDays(); ok && current > 0 {
+	if current, ok := read(); ok && current > 0 {
 		days = current
 	}
 	return kickstart.SeedRetentionInitial(draft, days)

@@ -96,19 +96,12 @@ rows:
       hints:
         - applied after save.
 
-  - name: review-guide
-    surface: registry-section
-    sectionKey: receipt
-    sectionTitle: review and save
-    selectionMode: all
-    wantVisible: true
-    fieldKey: summary
-    fieldKind: info
-    fieldText: 'transcripts:'
-    guide:
-      intro: review settings before local import begins.
-      hints:
-        - nothing is written until you confirm.
+  - name: guided-review-summary
+    surface: guided-summary
+    wantContains:
+      - review your changes
+      - content license
+      - 'changed: default license attached to pushed transcripts'
 
   - name: hidden-auto-ingest-guide
     surface: registry-section

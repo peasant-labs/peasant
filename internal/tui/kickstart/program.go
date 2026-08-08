@@ -81,7 +81,9 @@ type ProgramDeps struct {
 	// commit without importing (config-only run).
 	Ingest IngestFunc
 	// Retention writes the Claude cleanupPeriodDays preference AFTER the config
-	// save (legacy ordering). When nil, or RetentionDays<=0, it is skipped.
+	// save (legacy ordering). When nil it is skipped. RetentionDays is an explicit
+	// fallback used only when the guided retention section was not offered; zero
+	// therefore authorizes no hidden write.
 	Retention     RetentionWriter
 	RetentionDays int
 	// AlreadyConnected is true when the machine already holds valid village
@@ -345,11 +347,11 @@ func (p Program) afterCommit() (Program, tea.Cmd) {
 	return p, tea.Batch(p.runIngest(), p.spinner.Tick())
 }
 
-// retentionDays reports the Claude Code cleanup period to write: the value the
-// user chose in the flow's retention field, or the injected fallback when the
-// field was not offered (no Claude sessions) and a caller pre-set a value.
+// retentionDays reports the Claude Code cleanup period to write. A Draft value
+// is eligible only when discovery offered the retention section to the user;
+// otherwise only the caller's explicit fallback may authorize a write.
 func (p Program) retentionDays() int {
-	if p.deps.Draft != nil {
+	if p.deps.ClaudeSessionsPresent && p.deps.Draft != nil {
 		if chosen := p.deps.Draft.Working().ClaudeRetentionDays; chosen > 0 {
 			return chosen
 		}

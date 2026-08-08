@@ -17,13 +17,32 @@ import (
 // Draft remain the real mounted path.
 func TestKickstartCommandMountsGuidedProgram(t *testing.T) {
 	t.Parallel()
+	cataloged := false
+	for _, build := range commands {
+		if command := build(); command.Name() == "kickstart" {
+			cataloged = true
+			break
+		}
+	}
+	if !cataloged {
+		t.Fatal("production command catalog does not mount BuildKickstartCommand")
+	}
 	var runnerCalls int
+	var legacyCalls int
 	deps := defaultKickstartCommandDeps()
+	if deps.runFlow == nil || deps.runModel == nil || deps.readRetention == nil {
+		t.Fatal("production kickstart defaults do not select the complete guided path")
+	}
 	deps.discover = func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
 		return ftue.ProviderInventory{}, nil
 	}
 	deps.existingUser = func(string) string { return "" }
-	deps.runFlow = func(model tea.Model) error {
+	deps.readRetention = func() (int, bool) { return 90, true }
+	deps.run = func(ftue.WizardModel) error {
+		legacyCalls++
+		return nil
+	}
+	deps.runModel = func(model tea.Model) error {
 		runnerCalls++
 		mounted, ok := model.(kickstart.Model)
 		if !ok {
@@ -48,5 +67,8 @@ func TestKickstartCommandMountsGuidedProgram(t *testing.T) {
 	}
 	if runnerCalls != 1 {
 		t.Fatalf("production kickstart command called the Tea runner %d times, want 1", runnerCalls)
+	}
+	if legacyCalls != 0 {
+		t.Fatalf("production kickstart command selected the retained legacy runner %d times", legacyCalls)
 	}
 }

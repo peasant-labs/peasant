@@ -1,7 +1,6 @@
 package kickstart
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -42,7 +41,6 @@ const (
 	SectionLicense     = "license"
 	SectionDestination = "destination"
 	SectionRetention   = "retention"
-	SectionReceipt     = "receipt"
 )
 
 // Field keys are stable within their section.
@@ -53,7 +51,6 @@ const (
 	FieldLicense    = "content-license"
 	FieldVisibility = "default-visibility"
 	FieldRetention  = "claude-retention-days"
-	FieldReceipt    = "summary"
 )
 
 // neverExpireDays is the cleanupPeriodDays value that keeps Claude Code
@@ -71,10 +68,10 @@ const licenseNone = "none (do not attach a license)"
 
 // BuildRegistry composes the kickstart onboarding as a settings.Registry: the
 // selection tree, the conditional auto-ingest-new-branches toggle, the privacy
-// (redaction) choice, the content-license choice, and the read-only receipt that
-// is the single atomic commit point. The village destination/visibility and
-// Claude retention fields are gated by opts and, when present, appear between
-// license and receipt.
+// (redaction) choice, and the content-license choice. The village
+// destination/visibility and Claude retention fields are gated by opts. Final
+// review and save guidance belongs to each presentation rather than appearing
+// here as a false setting.
 //
 // Every field edits the draft through an Accessor whose target IS the real
 // config.Config layout, so a committed draft is field-for-field the same shape
@@ -175,17 +172,6 @@ func BuildRegistry(opts Options) settings.Registry {
 				settings.WithDescription(
 					settings.Radio(FieldRetention, "how long claude code keeps its transcripts", retentionAccessor(), retentionOptions()...),
 					"choose when claude code deletes its own transcript files."),
-			},
-		},
-		{
-			Key:   SectionReceipt,
-			Title: "review and save",
-			Guide: sectionGuide(
-				"review settings before local import begins.",
-				"nothing is written until you confirm.",
-			),
-			Fields: []settings.Field{
-				settings.Info(FieldReceipt, receiptContent),
 			},
 		},
 	}
@@ -387,33 +373,4 @@ func retentionOptions() []settings.Option[int] {
 		{Label: "1 year", Value: 365, Description: "removes claude transcripts after 365 days."},
 		{Label: "never expire", Value: neverExpireDays, Description: "keeps claude transcripts forever. recommended for peasant users."},
 	}
-}
-
-// receiptContent renders the read-only commit summary from the working draft. It
-// reports exactly what a confirm will persist: the selection mode, the number of
-// selected harnesses, the auto-ingest answer, the redaction level, and the
-// license.
-func receiptContent(d *settings.Draft) string {
-	cfg := d.Working()
-	var b strings.Builder
-	fmt.Fprintf(&b, "transcripts: %s\n", cfg.Selection.Mode)
-	if cfg.Selection.Mode == config.SelectionModeSelected {
-		fmt.Fprintf(&b, "selected harnesses: %d\n", len(cfg.Selection.Harnesses))
-		fmt.Fprintf(&b, "auto-ingest new branches: %t\n", cfg.Selection.AutoIngestNewBranches)
-	} else {
-		b.WriteString("auto-ingest new branches: yes (standing policy)\n")
-	}
-	fmt.Fprintf(&b, "redaction level: %s\n", cfg.Redaction.Level)
-	if cfg.Push.License == "" {
-		b.WriteString("license: none\n")
-	} else {
-		fmt.Fprintf(&b, "license: %s\n", cfg.Push.License)
-	}
-	if cfg.ClaudeRetentionDays >= neverExpireDays {
-		b.WriteString("claude retention: never expire\n")
-	} else if cfg.ClaudeRetentionDays > 0 {
-		fmt.Fprintf(&b, "claude retention: %d days\n", cfg.ClaudeRetentionDays)
-	}
-	b.WriteString("\npress enter to save.")
-	return b.String()
 }

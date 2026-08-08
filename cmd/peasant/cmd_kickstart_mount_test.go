@@ -15,11 +15,15 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
+	"github.com/peasant-labs/peasant/internal/tui/settings"
+	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 )
@@ -37,7 +41,105 @@ const (
 	mountTruncatedSessionID = "8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68"
 	mountFreshSessionID     = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
 	mountProjectRowID       = "git@github.com:acme/tool.git"
+	expectedMountSeedRows   = 1
 )
+
+type mountRetentionSeedFixture struct {
+	Name        string `yaml:"name"`
+	CleanupDays int    `yaml:"cleanupDays"`
+}
+
+type mountContractDocument struct {
+	ExpectedRetentionSeedRows int                         `yaml:"expectedRetentionSeedRows"`
+	RetentionSeeds            []mountRetentionSeedFixture `yaml:"retentionSeeds"`
+}
+
+//go:embed testdata/kickstart_mount.yaml
+var kickstartMountData []byte
+
+func loadMountContractDocument(t *testing.T) mountContractDocument {
+	t.Helper()
+	var document mountContractDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(kickstartMountData))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode testdata/kickstart_mount.yaml: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("found a second YAML document")
+		}
+		t.Fatalf("kickstart_mount.yaml must hold exactly one document: %v", err)
+	}
+	if document.ExpectedRetentionSeedRows != expectedMountSeedRows || len(document.RetentionSeeds) != expectedMountSeedRows {
+		t.Fatalf("retention seed rows: declared=%d actual=%d required=%d",
+			document.ExpectedRetentionSeedRows, len(document.RetentionSeeds), expectedMountSeedRows)
+	}
+	for _, row := range document.RetentionSeeds {
+		if strings.TrimSpace(row.Name) == "" || row.CleanupDays <= 0 {
+			t.Fatalf("invalid retention seed fixture: %#v", row)
+		}
+	}
+	return document
+}
+
+func TestSeedRetentionChoicePairsDraftBeforeFlowMount(t *testing.T) {
+	for _, row := range loadMountContractDocument(t).RetentionSeeds {
+		row := row
+		t.Run(row.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := config.SaveAtomic(path, config.BaseConfig()); err != nil {
+				t.Fatalf("seed config: %v", err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read config: %v", err)
+			}
+			loaded, err := config.Parse(data)
+			if err != nil {
+				t.Fatalf("parse config: %v", err)
+			}
+			draft, err := settings.NewDraft(path, loaded)
+			if err != nil {
+				t.Fatalf("open Draft: %v", err)
+			}
+			if err := seedRetentionChoice(draft, func() (int, bool) { return row.CleanupDays, true }); err != nil {
+				t.Fatalf("seed mounted retention choice: %v", err)
+			}
+			if draft.Baseline().ClaudeRetentionDays != row.CleanupDays ||
+				draft.Working().ClaudeRetentionDays != row.CleanupDays {
+				t.Fatalf("mounted retention seed baseline/working=%d/%d want=%d/%d",
+					draft.Baseline().ClaudeRetentionDays, draft.Working().ClaudeRetentionDays,
+					row.CleanupDays, row.CleanupDays)
+			}
+			if kickstart.RetentionChanged(draft) {
+				t.Fatal("mounted retention seed is dirty before Flow mounts")
+			}
+
+			registry := kickstart.BuildRegistry(kickstart.Options{
+				Source:                scannerfix.NewFixtureTreeSource("standard"),
+				ClaudeSessionsPresent: true,
+			})
+			var retentionField settings.Field
+			for _, section := range registry.Sections {
+				if section.Key == kickstart.SectionRetention && len(section.Fields) == 1 {
+					retentionField = section.Fields[0]
+				}
+			}
+			if retentionField == nil {
+				t.Fatal("canonical registry has no retention field")
+			}
+			if retentionField.Dirty(draft) {
+				t.Fatal("retention field is dirty before Flow mounts")
+			}
+			_ = settings.NewFlow(theme.New(theme.ModeDark), registry, draft)
+			if retentionField.Dirty(draft) || kickstart.RetentionChanged(draft) {
+				t.Fatal("Flow mount changed the clean paired retention seed")
+			}
+		})
+	}
+}
 
 // mountPreviewSessions is the discovery listing the mounted preview names rows
 // from - the same shape the selection tree is folded from.
