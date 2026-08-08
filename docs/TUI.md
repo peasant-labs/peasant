@@ -26,10 +26,14 @@ the values that were committed.
 | Leave without saving | `esc` `b` `q` | Open the discard confirmation |
 | Help | `?` | Show the bindings available for the current focus |
 
-When Claude transcript retention changed, the config file is committed first and
-the existing Claude settings writer runs once afterward. A clean save, discard,
-validation failure, or config drift failure does not run that writer. If the
-second file cannot be updated after the config commit, Peasant reports an honest
+Peasant opens the resolved Claude settings path once before mounting the editor.
+A missing file or retention key uses the recommended value; unreadable,
+malformed, non-object, or invalid settings stop before editing. When retention
+changed, the config file is committed first and the path-bound Claude settings
+document is atomically replaced once afterward while preserving unrelated keys.
+A clean save, discard, validation failure, or config drift failure performs no
+retention write. If the atomic replacement fails after the config commit, the
+Claude settings destination remains unchanged and Peasant reports an honest
 partial save with both paths and repair guidance. The config command edits
 settings only; it does not import or share transcripts.
 

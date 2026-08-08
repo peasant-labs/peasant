@@ -1,0 +1,66 @@
+expectedRows: 7
+cases:
+  - name: absent file seeds the recommendation and creates the selected value
+    scenario: missing-file
+    selectedRetention: 365
+    expectOpenCalls: 1
+    expectRunnerCalls: 1
+    expectWriterCalls: 1
+    expectError: false
+  - name: absent key stays bound to the opened path and preserves unrelated settings
+    scenario: missing-key-path-stability
+    initialDocument: |
+      {
+        "theme": "dark",
+        "nested": {"keep": true}
+      }
+    selectedRetention: 90
+    expectOpenCalls: 1
+    expectRunnerCalls: 1
+    expectWriterCalls: 1
+    expectError: false
+  - name: malformed json stops before the screen mounts
+    scenario: malformed-json
+    initialDocument: '{"cleanupPeriodDays": 30'
+    expectOpenCalls: 1
+    expectRunnerCalls: 0
+    expectWriterCalls: 0
+    expectError: true
+    wantErrorContains: [malformed, no settings were changed]
+  - name: non-object json stops before the screen mounts
+    scenario: non-object-json
+    initialDocument: '[{"cleanupPeriodDays": 30}]'
+    expectOpenCalls: 1
+    expectRunnerCalls: 0
+    expectWriterCalls: 0
+    expectError: true
+    wantErrorContains: [object, no settings were changed]
+  - name: invalid cleanup value stops before the screen mounts
+    scenario: invalid-retention
+    initialDocument: '{"cleanupPeriodDays": "thirty"}'
+    expectOpenCalls: 1
+    expectRunnerCalls: 0
+    expectWriterCalls: 0
+    expectError: true
+    wantErrorContains: [cleanupPeriodDays, positive integer]
+  - name: unreadable settings path stops before the screen mounts
+    scenario: unreadable-path
+    expectOpenCalls: 1
+    expectRunnerCalls: 0
+    expectWriterCalls: 0
+    expectError: true
+    wantErrorContains: [read, no settings were changed]
+  - name: late atomic replacement failure leaves its destination untouched
+    scenario: late-replace-failure
+    initialDocument: |
+      {
+        "cleanupPeriodDays": 30,
+        "theme": "dark",
+        "nested": {"keep": true}
+      }
+    selectedRetention: 365
+    expectOpenCalls: 1
+    expectRunnerCalls: 1
+    expectWriterCalls: 1
+    expectError: true
+    wantErrorContains: [atomically replace, remains committed, did not change]

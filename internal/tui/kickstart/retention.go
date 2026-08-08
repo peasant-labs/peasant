@@ -26,16 +26,17 @@ func (f RetentionWriterFunc) WriteCleanupDays(days int) error { return f(days) }
 
 var _ RetentionWriter = RetentionWriterFunc(nil)
 
-// DefaultRetentionWriter writes to the real ~/.claude/settings.json via the
-// existing ftue retention writer, unchanged in behavior. The mounted program
-// injects this; tests inject a temp-path func over ftue.WriteClaudeCleanupDaysAt.
+// DefaultRetentionWriter writes to the real ~/.claude/settings.json through the
+// strict merge-preserving atomic writer. The mounted program injects this; tests
+// inject a temp-path func over ftue.WriteClaudeCleanupDaysAt.
 func DefaultRetentionWriter() RetentionWriter {
 	return RetentionWriterFunc(ftue.WriteClaudeCleanupDays)
 }
 
 // FileRetentionWriter writes cleanupPeriodDays to an explicit settings path,
-// reusing the exact merge/create semantics of the production writer. It exists so
-// the retention step can be exercised against a temporary file.
+// reusing the exact strict merge/create/atomic semantics of the production
+// writer. It exists so the retention step can be exercised against a temporary
+// file.
 func FileRetentionWriter(path string) RetentionWriter {
 	return RetentionWriterFunc(func(days int) error {
 		return ftue.WriteClaudeCleanupDaysAt(path, days)

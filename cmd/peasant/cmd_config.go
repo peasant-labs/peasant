@@ -45,16 +45,24 @@ func (s configSelectionSource) Load(ctx context.Context) ([]*kit.TreeNode, error
 
 var _ kit.TreeSource = configSelectionSource{}
 
+// configRetentionFile binds the initial retention value, later writer, and
+// reported path to one strictly opened Claude settings document.
+type configRetentionFile interface {
+	Path() string
+	CleanupDays() (int, bool)
+	WriteCleanupDays(int) error
+}
+
+var _ configRetentionFile = (*ftue.ClaudeSettingsFile)(nil)
+
 // configCommandDeps contains only external boundaries used by the config
 // command. The production builder wires real discovery, Claude retention I/O,
 // and Bubble Tea; tests replace those boundaries while retaining the real
 // command, Screen, Registry, fields, and Draft.
 type configCommandDeps struct {
-	discover        func(context.Context, string, string) configDiscovery
-	retentionPath   func() (string, error)
-	readRetention   func(string) (int, bool)
-	retentionWriter kickstart.RetentionWriter
-	run             func(tea.Model) (tea.Model, error)
+	discover      func(context.Context, string, string) configDiscovery
+	openRetention func() (configRetentionFile, error)
+	run           func(tea.Model) (tea.Model, error)
 }
 
 func defaultConfigCommandDeps() configCommandDeps {
@@ -68,9 +76,9 @@ func defaultConfigCommandDeps() configCommandDeps {
 				source:    kickstart.NewScannerTreeSource(sessions),
 			}
 		},
-		retentionPath:   ftue.ClaudeSettingsPath,
-		readRetention:   ftue.ReadClaudeCleanupDaysAt,
-		retentionWriter: kickstart.DefaultRetentionWriter(),
+		openRetention: func() (configRetentionFile, error) {
+			return ftue.OpenClaudeSettings()
+		},
 		run: func(model tea.Model) (tea.Model, error) {
 			return tea.NewProgram(model).Run()
 		},
@@ -121,20 +129,19 @@ func buildConfigCommand(deps configCommandDeps) *cobra.Command {
 					configPath, err)
 			}
 
-			retentionPath, err := deps.retentionPath()
-			if err != nil || retentionPath == "" {
-				return fmt.Errorf(
-					"resolve Claude settings path while opening config editor: %w.\n"+
-						"what: the transcript-retention settings file location could not be determined.\n"+
-						"why: the current home directory is unavailable or resolved to an empty path.\n"+
-						"where: peasant config retention setup.\n"+
-						"when: before seeding the settings draft and mounting fields.\n"+
-						"means: no settings were changed and neither file was written.\n"+
-						"fix: configure a valid home directory and run peasant config again.",
-					pathResolutionError(err, retentionPath))
+			retentionFile, err := deps.openRetention()
+			if err != nil {
+				return configRetentionOpenError(err)
 			}
-			retentionDays, found := deps.readRetention(retentionPath)
-			if !found || retentionDays <= 0 {
+			if retentionFile == nil || retentionFile.Path() == "" {
+				return configRetentionOpenError(fmt.Errorf("opened retention file is nil or has an empty path"))
+			}
+			retentionPath := retentionFile.Path()
+			retentionDays, found := retentionFile.CleanupDays()
+			if found && retentionDays <= 0 {
+				return configRetentionOpenError(fmt.Errorf("cleanupPeriodDays=%d at %q is not a positive integer", retentionDays, retentionPath))
+			}
+			if !found {
 				retentionDays = kickstart.RecommendedRetentionDays
 			}
 			if err := kickstart.SeedRetentionInitial(draft, retentionDays); err != nil {
@@ -171,11 +178,10 @@ func buildConfigCommand(deps configCommandDeps) *cobra.Command {
 				return err
 			}
 			model := &configScreenModel{
-				screen:        screen,
-				draft:         draft,
-				writer:        deps.retentionWriter,
-				configPath:    configPath,
-				retentionPath: retentionPath,
+				screen:     screen,
+				draft:      draft,
+				retention:  retentionFile,
+				configPath: configPath,
 			}
 			final, err := deps.run(model)
 			if err != nil {
@@ -211,12 +217,11 @@ func buildConfigCommand(deps configCommandDeps) *cobra.Command {
 // configScreenModel adapts the concrete Screen update contract to tea.Model and
 // owns the one responsibility-specific effect that follows a successful save.
 type configScreenModel struct {
-	screen settings.Screen
-	draft  *settings.Draft
-	writer kickstart.RetentionWriter
+	screen    settings.Screen
+	draft     *settings.Draft
+	retention configRetentionFile
 
-	configPath    string
-	retentionPath string
+	configPath string
 
 	saved            bool
 	retentionWritten bool
@@ -247,8 +252,8 @@ func (m *configScreenModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		days := m.draft.Working().ClaudeRetentionDays
-		if err := m.writer.WriteCleanupDays(days); err != nil {
-			m.err = configPartialSuccessError(m.configPath, m.retentionPath, err)
+		if err := m.retention.WriteCleanupDays(days); err != nil {
+			m.err = configPartialSuccessError(m.configPath, m.retention.Path(), err)
 			return m, tea.Quit
 		}
 		m.retentionWritten = true
@@ -270,7 +275,7 @@ func configPartialSuccessError(configPath, retentionPath string, cause error) er
 	return fmt.Errorf(
 		"save config settings partially: update Claude retention at %q after committing %q: %w.\n"+
 			"what: peasant configuration was saved, but Claude transcript retention was not updated.\n"+
-			"why: the existing retention writer could not merge the selected cleanup period into the Claude settings file.\n"+
+			"why: the path-bound retention file could not atomically merge the selected cleanup period into Claude settings.\n"+
 			"where: peasant config post-commit retention step for %q.\n"+
 			"when: after Draft.Commit successfully replaced %q.\n"+
 			"means: config %q remains committed while retention at %q did not change; the two files now reflect a partial save.\n"+
@@ -278,8 +283,20 @@ func configPartialSuccessError(configPath, retentionPath string, cause error) er
 		retentionPath, configPath, cause, retentionPath, configPath, configPath, retentionPath)
 }
 
+func configRetentionOpenError(cause error) error {
+	return fmt.Errorf(
+		"open Claude transcript retention while opening config editor: %w.\n"+
+			"what: the Claude settings document could not be opened for one path-bound read and write.\n"+
+			"why: its path is unavailable, the file is unreadable or malformed, the top level is not an object, or cleanupPeriodDays is not a positive integer.\n"+
+			"where: peasant config retention setup.\n"+
+			"when: after opening the config draft and before mounting any interactive field.\n"+
+			"means: no settings were changed and neither config nor Claude settings was written.\n"+
+			"fix: repair or remove the named Claude settings document, ensure the home path is accessible, then run peasant config again.",
+		cause)
+}
+
 func validateConfigCommandDeps(deps configCommandDeps) error {
-	if deps.discover == nil || deps.retentionPath == nil || deps.readRetention == nil || deps.retentionWriter == nil || deps.run == nil {
+	if deps.discover == nil || deps.openRetention == nil || deps.run == nil {
 		return fmt.Errorf(
 			"build config command: one or more required dependencies are nil.\n" +
 				"what: the config editor is missing discovery, retention I/O, or its terminal runner.\n" +
@@ -290,13 +307,6 @@ func validateConfigCommandDeps(deps configCommandDeps) error {
 				"fix: construct the command through BuildConfigCommand or provide every boundary dependency.")
 	}
 	return nil
-}
-
-func pathResolutionError(err error, path string) error {
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("resolved path is empty: %q", path)
 }
 
 var _ tea.Model = (*configScreenModel)(nil)
