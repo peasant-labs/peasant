@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -29,6 +30,8 @@ const (
 	expectedConfigAliasFixtureRows    = 2
 	expectedPartialSuccessFixtureRows = 1
 	expectedConfigAuthorityRows       = 8
+	expectedSelectionIntentRows       = 1
+	expectedSaveOrderRows             = 1
 )
 
 //go:embed testdata/config-screen/retention.yaml
@@ -42,6 +45,12 @@ var configPartialSuccessFixtureYAML []byte
 
 //go:embed testdata/config-screen/authority.yaml
 var configAuthorityFixtureYAML []byte
+
+//go:embed testdata/config-screen/selection-intent.yaml
+var configSelectionIntentFixtureYAML []byte
+
+//go:embed testdata/config-screen/save-order.yaml
+var configSaveOrderFixtureYAML []byte
 
 type configRetentionScenario string
 
@@ -106,6 +115,32 @@ type configAuthorityDocument struct {
 	Forbidden    []string `yaml:"forbidden"`
 }
 
+type configSelectionIntentFixture struct {
+	Name             string               `yaml:"name"`
+	SelectedSessions []string             `yaml:"selectedSessions"`
+	ExpectMode       config.SelectionMode `yaml:"expectMode"`
+	UnrelatedLicense config.License       `yaml:"unrelatedLicense"`
+}
+
+type configSelectionIntentDocument struct {
+	ExpectedRows int                            `yaml:"expectedRows"`
+	Cases        []configSelectionIntentFixture `yaml:"cases"`
+}
+
+type configSaveOrderFixture struct {
+	Name              string   `yaml:"name"`
+	InitialRetention  int      `yaml:"initialRetention"`
+	SelectedRetention int      `yaml:"selectedRetention"`
+	ExpectWriterCalls int      `yaml:"expectWriterCalls"`
+	ReorderedInput    []string `yaml:"reorderedInput"`
+	SaveInstruction   string   `yaml:"saveInstruction"`
+}
+
+type configSaveOrderDocument struct {
+	ExpectedRows int                      `yaml:"expectedRows"`
+	Cases        []configSaveOrderFixture `yaml:"cases"`
+}
+
 func loadConfigRetentionFixtures(t *testing.T) []configRetentionFixture {
 	t.Helper()
 	var document configRetentionDocument
@@ -157,6 +192,40 @@ func loadConfigAuthorityFixture(t *testing.T) configAuthorityDocument {
 		t.Fatalf("authority fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Forbidden), expectedConfigAuthorityRows)
 	}
 	return document
+}
+
+func loadConfigSelectionIntentFixtures(t *testing.T) []configSelectionIntentFixture {
+	t.Helper()
+	var document configSelectionIntentDocument
+	if err := decodeConfigScreenFixture("selection-intent.yaml", configSelectionIntentFixtureYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ExpectedRows != expectedSelectionIntentRows || len(document.Cases) != expectedSelectionIntentRows {
+		t.Fatalf("selection-intent fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedSelectionIntentRows)
+	}
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || !fixture.ExpectMode.IsValid() || len(fixture.SelectedSessions) == 0 || fixture.UnrelatedLicense == "" {
+			t.Fatalf("invalid selection-intent fixture: %+v", fixture)
+		}
+	}
+	return document.Cases
+}
+
+func loadConfigSaveOrderFixtures(t *testing.T) []configSaveOrderFixture {
+	t.Helper()
+	var document configSaveOrderDocument
+	if err := decodeConfigScreenFixture("save-order.yaml", configSaveOrderFixtureYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ExpectedRows != expectedSaveOrderRows || len(document.Cases) != expectedSaveOrderRows {
+		t.Fatalf("save-order fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedSaveOrderRows)
+	}
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || fixture.InitialRetention <= 0 || fixture.SelectedRetention <= 0 || fixture.ExpectWriterCalls != 1 || len(fixture.ReorderedInput) == 0 || fixture.SaveInstruction == "" {
+			t.Fatalf("invalid save-order fixture: %+v", fixture)
+		}
+	}
+	return document.Cases
 }
 
 func decodeConfigScreenFixture(name string, data []byte, destination any) error {
@@ -217,6 +286,9 @@ func TestConfigCommand_RetentionFixtures(t *testing.T) {
 			if world.writerCalls != fixture.ExpectWriterCalls {
 				t.Fatalf("retention writer calls=%d want=%d", world.writerCalls, fixture.ExpectWriterCalls)
 			}
+			if len(world.writerValues) != fixture.ExpectWriterCalls {
+				t.Fatalf("retention writer values=%v want %d calls", world.writerValues, fixture.ExpectWriterCalls)
+			}
 			world.assertScenarioOutcome(t, fixture, stdout)
 		})
 	}
@@ -236,6 +308,137 @@ func TestConfigCommand_AliasParityFixtures(t *testing.T) {
 			}
 			if world.runnerCalls != 1 || !world.observedScreenDirty {
 				t.Fatalf("%s mounted runner=%d dirty=%t; want the shared Screen path", fixture.Command, world.runnerCalls, world.observedScreenDirty)
+			}
+		})
+	}
+}
+
+func TestConfigCommand_ProductionRegistrationFixtures(t *testing.T) {
+	for _, fixture := range loadConfigAliasFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			root := buildRootCommand()
+			primary, _, findErr := root.Find([]string{"config"})
+			if findErr != nil || primary == nil || primary.Name() != "config" || primary.RunE == nil {
+				t.Fatalf("production config command is not mounted: command=%#v error=%v", primary, findErr)
+			}
+			resolved, remaining, findErr := root.Find([]string{fixture.Command})
+			if findErr != nil {
+				t.Fatalf("find production command %q: %v", fixture.Command, findErr)
+			}
+			if len(remaining) != 0 {
+				t.Fatalf("production command %q left unresolved args %v", fixture.Command, remaining)
+			}
+			if resolved != primary {
+				t.Fatalf("production command %q resolved to %#v, want mounted config", fixture.Command, resolved)
+			}
+		})
+	}
+}
+
+func TestConfigCommand_SelectedIntentSurvivesUnrelatedSave(t *testing.T) {
+	for _, fixture := range loadConfigSelectionIntentFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			world := newConfigScreenWorld(t, 90)
+			world.sourceName = "standard"
+			world.useSelectedAllCurrentConfig(t, fixture.SelectedSessions)
+			deps := world.dependencies(t)
+			deps.run = func(model tea.Model) (tea.Model, error) {
+				model = configScreenDrain(model, model.Init())
+				model = configScreenUpdate(model, tea.WindowSizeMsg{Width: 100, Height: 28})
+				host := model.(*configScreenModel)
+				if host.screen.Dirty() || host.draft.Dirty() {
+					t.Fatalf("initial selected-all-current screen is dirty: screen=%t draft=%t selection=%+v", host.screen.Dirty(), host.draft.Dirty(), host.draft.Working().Selection)
+				}
+				if !reflect.DeepEqual(host.draft.Working().Selection, host.draft.Baseline().Selection) {
+					t.Fatalf("asynchronous load changed selected intent: working=%+v baseline=%+v", host.draft.Working().Selection, host.draft.Baseline().Selection)
+				}
+				model = configScreenUpdate(model, configScreenKey("down"))
+				model = configScreenUpdate(model, configScreenKey("down"))
+				model = configScreenUpdate(model, configScreenKey("down"))
+				model = configScreenUpdate(model, configScreenKey("enter"))
+				model = configScreenUpdate(model, configScreenKey("down"))
+				model = configScreenUpdate(model, configScreenKey("space"))
+				return configScreenUpdate(model, configScreenKey("ctrl+s")), nil
+			}
+
+			if _, err := executeConfigScreenCommand(t, buildConfigCommand(deps), world, "config"); err != nil {
+				t.Fatalf("save unrelated config setting: %v", err)
+			}
+			saved := configScreenConfig(t, world.configPath)
+			if saved.Selection.Mode != fixture.ExpectMode {
+				t.Fatalf("saved selection mode=%q want=%q", saved.Selection.Mode, fixture.ExpectMode)
+			}
+			want := config.SelectionConfig{
+				Mode: fixture.ExpectMode,
+				Harnesses: map[string]config.SelectionHarnessConfig{
+					string(defaults.HarnessClaudeCode): {Sessions: fixture.SelectedSessions},
+				},
+			}
+			if !reflect.DeepEqual(saved.Selection, want) {
+				t.Fatalf("saved selection=%+v want=%+v", saved.Selection, want)
+			}
+			if saved.Push.License != fixture.UnrelatedLicense {
+				t.Fatalf("saved unrelated license=%q want=%q", saved.Push.License, fixture.UnrelatedLicense)
+			}
+		})
+	}
+}
+
+func TestConfigCommand_SavePendingFreezesMountedModel(t *testing.T) {
+	for _, fixture := range loadConfigSaveOrderFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			world := newConfigScreenWorld(t, fixture.InitialRetention)
+			world.selectedRetention = fixture.SelectedRetention
+			world.editLicense = true
+			world.sourceName = "standard"
+			deps := world.dependencies(t)
+			deps.run = func(model tea.Model) (tea.Model, error) {
+				model = configScreenDrain(model, model.Init())
+				model = configScreenUpdate(model, tea.WindowSizeMsg{Width: 100, Height: 28})
+				if view := model.(*configScreenModel).screen.View(); !strings.Contains(view, fixture.SaveInstruction) {
+					t.Fatalf("mounted config screen missing save instruction %q", fixture.SaveInstruction)
+				}
+				model = world.editRetention(model)
+				model = world.editLicenseFromRetention(model)
+				model = configScreenUpdate(model, configScreenKey("tab"))
+				model = configScreenUpdate(model, configScreenKey("down"))
+				model = configScreenUpdate(model, configScreenKey("enter"))
+
+				model, savedCmd := model.Update(configScreenKey("ctrl+s"))
+				if savedCmd == nil {
+					t.Fatal("mounted save returned no completion command")
+				}
+				for _, key := range fixture.ReorderedInput {
+					message := configScreenKey(key)
+					var blocked tea.Cmd
+					model, blocked = model.Update(message)
+					if blocked != nil {
+						t.Fatalf("pending save accepted reordered %T input", message)
+					}
+				}
+				host := model.(*configScreenModel)
+				if got := host.draft.Working().ClaudeRetentionDays; got != fixture.SelectedRetention {
+					t.Fatalf("pending mounted save retention=%d want committed=%d", got, fixture.SelectedRetention)
+				}
+				completion := savedCmd()
+				model, _ = model.Update(completion)
+				return model, nil
+			}
+
+			if _, err := executeConfigScreenCommand(t, buildConfigCommand(deps), world, "config"); err != nil {
+				t.Fatalf("mounted reordered save: %v", err)
+			}
+			if world.writerCalls != fixture.ExpectWriterCalls || len(world.writerValues) != fixture.ExpectWriterCalls {
+				t.Fatalf("retention attempts: calls=%d values=%v want=%d", world.writerCalls, world.writerValues, fixture.ExpectWriterCalls)
+			}
+			if world.writerValues[0] != fixture.SelectedRetention {
+				t.Fatalf("retention attempt=%d want committed=%d", world.writerValues[0], fixture.SelectedRetention)
+			}
+			if got, _ := ftue.ReadClaudeCleanupDaysAt(world.claudePath); got != fixture.SelectedRetention {
+				t.Fatalf("persisted cleanupPeriodDays=%d want=%d", got, fixture.SelectedRetention)
 			}
 		})
 	}
@@ -267,6 +470,9 @@ func TestConfigCommand_PartialSuccessIsActionable(t *testing.T) {
 			}
 			if got, _ := ftue.ReadClaudeCleanupDaysAt(world.claudePath); got != fixture.InitialRetention {
 				t.Fatalf("Claude retention changed after writer failure: got=%d want=%d", got, fixture.InitialRetention)
+			}
+			if world.writerCalls != 1 || len(world.writerValues) != 1 || world.writerValues[0] != fixture.SelectedRetention {
+				t.Fatalf("retention attempts: calls=%d values=%v want one %d", world.writerCalls, world.writerValues, fixture.SelectedRetention)
 			}
 		})
 	}
@@ -302,6 +508,7 @@ type configScreenWorld struct {
 
 	runnerCalls         int
 	writerCalls         int
+	writerValues        []int
 	observedScreenDirty bool
 	observedDraftDirty  bool
 	observedScreenErr   error
@@ -346,6 +553,21 @@ func (w *configScreenWorld) useSelectedConfig(t *testing.T) {
 	w.initialConfig = mustReadConfigScreenFile(t, w.configPath)
 }
 
+func (w *configScreenWorld) useSelectedAllCurrentConfig(t *testing.T, sessions []string) {
+	t.Helper()
+	cfg := configScreenConfig(t, w.configPath)
+	cfg.Selection = config.SelectionConfig{
+		Mode: config.SelectionModeSelected,
+		Harnesses: map[string]config.SelectionHarnessConfig{
+			string(defaults.HarnessClaudeCode): {Sessions: append([]string(nil), sessions...)},
+		},
+	}
+	if err := config.SaveAtomic(w.configPath, cfg); err != nil {
+		t.Fatalf("seed selected-all-current config: %v", err)
+	}
+	w.initialConfig = mustReadConfigScreenFile(t, w.configPath)
+}
+
 func (w *configScreenWorld) dependencies(t *testing.T) configCommandDeps {
 	t.Helper()
 	return configCommandDeps{
@@ -371,6 +593,7 @@ func (w *configScreenWorld) dependencies(t *testing.T) configCommandDeps {
 		readRetention: ftue.ReadClaudeCleanupDaysAt,
 		retentionWriter: kickstart.RetentionWriterFunc(func(days int) error {
 			w.writerCalls++
+			w.writerValues = append(w.writerValues, days)
 			w.writerSawCommitted = configScreenLicense(t, w.configPath) != ""
 			if w.writerErr != nil {
 				return w.writerErr
@@ -491,6 +714,12 @@ func (w *configScreenWorld) assertScenarioOutcome(t *testing.T, fixture configRe
 		if !w.writerSawCommitted {
 			t.Fatal("retention writer ran before the YAML-backed config commit")
 		}
+		if w.writerCalls != 1 || len(w.writerValues) != 1 || w.writerValues[0] != fixture.SelectedRetention {
+			t.Fatalf("retention write: calls=%d values=%v want one %d", w.writerCalls, w.writerValues, fixture.SelectedRetention)
+		}
+		if got, _ := ftue.ReadClaudeCleanupDaysAt(w.claudePath); got != fixture.SelectedRetention {
+			t.Fatalf("persisted cleanupPeriodDays=%d want=%d", got, fixture.SelectedRetention)
+		}
 		if !bytes.Contains(claudeAfter, []byte(`"theme": "dark"`)) || !bytes.Contains(claudeAfter, []byte(`"keep": true`)) {
 			t.Fatal("merge-preserving retention writer dropped unrelated Claude settings")
 		}
@@ -592,15 +821,17 @@ func ftueCleanupIndex(days int) int {
 
 func configScreenLicense(t *testing.T, path string) config.License {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
+	return configScreenConfig(t, path).Push.License
+}
+
+func configScreenConfig(t *testing.T, path string) *config.Config {
+	t.Helper()
+	data := mustReadConfigScreenFile(t, path)
 	cfg, err := config.Parse(data)
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	return cfg.Push.License
+	return cfg
 }
 
 func mustReadConfigScreenFile(t *testing.T, path string) []byte {

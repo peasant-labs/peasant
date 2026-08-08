@@ -1,4 +1,4 @@
-expectedRows: 7
+expectedRows: 8
 cases:
   - name: visible transient edit marks the field section and screen
     operation: visible-transient-dirty
@@ -20,6 +20,7 @@ cases:
     connected: false
     initialRetention: 30
     selectedRetention: 30
+    saveInstruction: "ctrl+s saves visible settings"
   - name: section navigation jumps without changing the draft
     operation: jump-navigation
     connected: true
@@ -33,5 +34,10 @@ cases:
   - name: saving converges across a long persisted and transient visibility cascade
     operation: hidden-field-cascade
     connected: false
+    initialRetention: 30
+    selectedRetention: 90
+  - name: pending save ignores discard and value mutation until completion
+    operation: save-pending-freeze
+    connected: true
     initialRetention: 30
     selectedRetention: 90

@@ -20,7 +20,7 @@ import (
 
 const (
 	expectedScreenSeedRows     = 4
-	expectedScreenBehaviorRows = 7
+	expectedScreenBehaviorRows = 8
 	expectedScreenPopulateRows = 2
 )
 
@@ -71,13 +71,14 @@ const (
 	screenBehaviorJump             screenBehaviorOperation = "jump-navigation"
 	screenBehaviorHiddenField      screenBehaviorOperation = "hidden-field-save"
 	screenBehaviorHiddenCascade    screenBehaviorOperation = "hidden-field-cascade"
+	screenBehaviorSavePending      screenBehaviorOperation = "save-pending-freeze"
 )
 
 func (o screenBehaviorOperation) valid() bool {
 	switch o {
 	case screenBehaviorVisibleTransient, screenBehaviorHiddenSave, screenBehaviorDiscard,
 		screenBehaviorSave, screenBehaviorJump, screenBehaviorHiddenField,
-		screenBehaviorHiddenCascade:
+		screenBehaviorHiddenCascade, screenBehaviorSavePending:
 		return true
 	}
 	return false
@@ -89,6 +90,7 @@ type screenBehaviorFixture struct {
 	Connected         bool                    `yaml:"connected"`
 	InitialRetention  int                     `yaml:"initialRetention"`
 	SelectedRetention int                     `yaml:"selectedRetention"`
+	SaveInstruction   string                  `yaml:"saveInstruction"`
 }
 
 type screenBehaviorDocument struct {
@@ -288,6 +290,9 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 			if strings.Contains(screen.View(), "guided-only framing") {
 				t.Fatal("dense Screen rendered Section.Guide metadata")
 			}
+			if fixture.SaveInstruction != "" && !strings.Contains(screen.View(), fixture.SaveInstruction) {
+				t.Fatalf("Screen.View missing save instruction %q", fixture.SaveInstruction)
+			}
 
 			switch fixture.Operation {
 			case screenBehaviorVisibleTransient:
@@ -383,6 +388,31 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 				reloaded := screenParseConfig(t, path)
 				if screenCascadeValues(reloaded) != [4]bool{} {
 					t.Fatalf("persisted cascade values reached disk: %v", screenCascadeValues(reloaded))
+				}
+			case screenBehaviorSavePending:
+				screen = selectFixtureRetention(screen, fixture.InitialRetention, fixture.SelectedRetention)
+				var savedCmd tea.Cmd
+				screen, savedCmd = screen.Update(screenKey("ctrl+s"))
+				if savedCmd == nil || !screen.savePending {
+					t.Fatal("save did not enter pending state with a completion command")
+				}
+				var blockedCmd tea.Cmd
+				screen, blockedCmd = screen.Update(screenKey("esc"))
+				if blockedCmd != nil || screen.confirming {
+					t.Fatal("pending save opened discard confirmation")
+				}
+				screen, _ = screen.Update(screenKey("up"))
+				screen, _ = screen.Update(screenKey("space"))
+				if got := draft.Working().ClaudeRetentionDays; got != fixture.SelectedRetention {
+					t.Fatalf("pending save accepted retention mutation: got=%d want=%d", got, fixture.SelectedRetention)
+				}
+				message, ok := runResult(savedCmd).(SavedMsg)
+				if !ok {
+					t.Fatalf("save completion=%T want SavedMsg", message)
+				}
+				screen, blockedCmd = screen.Update(message)
+				if blockedCmd == nil {
+					t.Fatal("matching save completion did not quit")
 				}
 			}
 		})

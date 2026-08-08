@@ -135,10 +135,16 @@ func (s Screen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	if !s.ready {
 		return s, nil
 	}
-	if saved, ok := msg.(SavedMsg); ok {
-		if saved.Draft() == s.draft && s.draft != nil {
+	if s.savePending {
+		if saved, ok := msg.(SavedMsg); ok && saved.Draft() == s.draft && s.draft != nil {
 			return s, tea.Quit
 		}
+		// Draft.Commit has completed and the parent has not yet handled the
+		// matching completion. Freeze every field and overlay until then so the
+		// committed state is also the state any post-commit effect observes.
+		return s, nil
+	}
+	if _, ok := msg.(SavedMsg); ok {
 		return s, nil
 	}
 	if s.confirming {
@@ -508,30 +514,53 @@ func (s Screen) body(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
+	summary := s.renderSaveSummary(width)
+	contentHeight := height - 1
+	if contentHeight <= 0 {
+		return summary
+	}
+	var content string
 	if len(s.sections) == 0 {
 		if s.err != nil {
-			return s.renderError(width)
+			content = s.renderError(width)
+		} else {
+			content = s.th.Styles().Muted.Render(clip("no settings are currently available", width))
 		}
-		return s.th.Styles().Muted.Render(clip("no settings are currently available", width))
+	} else if width < screenMinNavWidth*2+1 {
+		content = s.renderSection(width, contentHeight)
+	} else {
+		navWidth := width / 3
+		if navWidth < screenMinNavWidth {
+			navWidth = screenMinNavWidth
+		}
+		if navWidth > screenMaxNavWidth {
+			navWidth = screenMaxNavWidth
+		}
+		bodyWidth := width - navWidth - 1
+		nav := lipgloss.NewStyle().Width(navWidth).Height(contentHeight).MaxWidth(navWidth).MaxHeight(contentHeight).
+			Render(s.renderNavigation(navWidth))
+		divider := lipgloss.NewStyle().Width(1).Height(contentHeight).MaxHeight(contentHeight).
+			Render(strings.TrimSuffix(strings.Repeat("│\n", contentHeight), "\n"))
+		body := lipgloss.NewStyle().Width(bodyWidth).Height(contentHeight).MaxWidth(bodyWidth).MaxHeight(contentHeight).
+			Render(s.renderSection(bodyWidth, contentHeight))
+		content = lipgloss.JoinHorizontal(lipgloss.Top, nav, s.th.Styles().Muted.Render(divider), body)
 	}
-	if width < screenMinNavWidth*2+1 {
-		return s.renderSection(width, height)
+	return lipgloss.JoinVertical(lipgloss.Left, summary, content)
+}
+
+// renderSaveSummary is Screen-owned chrome, not a canonical registry field.
+// It states the one save action the dense presentation actually dispatches.
+func (s Screen) renderSaveSummary(width int) string {
+	text := "ctrl+s saves visible settings"
+	style := s.th.Styles().Muted
+	if s.savePending {
+		text = "saving settings; input is paused"
+		style = s.th.Styles().Header
+	} else if s.Dirty() {
+		text = "visible changes are buffered; " + text
+		style = s.th.Styles().Warning
 	}
-	navWidth := width / 3
-	if navWidth < screenMinNavWidth {
-		navWidth = screenMinNavWidth
-	}
-	if navWidth > screenMaxNavWidth {
-		navWidth = screenMaxNavWidth
-	}
-	bodyWidth := width - navWidth - 1
-	nav := lipgloss.NewStyle().Width(navWidth).Height(height).MaxWidth(navWidth).MaxHeight(height).
-		Render(s.renderNavigation(navWidth))
-	divider := lipgloss.NewStyle().Width(1).Height(height).MaxHeight(height).
-		Render(strings.TrimSuffix(strings.Repeat("│\n", height), "\n"))
-	body := lipgloss.NewStyle().Width(bodyWidth).Height(height).MaxWidth(bodyWidth).MaxHeight(height).
-		Render(s.renderSection(bodyWidth, height))
-	return lipgloss.JoinHorizontal(lipgloss.Top, nav, s.th.Styles().Muted.Render(divider), body)
+	return style.Render(clip(text, width))
 }
 
 func (s Screen) renderNavigation(width int) string {
