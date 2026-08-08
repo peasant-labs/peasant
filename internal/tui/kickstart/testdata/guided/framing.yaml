@@ -1,0 +1,169 @@
+# Guided framing cases cover the production connect step, every canonical
+# registry section when visible, each conditional section when hidden, and the
+# optional derived-example contract. The exact count prevents silent case loss.
+expectedRowCount: 12
+rows:
+  - name: connect-before-settings
+    surface: connect
+    wantContains:
+      - connect to a village
+      - a village is a shared commons for agent transcripts.
+      - publishing stays explicit and opt-in.
+
+  - name: selection-guide
+    surface: registry-section
+    sectionKey: selection
+    sectionTitle: choose transcripts to import
+    selectionMode: all
+    wantVisible: true
+    fieldKey: transcripts
+    fieldKind: tree
+    fieldText: transcripts
+    guide:
+      intro: choose which recorded sessions peasant should import.
+      hints:
+        - select everything or narrow the list by project, branch, or session.
+
+  - name: auto-ingest-guide
+    surface: registry-section
+    sectionKey: auto-ingest
+    sectionTitle: auto-ingest new branches
+    selectionMode: selected
+    wantVisible: true
+    fieldKey: auto-ingest-new-branches
+    fieldKind: toggle
+    fieldText: auto-ingest new branches in fully-selected projects
+    guide:
+      intro: decide how future branches in selected projects enter your local history.
+      hints:
+        - this applies only to projects you fully selected.
+
+  - name: privacy-guide
+    surface: registry-section
+    sectionKey: privacy
+    sectionTitle: privacy
+    selectionMode: all
+    wantVisible: true
+    fieldKey: redaction-level
+    fieldKind: radio
+    fieldText: redaction level
+    guide:
+      intro: choose how much sensitive context peasant removes before storing transcripts.
+      hints:
+        - you can review and change this setting later.
+
+  - name: license-guide
+    surface: registry-section
+    sectionKey: license
+    sectionTitle: content license
+    selectionMode: all
+    wantVisible: true
+    fieldKey: content-license
+    fieldKind: radio
+    fieldText: default license attached to pushed transcripts
+    guide:
+      intro: choose the default license for transcripts you explicitly share later.
+      hints:
+        - kickstart does not publish anything.
+
+  - name: destination-guide
+    surface: registry-section
+    sectionKey: destination
+    sectionTitle: sharing
+    selectionMode: all
+    villageConnected: true
+    wantVisible: true
+    fieldKey: default-visibility
+    fieldKind: radio
+    fieldText: default visibility for pushed transcripts
+    guide:
+      intro: choose the default visibility used when you explicitly push a transcript.
+      hints:
+        - saving this setting does not publish anything.
+
+  - name: retention-guide
+    surface: registry-section
+    sectionKey: retention
+    sectionTitle: claude retention
+    selectionMode: all
+    claudeSessionsPresent: true
+    wantVisible: true
+    fieldKey: claude-retention-days
+    fieldKind: radio
+    fieldText: how long claude code keeps its transcripts
+    guide:
+      intro: choose how long claude code keeps its local transcript files.
+      hints:
+        - the selected retention period is applied after you save.
+
+  - name: review-guide
+    surface: registry-section
+    sectionKey: receipt
+    sectionTitle: review and save
+    selectionMode: all
+    wantVisible: true
+    fieldKey: summary
+    fieldKind: info
+    fieldText: 'transcripts:'
+    guide:
+      intro: review the settings peasant will save before local import begins.
+      hints:
+        - nothing is written until you confirm.
+
+  - name: hidden-auto-ingest-guide
+    surface: registry-section
+    sectionKey: auto-ingest
+    sectionTitle: auto-ingest new branches
+    selectionMode: all
+    wantVisible: false
+    fieldKey: auto-ingest-new-branches
+    fieldKind: toggle
+    fieldText: auto-ingest new branches in fully-selected projects
+    guide:
+      intro: decide how future branches in selected projects enter your local history.
+      hints:
+        - this applies only to projects you fully selected.
+
+  - name: hidden-destination-guide
+    surface: registry-section
+    sectionKey: destination
+    sectionTitle: sharing
+    selectionMode: all
+    villageConnected: false
+    wantVisible: false
+    fieldKey: default-visibility
+    fieldKind: radio
+    fieldText: default visibility for pushed transcripts
+    guide:
+      intro: choose the default visibility used when you explicitly push a transcript.
+      hints:
+        - saving this setting does not publish anything.
+
+  - name: hidden-retention-guide
+    surface: registry-section
+    sectionKey: retention
+    sectionTitle: claude retention
+    selectionMode: all
+    claudeSessionsPresent: false
+    wantVisible: false
+    fieldKey: claude-retention-days
+    fieldKind: radio
+    fieldText: how long claude code keeps its transcripts
+    guide:
+      intro: choose how long claude code keeps its local transcript files.
+      hints:
+        - the selected retention period is applied after you save.
+
+  - name: derived-example
+    surface: derived-example
+    sectionKey: example
+    sectionTitle: example
+    wantVisible: true
+    fieldKey: unchanged-field
+    fieldKind: info
+    fieldText: field output remains unchanged
+    exampleText: 'current village: https://village.example'
+    guide:
+      intro: see how the current draft affects this step.
+      hints:
+        - this example is derived without changing the draft.
