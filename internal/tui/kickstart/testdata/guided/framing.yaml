@@ -18,11 +18,11 @@ rows:
     wantVisible: true
     fieldKey: transcripts
     fieldKind: tree
-    fieldText: transcripts
+    fieldText: no projects
     guide:
-      intro: choose which recorded sessions peasant should import.
+      intro: choose which recorded sessions to import.
       hints:
-        - select everything or narrow the list by project, branch, or session.
+        - select all or narrow by project, branch, or session.
 
   - name: auto-ingest-guide
     surface: registry-section
@@ -34,9 +34,9 @@ rows:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     guide:
-      intro: decide how future branches in selected projects enter your local history.
+      intro: choose how new branches in selected projects enter local history.
       hints:
-        - this applies only to projects you fully selected.
+        - only fully selected projects are affected.
 
   - name: privacy-guide
     surface: registry-section
@@ -48,9 +48,9 @@ rows:
     fieldKind: radio
     fieldText: redaction level
     guide:
-      intro: choose how much sensitive context peasant removes before storing transcripts.
+      intro: choose how much sensitive context peasant removes.
       hints:
-        - you can review and change this setting later.
+        - you can change this later.
 
   - name: license-guide
     surface: registry-section
@@ -62,9 +62,9 @@ rows:
     fieldKind: radio
     fieldText: default license attached to pushed transcripts
     guide:
-      intro: choose the default license for transcripts you explicitly share later.
+      intro: choose the default license for later shares.
       hints:
-        - kickstart does not publish anything.
+        - kickstart does not publish.
 
   - name: destination-guide
     surface: registry-section
@@ -77,9 +77,9 @@ rows:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     guide:
-      intro: choose the default visibility used when you explicitly push a transcript.
+      intro: choose visibility for later explicit pushes.
       hints:
-        - saving this setting does not publish anything.
+        - saving does not publish.
 
   - name: retention-guide
     surface: registry-section
@@ -92,9 +92,9 @@ rows:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     guide:
-      intro: choose how long claude code keeps its local transcript files.
+      intro: choose how long claude keeps local transcripts.
       hints:
-        - the selected retention period is applied after you save.
+        - applied after save.
 
   - name: review-guide
     surface: registry-section
@@ -106,7 +106,7 @@ rows:
     fieldKind: info
     fieldText: 'transcripts:'
     guide:
-      intro: review the settings peasant will save before local import begins.
+      intro: review settings before local import begins.
       hints:
         - nothing is written until you confirm.
 
@@ -120,9 +120,9 @@ rows:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     guide:
-      intro: decide how future branches in selected projects enter your local history.
+      intro: choose how new branches in selected projects enter local history.
       hints:
-        - this applies only to projects you fully selected.
+        - only fully selected projects are affected.
 
   - name: hidden-destination-guide
     surface: registry-section
@@ -135,9 +135,9 @@ rows:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     guide:
-      intro: choose the default visibility used when you explicitly push a transcript.
+      intro: choose visibility for later explicit pushes.
       hints:
-        - saving this setting does not publish anything.
+        - saving does not publish.
 
   - name: hidden-retention-guide
     surface: registry-section
@@ -150,9 +150,9 @@ rows:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     guide:
-      intro: choose how long claude code keeps its local transcript files.
+      intro: choose how long claude keeps local transcripts.
       hints:
-        - the selected retention period is applied after you save.
+        - applied after save.
 
   - name: derived-example
     surface: derived-example

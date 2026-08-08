@@ -51,7 +51,9 @@ func runKickstartFlow(
 	// cleanup setting so its cursor lands on the value already in force (or the
 	// recommended keep-forever when none is set). The value is transient (never
 	// written to config.yaml); the flow carries it to the retention writer.
-	seedRetentionChoice(draft)
+	if err := seedRetentionChoice(draft); err != nil {
+		return err
+	}
 
 	th := theme.New(themeModeFor(loaded))
 
@@ -172,17 +174,17 @@ func themeModeFor(cfg *config.Config) theme.Mode {
 	return mode
 }
 
-// seedRetentionChoice sets the draft's transient Claude retention value from the
-// cleanup period already written in ~/.claude/settings.json, so the retention
-// field opens on the value in force. When no value is set, it defaults to the
-// recommended keep-forever so a first-time user's cursor lands on the safe
+// seedRetentionChoice initializes both copies of the draft's transient Claude
+// retention value from the cleanup period already written in
+// ~/.claude/settings.json, so the retention field opens clean on the value in
+// force. When no value is set, it defaults to the recommended keep-forever
 // choice. The value is never persisted to config.yaml (yaml:"-").
-func seedRetentionChoice(draft *settings.Draft) {
-	if days, ok := ftue.ReadClaudeCleanupDays(); ok && days > 0 {
-		draft.Working().ClaudeRetentionDays = days
-		return
+func seedRetentionChoice(draft *settings.Draft) error {
+	days := kickstart.RecommendedRetentionDays
+	if current, ok := ftue.ReadClaudeCleanupDays(); ok && current > 0 {
+		days = current
 	}
-	draft.Working().ClaudeRetentionDays = kickstart.RecommendedRetentionDays
+	return kickstart.SeedRetentionInitial(draft, days)
 }
 
 // claudeSessionsPresent reports whether the discovery inventory found any Claude

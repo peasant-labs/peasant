@@ -156,6 +156,10 @@ func loadGuidedFramingDoc(t *testing.T) guidedFramingDoc {
 				row.FieldKind == "" || row.FieldText == "" || row.Guide.Intro == "" || len(row.Guide.Hints) == 0 {
 				t.Fatalf("guided framing row %q leaves its section, field, or guide contract unspecified", row.Name)
 			}
+			if row.Surface == guidedSurfaceRegistrySection &&
+				row.SelectionMode != config.SelectionModeAll && row.SelectionMode != config.SelectionModeSelected {
+				t.Fatalf("guided framing row %q has unknown selection mode %q", row.Name, row.SelectionMode)
+			}
 		}
 	}
 	return doc
@@ -372,13 +376,23 @@ func TestGuidedLifecycleFixture(t *testing.T) {
 			draft, path := newGuidedDraft(t)
 			before := mustReadFile(t, path)
 			draft.Working().Push.License = row.EditLicense
+			if err := kickstart.SeedRetentionInitial(draft, row.RetentionDays); err != nil {
+				t.Fatalf("seed paired retention state: %v", err)
+			}
+			if draft.Baseline().ClaudeRetentionDays != row.RetentionDays ||
+				draft.Working().ClaudeRetentionDays != row.RetentionDays {
+				t.Fatalf("paired retention seed = %d/%d, want %d/%d",
+					draft.Baseline().ClaudeRetentionDays, draft.Working().ClaudeRetentionDays,
+					row.RetentionDays, row.RetentionDays)
+			}
 			effects := []string{}
 			retentionSawCommit := false
 			program := kickstart.NewProgram(kickstart.ProgramDeps{
-				Theme:         theme.New(theme.ModeDark),
-				Draft:         draft,
-				Source:        scannerfix.NewFixtureTreeSource("standard"),
-				RetentionDays: row.RetentionDays,
+				Theme:                 theme.New(theme.ModeDark),
+				Draft:                 draft,
+				Source:                scannerfix.NewFixtureTreeSource("standard"),
+				ClaudeSessionsPresent: true,
+				RetentionDays:         0,
 				Retention: kickstart.RetentionWriterFunc(func(int) error {
 					effects = append(effects, "retention")
 					persisted, err := config.Parse(mustReadFile(t, path))

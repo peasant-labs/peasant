@@ -85,6 +85,10 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionSelection,
 			Title: "choose transcripts to import",
+			Guide: sectionGuide(
+				"choose which recorded sessions to import.",
+				"select all or narrow by project, branch, or session.",
+			),
 			Fields: []settings.Field{
 				settings.Tree(FieldSelection, "transcripts", selectionAccessor(), opts.Source,
 					selectionTreeOptions(opts)...),
@@ -93,6 +97,10 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionAutoIngest,
 			Title: "auto-ingest new branches",
+			Guide: sectionGuide(
+				"choose how new branches in selected projects enter local history.",
+				"only fully selected projects are affected.",
+			),
 			// Only offered for a narrowed selection: with mode:all every future
 			// branch is already ingested, so the question is meaningless.
 			When: func(d *settings.Draft) bool {
@@ -107,6 +115,10 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionPrivacy,
 			Title: "privacy",
+			Guide: sectionGuide(
+				"choose how much sensitive context peasant removes.",
+				"you can change this later.",
+			),
 			Fields: []settings.Field{
 				settings.WithDescription(
 					settings.Radio(FieldPrivacy, "redaction level", privacyAccessor(), privacyOptions()...),
@@ -116,6 +128,10 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionLicense,
 			Title: "content license",
+			Guide: sectionGuide(
+				"choose the default license for later shares.",
+				"kickstart does not publish.",
+			),
 			Fields: []settings.Field{
 				settings.WithDescription(
 					settings.Radio(FieldLicense, "default license attached to pushed transcripts", licenseAccessor(), licenseOptions()...),
@@ -125,6 +141,10 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionDestination,
 			Title: "sharing",
+			Guide: sectionGuide(
+				"choose visibility for later explicit pushes.",
+				"saving does not publish.",
+			),
 			// Only meaningful once a village connection exists: the default
 			// visibility governs transcripts PUSHED to that village. With no
 			// village connected there is nowhere to push, so the question is
@@ -141,6 +161,10 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionRetention,
 			Title: "claude retention",
+			Guide: sectionGuide(
+				"choose how long claude keeps local transcripts.",
+				"applied after save.",
+			),
 			// Only offered when Claude Code sessions were discovered: the field
 			// edits Claude Code's own cleanup setting, which is meaningless when no
 			// Claude sessions exist (legacy shouldSkip parity).
@@ -156,12 +180,22 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionReceipt,
 			Title: "review and save",
+			Guide: sectionGuide(
+				"review settings before local import begins.",
+				"nothing is written until you confirm.",
+			),
 			Fields: []settings.Field{
 				settings.Info(FieldReceipt, receiptContent),
 			},
 		},
 	}
 	return settings.Registry{Sections: sections}
+}
+
+// sectionGuide keeps the canonical registry's optional framing concise and
+// static. It describes a section without changing its fields or visibility.
+func sectionGuide(intro string, hints ...string) *settings.Guide {
+	return &settings.Guide{Intro: intro, Hints: hints}
 }
 
 // selectionTreeOptions composes the selection tree's options: the harness facet

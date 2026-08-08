@@ -371,6 +371,9 @@ func (f Flow) body(width, height int) string {
 		return joinLines([]string{tabs, "", f.renderReceipt(styles, width)})
 	}
 	lines := []string{tabs, ""}
+	if guide := f.guideLines(styles, width); len(guide) > 0 {
+		lines = append(lines, guide...)
+	}
 	// The tab strip and its blank separator already consume rows; a scrolling
 	// field (the tree) must be sized to the height that REMAINS, minus the
 	// header and description lines it draws above its control. Sizing it to the
@@ -414,6 +417,47 @@ func (f Flow) body(width, height int) string {
 		used += chrome + strings.Count(rendered, "\n") + 1
 	}
 	return joinLines(lines)
+}
+
+// guideLines renders the current section's optional onboarding metadata before
+// its fields. Dense presentations intentionally do not call this helper. Empty
+// guide values consume no space, and a derived example receives the same theme
+// and Draft the fields use without gaining any control over field behavior.
+func (f Flow) guideLines(styles theme.Styles, width int) []string {
+	if f.OnReceipt() || f.cur < 0 || f.cur >= len(f.steps) {
+		return nil
+	}
+	guide := f.steps[f.cur].Guide
+	if guide == nil {
+		return nil
+	}
+	var band strings.Builder
+	appendInline := func(value string, prefix string, style lipgloss.Style) {
+		value = strings.Join(strings.Fields(value), " ")
+		if value == "" {
+			return
+		}
+		if band.Len() > 0 {
+			band.WriteString("  ")
+		}
+		band.WriteString(style.Render(prefix + value))
+	}
+	appendInline(guide.Intro, "", styles.Surface)
+	for _, hint := range guide.Hints {
+		appendInline(hint, "• ", styles.Muted)
+	}
+	var lines []string
+	if band.Len() > 0 {
+		lines = append(lines, clip(band.String(), width))
+	}
+	if guide.Example != nil {
+		for _, line := range splitLines(strings.TrimSpace(guide.Example(f.th, f.draft))) {
+			if line != "" {
+				lines = append(lines, styles.Surface.Render(clip(line, width)))
+			}
+		}
+	}
+	return lines
 }
 
 // interactive reports whether a field takes input (everything but Info).
