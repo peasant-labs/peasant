@@ -12,7 +12,10 @@ guided sequence.
 Edits stay in a buffered draft until an explicit save. The section list and each
 edited field show a modified marker. Only currently visible fields contribute to
 those markers. If an earlier answer hides a section or field, its buffered edit
-is dropped before validation and save.
+is dropped before validation and save. The screen's own status line names
+`ctrl+s` as the save action. Once a save commits, field and discard input pause
+until the matching completion is handled, so post-save effects observe exactly
+the values that were committed.
 
 | Action | Keys | Description |
 |--------|------|-------------|
