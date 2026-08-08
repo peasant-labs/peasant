@@ -190,14 +190,12 @@ func (f *treeField) availableActions() []keymap.ActionID {
 
 func (f *treeField) sync(d *Draft) {}
 
-// handle forwards a message to the live tree. It writes a newly-derived
-// selection only for an explicit selection action; asynchronous loading and
-// navigation retain the accessor's loaded selected-vs-all intent. The filter key
-// is answered first: it re-points the tree at a narrowed VIEW of the loaded
-// forest rather than reaching the tree as navigation.
+// handle forwards a message to the live tree, then re-derives the selection
+// from the current forest and writes it back into the draft. The filter key is
+// answered first: it re-points the tree at a narrowed VIEW of the loaded forest
+// rather than reaching the tree as navigation.
 func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
-	selectionEdit := f.isSelectionEdit(msg)
 	if !f.handleFacetKey(msg) {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
@@ -208,32 +206,11 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		}
 		f.captureForest()
 	}
-	if selectionEdit {
-		// Selection is always derived from the whole forest, never only the
-		// currently faceted view.
-		f.acc.Set(d.Working(), FromTreeNodes(f.selectionRoots()))
-	}
+	// The selection is re-derived after a facet change too, so what a commit
+	// would persist is always read from the whole forest - never left behind at
+	// whatever the last narrowed view happened to hold.
+	f.acc.Set(d.Working(), FromTreeNodes(f.selectionRoots()))
 	return cmd
-}
-
-// isSelectionEdit reports whether msg is one of the tree's explicit selection
-// actions in its current pane/loading state. Expansion, navigation, filtering,
-// preview messages, and source results are presentation changes only.
-func (f *treeField) isSelectionEdit(msg tea.Msg) bool {
-	keyMsg, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return false
-	}
-	action, matched := keymap.Match(keymap.Default(), keyMsg, availList(f.availableActions()))
-	if !matched {
-		return false
-	}
-	switch action {
-	case keymap.ActionToggle, keymap.ActionSelectAll, keymap.ActionSelectUnderProject:
-		return true
-	default:
-		return false
-	}
 }
 
 // handleFacetKey answers the filter key when a facet is configured, reporting

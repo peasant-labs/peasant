@@ -73,13 +73,10 @@ func TestFlow_TreeFieldCommitsSelection(t *testing.T) {
 	f.SetSize(80, 20)
 	f = drainInit(f)
 
-	// Loading and navigation retain the Draft's saved intent. Two explicit
-	// toggles first select, then clear, the current provider and derive a narrowed
-	// selection through the accessor.
-	f = send(f, "space")
-	f = send(f, "space")
+	// The standard fixture has a partial selection, so the derived selection is
+	// "selected" with a per-harness allowlist — written through the accessor.
 	if d.Working().Selection.Mode != config.SelectionModeSelected {
-		t.Fatalf("selection mode after explicit edits = %q", d.Working().Selection.Mode)
+		t.Fatalf("selection mode after load = %q", d.Working().Selection.Mode)
 	}
 
 	f = send(f, "tab") // to receipt

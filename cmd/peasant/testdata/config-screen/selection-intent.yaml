@@ -1,6 +1,0 @@
-expectedRows: 1
-cases:
-  - name: selected intent survives when every currently discovered session is checked
-    selectedSessions: [fixture-session]
-    expectMode: selected
-    unrelatedLicense: CC0-1.0

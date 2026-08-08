@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -30,7 +29,6 @@ const (
 	expectedConfigAliasFixtureRows    = 2
 	expectedPartialSuccessFixtureRows = 1
 	expectedConfigAuthorityRows       = 8
-	expectedSelectionIntentRows       = 1
 	expectedSaveOrderRows             = 1
 )
 
@@ -45,9 +43,6 @@ var configPartialSuccessFixtureYAML []byte
 
 //go:embed testdata/config-screen/authority.yaml
 var configAuthorityFixtureYAML []byte
-
-//go:embed testdata/config-screen/selection-intent.yaml
-var configSelectionIntentFixtureYAML []byte
 
 //go:embed testdata/config-screen/save-order.yaml
 var configSaveOrderFixtureYAML []byte
@@ -115,18 +110,6 @@ type configAuthorityDocument struct {
 	Forbidden    []string `yaml:"forbidden"`
 }
 
-type configSelectionIntentFixture struct {
-	Name             string               `yaml:"name"`
-	SelectedSessions []string             `yaml:"selectedSessions"`
-	ExpectMode       config.SelectionMode `yaml:"expectMode"`
-	UnrelatedLicense config.License       `yaml:"unrelatedLicense"`
-}
-
-type configSelectionIntentDocument struct {
-	ExpectedRows int                            `yaml:"expectedRows"`
-	Cases        []configSelectionIntentFixture `yaml:"cases"`
-}
-
 type configSaveOrderFixture struct {
 	Name              string   `yaml:"name"`
 	InitialRetention  int      `yaml:"initialRetention"`
@@ -192,23 +175,6 @@ func loadConfigAuthorityFixture(t *testing.T) configAuthorityDocument {
 		t.Fatalf("authority fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Forbidden), expectedConfigAuthorityRows)
 	}
 	return document
-}
-
-func loadConfigSelectionIntentFixtures(t *testing.T) []configSelectionIntentFixture {
-	t.Helper()
-	var document configSelectionIntentDocument
-	if err := decodeConfigScreenFixture("selection-intent.yaml", configSelectionIntentFixtureYAML, &document); err != nil {
-		t.Fatal(err)
-	}
-	if document.ExpectedRows != expectedSelectionIntentRows || len(document.Cases) != expectedSelectionIntentRows {
-		t.Fatalf("selection-intent fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedSelectionIntentRows)
-	}
-	for _, fixture := range document.Cases {
-		if fixture.Name == "" || !fixture.ExpectMode.IsValid() || len(fixture.SelectedSessions) == 0 || fixture.UnrelatedLicense == "" {
-			t.Fatalf("invalid selection-intent fixture: %+v", fixture)
-		}
-	}
-	return document.Cases
 }
 
 func loadConfigSaveOrderFixtures(t *testing.T) []configSaveOrderFixture {
@@ -331,56 +297,6 @@ func TestConfigCommand_ProductionRegistrationFixtures(t *testing.T) {
 			}
 			if resolved != primary {
 				t.Fatalf("production command %q resolved to %#v, want mounted config", fixture.Command, resolved)
-			}
-		})
-	}
-}
-
-func TestConfigCommand_SelectedIntentSurvivesUnrelatedSave(t *testing.T) {
-	for _, fixture := range loadConfigSelectionIntentFixtures(t) {
-		fixture := fixture
-		t.Run(fixture.Name, func(t *testing.T) {
-			world := newConfigScreenWorld(t, 90)
-			world.sourceName = "standard"
-			world.useSelectedAllCurrentConfig(t, fixture.SelectedSessions)
-			deps := world.dependencies(t)
-			deps.run = func(model tea.Model) (tea.Model, error) {
-				model = configScreenDrain(model, model.Init())
-				model = configScreenUpdate(model, tea.WindowSizeMsg{Width: 100, Height: 28})
-				host := model.(*configScreenModel)
-				if host.screen.Dirty() || host.draft.Dirty() {
-					t.Fatalf("initial selected-all-current screen is dirty: screen=%t draft=%t selection=%+v", host.screen.Dirty(), host.draft.Dirty(), host.draft.Working().Selection)
-				}
-				if !reflect.DeepEqual(host.draft.Working().Selection, host.draft.Baseline().Selection) {
-					t.Fatalf("asynchronous load changed selected intent: working=%+v baseline=%+v", host.draft.Working().Selection, host.draft.Baseline().Selection)
-				}
-				model = configScreenUpdate(model, configScreenKey("down"))
-				model = configScreenUpdate(model, configScreenKey("down"))
-				model = configScreenUpdate(model, configScreenKey("down"))
-				model = configScreenUpdate(model, configScreenKey("enter"))
-				model = configScreenUpdate(model, configScreenKey("down"))
-				model = configScreenUpdate(model, configScreenKey("space"))
-				return configScreenUpdate(model, configScreenKey("ctrl+s")), nil
-			}
-
-			if _, err := executeConfigScreenCommand(t, buildConfigCommand(deps), world, "config"); err != nil {
-				t.Fatalf("save unrelated config setting: %v", err)
-			}
-			saved := configScreenConfig(t, world.configPath)
-			if saved.Selection.Mode != fixture.ExpectMode {
-				t.Fatalf("saved selection mode=%q want=%q", saved.Selection.Mode, fixture.ExpectMode)
-			}
-			want := config.SelectionConfig{
-				Mode: fixture.ExpectMode,
-				Harnesses: map[string]config.SelectionHarnessConfig{
-					string(defaults.HarnessClaudeCode): {Sessions: fixture.SelectedSessions},
-				},
-			}
-			if !reflect.DeepEqual(saved.Selection, want) {
-				t.Fatalf("saved selection=%+v want=%+v", saved.Selection, want)
-			}
-			if saved.Push.License != fixture.UnrelatedLicense {
-				t.Fatalf("saved unrelated license=%q want=%q", saved.Push.License, fixture.UnrelatedLicense)
 			}
 		})
 	}
@@ -549,21 +465,6 @@ func (w *configScreenWorld) useSelectedConfig(t *testing.T) {
 	cfg.Selection.Mode = config.SelectionModeSelected
 	if err := config.SaveAtomic(w.configPath, cfg); err != nil {
 		t.Fatalf("seed selected-mode config: %v", err)
-	}
-	w.initialConfig = mustReadConfigScreenFile(t, w.configPath)
-}
-
-func (w *configScreenWorld) useSelectedAllCurrentConfig(t *testing.T, sessions []string) {
-	t.Helper()
-	cfg := configScreenConfig(t, w.configPath)
-	cfg.Selection = config.SelectionConfig{
-		Mode: config.SelectionModeSelected,
-		Harnesses: map[string]config.SelectionHarnessConfig{
-			string(defaults.HarnessClaudeCode): {Sessions: append([]string(nil), sessions...)},
-		},
-	}
-	if err := config.SaveAtomic(w.configPath, cfg); err != nil {
-		t.Fatalf("seed selected-all-current config: %v", err)
 	}
 	w.initialConfig = mustReadConfigScreenFile(t, w.configPath)
 }
