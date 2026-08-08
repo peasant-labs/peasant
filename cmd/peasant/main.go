@@ -20,6 +20,7 @@ var commands = [...]func() *cobra.Command{
 	BuildSessionsCommand,
 	BuildVersionCommand,
 	BuildKickstartCommand,
+	BuildConfigCommand,
 	BuildAnnotateCommand,
 	BuildMemoryCommand,
 	BuildExportCommand,

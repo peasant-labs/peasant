@@ -209,11 +209,27 @@ func (s Screen) save() (Screen, tea.Cmd) {
 	s.reg.dropHiddenEdits(s.draft)
 	s.recomputeSections()
 	if err := s.reg.validateVisible(s.draft); err != nil {
-		s.err = err
+		s.err = fmt.Errorf(
+			"save config settings: visible field validation failed: %w.\n"+
+				"what: at least one visible setting cannot be committed in its current state.\n"+
+				"why: the field-specific validation reported the error above.\n"+
+				"where: settings.Screen save validation.\n"+
+				"when: after hidden edits were dropped and before Draft.Commit.\n"+
+				"means: no config or external setting was written.\n"+
+				"fix: correct the visible field named above, then press ctrl+s again.",
+			err)
 		return s, nil
 	}
 	if err := s.draft.Commit(); err != nil {
-		s.err = err
+		s.err = fmt.Errorf(
+			"save config settings to %q: %w.\n"+
+				"what: the buffered configuration could not be committed.\n"+
+				"why: the atomic Draft.Commit step reported the error above.\n"+
+				"where: settings.Screen save commit.\n"+
+				"when: after validation passed and before SavedMsg could be emitted.\n"+
+				"means: no SavedMsg was sent and no post-commit external writer will run.\n"+
+				"fix: follow the commit error guidance, reopen current disk state if needed, and retry ctrl+s.",
+			s.draft.Path(), err)
 		return s, nil
 	}
 	s.savePending = true
@@ -579,6 +595,10 @@ func (s Screen) renderSection(width, height int) string {
 		rendered := fld.render(s.draft, styles, width)
 		lines = append(lines, rendered)
 		used += strings.Count(rendered, "\n") + 1
+		if fld.Kind() == KindToggle && fld.Dirty(s.draft) {
+			lines = append(lines, styles.Warning.Render(clip("[modified]", width)))
+			used++
+		}
 	}
 	return strings.Join(lines, "\n")
 }

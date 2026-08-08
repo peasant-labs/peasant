@@ -1,0 +1,581 @@
+package settings
+
+import (
+	"bytes"
+	_ "embed"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"gopkg.in/yaml.v3"
+
+	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
+)
+
+const (
+	expectedScreenSeedRows     = 4
+	expectedScreenBehaviorRows = 6
+	expectedScreenPopulateRows = 2
+)
+
+//go:embed testdata/screen/seed.yaml
+var screenSeedFixtureYAML []byte
+
+//go:embed testdata/screen/behavior.yaml
+var screenBehaviorFixtureYAML []byte
+
+//go:embed testdata/screen/prepopulate.yaml
+var screenPopulateFixtureYAML []byte
+
+type screenSeedOperation string
+
+const (
+	screenSeedValid    screenSeedOperation = "valid"
+	screenSeedNilDraft screenSeedOperation = "nil-draft"
+	screenSeedNilGet   screenSeedOperation = "nil-get"
+	screenSeedNilSet   screenSeedOperation = "nil-set"
+)
+
+func (o screenSeedOperation) valid() bool {
+	switch o {
+	case screenSeedValid, screenSeedNilDraft, screenSeedNilGet, screenSeedNilSet:
+		return true
+	}
+	return false
+}
+
+type screenSeedFixture struct {
+	Name      string              `yaml:"name"`
+	Operation screenSeedOperation `yaml:"operation"`
+	Initial   int                 `yaml:"initial"`
+}
+
+type screenSeedDocument struct {
+	ExpectedRows int                 `yaml:"expectedRows"`
+	Cases        []screenSeedFixture `yaml:"cases"`
+}
+
+type screenBehaviorOperation string
+
+const (
+	screenBehaviorVisibleTransient screenBehaviorOperation = "visible-transient-dirty"
+	screenBehaviorHiddenSave       screenBehaviorOperation = "hidden-transient-save"
+	screenBehaviorDiscard          screenBehaviorOperation = "discard"
+	screenBehaviorSave             screenBehaviorOperation = "save"
+	screenBehaviorJump             screenBehaviorOperation = "jump-navigation"
+	screenBehaviorHiddenField      screenBehaviorOperation = "hidden-field-save"
+)
+
+func (o screenBehaviorOperation) valid() bool {
+	switch o {
+	case screenBehaviorVisibleTransient, screenBehaviorHiddenSave, screenBehaviorDiscard,
+		screenBehaviorSave, screenBehaviorJump, screenBehaviorHiddenField:
+		return true
+	}
+	return false
+}
+
+type screenBehaviorFixture struct {
+	Name              string                  `yaml:"name"`
+	Operation         screenBehaviorOperation `yaml:"operation"`
+	Connected         bool                    `yaml:"connected"`
+	InitialRetention  int                     `yaml:"initialRetention"`
+	SelectedRetention int                     `yaml:"selectedRetention"`
+}
+
+type screenBehaviorDocument struct {
+	ExpectedRows int                     `yaml:"expectedRows"`
+	Cases        []screenBehaviorFixture `yaml:"cases"`
+}
+
+type screenPopulateFixture struct {
+	Name             string               `yaml:"name"`
+	Mode             config.SelectionMode `yaml:"mode"`
+	SelectedSessions []string             `yaml:"selectedSessions"`
+	ExpectMode       config.SelectionMode `yaml:"expectMode"`
+	ExpectChecked    []string             `yaml:"expectChecked"`
+}
+
+type screenPopulateDocument struct {
+	ExpectedRows int                     `yaml:"expectedRows"`
+	Cases        []screenPopulateFixture `yaml:"cases"`
+}
+
+func loadScreenSeedFixtures(t *testing.T) []screenSeedFixture {
+	t.Helper()
+	var document screenSeedDocument
+	if err := decodeScreenFixture("testdata/screen/seed.yaml", screenSeedFixtureYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ExpectedRows != expectedScreenSeedRows || len(document.Cases) != expectedScreenSeedRows {
+		t.Fatalf("seed fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedScreenSeedRows)
+	}
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || !fixture.Operation.valid() {
+			t.Fatalf("invalid seed fixture: name=%q operation=%q", fixture.Name, fixture.Operation)
+		}
+	}
+	return document.Cases
+}
+
+func loadScreenBehaviorFixtures(t *testing.T) []screenBehaviorFixture {
+	t.Helper()
+	var document screenBehaviorDocument
+	if err := decodeScreenFixture("testdata/screen/behavior.yaml", screenBehaviorFixtureYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ExpectedRows != expectedScreenBehaviorRows || len(document.Cases) != expectedScreenBehaviorRows {
+		t.Fatalf("behavior fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedScreenBehaviorRows)
+	}
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || !fixture.Operation.valid() {
+			t.Fatalf("invalid behavior fixture: name=%q operation=%q", fixture.Name, fixture.Operation)
+		}
+	}
+	return document.Cases
+}
+
+func loadScreenPopulateFixtures(t *testing.T) []screenPopulateFixture {
+	t.Helper()
+	var document screenPopulateDocument
+	if err := decodeScreenFixture("testdata/screen/prepopulate.yaml", screenPopulateFixtureYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ExpectedRows != expectedScreenPopulateRows || len(document.Cases) != expectedScreenPopulateRows {
+		t.Fatalf("prepopulate fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedScreenPopulateRows)
+	}
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || !fixture.Mode.IsValid() || !fixture.ExpectMode.IsValid() {
+			t.Fatalf("invalid prepopulate fixture: name=%q mode=%q expectMode=%q", fixture.Name, fixture.Mode, fixture.ExpectMode)
+		}
+	}
+	return document.Cases
+}
+
+func decodeScreenFixture(path string, data []byte, destination any) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(destination); err != nil {
+		return fmt.Errorf("decode %s with known fields: %w", path, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("%s must contain exactly one YAML document", path)
+		}
+		return fmt.Errorf("decode trailing document in %s: %w", path, err)
+	}
+	return nil
+}
+
+func TestScreenFixtureDecoder_StrictAndSingleDocument(t *testing.T) {
+	var unknown screenBehaviorDocument
+	withUnknown := append([]byte("unexpectedField: true\n"), screenBehaviorFixtureYAML...)
+	if err := decodeScreenFixture("behavior.yaml", withUnknown, &unknown); err == nil || !strings.Contains(err.Error(), "field unexpectedField not found") {
+		t.Fatalf("unknown field error=%v want strict rejection", err)
+	}
+
+	var trailing screenBehaviorDocument
+	withTrailing := append(append([]byte(nil), screenBehaviorFixtureYAML...), []byte("\n---\nexpectedRows: 0\n")...)
+	if err := decodeScreenFixture("behavior.yaml", withTrailing, &trailing); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("trailing document error=%v want single-document rejection", err)
+	}
+}
+
+func TestSeedInitial_Fixtures(t *testing.T) {
+	for _, fixture := range loadScreenSeedFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			path, loaded, before := screenFixtureConfig(t, true)
+			draft, err := NewDraft(path, loaded)
+			if err != nil {
+				t.Fatalf("NewDraft: %v", err)
+			}
+			accessor := screenRetentionAccessor()
+			var target *Draft = draft
+			switch fixture.Operation {
+			case screenSeedNilDraft:
+				target = nil
+			case screenSeedNilGet:
+				accessor.Get = nil
+			case screenSeedNilSet:
+				accessor.Set = nil
+			}
+
+			err = SeedInitial(target, accessor, fixture.Initial)
+			if fixture.Operation != screenSeedValid {
+				if err == nil {
+					t.Fatal("SeedInitial accepted an invalid boundary")
+				}
+				assertActionableScreenError(t, err)
+				if draft.Baseline().ClaudeRetentionDays != 0 || draft.Working().ClaudeRetentionDays != 0 {
+					t.Fatalf("rejected seed mutated draft: baseline=%d working=%d", draft.Baseline().ClaudeRetentionDays, draft.Working().ClaudeRetentionDays)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SeedInitial: %v", err)
+			}
+			if got := draft.Baseline().ClaudeRetentionDays; got != fixture.Initial {
+				t.Fatalf("baseline retention=%d want=%d", got, fixture.Initial)
+			}
+			if got := draft.Working().ClaudeRetentionDays; got != fixture.Initial {
+				t.Fatalf("working retention=%d want=%d", got, fixture.Initial)
+			}
+			draft.Working().ClaudeRetentionDays++
+			if err := draft.Discard(); err != nil {
+				t.Fatalf("Discard: %v", err)
+			}
+			if got := draft.Working().ClaudeRetentionDays; got != fixture.Initial {
+				t.Fatalf("discarded retention=%d want seeded=%d", got, fixture.Initial)
+			}
+			after, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatalf("read config after seed: %v", readErr)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("SeedInitial or Discard changed the expected on-disk snapshot")
+			}
+		})
+	}
+}
+
+func TestScreen_BehaviorFixtures(t *testing.T) {
+	for _, fixture := range loadScreenBehaviorFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			path, loaded, before := screenFixtureConfig(t, fixture.Connected)
+			draft, err := NewDraft(path, loaded)
+			if err != nil {
+				t.Fatalf("NewDraft: %v", err)
+			}
+			if err := SeedInitial(draft, screenRetentionAccessor(), fixture.InitialRetention); err != nil {
+				t.Fatalf("SeedInitial: %v", err)
+			}
+			registry := screenFixtureRegistry()
+			if fixture.Operation == screenBehaviorHiddenField {
+				registry = screenFieldVisibilityRegistry()
+			}
+			screen := NewScreen(theme.New(theme.ModeDark), registry, draft)
+			screen.SetSize(80, 20)
+			if screen.Err() != nil {
+				t.Fatalf("NewScreen: %v", screen.Err())
+			}
+			if strings.Contains(screen.View(), "guided-only framing") {
+				t.Fatal("dense Screen rendered Section.Guide metadata")
+			}
+
+			switch fixture.Operation {
+			case screenBehaviorVisibleTransient:
+				screen = selectFixtureRetention(screen, fixture.InitialRetention, fixture.SelectedRetention)
+				if !screen.Dirty() || !screen.sections[screen.section].dirty(draft) {
+					t.Fatal("visible transient edit did not mark section and screen dirty")
+				}
+				if draft.Dirty() {
+					t.Fatal("yaml-backed Draft.Dirty included transient retention")
+				}
+				if !strings.Contains(screen.View(), "[modified]") {
+					t.Fatal("visible dirty indicator is absent from Screen.View")
+				}
+			case screenBehaviorHiddenSave:
+				screen = selectFixtureRetention(screen, fixture.InitialRetention, fixture.SelectedRetention)
+				screen = sendScreenKeys(screen, screenKey("tab"), screenKey("up"), screenKey("enter"), screenKey("space"))
+				var cmd tea.Cmd
+				screen, cmd = screen.Update(screenKey("ctrl+s"))
+				message := runResult(cmd)
+				if _, ok := message.(SavedMsg); !ok {
+					t.Fatalf("save command message=%T want SavedMsg; err=%v", message, screen.Err())
+				}
+				if got := draft.Working().ClaudeRetentionDays; got != fixture.InitialRetention {
+					t.Fatalf("hidden retention edit survived save: got=%d want=%d", got, fixture.InitialRetention)
+				}
+			case screenBehaviorDiscard:
+				screen = selectFixtureRetention(screen, fixture.InitialRetention, fixture.SelectedRetention)
+				screen = sendScreenKeys(screen, screenKey("esc"), screenKey("left"))
+				var cmd tea.Cmd
+				screen, cmd = screen.Update(screenKey("enter"))
+				if cmd == nil {
+					t.Fatal("confirmed discard did not issue quit")
+				}
+				if draft.Working().ClaudeRetentionDays != fixture.InitialRetention || screen.Dirty() {
+					t.Fatalf("discard did not restore transient state: retention=%d dirty=%t", draft.Working().ClaudeRetentionDays, screen.Dirty())
+				}
+				after, readErr := os.ReadFile(path)
+				if readErr != nil {
+					t.Fatalf("read after discard: %v", readErr)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatal("confirmed discard changed config bytes")
+				}
+			case screenBehaviorSave:
+				screen = sendScreenKeys(screen, screenKey("enter"), screenKey("space"))
+				if !strings.Contains(screen.View(), "[modified]") {
+					t.Fatal("toggle edit has no field-level dirty indicator")
+				}
+				var cmd tea.Cmd
+				screen, cmd = screen.Update(screenKey("ctrl+s"))
+				message, ok := runResult(cmd).(SavedMsg)
+				if !ok || message.Draft() != draft {
+					t.Fatalf("save result=%T draft=%p want SavedMsg draft=%p; err=%v", message, message.Draft(), draft, screen.Err())
+				}
+				reloaded := screenParseConfig(t, path)
+				if reloaded.Village.Connected == fixture.Connected {
+					t.Fatalf("explicit save did not commit toggle: connected=%t", reloaded.Village.Connected)
+				}
+			case screenBehaviorJump:
+				beforeView := screen.View()
+				screen = sendScreenKeys(screen, screenKey("down"))
+				if screen.sections[screen.section].Key != "retention" {
+					t.Fatalf("jump navigation selected %q want retention", screen.sections[screen.section].Key)
+				}
+				if beforeView == screen.View() {
+					t.Fatal("jump navigation did not change the mounted view")
+				}
+				if screen.Dirty() || draft.Dirty() {
+					t.Fatal("jump navigation changed the draft")
+				}
+			case screenBehaviorHiddenField:
+				screen = sendScreenKeys(screen, screenKey("enter"), screenKey("tab"), screenKey("down"), screenKey("space"), screenKey("shift+tab"), screenKey("space"))
+				var cmd tea.Cmd
+				screen, cmd = screen.Update(screenKey("ctrl+s"))
+				if _, ok := runResult(cmd).(SavedMsg); !ok {
+					t.Fatalf("hidden-field save did not emit SavedMsg: err=%v", screen.Err())
+				}
+				if got := draft.Working().ClaudeRetentionDays; got != fixture.InitialRetention {
+					t.Fatalf("hidden field edit survived save: retention=%d want=%d", got, fixture.InitialRetention)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyExistingSelection_ProjectFirstFixtures(t *testing.T) {
+	for _, fixture := range loadScreenPopulateFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			roots := screenProjectFirstForest()
+			selection := config.SelectionConfig{Mode: fixture.Mode}
+			if fixture.Mode == config.SelectionModeSelected {
+				selection.Harnesses = map[string]config.SelectionHarnessConfig{
+					"claude-code": {Sessions: fixture.SelectedSessions},
+				}
+			}
+			ApplyExistingSelection(roots, selection)
+
+			checked := screenCheckedSessionIDs(roots)
+			if !sameSet(checked, fixture.ExpectChecked) {
+				t.Fatalf("checked sessions=%v want=%v", checked, fixture.ExpectChecked)
+			}
+			derived := FromTreeNodes(roots)
+			if derived.Mode != fixture.ExpectMode {
+				t.Fatalf("derived mode=%q want=%q", derived.Mode, fixture.ExpectMode)
+			}
+			if fixture.ExpectMode == config.SelectionModeSelected && !sameSet(derived.Harnesses["claude-code"].Sessions, fixture.SelectedSessions) {
+				t.Fatalf("derived sessions=%v want=%v", derived.Harnesses["claude-code"].Sessions, fixture.SelectedSessions)
+			}
+		})
+	}
+}
+
+func screenFixtureConfig(t *testing.T, connected bool) (string, *config.Config, []byte) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.BaseConfig()
+	cfg.Village.Connected = connected
+	if err := config.SaveAtomic(path, cfg); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read seeded config: %v", err)
+	}
+	loaded, err := config.Parse(before)
+	if err != nil {
+		t.Fatalf("parse seeded config: %v", err)
+	}
+	return path, loaded, before
+}
+
+func screenFixtureRegistry() Registry {
+	return Registry{Sections: []Section{
+		{
+			Key:   "general",
+			Title: "general",
+			Guide: &Guide{Intro: "guided-only framing"},
+			Fields: []Field{
+				Toggle("connected", "connected", connectedAccessor()),
+			},
+		},
+		{
+			Key:   "retention",
+			Title: "retention",
+			When:  func(d *Draft) bool { return d.Working().Village.Connected },
+			Fields: []Field{
+				Radio("retention-days", "retention days", screenRetentionAccessor(),
+					Option[int]{Label: "30 days", Value: 30},
+					Option[int]{Label: "90 days", Value: 90},
+					Option[int]{Label: "365 days", Value: 365},
+					Option[int]{Label: "never", Value: 99999}),
+			},
+		},
+	}}
+}
+
+func screenFieldVisibilityRegistry() Registry {
+	retention := Radio("retention-days", "retention days", screenRetentionAccessor(),
+		Option[int]{Label: "30 days", Value: 30},
+		Option[int]{Label: "90 days", Value: 90},
+	).(*radioField[int])
+	retention.when = func(d *Draft) bool { return d.Working().Village.Connected }
+	return Registry{Sections: []Section{
+		{
+			Key:   "general",
+			Title: "general",
+			Fields: []Field{
+				Toggle("connected", "connected", connectedAccessor()),
+				retention,
+			},
+		},
+	}}
+}
+
+func screenProjectFirstForest() []*kit.TreeNode {
+	return []*kit.TreeNode{
+		{
+			ID:    "git@example.test:team/project.git",
+			Label: "example:team/project",
+			Meta:  map[string]string{MetaRemote: "git@example.test:team/project.git"},
+			Children: []*kit.TreeNode{
+				{
+					ID:    "main",
+					Label: "main",
+					Meta:  map[string]string{MetaBranch: "main"},
+					Children: []*kit.TreeNode{
+						{ID: "session-one", Label: "session one", Meta: map[string]string{MetaHarness: "claude-code"}},
+						{ID: "session-two", Label: "session two", Meta: map[string]string{MetaHarness: "claude-code"}},
+					},
+				},
+			},
+		},
+	}
+}
+
+func screenCheckedSessionIDs(roots []*kit.TreeNode) []string {
+	var checked []string
+	var walk func(*kit.TreeNode)
+	walk = func(node *kit.TreeNode) {
+		if node.Meta[MetaHarness] != "" && node.State == kit.Checked {
+			checked = append(checked, node.ID)
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	for _, root := range roots {
+		walk(root)
+	}
+	return checked
+}
+
+func screenRetentionAccessor() Accessor[int] {
+	return Accessor[int]{
+		Get: func(cfg *config.Config) int { return cfg.ClaudeRetentionDays },
+		Set: func(cfg *config.Config, value int) { cfg.ClaudeRetentionDays = value },
+	}
+}
+
+func selectFixtureRetention(screen Screen, initial, selected int) Screen {
+	screen = sendScreenKeys(screen, screenKey("down"), screenKey("enter"))
+	step := 1
+	if selected < initial {
+		step = -1
+	}
+	for current := initial; current != selected; {
+		if step > 0 {
+			screen = sendScreenKeys(screen, screenKey("down"))
+		} else {
+			screen = sendScreenKeys(screen, screenKey("up"))
+		}
+		current = nextRetentionFixtureValue(current, step)
+	}
+	return sendScreenKeys(screen, screenKey("space"))
+}
+
+func nextRetentionFixtureValue(current, direction int) int {
+	switch {
+	case direction > 0 && current == 30:
+		return 90
+	case direction > 0 && current == 90:
+		return 365
+	case direction > 0 && current == 365:
+		return 99999
+	case direction < 0 && current == 99999:
+		return 365
+	case direction < 0 && current == 365:
+		return 90
+	case direction < 0 && current == 90:
+		return 30
+	default:
+		return current
+	}
+}
+
+func sendScreenKeys(screen Screen, keys ...tea.KeyPressMsg) Screen {
+	for _, message := range keys {
+		screen, _ = screen.Update(message)
+	}
+	return screen
+}
+
+func screenKey(name string) tea.KeyPressMsg {
+	switch name {
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "ctrl+s":
+		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	default:
+		return tea.KeyPressMsg{}
+	}
+}
+
+func screenParseConfig(t *testing.T, path string) *config.Config {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	return cfg
+}
+
+func assertActionableScreenError(t *testing.T, err error) {
+	t.Helper()
+	for _, part := range []string{"what:", "why:", "where:", "when:", "means:", "fix:"} {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("error missing %q: %v", part, err)
+		}
+	}
+}

@@ -484,6 +484,10 @@ func ApplyExistingSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
 		}
 		return
 	}
+	if isProjectFirstForest(roots) {
+		applyExistingProjectFirstSelection(roots, sel)
+		return
+	}
 	matcher := config.CompileSelectionMatcher(sel)
 	for _, provider := range roots {
 		harness := ingest.Harness(provider.ID)
@@ -510,6 +514,45 @@ func ApplyExistingSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
 	}
 	for _, r := range roots {
 		rollup(r)
+	}
+}
+
+// applyExistingProjectFirstSelection applies sel to the project -> branch ->
+// session forest produced by kickstart.ScannerTreeSource. Each session leaf
+// carries its harness, while its project and branch identities come from its
+// ancestors. This is the same MatchDiscovery boundary used for the older
+// harness-first shape above, only traversed according to the detected shape.
+func applyExistingProjectFirstSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
+	matcher := config.CompileSelectionMatcher(sel)
+	for _, project := range roots {
+		remote := gitRemoteOf(project)
+		projectName := project.Label
+		for _, branch := range project.Children {
+			branchName := branchOf(branch)
+			var applySession func(*kit.TreeNode)
+			applySession = func(session *kit.TreeNode) {
+				if harness := harnessOf(session); harness != "" {
+					match := matcher.MatchDiscovery(
+						ingest.Harness(harness), remote, projectName, branchName,
+						ingest.SessionID(session.ID), sel.AutoIngestNewBranches)
+					switch match {
+					case ingest.BranchMatchYes:
+						session.State = kit.Checked
+					case ingest.BranchMatchWithheldConflict:
+						session.State = kit.Conflict
+					default:
+						session.State = kit.Unchecked
+					}
+				}
+				for _, child := range session.Children {
+					applySession(child)
+				}
+			}
+			for _, session := range branch.Children {
+				applySession(session)
+			}
+		}
+		rollup(project)
 	}
 }
 

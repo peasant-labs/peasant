@@ -1,0 +1,32 @@
+expectedRows: 6
+cases:
+  - name: visible transient edit marks the field section and screen
+    operation: visible-transient-dirty
+    connected: true
+    initialRetention: 30
+    selectedRetention: 90
+  - name: saving drops a transient edit after its section becomes hidden
+    operation: hidden-transient-save
+    connected: true
+    initialRetention: 30
+    selectedRetention: 365
+  - name: confirmed discard restores yaml and transient values
+    operation: discard
+    connected: true
+    initialRetention: 90
+    selectedRetention: 365
+  - name: explicit save commits and emits the committed draft
+    operation: save
+    connected: false
+    initialRetention: 30
+    selectedRetention: 30
+  - name: section navigation jumps without changing the draft
+    operation: jump-navigation
+    connected: true
+    initialRetention: 365
+    selectedRetention: 365
+  - name: saving drops an edit after its field becomes hidden
+    operation: hidden-field-save
+    connected: true
+    initialRetention: 30
+    selectedRetention: 90

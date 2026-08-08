@@ -2,6 +2,39 @@
 
 Peasant's TUI pages use a layered keymap system built on [`charmbracelet/bubbles/key`](https://pkg.go.dev/github.com/charmbracelet/bubbles/key). A shared base keymap (`PageKeyMap`) provides common bindings; page-specific keymaps embed it and add their own.
 
+## Config screen
+
+Run `peasant config` to open the dense settings editor. `peasant settings` is an
+alias for the same command and mounts the same screen. The editor uses the same
+settings registry as kickstart, but presents it as a section list rather than a
+guided sequence.
+
+Edits stay in a buffered draft until an explicit save. The section list and each
+edited field show a modified marker. Only currently visible fields contribute to
+those markers. If an earlier answer hides a section or field, its buffered edit
+is dropped before validation and save.
+
+| Action | Keys | Description |
+|--------|------|-------------|
+| Choose section | `↑` `k` `↓` `j` | Move through the section list |
+| Enter section | `enter` or `tab` | Focus the selected section's first field |
+| Move between fields | `tab` `shift+tab` | Move field focus or return to the section list |
+| Save | `ctrl+s` | Validate visible fields and atomically save `config.yaml` |
+| Leave without saving | `esc` `b` `q` | Open the discard confirmation |
+| Help | `?` | Show the bindings available for the current focus |
+
+When Claude transcript retention changed, the config file is committed first and
+the existing Claude settings writer runs once afterward. A clean save, discard,
+validation failure, or config drift failure does not run that writer. If the
+second file cannot be updated after the config commit, Peasant reports an honest
+partial save with both paths and repair guidance. The config command edits
+settings only; it does not import or share transcripts.
+
+The config screen and other kit surfaces derive dispatch, footer hints, and help
+from the shared `internal/tui/keymap` action catalog. The older page-specific
+reference below remains for legacy wizard pages that have not yet moved to the
+kit.
+
 ## Architecture
 
 ```

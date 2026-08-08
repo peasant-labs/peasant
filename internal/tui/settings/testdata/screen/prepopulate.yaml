@@ -1,0 +1,12 @@
+expectedRows: 2
+cases:
+  - name: all mode checks the complete project-first forest
+    mode: all
+    selectedSessions: []
+    expectMode: all
+    expectChecked: [session-one, session-two]
+  - name: selected mode checks only the saved project-first session
+    mode: selected
+    selectedSessions: [session-one]
+    expectMode: selected
+    expectChecked: [session-one]

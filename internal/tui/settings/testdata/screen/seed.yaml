@@ -1,0 +1,14 @@
+expectedRows: 4
+cases:
+  - name: paired value survives discard without changing the disk snapshot
+    operation: valid
+    initial: 30
+  - name: nil draft is rejected before mutation
+    operation: nil-draft
+    initial: 90
+  - name: missing getter is rejected before mutation
+    operation: nil-get
+    initial: 365
+  - name: missing setter is rejected before mutation
+    operation: nil-set
+    initial: 99999

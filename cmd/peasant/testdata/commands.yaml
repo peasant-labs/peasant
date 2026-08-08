@@ -114,6 +114,10 @@ commands:
         type: bool
         default: "false"
 
+  - name: Config
+    use: config
+    aliases: ["settings"]
+
   - name: Login
     use: login
 
