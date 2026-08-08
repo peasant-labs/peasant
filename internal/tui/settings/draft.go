@@ -22,12 +22,73 @@ type Draft struct {
 	baseline config.Config
 	working  config.Config
 
+	// transientResets re-applies values intentionally omitted from config YAML
+	// after Discard deep-copies the baseline through YAML. SeedInitial is the
+	// only way to register one of these values, so baseline and working always
+	// start from the same typed value.
+	transientResets []func(*config.Config)
+
 	// expectedBytes is the exact file content observed when the draft opened.
 	// Commit compares the file against it and fails closed if another process
 	// changed the file since - the CheckSnapshot / ExpectedBytes discipline the
 	// kickstart wizard's SaveTo uses.
 	expectedBytes  []byte
 	expectedExists bool
+}
+
+// SeedInitial applies value through the same typed accessor to both the
+// baseline and working copies of d. It is intended for settings that
+// participate in a settings presentation but are persisted somewhere other
+// than config.yaml. The draft and both accessor functions are validated before
+// either copy is mutated.
+func SeedInitial[T comparable](d *Draft, acc Accessor[T], value T) error {
+	if d == nil {
+		return fmt.Errorf(
+			"seed settings initial value: draft is nil.\n" +
+				"what: no settings draft was provided for paired initialization.\n" +
+				"why: baseline and working state cannot be updated without an open draft.\n" +
+				"where: settings.SeedInitial.\n" +
+				"when: before fields mount for a settings presentation.\n" +
+				"means: no draft state was changed.\n" +
+				"fix: call settings.NewDraft successfully, then pass that draft to SeedInitial.")
+	}
+	if d.path == "" {
+		return fmt.Errorf(
+			"seed settings initial value: draft has no destination path.\n" +
+				"what: the supplied draft is not a valid editing session.\n" +
+				"why: it was not opened through settings.NewDraft with a resolved config path.\n" +
+				"where: settings.SeedInitial.\n" +
+				"when: before fields mount for a settings presentation.\n" +
+				"means: neither baseline nor working state was changed.\n" +
+				"fix: create the draft with settings.NewDraft and retry paired initialization.")
+	}
+	if acc.Get == nil {
+		return fmt.Errorf(
+			"seed settings initial value for %q: accessor Get is nil.\n"+
+				"what: the typed accessor cannot read the initialized value.\n"+
+				"why: its Get function was not supplied.\n"+
+				"where: settings.SeedInitial.\n"+
+				"when: validating the accessor before draft mutation.\n"+
+				"means: neither baseline nor working state was changed.\n"+
+				"fix: provide one Accessor with both Get and Set functions, then retry.", d.path)
+	}
+	if acc.Set == nil {
+		return fmt.Errorf(
+			"seed settings initial value for %q: accessor Set is nil.\n"+
+				"what: the typed accessor cannot write the initialized value.\n"+
+				"why: its Set function was not supplied.\n"+
+				"where: settings.SeedInitial.\n"+
+				"when: validating the accessor before draft mutation.\n"+
+				"means: neither baseline nor working state was changed.\n"+
+				"fix: provide one Accessor with both Get and Set functions, then retry.", d.path)
+	}
+
+	acc.Set(&d.baseline, value)
+	acc.Set(&d.working, value)
+	d.transientResets = append(d.transientResets, func(cfg *config.Config) {
+		acc.Set(cfg, value)
+	})
+	return nil
 }
 
 // NewDraft opens a draft over loaded, editing the config persisted at path. It
@@ -101,6 +162,9 @@ func (d *Draft) Discard() error {
 	baseline, err := cloneConfig(&d.baseline)
 	if err != nil {
 		return fmt.Errorf("discard settings draft for %q: %w", d.path, err)
+	}
+	for _, reset := range d.transientResets {
+		reset(&baseline)
 	}
 	d.working = baseline
 	return nil

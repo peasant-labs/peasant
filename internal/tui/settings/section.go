@@ -40,3 +40,27 @@ func (s Section) visible(d *Draft) bool {
 	}
 	return s.When(d)
 }
+
+// visibleFields returns the fields currently shown within s. Field-level When
+// predicates are evaluated against the same draft as the section predicate.
+func (s Section) visibleFields(d *Draft) []Field {
+	var out []Field
+	for _, fld := range s.Fields {
+		if fld != nil && fld.When(d) {
+			out = append(out, fld)
+		}
+	}
+	return out
+}
+
+// dirty reports whether any currently visible field in s differs from its
+// baseline. It deliberately delegates to Field.Dirty rather than Draft.Dirty
+// so settings omitted from config YAML participate in presentation state.
+func (s Section) dirty(d *Draft) bool {
+	for _, fld := range s.visibleFields(d) {
+		if fld.Dirty(d) {
+			return true
+		}
+	}
+	return false
+}
