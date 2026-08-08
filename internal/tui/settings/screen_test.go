@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,13 +16,15 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
 const (
-	expectedScreenSeedRows     = 4
-	expectedScreenBehaviorRows = 8
-	expectedScreenPopulateRows = 2
+	expectedScreenSeedRows       = 4
+	expectedScreenBehaviorRows   = 9
+	expectedScreenPopulateRows   = 2
+	expectedFlowScreenParityRows = 2
 )
 
 //go:embed testdata/screen/seed.yaml
@@ -72,13 +75,14 @@ const (
 	screenBehaviorHiddenField      screenBehaviorOperation = "hidden-field-save"
 	screenBehaviorHiddenCascade    screenBehaviorOperation = "hidden-field-cascade"
 	screenBehaviorSavePending      screenBehaviorOperation = "save-pending-freeze"
+	screenBehaviorHiddenValidation screenBehaviorOperation = "hidden-field-validation"
 )
 
 func (o screenBehaviorOperation) valid() bool {
 	switch o {
 	case screenBehaviorVisibleTransient, screenBehaviorHiddenSave, screenBehaviorDiscard,
 		screenBehaviorSave, screenBehaviorJump, screenBehaviorHiddenField,
-		screenBehaviorHiddenCascade, screenBehaviorSavePending:
+		screenBehaviorHiddenCascade, screenBehaviorSavePending, screenBehaviorHiddenValidation:
 		return true
 	}
 	return false
@@ -91,6 +95,7 @@ type screenBehaviorFixture struct {
 	InitialRetention  int                     `yaml:"initialRetention"`
 	SelectedRetention int                     `yaml:"selectedRetention"`
 	SaveInstruction   string                  `yaml:"saveInstruction"`
+	FlowScreenParity  bool                    `yaml:"flowScreenParity"`
 }
 
 type screenBehaviorDocument struct {
@@ -137,10 +142,17 @@ func loadScreenBehaviorFixtures(t *testing.T) []screenBehaviorFixture {
 	if document.ExpectedRows != expectedScreenBehaviorRows || len(document.Cases) != expectedScreenBehaviorRows {
 		t.Fatalf("behavior fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedScreenBehaviorRows)
 	}
+	parityRows := 0
 	for _, fixture := range document.Cases {
 		if fixture.Name == "" || !fixture.Operation.valid() {
 			t.Fatalf("invalid behavior fixture: name=%q operation=%q", fixture.Name, fixture.Operation)
 		}
+		if fixture.FlowScreenParity {
+			parityRows++
+		}
+	}
+	if parityRows != expectedFlowScreenParityRows {
+		t.Fatalf("flow/screen parity rows=%d want=%d", parityRows, expectedFlowScreenParityRows)
 	}
 	return document.Cases
 }
@@ -282,6 +294,9 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 				screenSetCascadeValues(draft.Working(), true)
 				draft.Working().ClaudeRetentionDays = fixture.SelectedRetention
 			}
+			if fixture.Operation == screenBehaviorHiddenValidation {
+				registry = screenHiddenValidationRegistry(t, draft)
+			}
 			screen := NewScreen(theme.New(theme.ModeDark), registry, draft)
 			screen.SetSize(80, 20)
 			if screen.Err() != nil {
@@ -414,8 +429,123 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 				if blockedCmd == nil {
 					t.Fatal("matching save completion did not quit")
 				}
+			case screenBehaviorHiddenValidation:
+				var cmd tea.Cmd
+				screen, cmd = screen.Update(screenKey("ctrl+s"))
+				if _, ok := runResult(cmd).(SavedMsg); !ok {
+					t.Fatalf("hidden-validation save did not emit SavedMsg: err=%v", screen.Err())
+				}
 			}
 		})
+	}
+}
+
+func TestFlowScreen_FieldVisibilityParityFixtures(t *testing.T) {
+	for _, fixture := range loadScreenBehaviorFixtures(t) {
+		fixture := fixture
+		if !fixture.FlowScreenParity {
+			continue
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			flowDraft, flowPath := screenParityDraft(t, fixture, "flow")
+			screenDraft, screenPath := screenParityDraft(t, fixture, "screen")
+			flowRegistry := screenParityRegistry(t, fixture, flowDraft)
+			screenRegistry := screenParityRegistry(t, fixture, screenDraft)
+			if fixture.Operation == screenBehaviorHiddenCascade &&
+				(!flowRegistry.dirty(flowDraft) || !screenRegistry.dirty(screenDraft)) {
+				t.Fatal("cascade precondition is not visibly dirty in both presentations")
+			}
+
+			flow := NewFlow(theme.New(theme.ModeDark), flowRegistry, flowDraft)
+			flow.SetSize(80, 20)
+			for step := 0; step <= len(flowRegistry.Sections) && !flow.OnReceipt(); step++ {
+				flow, _ = flow.Update(screenKey("tab"))
+			}
+			flow, _ = flow.Update(screenKey("enter"))
+
+			screen := NewScreen(theme.New(theme.ModeDark), screenRegistry, screenDraft)
+			screen.SetSize(80, 20)
+			screen, cmd := screen.Update(screenKey("ctrl+s"))
+			message, saved := runResult(cmd).(SavedMsg)
+			if !flow.Committed() || flow.Err() != nil || !saved || message.Draft() != screenDraft || screen.Err() != nil {
+				t.Fatalf("Flow/Screen save results committed/error/message = %t/%v/%T/%v",
+					flow.Committed(), flow.Err(), message, screen.Err())
+			}
+			flowConfig := screenParseConfig(t, flowPath)
+			screenConfig := screenParseConfig(t, screenPath)
+			if !reflect.DeepEqual(flowConfig, screenConfig) {
+				t.Fatalf("Flow and Screen persisted different config:\nFlow=%#v\nScreen=%#v", flowConfig, screenConfig)
+			}
+
+			switch fixture.Operation {
+			case screenBehaviorHiddenCascade:
+				if screenCascadeValues(flowDraft.Working()) != [4]bool{} ||
+					screenCascadeValues(screenDraft.Working()) != [4]bool{} {
+					t.Fatalf("field-level persisted edits survived: Flow=%v Screen=%v",
+						screenCascadeValues(flowDraft.Working()), screenCascadeValues(screenDraft.Working()))
+				}
+				if flowDraft.Working().ClaudeRetentionDays != fixture.InitialRetention ||
+					screenDraft.Working().ClaudeRetentionDays != fixture.InitialRetention {
+					t.Fatalf("field-level transient edit survived: Flow=%d Screen=%d want=%d",
+						flowDraft.Working().ClaudeRetentionDays, screenDraft.Working().ClaudeRetentionDays,
+						fixture.InitialRetention)
+				}
+				if flowRegistry.dirty(flowDraft) || screenRegistry.dirty(screenDraft) {
+					t.Fatal("a presentation remained dirty after converging hidden field edits")
+				}
+			case screenBehaviorHiddenValidation:
+				if !reflect.DeepEqual(flowDraft.Working().Selection, flowDraft.Baseline().Selection) ||
+					!reflect.DeepEqual(screenDraft.Working().Selection, screenDraft.Baseline().Selection) {
+					t.Fatal("hidden invalid selection was not reset to baseline before save")
+				}
+			}
+		})
+	}
+}
+
+func screenParityDraft(t *testing.T, fixture screenBehaviorFixture, suffix string) (*Draft, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), suffix+".yaml")
+	cfg := config.BaseConfig()
+	cfg.Village.Connected = fixture.Connected
+	if fixture.Operation == screenBehaviorHiddenCascade {
+		screenSetCascadeValues(cfg, false)
+	}
+	if err := config.SaveAtomic(path, cfg); err != nil {
+		t.Fatalf("seed parity config: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read parity config: %v", err)
+	}
+	loaded, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parse parity config: %v", err)
+	}
+	draft, err := NewDraft(path, loaded)
+	if err != nil {
+		t.Fatalf("open parity Draft: %v", err)
+	}
+	if err := SeedInitial(draft, screenRetentionAccessor(), fixture.InitialRetention); err != nil {
+		t.Fatalf("seed parity retention: %v", err)
+	}
+	if fixture.Operation == screenBehaviorHiddenCascade {
+		screenSetCascadeValues(draft.Working(), true)
+		draft.Working().ClaudeRetentionDays = fixture.SelectedRetention
+	}
+	return draft, path
+}
+
+func screenParityRegistry(t *testing.T, fixture screenBehaviorFixture, draft *Draft) Registry {
+	t.Helper()
+	switch fixture.Operation {
+	case screenBehaviorHiddenCascade:
+		return screenCascadeRegistry()
+	case screenBehaviorHiddenValidation:
+		return screenHiddenValidationRegistry(t, draft)
+	default:
+		t.Fatalf("behavior %q is not a Flow/Screen parity operation", fixture.Operation)
+		return Registry{}
 	}
 }
 
@@ -507,6 +637,24 @@ func screenFieldVisibilityRegistry() Registry {
 			},
 		},
 	}}
+}
+
+func screenHiddenValidationRegistry(t *testing.T, draft *Draft) Registry {
+	t.Helper()
+	selection := Tree("hidden-selection", "hidden selection", selectionAccessor(), scannerfix.NewFixtureTreeSource("conflict")).(*treeField)
+	selection.when = func(*Draft) bool { return false }
+	selection.mount(theme.New(theme.ModeDark))
+	for _, message := range runAll(selection.initCmd()) {
+		selection.handle(draft, message)
+	}
+	if err := selection.Validate(draft); err == nil {
+		t.Fatal("hidden validation fixture did not load a real conflicting tree")
+	}
+	return Registry{Sections: []Section{{
+		Key:    "hidden-validation",
+		Title:  "hidden validation",
+		Fields: []Field{selection},
+	}}}
 }
 
 func screenCascadeRegistry() Registry {

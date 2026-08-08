@@ -22,8 +22,8 @@ import (
 //     (re-)entry.
 //   - The receipt-step confirm is the SINGLE commit point - there is no
 //     mid-flow save.
-//   - A step hidden by a changed earlier answer has its edits DROPPED before
-//     the receipt, and the receipt reflects that.
+//   - A section or field hidden by a changed earlier answer has its edits
+//     DROPPED before the receipt, and the receipt reflects that.
 //   - A field whose Validate fails (e.g. an unresolved selection Conflict)
 //     blocks the receipt commit fail-closed with its actionable error.
 //
@@ -158,9 +158,9 @@ func (f *Flow) advance() {
 		f.cur++
 	}
 	if f.OnReceipt() {
-		// Reaching the receipt drops the edits of any step hidden by a changed
-		// answer so the receipt reflects only what will be committed.
-		f.dropHiddenEdits()
+		// Reaching the receipt applies the Registry's canonical hidden-field
+		// convergence so its summary reflects exactly what will be committed.
+		f.reg.dropHiddenEdits(f.draft)
 	}
 	f.enterStep()
 }
@@ -175,39 +175,13 @@ func (f *Flow) retreat() {
 	f.enterStep()
 }
 
-// dropHiddenEdits resets every field of every hidden section to its baseline,
-// iterating to a fixpoint because dropping an edit can change which sections
-// are hidden. This is what makes a step hidden by a changed answer contribute
-// nothing to the commit, and what the receipt reflects.
-func (f *Flow) dropHiddenEdits() {
-	for i := 0; i < len(f.reg.Sections)+1; i++ {
-		changed := false
-		for _, s := range f.reg.hiddenSections(f.draft) {
-			for _, fld := range s.Fields {
-				before := f.draft.Dirty()
-				fld.reset(f.draft)
-				if before != f.draft.Dirty() {
-					changed = true
-				}
-			}
-		}
-		if !changed {
-			return
-		}
-	}
-}
-
 // commit drops hidden edits, validates every visible field, then performs the
 // single atomic commit. Any failure sets err and writes nothing.
 func (f *Flow) commit() tea.Cmd {
-	f.dropHiddenEdits()
-	for _, s := range f.reg.visibleSections(f.draft) {
-		for _, fld := range s.Fields {
-			if err := fld.Validate(f.draft); err != nil {
-				f.err = err
-				return nil
-			}
-		}
+	f.reg.dropHiddenEdits(f.draft)
+	if err := f.reg.validateVisible(f.draft); err != nil {
+		f.err = err
+		return nil
 	}
 	if err := f.draft.Commit(); err != nil {
 		f.err = err

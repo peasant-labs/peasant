@@ -1,4 +1,4 @@
-expectedRows: 8
+expectedRows: 9
 cases:
   - name: visible transient edit marks the field section and screen
     operation: visible-transient-dirty
@@ -36,8 +36,15 @@ cases:
     connected: false
     initialRetention: 30
     selectedRetention: 90
+    flowScreenParity: true
   - name: pending save ignores discard and value mutation until completion
     operation: save-pending-freeze
     connected: true
     initialRetention: 30
     selectedRetention: 90
+  - name: a hidden invalid field does not block either presentation
+    operation: hidden-field-validation
+    connected: false
+    initialRetention: 30
+    selectedRetention: 30
+    flowScreenParity: true
