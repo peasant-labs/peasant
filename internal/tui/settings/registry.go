@@ -75,7 +75,7 @@ func (r Registry) hiddenFields(d *Draft) []Field {
 // Field.Dirty is the change detector so transient, YAML-omitted values are not
 // accidentally retained.
 func (r Registry) dropHiddenEdits(d *Draft) {
-	for i := 0; i < len(r.Sections)+1; i++ {
+	for i := 0; i < r.fieldCount(); i++ {
 		changed := false
 		for _, fld := range r.hiddenFields(d) {
 			if fld.Dirty(d) {
@@ -87,6 +87,21 @@ func (r Registry) dropHiddenEdits(d *Draft) {
 			return
 		}
 	}
+}
+
+// fieldCount returns the maximum number of distinct field resets needed to
+// converge hidden edits. Visibility can cascade between fields within one
+// section, so a section-count bound is too short for the field-level contract.
+func (r Registry) fieldCount() int {
+	count := 0
+	for _, section := range r.Sections {
+		for _, fld := range section.Fields {
+			if fld != nil {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 // validateVisible validates exactly the fields the user can currently see.

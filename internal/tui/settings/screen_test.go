@@ -20,7 +20,7 @@ import (
 
 const (
 	expectedScreenSeedRows     = 4
-	expectedScreenBehaviorRows = 6
+	expectedScreenBehaviorRows = 7
 	expectedScreenPopulateRows = 2
 )
 
@@ -70,12 +70,14 @@ const (
 	screenBehaviorSave             screenBehaviorOperation = "save"
 	screenBehaviorJump             screenBehaviorOperation = "jump-navigation"
 	screenBehaviorHiddenField      screenBehaviorOperation = "hidden-field-save"
+	screenBehaviorHiddenCascade    screenBehaviorOperation = "hidden-field-cascade"
 )
 
 func (o screenBehaviorOperation) valid() bool {
 	switch o {
 	case screenBehaviorVisibleTransient, screenBehaviorHiddenSave, screenBehaviorDiscard,
-		screenBehaviorSave, screenBehaviorJump, screenBehaviorHiddenField:
+		screenBehaviorSave, screenBehaviorJump, screenBehaviorHiddenField,
+		screenBehaviorHiddenCascade:
 		return true
 	}
 	return false
@@ -251,6 +253,17 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			path, loaded, before := screenFixtureConfig(t, fixture.Connected)
+			if fixture.Operation == screenBehaviorHiddenCascade {
+				screenSetCascadeValues(loaded, false)
+				if err := config.SaveAtomic(path, loaded); err != nil {
+					t.Fatalf("seed cascade config: %v", err)
+				}
+				var readErr error
+				before, readErr = os.ReadFile(path)
+				if readErr != nil {
+					t.Fatalf("read cascade config: %v", readErr)
+				}
+			}
 			draft, err := NewDraft(path, loaded)
 			if err != nil {
 				t.Fatalf("NewDraft: %v", err)
@@ -261,6 +274,11 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 			registry := screenFixtureRegistry()
 			if fixture.Operation == screenBehaviorHiddenField {
 				registry = screenFieldVisibilityRegistry()
+			}
+			if fixture.Operation == screenBehaviorHiddenCascade {
+				registry = screenCascadeRegistry()
+				screenSetCascadeValues(draft.Working(), true)
+				draft.Working().ClaudeRetentionDays = fixture.SelectedRetention
 			}
 			screen := NewScreen(theme.New(theme.ModeDark), registry, draft)
 			screen.SetSize(80, 20)
@@ -349,6 +367,22 @@ func TestScreen_BehaviorFixtures(t *testing.T) {
 				}
 				if got := draft.Working().ClaudeRetentionDays; got != fixture.InitialRetention {
 					t.Fatalf("hidden field edit survived save: retention=%d want=%d", got, fixture.InitialRetention)
+				}
+			case screenBehaviorHiddenCascade:
+				var cmd tea.Cmd
+				screen, cmd = screen.Update(screenKey("ctrl+s"))
+				if _, ok := runResult(cmd).(SavedMsg); !ok {
+					t.Fatalf("cascade save did not emit SavedMsg: err=%v", screen.Err())
+				}
+				if screenCascadeValues(draft.Working()) != [4]bool{} {
+					t.Fatalf("persisted cascade edits survived save: %v", screenCascadeValues(draft.Working()))
+				}
+				if got := draft.Working().ClaudeRetentionDays; got != fixture.InitialRetention {
+					t.Fatalf("transient cascade edit survived save: retention=%d want=%d", got, fixture.InitialRetention)
+				}
+				reloaded := screenParseConfig(t, path)
+				if screenCascadeValues(reloaded) != [4]bool{} {
+					t.Fatalf("persisted cascade values reached disk: %v", screenCascadeValues(reloaded))
 				}
 			}
 		})
@@ -443,6 +477,60 @@ func screenFieldVisibilityRegistry() Registry {
 			},
 		},
 	}}
+}
+
+func screenCascadeRegistry() Registry {
+	first := Toggle("cascade-first", "cascade first", screenCascadeAccessor(0)).(*toggleField)
+	first.when = func(*Draft) bool { return false }
+	second := Toggle("cascade-second", "cascade second", screenCascadeAccessor(1)).(*toggleField)
+	second.when = func(d *Draft) bool { return screenCascadeAccessor(0).Get(d.Working()) }
+	third := Toggle("cascade-third", "cascade third", screenCascadeAccessor(2)).(*toggleField)
+	third.when = func(d *Draft) bool { return screenCascadeAccessor(1).Get(d.Working()) }
+	fourth := Toggle("cascade-fourth", "cascade fourth", screenCascadeAccessor(3)).(*toggleField)
+	fourth.when = func(d *Draft) bool { return screenCascadeAccessor(2).Get(d.Working()) }
+	retention := Radio("cascade-retention", "cascade retention", screenRetentionAccessor(),
+		Option[int]{Label: "30 days", Value: 30},
+		Option[int]{Label: "90 days", Value: 90},
+	).(*radioField[int])
+	retention.when = func(d *Draft) bool { return screenCascadeAccessor(3).Get(d.Working()) }
+	return Registry{Sections: []Section{{
+		Key:    "cascade",
+		Title:  "cascade",
+		Fields: []Field{first, second, third, fourth, retention},
+	}}}
+}
+
+func screenCascadeAccessor(index int) Accessor[bool] {
+	return Accessor[bool]{
+		Get: func(cfg *config.Config) bool { return screenCascadeValues(cfg)[index] },
+		Set: func(cfg *config.Config, value bool) {
+			switch index {
+			case 0:
+				cfg.Village.Connected = value
+			case 1:
+				cfg.Sources.ClaudeCode.Enabled = value
+			case 2:
+				cfg.Sources.Codex.Enabled = value
+			case 3:
+				cfg.Push.Fields.GitRemote = value
+			}
+		},
+	}
+}
+
+func screenCascadeValues(cfg *config.Config) [4]bool {
+	return [4]bool{
+		cfg.Village.Connected,
+		cfg.Sources.ClaudeCode.Enabled,
+		cfg.Sources.Codex.Enabled,
+		cfg.Push.Fields.GitRemote,
+	}
+}
+
+func screenSetCascadeValues(cfg *config.Config, value bool) {
+	for index := range screenCascadeValues(cfg) {
+		screenCascadeAccessor(index).Set(cfg, value)
+	}
 }
 
 func screenProjectFirstForest() []*kit.TreeNode {

@@ -1,4 +1,4 @@
-expectedRows: 6
+expectedRows: 7
 cases:
   - name: visible transient edit marks the field section and screen
     operation: visible-transient-dirty
@@ -28,5 +28,10 @@ cases:
   - name: saving drops an edit after its field becomes hidden
     operation: hidden-field-save
     connected: true
+    initialRetention: 30
+    selectedRetention: 90
+  - name: saving converges across a long persisted and transient visibility cascade
+    operation: hidden-field-cascade
+    connected: false
     initialRetention: 30
     selectedRetention: 90
