@@ -185,3 +185,76 @@ func TestProgressState_AllStagesPrePopulated(t *testing.T) {
 		t.Errorf("snapshot len: got %d, want %d", len(snap), len(StageOrder))
 	}
 }
+
+func TestProgressState_ResetClearsEveryCanonicalStage(t *testing.T) {
+	ps := NewProgressState()
+	for _, stage := range StageOrder {
+		ps.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: 9})
+		ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Done: 4, Total: 9})
+		ps.Update(ProgressEvent{Kind: KindEnd, Stage: stage, Done: 7, Total: 9, Err: errTest})
+	}
+	for stage, progress := range ps.Snapshot() {
+		if progress.Total == 0 || progress.Done == 0 || !progress.Started || !progress.Ended || !progress.HasErr {
+			t.Fatalf("precondition: stage %s did not populate every mutable field: %#v", stage, progress)
+		}
+	}
+
+	ps.Reset()
+	snapshot := ps.Snapshot()
+	if len(snapshot) != len(StageOrder) {
+		t.Fatalf("reset snapshot has %d stages, want %d canonical stages", len(snapshot), len(StageOrder))
+	}
+	for _, stage := range StageOrder {
+		progress, present := snapshot[stage]
+		if !present {
+			t.Errorf("reset removed canonical stage %s", stage)
+			continue
+		}
+		if progress != (StageProgress{}) {
+			t.Errorf("reset stage %s = %#v, want zero state", stage, progress)
+		}
+	}
+}
+
+// TestProgressState_ConcurrentResetUpdateSnapshot exercises the retry reset
+// against the same producer and renderer operations used in production. Run
+// with -race: synchronization failures are part of this test's contract.
+func TestProgressState_ConcurrentResetUpdateSnapshot(t *testing.T) {
+	ps := NewProgressState()
+	const iterations = 300
+	var wg sync.WaitGroup
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for index := range iterations {
+			stage := StageOrder[index%len(StageOrder)]
+			ps.Update(ProgressEvent{Kind: KindStart, Stage: stage, Total: iterations})
+			ps.Update(ProgressEvent{Kind: KindAdvance, Stage: stage, Done: index, Total: iterations})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			ps.Reset()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			snapshot := ps.Snapshot()
+			if len(snapshot) != len(StageOrder) {
+				t.Errorf("concurrent snapshot has %d stages, want %d", len(snapshot), len(StageOrder))
+				return
+			}
+			for _, stage := range StageOrder {
+				if _, present := snapshot[stage]; !present {
+					t.Errorf("concurrent snapshot omitted canonical stage %s", stage)
+					return
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
+}

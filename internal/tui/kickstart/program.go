@@ -32,8 +32,8 @@ const (
 	// PhaseVisibility offers the kickstart-only login choice when a user reaches
 	// sharing guidance while disconnected. Config Screen never enters this phase.
 	PhaseVisibility
-	// PhaseIngest runs the ingest/journey pipeline ONLY after a successful
-	// commit, preserving the legacy ordering (save, then import).
+	// PhaseIngest runs the mounted local FTUE ingest boundary ONLY after a
+	// successful commit, preserving the ordering (save, then import).
 	PhaseIngest
 	// PhaseDone is the terminal stage: the program has committed and ingested,
 	// or the user confirmed a no-save exit.
@@ -63,9 +63,9 @@ func (p Phase) String() string {
 // program never reaches for auth or the network itself; a test supplies a fake.
 type LoginFunc func(ctx context.Context) (username string, err error)
 
-// IngestFunc runs the ingest pipeline after the config is saved and returns its
-// summary. It wraps the existing ftue ingest runner / JourneyRunner, closed over
-// the freshly-committed config path so it imports exactly what was just saved.
+// IngestFunc runs local transcript ingest after the config is saved and returns
+// its summary. Production wraps the mounted FTUE local-ingest runner, closed
+// over the freshly committed config path so it imports exactly what was saved.
 type IngestFunc func(ctx context.Context) (*ftue.IngestResult, error)
 
 // ProgramDeps are the runtime seams the kickstart program composes. Every field
@@ -129,8 +129,13 @@ type ingestDoneMsg struct {
 }
 
 // progressTickMsg asks Program to take one non-blocking snapshot from the
-// concurrent ingest progress source.
-type progressTickMsg struct{ at time.Time }
+// concurrent ingest progress source. generation binds the recurring timer to
+// the ingest attempt that created it, so a late retry-era tick cannot start a
+// second polling chain.
+type progressTickMsg struct {
+	at         time.Time
+	generation uint64
+}
 
 const progressPollInterval = 100 * time.Millisecond
 
@@ -139,10 +144,11 @@ const (
 	visibilityPrompt = "log in now to choose a default sharing visibility?"
 )
 
-// Program is the mounted first-run onboarding: OAuth -> settings.Flow -> Ingest,
-// all rendered on the kit. It is a bubbletea model. The flow is the single
-// commit point; ingest runs only after that commit succeeds; a confirmed esc in
-// the flow exits writing nothing and leaves ingest un-run.
+// Program is the mounted first-run onboarding: OAuth -> settings.Flow (with an
+// optional visibility-login detour) -> local Ingest -> persistent Done, all
+// rendered on the kit. The flow is the single commit point; ingest runs only
+// after that commit succeeds. A confirmed no-save exit instead enters Done
+// without writing config or running ingest.
 type Program struct {
 	deps ProgramDeps
 
@@ -171,6 +177,7 @@ type Program struct {
 	retentionAttempted bool
 	retentionApplied   bool
 	retryAttempt       bool
+	ingestGeneration   uint64
 	attemptStarted     time.Time
 	stageObservations  map[ingest.Stage]stageObservation
 	nextSteps          []NextStep
@@ -555,6 +562,8 @@ func (p Program) afterCommit() (Program, tea.Cmd) {
 // and timing state; config and retention are durable effects owned by the first
 // post-consent transition and are deliberately not revisited on retry.
 func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
+	p.ingestGeneration++
+	generation := p.ingestGeneration
 	p.phase = PhaseIngest
 	p.ingestRes = nil
 	p.ingestErr = nil
@@ -564,8 +573,12 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	if p.deps.Progress != nil {
 		p.deps.Progress.Reset()
 	}
-	p.spinner = p.spinner.SetLabel("importing transcripts")
-	return p, tea.Batch(p.runIngest(), p.progressTick(), p.spinner.Tick())
+	// A fresh spinner carries a fresh bubbles generation tag. Late animation
+	// messages from an earlier failed attempt are therefore ignored rather than
+	// extending a second animation chain into the retry.
+	p.spinner = kit.NewSpinner(p.deps.Theme, "importing transcripts")
+	p.spinner.SetSize(p.width, p.height)
+	return p, tea.Batch(p.runIngest(), p.progressTick(generation), p.spinner.Tick())
 }
 
 // retentionDays reports the Claude Code cleanup period to write. A Draft value
@@ -590,9 +603,9 @@ func (p Program) runIngest() tea.Cmd {
 	}
 }
 
-func (p Program) progressTick() tea.Cmd {
+func (p Program) progressTick(generation uint64) tea.Cmd {
 	return p.deps.Tick(progressPollInterval, func(at time.Time) tea.Msg {
-		return progressTickMsg{at: at}
+		return progressTickMsg{at: at, generation: generation}
 	})
 }
 
@@ -609,8 +622,11 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		}
 		return p, nil
 	case progressTickMsg:
+		if m.generation != p.ingestGeneration {
+			return p, nil
+		}
 		p = p.observeProgress(m.at)
-		return p, p.progressTick()
+		return p, p.progressTick(m.generation)
 	default:
 		var cmd tea.Cmd
 		p.spinner, cmd = p.spinner.Update(m)

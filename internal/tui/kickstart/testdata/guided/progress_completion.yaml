@@ -67,6 +67,7 @@ completion:
   - name: retry-local-import-only
     attemptErrors: [synthetic local import failure, ""]
     mutateConfigBeforeRetry: true
+    useRealProgress: true
     wantFailureContains:
       - config remains saved
       - retention remains applied
@@ -77,6 +78,9 @@ completion:
     wantRetryContains:
       - 'local import elapsed: 0s'
       - estimate unavailable
+    wantRetryMissing:
+      - 'report 1/2'
+      - stale prior-attempt progress
     wantContains:
       - local import completed
       - peasant web start

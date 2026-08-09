@@ -52,8 +52,10 @@ type completionFixture struct {
 	Name                    string   `yaml:"name"`
 	AttemptErrors           []string `yaml:"attemptErrors"`
 	MutateConfigBeforeRetry bool     `yaml:"mutateConfigBeforeRetry"`
+	UseRealProgress         bool     `yaml:"useRealProgress"`
 	WantFailureContains     []string `yaml:"wantFailureContains"`
 	WantRetryContains       []string `yaml:"wantRetryContains"`
+	WantRetryMissing        []string `yaml:"wantRetryMissing"`
 	WantContains            []string `yaml:"wantContains"`
 	WantMissing             []string `yaml:"wantMissing"`
 	WantIngestCalls         int      `yaml:"wantIngestCalls"`
@@ -113,7 +115,8 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 			t.Fatalf("completion row is incomplete, duplicated, or internally inconsistent: %#v", row)
 		}
 		completionNames[row.Name] = true
-		if len(row.AttemptErrors) > 1 && (len(row.WantFailureContains) == 0 || len(row.WantRetryContains) == 0 || !row.MutateConfigBeforeRetry) {
+		if len(row.AttemptErrors) > 1 && (len(row.WantFailureContains) == 0 || len(row.WantRetryContains) == 0 ||
+			len(row.WantRetryMissing) == 0 || !row.MutateConfigBeforeRetry || !row.UseRealProgress) {
 			t.Fatalf("retry completion row %q does not prove failure truth, volatile reset, and no recommit", row.Name)
 		}
 	}
@@ -141,6 +144,34 @@ type fixtureProgressSource struct {
 	mu       sync.Mutex
 	snapshot map[ingest.Stage]ingest.StageProgress
 	resets   int
+}
+
+type realProgressSource struct {
+	*ingest.ProgressState
+	mu     sync.Mutex
+	resets int
+}
+
+func newRealProgressSource() *realProgressSource {
+	return &realProgressSource{ProgressState: ingest.NewProgressState()}
+}
+
+func (s *realProgressSource) Reset() {
+	s.ProgressState.Reset()
+	s.mu.Lock()
+	s.resets++
+	s.mu.Unlock()
+}
+
+func (s *realProgressSource) Resets() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resets
+}
+
+type resetCountingProgress interface {
+	kickstart.ProgressSource
+	Resets() int
 }
 
 func (s *fixtureProgressSource) Snapshot() map[ingest.Stage]ingest.StageProgress {
@@ -183,7 +214,7 @@ func (s *fixtureProgressSource) Resets() int {
 
 func newProgressProgram(
 	t *testing.T,
-	progress *fixtureProgressSource,
+	progress kickstart.ProgressSource,
 	clock *fixtureClock,
 	ingestRun kickstart.IngestFunc,
 	retention kickstart.RetentionWriter,
@@ -291,7 +322,12 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
 			clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
-			progress := &fixtureProgressSource{}
+			var progress resetCountingProgress = &fixtureProgressSource{}
+			var realProgress *realProgressSource
+			if row.UseRealProgress {
+				realProgress = newRealProgressSource()
+				progress = realProgress
+			}
 			retentionCalls := 0
 			ingestCalls := 0
 			ingestRun := func(context.Context) (*ftue.IngestResult, error) {
@@ -333,12 +369,23 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 						t.Fatalf("close retry sentinel: %v", err)
 					}
 				}
+				if realProgress != nil {
+					realProgress.Update(ingest.ProgressEvent{
+						Kind: ingest.KindEnd, Stage: ingest.StageReport,
+						Done: 1, Total: 2, Err: errors.New("stale prior-attempt progress"),
+					})
+				}
 				mutated := mustReadFile(t, path)
 				program, command = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 				retryView := strings.ToLower(stripRender(program.View()))
 				for _, want := range row.WantRetryContains {
 					if !strings.Contains(retryView, strings.ToLower(want)) {
 						t.Errorf("retry start does not contain %q:\n%s", want, retryView)
+					}
+					for _, missing := range row.WantRetryMissing {
+						if strings.Contains(retryView, strings.ToLower(missing)) {
+							t.Errorf("retry retained stale progress %q:\n%s", missing, retryView)
+						}
 					}
 				}
 				program, quitEarly = runAttemptCommandsOnce(program, command)
@@ -381,5 +428,78 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 				t.Fatal("explicit completion exit did not request tea.Quit")
 			}
 		})
+	}
+}
+
+func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	loaded := config.BaseConfig()
+	if err := config.SaveAtomic(path, loaded); err != nil {
+		t.Fatalf("seed retry generation config: %v", err)
+	}
+	draft, err := settings.NewDraft(path, loaded)
+	if err != nil {
+		t.Fatalf("open retry generation draft: %v", err)
+	}
+	clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
+	var callbacks []func(time.Time) tea.Msg
+	ingestCalls := 0
+	program := kickstart.NewProgram(kickstart.ProgramDeps{
+		Theme:            theme.New(theme.ModeDark),
+		Draft:            draft,
+		Source:           scannerfix.NewFixtureTreeSource("standard"),
+		AlreadyConnected: true,
+		Clock:            clock,
+		Progress:         ingest.NewProgressState(),
+		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
+			callbacks = append(callbacks, callback)
+			return func() tea.Msg { return callback(clock.Now()) }
+		},
+		Ingest: func(context.Context) (*ftue.IngestResult, error) {
+			ingestCalls++
+			if ingestCalls == 1 {
+				return nil, errors.New("first attempt failed")
+			}
+			return &ftue.IngestResult{New: 1}, nil
+		},
+	})
+	program.SetSize(120, 30)
+	program, firstBatch := advanceToCommit(program)
+	firstChildren := unwrapBatch(firstBatch)
+	if len(firstChildren) != 3 || len(callbacks) != 1 {
+		t.Fatalf("first attempt children/callbacks=%d/%d, want 3/1", len(firstChildren), len(callbacks))
+	}
+	oldProgressMessage := callbacks[0](clock.Now())
+	oldSpinnerMessage := firstChildren[2]()
+	program, _ = program.Update(firstChildren[0]())
+	if program.Phase() != kickstart.PhaseDone || program.IngestErr() == nil {
+		t.Fatalf("first attempt phase/error=%s/%v, want failed completion", program.Phase(), program.IngestErr())
+	}
+
+	program, retryBatch := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	retryChildren := unwrapBatch(retryBatch)
+	if program.Phase() != kickstart.PhaseIngest || len(retryChildren) != 3 || len(callbacks) != 2 {
+		t.Fatalf("retry phase/children/callbacks=%s/%d/%d, want ingest/3/2",
+			program.Phase(), len(retryChildren), len(callbacks))
+	}
+
+	var staleCommand tea.Cmd
+	program, staleCommand = program.Update(oldProgressMessage)
+	if staleCommand != nil || len(callbacks) != 2 {
+		t.Fatalf("stale progress tick rescheduled a chain: command=%v callbacks=%d", staleCommand != nil, len(callbacks))
+	}
+	program, staleCommand = program.Update(oldSpinnerMessage)
+	if staleCommand != nil {
+		t.Fatal("stale spinner tick rescheduled an animation chain")
+	}
+
+	currentProgressMessage := callbacks[1](clock.Now())
+	program, currentCommand := program.Update(currentProgressMessage)
+	if currentCommand == nil || len(callbacks) != 3 {
+		t.Fatalf("current progress tick command/callbacks=%v/%d, want one continuing chain", currentCommand != nil, len(callbacks))
+	}
+	_, currentSpinnerCommand := program.Update(retryChildren[2]())
+	if currentSpinnerCommand == nil {
+		t.Fatal("current retry spinner tick did not continue its animation chain")
 	}
 }
