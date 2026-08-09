@@ -561,13 +561,7 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 
 		// Map selected sessions to AllowedSessionIDs filter, expanding
 		// parent sessions to include their subagent children.
-		allowedIDs := expandAllowedSessionIDs(answers.EffectiveSelectedSessions())
-		if allowedIDs == nil && hasRestrictedProviderSelection(answers.ProviderSelections) {
-			// An explicitly empty individual selection means import nothing. A nil
-			// map means allow all to Pipeline, so preserve the empty selection as a
-			// non-nil map.
-			allowedIDs = map[ingest.SessionID]bool{}
-		}
+		allowedIDs := kickstartAllowedSessionIDs(answers)
 
 		pipelineCfg := ingest.PipelineConfig{
 			Sources:            sources,
@@ -622,6 +616,19 @@ func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (f
 			ProviderCounts: providerCounts,
 		}, nil
 	}, progState
+}
+
+// kickstartAllowedSessionIDs preserves the difference between unrestricted
+// legacy wizard input and a committed selected-mode policy that currently
+// matches no discovered sessions. Pipeline uses nil to mean allow all, so the
+// latter must cross this adapter as an allocated empty set.
+func kickstartAllowedSessionIDs(answers ftue.WizardAnswers) map[ingest.SessionID]bool {
+	allowed := expandAllowedSessionIDs(answers.EffectiveSelectedSessions())
+	if allowed == nil && (answers.SelectionMode == config.SelectionModeSelected ||
+		hasRestrictedProviderSelection(answers.ProviderSelections)) {
+		return map[ingest.SessionID]bool{}
+	}
+	return allowed
 }
 
 func hasRestrictedProviderSelection(selections []ftue.ProviderSelection) bool {

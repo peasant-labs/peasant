@@ -299,7 +299,7 @@ func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) 
 		for h := range harnesses {
 			provs = append(provs, ftue.ProviderSelection{Harness: h, ImportAll: true})
 		}
-		return ftue.WizardAnswers{ProviderSelections: provs}
+		return ftue.WizardAnswers{SelectionMode: cfg.Selection.Mode, ProviderSelections: provs}
 	}
 
 	matcher := config.CompileSelectionMatcher(cfg.Selection)
@@ -319,6 +319,7 @@ func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) 
 		provs = append(provs, ftue.ProviderSelection{Harness: h, ImportAll: false})
 	}
 	return ftue.WizardAnswers{
+		SelectionMode:      cfg.Selection.Mode,
 		ProviderSelections: provs,
 		SelectedSessions:   selected,
 	}
