@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -291,5 +292,50 @@ func TestLoginFromChecksOnlySelectedCredentialStore(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoginFromSavesSuccessfulCallbackIntoSelectedStore(t *testing.T) {
+	defaultHome := t.TempDir()
+	customHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", defaultHome)
+	defaultCredentials := &Credentials{
+		APIKey: "default-key", KeyID: "default-key-id", UserID: "default-user-id", Username: "default-user",
+	}
+	if err := SaveCredentials(defaultCredentials); err != nil {
+		t.Fatalf("seed unrelated default credentials: %v", err)
+	}
+	wantTime := time.Date(2026, time.August, 9, 12, 30, 0, 0, time.UTC)
+	callbackCalls := 0
+	got, err := loginFromWith(
+		context.Background(),
+		"https://village.example.test",
+		false,
+		customHome,
+		func(context.Context, string) (*Credentials, error) {
+			callbackCalls++
+			return &Credentials{
+				APIKey: "custom-key", KeyID: "custom-key-id", UserID: "custom-user-id", Username: "custom-user",
+			}, nil
+		},
+		func() time.Time { return wantTime },
+	)
+	if err != nil {
+		t.Fatalf("LoginFrom successful callback: %v", err)
+	}
+	if callbackCalls != 1 || got == nil || got.Username != "custom-user" {
+		t.Fatalf("callback calls/result=%d/%#v, want one custom-profile result", callbackCalls, got)
+	}
+	customCredentials, err := LoadCredentialsFrom(customHome)
+	if err != nil || customCredentials == nil {
+		t.Fatalf("load custom credentials after LoginFrom: %#v, %v", customCredentials, err)
+	}
+	if customCredentials.Username != "custom-user" || customCredentials.VillageURL != "https://village.example.test" ||
+		!customCredentials.LinkedAt.Equal(wantTime) {
+		t.Errorf("saved custom credentials = %#v, want callback identity with resolved village/time", customCredentials)
+	}
+	loadedDefault, err := LoadCredentials()
+	if err != nil || loadedDefault == nil || loadedDefault.Username != defaultCredentials.Username {
+		t.Fatalf("successful custom login changed default credentials = %#v, %v", loadedDefault, err)
 	}
 }

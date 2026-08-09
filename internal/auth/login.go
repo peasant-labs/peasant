@@ -26,6 +26,19 @@ func Login(ctx context.Context, villageURL string, forceReauth bool) (*Credentia
 // same XDG config-home override. The pre-check and successful callback save can
 // therefore never collide with a different default profile.
 func LoginFrom(ctx context.Context, villageURL string, forceReauth bool, xdgConfigHomeOverride string) (*Credentials, error) {
+	return loginFromWith(ctx, villageURL, forceReauth, xdgConfigHomeOverride, browserLogin, time.Now)
+}
+
+type browserLoginFunc func(context.Context, string) (*Credentials, error)
+
+func loginFromWith(
+	ctx context.Context,
+	villageURL string,
+	forceReauth bool,
+	xdgConfigHomeOverride string,
+	login browserLoginFunc,
+	now func() time.Time,
+) (*Credentials, error) {
 	if !forceReauth {
 		existing, err := LoadCredentialsFrom(xdgConfigHomeOverride)
 		if err != nil {
@@ -38,7 +51,31 @@ func LoginFrom(ctx context.Context, villageURL string, forceReauth bool, xdgConf
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("login cancelled: %w", err)
 	}
+	if login == nil {
+		return nil, fmt.Errorf("perform browser login: callback boundary is nil")
+	}
+	if now == nil {
+		return nil, fmt.Errorf("perform browser login: clock boundary is nil")
+	}
+	credentials, err := login(ctx, villageURL)
+	if err != nil {
+		return nil, err
+	}
+	if credentials == nil {
+		return nil, fmt.Errorf("perform browser login: callback returned no credentials; no local credential file was changed; retry the village login")
+	}
+	credentials.VillageURL = villageURL
+	credentials.LinkedAt = now()
+	if err := SaveCredentialsFrom(credentials, xdgConfigHomeOverride); err != nil {
+		return nil, fmt.Errorf("save credentials: %w", err)
+	}
+	return credentials, nil
+}
 
+// browserLogin performs the browser/callback exchange and returns the received
+// credentials without choosing a local store. loginFromWith exclusively owns
+// the path-aware pre-check and save on either side of this network boundary.
+func browserLogin(ctx context.Context, villageURL string) (*Credentials, error) {
 	state, err := generateRandomState()
 	if err != nil {
 		return nil, fmt.Errorf("generate state: %w", err)
@@ -72,11 +109,6 @@ func LoginFrom(ctx context.Context, villageURL string, forceReauth bool, xdgConf
 	case result := <-resultCh:
 		if result.Err != nil {
 			return nil, fmt.Errorf("login callback: %w", result.Err)
-		}
-		result.Credentials.VillageURL = villageURL
-		result.Credentials.LinkedAt = time.Now()
-		if err := SaveCredentialsFrom(result.Credentials, xdgConfigHomeOverride); err != nil {
-			return nil, fmt.Errorf("save credentials: %w", err)
 		}
 		return result.Credentials, nil
 
