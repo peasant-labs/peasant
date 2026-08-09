@@ -97,6 +97,10 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 
 	var blocks []string
 	for _, sample := range samples {
+		categoryLabel, err := canonicalPrivacyCategoryLabel(sample.Category)
+		if err != nil {
+			return "", err
+		}
 		matches := redactor.Detect(sample.Before)
 		categoryFound := false
 		for _, match := range matches {
@@ -121,9 +125,26 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 				"detection claimed the category but the real redaction output did not change",
 				"repair the redactor replacement behavior instead of hard-coding example output")
 		}
-		blocks = append(blocks, fmt.Sprintf("%s\nbefore: %s\nafter: %s", sample.Category, sample.Before, after))
+		blocks = append(blocks, fmt.Sprintf("%s\nbefore: %s\nafter: %s", categoryLabel, sample.Before, after))
 	}
 	return strings.Join(blocks, "\n\n"), nil
+}
+
+func canonicalPrivacyCategoryLabel(category redact.Category) (redact.CategoryString, error) {
+	if err := category.Validate(); err != nil {
+		return "", privacyExampleError(
+			fmt.Sprintf("privacy guidance cannot render unknown category %q", category),
+			err.Error(),
+			"repair the redaction rule category before rendering privacy guidance")
+	}
+	label := category.String()
+	if label == "" {
+		return "", privacyExampleError(
+			fmt.Sprintf("privacy guidance has no canonical label for category %q", category),
+			"the validated category resolved to an empty public CategoryString",
+			"restore the canonical CREDENTIAL, PII, PATH, or INTERNAL category mapping")
+	}
+	return label, nil
 }
 
 func privacyExampleError(what, why, fix string) error {

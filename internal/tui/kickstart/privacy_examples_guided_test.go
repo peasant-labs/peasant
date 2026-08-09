@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	privacyAdapterSampleRows  = 4
-	privacyAdapterFailureRows = 4
-	privacyAdapterLicenseRows = 4
+	privacyAdapterSampleRows        = 4
+	privacyAdapterFailureRows       = 4
+	privacyAdapterLabelMutationRows = 3
+	privacyAdapterLicenseRows       = 4
 )
 
 type adapterFailureKind string
@@ -42,9 +43,17 @@ func (k adapterFailureKind) valid() bool {
 }
 
 type adapterSampleFixture struct {
-	Name     string          `yaml:"name"`
-	Category redact.Category `yaml:"category"`
-	Before   string          `yaml:"before"`
+	Name          string                `yaml:"name"`
+	Category      redact.Category       `yaml:"category"`
+	CategoryLabel redact.CategoryString `yaml:"categoryLabel"`
+	Before        string                `yaml:"before"`
+}
+
+type adapterLabelMutationFixture struct {
+	Name          string                `yaml:"name"`
+	Kind          string                `yaml:"kind"`
+	SampleName    string                `yaml:"sampleName"`
+	CategoryLabel redact.CategoryString `yaml:"categoryLabel"`
 }
 
 type adapterFailureFixture struct {
@@ -62,12 +71,14 @@ type adapterLicenseFixture struct {
 }
 
 type adapterFixtureDocument struct {
-	ExpectedPrivacySampleCount int                     `yaml:"expectedPrivacySampleCount"`
-	PrivacySamples             []adapterSampleFixture  `yaml:"privacySamples"`
-	ExpectedFailureCount       int                     `yaml:"expectedFailureCount"`
-	Failures                   []adapterFailureFixture `yaml:"failures"`
-	ExpectedLicenseCount       int                     `yaml:"expectedLicenseCount"`
-	Licenses                   []adapterLicenseFixture `yaml:"licenses"`
+	ExpectedPrivacySampleCount int                           `yaml:"expectedPrivacySampleCount"`
+	PrivacySamples             []adapterSampleFixture        `yaml:"privacySamples"`
+	ExpectedFailureCount       int                           `yaml:"expectedFailureCount"`
+	Failures                   []adapterFailureFixture       `yaml:"failures"`
+	ExpectedLabelMutationCount int                           `yaml:"expectedLabelMutationCount"`
+	LabelMutations             []adapterLabelMutationFixture `yaml:"labelMutations"`
+	ExpectedLicenseCount       int                           `yaml:"expectedLicenseCount"`
+	Licenses                   []adapterLicenseFixture       `yaml:"licenses"`
 }
 
 //go:embed testdata/guided/privacy_license.yaml
@@ -93,6 +104,10 @@ func loadPrivacyAdapterFixture(t *testing.T) adapterFixtureDocument {
 		t.Fatalf("privacy adapter failures: declared=%d actual=%d required=%d",
 			document.ExpectedFailureCount, len(document.Failures), privacyAdapterFailureRows)
 	}
+	if document.ExpectedLabelMutationCount != privacyAdapterLabelMutationRows || len(document.LabelMutations) != privacyAdapterLabelMutationRows {
+		t.Fatalf("privacy adapter label mutations: declared=%d actual=%d required=%d",
+			document.ExpectedLabelMutationCount, len(document.LabelMutations), privacyAdapterLabelMutationRows)
+	}
 	if document.ExpectedLicenseCount != privacyAdapterLicenseRows || len(document.Licenses) != privacyAdapterLicenseRows {
 		t.Fatalf("privacy adapter licenses: declared=%d actual=%d required=%d",
 			document.ExpectedLicenseCount, len(document.Licenses), privacyAdapterLicenseRows)
@@ -105,6 +120,9 @@ func loadPrivacyAdapterFixture(t *testing.T) adapterFixtureDocument {
 		seenSamples[row.Name] = true
 		if err := row.Category.Validate(); err != nil {
 			t.Fatalf("privacy adapter sample %q category: %v", row.Name, err)
+		}
+		if row.CategoryLabel == "" || row.CategoryLabel != row.Category.String() {
+			t.Fatalf("privacy adapter sample %q label=%q, want %q", row.Name, row.CategoryLabel, row.Category.String())
 		}
 	}
 	seenFailures := map[string]bool{}

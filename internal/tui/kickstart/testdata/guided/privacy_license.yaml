@@ -4,15 +4,19 @@ expectedPrivacySampleCount: 4
 privacySamples:
   - name: synthetic-secret
     category: secrets
+    categoryLabel: CREDENTIAL
     before: sk-ant-api03-EXAMPLEKEY0000000000000
   - name: synthetic-email
     category: pii
+    categoryLabel: PII
     before: user@example.com
   - name: synthetic-home-path
     category: paths
+    categoryLabel: PATH
     before: /Users/example/projects/sample/
   - name: synthetic-project-import
     category: project
+    categoryLabel: INTERNAL
     before: '"github.com/example-org/example-repo"'
 
 expectedFailureCount: 4
@@ -29,6 +33,21 @@ failures:
   - name: unchanged-output
     kind: unchanged-output
     wantContains: ['example unavailable', 'unverified output withheld', 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+
+expectedLabelMutationCount: 3
+labelMutations:
+  - name: raw-storage-label-is-rejected
+    kind: raw
+    sampleName: synthetic-secret
+    categoryLabel: secrets
+  - name: invalid-public-label-is-rejected
+    kind: invalid
+    sampleName: synthetic-email
+    categoryLabel: PERSONAL
+  - name: zero-public-label-is-rejected
+    kind: zero
+    sampleName: synthetic-project-import
+    categoryLabel: ""
 
 expectedLicenseCount: 4
 licenses:

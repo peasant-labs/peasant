@@ -2,6 +2,7 @@ package kickstart_test
 
 import (
 	_ "embed"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,9 +17,10 @@ import (
 )
 
 const (
-	expectedPrivacySampleRows  = 4
-	expectedPrivacyFailureRows = 4
-	expectedLicenseRows        = 4
+	expectedPrivacySampleRows        = 4
+	expectedPrivacyFailureRows       = 4
+	expectedPrivacyLabelMutationRows = 3
+	expectedLicenseRows              = 4
 )
 
 type privacyFailureKind string
@@ -40,9 +42,29 @@ func (k privacyFailureKind) valid() bool {
 }
 
 type privacySampleFixture struct {
-	Name     string          `yaml:"name"`
-	Category redact.Category `yaml:"category"`
-	Before   string          `yaml:"before"`
+	Name          string                `yaml:"name"`
+	Category      redact.Category       `yaml:"category"`
+	CategoryLabel redact.CategoryString `yaml:"categoryLabel"`
+	Before        string                `yaml:"before"`
+}
+
+type privacyLabelMutationKind string
+
+const (
+	privacyLabelMutationRaw     privacyLabelMutationKind = "raw"
+	privacyLabelMutationInvalid privacyLabelMutationKind = "invalid"
+	privacyLabelMutationZero    privacyLabelMutationKind = "zero"
+)
+
+func (k privacyLabelMutationKind) valid() bool {
+	return k == privacyLabelMutationRaw || k == privacyLabelMutationInvalid || k == privacyLabelMutationZero
+}
+
+type privacyLabelMutationFixture struct {
+	Name          string                   `yaml:"name"`
+	Kind          privacyLabelMutationKind `yaml:"kind"`
+	SampleName    string                   `yaml:"sampleName"`
+	CategoryLabel redact.CategoryString    `yaml:"categoryLabel"`
 }
 
 type privacyFailureFixture struct {
@@ -60,12 +82,31 @@ type licenseFixture struct {
 }
 
 type privacyLicenseDocument struct {
-	ExpectedPrivacySampleCount int                     `yaml:"expectedPrivacySampleCount"`
-	PrivacySamples             []privacySampleFixture  `yaml:"privacySamples"`
-	ExpectedFailureCount       int                     `yaml:"expectedFailureCount"`
-	Failures                   []privacyFailureFixture `yaml:"failures"`
-	ExpectedLicenseCount       int                     `yaml:"expectedLicenseCount"`
-	Licenses                   []licenseFixture        `yaml:"licenses"`
+	ExpectedPrivacySampleCount int                           `yaml:"expectedPrivacySampleCount"`
+	PrivacySamples             []privacySampleFixture        `yaml:"privacySamples"`
+	ExpectedFailureCount       int                           `yaml:"expectedFailureCount"`
+	Failures                   []privacyFailureFixture       `yaml:"failures"`
+	ExpectedLabelMutationCount int                           `yaml:"expectedLabelMutationCount"`
+	LabelMutations             []privacyLabelMutationFixture `yaml:"labelMutations"`
+	ExpectedLicenseCount       int                           `yaml:"expectedLicenseCount"`
+	Licenses                   []licenseFixture              `yaml:"licenses"`
+}
+
+func validatePrivacySampleCategoryLabel(row privacySampleFixture) error {
+	if err := row.Category.Validate(); err != nil {
+		return fmt.Errorf("privacy sample %q category: %w", row.Name, err)
+	}
+	canonical := row.Category.String()
+	if canonical == "" {
+		return fmt.Errorf("privacy sample %q category %q has no canonical public label", row.Name, row.Category)
+	}
+	if row.CategoryLabel == "" {
+		return fmt.Errorf("privacy sample %q has an empty public category label", row.Name)
+	}
+	if row.CategoryLabel != canonical {
+		return fmt.Errorf("privacy sample %q label=%q, want canonical %q", row.Name, row.CategoryLabel, canonical)
+	}
+	return nil
 }
 
 //go:embed testdata/guided/privacy_license.yaml
@@ -83,6 +124,10 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 		t.Fatalf("privacy failures: declared=%d actual=%d required=%d",
 			document.ExpectedFailureCount, len(document.Failures), expectedPrivacyFailureRows)
 	}
+	if document.ExpectedLabelMutationCount != expectedPrivacyLabelMutationRows || len(document.LabelMutations) != expectedPrivacyLabelMutationRows {
+		t.Fatalf("privacy label mutations: declared=%d actual=%d required=%d",
+			document.ExpectedLabelMutationCount, len(document.LabelMutations), expectedPrivacyLabelMutationRows)
+	}
 	if document.ExpectedLicenseCount != expectedLicenseRows || len(document.Licenses) != expectedLicenseRows {
 		t.Fatalf("licenses: declared=%d actual=%d required=%d",
 			document.ExpectedLicenseCount, len(document.Licenses), expectedLicenseRows)
@@ -95,8 +140,8 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 			t.Fatalf("privacy sample is missing a unique name or synthetic input: %#v", row)
 		}
 		privacyNames[row.Name] = true
-		if err := row.Category.Validate(); err != nil {
-			t.Fatalf("privacy sample %q category: %v", row.Name, err)
+		if err := validatePrivacySampleCategoryLabel(row); err != nil {
+			t.Fatal(err)
 		}
 		if seenCategories[row.Category] {
 			t.Fatalf("privacy category %q has more than one claimed sample", row.Category)
@@ -115,6 +160,31 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 			t.Fatalf("privacy failure row is incomplete or duplicated: %#v", row)
 		}
 		failureNames[row.Name] = true
+	}
+
+	mutationNames := map[string]bool{}
+	mutationKinds := map[privacyLabelMutationKind]bool{}
+	for _, row := range document.LabelMutations {
+		if strings.TrimSpace(row.Name) == "" || mutationNames[row.Name] || !row.Kind.valid() ||
+			strings.TrimSpace(row.SampleName) == "" || mutationKinds[row.Kind] || !privacyNames[row.SampleName] {
+			t.Fatalf("privacy label mutation row is incomplete or duplicated: %#v", row)
+		}
+		mutationNames[row.Name] = true
+		mutationKinds[row.Kind] = true
+		switch row.Kind {
+		case privacyLabelMutationRaw:
+			if row.CategoryLabel == "" {
+				t.Fatalf("raw privacy label mutation %q is empty", row.Name)
+			}
+		case privacyLabelMutationInvalid:
+			if row.CategoryLabel == "" {
+				t.Fatalf("invalid privacy label mutation %q is empty", row.Name)
+			}
+		case privacyLabelMutationZero:
+			if row.CategoryLabel != "" {
+				t.Fatalf("zero privacy label mutation %q has label %q", row.Name, row.CategoryLabel)
+			}
+		}
 	}
 
 	licenseNames := map[string]bool{}
@@ -180,11 +250,34 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 		if after == row.Before {
 			t.Fatalf("real Standard redactor left synthetic %s sample unchanged", row.Category)
 		}
-		for _, want := range []string{string(row.Category), "before: " + row.Before, "after: " + after} {
+		for _, want := range []string{row.CategoryLabel.String(), "before: " + row.Before, "after: " + after} {
 			if !strings.Contains(view, want) {
 				t.Errorf("privacy example does not contain runtime-derived %q:\n%s", want, view)
 			}
 		}
+		for _, line := range strings.Split(view, "\n") {
+			if line == string(row.Category) {
+				t.Errorf("privacy example renders raw storage category %q instead of %q:\n%s", row.Category, row.CategoryLabel, view)
+			}
+		}
+	}
+}
+
+func TestPrivacyCategoryLabelFixtureMutationsFailClosed(t *testing.T) {
+	document := loadPrivacyLicenseDocument(t)
+	byName := make(map[string]privacySampleFixture, len(document.PrivacySamples))
+	for _, sample := range document.PrivacySamples {
+		byName[sample.Name] = sample
+	}
+	for _, mutation := range document.LabelMutations {
+		mutation := mutation
+		t.Run(mutation.Name, func(t *testing.T) {
+			sample := byName[mutation.SampleName]
+			sample.CategoryLabel = mutation.CategoryLabel
+			if err := validatePrivacySampleCategoryLabel(sample); err == nil {
+				t.Fatalf("privacy label mutation %q unexpectedly passed canonical validation", mutation.Name)
+			}
+		})
 	}
 }
 
