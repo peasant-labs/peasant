@@ -8,7 +8,7 @@
 # test asserts the union of every wantAction across wantOK=true rows equals
 # keymap.AllActions() exactly, so an ActionID added to the enum without a
 # passing dispatch row here fails that guard, not just this row count.
-expectedCaseCount: 35
+expectedCaseCount: 41
 cases:
   - name: dispatches-quit
     available: [quit]
@@ -130,6 +130,21 @@ cases:
     pressedKey: K
     wantOK: true
     wantAction: prev-project
+  - name: dispatches-prev-scope
+    available: [prev-scope]
+    pressedKey: "["
+    wantOK: true
+    wantAction: prev-scope
+  - name: dispatches-next-scope
+    available: [next-scope]
+    pressedKey: "]"
+    wantOK: true
+    wantAction: next-scope
+  - name: dispatches-search-scope
+    available: [search-scope]
+    pressedKey: "/"
+    wantOK: true
+    wantAction: search-scope
   - name: dispatches-focus-pane-left
     available: [focus-pane-left]
     pressedKey: ctrl+h
@@ -162,6 +177,21 @@ cases:
     pressedKey: f
     wantOK: true
     wantAction: filter
+  - name: dispatches-delete-filter
+    available: [delete-filter]
+    pressedKey: backspace
+    wantOK: true
+    wantAction: delete-filter
+  - name: dispatches-keep-filter
+    available: [keep-filter]
+    pressedKey: enter
+    wantOK: true
+    wantAction: keep-filter
+  - name: dispatches-clear-filter
+    available: [clear-filter]
+    pressedKey: esc
+    wantOK: true
+    wantAction: clear-filter
   # Extra cases beyond one-per-action: unavailable keys, alias keys, and
   # avail-order priority when two available actions share a physical key.
   - name: no-match-when-action-unavailable
@@ -188,11 +218,12 @@ cases:
     available:
       [
         quit, confirm, back, up, down, left, right, page-up, page-down,
+        prev-scope, next-scope, search-scope,
         focus-pane-left, focus-pane-right,
         next-field, prev-field, toggle, select-all, expand, collapse,
         save, help, filter, top, bottom, next-project, prev-project,
         select-under-project, expand-level, collapse-level,
-        expand-all, collapse-all,
+        expand-all, collapse-all, delete-filter, keep-filter, clear-filter,
       ]
     pressedKey: z
     wantOK: false

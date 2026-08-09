@@ -75,6 +75,14 @@ const (
 	ActionNextProject
 	// ActionPrevProject moves the cursor to the previous top-level project.
 	ActionPrevProject
+	// ActionPrevScope moves the tree's active scope one level toward Project.
+	// It does not collapse a node or move split-pane focus.
+	ActionPrevScope
+	// ActionNextScope moves the tree's active scope one level toward Session.
+	// It does not expand a node or move split-pane focus.
+	ActionNextScope
+	// ActionSearchScope starts text search at the tree's current typed scope.
+	ActionSearchScope
 
 	// ActionFocusPaneLeft moves focus to the LEFT pane of a split surface.
 	// It is pane navigation, not field navigation: a split is one field, and
@@ -124,6 +132,15 @@ const (
 	ActionHelp
 	// ActionFilter enters filter/search-text mode.
 	ActionFilter
+	// ActionDeleteFilter removes the previous character while filter text is
+	// being edited.
+	ActionDeleteFilter
+	// ActionKeepFilter exits filter editing while retaining the current query.
+	ActionKeepFilter
+	// ActionClearFilter exits filter editing and clears the current query. It
+	// remains available while a kept query is active, so users always have a
+	// visible way back to the unfiltered forest.
+	ActionClearFilter
 )
 
 // AllActions returns the full closed set of real (non-ActionUnknown)
@@ -146,6 +163,9 @@ func AllActions() []ActionID {
 		ActionBottom,
 		ActionNextProject,
 		ActionPrevProject,
+		ActionPrevScope,
+		ActionNextScope,
+		ActionSearchScope,
 		ActionFocusPaneLeft,
 		ActionFocusPaneRight,
 		ActionNextField,
@@ -162,6 +182,9 @@ func AllActions() []ActionID {
 		ActionSave,
 		ActionHelp,
 		ActionFilter,
+		ActionDeleteFilter,
+		ActionKeepFilter,
+		ActionClearFilter,
 	}
 }
 
@@ -171,10 +194,12 @@ func (a ActionID) IsValid() bool {
 	case ActionQuit, ActionConfirm, ActionBack,
 		ActionUp, ActionDown, ActionLeft, ActionRight, ActionPageUp, ActionPageDown,
 		ActionTop, ActionBottom, ActionNextProject, ActionPrevProject,
+		ActionPrevScope, ActionNextScope, ActionSearchScope,
 		ActionFocusPaneLeft, ActionFocusPaneRight,
 		ActionNextField, ActionPrevField, ActionToggle, ActionSelectAll, ActionSelectUnderProject,
 		ActionExpand, ActionCollapse, ActionExpandLevel, ActionCollapseLevel, ActionExpandAll, ActionCollapseAll,
-		ActionSave, ActionHelp, ActionFilter:
+		ActionSave, ActionHelp, ActionFilter,
+		ActionDeleteFilter, ActionKeepFilter, ActionClearFilter:
 		return true
 	default:
 		return false
@@ -191,6 +216,7 @@ func (a ActionID) IsNavigation() bool {
 	case ActionUp, ActionDown, ActionLeft, ActionRight,
 		ActionPageUp, ActionPageDown, ActionTop, ActionBottom,
 		ActionNextProject, ActionPrevProject,
+		ActionPrevScope, ActionNextScope,
 		ActionExpand, ActionCollapse,
 		ActionExpandLevel, ActionCollapseLevel, ActionExpandAll, ActionCollapseAll,
 		ActionFocusPaneLeft, ActionFocusPaneRight,
@@ -232,6 +258,12 @@ func (a ActionID) String() string {
 		return "next-project"
 	case ActionPrevProject:
 		return "prev-project"
+	case ActionPrevScope:
+		return "prev-scope"
+	case ActionNextScope:
+		return "next-scope"
+	case ActionSearchScope:
+		return "search-scope"
 	case ActionFocusPaneLeft:
 		return "focus-pane-left"
 	case ActionFocusPaneRight:
@@ -264,6 +296,12 @@ func (a ActionID) String() string {
 		return "help"
 	case ActionFilter:
 		return "filter"
+	case ActionDeleteFilter:
+		return "delete-filter"
+	case ActionKeepFilter:
+		return "keep-filter"
+	case ActionClearFilter:
+		return "clear-filter"
 	default:
 		return "unknown"
 	}
@@ -356,6 +394,18 @@ func Default() Keymap {
 			key.WithKeys("shift+k", "K"),
 			key.WithHelp("shift+k", "prev project"),
 		),
+		ActionPrevScope: key.NewBinding(
+			key.WithKeys("["),
+			key.WithHelp("[", "previous scope"),
+		),
+		ActionNextScope: key.NewBinding(
+			key.WithKeys("]"),
+			key.WithHelp("]", "next scope"),
+		),
+		ActionSearchScope: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search scope"),
+		),
 		// Vim window-navigation keys for the two panes of a split surface.
 		//
 		// ctrl+h is worth a note, because it is famously ambiguous: the keystroke
@@ -430,6 +480,18 @@ func Default() Keymap {
 		ActionFilter: key.NewBinding(
 			key.WithKeys("f"),
 			key.WithHelp("f", "filter"),
+		),
+		ActionDeleteFilter: key.NewBinding(
+			key.WithKeys("backspace"),
+			key.WithHelp("backspace", "delete"),
+		),
+		ActionKeepFilter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "keep filter"),
+		),
+		ActionClearFilter: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "clear filter"),
 		),
 	}
 }

@@ -74,6 +74,179 @@ func (s TriState) String() string {
 	}
 }
 
+// TreeScope is the closed set of levels a project-first selection tree can
+// navigate and search. Scope is independent from expand/collapse and pane
+// focus: changing it names which column a search targets without repurposing
+// either interaction.
+type TreeScope uint8
+
+const (
+	// TreeScopeUnknown is the invalid zero value.
+	TreeScopeUnknown TreeScope = iota
+	// TreeScopeProject targets top-level project rows.
+	TreeScopeProject
+	// TreeScopeBranch targets branch rows beneath projects.
+	TreeScopeBranch
+	// TreeScopeSession targets session rows beneath branches.
+	TreeScopeSession
+)
+
+// AllTreeScopes returns every valid scope in previous/next navigation order.
+func AllTreeScopes() []TreeScope {
+	return []TreeScope{TreeScopeProject, TreeScopeBranch, TreeScopeSession}
+}
+
+// IsValid reports whether s names a project-first tree scope.
+func (s TreeScope) IsValid() bool {
+	switch s {
+	case TreeScopeProject, TreeScopeBranch, TreeScopeSession:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns the lower-case user-facing scope name, or "unknown".
+func (s TreeScope) String() string {
+	switch s {
+	case TreeScopeProject:
+		return "project"
+	case TreeScopeBranch:
+		return "branch"
+	case TreeScopeSession:
+		return "session"
+	default:
+		return "unknown"
+	}
+}
+
+// depth returns the project-first row depth represented by s.
+func (s TreeScope) depth() int {
+	switch s {
+	case TreeScopeProject:
+		return 0
+	case TreeScopeBranch:
+		return 1
+	case TreeScopeSession:
+		return 2
+	default:
+		return -1
+	}
+}
+
+// Previous returns the adjacent scope toward Project, clamped at Project. An
+// unknown scope stays unknown so invalid state fails closed instead of silently
+// selecting a real column.
+func (s TreeScope) Previous() TreeScope {
+	switch s {
+	case TreeScopeSession:
+		return TreeScopeBranch
+	case TreeScopeBranch, TreeScopeProject:
+		return TreeScopeProject
+	default:
+		return TreeScopeUnknown
+	}
+}
+
+// Next returns the adjacent scope toward Session, clamped at Session. An
+// unknown scope stays unknown.
+func (s TreeScope) Next() TreeScope {
+	switch s {
+	case TreeScopeProject:
+		return TreeScopeBranch
+	case TreeScopeBranch, TreeScopeSession:
+		return TreeScopeSession
+	default:
+		return TreeScopeUnknown
+	}
+}
+
+// TreeFilterMode is the closed lifecycle of current-scope text search.
+type TreeFilterMode uint8
+
+const (
+	// TreeFilterModeUnknown is the invalid zero value.
+	TreeFilterModeUnknown TreeFilterMode = iota
+	// TreeFilterInactive means no text query is being edited or kept.
+	TreeFilterInactive
+	// TreeFilterEditing means printable input and delete edit the query.
+	TreeFilterEditing
+	// TreeFilterKept means editing ended while the query remains active.
+	TreeFilterKept
+)
+
+// IsValid reports whether m is a known filter lifecycle state.
+func (m TreeFilterMode) IsValid() bool {
+	switch m {
+	case TreeFilterInactive, TreeFilterEditing, TreeFilterKept:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns a stable lower-case name for m, or "unknown".
+func (m TreeFilterMode) String() string {
+	switch m {
+	case TreeFilterInactive:
+		return "inactive"
+	case TreeFilterEditing:
+		return "editing"
+	case TreeFilterKept:
+		return "kept"
+	default:
+		return "unknown"
+	}
+}
+
+// TreeFilterState is the typed, inspectable text-search state. Query narrows
+// only rows at Scope; ancestor rows remain as context. It never owns or copies
+// checkbox state: projections retain shared TreeNode identity.
+type TreeFilterState struct {
+	Scope TreeScope
+	Mode  TreeFilterMode
+	Query string
+}
+
+// Active reports whether a non-empty query currently narrows the visible tree.
+func (s TreeFilterState) Active() bool { return strings.TrimSpace(s.Query) != "" }
+
+// Editing reports whether text input currently edits the query.
+func (s TreeFilterState) Editing() bool { return s.Mode == TreeFilterEditing }
+
+// AvailableActions reports the filter lifecycle actions dispatchable in this
+// state. It is itself a keymap.Availability, so search-mode dispatch, footer,
+// and help can consume exactly the same typed set.
+func (s TreeFilterState) AvailableActions() []keymap.ActionID {
+	switch s.Mode {
+	case TreeFilterEditing:
+		return []keymap.ActionID{
+			keymap.ActionDeleteFilter,
+			keymap.ActionKeepFilter,
+			keymap.ActionClearFilter,
+		}
+	case TreeFilterKept:
+		return []keymap.ActionID{keymap.ActionSearchScope, keymap.ActionClearFilter}
+	case TreeFilterInactive:
+		return []keymap.ActionID{keymap.ActionSearchScope}
+	default:
+		return nil
+	}
+}
+
+var _ keymap.Availability = TreeFilterState{}
+
+// TreeOverflow reports whether usable rows exist above or below the current
+// viewport. The view renders markers from this state rather than guessing from
+// cursor position.
+type TreeOverflow struct {
+	Top    bool
+	Bottom bool
+}
+
+// Any reports whether either viewport edge has hidden rows.
+func (o TreeOverflow) Any() bool { return o.Top || o.Bottom }
+
 // TreeNode is one node in the selection hierarchy the kit tree renders:
 // provider -> remote -> worktree -> session. A node owns its selection State,
 // its ordered Children, and a display-only Meta bag. The tree mutates State in
@@ -117,6 +290,12 @@ const (
 	MetaIngested = "ingested"
 	// MetaIngestedValue is the value MetaIngested carries when set.
 	MetaIngestedValue = "true"
+	// MetaTracked marks a row included by the selection saved before the current
+	// editing run. It is intentionally independent from MetaIngested (local
+	// store presence) and the node's mutable checkbox State.
+	MetaTracked = "tracked"
+	// MetaTrackedValue is the value MetaTracked carries when set.
+	MetaTrackedValue = "true"
 )
 
 // isLeaf reports whether n has no children.
@@ -181,6 +360,7 @@ type Tree struct {
 	width   int
 	height  int
 	focused bool
+	filter  TreeFilterState
 }
 
 // NewTree builds a Tree over theme t that loads its forest from src. It starts
@@ -195,6 +375,10 @@ func NewTree(t theme.Theme, src TreeSource) Tree {
 		expanded: map[*TreeNode]bool{},
 		width:    TreeMinSize.Width,
 		height:   TreeMinSize.Height,
+		filter: TreeFilterState{
+			Scope: TreeScopeProject,
+			Mode:  TreeFilterInactive,
+		},
 	}
 }
 
@@ -296,6 +480,28 @@ func (t Tree) Roots() []*TreeNode { return t.roots }
 
 // Cursor reports the current cursor index into the visible (expanded) rows.
 func (t Tree) Cursor() int { return t.cursor }
+
+// Scope reports the typed Project, Branch, or Session level text search targets.
+func (t Tree) Scope() TreeScope { return t.filter.Scope }
+
+// FilterState reports a copy of the current-scope text-search state.
+func (t Tree) FilterState() TreeFilterState { return t.filter }
+
+// Overflow reports whether the current visible viewport has rows above or
+// below it. Loading and empty trees report no overflow.
+func (t Tree) Overflow() TreeOverflow {
+	if t.loading || t.height < 1 {
+		return TreeOverflow{}
+	}
+	count := len(t.visibleRows())
+	if count == 0 {
+		return TreeOverflow{}
+	}
+	return TreeOverflow{
+		Top:    t.offset > 0,
+		Bottom: t.offset+t.height < count,
+	}
+}
 
 // CurrentNode returns the node under the cursor and true, or nil and false
 // when there are no visible rows.

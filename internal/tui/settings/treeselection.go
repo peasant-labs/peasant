@@ -63,6 +63,12 @@ const (
 	MetaIngested = kit.MetaIngested
 	// MetaIngestedValue is the value MetaIngested carries when set.
 	MetaIngestedValue = kit.MetaIngestedValue
+	// MetaTracked marks a row included by the previously saved selection. It is
+	// display-only and must never be inferred from MetaIngested or current
+	// checkbox state.
+	MetaTracked = kit.MetaTracked
+	// MetaTrackedValue is the value MetaTracked carries when set.
+	MetaTrackedValue = kit.MetaTrackedValue
 	// MetaChildCount carries how many child (subagent) sessions a parent session
 	// groups. A parent session is a LEAF row that summarises its subagents, so
 	// the count is display-only context and never affects the derived

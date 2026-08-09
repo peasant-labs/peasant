@@ -12,7 +12,8 @@ scenarios:
   - name: form-page-scope
     available: [next-field, prev-field, confirm, back, save, quit, help]
   - name: filter-mode-scope
-    available: [filter, confirm, back]
+    available: [delete-filter, keep-filter, clear-filter]
   - name: tree-page-scope
     available:
-      [up, down, expand, collapse, select-all, toggle, confirm, back, help, filter]
+      [up, down, expand, collapse, prev-scope, next-scope, search-scope,
+       select-all, toggle, confirm, back, help, filter]
