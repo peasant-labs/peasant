@@ -2,6 +2,12 @@ package settings
 
 import "github.com/peasant-labs/peasant/internal/tui/theme"
 
+// GuideExampleFunc derives one live, presentation-only example from the same
+// theme and draft a guided flow is rendering. Returning an error is fail-closed:
+// the flow renders the actionable error instead of omitting the example or
+// substituting output that did not come from the real behavior being explained.
+type GuideExampleFunc func(theme.Theme, *Draft) (string, error)
+
 // Guide is optional presentation-neutral framing for a [Section]. A guided
 // presentation may render it before the section's fields, while denser
 // presentations may ignore it. Guide metadata never changes field identity,
@@ -12,7 +18,7 @@ type Guide struct {
 	// Hints provide short supporting guidance in display order.
 	Hints []string
 	// Example optionally derives a themed example from the current draft.
-	Example func(theme.Theme, *Draft) string
+	Example GuideExampleFunc
 }
 
 // Section is one step of a settings [Flow]: a titled group of [Field]s, shown

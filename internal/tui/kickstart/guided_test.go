@@ -352,12 +352,12 @@ func TestGuidedFramingFixture(t *testing.T) {
 					Guide: &settings.Guide{
 						Intro: row.Guide.Intro,
 						Hints: row.Guide.Hints,
-						Example: func(gotTheme theme.Theme, gotDraft *settings.Draft) string {
+						Example: func(gotTheme theme.Theme, gotDraft *settings.Draft) (string, error) {
 							called = true
 							if gotTheme.Mode != th.Mode || gotDraft != draft {
 								t.Errorf("guide example received theme/draft %v/%p, want %v/%p", gotTheme.Mode, gotDraft, th.Mode, draft)
 							}
-							return row.ExampleText
+							return row.ExampleText, nil
 						},
 					},
 					Fields: []settings.Field{settings.Info(row.FieldKey, func(*settings.Draft) string {

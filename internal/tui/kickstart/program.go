@@ -24,6 +24,9 @@ const (
 	// PhaseFlow runs the declarative settings.Flow: the single atomic config
 	// commit point (esc there always prompts a confirm-exit that writes nothing).
 	PhaseFlow
+	// PhaseVisibility offers the kickstart-only login choice when a user reaches
+	// sharing guidance while disconnected. Config Screen never enters this phase.
+	PhaseVisibility
 	// PhaseIngest runs the ingest/journey pipeline ONLY after a successful
 	// commit, preserving the legacy ordering (save, then import).
 	PhaseIngest
@@ -39,6 +42,8 @@ func (p Phase) String() string {
 		return "oauth"
 	case PhaseFlow:
 		return "flow"
+	case PhaseVisibility:
+		return "visibility"
 	case PhaseIngest:
 		return "ingest"
 	case PhaseDone:
@@ -80,6 +85,16 @@ type ProgramDeps struct {
 	// Ingest runs the pipeline after commit. When nil the program finishes at
 	// commit without importing (config-only run).
 	Ingest IngestFunc
+	// Progress is the concurrent-safe pull source populated by the same local
+	// ingest run. Program observes it on Tick without blocking pipeline workers.
+	Progress ProgressSource
+	// Clock and Tick are the injected timing boundaries for honest elapsed and
+	// qualified ETA presentation.
+	Clock Clock
+	Tick  TickFunc
+	// NextSteps produces display-only completion instructions. Program renders
+	// them but has no authority to execute any command they name.
+	NextSteps NextStepsFunc
 	// Retention writes the Claude cleanupPeriodDays preference AFTER the config
 	// save (legacy ordering). When nil it is skipped. RetentionDays is an explicit
 	// fallback used only when the guided retention section was not offered; zero

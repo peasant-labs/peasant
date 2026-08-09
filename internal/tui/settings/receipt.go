@@ -4,6 +4,20 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
+// ConsentSummary is the guided presentation's final explanation of the values
+// about to be saved and the effects that confirming will run. Its lines are
+// display-only; the Registry remains the sole owner of field behavior and the
+// Flow remains the sole commit boundary.
+type ConsentSummary struct {
+	Values  []string
+	Effects []string
+}
+
+// ConsentSummaryFunc derives consent copy from the current Draft. Flow invokes
+// it only on the receipt after canonical hidden-edit convergence, so the values
+// described are the values a confirm will validate and commit.
+type ConsentSummaryFunc func(*Draft) ConsentSummary
+
 // renderReceipt draws the final review step: a per-section summary of which
 // fields the draft changed, an explicit "no changes" when nothing is dirty, and
 // the actionable error from a blocked commit when one is present. It reads the
@@ -12,6 +26,21 @@ import (
 func (f Flow) renderReceipt(styles theme.Styles, width int) string {
 	var lines []string
 	lines = append(lines, styles.Header.Render(clip("review your changes", width)))
+	if f.consent != nil {
+		summary := f.consent(f.draft)
+		if len(summary.Values) > 0 {
+			lines = append(lines, styles.Base.Render(clip("your choices", width)))
+			for _, value := range summary.Values {
+				lines = append(lines, styles.Muted.Render(clip("  "+value, width)))
+			}
+		}
+		if len(summary.Effects) > 0 {
+			lines = append(lines, styles.Base.Render(clip("when you confirm", width)))
+			for _, effect := range summary.Effects {
+				lines = append(lines, styles.Muted.Render(clip("  "+effect, width)))
+			}
+		}
+	}
 
 	anyDirty := false
 	for _, s := range f.reg.visibleSections(f.draft) {

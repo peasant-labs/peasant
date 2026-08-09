@@ -35,6 +35,8 @@ type Flow struct {
 	reg   Registry
 	draft *Draft
 
+	consent ConsentSummaryFunc
+
 	steps      []Section // current visible steps, recomputed on navigation
 	cur        int       // 0..len(steps); == len(steps) is the receipt step
 	focusField int       // index of the focused field within the current step
@@ -51,18 +53,35 @@ type Flow struct {
 	width, height int
 }
 
+// FlowOption configures presentation-owned behavior without changing Registry
+// fields or their persistence contract.
+type FlowOption func(*Flow)
+
+// WithConsentSummary installs the final consent summary rendered by the guided
+// presentation. The provider reads the live Draft at receipt render time, after
+// hidden edits have been dropped, so it cannot drift from the values a confirm
+// will commit. Dense settings presentations do not use this option.
+func WithConsentSummary(provider ConsentSummaryFunc) FlowOption {
+	return func(f *Flow) { f.consent = provider }
+}
+
 // exitPrompt is the confirm-exit modal's text.
 const exitPrompt = "leave settings without saving?"
 
 // NewFlow mounts every field in reg over theme t and opens the flow on the
 // first visible step of draft d.
-func NewFlow(t theme.Theme, reg Registry, d *Draft) Flow {
+func NewFlow(t theme.Theme, reg Registry, d *Draft, opts ...FlowOption) Flow {
 	for _, s := range reg.Sections {
 		for _, fld := range s.Fields {
 			fld.mount(t)
 		}
 	}
 	f := Flow{th: t, reg: reg, draft: d, confirm: kit.NewConfirm(t, exitPrompt), overlay: kit.NewOverlay(t)}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&f)
+		}
+	}
 	f.steps = reg.visibleSections(d)
 	f.enterStep()
 	return f
@@ -113,6 +132,32 @@ func (f Flow) CurrentSectionKey() string {
 		return ""
 	}
 	return f.steps[f.cur].Key
+}
+
+// OpenSection moves an already-mounted flow to the visible section identified
+// by key. It is the narrow reconstruction seam used when kickstart authenticates
+// during visibility guidance and rebuilds the same registry over the same Draft.
+// It does not edit the draft, commit, or alter section visibility.
+func (f *Flow) OpenSection(key string) error {
+	f.recompute()
+	for index := range f.steps {
+		if f.steps[index].Key != key {
+			continue
+		}
+		f.cur = index
+		f.err = nil
+		f.enterStep()
+		return nil
+	}
+	return fmt.Errorf(
+		"open guided settings section %q: section is not visible.\n"+
+			"what: the rebuilt flow could not restore the requested guided section.\n"+
+			"why: the canonical registry has no currently visible section with that key.\n"+
+			"where: settings.Flow.OpenSection after rebuilding a guided flow.\n"+
+			"when: restoring the user's position without committing or discarding the draft.\n"+
+			"means: the draft is still buffered and no setting was written.\n"+
+			"fix: rebuild the registry with the expected runtime visibility state and retry.",
+		key)
 }
 
 // SetSize records the outer render region.
@@ -425,9 +470,15 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 		lines = append(lines, clip(band.String(), width))
 	}
 	if guide.Example != nil {
-		for _, line := range splitLines(strings.TrimSpace(guide.Example(f.th, f.draft))) {
+		example, err := guide.Example(f.th, f.draft)
+		style := styles.Surface
+		if err != nil {
+			example = err.Error()
+			style = styles.Danger
+		}
+		for _, line := range splitLines(strings.TrimSpace(example)) {
 			if line != "" {
-				lines = append(lines, styles.Surface.Render(clip(line, width)))
+				lines = append(lines, style.Render(clip(line, width)))
 			}
 		}
 	}
