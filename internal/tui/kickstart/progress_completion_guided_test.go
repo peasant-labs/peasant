@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	expectedProgressRows   = 6
+	expectedProgressRows   = 8
 	expectedCompletionRows = 3
 )
 
@@ -42,10 +42,13 @@ type progressObservationFixture struct {
 }
 
 type progressFixture struct {
-	Name         string                       `yaml:"name"`
-	Observations []progressObservationFixture `yaml:"observations"`
-	WantContains []string                     `yaml:"wantContains"`
-	WantMissing  []string                     `yaml:"wantMissing"`
+	Name                    string                       `yaml:"name"`
+	TerminalWidth           int                          `yaml:"terminalWidth"`
+	TerminalHeight          int                          `yaml:"terminalHeight"`
+	LegacyUnboundedOverflow bool                         `yaml:"legacyUnboundedOverflow"`
+	Observations            []progressObservationFixture `yaml:"observations"`
+	WantContains            []string                     `yaml:"wantContains"`
+	WantMissing             []string                     `yaml:"wantMissing"`
 }
 
 type completionFixture struct {
@@ -108,6 +111,21 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 				seenStages[stage.Stage] = true
 			}
 		}
+		if row.LegacyUnboundedOverflow {
+			if row.TerminalWidth != 80 || row.TerminalHeight != 24 {
+				t.Fatalf("progress row %q overflow mutation must exercise the mounted 80x24 terminal", row.Name)
+			}
+			latest := row.Observations[len(row.Observations)-1]
+			if len(latest.Stages) != len(ingest.StageOrder) {
+				t.Fatalf("progress row %q overflow mutation has %d stages, want full order of %d",
+					row.Name, len(latest.Stages), len(ingest.StageOrder))
+			}
+			for _, stage := range ingest.StageOrder {
+				if !seenProgressStage(latest.Stages, stage) {
+					t.Fatalf("progress row %q overflow mutation omits %s", row.Name, stage)
+				}
+			}
+		}
 	}
 	completionNames := map[string]bool{}
 	for _, row := range document.Completion {
@@ -122,6 +140,15 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 		}
 	}
 	return document
+}
+
+func seenProgressStage(stages []progressStageFixture, want ingest.Stage) bool {
+	for _, stage := range stages {
+		if stage.Stage == want {
+			return true
+		}
+	}
+	return false
 }
 
 type fixtureClock struct {
@@ -269,6 +296,9 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 			program, _, _ := newProgressProgram(t, progress, clock, func(context.Context) (*ftue.IngestResult, error) {
 				return &ftue.IngestResult{New: 1}, nil
 			}, nil, &tick)
+			if row.TerminalWidth > 0 || row.TerminalHeight > 0 {
+				program.SetSize(row.TerminalWidth, row.TerminalHeight)
+			}
 			if tick == nil {
 				t.Fatal("starting local ingest did not schedule the injected progress tick")
 			}
@@ -277,7 +307,8 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 				progress.Set(observation.Stages)
 				program, _ = program.Update(tick(clock.Now()))
 			}
-			view := strings.ToLower(stripRender(program.View()))
+			rendered := stripRender(program.View())
+			view := strings.ToLower(rendered)
 			for _, want := range row.WantContains {
 				if !strings.Contains(view, strings.ToLower(want)) {
 					t.Errorf("progress view does not contain %q:\n%s", want, view)
@@ -288,8 +319,27 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 					t.Errorf("progress view contains unsupported estimate %q:\n%s", missing, view)
 				}
 			}
+			if row.TerminalHeight > 0 {
+				if lines := renderedLineCount(rendered); lines > row.TerminalHeight {
+					t.Errorf("progress view uses %d lines, exceeds mounted height %d:\n%s", lines, row.TerminalHeight, rendered)
+				}
+			}
+			if row.LegacyUnboundedOverflow {
+				latest := row.Observations[len(row.Observations)-1]
+				legacyLines := 4 + 3*len(latest.Stages)
+				if legacyLines <= row.TerminalHeight {
+					t.Fatalf("legacy unbounded mutation is vacuous: %d lines fit height %d", legacyLines, row.TerminalHeight)
+				}
+			}
 		})
 	}
+}
+
+func renderedLineCount(rendered string) int {
+	if rendered == "" {
+		return 0
+	}
+	return strings.Count(rendered, "\n") + 1
 }
 
 func runAttemptCommandsOnce(program kickstart.Program, command tea.Cmd) (kickstart.Program, bool) {

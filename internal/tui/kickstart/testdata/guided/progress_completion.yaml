@@ -1,4 +1,4 @@
-expectedProgressCount: 6
+expectedProgressCount: 8
 progress:
   - name: stable-monotonic-total
     observations:
@@ -47,6 +47,67 @@ progress:
       - advanceSeconds: 1
         stages: [{stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}]
     wantContains: ['report 1/2', 'failed', 'estimate unavailable']
+  - name: full-pipeline-report-active-at-common-height
+    terminalWidth: 80
+    terminalHeight: 24
+    legacyUnboundedOverflow: true
+    observations:
+      - advanceSeconds: 0
+        stages:
+          - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
+          - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
+          - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
+          - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
+          - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
+          - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
+          - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
+          - {stage: REPORT, started: true, done: 0, total: 10}
+      - advanceSeconds: 2
+        stages:
+          - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
+          - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
+          - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
+          - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
+          - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
+          - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
+          - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
+          - {stage: REPORT, started: true, done: 4, total: 10}
+    wantContains: ['local import elapsed: 2s', 'report 4/10', 'observed elapsed: 2s', 'estimate: 3s']
+    wantMissing: [estimate unavailable]
+  - name: full-pipeline-late-failure-at-common-height
+    terminalWidth: 80
+    terminalHeight: 24
+    legacyUnboundedOverflow: true
+    observations:
+      - advanceSeconds: 0
+        stages:
+          - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
+          - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
+          - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
+          - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
+          - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
+          - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
+          - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
+          - {stage: REPORT, started: true, done: 0, total: 2}
+      - advanceSeconds: 1
+        stages:
+          - {stage: DISCOVER, started: true, done: 10, total: 10, ended: true}
+          - {stage: DIFF, started: true, done: 10, total: 10, ended: true}
+          - {stage: FILTER, started: true, done: 10, total: 10, ended: true}
+          - {stage: EXTRACT+WRITE, started: true, done: 10, total: 10, ended: true}
+          - {stage: DB INSERT, started: true, done: 10, total: 10, ended: true}
+          - {stage: INDEX, started: true, done: 10, total: 10, ended: true}
+          - {stage: COMPUTE, started: true, done: 10, total: 10, ended: true}
+          - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
+          - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
+          - {stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}
+    wantContains: ['local import elapsed: 1s', 'report 1/2 failed', 'observed elapsed: 1s', 'estimate unavailable']
 
 expectedCompletionCount: 3
 completion:

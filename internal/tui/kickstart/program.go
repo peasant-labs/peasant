@@ -856,6 +856,9 @@ func (p Program) viewIngest() string {
 		styles.Header.Render("local import progress"),
 	}
 	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now())...)
+	if p.height > 0 && len(lines) > p.height {
+		lines = lines[:p.height]
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -864,6 +867,7 @@ func (p Program) progressLines(styles theme.Styles, now time.Time) []string {
 		now = p.attemptStarted
 	}
 	lines := []string{styles.Base.Render("local import elapsed: " + displayDuration(now.Sub(p.attemptStarted)))}
+	focus, hasFocus := p.progressFocusStage()
 	shown := false
 	for _, stage := range ingest.StageOrder {
 		observation, ok := p.stageObservations[stage]
@@ -880,6 +884,9 @@ func (p Program) progressLines(styles theme.Styles, now time.Time) []string {
 			label += " failed"
 		}
 		lines = append(lines, styles.Base.Render(label))
+		if !hasFocus || stage != focus {
+			continue
+		}
 		end := now
 		if sp.Ended && observation.lastAt.Before(end) {
 			end = observation.lastAt
@@ -896,7 +903,52 @@ func (p Program) progressLines(styles theme.Styles, now time.Time) []string {
 			styles.Muted.Render("waiting for the first progress update"),
 			styles.Muted.Render("estimate unavailable"))
 	}
+	const ingestHeaderLines = 3
+	available := p.height - ingestHeaderLines
+	if p.height > 0 && len(lines) > available {
+		if available <= 0 {
+			return nil
+		}
+		if available == 1 {
+			return lines[:1]
+		}
+		// Whole-run elapsed is always the first line. Keep it plus the newest
+		// stage window so the current or latest stage survives a short terminal.
+		window := make([]string, 0, available)
+		window = append(window, lines[0])
+		window = append(window, lines[len(lines)-(available-1):]...)
+		return window
+	}
 	return lines
+}
+
+// progressFocusStage chooses the stage whose elapsed and estimate detail is
+// most useful now. All observed stages retain a compact status row; detailed
+// timing belongs to the latest failure, otherwise the latest active stage, and
+// finally the latest completed stage.
+func (p Program) progressFocusStage() (ingest.Stage, bool) {
+	var latest, active, failed ingest.Stage
+	var hasLatest, hasActive, hasFailed bool
+	for _, stage := range ingest.StageOrder {
+		observation, ok := p.stageObservations[stage]
+		if !ok || !observation.progress.Started {
+			continue
+		}
+		latest, hasLatest = stage, true
+		if !observation.progress.Ended {
+			active, hasActive = stage, true
+		}
+		if observation.progress.HasErr {
+			failed, hasFailed = stage, true
+		}
+	}
+	if hasFailed {
+		return failed, true
+	}
+	if hasActive {
+		return active, true
+	}
+	return latest, hasLatest
 }
 
 func (p Program) viewDone() string {
