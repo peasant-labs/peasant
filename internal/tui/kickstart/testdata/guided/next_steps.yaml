@@ -1,0 +1,29 @@
+expectedRowCount: 4
+rows:
+  - name: canonical-catalog
+    valid: true
+    kinds: [web-start, village-login, village-push]
+    wantContains:
+      - open the local dashboard
+      - peasant web start
+      - starts the dashboard and prints or opens its actual url
+      - connect to a village later
+      - peasant village login
+      - publish later, explicitly
+      - peasant village push
+    wantMissing: ['http://localhost:8690', completion guidance unavailable]
+  - name: unknown-kind
+    valid: false
+    kinds: [unknown]
+    wantContains: [completion guidance unavailable, 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantMissing: [peasant web start, peasant village login, peasant village push]
+  - name: empty-provider-result
+    valid: false
+    kinds: []
+    wantContains: [completion guidance unavailable, no actions, 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantMissing: [peasant web start, peasant village login, peasant village push]
+  - name: duplicate-kind
+    valid: false
+    kinds: [web-start, web-start]
+    wantContains: [completion guidance unavailable, repeats, 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantMissing: [peasant web start, peasant village login, peasant village push]

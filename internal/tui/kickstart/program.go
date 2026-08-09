@@ -180,7 +180,8 @@ type Program struct {
 	ingestGeneration   uint64
 	attemptStarted     time.Time
 	stageObservations  map[ingest.Stage]stageObservation
-	nextSteps          []NextStep
+	nextSteps          []NextStepKind
+	nextStepsErr       error
 
 	width, height int
 }
@@ -242,6 +243,10 @@ func (p Program) IngestErr() error { return p.ingestErr }
 
 // RetentionErr reports a retention-write failure, if any.
 func (p Program) RetentionErr() error { return p.retentionErr }
+
+// NextStepsErr reports an invalid completion-provider result. Local setup is
+// still complete; the unverified display guidance is withheld.
+func (p Program) NextStepsErr() error { return p.nextStepsErr }
 
 // Init starts the active phase: the flow's async startup when the connect-now
 // step was skipped (already connected), else the OAuth confirm's cursor.
@@ -552,7 +557,7 @@ func (p Program) afterCommit() (Program, tea.Cmd) {
 	}
 	if p.deps.Ingest == nil {
 		p.phase = PhaseDone
-		p.nextSteps = p.deps.NextSteps(nil)
+		p = p.resolveNextSteps(nil)
 		return p, nil
 	}
 	return p.startIngest(false)
@@ -618,7 +623,7 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		p.ingestErr = m.err
 		p.phase = PhaseDone
 		if m.err == nil {
-			p.nextSteps = p.deps.NextSteps(m.result)
+			p = p.resolveNextSteps(m.result)
 		}
 		return p, nil
 	case progressTickMsg:
@@ -632,6 +637,21 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		p.spinner, cmd = p.spinner.Update(m)
 		return p, cmd
 	}
+}
+
+// resolveNextSteps validates the provider's complete typed result once. Invalid
+// guidance is retained as an actionable presentation error rather than being
+// silently dropped one row at a time.
+func (p Program) resolveNextSteps(result *ftue.IngestResult) Program {
+	kinds := p.deps.NextSteps(result)
+	if err := validateNextSteps(kinds); err != nil {
+		p.nextSteps = nil
+		p.nextStepsErr = err
+		return p
+	}
+	p.nextSteps = append([]NextStepKind(nil), kinds...)
+	p.nextStepsErr = nil
+	return p
 }
 
 // observeProgress records presentation timing from one non-blocking snapshot.
@@ -895,14 +915,25 @@ func (p Program) viewDone() string {
 		lines = append(lines, styles.Muted.Render("local import was not run"))
 	}
 	lines = append(lines, styles.Base.Render("kickstart published nothing"), "", styles.Header.Render("next steps"))
-	for _, step := range p.nextSteps {
-		if !step.Kind.IsValid() || strings.TrimSpace(step.Command) == "" {
-			continue
+	if p.nextStepsErr != nil {
+		for _, line := range strings.Split(p.nextStepsErr.Error(), "\n") {
+			lines = append(lines, styles.Danger.Render(line))
 		}
-		lines = append(lines,
-			styles.Base.Render(step.Title),
-			styles.Selected.Render(step.Command),
-			styles.Muted.Render(step.Detail))
+	} else {
+		for _, kind := range p.nextSteps {
+			step, present := canonicalNextStep(kind)
+			if !present {
+				// resolveNextSteps validates the entire result before storing it;
+				// this branch is unreachable unless that invariant regresses.
+				lines = append(lines, styles.Danger.Render(nextStepsActionableError(
+					"a previously validated action lost its canonical catalog entry").Error()))
+				break
+			}
+			lines = append(lines,
+				styles.Base.Render(step.title),
+				styles.Selected.Render(step.command),
+				styles.Muted.Render(step.detail))
+		}
 	}
 	lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
 		programActionAvailability{keymap.ActionBack, keymap.ActionQuit}))

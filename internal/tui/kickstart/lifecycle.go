@@ -1,6 +1,7 @@
 package kickstart
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -74,44 +75,87 @@ func (k NextStepKind) String() string {
 	}
 }
 
-// NextStep is one display-only completion instruction. Command is rendered as
-// text and is never executed by Program.
-type NextStep struct {
-	Kind    NextStepKind
-	Title   string
-	Command string
-	Detail  string
+// nextStepDetails is the private display catalog for one typed completion
+// action. Providers return only NextStepKind, so titles, commands, and details
+// cannot be paired with an incoherent kind or a fabricated address.
+type nextStepDetails struct {
+	title   string
+	command string
+	detail  string
 }
 
-// NextStepsFunc derives completion instructions from the completed local ingest
-// result. It has no command runner, publisher, or other execution authority.
-type NextStepsFunc func(result *ftue.IngestResult) []NextStep
+// NextStepsFunc chooses typed completion instructions from the completed local
+// ingest result. Program resolves each kind through one canonical display
+// catalog; the provider has no free-form command text, command runner,
+// publisher, or other execution authority.
+type NextStepsFunc func(result *ftue.IngestResult) []NextStepKind
 
 // DefaultNextSteps returns the three honest, display-only actions available
 // after a local kickstart run. In particular, it does not invent a dashboard
 // address: peasant web start is the component that can report the real address
 // after the server has successfully bound and become ready.
-func DefaultNextSteps(_ *ftue.IngestResult) []NextStep {
-	return []NextStep{
-		{
-			Kind:    NextStepWebStart,
-			Title:   "open the local dashboard",
-			Command: "peasant web start",
-			Detail:  "starts the dashboard and prints or opens its actual url",
-		},
-		{
-			Kind:    NextStepVillageLogin,
-			Title:   "connect to a village later",
-			Command: "peasant village login",
-			Detail:  "connects this machine without publishing a transcript",
-		},
-		{
-			Kind:    NextStepVillagePush,
-			Title:   "publish later, explicitly",
-			Command: "peasant village push",
-			Detail:  "starts a separate explicit publish flow",
-		},
+func DefaultNextSteps(_ *ftue.IngestResult) []NextStepKind {
+	return []NextStepKind{
+		NextStepWebStart,
+		NextStepVillageLogin,
+		NextStepVillagePush,
 	}
+}
+
+func canonicalNextStep(kind NextStepKind) (nextStepDetails, bool) {
+	switch kind {
+	case NextStepWebStart:
+		return nextStepDetails{
+			title:   "open the local dashboard",
+			command: "peasant web start",
+			detail:  "starts the dashboard and prints or opens its actual url",
+		}, true
+	case NextStepVillageLogin:
+		return nextStepDetails{
+			title:   "connect to a village later",
+			command: "peasant village login",
+			detail:  "connects this machine without publishing a transcript",
+		}, true
+	case NextStepVillagePush:
+		return nextStepDetails{
+			title:   "publish later, explicitly",
+			command: "peasant village push",
+			detail:  "starts a separate explicit publish flow",
+		}, true
+	default:
+		return nextStepDetails{}, false
+	}
+}
+
+func validateNextSteps(kinds []NextStepKind) error {
+	if len(kinds) == 0 {
+		return nextStepsActionableError("the completion provider returned no actions")
+	}
+	seen := make(map[NextStepKind]bool, len(kinds))
+	for index, kind := range kinds {
+		if !kind.IsValid() {
+			return nextStepsActionableError(fmt.Sprintf("action %d has unknown kind %d", index+1, kind))
+		}
+		if seen[kind] {
+			return nextStepsActionableError(fmt.Sprintf("action %d repeats %q", index+1, kind))
+		}
+		if _, present := canonicalNextStep(kind); !present {
+			return nextStepsActionableError(fmt.Sprintf("action %d has no canonical display catalog entry for %q", index+1, kind))
+		}
+		seen[kind] = true
+	}
+	return nil
+}
+
+func nextStepsActionableError(reason string) error {
+	return fmt.Errorf(
+		"completion guidance unavailable.\n"+
+			"what: kickstart could not validate its display-only next steps.\n"+
+			"why: %s.\n"+
+			"where: kickstart completion provider validation.\n"+
+			"when: after local setup completed and before rendering follow-up commands.\n"+
+			"means: no unverified or incoherent command guidance was shown; setup remains complete.\n"+
+			"fix: use supported unique NextStepKind values and rerun kickstart.", reason)
 }
 
 // stageObservation is presentation-only state derived from successive progress
