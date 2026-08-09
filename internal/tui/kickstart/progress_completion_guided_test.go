@@ -24,7 +24,7 @@ import (
 
 const (
 	expectedProgressRows   = 6
-	expectedCompletionRows = 2
+	expectedCompletionRows = 3
 )
 
 type progressStageFixture struct {
@@ -51,6 +51,7 @@ type progressFixture struct {
 type completionFixture struct {
 	Name                    string   `yaml:"name"`
 	AttemptErrors           []string `yaml:"attemptErrors"`
+	RetentionError          string   `yaml:"retentionError"`
 	MutateConfigBeforeRetry bool     `yaml:"mutateConfigBeforeRetry"`
 	UseRealProgress         bool     `yaml:"useRealProgress"`
 	WantFailureContains     []string `yaml:"wantFailureContains"`
@@ -343,6 +344,9 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 			program, path, command := newProgressProgram(t, progress, clock, ingestRun,
 				kickstart.RetentionWriterFunc(func(int) error {
 					retentionCalls++
+					if row.RetentionError != "" {
+						return errors.New(row.RetentionError)
+					}
 					return nil
 				}), &tick)
 			program, quitEarly := runAttemptCommandsOnce(program, command)

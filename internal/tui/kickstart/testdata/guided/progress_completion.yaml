@@ -48,7 +48,7 @@ progress:
         stages: [{stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}]
     wantContains: ['report 1/2', 'failed', 'estimate unavailable']
 
-expectedCompletionCount: 2
+expectedCompletionCount: 3
 completion:
   - name: successful-local-import
     attemptErrors: [""]
@@ -90,3 +90,21 @@ completion:
     wantIngestCalls: 2
     wantRetentionCalls: 1
     wantProgressResets: 2
+  - name: retention-and-local-import-fail
+    attemptErrors: [synthetic local import failure]
+    retentionError: synthetic retention failure
+    wantContains:
+      - config remains saved
+      - claude retention change failed
+      - synthetic retention failure
+      - 'where: kickstart after config save'
+      - 'fix: update claude settings manually and rerun kickstart if needed'
+      - local import failed
+      - synthetic local import failure
+      - 'where: kickstart local ingest after config and retention effects'
+      - 'fix: correct the reported local problem, then press enter to retry local import only'
+      - kickstart published nothing
+    wantMissing: [retention remains applied]
+    wantIngestCalls: 1
+    wantRetentionCalls: 1
+    wantProgressResets: 1

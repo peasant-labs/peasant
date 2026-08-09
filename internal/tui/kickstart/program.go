@@ -914,8 +914,8 @@ func (p Program) viewDone() string {
 			styles.Base.Render("config remains saved"))
 		if p.retentionApplied {
 			lines = append(lines, styles.Base.Render("retention remains applied"))
-		} else if p.retentionAttempted {
-			lines = append(lines, styles.Danger.Render("retention change failed before local import"))
+		} else if p.retentionAttempted && p.retentionErr != nil {
+			lines = append(lines, styles.Danger.Render(retentionActionableError(p.retentionErr)))
 		}
 		lines = append(lines,
 			styles.Danger.Render("local import failed"),
