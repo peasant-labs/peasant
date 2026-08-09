@@ -6,6 +6,7 @@ import {
   OPEN_COMMAND_PALETTE_EVENT,
   type Command,
 } from './CommandPalette';
+import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -15,7 +16,8 @@ vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle }
 
 const fetchProjectSummaries = vi.fn();
 const fetchSearch = vi.fn();
-const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const parentVisibleFixture = projectViewerStateFixture('explicit session makes parent visible');
+const PROJECT_HASH = parentVisibleFixture.summary.projects[0].projectHash;
 vi.mock('@/lib/api/map', () => ({
   fetchProjectSummaries: () => fetchProjectSummaries(),
   fetchSearch: (q: string, limit?: number) => fetchSearch(q, limit),
@@ -26,18 +28,7 @@ beforeEach(() => {
   toggle.mockClear();
   fetchSearch.mockReset();
   fetchSearch.mockResolvedValue({ query: '', results: [] });
-  fetchProjectSummaries.mockResolvedValue({
-    projects: [
-      {
-        projectHash: PROJECT_HASH,
-        project: '/work/alpha-project',
-        sessions: 3,
-        recordedFiles: 1,
-        totalFiles: 2,
-        openChanges: 1,
-      },
-    ],
-  });
+  fetchProjectSummaries.mockResolvedValue(parentVisibleFixture.summary);
 });
 afterEach(() => cleanup());
 
@@ -84,7 +75,7 @@ describe('CommandPalette', () => {
     expect(push).toHaveBeenCalledWith('/map');
   });
 
-  it('lists fetched projects and jumps to a project map', async () => {
+  it('lists the explicit session parent from the shared summary and jumps to its map', async () => {
     open();
     const input = screen.getByRole('combobox');
     // Project commands appear once the summary fetch resolves.
@@ -92,6 +83,8 @@ describe('CommandPalette', () => {
     fireEvent.change(input, { target: { value: 'alpha-project · map' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(push).toHaveBeenCalledWith(`/map/${PROJECT_HASH}`);
+    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
+    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
   });
 
   it('retries failed project discovery on the same surface and repopulates projects', async () => {

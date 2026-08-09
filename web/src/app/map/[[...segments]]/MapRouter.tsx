@@ -7,9 +7,17 @@ import { IngestTeach } from '@/components/IngestTeach';
 import { FeedbackPanel, Skeleton } from '@/lib/ft-ui';
 import { ExplainerToggle, useExplainer } from '@/components/Explainer';
 import { ProjectPicker, PickerExplainer, rowsFromSummaries } from '@/components/picker/ProjectPicker';
-import { cachedProjectSummaries, fetchProjectSummaries } from '@/lib/api/map';
+import {
+  ProjectListState,
+  SelectionRecoveryPanel,
+  projectListState,
+} from '@/components/picker/SelectionRecoveryPanel';
+import {
+  cachedProjectSummaries,
+  fetchProjectSummaries,
+  type DecodedProjectSummariesPayload,
+} from '@/lib/api/map';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
-import type { ProjectSummary } from '@peasant-labs/schema';
 import { MapPageClient } from './MapPageClient';
 import { formatMapRouteState, mapHref, parseMapRoute, parseMapRouteState } from '@/lib/navigation/projectRoutes';
 import { useProjectIdentity } from '@/lib/navigation/useProjectIdentity';
@@ -76,8 +84,8 @@ function MapRouteSkeleton() {
 function MapPicker() {
   // Seed from the module cache so returning to this tab renders the last
   // list instantly; the effect below refreshes it in the background.
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(
-    () => cachedProjectSummaries()?.projects ?? null,
+  const [summaries, setSummaries] = useState<DecodedProjectSummariesPayload | null>(
+    () => cachedProjectSummaries(),
   );
   const [error, setError] = useState<unknown>(null);
   const [reload, setReload] = useState(0);
@@ -90,12 +98,12 @@ function MapPicker() {
       .then((payload) => {
         if (!cancelled) {
           setError(null);
-          setProjects(payload.projects);
+          setSummaries(payload);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setProjects(null);
+          setSummaries(null);
           setError(err);
         }
       });
@@ -103,6 +111,10 @@ function MapPicker() {
       cancelled = true;
     };
   }, [reload]);
+
+  const listState = summaries === null ? null : projectListState(summaries);
+  const selectionRecovery =
+    listState === ProjectListState.SelectionRecovery ? summaries?.selection ?? null : null;
 
   return (
     <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
@@ -120,7 +132,7 @@ function MapPicker() {
       </div>
 
       {/* Same on-screen column meaning Home has, so /map isn't tooltip-only. */}
-      {projects !== null && projects.length > 0 && (
+      {summaries !== null && summaries.projects.length > 0 && (
         <PickerExplainer explainer={explainer} destination="map" />
       )}
 
@@ -131,7 +143,7 @@ function MapPicker() {
             type="button"
             className="border border-rule px-3 py-2 font-mono text-sm text-ink focus-mono"
             onClick={() => {
-              setProjects(null);
+              setSummaries(null);
               setError(null);
               setReload((value) => value + 1);
             }}
@@ -141,16 +153,18 @@ function MapPicker() {
         </div>
       )}
 
-      {!error && projects === null && (
+      {!error && summaries === null && (
         <Skeleton avatar={false} lines={3} label="Loading projects" />
       )}
 
-      {!error && projects !== null && projects.length === 0 && <IngestTeach />}
+      {!error && selectionRecovery && <SelectionRecoveryPanel {...selectionRecovery} />}
+
+      {!error && listState === ProjectListState.NoData && <IngestTeach />}
 
       {/* The ONE shared picker — same rows/columns as Home, only the row's
           destination differs (map vs changes). */}
-      {projects !== null && projects.length > 0 && (
-        <ProjectPicker rows={rowsFromSummaries({ projects })} destination="map" />
+      {summaries !== null && summaries.projects.length > 0 && (
+        <ProjectPicker rows={rowsFromSummaries(summaries)} destination="map" />
       )}
     </div>
   );
