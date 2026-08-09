@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -20,6 +22,8 @@ const (
 	expectedPrivacySampleRows        = 4
 	expectedPrivacyFailureRows       = 4
 	expectedPrivacyLabelMutationRows = 3
+	expectedPrivacyViewportRows      = 2
+	expectedPrivacyViewportMutations = 1
 	expectedLicenseRows              = 4
 )
 
@@ -67,6 +71,23 @@ type privacyLabelMutationFixture struct {
 	CategoryLabel redact.CategoryString    `yaml:"categoryLabel"`
 }
 
+type privacyViewportKey string
+
+const privacyViewportPageDown privacyViewportKey = "page-down"
+
+func (k privacyViewportKey) valid() bool { return k == privacyViewportPageDown }
+
+type privacyViewportFixture struct {
+	Name           string               `yaml:"name"`
+	Width          int                  `yaml:"width"`
+	Height         int                  `yaml:"height"`
+	Keys           []privacyViewportKey `yaml:"keys"`
+	WantContains   []string             `yaml:"wantContains"`
+	WantMissing    []string             `yaml:"wantMissing"`
+	MutationProbe  bool                 `yaml:"mutationProbe"`
+	MutationReveal string               `yaml:"mutationReveal"`
+}
+
 type privacyFailureFixture struct {
 	Name         string             `yaml:"name"`
 	Kind         privacyFailureKind `yaml:"kind"`
@@ -82,14 +103,17 @@ type licenseFixture struct {
 }
 
 type privacyLicenseDocument struct {
-	ExpectedPrivacySampleCount int                           `yaml:"expectedPrivacySampleCount"`
-	PrivacySamples             []privacySampleFixture        `yaml:"privacySamples"`
-	ExpectedFailureCount       int                           `yaml:"expectedFailureCount"`
-	Failures                   []privacyFailureFixture       `yaml:"failures"`
-	ExpectedLabelMutationCount int                           `yaml:"expectedLabelMutationCount"`
-	LabelMutations             []privacyLabelMutationFixture `yaml:"labelMutations"`
-	ExpectedLicenseCount       int                           `yaml:"expectedLicenseCount"`
-	Licenses                   []licenseFixture              `yaml:"licenses"`
+	ExpectedPrivacySampleCount    int                           `yaml:"expectedPrivacySampleCount"`
+	PrivacySamples                []privacySampleFixture        `yaml:"privacySamples"`
+	ExpectedFailureCount          int                           `yaml:"expectedFailureCount"`
+	Failures                      []privacyFailureFixture       `yaml:"failures"`
+	ExpectedLabelMutationCount    int                           `yaml:"expectedLabelMutationCount"`
+	LabelMutations                []privacyLabelMutationFixture `yaml:"labelMutations"`
+	ExpectedViewportCount         int                           `yaml:"expectedViewportCount"`
+	ExpectedViewportMutationCount int                           `yaml:"expectedViewportMutationCount"`
+	Viewport                      []privacyViewportFixture      `yaml:"viewport"`
+	ExpectedLicenseCount          int                           `yaml:"expectedLicenseCount"`
+	Licenses                      []licenseFixture              `yaml:"licenses"`
 }
 
 func validatePrivacySampleCategoryLabel(row privacySampleFixture) error {
@@ -127,6 +151,14 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 	if document.ExpectedLabelMutationCount != expectedPrivacyLabelMutationRows || len(document.LabelMutations) != expectedPrivacyLabelMutationRows {
 		t.Fatalf("privacy label mutations: declared=%d actual=%d required=%d",
 			document.ExpectedLabelMutationCount, len(document.LabelMutations), expectedPrivacyLabelMutationRows)
+	}
+	if document.ExpectedViewportCount != expectedPrivacyViewportRows || len(document.Viewport) != expectedPrivacyViewportRows {
+		t.Fatalf("privacy viewport rows: declared=%d actual=%d required=%d",
+			document.ExpectedViewportCount, len(document.Viewport), expectedPrivacyViewportRows)
+	}
+	if document.ExpectedViewportMutationCount != expectedPrivacyViewportMutations {
+		t.Fatalf("privacy viewport mutation rows: declared=%d required=%d",
+			document.ExpectedViewportMutationCount, expectedPrivacyViewportMutations)
 	}
 	if document.ExpectedLicenseCount != expectedLicenseRows || len(document.Licenses) != expectedLicenseRows {
 		t.Fatalf("licenses: declared=%d actual=%d required=%d",
@@ -185,6 +217,30 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 				t.Fatalf("zero privacy label mutation %q has label %q", row.Name, row.CategoryLabel)
 			}
 		}
+	}
+
+	viewportNames := map[string]bool{}
+	viewportMutations := 0
+	for _, row := range document.Viewport {
+		if strings.TrimSpace(row.Name) == "" || viewportNames[row.Name] || row.Width != 80 || row.Height != 24 ||
+			len(row.WantContains) == 0 || len(row.WantMissing) == 0 {
+			t.Fatalf("privacy viewport row is incomplete or duplicated: %#v", row)
+		}
+		viewportNames[row.Name] = true
+		for _, viewportKey := range row.Keys {
+			if !viewportKey.valid() {
+				t.Fatalf("privacy viewport row %q has invalid key %q", row.Name, viewportKey)
+			}
+		}
+		if row.MutationProbe {
+			viewportMutations++
+			if strings.TrimSpace(row.MutationReveal) == "" || len(row.Keys) == 0 {
+				t.Fatalf("privacy viewport mutation row %q cannot reveal clipped content", row.Name)
+			}
+		}
+	}
+	if viewportMutations != expectedPrivacyViewportMutations {
+		t.Fatalf("privacy viewport mutation rows=%d, want %d", viewportMutations, expectedPrivacyViewportMutations)
 	}
 
 	licenseNames := map[string]bool{}
@@ -276,6 +332,53 @@ func TestPrivacyCategoryLabelFixtureMutationsFailClosed(t *testing.T) {
 			sample.CategoryLabel = mutation.CategoryLabel
 			if err := validatePrivacySampleCategoryLabel(sample); err == nil {
 				t.Fatalf("privacy label mutation %q unexpectedly passed canonical validation", mutation.Name)
+			}
+		})
+	}
+}
+
+func TestPrivacyGuideViewportAtCommonTerminalHeight(t *testing.T) {
+	document := loadPrivacyLicenseDocument(t)
+	section := findSection(t, kickstart.BuildRegistry(kickstart.Options{
+		Source: scannerfix.NewFixtureTreeSource("standard"),
+	}), kickstart.SectionPrivacy)
+	for _, row := range document.Viewport {
+		row := row
+		t.Run(row.Name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			loaded := config.BaseConfig()
+			if err := config.SaveAtomic(path, loaded); err != nil {
+				t.Fatalf("seed privacy viewport config: %v", err)
+			}
+			draft, err := settings.NewDraft(path, loaded)
+			if err != nil {
+				t.Fatalf("open privacy viewport draft: %v", err)
+			}
+			flow := settings.NewFlow(theme.New(theme.ModeDark), settings.Registry{Sections: []settings.Section{section}}, draft)
+			flow.SetSize(row.Width, row.Height)
+			before := stripRender(flow.View())
+			if row.MutationProbe && strings.Contains(before, row.MutationReveal) {
+				t.Fatalf("privacy viewport mutation reveal %q was visible before paging:\n%s", row.MutationReveal, before)
+			}
+			for _, viewportKey := range row.Keys {
+				switch viewportKey {
+				case privacyViewportPageDown:
+					flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+				}
+			}
+			view := stripRender(flow.View())
+			for _, want := range row.WantContains {
+				if !strings.Contains(view, want) {
+					t.Errorf("privacy viewport does not contain %q:\n%s", want, view)
+				}
+			}
+			for _, missing := range row.WantMissing {
+				if strings.Contains(view, missing) {
+					t.Errorf("privacy viewport unexpectedly contains %q:\n%s", missing, view)
+				}
+			}
+			if lines := strings.Count(view, "\n") + 1; lines > row.Height {
+				t.Errorf("privacy viewport rendered %d lines at height %d", lines, row.Height)
 			}
 		})
 	}

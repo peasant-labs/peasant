@@ -51,6 +51,7 @@ type Flow struct {
 	err       error
 
 	width, height int
+	viewOffset    int
 }
 
 // FlowOption configures presentation-owned behavior without changing Registry
@@ -173,11 +174,13 @@ func (f *Flow) ResumeNextField() {
 func (f *Flow) SetSize(width, height int) {
 	f.width, f.height = width, height
 	f.overlay.SetSize(width, height)
+	f.viewOffset = 0
 }
 
 // enterStep re-syncs the current step's fields from the draft and focuses its
 // first interactive field.
 func (f *Flow) enterStep() {
+	f.viewOffset = 0
 	if f.OnReceipt() {
 		return
 	}
@@ -293,7 +296,7 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 		// global bindings such as q (quit), b (back), and ? (help).
 		return f.forwardToFields(msg)
 	}
-	action, ok := keymap.Match(keymap.Default(), keyMsg, f.availability())
+	action, ok := keymap.Match(keymap.Default(), keyMsg, f.dispatchAvailability(keyMsg))
 	if ok {
 		switch action {
 		case keymap.ActionHelp:
@@ -316,6 +319,11 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 			if f.OnReceipt() {
 				cmd := f.commit()
 				return f, cmd
+			}
+		case keymap.ActionPageUp, keymap.ActionPageDown, keymap.ActionTop, keymap.ActionBottom:
+			if !f.focusedFieldOwnsViewport() {
+				f.scrollViewport(action)
+				return f, nil
 			}
 		}
 	}
@@ -379,18 +387,40 @@ func (f Flow) forwardAsync(msg tea.Msg) (Flow, tea.Cmd) {
 
 // availability reports the flow-level actions for dispatch, footer, and help.
 func (f Flow) availability() flowAvailability {
-	return flowAvailability{flow: &f}
+	state := f.viewportState()
+	return flowAvailability{flow: &f, viewport: &state}
+}
+
+// dispatchAvailability measures the Flow viewport only for one of its paging
+// keys. Ordinary field and lifecycle input therefore does not re-render a
+// derived guide or consent provider merely to resolve an unrelated action.
+func (f Flow) dispatchAvailability(keyMsg tea.KeyPressMsg) flowAvailability {
+	availability := flowAvailability{flow: &f}
+	if f.focusedFieldOwnsViewport() {
+		return availability
+	}
+	if _, paging := keymap.Match(keymap.Default(), keyMsg, flowViewportKeyAvailability{}); !paging {
+		return availability
+	}
+	state := f.viewportState()
+	availability.viewport = &state
+	return availability
 }
 
 // View renders the current step (or receipt) inside a kit.Frame, overlaying the
 // exit-confirm modal when it is shown.
 func (f Flow) View() string {
-	frame := kit.NewFrame(f.th).WithTitle(f.title()).WithFooter(f.footer())
+	layout := kit.NewFrame(f.th).WithTitle(f.title()).WithFooter(" ")
+	layout.SetSize(f.width, f.height)
+	body := f.renderBody(layout.InnerWidth(), layout.InnerHeight())
+	state := viewportStateFor(body, layout.InnerHeight(), f.viewOffset)
+	availability := flowAvailability{flow: &f, viewport: &state}
+	frame := kit.NewFrame(f.th).WithTitle(f.title()).WithFooter(f.footer(availability))
 	frame.SetSize(f.width, f.height)
-	frame.SetContent(f.body(frame.InnerWidth(), frame.InnerHeight()))
+	frame.SetContent(windowBodyAt(body, frame.InnerHeight(), state.offset))
 	base := frame.View()
 	if f.helping {
-		return f.overlay.Push(helpLayer{th: f.th, entries: keymap.HelpEntries(keymap.Default(), f.availability())}).View(base)
+		return f.overlay.Push(helpLayer{th: f.th, entries: keymap.HelpEntries(keymap.Default(), availability)}).View(base)
 	}
 	if f.confirming {
 		f.confirm.SetSize(kit.ConfirmMinSize.Width, kit.ConfirmMinSize.Height)
@@ -437,12 +467,19 @@ func (f Flow) title() string {
 	return f.steps[f.cur].Title
 }
 
-func (f Flow) footer() string {
-	return keymap.FooterView(f.th, keymap.Default(), f.availability())
+func (f Flow) footer(availability keymap.Availability) string {
+	return keymap.FooterView(f.th, keymap.Default(), availability)
 }
 
-// body renders the current step's fields, or the receipt.
+// body renders the current step's fields, or the receipt, through Flow's
+// private viewport. Tree fields keep their own viewport and are already sized
+// to the remaining body height; guided prose, choice fields, and receipts use
+// this window so every row remains reachable in a fixed terminal.
 func (f Flow) body(width, height int) string {
+	return f.windowBody(f.renderBody(width, height), height)
+}
+
+func (f Flow) renderBody(width, height int) string {
 	styles := f.th.Styles()
 	tabs := f.stepTabs(width)
 	if f.OnReceipt() {
@@ -497,6 +534,105 @@ func (f Flow) body(width, height int) string {
 	return joinLines(lines)
 }
 
+type flowViewportState struct {
+	offset    int
+	maxOffset int
+	page      int
+}
+
+func (f Flow) viewportState() flowViewportState {
+	frame := kit.NewFrame(f.th).WithTitle(f.title()).WithFooter(" ")
+	frame.SetSize(f.width, f.height)
+	page := frame.InnerHeight()
+	if page < 0 {
+		page = 0
+	}
+	body := f.renderBody(frame.InnerWidth(), page)
+	return viewportStateFor(body, page, f.viewOffset)
+}
+
+func viewportStateFor(body string, page, offset int) flowViewportState {
+	total := len(strings.Split(body, "\n"))
+	maxOffset := total - page
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	return flowViewportState{offset: offset, maxOffset: maxOffset, page: page}
+}
+
+func (f Flow) windowBody(body string, height int) string {
+	state := viewportStateFor(body, height, f.viewOffset)
+	return windowBodyAt(body, height, state.offset)
+}
+
+func windowBodyAt(body string, height, offset int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	end := offset + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return joinLines(lines[offset:end])
+}
+
+func (f *Flow) scrollViewport(action keymap.ActionID) {
+	state := f.viewportState()
+	offset := state.offset
+	page := state.page
+	if page < 1 {
+		page = 1
+	}
+	switch action {
+	case keymap.ActionPageUp:
+		offset -= page
+	case keymap.ActionPageDown:
+		offset += page
+	case keymap.ActionTop:
+		offset = 0
+	case keymap.ActionBottom:
+		offset = state.maxOffset
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > state.maxOffset {
+		offset = state.maxOffset
+	}
+	f.viewOffset = offset
+}
+
+func (f Flow) focusedFieldOwnsViewport() bool {
+	if f.OnReceipt() || f.focusField < 0 || f.focusField >= len(f.steps[f.cur].Fields) {
+		return false
+	}
+	return f.steps[f.cur].Fields[f.focusField].Kind() == KindTree
+}
+
+func (f Flow) viewportActions(state *flowViewportState) []keymap.ActionID {
+	if f.focusedFieldOwnsViewport() {
+		return nil
+	}
+	if state == nil || state.maxOffset == 0 {
+		return nil
+	}
+	var actions []keymap.ActionID
+	if state.offset > 0 {
+		actions = append(actions, keymap.ActionPageUp, keymap.ActionTop)
+	}
+	if state.offset < state.maxOffset {
+		actions = append(actions, keymap.ActionPageDown, keymap.ActionBottom)
+	}
+	return actions
+}
+
 // guideLines renders the current section's optional onboarding metadata before
 // its fields. Dense presentations intentionally do not call this helper. Empty
 // guide values consume no space, and a derived example receives the same theme
@@ -542,13 +678,17 @@ func interactive(fld Field) bool { return fld.Kind() != KindInfo }
 
 // flowAvailability adapts a Flow's current state to keymap.Availability so
 // dispatch, the footer, and the help overlay stay in lockstep.
-type flowAvailability struct{ flow *Flow }
+type flowAvailability struct {
+	flow     *Flow
+	viewport *flowViewportState
+}
 
 func (a flowAvailability) AvailableActions() []keymap.ActionID {
 	f := a.flow
 	var out []keymap.ActionID
 	if f.OnReceipt() {
 		out = append(out, keymap.ActionConfirm)
+		out = append(out, f.viewportActions(a.viewport)...)
 		if len(f.steps) > 0 {
 			out = append(out, keymap.ActionPrevField)
 		}
@@ -559,6 +699,7 @@ func (a flowAvailability) AvailableActions() []keymap.ActionID {
 	if f.focusField >= 0 && f.focusField < len(f.steps[f.cur].Fields) {
 		out = append(out, f.steps[f.cur].Fields[f.focusField].availableActions()...)
 	}
+	out = append(out, f.viewportActions(a.viewport)...)
 	out = append(out, keymap.ActionNextField)
 	if f.cur > 0 {
 		out = append(out, keymap.ActionPrevField)
@@ -580,6 +721,12 @@ func (a flowAvailability) AvailableActions() []keymap.ActionID {
 		}
 	}
 	return effective
+}
+
+type flowViewportKeyAvailability struct{}
+
+func (flowViewportKeyAvailability) AvailableActions() []keymap.ActionID {
+	return []keymap.ActionID{keymap.ActionPageUp, keymap.ActionPageDown, keymap.ActionTop, keymap.ActionBottom}
 }
 
 func dedupeActions(in []keymap.ActionID) []keymap.ActionID {

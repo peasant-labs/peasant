@@ -31,6 +31,12 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "shift+tab":
 		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "shift+g":
+		return tea.KeyPressMsg{Code: 'G', Text: "G"}
 	default:
 		return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 	}

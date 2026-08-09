@@ -21,6 +21,8 @@ const (
 	privacyAdapterSampleRows        = 4
 	privacyAdapterFailureRows       = 4
 	privacyAdapterLabelMutationRows = 3
+	privacyAdapterViewportRows      = 2
+	privacyAdapterViewportMutations = 1
 	privacyAdapterLicenseRows       = 4
 )
 
@@ -56,6 +58,17 @@ type adapterLabelMutationFixture struct {
 	CategoryLabel redact.CategoryString `yaml:"categoryLabel"`
 }
 
+type adapterViewportFixture struct {
+	Name           string   `yaml:"name"`
+	Width          int      `yaml:"width"`
+	Height         int      `yaml:"height"`
+	Keys           []string `yaml:"keys"`
+	WantContains   []string `yaml:"wantContains"`
+	WantMissing    []string `yaml:"wantMissing"`
+	MutationProbe  bool     `yaml:"mutationProbe"`
+	MutationReveal string   `yaml:"mutationReveal"`
+}
+
 type adapterFailureFixture struct {
 	Name         string             `yaml:"name"`
 	Kind         adapterFailureKind `yaml:"kind"`
@@ -71,14 +84,17 @@ type adapterLicenseFixture struct {
 }
 
 type adapterFixtureDocument struct {
-	ExpectedPrivacySampleCount int                           `yaml:"expectedPrivacySampleCount"`
-	PrivacySamples             []adapterSampleFixture        `yaml:"privacySamples"`
-	ExpectedFailureCount       int                           `yaml:"expectedFailureCount"`
-	Failures                   []adapterFailureFixture       `yaml:"failures"`
-	ExpectedLabelMutationCount int                           `yaml:"expectedLabelMutationCount"`
-	LabelMutations             []adapterLabelMutationFixture `yaml:"labelMutations"`
-	ExpectedLicenseCount       int                           `yaml:"expectedLicenseCount"`
-	Licenses                   []adapterLicenseFixture       `yaml:"licenses"`
+	ExpectedPrivacySampleCount    int                           `yaml:"expectedPrivacySampleCount"`
+	PrivacySamples                []adapterSampleFixture        `yaml:"privacySamples"`
+	ExpectedFailureCount          int                           `yaml:"expectedFailureCount"`
+	Failures                      []adapterFailureFixture       `yaml:"failures"`
+	ExpectedLabelMutationCount    int                           `yaml:"expectedLabelMutationCount"`
+	LabelMutations                []adapterLabelMutationFixture `yaml:"labelMutations"`
+	ExpectedViewportCount         int                           `yaml:"expectedViewportCount"`
+	ExpectedViewportMutationCount int                           `yaml:"expectedViewportMutationCount"`
+	Viewport                      []adapterViewportFixture      `yaml:"viewport"`
+	ExpectedLicenseCount          int                           `yaml:"expectedLicenseCount"`
+	Licenses                      []adapterLicenseFixture       `yaml:"licenses"`
 }
 
 //go:embed testdata/guided/privacy_license.yaml
@@ -107,6 +123,23 @@ func loadPrivacyAdapterFixture(t *testing.T) adapterFixtureDocument {
 	if document.ExpectedLabelMutationCount != privacyAdapterLabelMutationRows || len(document.LabelMutations) != privacyAdapterLabelMutationRows {
 		t.Fatalf("privacy adapter label mutations: declared=%d actual=%d required=%d",
 			document.ExpectedLabelMutationCount, len(document.LabelMutations), privacyAdapterLabelMutationRows)
+	}
+	if document.ExpectedViewportCount != privacyAdapterViewportRows || len(document.Viewport) != privacyAdapterViewportRows {
+		t.Fatalf("privacy adapter viewport rows: declared=%d actual=%d required=%d",
+			document.ExpectedViewportCount, len(document.Viewport), privacyAdapterViewportRows)
+	}
+	viewportMutations := 0
+	for _, row := range document.Viewport {
+		if strings.TrimSpace(row.Name) == "" || row.Width != 80 || row.Height != 24 || len(row.WantContains) == 0 || len(row.WantMissing) == 0 {
+			t.Fatalf("privacy adapter viewport row is incomplete: %#v", row)
+		}
+		if row.MutationProbe {
+			viewportMutations++
+		}
+	}
+	if document.ExpectedViewportMutationCount != privacyAdapterViewportMutations || viewportMutations != privacyAdapterViewportMutations {
+		t.Fatalf("privacy adapter viewport mutations: declared=%d actual=%d required=%d",
+			document.ExpectedViewportMutationCount, viewportMutations, privacyAdapterViewportMutations)
 	}
 	if document.ExpectedLicenseCount != privacyAdapterLicenseRows || len(document.Licenses) != privacyAdapterLicenseRows {
 		t.Fatalf("privacy adapter licenses: declared=%d actual=%d required=%d",

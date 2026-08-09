@@ -69,7 +69,19 @@ func buildFlowForRender(t *testing.T, th theme.Theme, state string, w, h int) Fl
 	if err != nil {
 		t.Fatalf("NewDraft: %v", err)
 	}
-	f := NewFlow(th, testRegistry(), d)
+	registry := testRegistry()
+	var options []FlowOption
+	if state == "viewport-step-top" || state == "viewport-step-bottom" {
+		registry = flowViewportStepRegistry(loadFlowViewportFixture(t))
+	}
+	if state == "viewport-receipt-error-bottom" {
+		document := loadFlowViewportFixture(t)
+		registry = flowViewportReceiptRegistry(document)
+		options = append(options, WithConsentSummary(func(ConsentContext) (ConsentSummary, error) {
+			return ConsentSummary{Values: document.ReceiptValues, Effects: document.ReceiptEffects}, nil
+		}))
+	}
+	f := NewFlow(th, registry, d, options...)
 	f.SetSize(w, h)
 	switch state {
 	case "step":
@@ -82,6 +94,12 @@ func buildFlowForRender(t *testing.T, th theme.Theme, state string, w, h int) Fl
 		f = send(f, "esc") // open exit-confirm overlay
 	case "help":
 		f = send(f, "?") // open the grouped keybinding help overlay
+	case "viewport-step-top":
+		// overflowing guided step at its initial viewport offset
+	case "viewport-step-bottom":
+		f = send(f, "shift+g")
+	case "viewport-receipt-error-bottom":
+		f = send(f, "tab", "enter", "shift+g")
 	default:
 		t.Fatalf("unknown state %q", state)
 	}
