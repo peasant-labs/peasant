@@ -12,7 +12,7 @@ import (
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), tmp)
 
 	creds := &Credentials{
 		APIKey:     "peasant_test1234",
@@ -54,7 +54,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestLoadCredentials_NotFound(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), tmp)
 
 	creds, err := LoadCredentials()
 	if err != nil {
@@ -67,7 +67,7 @@ func TestLoadCredentials_NotFound(t *testing.T) {
 
 func TestClearCredentials(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), tmp)
 
 	creds := &Credentials{
 		APIKey:   "peasant_test1234",
@@ -94,7 +94,7 @@ func TestClearCredentials(t *testing.T) {
 
 func TestClearCredentials_NotFound(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), tmp)
 
 	if err := ClearCredentials(); err != nil {
 		t.Fatalf("ClearCredentials on non-existent file: %v", err)
@@ -103,7 +103,7 @@ func TestClearCredentials_NotFound(t *testing.T) {
 
 func TestSaveCredentials_Permissions(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), tmp)
 
 	creds := &Credentials{
 		APIKey:   "peasant_test1234",
@@ -161,7 +161,7 @@ func TestCredentials_IsValid(t *testing.T) {
 func TestCredentialsFrom_RoundTripIsolatedFromDefaultStore(t *testing.T) {
 	defaultHome := t.TempDir()
 	customHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", defaultHome)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), defaultHome)
 	defaultCredentials := &Credentials{
 		APIKey: "default-key", KeyID: "default-key-id", UserID: "default-user-id", Username: "default-user",
 	}

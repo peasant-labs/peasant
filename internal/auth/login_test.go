@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 const expectedLoginConfigDirRows = 2
@@ -259,7 +261,7 @@ func TestLoginFromChecksOnlySelectedCredentialStore(t *testing.T) {
 		t.Run(row.Name, func(t *testing.T) {
 			defaultHome := t.TempDir()
 			customHome := t.TempDir()
-			t.Setenv("XDG_CONFIG_HOME", defaultHome)
+			t.Setenv(defaults.EnvXDGConfigHome.String(), defaultHome)
 			credentials := &Credentials{
 				APIKey: "fixture-key", KeyID: "fixture-key-id", UserID: "fixture-user-id", Username: row.Username,
 			}
@@ -298,7 +300,7 @@ func TestLoginFromChecksOnlySelectedCredentialStore(t *testing.T) {
 func TestLoginFromSavesSuccessfulCallbackIntoSelectedStore(t *testing.T) {
 	defaultHome := t.TempDir()
 	customHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", defaultHome)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), defaultHome)
 	defaultCredentials := &Credentials{
 		APIKey: "default-key", KeyID: "default-key-id", UserID: "default-user-id", Username: "default-user",
 	}

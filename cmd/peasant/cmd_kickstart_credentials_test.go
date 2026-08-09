@@ -12,7 +12,7 @@ import (
 func TestKickstartLoginUsesCommandCredentialStore(t *testing.T) {
 	defaultHome := t.TempDir()
 	customHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", defaultHome)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), defaultHome)
 	defaultCredentials := &auth.Credentials{
 		APIKey: "default-key", KeyID: "default-key-id", UserID: "default-user-id", Username: "default-user",
 	}

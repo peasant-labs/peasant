@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/peasant-labs/peasant/internal/defaults"
 )
 
 func TestLogoutFromClearsOnlySelectedCredentialStore(t *testing.T) {
@@ -20,7 +22,7 @@ func TestLogoutFromClearsOnlySelectedCredentialStore(t *testing.T) {
 
 	defaultHome := t.TempDir()
 	customHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", defaultHome)
+	t.Setenv(defaults.EnvXDGConfigHome.String(), defaultHome)
 	if err := SaveCredentials(&Credentials{
 		APIKey: "default-key", KeyID: "default-key-id", UserID: "default-user-id", Username: "default-user",
 	}); err != nil {
