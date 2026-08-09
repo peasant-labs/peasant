@@ -7,7 +7,9 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -26,6 +28,8 @@ type mountedJourneyFixture struct {
 	Name              string   `yaml:"name"`
 	ConnectCopy       []string `yaml:"connectCopy"`
 	ConsentCopy       []string `yaml:"consentCopy"`
+	ProgressCopy      []string `yaml:"progressCopy"`
+	ProgressForbidden []string `yaml:"progressForbidden"`
 	CompletionCopy    []string `yaml:"completionCopy"`
 	ForbiddenCopy     []string `yaml:"forbiddenCopy"`
 	WantIngestCalls   int      `yaml:"wantIngestCalls"`
@@ -59,39 +63,13 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 	seen := map[string]bool{}
 	for _, row := range document.Rows {
 		if strings.TrimSpace(row.Name) == "" || seen[row.Name] || len(row.ConnectCopy) != 2 || len(row.ConsentCopy) == 0 ||
+			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 ||
 			len(row.CompletionCopy) != 4 || len(row.ForbiddenCopy) == 0 || row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
 			t.Fatalf("mounted journey row is incomplete or duplicated: %#v", row)
 		}
 		seen[row.Name] = true
 	}
 	return document
-}
-
-func executeProgramBatchOnce(program kickstart.Program, command tea.Cmd) (kickstart.Program, bool) {
-	if command == nil {
-		return program, false
-	}
-	message := command()
-	children, ok := message.(tea.BatchMsg)
-	if !ok {
-		children = tea.BatchMsg{func() tea.Msg { return message }}
-	}
-	quitEarly := false
-	for _, child := range children {
-		if child == nil {
-			continue
-		}
-		message := child()
-		if message == nil {
-			continue
-		}
-		var next tea.Cmd
-		program, next = program.Update(message)
-		if program.Phase() == kickstart.PhaseDone && next != nil {
-			_, quitEarly = next().(tea.QuitMsg)
-		}
-	}
-	return program, quitEarly
 }
 
 func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *testing.T) {
@@ -114,11 +92,19 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 			deps.readRetention = func() (int, bool) { return 90, true }
 			deps.alreadyConnected = func(string) bool { return false }
 			ingestCalls := 0
+			ingestStarted := make(chan struct{})
+			releaseIngest := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(releaseIngest) }) }
+			defer release()
 			deps.localIngest = func(*cobra.Command, string, []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource) {
 				progress := ingest.NewProgressState()
 				return func(context.Context) (*ftue.IngestResult, error) {
 					ingestCalls++
-					progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 1})
+					progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover})
+					progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1})
+					close(ingestStarted)
+					<-releaseIngest
 					progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 1, Total: 1})
 					return &ftue.IngestResult{New: 1}, nil
 				}, progress
@@ -160,9 +146,65 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 					program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 				}
 				program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-				program, quitEarly := executeProgramBatchOnce(program, command)
-				if quitEarly {
-					t.Fatal("mounted local completion quit before explicit exit")
+				if command == nil {
+					t.Fatal("mounted receipt confirmation did not start local ingest")
+				}
+				message := command()
+				children, ok := message.(tea.BatchMsg)
+				if !ok || len(children) != 3 {
+					t.Fatalf("mounted local ingest command produced %T with %d children, want a three-command batch", message, len(children))
+				}
+				messages := make(chan tea.Msg, len(children))
+				for _, child := range children {
+					child := child
+					go func() {
+						if child != nil {
+							messages <- child()
+						}
+					}()
+				}
+				select {
+				case <-ingestStarted:
+				case <-time.After(2 * time.Second):
+					t.Fatal("mounted local ingest did not reach its blocking progress boundary")
+				}
+				// The ingest command remains blocked. The other two messages are the
+				// real progress and spinner ticks from Program's production batch.
+				for range len(children) - 1 {
+					select {
+					case message := <-messages:
+						program, _ = program.Update(message)
+					case <-time.After(2 * time.Second):
+						t.Fatal("mounted Program did not deliver its live progress ticks")
+					}
+				}
+				if program.Phase() != kickstart.PhaseIngest {
+					t.Fatalf("mounted Program phase=%s before ingest release, want ingest", program.Phase())
+				}
+				progressView := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
+				for _, want := range row.ProgressCopy {
+					if !strings.Contains(progressView, strings.ToLower(want)) {
+						t.Errorf("mounted live progress does not contain %q:\n%s", want, progressView)
+					}
+				}
+				for _, forbidden := range row.ProgressForbidden {
+					if strings.Contains(progressView, strings.ToLower(forbidden)) {
+						t.Errorf("mounted live progress contains premature or unsupported copy %q:\n%s", forbidden, progressView)
+					}
+				}
+
+				release()
+				select {
+				case message := <-messages:
+					var next tea.Cmd
+					program, next = program.Update(message)
+					if next != nil {
+						if _, quitEarly := next().(tea.QuitMsg); quitEarly {
+							t.Fatal("mounted local completion quit before explicit exit")
+						}
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("mounted local ingest did not complete after release")
 				}
 				completion := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
 				for _, want := range row.CompletionCopy {
@@ -173,6 +215,13 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 				for _, forbidden := range row.ForbiddenCopy {
 					if strings.Contains(completion, strings.ToLower(forbidden)) {
 						t.Errorf("mounted completion fabricates %q:\n%s", forbidden, completion)
+					}
+				}
+				program, _ = program.Update(tea.WindowSizeMsg{Width: 181, Height: 51})
+				persistentCompletion := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
+				for _, want := range row.CompletionCopy {
+					if !strings.Contains(persistentCompletion, strings.ToLower(want)) {
+						t.Errorf("mounted completion did not persist %q after resize:\n%s", want, persistentCompletion)
 					}
 				}
 				return nil

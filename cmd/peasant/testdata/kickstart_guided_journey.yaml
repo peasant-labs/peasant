@@ -8,6 +8,13 @@ rows:
       - save the visible choices to peasant configuration
       - import the selected transcripts into the local peasant store
       - publish nothing; sharing requires a later explicit push
+    progressCopy:
+      - 'local import elapsed:'
+      - discover 1
+      - estimate unavailable
+    progressForbidden:
+      - 'estimate:'
+      - kickstart complete
     completionCopy:
       - peasant web start
       - starts the dashboard and prints or opens its actual url
