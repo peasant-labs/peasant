@@ -30,7 +30,8 @@ const (
 	expectedPartialSuccessFixtureRows = 1
 	expectedConfigAuthorityRows       = 8
 	expectedSaveOrderRows             = 1
-	expectedRetentionIORows           = 7
+	expectedRetentionIORows           = 10
+	expectedSaveSemanticsRows         = 3
 )
 
 //go:embed testdata/config-screen/retention.yaml
@@ -50,6 +51,9 @@ var configSaveOrderFixtureYAML []byte
 
 //go:embed testdata/config-screen/retention-io.yaml
 var configRetentionIOFixtureYAML []byte
+
+//go:embed testdata/config-screen/save-semantics.yaml
+var configSaveSemanticsFixtureYAML []byte
 
 type configRetentionScenario string
 
@@ -140,7 +144,10 @@ const (
 	configRetentionIONonObjectJSON        configRetentionIOScenario = "non-object-json"
 	configRetentionIOInvalidValue         configRetentionIOScenario = "invalid-retention"
 	configRetentionIOUnreadablePath       configRetentionIOScenario = "unreadable-path"
-	configRetentionIOLateReplaceFailure   configRetentionIOScenario = "late-replace-failure"
+	configRetentionIOLateUnreadable       configRetentionIOScenario = "late-unreadable"
+	configRetentionIOLateValidEdit        configRetentionIOScenario = "late-valid-edit"
+	configRetentionIOLateMalformedEdit    configRetentionIOScenario = "late-malformed-edit"
+	configRetentionIOLateRetentionDrift   configRetentionIOScenario = "late-retention-drift"
 )
 
 func (s configRetentionIOScenario) valid() bool {
@@ -148,27 +155,64 @@ func (s configRetentionIOScenario) valid() bool {
 	case configRetentionIOMissingFile, configRetentionIOMissingKeyPathStable,
 		configRetentionIOMalformedJSON, configRetentionIONonObjectJSON,
 		configRetentionIOInvalidValue, configRetentionIOUnreadablePath,
-		configRetentionIOLateReplaceFailure:
+		configRetentionIOLateUnreadable, configRetentionIOLateValidEdit,
+		configRetentionIOLateMalformedEdit, configRetentionIOLateRetentionDrift:
 		return true
 	}
 	return false
 }
 
 type configRetentionIOFixture struct {
-	Name              string                    `yaml:"name"`
-	Scenario          configRetentionIOScenario `yaml:"scenario"`
-	InitialDocument   string                    `yaml:"initialDocument"`
-	SelectedRetention int                       `yaml:"selectedRetention"`
-	ExpectOpenCalls   int                       `yaml:"expectOpenCalls"`
-	ExpectRunnerCalls int                       `yaml:"expectRunnerCalls"`
-	ExpectWriterCalls int                       `yaml:"expectWriterCalls"`
-	ExpectError       bool                      `yaml:"expectError"`
-	WantErrorContains []string                  `yaml:"wantErrorContains"`
+	Name                 string                    `yaml:"name"`
+	Scenario             configRetentionIOScenario `yaml:"scenario"`
+	InitialDocument      string                    `yaml:"initialDocument"`
+	LateDocument         string                    `yaml:"lateDocument"`
+	SelectedRetention    int                       `yaml:"selectedRetention"`
+	ExpectOpenCalls      int                       `yaml:"expectOpenCalls"`
+	ExpectRunnerCalls    int                       `yaml:"expectRunnerCalls"`
+	ExpectWriterCalls    int                       `yaml:"expectWriterCalls"`
+	ExpectError          bool                      `yaml:"expectError"`
+	WantErrorContains    []string                  `yaml:"wantErrorContains"`
+	WantDocumentContains []string                  `yaml:"wantDocumentContains"`
 }
 
 type configRetentionIODocument struct {
 	ExpectedRows int                        `yaml:"expectedRows"`
 	Cases        []configRetentionIOFixture `yaml:"cases"`
+}
+
+type configSaveSemanticsScenario string
+
+const (
+	configSaveSemanticsExistingClean configSaveSemanticsScenario = "existing-clean"
+	configSaveSemanticsMissingFile   configSaveSemanticsScenario = "missing-file"
+	configSaveSemanticsTransientOnly configSaveSemanticsScenario = "transient-only"
+)
+
+func (s configSaveSemanticsScenario) valid() bool {
+	switch s {
+	case configSaveSemanticsExistingClean, configSaveSemanticsMissingFile, configSaveSemanticsTransientOnly:
+		return true
+	}
+	return false
+}
+
+type configSaveSemanticsFixture struct {
+	Name                string                      `yaml:"name"`
+	Scenario            configSaveSemanticsScenario `yaml:"scenario"`
+	ConfigDocument      string                      `yaml:"configDocument"`
+	InitialRetention    int                         `yaml:"initialRetention"`
+	SelectedRetention   int                         `yaml:"selectedRetention"`
+	ExpectScreenDirty   bool                        `yaml:"expectScreenDirty"`
+	ExpectDraftDirty    bool                        `yaml:"expectDraftDirty"`
+	ExpectWriterCalls   int                         `yaml:"expectWriterCalls"`
+	ExpectConfigChanged bool                        `yaml:"expectConfigChanged"`
+	ExpectClaudeChanged bool                        `yaml:"expectClaudeChanged"`
+}
+
+type configSaveSemanticsDocument struct {
+	ExpectedRows int                          `yaml:"expectedRows"`
+	Cases        []configSaveSemanticsFixture `yaml:"cases"`
 }
 
 func loadConfigRetentionFixtures(t *testing.T) []configRetentionFixture {
@@ -256,6 +300,26 @@ func loadConfigRetentionIOFixtures(t *testing.T) []configRetentionIOFixture {
 		}
 		if fixture.ExpectRunnerCalls > 0 && fixture.SelectedRetention <= 0 {
 			t.Fatalf("mounted retention I/O fixture has no selected value: %+v", fixture)
+		}
+	}
+	return document.Cases
+}
+
+func loadConfigSaveSemanticsFixtures(t *testing.T) []configSaveSemanticsFixture {
+	t.Helper()
+	var document configSaveSemanticsDocument
+	if err := decodeConfigScreenFixture("save-semantics.yaml", configSaveSemanticsFixtureYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ExpectedRows != expectedSaveSemanticsRows || len(document.Cases) != expectedSaveSemanticsRows {
+		t.Fatalf("save semantics fixture rows: header=%d actual=%d want=%d", document.ExpectedRows, len(document.Cases), expectedSaveSemanticsRows)
+	}
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || !fixture.Scenario.valid() || fixture.InitialRetention <= 0 || fixture.SelectedRetention <= 0 {
+			t.Fatalf("invalid save semantics fixture: %+v", fixture)
+		}
+		if fixture.Scenario != configSaveSemanticsMissingFile && fixture.ConfigDocument == "" {
+			t.Fatalf("save semantics fixture needs an existing config document: %+v", fixture)
 		}
 	}
 	return document.Cases
@@ -462,6 +526,69 @@ func TestConfigCommand_PartialSuccessIsActionable(t *testing.T) {
 	}
 }
 
+func TestConfigCommand_SaveSemanticsFixtures(t *testing.T) {
+	for _, fixture := range loadConfigSaveSemanticsFixtures(t) {
+		fixture := fixture
+		t.Run(fixture.Name, func(t *testing.T) {
+			world := newConfigScreenWorld(t, fixture.InitialRetention)
+			world.selectedRetention = fixture.SelectedRetention
+			world.sourceName = "standard"
+			world.scenario = configRetentionClean
+			if fixture.Scenario == configSaveSemanticsTransientOnly {
+				world.scenario = configRetentionOrdered
+			}
+
+			var configBefore []byte
+			if fixture.Scenario == configSaveSemanticsMissingFile {
+				if err := os.Remove(world.configPath); err != nil {
+					t.Fatalf("remove config before mounted missing-file save: %v", err)
+				}
+			} else {
+				configBefore = []byte(fixture.ConfigDocument)
+				if _, err := config.Parse(configBefore); err != nil {
+					t.Fatalf("fixture config is not valid: %v", err)
+				}
+				if err := os.WriteFile(world.configPath, configBefore, defaults.PublicFilePerm); err != nil {
+					t.Fatalf("seed noncanonical config document: %v", err)
+				}
+			}
+			claudeBefore := mustReadConfigScreenFile(t, world.claudePath)
+
+			stdout, err := executeConfigScreenCommand(t, buildConfigCommand(world.dependencies(t)), world, "config")
+			if err != nil {
+				t.Fatalf("mounted save semantics command: %v", err)
+			}
+			if !strings.Contains(stdout, world.configPath) {
+				t.Fatalf("successful save summary does not name config path: %q", stdout)
+			}
+			if world.observedScreenDirty != fixture.ExpectScreenDirty || world.observedDraftDirty != fixture.ExpectDraftDirty {
+				t.Fatalf("dirty state: Screen=%t Draft=%t want Screen=%t Draft=%t", world.observedScreenDirty, world.observedDraftDirty, fixture.ExpectScreenDirty, fixture.ExpectDraftDirty)
+			}
+			if world.writerCalls != fixture.ExpectWriterCalls || len(world.writerValues) != fixture.ExpectWriterCalls {
+				t.Fatalf("retention attempts: calls=%d values=%v want=%d", world.writerCalls, world.writerValues, fixture.ExpectWriterCalls)
+			}
+			if fixture.ExpectWriterCalls == 1 && world.writerValues[0] != fixture.SelectedRetention {
+				t.Fatalf("retention attempt=%d want=%d", world.writerValues[0], fixture.SelectedRetention)
+			}
+
+			configAfter := mustReadConfigScreenFile(t, world.configPath)
+			if changed := !bytes.Equal(configAfter, configBefore); changed != fixture.ExpectConfigChanged {
+				t.Fatalf("config bytes changed=%t want=%t\nbefore=%q\nafter=%q", changed, fixture.ExpectConfigChanged, configBefore, configAfter)
+			}
+			if _, err := config.Parse(configAfter); err != nil {
+				t.Fatalf("saved config is invalid: %v", err)
+			}
+			claudeAfter := mustReadConfigScreenFile(t, world.claudePath)
+			if changed := !bytes.Equal(claudeAfter, claudeBefore); changed != fixture.ExpectClaudeChanged {
+				t.Fatalf("Claude settings changed=%t want=%t", changed, fixture.ExpectClaudeChanged)
+			}
+			if fixture.ExpectClaudeChanged {
+				assertConfigRetentionValue(t, world.claudePath, fixture.SelectedRetention)
+			}
+		})
+	}
+}
+
 func TestConfigCommand_RetentionIOFixtures(t *testing.T) {
 	for _, fixture := range loadConfigRetentionIOFixtures(t) {
 		fixture := fixture
@@ -533,19 +660,36 @@ func TestConfigCommand_RetentionIOFixtures(t *testing.T) {
 				if got := mustReadConfigScreenFile(t, probe.sentinelPath); !bytes.Equal(got, probe.sentinelBefore) {
 					t.Fatal("unreadable retention open failure changed its directory sentinel")
 				}
-			case configRetentionIOLateReplaceFailure:
+			case configRetentionIOLateUnreadable:
 				if !world.writerSawCommitted {
-					t.Fatal("late retention failure occurred before config commit")
+					t.Fatal("late unreadable retention failure occurred before config commit")
 				}
 				info, statErr := os.Stat(world.claudePath)
 				if statErr != nil || !info.IsDir() {
-					t.Fatalf("failed atomic replacement changed destination kind: info=%v err=%v", info, statErr)
+					t.Fatalf("late unreadable check changed destination kind: info=%v err=%v", info, statErr)
 				}
 				if got := mustReadConfigScreenFile(t, probe.sentinelPath); !bytes.Equal(got, probe.sentinelBefore) {
-					t.Fatal("failed atomic replacement changed destination contents")
+					t.Fatal("late unreadable check changed destination contents")
 				}
 				if got := mustReadConfigScreenFile(t, probe.backupPath); !bytes.Equal(got, probe.retentionBefore) {
-					t.Fatal("late-failure setup lost the original Claude settings bytes")
+					t.Fatal("late unreadable setup lost the original Claude settings bytes")
+				}
+				assertNoConfigRetentionTemps(t, filepath.Dir(world.claudePath))
+			case configRetentionIOLateValidEdit:
+				assertConfigRetentionValue(t, world.claudePath, fixture.SelectedRetention)
+				written := mustReadConfigScreenFile(t, world.claudePath)
+				for _, want := range fixture.WantDocumentContains {
+					if !bytes.Contains(written, []byte(want)) {
+						t.Fatalf("late valid setting %q was not preserved: %s", want, written)
+					}
+				}
+				assertNoConfigRetentionTemps(t, filepath.Dir(world.claudePath))
+			case configRetentionIOLateMalformedEdit, configRetentionIOLateRetentionDrift:
+				if !world.writerSawCommitted {
+					t.Fatal("late strict retention failure occurred before config commit")
+				}
+				if got := mustReadConfigScreenFile(t, world.claudePath); !bytes.Equal(got, probe.lateBefore) {
+					t.Fatalf("late strict retention failure replaced destination\nbefore=%q\nafter=%q", probe.lateBefore, got)
 				}
 				assertNoConfigRetentionTemps(t, filepath.Dir(world.claudePath))
 			}
@@ -608,6 +752,7 @@ type configScreenWorld struct {
 type configRetentionIOProbe struct {
 	retentionBefore     []byte
 	retentionInfoBefore os.FileInfo
+	lateBefore          []byte
 	alternatePath       string
 	alternateBefore     []byte
 	backupPath          string
@@ -690,7 +835,7 @@ func configureConfigRetentionIOFixture(t *testing.T, world *configScreenWorld, f
 		}
 	}
 
-	if fixture.Scenario == configRetentionIOLateReplaceFailure {
+	if fixture.Scenario == configRetentionIOLateUnreadable {
 		world.beforeRetentionWrite = func() {
 			probe.backupPath = world.claudePath + ".before-write"
 			if err := os.Rename(world.claudePath, probe.backupPath); err != nil {
@@ -703,6 +848,19 @@ func configureConfigRetentionIOFixture(t *testing.T, world *configScreenWorld, f
 			probe.sentinelBefore = []byte("late replacement destination sentinel")
 			if err := os.WriteFile(probe.sentinelPath, probe.sentinelBefore, defaults.PrivateFilePerm); err != nil {
 				t.Fatalf("seed late-failure destination sentinel: %v", err)
+			}
+		}
+	}
+
+	switch fixture.Scenario {
+	case configRetentionIOLateValidEdit, configRetentionIOLateMalformedEdit, configRetentionIOLateRetentionDrift:
+		if fixture.LateDocument == "" {
+			t.Fatalf("late retention I/O fixture %q needs a late document", fixture.Name)
+		}
+		probe.lateBefore = []byte(fixture.LateDocument)
+		world.beforeRetentionWrite = func() {
+			if err := os.WriteFile(world.claudePath, probe.lateBefore, defaults.PrivateFilePerm); err != nil {
+				t.Fatalf("write late same-path Claude settings edit: %v", err)
 			}
 		}
 	}

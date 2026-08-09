@@ -14,9 +14,10 @@ import (
 // deep-copied baseline (the config as it was when the flow opened) and a working
 // copy the fields edit through their accessors. Dirty tracking is a
 // baseline-vs-working compare; Discard resets the working copy to baseline; and
-// Commit routes through the ONE existing atomic save path with the same
-// drift-detection discipline the kickstart wizard's save uses - so the settings
-// flow never invents a second way to persist configuration.
+// Commit preserves an existing clean source byte-for-byte or routes changed and
+// missing configs through the ONE existing atomic save path with the same drift
+// discipline the kickstart wizard uses, so the settings flow never invents a
+// second way to persist configuration.
 type Draft struct {
 	path     string
 	baseline config.Config
@@ -146,15 +147,8 @@ func (d *Draft) Baseline() *config.Config { return &d.baseline }
 
 // Dirty reports whether the working copy differs from the baseline.
 func (d *Draft) Dirty() bool {
-	base, err := yaml.Marshal(&d.baseline)
-	if err != nil {
-		return true
-	}
-	work, err := yaml.Marshal(&d.working)
-	if err != nil {
-		return true
-	}
-	return !bytes.Equal(base, work)
+	equal, err := persistedConfigsEqual(&d.baseline, &d.working)
+	return err != nil || !equal
 }
 
 // Discard drops every edit, resetting the working copy to the baseline.
@@ -170,10 +164,12 @@ func (d *Draft) Discard() error {
 	return nil
 }
 
-// Commit atomically writes the working copy to the draft's path. It first
-// detects drift (the file changed since the draft opened) and fails closed with
-// an actionable error, then delegates to config.SaveAtomic, which re-validates
-// the configuration before replacing the file. Nothing is written on any error.
+// Commit first detects drift and fails closed if the destination changed. An
+// existing semantically clean config is then a successful byte-preserving
+// no-op, allowing Screen to emit SavedMsg for transient-only effects without
+// discarding comments or formatting. A missing destination is still created;
+// changed persisted settings delegate to config.SaveAtomic. Nothing is written
+// on any error.
 func (d *Draft) Commit() error {
 	current, err := os.ReadFile(d.path)
 	switch {
@@ -196,6 +192,23 @@ func (d *Draft) Commit() error {
 				"means: no file was changed.\n"+
 				"fix: ensure the config path is readable and re-run the settings flow.", d.path, err)
 	}
+	if d.expectedExists {
+		equal, err := persistedConfigsEqual(&d.baseline, &d.working)
+		if err != nil {
+			return fmt.Errorf(
+				"commit settings: compare persisted state for %q after drift validation: %w.\n"+
+					"what: the draft could not determine whether config-backed settings changed.\n"+
+					"why: baseline or working configuration could not be serialized for a semantic comparison.\n"+
+					"where: settings.Draft.Commit clean-save decision.\n"+
+					"when: after the exact-byte drift check and before any atomic replacement.\n"+
+					"means: the existing config bytes, comments, ordering, and formatting remain unchanged.\n"+
+					"fix: correct the unsupported configuration value, reopen the editor, and retry ctrl+s.",
+				d.path, err)
+		}
+		if equal {
+			return nil
+		}
+	}
 	if err := config.SaveAtomic(d.path, &d.working); err != nil {
 		return err
 	}
@@ -206,6 +219,18 @@ func (d *Draft) Commit() error {
 		d.expectedExists = true
 	}
 	return nil
+}
+
+func persistedConfigsEqual(left, right *config.Config) (bool, error) {
+	leftBytes, err := yaml.Marshal(left)
+	if err != nil {
+		return false, fmt.Errorf("marshal baseline config: %w", err)
+	}
+	rightBytes, err := yaml.Marshal(right)
+	if err != nil {
+		return false, fmt.Errorf("marshal working config: %w", err)
+	}
+	return bytes.Equal(leftBytes, rightBytes), nil
 }
 
 // driftError formats the fail-closed drift message with the standard

@@ -22,20 +22,28 @@ the values that were committed.
 | Choose section | `↑` `k` `↓` `j` | Move through the section list |
 | Enter section | `enter` or `tab` | Focus the selected section's first field |
 | Move between fields | `tab` `shift+tab` | Move field focus or return to the section list |
-| Save | `ctrl+s` | Validate visible fields and atomically save `config.yaml` |
+| Save | `ctrl+s` | Validate visible fields and persist applicable changes |
 | Leave without saving | `esc` `b` `q` | Open the discard confirmation |
 | Help | `?` | Show the bindings available for the current focus |
+
+After the exact-byte drift check, saving an existing semantically clean config
+is a successful byte-preserving no-op, so comments, ordering, omitted defaults,
+and formatting remain intact. A config path that was missing when the editor
+opened is still created. A transient-only retention change also completes this
+config step and emits the normal save completion so its external write can run.
 
 Peasant opens the resolved Claude settings path once before mounting the editor.
 A missing file or retention key uses the recommended value; unreadable,
 malformed, non-object, or invalid settings stop before editing. When retention
-changed, the config file is committed first and the path-bound Claude settings
-document is atomically replaced once afterward while preserving unrelated keys.
-A clean save, discard, validation failure, or config drift failure performs no
-retention write. If the atomic replacement fails after the config commit, the
-Claude settings destination remains unchanged and Peasant reports an honest
-partial save with both paths and repair guidance. The config command edits
-settings only; it does not import or share transcripts.
+changed, the config step completes first. Peasant then strictly rereads the same
+bound Claude path, preserves valid unrelated values added while the TUI was
+open, and atomically replaces the document once. A late malformed or unreadable
+document, or a changed cleanup value, fails before rename and leaves the current
+destination unchanged. A save with no visible changes, discard, validation
+failure, or config drift failure performs no retention write. Post-config
+retention failures report an honest partial save with both paths and repair
+guidance. The config command edits settings only; it does not import or share
+transcripts.
 
 The config screen and other kit surfaces derive dispatch, footer hints, and help
 from the shared `internal/tui/keymap` action catalog. The older page-specific

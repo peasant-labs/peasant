@@ -17,7 +17,7 @@ const cleanupPeriodDaysKey = "cleanupPeriodDays"
 // initial retention read, later atomic write, and user-facing path reporting.
 type ClaudeSettingsFile struct {
 	path          string
-	settings      map[string]json.RawMessage
+	exists        bool
 	cleanupDays   int
 	cleanupDaysOK bool
 }
@@ -49,7 +49,7 @@ func OpenClaudeSettingsAt(path string) (*ClaudeSettingsFile, error) {
 		return nil, fmt.Errorf("open Claude settings: path is empty before reading transcript retention; no settings were changed; pass the resolved settings.json path and retry")
 	}
 
-	settings, err := readClaudeSettingsObject(path)
+	settings, exists, err := readClaudeSettingsObject(path)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func OpenClaudeSettingsAt(path string) (*ClaudeSettingsFile, error) {
 	}
 	return &ClaudeSettingsFile{
 		path:          path,
-		settings:      settings,
+		exists:        exists,
 		cleanupDays:   days,
 		cleanupDaysOK: found,
 	}, nil
@@ -82,10 +82,11 @@ func (f *ClaudeSettingsFile) CleanupDays() (int, bool) {
 	return f.cleanupDays, f.cleanupDaysOK
 }
 
-// WriteCleanupDays merges cleanupPeriodDays into the document opened at Path
-// and atomically replaces that destination. Every returned error occurs before
-// a successful rename, so the destination present when the write began remains
-// unchanged. Unrelated JSON values from the opened document are preserved.
+// WriteCleanupDays strictly rereads the document at Path immediately before
+// merging cleanupPeriodDays, then atomically replaces that same destination.
+// Valid late unrelated edits are preserved. A malformed/unreadable document or
+// a late cleanupPeriodDays change fails before rename, so every returned error
+// leaves the destination present when the write began unchanged.
 func (f *ClaudeSettingsFile) WriteCleanupDays(days int) error {
 	if f == nil || f.path == "" {
 		return fmt.Errorf("write Claude transcript retention: settings file is nil or has an empty path before merge; no destination was changed; reopen the resolved settings.json path and retry")
@@ -94,7 +95,29 @@ func (f *ClaudeSettingsFile) WriteCleanupDays(days int) error {
 		return fmt.Errorf("write Claude transcript retention at %q: cleanupPeriodDays=%d is not a positive integer; the destination was not changed; select a supported retention period and retry", f.path, days)
 	}
 
-	settings := cloneClaudeSettings(f.settings)
+	latest, latestExists, err := readClaudeSettingsObject(f.path)
+	if err != nil {
+		return refreshClaudeSettingsError(f.path, err)
+	}
+	latestDays, latestFound, err := cleanupDaysFromSettings(f.path, latest)
+	if err != nil {
+		return refreshClaudeSettingsError(f.path, err)
+	}
+	if (f.exists && !latestExists) || latestFound != f.cleanupDaysOK || (latestFound && latestDays != f.cleanupDays) {
+		return fmt.Errorf(
+			"write Claude transcript retention at %q: cleanupPeriodDays changed outside the config editor from %s to %s.\n"+
+				"what: the retention value at the bound Claude settings path drifted after the editor opened.\n"+
+				"why: replacing it would overwrite a newer retention decision made by Claude Code or another editor.\n"+
+				"where: ftue.ClaudeSettingsFile.WriteCleanupDays drift check.\n"+
+				"when: immediately after the strict same-path reread and before merge or atomic rename.\n"+
+				"means: the current Claude settings destination was not changed.\n"+
+				"fix: reopen peasant config, review the current retention value, and apply the choice again.",
+			f.path,
+			cleanupDaysState(f.cleanupDays, f.cleanupDaysOK, f.exists),
+			cleanupDaysState(latestDays, latestFound, latestExists))
+	}
+
+	settings := cloneClaudeSettings(latest)
 	rawDays, err := json.Marshal(days)
 	if err != nil {
 		return fmt.Errorf("marshal cleanupPeriodDays=%d for Claude settings %q before replacement: %w; the destination was not changed; select a valid retention period and retry", days, f.path, err)
@@ -107,9 +130,9 @@ func (f *ClaudeSettingsFile) WriteCleanupDays(days int) error {
 	if err := replaceClaudeSettingsAtomic(f.path, append(out, '\n')); err != nil {
 		return err
 	}
-	f.settings = settings
 	f.cleanupDays = days
 	f.cleanupDaysOK = true
+	f.exists = true
 	return nil
 }
 
@@ -159,31 +182,31 @@ func WriteClaudeCleanupDaysAt(path string, days int) error {
 	return opened.WriteCleanupDays(days)
 }
 
-func readClaudeSettingsObject(path string) (map[string]json.RawMessage, error) {
+func readClaudeSettingsObject(path string) (map[string]json.RawMessage, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return make(map[string]json.RawMessage), nil
+			return make(map[string]json.RawMessage), false, nil
 		}
-		return nil, fmt.Errorf("read Claude settings %q before opening transcript retention: %w; no settings were changed; repair the path or permissions and retry", path, err)
+		return nil, false, fmt.Errorf("read Claude settings %q at the strict transcript-retention boundary: %w; no settings were changed; repair the path or permissions and retry", path, err)
 	}
 
 	trimmed := bytes.TrimSpace(data)
 	if !json.Valid(trimmed) {
-		return nil, fmt.Errorf("parse Claude settings %q before opening transcript retention: JSON is malformed; no settings were changed; repair settings.json and retry", path)
+		return nil, true, fmt.Errorf("parse Claude settings %q at the strict transcript-retention boundary: JSON is malformed; no settings were changed; repair settings.json and retry", path)
 	}
 	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, fmt.Errorf("parse Claude settings %q before opening transcript retention: top-level JSON must be an object; no settings were changed; replace the non-object document with a settings object and retry", path)
+		return nil, true, fmt.Errorf("parse Claude settings %q at the strict transcript-retention boundary: top-level JSON must be an object; no settings were changed; replace the non-object document with a settings object and retry", path)
 	}
 
 	var settings map[string]json.RawMessage
 	if err := json.Unmarshal(trimmed, &settings); err != nil {
-		return nil, fmt.Errorf("parse Claude settings object %q before opening transcript retention: %w; no settings were changed; repair settings.json and retry", path, err)
+		return nil, true, fmt.Errorf("parse Claude settings object %q at the strict transcript-retention boundary: %w; no settings were changed; repair settings.json and retry", path, err)
 	}
 	if settings == nil {
 		settings = make(map[string]json.RawMessage)
 	}
-	return settings, nil
+	return settings, true, nil
 }
 
 func cleanupDaysFromSettings(path string, settings map[string]json.RawMessage) (int, bool, error) {
@@ -193,9 +216,31 @@ func cleanupDaysFromSettings(path string, settings map[string]json.RawMessage) (
 	}
 	var days int
 	if err := json.Unmarshal(raw, &days); err != nil || days <= 0 {
-		return 0, false, fmt.Errorf("parse cleanupPeriodDays in Claude settings %q before opening transcript retention: value must be a positive integer; no settings were changed; correct or remove the key and retry", path)
+		return 0, false, fmt.Errorf("parse cleanupPeriodDays in Claude settings %q at the strict transcript-retention boundary: value must be a positive integer; no settings were changed; correct or remove the key and retry", path)
 	}
 	return days, true, nil
+}
+
+func refreshClaudeSettingsError(path string, cause error) error {
+	return fmt.Errorf(
+		"refresh Claude settings at %q before merging transcript retention: %w.\n"+
+			"what: the bound Claude settings document could not be strictly reread.\n"+
+			"why: the same path became unreadable, malformed, non-object, or carried an invalid cleanupPeriodDays value while the editor was open.\n"+
+			"where: ftue.ClaudeSettingsFile.WriteCleanupDays pre-merge refresh.\n"+
+			"when: immediately before merging the selected retention value and before atomic rename.\n"+
+			"means: the current Claude settings destination was not changed.\n"+
+			"fix: repair the current settings.json document, reopen peasant config, and apply the retention choice again.",
+		path, cause)
+}
+
+func cleanupDaysState(days int, found, exists bool) string {
+	if !exists {
+		return "document missing"
+	}
+	if !found {
+		return "absent"
+	}
+	return fmt.Sprintf("%d", days)
 }
 
 func cloneClaudeSettings(settings map[string]json.RawMessage) map[string]json.RawMessage {

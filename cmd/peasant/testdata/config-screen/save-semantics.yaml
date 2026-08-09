@@ -1,0 +1,38 @@
+expectedRows: 3
+cases:
+  - name: clean save preserves a noncanonical commented config byte for byte
+    scenario: existing-clean
+    configDocument: |
+      # keep this hand-written configuration note
+      display: {theme: dark}
+      version: 1
+    initialRetention: 90
+    selectedRetention: 90
+    expectScreenDirty: false
+    expectDraftDirty: false
+    expectWriterCalls: 0
+    expectConfigChanged: false
+    expectClaudeChanged: false
+  - name: clean save creates a config that was missing when the editor opened
+    scenario: missing-file
+    initialRetention: 90
+    selectedRetention: 90
+    expectScreenDirty: false
+    expectDraftDirty: false
+    expectWriterCalls: 0
+    expectConfigChanged: true
+    expectClaudeChanged: false
+  - name: transient-only save preserves config bytes and writes retention
+    scenario: transient-only
+    configDocument: |
+      # retention is stored elsewhere; keep this source unchanged
+      version: 1
+      display:
+        theme: dark
+    initialRetention: 30
+    selectedRetention: 365
+    expectScreenDirty: true
+    expectDraftDirty: false
+    expectWriterCalls: 1
+    expectConfigChanged: false
+    expectClaudeChanged: true

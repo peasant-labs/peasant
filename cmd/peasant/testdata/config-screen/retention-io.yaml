@@ -1,4 +1,4 @@
-expectedRows: 7
+expectedRows: 10
 cases:
   - name: absent file seeds the recommendation and creates the selected value
     scenario: missing-file
@@ -50,8 +50,8 @@ cases:
     expectWriterCalls: 0
     expectError: true
     wantErrorContains: [read, no settings were changed]
-  - name: late atomic replacement failure leaves its destination untouched
-    scenario: late-replace-failure
+  - name: late unreadable same-path edit fails before replacement
+    scenario: late-unreadable
     initialDocument: |
       {
         "cleanupPeriodDays": 30,
@@ -63,4 +63,43 @@ cases:
     expectRunnerCalls: 1
     expectWriterCalls: 1
     expectError: true
-    wantErrorContains: [atomically replace, remains committed, did not change]
+    wantErrorContains: [read, remains committed, did not change]
+  - name: late valid same-path edit preserves its unrelated values
+    scenario: late-valid-edit
+    initialDocument: |
+      {
+        "cleanupPeriodDays": 30,
+        "theme": "dark"
+      }
+    lateDocument: |
+      {
+        "cleanupPeriodDays": 30,
+        "theme": "light",
+        "late": {"keep": true}
+      }
+    selectedRetention: 365
+    expectOpenCalls: 1
+    expectRunnerCalls: 1
+    expectWriterCalls: 1
+    expectError: false
+    wantDocumentContains: ['"theme": "light"', '"keep": true']
+  - name: late malformed same-path edit fails without replacement
+    scenario: late-malformed-edit
+    initialDocument: '{"cleanupPeriodDays": 30, "theme": "dark"}'
+    lateDocument: '{"cleanupPeriodDays": 30'
+    selectedRetention: 365
+    expectOpenCalls: 1
+    expectRunnerCalls: 1
+    expectWriterCalls: 1
+    expectError: true
+    wantErrorContains: [malformed, remains committed, did not change]
+  - name: late retention drift fails without replacement
+    scenario: late-retention-drift
+    initialDocument: '{"cleanupPeriodDays": 30, "theme": "dark"}'
+    lateDocument: '{"cleanupPeriodDays": 90, "theme": "late"}'
+    selectedRetention: 365
+    expectOpenCalls: 1
+    expectRunnerCalls: 1
+    expectWriterCalls: 1
+    expectError: true
+    wantErrorContains: [changed outside, remains committed, did not change]
