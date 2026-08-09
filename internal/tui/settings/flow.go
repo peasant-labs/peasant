@@ -136,8 +136,8 @@ func (f Flow) CurrentSectionKey() string {
 }
 
 // OpenSection moves an already-mounted flow to the visible section identified
-// by key. It is the narrow reconstruction seam used when kickstart authenticates
-// during visibility guidance and rebuilds the same registry over the same Draft.
+// by key. It is the narrow transition seam used when kickstart authenticates
+// during visibility guidance and reveals a section on the retained registry.
 // It does not edit the draft, commit, or alter section visibility.
 func (f *Flow) OpenSection(key string) error {
 	f.recompute()
@@ -152,13 +152,21 @@ func (f *Flow) OpenSection(key string) error {
 	}
 	return fmt.Errorf(
 		"open guided settings section %q: section is not visible.\n"+
-			"what: the rebuilt flow could not restore the requested guided section.\n"+
+			"what: the retained flow could not open the requested guided section.\n"+
 			"why: the canonical registry has no currently visible section with that key.\n"+
-			"where: settings.Flow.OpenSection after rebuilding a guided flow.\n"+
+			"where: settings.Flow.OpenSection after refreshing guided visibility.\n"+
 			"when: restoring the user's position without committing or discarding the draft.\n"+
 			"means: the draft is still buffered and no setting was written.\n"+
-			"fix: rebuild the registry with the expected runtime visibility state and retry.",
+			"fix: update the registry's runtime visibility state and retry.",
 		key)
+}
+
+// ResumeNextField completes the same typed next-field transition Flow handles
+// for the canonical keymap. A parent presentation uses it after an intentional
+// modal detour so it can resume navigation without replaying a terminal key or
+// defining a second dispatch path.
+func (f *Flow) ResumeNextField() {
+	f.advance()
 }
 
 // SetSize records the outer render region.
@@ -189,9 +197,26 @@ func (f *Flow) enterStep() {
 // recompute re-derives the visible steps from the current draft (conditional
 // re-evaluation) and clamps the cursor.
 func (f *Flow) recompute() {
+	onReceipt := f.OnReceipt()
+	currentKey := f.CurrentSectionKey()
+	currentIndex := f.cur
 	f.steps = f.reg.visibleSections(f.draft)
-	if f.cur > len(f.steps) {
+	if onReceipt {
 		f.cur = len(f.steps)
+		return
+	}
+	for index := range f.steps {
+		if f.steps[index].Key == currentKey {
+			f.cur = index
+			return
+		}
+	}
+	f.cur = currentIndex
+	if f.cur >= len(f.steps) {
+		f.cur = len(f.steps) - 1
+	}
+	if f.cur < 0 {
+		f.cur = 0
 	}
 }
 
@@ -246,9 +271,10 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 	}
 	keyMsg, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
-		// Forward non-key messages (async tree load results, spinner ticks) to
-		// the current step's fields.
-		return f.forwardToFields(msg)
+		// Async results belong to mounted fields, not the currently-visible step.
+		// Forward to every field exactly as Screen does so a tree or preview can
+		// finish loading while a later section is current.
+		return f.forwardAsync(msg)
 	}
 	if f.helping {
 		// While the help overlay is up, ? or esc closes it and every other key
@@ -281,7 +307,7 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 			f.confirm.Focus()
 			return f, nil
 		case keymap.ActionNextField:
-			f.advance()
+			f.ResumeNextField()
 			return f, nil
 		case keymap.ActionPrevField:
 			f.retreat()
@@ -332,6 +358,25 @@ func (f Flow) forwardToFields(msg tea.Msg) (Flow, tea.Cmd) {
 	return f, cmd
 }
 
+// forwardAsync gives every mounted field a non-key message. Field components
+// retain their own generation and instance guards, so only the owner consumes
+// a tree, preview, or spinner result while unrelated fields remain unchanged.
+func (f Flow) forwardAsync(msg tea.Msg) (Flow, tea.Cmd) {
+	var cmds []tea.Cmd
+	for _, section := range f.reg.Sections {
+		for _, field := range section.Fields {
+			if cmd := field.handle(f.draft, msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	f.recompute()
+	if len(cmds) == 0 {
+		return f, nil
+	}
+	return f, tea.Batch(cmds...)
+}
+
 // availability reports the flow-level actions for dispatch, footer, and help.
 func (f Flow) availability() flowAvailability {
 	return flowAvailability{flow: &f}
@@ -356,8 +401,8 @@ func (f Flow) View() string {
 
 // stepTabs renders the ordered step navigation as a single tab strip with the
 // current step highlighted, so a user always sees which step they are on and
-// how many remain - the FTUE wizard always showed its step position, and the
-// UAT flagged that the rebuild changed steps with no on-screen indicator. The
+// how many remain - the FTUE wizard always showed its step position, and prior
+// feedback flagged that changing steps without an indicator was disorienting. The
 // synthetic final commit step is shown as a trailing "review & save" tab.
 func (f Flow) stepTabs(width int) string {
 	styles := f.th.Styles()

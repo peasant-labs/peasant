@@ -23,7 +23,7 @@ import (
 
 const (
 	expectedConsentRows = 3
-	expectedLoginRows   = 2
+	expectedLoginRows   = 3
 )
 
 type loginOutcome string
@@ -31,9 +31,12 @@ type loginOutcome string
 const (
 	loginSuccess loginOutcome = "success"
 	loginFailure loginOutcome = "failure"
+	loginDecline loginOutcome = "decline"
 )
 
-func (o loginOutcome) valid() bool { return o == loginSuccess || o == loginFailure }
+func (o loginOutcome) valid() bool {
+	return o == loginSuccess || o == loginFailure || o == loginDecline
+}
 
 type consentFixture struct {
 	Name                  string               `yaml:"name"`
@@ -252,7 +255,7 @@ func TestFinalConsentUsesVisibleDraftValuesAndPromisesNoPublication(t *testing.T
 	}
 }
 
-func TestVisibilityLoginRebuildsSameSourceAndPreservesDraft(t *testing.T) {
+func TestVisibilityLoginRetainsSameSourceAndPreservesDraft(t *testing.T) {
 	for _, row := range loadConsentLoginDocument(t).Login {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
@@ -290,34 +293,37 @@ func TestVisibilityLoginRebuildsSameSourceAndPreservesDraft(t *testing.T) {
 				t.Fatalf("logged-out guided flow never offered visibility login; phase=%s view:\n%s", program.Phase(), stripRender(program.View()))
 			}
 
-			program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
-			program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			if command == nil {
-				t.Fatal("accepting visibility login produced no Login command")
-			}
-			message := command()
-			children, ok := message.(tea.BatchMsg)
-			if !ok {
-				children = tea.BatchMsg{func() tea.Msg { return message }}
-			}
-			for _, child := range children {
-				if child == nil {
-					continue
+			if row.Outcome == loginDecline {
+				var command tea.Cmd
+				program, command = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				if command != nil {
+					t.Fatal("declining visibility login emitted an unexpected command")
 				}
-				message := child()
-				if message == nil {
-					continue
+			} else {
+				program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+				var command tea.Cmd
+				program, command = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				if command == nil {
+					t.Fatal("accepting visibility login produced no Login command")
 				}
-				beforePhase := program.Phase()
-				var next tea.Cmd
-				program, next = program.Update(message)
-				if beforePhase == kickstart.PhaseVisibility && program.Phase() == kickstart.PhaseFlow {
-					program = runFlowInitOnce(t, program, next)
+				for _, message := range collectMsgs(command) {
+					beforePhase := program.Phase()
+					var next tea.Cmd
+					program, next = program.Update(message)
+					if beforePhase == kickstart.PhaseVisibility && program.Phase() == kickstart.PhaseFlow {
+						if next != nil {
+							t.Fatal("successful visibility login restarted the mounted settings flow")
+						}
+					}
 				}
 			}
 
-			if loginCalls != 1 {
-				t.Fatalf("visibility Login calls=%d, want 1", loginCalls)
+			wantLoginCalls := 1
+			if row.Outcome == loginDecline {
+				wantLoginCalls = 0
+			}
+			if loginCalls != wantLoginCalls {
+				t.Fatalf("visibility Login calls=%d, want %d", loginCalls, wantLoginCalls)
 			}
 			if draft.Working().Push.License != row.BufferedLicense {
 				t.Fatalf("visibility login changed buffered license to %q, want %q", draft.Working().Push.License, row.BufferedLicense)
@@ -336,8 +342,8 @@ func TestVisibilityLoginRebuildsSameSourceAndPreservesDraft(t *testing.T) {
 				if !program.Connected() || program.Phase() != kickstart.PhaseFlow {
 					t.Fatalf("successful visibility login connected/phase=%t/%s, want true/flow", program.Connected(), program.Phase())
 				}
-				if source.Loads() != 2 {
-					t.Fatalf("successful visibility login source loads=%d, want same source loaded once before and once after rebuild", source.Loads())
+				if source.Loads() != 1 {
+					t.Fatalf("successful visibility login source loads=%d, want one retained-flow load", source.Loads())
 				}
 			case loginFailure:
 				if program.Connected() || program.Phase() != kickstart.PhaseVisibility {
@@ -345,6 +351,13 @@ func TestVisibilityLoginRebuildsSameSourceAndPreservesDraft(t *testing.T) {
 				}
 				if source.Loads() != 1 {
 					t.Fatalf("failed visibility login rebuilt source %d times, want initial load only", source.Loads())
+				}
+			case loginDecline:
+				if program.Connected() || program.Phase() != kickstart.PhaseFlow {
+					t.Fatalf("declined visibility login connected/phase=%t/%s, want false/flow", program.Connected(), program.Phase())
+				}
+				if source.Loads() != 1 {
+					t.Fatalf("declined visibility login loaded source %d times, want initial load only", source.Loads())
 				}
 			}
 		})

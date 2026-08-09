@@ -32,7 +32,8 @@ Discovery runs before the interactive screen. The guided flow then presents:
    default, and saving any default does not publish anything.
 6. **Sharing visibility:** when connected to a Village, choose the default visibility for later
    explicit pushes. A disconnected flow offers an optional login at this boundary before continuing
-   locally without the visibility section. Login preserves the buffered draft and publishes nothing.
+   locally without the visibility section. Login keeps the buffered selection, filters, tree position,
+   and preview focus in place, and publishes nothing.
 7. **Claude retention:** when Claude Code sessions were discovered, choose how long Claude Code keeps
    its local transcript files.
 8. **Review and save:** review every visible buffered value and the promised local effects, then

@@ -122,9 +122,15 @@ func selectionAffordanceProgram(t *testing.T, saved config.SelectionConfig, drai
 		Preview: kickstart.NewListingPreview(th, renderDoc.Listings, turnsFromPrompts(renderDoc.Stored)),
 	})
 	program.SetSize(132, 30)
-	program = declineOAuth(t, program)
 	if drainInitial {
-		program = drainProgram(program, program.Init())
+		program = declineOAuth(t, program)
+	} else {
+		// Keep the transition's initialization command pending so fixtures can
+		// assert which controls are available before the first scan completes.
+		program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if program.Phase() != kickstart.PhaseFlow {
+			t.Fatalf("after declining OAuth, phase = %s, want flow", program.Phase())
+		}
 	}
 	return program
 }

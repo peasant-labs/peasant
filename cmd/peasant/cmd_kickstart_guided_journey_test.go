@@ -128,10 +128,13 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 					}
 				}
 
-				program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				program, startup := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				program = drainMountedKickstartStartup(program, startup)
 				for step := 0; step < 24; step++ {
 					if program.Phase() == kickstart.PhaseVisibility {
-						program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+						var resume tea.Cmd
+						program, resume = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+						program = drainMountedKickstartStartup(program, resume)
 						continue
 					}
 					view := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
@@ -236,4 +239,24 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 			}
 		})
 	}
+}
+
+func drainMountedKickstartStartup(program kickstart.Program, command tea.Cmd) kickstart.Program {
+	if command == nil {
+		return program
+	}
+	message := command()
+	commands, batched := message.(tea.BatchMsg)
+	if !batched {
+		commands = tea.BatchMsg{func() tea.Msg { return message }}
+	}
+	for _, child := range commands {
+		if child == nil {
+			continue
+		}
+		if message := child(); message != nil {
+			program, _ = program.Update(message)
+		}
+	}
+	return program
 }

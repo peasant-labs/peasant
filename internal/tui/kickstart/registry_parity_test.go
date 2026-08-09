@@ -421,6 +421,8 @@ func TestBuildRegistryFlowScreenParity(t *testing.T) {
 			flow.SetSize(120, 40)
 			screen = settings.NewScreen(th, registry, screenDraft)
 			screen.SetSize(120, 40)
+			flow = drainSettingsFlowInit(flow, flow.Init())
+			screen = drainParityScreenInit(screen)
 
 			switch row.Operation {
 			case parityVisibility:
@@ -509,6 +511,13 @@ func TestBuildRegistryFlowScreenParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func drainParityScreenInit(screen settings.Screen) settings.Screen {
+	for _, message := range collectMsgs(screen.Init()) {
+		screen, _ = screen.Update(message)
+	}
+	return screen
 }
 
 func TestBuildRegistryHasNoPresentationOptions(t *testing.T) {

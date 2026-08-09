@@ -250,6 +250,7 @@ func newProgressProgram(
 		},
 	})
 	program.SetSize(180, 50)
+	program = drainProgram(program, program.Init())
 	program, command := advanceToCommit(program)
 	if !program.Committed() || program.Phase() != kickstart.PhaseIngest {
 		t.Fatalf("progress Program committed/phase=%t/%s, want true/ingest", program.Committed(), program.Phase())
@@ -464,6 +465,7 @@ func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
 		},
 	})
 	program.SetSize(120, 30)
+	program = drainProgram(program, program.Init())
 	program, firstBatch := advanceToCommit(program)
 	firstChildren := unwrapBatch(firstBatch)
 	if len(firstChildren) != 3 || len(callbacks) != 1 {

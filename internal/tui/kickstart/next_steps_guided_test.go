@@ -95,6 +95,7 @@ func TestProgramValidatesTypedNextStepProvider(t *testing.T) {
 					return append([]kickstart.NextStepKind(nil), kinds...)
 				},
 			})
+			program = drainProgram(program, program.Init())
 			program, _ = advanceToCommit(program)
 			view := strings.ToLower(stripRender(program.View()))
 			for _, want := range row.WantContains {

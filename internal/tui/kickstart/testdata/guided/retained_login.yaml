@@ -1,0 +1,75 @@
+# Visibility login must retain the one mounted settings flow. The first case
+# exercises the complete selection presentation before authentication. The
+# second delays the original tree result until sharing is current, proving that
+# asynchronous field messages still reach their mounted owner.
+expectedCaseCount: 2
+cases:
+  - name: complete-selection-presentation-survives-login
+    scenario: preserve-presentation
+    fixture: faceted
+    width: 140
+    height: 16
+    savedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    beforeLoginKeys:
+      [f, down, left, down, down, "]", "]", "/", c, c, enter, space,
+       ctrl+l, down]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: git@github.com:peasant-labs/peasant.git
+              branches: [feature-x]
+        opencode:
+          sessions: [oc-1]
+    expectedSourceLoads: 1
+    expectedPreviewID: cc-2
+    stateLineLabels:
+      - 'preview focused; filter session: cc'
+      - 'selected 2; hidden by filters: 1'
+      - 'claude code 2'
+      - 'develop'
+      - 'share bridge scan'
+      - 'retained preview cc-2 line 3'
+    wantViewContains:
+      - 'preview focused; filter session: cc'
+      - 'hidden by filters: 1'
+      - 'claude code 2'
+      - '↑  ▸ [ ] develop'
+      - 'share bridge scan'
+      - 'retained preview cc-2 line 3'
+    wantViewMissing:
+      - 'ingest pipeline refactor'
+
+  - name: pending-tree-result-reaches-selection-while-sharing-is-current
+    scenario: pending-tree-result
+    fixture: faceted
+    width: 140
+    height: 30
+    savedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSourceLoads: 1
+    commitAfterDelivery: true
+    wantViewContains:
+      - 'ingest pipeline refactor'
+      - 'commit detector fix'
+      - 'share bridge scan'
+      - 'governance audit trigger'
+    wantViewMissing:
+      - 'scanning projects'

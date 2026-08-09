@@ -56,7 +56,7 @@ consent:
       - 'default visibility after a later publish:'
       - apply claude code retention
 
-expectedLoginCount: 2
+expectedLoginCount: 3
 login:
   - name: successful-visibility-login
     outcome: success
@@ -70,3 +70,7 @@ login:
     error: synthetic login refusal
     bufferedLicense: CC-BY-4.0
     wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+  - name: declined-visibility-login
+    outcome: decline
+    bufferedLicense: CC-BY-4.0
+    wantContains: ['review your changes']

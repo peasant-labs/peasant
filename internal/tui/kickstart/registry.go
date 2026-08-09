@@ -22,8 +22,14 @@ type Options struct {
 	// dev loop and tests it is scannerfix.FixtureTreeSource.
 	Source kit.TreeSource
 	// VillageConnected gates the destination/visibility fields, which only make
-	// sense once a village login has succeeded.
+	// sense once a village login has succeeded. It remains the static fallback
+	// for callers such as config Screen that do not need live authentication.
 	VillageConnected bool
+	// VillageConnectedFunc reports live connection state for the guided Program.
+	// When present it takes precedence over VillageConnected, allowing one
+	// mounted Registry and Flow to reveal sharing after login without replacing
+	// any field instance or presentation state.
+	VillageConnectedFunc func() bool
 	// ClaudeSessionsPresent gates the Claude transcript-retention field, which is
 	// only offered when Claude sessions were discovered (legacy shouldSkip parity).
 	ClaudeSessionsPresent bool
@@ -157,7 +163,7 @@ func BuildRegistry(opts Options) settings.Registry {
 			// village connected there is nowhere to push, so the question is
 			// hidden (its edits are dropped before the receipt).
 			When: func(_ *settings.Draft) bool {
-				return opts.VillageConnected
+				return opts.villageConnected()
 			},
 			Fields: []settings.Field{
 				settings.WithDescription(
@@ -187,6 +193,13 @@ func BuildRegistry(opts Options) settings.Registry {
 		},
 	}
 	return settings.Registry{Sections: sections}
+}
+
+func (o Options) villageConnected() bool {
+	if o.VillageConnectedFunc != nil {
+		return o.VillageConnectedFunc()
+	}
+	return o.VillageConnected
 }
 
 // sectionGuide keeps the canonical registry's optional framing concise and

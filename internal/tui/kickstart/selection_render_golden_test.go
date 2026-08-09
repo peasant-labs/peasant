@@ -327,7 +327,6 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 	})
 	p.SetSize(c.Width, c.Height)
 	p = declineOAuth(t, p)
-	p = drainProgram(p, p.Init())
 
 	switch c.State {
 	case selectionRenderDefault:

@@ -144,6 +144,23 @@ const (
 	visibilityPrompt = "log in now to choose a default sharing visibility?"
 )
 
+// villageConnectionState is shared by every Program value Bubble Tea produces.
+// Registry visibility closes over this pointer, so authentication can reveal a
+// section without replacing the mounted Registry, Flow, or any stateful field.
+type villageConnectionState struct {
+	connected bool
+}
+
+func (s *villageConnectionState) Connected() bool {
+	return s != nil && s.connected
+}
+
+func (s *villageConnectionState) Set(connected bool) {
+	if s != nil {
+		s.connected = connected
+	}
+}
+
 // Program is the mounted first-run onboarding: OAuth -> settings.Flow (with an
 // optional visibility-login detour) -> local Ingest -> persistent Done, all
 // rendered on the kit. The flow is the single commit point; ingest runs only
@@ -159,14 +176,11 @@ type Program struct {
 	overlay    kit.Overlay
 	spinner    kit.Spinner
 	authInFlt  bool
-	connected  bool
+	connection *villageConnectionState
 	loginErr   error
 	// visibilityAsked prevents repeated login interruptions after the user has
-	// explicitly continued locally. visibilityTrigger is the typed action that
-	// originally attempted to leave the license step; replaying that same message
-	// resumes Flow without introducing a parallel raw-key dispatch path.
-	visibilityAsked   bool
-	visibilityTrigger tea.KeyPressMsg
+	// explicitly continued locally.
+	visibilityAsked bool
 
 	flow      settings.Flow
 	flowBuilt bool
@@ -186,9 +200,9 @@ type Program struct {
 	width, height int
 }
 
-// NewProgram builds the kickstart program over its dependencies. The flow is not
-// constructed until the OAuth step resolves, so its village-gated fields see the
-// real connection result.
+// NewProgram builds the kickstart program and its one mounted settings flow.
+// Village-gated fields read the stable connection state dynamically, so later
+// authentication changes visibility without replacing the flow.
 func NewProgram(deps ProgramDeps) Program {
 	if deps.Context == nil {
 		deps.Context = context.Background()
@@ -209,16 +223,17 @@ func NewProgram(deps ProgramDeps) Program {
 		visibility:        kit.NewConfirm(deps.Theme, visibilityPrompt),
 		overlay:           kit.NewOverlay(deps.Theme),
 		spinner:           kit.NewSpinner(deps.Theme, "working"),
+		connection:        &villageConnectionState{connected: deps.AlreadyConnected},
 		stageObservations: map[ingest.Stage]stageObservation{},
 	}
+	p = p.buildFlow()
 	if deps.AlreadyConnected {
 		// Already holding valid credentials: skip the connect-now step and open
 		// straight into the flow with the village-gated fields shown. The flow's
 		// startup command is not dropped here - the constructor cannot return a
 		// tea.Cmd, so Program.Init emits flow.Init() once bubbletea starts the
 		// program (see buildFlow).
-		p.connected = true
-		p = p.buildFlow()
+		p.phase = PhaseFlow
 	}
 	return p
 }
@@ -227,7 +242,7 @@ func NewProgram(deps ProgramDeps) Program {
 func (p Program) Phase() Phase { return p.phase }
 
 // Connected reports whether the village OAuth step authenticated.
-func (p Program) Connected() bool { return p.connected }
+func (p Program) Connected() bool { return p.connection.Connected() }
 
 // Committed reports whether the flow committed the config.
 func (p Program) Committed() bool { return p.flowBuilt && p.flow.Committed() }
@@ -251,7 +266,7 @@ func (p Program) NextStepsErr() error { return p.nextStepsErr }
 // Init starts the active phase: the flow's async startup when the connect-now
 // step was skipped (already connected), else the OAuth confirm's cursor.
 func (p Program) Init() tea.Cmd {
-	if p.flowBuilt {
+	if p.phase == PhaseFlow {
 		return p.flow.Init()
 	}
 	return p.oauth.Focus()
@@ -305,11 +320,11 @@ func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 		p.authInFlt = false
 		if m.err != nil {
 			p.loginErr = loginActionableError(m.err, "the initial village connection step")
-			p.connected = false
+			p.connection.Set(false)
 			return p, nil
 		}
 		p.loginErr = nil
-		p.connected = true
+		p.connection.Set(true)
 		return p.enterFlow()
 	case tea.KeyPressMsg:
 		if p.authInFlt {
@@ -354,20 +369,36 @@ func (p Program) runLogin() tea.Cmd {
 // enters PhaseFlow, returning the flow's async startup command (the tree scan)
 // so the caller can dispatch it.
 func (p Program) enterFlow() (Program, tea.Cmd) {
-	p = p.buildFlow()
+	p.phase = PhaseFlow
+	if current := p.flow.CurrentSectionKey(); current != "" {
+		if err := p.flow.OpenSection(current); err != nil {
+			p.phase = PhaseOAuth
+			p.loginErr = fmt.Errorf(
+				"guided settings unavailable.\n"+
+					"what: kickstart could not enter its retained settings flow.\n"+
+					"why: %v\n"+
+					"where: kickstart Program after the initial village connection choice.\n"+
+					"when: before transcript scanning or final consent.\n"+
+					"means: the draft remains buffered and no setting or transcript was published.\n"+
+					"fix: exit without saving, rerun kickstart, and report the missing guided section.",
+				err)
+			return p, nil
+		}
+	}
 	return p, p.flow.Init()
 }
 
-// buildFlow constructs the settings.Flow with the now-known village connection
-// and enters PhaseFlow WITHOUT dispatching its startup command. Callers that can
-// dispatch a tea.Cmd use enterFlow; the constructor, which cannot return a
-// command, uses buildFlow and relies on Program.Init to emit flow.Init() exactly
-// once when bubbletea starts the program - so the scan still starts and no start
-// command is silently dropped.
+// buildFlow constructs the one settings.Registry and Flow for this Program.
+// Their destination visibility reads the stable connection pointer at runtime,
+// so neither object is rebuilt after authentication. The constructor cannot
+// dispatch Flow.Init; Program.Init or enterFlow emits it exactly once when the
+// guided flow first starts.
 func (p Program) buildFlow() Program {
+	connection := p.connection
 	reg := BuildRegistry(Options{
 		Source:                p.deps.Source,
-		VillageConnected:      p.connected,
+		VillageConnected:      p.Connected(),
+		VillageConnectedFunc:  connection.Connected,
 		ClaudeSessionsPresent: p.deps.ClaudeSessionsPresent,
 		Preview:               p.deps.Preview,
 	})
@@ -375,7 +406,6 @@ func (p Program) buildFlow() Program {
 		settings.WithConsentSummary(p.consentSummary))
 	p.flow.SetSize(p.width, p.height)
 	p.flowBuilt = true
-	p.phase = PhaseFlow
 	return p
 }
 
@@ -443,12 +473,11 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 // nothing was written and the program is done.
 func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok &&
-		!p.connected && !p.visibilityAsked && p.deps.Login != nil &&
+		!p.Connected() && !p.visibilityAsked && p.deps.Login != nil &&
 		p.flow.CurrentSectionKey() == SectionLicense {
 		if action, matched := keymap.Match(keymap.Default(), keyMsg,
 			programActionAvailability{keymap.ActionNextField}); matched && action == keymap.ActionNextField {
 			p.phase = PhaseVisibility
-			p.visibilityTrigger = keyMsg
 			p.visibility = kit.NewConfirm(p.deps.Theme, visibilityPrompt)
 			p.visibility.SetSize(promptWidth(visibilityPrompt, p.width), kit.ConfirmMinSize.Height)
 			return p, p.visibility.Focus()
@@ -467,22 +496,22 @@ func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 }
 
 // updateVisibility offers authentication exactly where its consequence becomes
-// understandable: before the sharing visibility choice. Declining replays the
-// Flow action that brought the user here. Success rebuilds the same registry over
-// the same Draft, Source, and Preview, then opens the newly-visible sharing step.
+// understandable: before the sharing visibility choice. Declining resumes the
+// typed Flow transition that brought the user here. Success updates the live
+// visibility state on the retained registry, then opens the mounted sharing step.
 func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
 	case loginDoneMsg:
 		p.authInFlt = false
 		if m.err != nil {
-			p.connected = false
+			p.connection.Set(false)
 			p.loginErr = loginActionableError(m.err, "the sharing visibility login step")
 			return p, nil
 		}
-		p.connected = true
+		p.connection.Set(true)
 		p.visibilityAsked = true
 		p.loginErr = nil
-		p = p.buildFlow()
+		p.phase = PhaseFlow
 		if err := p.flow.OpenSection(SectionDestination); err != nil {
 			p.phase = PhaseVisibility
 			p.loginErr = fmt.Errorf(
@@ -496,7 +525,7 @@ func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 				err)
 			return p, nil
 		}
-		return p, p.flow.Init()
+		return p, nil
 	case tea.KeyPressMsg:
 		if p.authInFlt {
 			return p, nil
@@ -514,8 +543,8 @@ func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 			p.visibilityAsked = true
 			p.loginErr = nil
 			p.phase = PhaseFlow
-			p.flow, cmd = p.flow.Update(p.visibilityTrigger)
-			return p, cmd
+			p.flow.ResumeNextField()
+			return p, nil
 		}
 		if p.deps.Login == nil {
 			p.loginErr = loginActionableError(
