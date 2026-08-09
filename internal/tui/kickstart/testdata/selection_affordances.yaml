@@ -12,8 +12,8 @@ cases:
   - name: default-distinguishes-saved-imported-and-current
     keys: []
     wantContains:
-      - "tracked = included by your previous saved selection"
-      - "imported = already in the local store"
+      - "tracked = included by previous saved selection"
+      - "imported = already in local store"
       - "scope: [project]  branch  session"
       - "/: search this scope"
       - "view only"

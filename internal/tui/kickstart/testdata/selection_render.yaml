@@ -44,7 +44,7 @@ previewAssertions:
   expectedRowCount: 3
   rows:
     - case: session-cursor-dark
-      wantVisible: [failed write, os.Rename]
+      wantVisible: [failed, os.Rename]
       wantColored:
         - text: func
           token: mauve
@@ -52,7 +52,7 @@ previewAssertions:
           token: ink-3
       wantFocusMarker: left
     - case: preview-focused-dark
-      wantVisible: [failed write, os.Rename]
+      wantVisible: [failed, os.Rename]
       wantColored:
         - text: func
           token: mauve
@@ -60,7 +60,7 @@ previewAssertions:
     # Scrolled past the prose at the top of the body, so the first words are no
     # longer on screen and the code below them is.
     - case: preview-scrolled-dark
-      wantVisible: [os.Rename]
+      wantVisible: [os.Rename, assistant, write to a temp directory first]
       wantMissing: [please refactor]
       wantFocusMarker: right
 listings:

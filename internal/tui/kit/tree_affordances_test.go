@@ -183,7 +183,7 @@ func TestTreeAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestTreeAffordanceFixtureEnforcesRowCount(t *testing.T) {
-	mutated := bytes.Replace(treeAffordanceData, []byte("expectedCaseCount: 11"), []byte("expectedCaseCount: 12"), 1)
+	mutated := bytes.Replace(treeAffordanceData, []byte("expectedCaseCount: 13"), []byte("expectedCaseCount: 14"), 1)
 	if _, err := decodeTreeAffordances(mutated); err == nil {
 		t.Fatal("tree affordance fixture accepted a mismatched row-count guard")
 	}

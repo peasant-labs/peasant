@@ -8,7 +8,7 @@
 # test asserts the union of every wantAction across wantOK=true rows equals
 # keymap.AllActions() exactly, so an ActionID added to the enum without a
 # passing dispatch row here fails that guard, not just this row count.
-expectedCaseCount: 41
+expectedCaseCount: 42
 cases:
   - name: dispatches-quit
     available: [quit]
@@ -180,6 +180,11 @@ cases:
   - name: dispatches-delete-filter
     available: [delete-filter]
     pressedKey: backspace
+    wantOK: true
+    wantAction: delete-filter
+  - name: dispatches-delete-filter-from-ctrl-h-terminal-backspace
+    available: [delete-filter]
+    pressedKey: ctrl+h
     wantOK: true
     wantAction: delete-filter
   - name: dispatches-keep-filter

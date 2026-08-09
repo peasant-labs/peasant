@@ -141,7 +141,7 @@ bindings:
     helpKey: "f"
     helpDesc: "filter"
   - action: delete-filter
-    keys: ["backspace"]
+    keys: ["backspace", "ctrl+h"]
     helpKey: "backspace"
     helpDesc: "delete"
   - action: keep-filter

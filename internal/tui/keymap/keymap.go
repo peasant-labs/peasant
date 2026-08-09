@@ -415,8 +415,9 @@ func Default() Keymap {
 		// case, and what kitty's and xterm's extended protocols encode
 		// unambiguously - the two are distinct here and this binding is live. On
 		// a terminal configured to send 0x08 for backspace they are one keystroke
-		// no software can separate; there, backspace focuses the left pane, which
-		// is harmless because no split surface takes text input.
+		// no software can separate. PreviewSplit therefore treats 0x08 as filter
+		// deletion only while its already-focused tree is editing search text; from
+		// the preview it retains the focus-left meaning.
 		ActionFocusPaneLeft: key.NewBinding(
 			key.WithKeys("ctrl+h"),
 			key.WithHelp("ctrl+h", "focus left pane"),
@@ -482,7 +483,7 @@ func Default() Keymap {
 			key.WithHelp("f", "filter"),
 		),
 		ActionDeleteFilter: key.NewBinding(
-			key.WithKeys("backspace"),
+			key.WithKeys("backspace", "ctrl+h"),
 			key.WithHelp("backspace", "delete"),
 		),
 		ActionKeepFilter: key.NewBinding(

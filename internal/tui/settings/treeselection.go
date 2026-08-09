@@ -523,6 +523,36 @@ func ApplyExistingSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
 	}
 }
 
+// ApplyTrackedSelection annotates the rows included by a previously saved
+// selection without changing their current checkbox state. It deliberately
+// reuses ApplyExistingSelection as the canonical matcher boundary, snapshots
+// every TriState first, and restores those states afterward. Local-store
+// presence is never consulted, so imported and tracked remain independent.
+func ApplyTrackedSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
+	states := map[*kit.TreeNode]kit.TriState{}
+	for _, root := range roots {
+		walkNodes(root, func(node *kit.TreeNode) {
+			states[node] = node.State
+			if node.Meta != nil {
+				delete(node.Meta, MetaTracked)
+			}
+		})
+	}
+
+	ApplyExistingSelection(roots, sel)
+	for _, root := range roots {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if node.State == kit.Checked || node.State == kit.Conflict {
+				if node.Meta == nil {
+					node.Meta = map[string]string{}
+				}
+				node.Meta[MetaTracked] = MetaTrackedValue
+			}
+			node.State = states[node]
+		})
+	}
+}
+
 // applyExistingProjectFirstSelection applies sel to the project -> branch ->
 // session forest produced by kickstart.ScannerTreeSource. Each session leaf
 // carries its harness, while its project and branch identities come from its

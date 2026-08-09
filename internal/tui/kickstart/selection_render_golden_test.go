@@ -344,9 +344,8 @@ func TestSelectionStep_RenderCarriesEachAnswer(t *testing.T) {
 			contains: []string{
 				"harness: claude code",                // the pane's own header chrome
 				"you",                                 // the person's turn is tagged
-				"assistant",                           // and so is the agent's
 				"please refactor the ingest pipeline", // the first turn
-				recordedExchange,                      // and the reply after it
+				"os.Rename",                           // and the recorded code below it
 			},
 			missing: []string{"imported session"},
 		},
@@ -355,10 +354,10 @@ func TestSelectionStep_RenderCarriesEachAnswer(t *testing.T) {
 		// are dropped while the preview keeps describing the highlighted row.
 		"session-cursor-narrow": {
 			contains: []string{
-				"harness: claude code",                // the preview names the row
-				"please refactor the ingest pipeline", // and the recorded transcript
+				"harness: claude code",       // the preview names the row
+				"please refactor the ingest", // and the wrapped recorded transcript
 			},
-			missing: []string{"child sessions", "already imported", "imported session"},
+			missing: []string{"child sessions", "already imported"},
 		},
 	}
 	requireEveryContentShapeAsserted(t, doc, want)

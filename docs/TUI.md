@@ -1,6 +1,10 @@
 # TUI Keyboard Shortcuts
 
-Peasant's TUI pages use a layered keymap system built on [`charmbracelet/bubbles/key`](https://pkg.go.dev/github.com/charmbracelet/bubbles/key). A shared base keymap (`PageKeyMap`) provides common bindings; page-specific keymaps embed it and add their own.
+Peasant's kit-based TUI screens derive dispatch, footer hints, and help from one
+typed action catalog in `internal/tui/keymap`, built on
+[`charmbracelet/bubbles/key`](https://pkg.go.dev/github.com/charmbracelet/bubbles/key).
+The legacy wizard pages still use the older layered keymaps documented later in
+this file.
 
 ## Config screen
 
@@ -50,7 +54,51 @@ from the shared `internal/tui/keymap` action catalog. The older page-specific
 reference below remains for legacy wizard pages that have not yet moved to the
 kit.
 
-## Architecture
+## Kickstart transcript selection
+
+The guided kickstart selection step uses a project → branch → session tree. Its
+status rows distinguish three independent facts:
+
+- `tracked` means the row was included by the previous saved selection;
+- `already imported` means transcript data is already in the local store; and
+- the checkbox is the current buffered choice for this run.
+
+Long trees show `↑`, `↓`, or `↕` in the row margin when more rows exist above,
+below, or in both directions. The selected-session summary also reports how many
+selected sessions are hidden by the current text or harness view.
+
+| Action | Keys | Description |
+|--------|------|-------------|
+| Move | `↑` `k` `↓` `j` | Move through visible rows |
+| Page | `PgUp` `Ctrl+u` `PgDn` `Ctrl+d` | Move one visible page |
+| First / last row | `g` `Shift+g` | Jump to the start or end |
+| Previous / next scope | `[` `]` | Move among project, branch, and session scope |
+| Search current scope | `/` | Start a text filter at the named scope |
+| Type filter | any printable key | Append text while search is editing |
+| Delete search text | `backspace` | Remove the previous character |
+| Keep filter | `enter` | Leave search editing while keeping the filter |
+| Clear filter | `esc` | Restore the complete tree |
+| Harness view | `f` | Cycle all harnesses, each harness, and hidden gutter |
+| Select row | `space` | Toggle the visible row and its visible descendants |
+| Select visible tree | `a` | Select or clear the current projected tree |
+| Select current project | `Shift+a` | Select visible sessions under the current project |
+| Collapse / expand | `←` `h` / `→` `l` | Change tree expansion without changing scope |
+| Focus tree / preview | `Ctrl+h` / `Ctrl+l` | Move input across the preview divider |
+| Help | `?` | Show actions available for the current focus |
+
+Search keeps ancestor rows for context and shares session nodes with the full
+forest, so selecting a filtered row changes the real buffered choice exactly
+once. Clearing restores the complete forest, expansion state, and the current
+row when it still exists. While a filter remains active, the status line keeps
+the clear path visible, including when preview focus requires returning to the
+tree first.
+
+The harness control is view-only: rows found only under an excluded harness are
+hidden, mixed-harness projects remain through included data, and hidden
+selections remain selected and counted. Changing the harness view does not
+rewrite saved selection intent.
+
+## Legacy wizard keymap architecture
 
 ```
 PageKeyMap (shared base)
@@ -136,14 +184,14 @@ sends the byte `0x08`, which some terminals also send for backspace. Bubble Tea 
 `0x08` as `Ctrl+h` and `0x7f` as backspace. On a terminal that sends `0x7f` for backspace,
 the two are distinct and this binding is live; that is the common case, and it is what
 kitty's and xterm's extended protocols encode unambiguously. On a terminal configured to
-send `0x08` for backspace they are one keystroke that no software can separate; there,
-backspace focuses the left pane, which is harmless because no split surface takes text
-input.
+send `0x08` for backspace they are one keystroke that no software can separate. While the
+already-focused tree is editing search text, the selection split treats that byte as
+delete; from the preview pane it retains the focus-left meaning.
 
 The preview renders the recorded first user message as markdown, with fenced code
 syntax-highlighted in the app's own palette (`internal/tui/mdrender`).
 
-### Search mode (inside session tree)
+### Legacy search mode (inside the legacy session tree)
 
 When search is active (`f`), normal navigation keys are intercepted as text input.
 

@@ -33,7 +33,10 @@ type treeField struct {
 	focused bool
 	width   int
 	height  int
-	mounted bool
+	// affordanceRows is the number of status rows reserved by the last render.
+	// It is cached so sizing never has to walk the full forest for counts.
+	affordanceRows int
+	mounted        bool
 
 	// facetKey is the Meta key the side gutter groups by (empty: no facet).
 	facetKey string
@@ -54,8 +57,14 @@ type treeField struct {
 	// previewBody builds the layout function the pane renders that body with. It
 	// is a factory over the theme rather than a ready-made renderer because a
 	// field only learns its theme at mount.
-	previewBody func(theme.Theme) kit.BodyRenderer
-	split       kit.PreviewSplit
+	previewBody  func(theme.Theme) kit.BodyRenderer
+	split        kit.PreviewSplit
+	previewRatio float64
+
+	// initializeSelection applies the Draft's saved/current selection when a
+	// fresh forest loads. Generic Tree fixtures may instead supply authoritative
+	// source states; the canonical kickstart/config registry enables this option.
+	initializeSelection bool
 
 	// full is the whole forest the source last loaded; view is the (possibly
 	// narrowed) forest the tree currently renders, sharing full's leaf pointers.
@@ -108,6 +117,19 @@ func WithPreviewBody(build func(theme.Theme) kit.BodyRenderer) TreeOption {
 	return func(f *treeField) { f.previewBody = build }
 }
 
+// WithPreviewRatio sets the fraction of the tree/preview region assigned to the
+// tree pane. PreviewSplit clamps the value to its safe range.
+func WithPreviewRatio(ratio float64) TreeOption {
+	return func(f *treeField) { f.previewRatio = ratio }
+}
+
+// WithDraftSelectionState makes the Draft baseline the saved tracked source and
+// the Draft working value the current checkbox source on every fresh load. It is
+// opt-in so a generic Tree can still load authoritative source states.
+func WithDraftSelectionState() TreeOption {
+	return func(f *treeField) { f.initializeSelection = true }
+}
+
 // Tree builds the selection-tree field bound to acc, loading its forest from
 // src (a kit.TreeSource - in tests, scannerfix.FixtureTreeSource).
 func Tree(key, label string, acc Accessor[TreeSelection], src kit.TreeSource, opts ...TreeOption) Field {
@@ -127,6 +149,9 @@ func (f *treeField) mount(t theme.Theme) {
 	// the preview never work on diverging copies of the forest.
 	if f.previewSource != nil {
 		f.split = kit.NewPreviewSplitWithBodies(t, kit.NewTreeLeftPane(&f.tree), f.previewSource)
+		if f.previewRatio > 0 {
+			f.split = f.split.WithRatio(f.previewRatio)
+		}
 	}
 	f.mounted = true
 }
@@ -149,6 +174,7 @@ func (f *treeField) blur()          { f.focused = false; f.tree.Blur() }
 
 func (f *treeField) setSize(w, h int) {
 	f.width, f.height = w, h
+	f.affordanceRows = clampAffordanceRows(treeAffordanceRows, h)
 	f.applySize()
 }
 
@@ -157,13 +183,42 @@ func (f *treeField) setSize(w, h int) {
 // which arrives after the first size.
 func (f *treeField) applySize() {
 	inner := f.width - f.gutterWidth()
+	height := f.contentHeight()
 	if f.hasPreview() {
 		// The split owns the divide between the tree and the preview body, and
 		// sizes the tree itself.
-		f.split.SetSize(inner, f.height)
+		f.split.SetSize(inner, height)
 		return
 	}
-	f.tree.SetSize(inner, f.height)
+	f.tree.SetSize(inner, height)
+}
+
+// treeAffordanceRows are the maximum field-local status rows above the tree:
+// current scope/search controls, tracked/imported definitions, and canonical
+// selected/hidden counts. Very short regions retain at least one tree row and
+// show as many status rows as fit. Wide regions combine the definitions and
+// count so the adjacent preview keeps another useful row.
+const treeAffordanceRows = 3
+
+func clampAffordanceRows(rows, height int) int {
+	if maximum := height - 1; rows > maximum {
+		rows = maximum
+	}
+	if rows < 0 {
+		return 0
+	}
+	if rows > treeAffordanceRows {
+		return treeAffordanceRows
+	}
+	return rows
+}
+
+func (f *treeField) contentHeight() int {
+	height := f.height - f.affordanceRows
+	if height < 1 {
+		return 1
+	}
+	return height
 }
 
 // availableActions reports what the field dispatches right now, plus the filter
@@ -188,6 +243,16 @@ func (f *treeField) availableActions() []keymap.ActionID {
 	return actions
 }
 
+// capturesPrintableInput is the Flow field-input contract: while the tree pane
+// is editing a scoped query, printable q, b, ?, and similar characters are text
+// before they are global shortcuts. Preview focus remains non-textual.
+func (f *treeField) capturesPrintableInput() bool {
+	if !f.focused || !f.tree.FilterState().Editing() {
+		return false
+	}
+	return !f.hasPreview() || f.split.ActivePane() == kit.PaneLeft
+}
+
 func (f *treeField) sync(d *Draft) {}
 
 // handle forwards a message to the live tree, then re-derives the selection
@@ -204,7 +269,11 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		} else {
 			f.tree, cmd = f.tree.Update(msg)
 		}
-		f.captureForest()
+		f.captureForest(d)
+	} else if f.hasPreview() {
+		// A facet can move the cursor onto a different row without routing through
+		// PreviewSplit.Update, so explicitly refresh the body it now names.
+		cmd = f.split.Load()
 	}
 	// The selection is re-derived after a facet change too, so what a commit
 	// would persist is always read from the whole forest - never left behind at
@@ -216,7 +285,7 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 // handleFacetKey answers the filter key when a facet is configured, reporting
 // whether it consumed the message.
 func (f *treeField) handleFacetKey(msg tea.Msg) bool {
-	if f.facetKey == "" {
+	if f.facetKey == "" || f.tree.FilterState().Editing() {
 		return false
 	}
 	keyMsg, ok := msg.(tea.KeyPressMsg)
@@ -235,13 +304,27 @@ func (f *treeField) handleFacetKey(msg tea.Msg) bool {
 // captureForest records a freshly-loaded forest as the full one and re-applies
 // the current facet to it. A load result is recognised by the tree's roots no
 // longer being the view the field last installed.
-func (f *treeField) captureForest() {
+func (f *treeField) captureForest(d *Draft) {
 	roots := f.tree.Roots()
 	if len(roots) == 0 || sameNodes(roots, f.view) {
 		return
 	}
+	// A config that existed when the Draft opened has a real saved selection:
+	// annotate it as tracked, then apply the current working selection to the
+	// checkboxes. On a first run there is no saved intent to label; preserve the
+	// source's initial states unless this is a registry rebuild after the user has
+	// already edited the same Draft.
+	baseline := f.acc.Get(d.Baseline())
+	working := f.acc.Get(d.Working())
+	if f.initializeSelection && d.expectedExists {
+		ApplyTrackedSelection(roots, baseline.ToSelectionConfig(d.Baseline().Selection.AutoIngestNewBranches))
+		ApplyExistingSelection(roots, working.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
+	} else if f.initializeSelection && !selectionsEqual(working, baseline) {
+		ApplyExistingSelection(roots, working.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
+	}
 	f.full = roots
 	f.view = roots
+	f.tree = f.tree.WithRoots(roots)
 	f.applyFacet()
 }
 
@@ -332,17 +415,147 @@ func (f *treeField) facetCount(value string) int {
 	return n
 }
 
-func (f *treeField) render(d *Draft, _ theme.Styles, width int) string {
+func (f *treeField) render(_ *Draft, _ theme.Styles, width int) string {
 	if width != f.width {
 		f.width = width
 	}
+	selected := checkedLeafCount(f.full)
+	hidden := f.hiddenSelectedCount()
+	status := f.affordanceLines(width, selected, hidden)
+	f.affordanceRows = clampAffordanceRows(len(status), f.height)
 	f.applySize()
+	status = status[:f.affordanceRows]
 	body := f.treeView()
-	gutter := f.gutterLines()
+	gutter := f.gutterLines(f.contentHeight())
 	if len(gutter) == 0 {
-		return body
+		return joinLines(append(status, strings.Split(body, "\n")...))
 	}
-	return joinColumns(gutter, body)
+	return joinLines(append(status, strings.Split(joinColumns(gutter, body), "\n")...))
+}
+
+// affordanceLines renders field-local state that must remain visible even when
+// the shared footer is too narrow to carry every Tree action.
+func (f *treeField) affordanceLines(width, selected, hidden int) []string {
+	styles := f.th.Styles()
+	state := f.tree.FilterState()
+	km := keymap.Default()
+	interaction := ""
+	switch {
+	case f.hasPreview() && f.split.ActivePane() == kit.PaneRight:
+		focusLeft := actionKey(km, keymap.ActionFocusPaneLeft)
+		clearFilter := actionHint(km, keymap.ActionClearFilter)
+		if state.Editing() {
+			interaction = fmt.Sprintf("preview focused; search %s: %s; %s returns to tree to keep or %s", state.Scope, state.Query, focusLeft, clearFilter)
+		} else if state.Active() {
+			interaction = fmt.Sprintf("preview focused; filter %s: %s; %s returns to tree, then %s", state.Scope, state.Query, focusLeft, clearFilter)
+		} else {
+			interaction = fmt.Sprintf("preview focused; %s returns to tree", focusLeft)
+		}
+	case state.Editing():
+		interaction = fmt.Sprintf("search %s: %s    type to filter  %s  %s  %s", state.Scope, state.Query,
+			actionHint(km, keymap.ActionDeleteFilter), actionHint(km, keymap.ActionKeepFilter), actionHint(km, keymap.ActionClearFilter))
+	case state.Active():
+		interaction = fmt.Sprintf("filter %s: %s    %s  %s", state.Scope, state.Query,
+			actionHint(km, keymap.ActionSearchScope), actionHint(km, keymap.ActionClearFilter))
+	default:
+		interaction = f.scopeHint(state.Scope, km)
+	}
+	definitions := "tracked = included by previous saved selection; imported = already in local store"
+	summary := fmt.Sprintf("selected sessions: %d; hidden by filters: %d", selected, hidden)
+	compactSummary := fmt.Sprintf("selected %d; hidden by filters: %d", selected, hidden)
+	if lipgloss.Width(definitions)+4+lipgloss.Width(compactSummary) <= width {
+		return []string{
+			styles.Muted.Render(clip(interaction, width)),
+			styles.Muted.Render(clip(definitions+"    "+compactSummary, width)),
+		}
+	}
+	return []string{
+		styles.Muted.Render(clip(interaction, width)),
+		styles.Muted.Render(clip(definitions, width)),
+		styles.Muted.Render(clip(summary, width)),
+	}
+}
+
+func (f *treeField) scopeHint(active kit.TreeScope, km keymap.Keymap) string {
+	labels := make([]string, 0, len(kit.AllTreeScopes()))
+	for _, scope := range kit.AllTreeScopes() {
+		label := scope.String()
+		if scope == active {
+			label = "[" + label + "]"
+		}
+		labels = append(labels, label)
+	}
+	actions := actionSet(f.availableActions())
+	hint := "scope: " + strings.Join(labels, "  ")
+	if actions[keymap.ActionSearchScope] {
+		hint += "    " + actionKey(km, keymap.ActionSearchScope) + ": search this scope"
+	}
+	if actions[keymap.ActionCollapse] {
+		hint += "    " + actionHint(km, keymap.ActionCollapse)
+	}
+	if actions[keymap.ActionExpand] {
+		hint += "  " + actionHint(km, keymap.ActionExpand)
+	}
+	if actions[keymap.ActionFocusPaneRight] {
+		hint += "  " + actionHint(km, keymap.ActionFocusPaneRight)
+	}
+	return hint
+}
+
+func actionHint(km keymap.Keymap, action keymap.ActionID) string {
+	entries := keymap.HelpEntries(km, availList{action})
+	if len(entries) != 1 {
+		return ""
+	}
+	return entries[0].Key + ": " + entries[0].Desc
+}
+
+func actionKey(km keymap.Keymap, action keymap.ActionID) string {
+	entries := keymap.HelpEntries(km, availList{action})
+	if len(entries) != 1 {
+		return ""
+	}
+	return entries[0].Key
+}
+
+func actionSet(actions []keymap.ActionID) map[keymap.ActionID]bool {
+	out := make(map[keymap.ActionID]bool, len(actions))
+	for _, action := range actions {
+		out[action] = true
+	}
+	return out
+}
+
+func checkedLeafCount(roots []*kit.TreeNode) int {
+	count := 0
+	for _, root := range roots {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if len(node.Children) == 0 && node.State == kit.Checked {
+				count++
+			}
+		})
+	}
+	return count
+}
+
+func (f *treeField) hiddenSelectedCount() int {
+	visible := map[*kit.TreeNode]bool{}
+	for _, root := range f.tree.VisibleRoots() {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if len(node.Children) == 0 {
+				visible[node] = true
+			}
+		})
+	}
+	hidden := 0
+	for _, root := range f.full {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if len(node.Children) == 0 && node.State == kit.Checked && !visible[node] {
+				hidden++
+			}
+		})
+	}
+	return hidden
 }
 
 // treeView renders the tree, beside its preview body when one is mounted.
@@ -418,7 +631,7 @@ func (f *treeField) displayValue(value string) string {
 // gutterLines renders the facet gutter as exactly f.height lines of exactly
 // gutterWidth cells: the label, then the "all" row and one row per value, with
 // the active row marked. It returns nil when no gutter is drawn.
-func (f *treeField) gutterLines() []string {
+func (f *treeField) gutterLines(height int) []string {
 	gw := f.gutterWidth()
 	if gw == 0 {
 		return nil
@@ -435,10 +648,10 @@ func (f *treeField) gutterLines() []string {
 		}
 		lines = append(lines, fitCell(style, marker+text, gw))
 	}
-	for len(lines) < f.height {
+	for len(lines) < height {
 		lines = append(lines, fitCell(styles.Base, "", gw))
 	}
-	return lines[:f.height]
+	return lines[:height]
 }
 
 // reset restores the draft's baseline selection value. The live tree forest is
@@ -501,9 +714,7 @@ func pruneNode(n *kit.TreeNode, key, value string) *kit.TreeNode {
 	if len(kept) == 0 {
 		return nil
 	}
-	cp := *n
-	cp.Children = kept
-	return &cp
+	return kit.ProjectTreeNode(n, kept)
 }
 
 // metaOf returns the value n carries for key, or "".

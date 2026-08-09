@@ -89,8 +89,10 @@ func BuildRegistry(opts Options) settings.Registry {
 				"filters change only this view; hidden selections stay selected.",
 			),
 			Fields: []settings.Field{
-				settings.Tree(FieldSelection, "transcripts", selectionAccessor(), opts.Source,
-					selectionTreeOptions(opts)...),
+				settings.WithDescription(
+					settings.Tree(FieldSelection, "transcripts", selectionAccessor(), opts.Source,
+						selectionTreeOptions(opts)...),
+					"view only: harness-only rows hide; mixed projects remain through included data; hidden selections stay selected and counted."),
 			},
 		},
 		{
@@ -203,9 +205,13 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 	out := []settings.TreeOption{
 		settings.WithFacet(settings.MetaHarness, "harness"),
 		settings.WithFacetDisplay(harnessFacetLabel),
+		settings.WithDraftSelectionState(),
 	}
 	if opts.Preview != nil {
-		out = append(out, settings.WithPreviewBodySource(opts.Preview))
+		out = append(out,
+			settings.WithPreviewBodySource(opts.Preview),
+			settings.WithPreviewRatio(0.5),
+		)
 	}
 	return out
 }

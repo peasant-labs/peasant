@@ -502,8 +502,9 @@ func (focusToggleAvailability) AvailableActions() []keymap.ActionID {
 	return []keymap.ActionID{keymap.ActionNextField, keymap.ActionPrevField}
 }
 
-// paneFocusAvailability restricts Match to the two pane-focus actions, so
-// ctrl+h / ctrl+l are resolved before the active pane sees them as navigation.
+// paneFocusAvailability restricts Match to the two pane-focus actions. They are
+// resolved before ordinary pane navigation; the one exception is ctrl+h while
+// the already-focused left pane explicitly advertises filter-text deletion.
 type paneFocusAvailability struct{}
 
 func (paneFocusAvailability) AvailableActions() []keymap.ActionID {
@@ -580,6 +581,18 @@ func (p PreviewSplit) Update(msg tea.Msg) (PreviewSplit, tea.Cmd) {
 				p.setActive(PaneLeft)
 			}
 			return p, nil
+		}
+		// A tree editing filter text may advertise ctrl+h as the terminal's
+		// indistinguishable backspace byte. When the LEFT pane already has focus,
+		// let that currently-available delete action consume the key; focusing the
+		// already-focused pane would be a no-op. From the preview pane, ctrl+h keeps
+		// its normal focus-left meaning.
+		if p.active == PaneLeft {
+			if action, ok := keymap.Match(p.keymap, m, p.left); ok && action == keymap.ActionDeleteFilter {
+				var cmd tea.Cmd
+				p.left, cmd = p.left.Update(m)
+				return p, tea.Batch(cmd, p.startLoad(false))
+			}
 		}
 		// Pane focus is resolved before the active pane sees the press, so
 		// ctrl+l always means "focus the preview" rather than reaching the tree

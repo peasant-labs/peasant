@@ -2,7 +2,7 @@
 # case drives the real component from a freshly loaded project -> branch ->
 # session forest. The row-count guard and strict loader make adding or removing
 # a behavior an explicit fixture edit.
-expectedCaseCount: 11
+expectedCaseCount: 13
 width: 52
 height: 4
 forest:
@@ -68,6 +68,7 @@ cases:
     expectScope: session
     expectMode: inactive
     expectCursorID: alpha-ingest
+    expectOverflowTop: true
     expectOverflowBottom: true
     wantAvailable: [prev-scope, search-scope, expand, collapse]
     wantUnavailable: [next-scope, focus-pane-left, focus-pane-right]
@@ -112,6 +113,15 @@ cases:
     wantAvailable: [delete-filter, keep-filter, clear-filter]
     wantUnavailable: [up, down, toggle, search-scope]
 
+  - name: no-match-message-names-the-active-session-scope
+    keys: ["]", "]", "/", z, z, enter]
+    expectScope: session
+    expectMode: kept
+    expectQuery: zz
+    wantAvailable: [prev-scope, search-scope, clear-filter]
+    wantViewContains: ["no matching sessions"]
+    wantViewMissing: ["no projects"]
+
   - name: clear-restores-the-complete-forest-and-selection-navigation
     keys: ["]", "]", "/", a, u, d, i, t, enter, esc]
     expectScope: session
@@ -120,6 +130,17 @@ cases:
     expectVisibleIDs:
       [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
        project-beta, beta-develop, beta-audit]
+    expectOverflowTop: true
+    wantAvailable: [prev-scope, search-scope, toggle]
+    wantUnavailable: [clear-filter, keep-filter, delete-filter]
+
+  - name: clear-after-no-match-restores-the-prefilter-cursor
+    keys: ["]", "]", "/", z, z, enter, esc]
+    expectScope: session
+    expectMode: inactive
+    expectQuery: ""
+    expectCursorID: alpha-ingest
+    expectOverflowTop: true
     expectOverflowBottom: true
     wantAvailable: [prev-scope, search-scope, toggle]
     wantUnavailable: [clear-filter, keep-filter, delete-filter]

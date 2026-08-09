@@ -38,45 +38,49 @@ type treeAnnotationDocument struct {
 	Cases             []treeAnnotationCase `yaml:"cases"`
 }
 
-func loadTreeAnnotations(t *testing.T) treeAnnotationDocument {
-	t.Helper()
+func decodeTreeAnnotations(data []byte) (treeAnnotationDocument, error) {
 	var doc treeAnnotationDocument
-	dec := yaml.NewDecoder(bytes.NewReader(treeAnnotationData))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil {
-		t.Fatalf("decode testdata/tree_annotations.yaml: %v", err)
+		return doc, fmt.Errorf("decode testdata/tree_annotations.yaml: %w", err)
 	}
 	var trailing any
 	if err := dec.Decode(&trailing); err != io.EOF {
 		if err == nil {
 			err = fmt.Errorf("found a second YAML document")
 		}
-		t.Fatalf("tree_annotations.yaml must hold exactly one document: %v", err)
+		return doc, fmt.Errorf("tree_annotations.yaml must hold exactly one document: %w", err)
 	}
 	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))
+		return doc, fmt.Errorf("tree_annotations.yaml expectedCaseCount=%d but has %d cases", doc.ExpectedCaseCount, len(doc.Cases))
 	}
+	seen := map[string]bool{}
 	for _, c := range doc.Cases {
-		requireCaseAssertions(t, "tree annotation", c.Name, len(c.WantContains)+len(c.WantMissing))
+		if c.Name == "" || seen[c.Name] {
+			return doc, fmt.Errorf("tree_annotations.yaml case name %q is empty or duplicated", c.Name)
+		}
+		seen[c.Name] = true
+		if len(c.WantContains)+len(c.WantMissing) == 0 {
+			return doc, fmt.Errorf("tree annotation fixture case %q declares no expected values", c.Name)
+		}
 		if c.Width <= 0 {
-			t.Fatalf("tree annotation fixture case %q declares width %d; a non-positive width renders nothing to assert on", c.Name, c.Width)
+			return doc, fmt.Errorf("tree annotation fixture case %q declares width %d; a non-positive width renders nothing to assert on", c.Name, c.Width)
 		}
 		if c.State != "" && c.State != "unchecked" && c.State != "checked" {
-			t.Fatalf("tree annotation fixture case %q declares unknown current state %q", c.Name, c.State)
+			return doc, fmt.Errorf("tree annotation fixture case %q declares unknown current state %q", c.Name, c.State)
 		}
 	}
-	return doc
+	return doc, nil
 }
 
-// requireCaseAssertions fails when a fixture case declares no expectations at
-// all. An empty want list turns its case into a guaranteed pass, so an edit that
-// empties one must fail loudly rather than quietly stop testing anything.
-func requireCaseAssertions(t *testing.T, corpus, caseName string, total int) {
+func loadTreeAnnotations(t *testing.T) treeAnnotationDocument {
 	t.Helper()
-	if total == 0 {
-		t.Fatalf("%s fixture case %q declares no expected values; an empty want list turns the case into a guaranteed pass - state what the run must observe",
-			corpus, caseName)
+	doc, err := decodeTreeAnnotations(treeAnnotationData)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return doc
 }
 
 // annotatedForest builds the one-project/one-session forest a case renders.
@@ -168,5 +172,26 @@ func TestTree_AnnotatedRowStaysOneLine(t *testing.T) {
 		if got := strings.Count(view, "\n") + 1; got != height {
 			t.Errorf("case %q rendered %d lines at height %d; an annotation split a row", c.Name, got, height)
 		}
+	}
+}
+
+func TestTreeAnnotationFixtureRejectsUnknownFields(t *testing.T) {
+	mutated := append(append([]byte(nil), treeAnnotationData...), []byte("\nunknownField: true\n")...)
+	if _, err := decodeTreeAnnotations(mutated); err == nil {
+		t.Fatal("tree annotation fixture accepted an unknown field")
+	}
+}
+
+func TestTreeAnnotationFixtureRejectsTrailingDocuments(t *testing.T) {
+	mutated := append(append([]byte(nil), treeAnnotationData...), []byte("\n---\n{}\n")...)
+	if _, err := decodeTreeAnnotations(mutated); err == nil {
+		t.Fatal("tree annotation fixture accepted a trailing document")
+	}
+}
+
+func TestTreeAnnotationFixtureEnforcesRowCount(t *testing.T) {
+	mutated := bytes.Replace(treeAnnotationData, []byte("expectedCaseCount: 13"), []byte("expectedCaseCount: 14"), 1)
+	if _, err := decodeTreeAnnotations(mutated); err == nil {
+		t.Fatal("tree annotation fixture accepted a mismatched row-count guard")
 	}
 }

@@ -42,6 +42,7 @@ type projectionRowAssertion struct {
 type projectionCase struct {
 	Name                 string                   `yaml:"name"`
 	Keys                 []string                 `yaml:"keys"`
+	WorkingSelection     *config.SelectionConfig  `yaml:"workingSelection"`
 	ExpectPane           string                   `yaml:"expectPane"`
 	ExpectScope          string                   `yaml:"expectScope"`
 	ExpectMode           string                   `yaml:"expectMode"`
@@ -105,6 +106,9 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 			return doc, fmt.Errorf("tree_projection.yaml contains an invalid or duplicate case: %#v", c)
 		}
 		seenCases[c.Name] = true
+		if c.WorkingSelection != nil && !c.WorkingSelection.Mode.IsValid() {
+			return doc, fmt.Errorf("tree_projection.yaml case %q has invalid working selection mode %q", c.Name, c.WorkingSelection.Mode)
+		}
 		if len(c.ExpectSelected)+len(c.ExpectUnselected)+len(c.WantVisibleRows)+len(c.WantMissingRows)+len(c.WantViewContains)+len(c.WantViewMissing)+len(c.RowAssertions) == 0 {
 			return doc, fmt.Errorf("tree_projection.yaml case %q has no observable assertion", c.Name)
 		}
@@ -163,7 +167,7 @@ func (projectionPreviewSource) Body(id string) (kit.PreviewBody, error) {
 	return projectionPreviewBody("preview for " + id), nil
 }
 
-func mountedProjectionFlow(t *testing.T, doc projectionDocument) (Flow, *Draft, *treeField) {
+func mountedProjectionFlow(t *testing.T, doc projectionDocument, c projectionCase) (Flow, *Draft, *treeField) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.BaseConfig()
@@ -183,12 +187,16 @@ func mountedProjectionFlow(t *testing.T, doc projectionDocument) (Flow, *Draft, 
 	if err != nil {
 		t.Fatalf("NewDraft: %v", err)
 	}
+	if c.WorkingSelection != nil {
+		draft.Working().Selection = *c.WorkingSelection
+	}
 	imported := map[string]bool{}
 	for _, id := range doc.ImportedSessionIDs {
 		imported[id] = true
 	}
 	field := Tree("selection", "transcripts", selectionAccessor(), projectionSource{fixture: doc.Fixture, imported: imported},
-		WithFacet(MetaHarness, "harness"), WithPreviewBodySource(projectionPreviewSource{}))
+		WithFacet(MetaHarness, "harness"), WithPreviewBodySource(projectionPreviewSource{}),
+		WithPreviewRatio(0.5), WithDraftSelectionState())
 	reg := Registry{Sections: []Section{{Key: "transcripts", Title: "select transcripts", Fields: []Field{field}}}}
 	flow := NewFlow(theme.New(theme.ModeDark), reg, draft)
 	flow.SetSize(doc.Width, doc.Height)
@@ -266,7 +274,7 @@ func TestFlow_TreeProjectionPreservesCanonicalSelection(t *testing.T) {
 	for _, c := range doc.Cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			flow, draft, field := mountedProjectionFlow(t, doc)
+			flow, draft, field := mountedProjectionFlow(t, doc, c)
 			flow = driveProjectionFlow(t, flow, c.Keys)
 			view := stripANSIForSettings(flow.View())
 
@@ -374,7 +382,7 @@ func TestTreeProjectionFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestTreeProjectionFixtureEnforcesRowCount(t *testing.T) {
-	mutated := bytes.Replace(treeProjectionData, []byte("expectedCaseCount: 7"), []byte("expectedCaseCount: 8"), 1)
+	mutated := bytes.Replace(treeProjectionData, []byte("expectedCaseCount: 11"), []byte("expectedCaseCount: 12"), 1)
 	if _, err := decodeTreeProjection(mutated); err == nil {
 		t.Fatal("tree projection fixture accepted a mismatched row-count guard")
 	}
