@@ -4,3 +4,5 @@ expectedRetentionSeedRows: 1
 retentionSeeds:
   - name: existing claude cleanup value starts clean
     cleanupDays: 90
+    selectedOption: "(•) 90 days"
+    cleanReceipt: no changes to save
