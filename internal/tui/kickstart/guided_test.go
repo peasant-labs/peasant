@@ -81,6 +81,7 @@ type guidedFramingRow struct {
 	ExampleText           string               `yaml:"exampleText"`
 	Guide                 guideFixture         `yaml:"guide"`
 	WantContains          []string             `yaml:"wantContains"`
+	WantBeforeChoice      []string             `yaml:"wantBeforeChoice"`
 }
 
 type guidedFramingDoc struct {
@@ -151,7 +152,7 @@ func loadGuidedFramingDoc(t *testing.T) guidedFramingDoc {
 		}
 		switch row.Surface {
 		case guidedSurfaceConnect:
-			if len(row.WantContains) == 0 {
+			if len(row.WantContains) == 0 || len(row.WantBeforeChoice) == 0 {
 				t.Fatalf("guided framing row %q asserts no connect copy", row.Name)
 			}
 		case guidedSurfaceSummary:
@@ -319,6 +320,16 @@ func TestGuidedFramingFixture(t *testing.T) {
 				for _, want := range row.WantContains {
 					if !strings.Contains(view, want) {
 						t.Errorf("connect framing does not contain %q:\n%s", want, view)
+					}
+				}
+				choiceAt := strings.Index(view, "connect to a village now?")
+				if choiceAt < 0 {
+					t.Fatalf("connect framing does not render its choice after the safety explanation:\n%s", view)
+				}
+				for _, want := range row.WantBeforeChoice {
+					copyAt := strings.Index(view, want)
+					if copyAt < 0 || copyAt >= choiceAt {
+						t.Errorf("connect safety copy %q must precede the choice; copy=%d choice=%d:\n%s", want, copyAt, choiceAt, view)
 					}
 				}
 			case guidedSurfaceRegistrySection:

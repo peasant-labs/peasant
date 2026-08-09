@@ -1,0 +1,50 @@
+expectedConsentCount: 2
+consent:
+  - name: local-all-no-license
+    selectionMode: all
+    license: ""
+    visibility: private
+    connected: false
+    claudeSessionsPresent: false
+    wantContains:
+      - 'selection: all discovered sessions'
+      - 'privacy: standard redaction'
+      - 'later publish license: none; all rights remain and reuse requires permission'
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - publish nothing; sharing requires a later explicit push
+    wantMissing:
+      - apply claude code retention
+      - 'default visibility:'
+  - name: selected-connected-retention
+    selectionMode: selected
+    license: CC-BY-SA-4.0
+    visibility: group
+    connected: true
+    claudeSessionsPresent: true
+    retentionDays: 90
+    wantContains:
+      - 'selection: only the buffered projects, branches, and sessions'
+      - 'privacy: standard redaction'
+      - 'later publish license: CC-BY-SA-4.0'
+      - 'default visibility after a later publish: group'
+      - 'claude code source retention: 90 days'
+      - save the visible choices to peasant configuration
+      - apply claude code retention after config saves
+      - import the selected transcripts into the local peasant store
+      - publish nothing; sharing requires a later explicit push
+
+expectedLoginCount: 2
+login:
+  - name: successful-visibility-login
+    outcome: success
+    username: example-user
+    bufferedLicense: CC-BY-4.0
+    wantContains:
+      - sharing
+      - default visibility for pushed transcripts
+  - name: failed-visibility-login
+    outcome: failure
+    error: synthetic login refusal
+    bufferedLicense: CC-BY-4.0
+    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']

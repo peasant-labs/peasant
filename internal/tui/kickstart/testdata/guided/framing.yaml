@@ -5,10 +5,15 @@ expectedRowCount: 12
 rows:
   - name: connect-before-settings
     surface: connect
+    wantBeforeChoice:
+      - local mode keeps all data on this machine
+      - connecting sends nothing until a later explicit publish
     wantContains:
       - connect to a village
-      - a village is a shared commons for agent transcripts.
-      - publishing stays explicit and opt-in.
+      - local mode keeps all data on this machine
+      - connecting sends nothing until a later explicit publish
+      - publishing is separate, explicit, and opt-in.
+      - peasant village login
 
   - name: selection-guide
     surface: registry-section
@@ -20,9 +25,11 @@ rows:
     fieldKind: tree
     fieldText: no projects
     guide:
-      intro: choose which recorded sessions to import.
+      intro: choose which recorded sessions become part of your local peasant history.
       hints:
-        - select all or narrow by project, branch, or session.
+        - tracked means included by the selection saved during an earlier kickstart run.
+        - imported means transcript data already exists in your local store.
+        - filters change only this view; hidden selections stay selected.
 
   - name: auto-ingest-guide
     surface: registry-section
@@ -34,9 +41,10 @@ rows:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     guide:
-      intro: choose how new branches in selected projects enter local history.
+      intro: decide how future branches enter your saved local selection.
       hints:
-        - only fully selected projects are affected.
+        - this applies only to new branches in projects selected in full.
+        - it never broadens an explicit branch or session selection.
 
   - name: privacy-guide
     surface: registry-section
@@ -48,9 +56,10 @@ rows:
     fieldKind: radio
     fieldText: redaction level
     guide:
-      intro: choose how much sensitive context peasant removes.
+      intro: see what standard redaction removes before transcripts enter peasant's local store.
       hints:
-        - you can change this later.
+        - examples below use synthetic text and the same redactor as local import.
+        - standard keeps git remote urls and branch output; maximum removes them.
 
   - name: license-guide
     surface: registry-section
@@ -62,9 +71,10 @@ rows:
     fieldKind: radio
     fieldText: default license attached to pushed transcripts
     guide:
-      intro: choose the default license for later shares.
+      intro: choose the default license for a later explicit publish.
       hints:
-        - kickstart does not publish.
+        - no license is the default unless your loaded config already chose one.
+        - no license keeps all rights; anyone who wants to reuse the transcript must ask.
 
   - name: destination-guide
     surface: registry-section
@@ -77,9 +87,10 @@ rows:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     guide:
-      intro: choose visibility for later explicit pushes.
+      intro: choose who may see transcripts after a later explicit publish.
       hints:
-        - saving does not publish.
+        - private means only you; group means group members; public means anyone.
+        - saving this default does not publish anything.
 
   - name: retention-guide
     surface: registry-section
@@ -92,9 +103,10 @@ rows:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     guide:
-      intro: choose how long claude keeps local transcripts.
+      intro: choose how long claude code keeps its source transcript files.
       hints:
-        - applied after save.
+        - the selected value is applied after config saves and before local import.
+        - changing claude retention does not delete transcripts already imported into peasant.
 
   - name: guided-review-summary
     surface: guided-summary
@@ -113,9 +125,10 @@ rows:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     guide:
-      intro: choose how new branches in selected projects enter local history.
+      intro: decide how future branches enter your saved local selection.
       hints:
-        - only fully selected projects are affected.
+        - this applies only to new branches in projects selected in full.
+        - it never broadens an explicit branch or session selection.
 
   - name: hidden-destination-guide
     surface: registry-section
@@ -128,9 +141,10 @@ rows:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     guide:
-      intro: choose visibility for later explicit pushes.
+      intro: choose who may see transcripts after a later explicit publish.
       hints:
-        - saving does not publish.
+        - private means only you; group means group members; public means anyone.
+        - saving this default does not publish anything.
 
   - name: hidden-retention-guide
     surface: registry-section
@@ -143,9 +157,10 @@ rows:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     guide:
-      intro: choose how long claude keeps local transcripts.
+      intro: choose how long claude code keeps its source transcript files.
       hints:
-        - applied after save.
+        - the selected value is applied after config saves and before local import.
+        - changing claude retention does not delete transcripts already imported into peasant.
 
   - name: derived-example
     surface: derived-example

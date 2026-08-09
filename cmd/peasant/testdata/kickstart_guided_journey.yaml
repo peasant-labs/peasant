@@ -1,0 +1,19 @@
+expectedRowCount: 1
+rows:
+  - name: mounted-local-completion
+    connectCopy:
+      - local mode keeps all data on this machine
+      - connecting sends nothing until a later explicit publish
+    consentCopy:
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - publish nothing; sharing requires a later explicit push
+    completionCopy:
+      - peasant web start
+      - starts the dashboard and prints or opens its actual url
+      - peasant village login
+      - peasant village push
+    forbiddenCopy:
+      - http://localhost:8690
+    wantIngestCalls: 1
+    wantTerminalCalls: 1

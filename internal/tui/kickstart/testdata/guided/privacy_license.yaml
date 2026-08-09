@@ -1,0 +1,51 @@
+# Privacy rows describe synthetic inputs only. Expected redacted text is always
+# produced by the real Standard redactor at test/runtime, never stored here.
+expectedPrivacySampleCount: 4
+privacySamples:
+  - name: synthetic-secret
+    category: secrets
+    before: sk-ant-api03-EXAMPLEKEY0000000000000
+  - name: synthetic-email
+    category: pii
+    before: user@example.com
+  - name: synthetic-home-path
+    category: paths
+    before: /Users/example/projects/sample/
+  - name: synthetic-project-import
+    category: project
+    before: '"github.com/example-org/example-repo"'
+
+expectedFailureCount: 4
+failures:
+  - name: constructor-failure
+    kind: constructor-error
+    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+  - name: unknown-category
+    kind: unknown-category
+    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+  - name: missing-claimed-category
+    kind: missing-category
+    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+  - name: unchanged-output
+    kind: unchanged-output
+    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+
+expectedLicenseCount: 4
+licenses:
+  - name: no-license-default
+    value: ""
+    label: none (do not attach a license)
+    guidance: attach no license. you keep all rights and others must ask to reuse the transcript.
+    isDefault: true
+  - name: cc0
+    value: CC0-1.0
+    label: CC0-1.0
+    guidance: place the transcript in the public domain. anyone may reuse it without credit.
+  - name: cc-by
+    value: CC-BY-4.0
+    label: CC-BY-4.0
+    guidance: allow anyone to reuse the transcript with credit to you.
+  - name: cc-by-sa
+    value: CC-BY-SA-4.0
+    label: CC-BY-SA-4.0
+    guidance: allow anyone to reuse the transcript with credit, under this same license.
