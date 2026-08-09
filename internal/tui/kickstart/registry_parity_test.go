@@ -50,6 +50,7 @@ type paritySectionFixture struct {
 	FieldKind   string `yaml:"fieldKind"`
 	FieldText   string `yaml:"fieldText"`
 	GuideIntro  string `yaml:"guideIntro"`
+	HasExample  bool   `yaml:"hasExample"`
 	Conditional bool   `yaml:"conditional"`
 }
 
@@ -187,9 +188,10 @@ func assertRegistryContract(t *testing.T, registry settings.Registry, fixtures [
 			t.Errorf("section %q field = %q/%s, want %q/%s",
 				section.Key, field.Key(), field.Kind(), fixture.FieldKey, fixture.FieldKind)
 		}
-		if section.Guide == nil || section.Guide.Intro != fixture.GuideIntro || section.Guide.Example != nil {
-			t.Errorf("section %q guide = %#v, want intro %q with no derived example",
-				section.Key, section.Guide, fixture.GuideIntro)
+		if section.Guide == nil || section.Guide.Intro != fixture.GuideIntro ||
+			(section.Guide.Example != nil) != fixture.HasExample {
+			t.Errorf("section %q guide = %#v, want intro %q with example=%t",
+				section.Key, section.Guide, fixture.GuideIntro, fixture.HasExample)
 		}
 	}
 }

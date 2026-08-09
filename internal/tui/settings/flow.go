@@ -260,6 +260,12 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 		}
 		return f, nil
 	}
+	if keyMsg.Text != "" && f.focusedFieldCapturesPrintableInput() {
+		// Text is Bubble Tea's typed signal that this is printable input rather
+		// than a lifecycle/control key. Let the focused editor consume it before
+		// global bindings such as q (quit), b (back), and ? (help).
+		return f.forwardToFields(msg)
+	}
 	action, ok := keymap.Match(keymap.Default(), keyMsg, f.availability())
 	if ok {
 		switch action {
@@ -289,6 +295,13 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 	// Not a flow-level action (or ActionConfirm on a non-receipt step): forward
 	// to the focused field.
 	return f.forwardToFields(msg)
+}
+
+func (f Flow) focusedFieldCapturesPrintableInput() bool {
+	if f.OnReceipt() || f.focusField < 0 || f.focusField >= len(f.steps[f.cur].Fields) {
+		return false
+	}
+	return f.steps[f.cur].Fields[f.focusField].capturesPrintableInput()
 }
 
 // updateConfirm drives the exit-confirm modal.
@@ -450,24 +463,17 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 	if guide == nil {
 		return nil
 	}
-	var band strings.Builder
-	appendInline := func(value string, prefix string, style lipgloss.Style) {
+	var lines []string
+	appendLine := func(value string, prefix string, style lipgloss.Style) {
 		value = strings.Join(strings.Fields(value), " ")
 		if value == "" {
 			return
 		}
-		if band.Len() > 0 {
-			band.WriteString("  ")
-		}
-		band.WriteString(style.Render(prefix + value))
+		lines = append(lines, style.Render(clip(prefix+value, width)))
 	}
-	appendInline(guide.Intro, "", styles.Surface)
+	appendLine(guide.Intro, "", styles.Surface)
 	for _, hint := range guide.Hints {
-		appendInline(hint, "• ", styles.Muted)
-	}
-	var lines []string
-	if band.Len() > 0 {
-		lines = append(lines, clip(band.String(), width))
+		appendLine(hint, "• ", styles.Muted)
 	}
 	if guide.Example != nil {
 		example, err := guide.Example(f.th, f.draft)

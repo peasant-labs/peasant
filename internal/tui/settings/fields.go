@@ -124,11 +124,12 @@ func Text(key, label string, acc Accessor[string]) Field {
 	return &textField{baseField: baseField{key: key, label: label}, acc: acc, width: kit.TextFieldMinSize.Width}
 }
 
-func (f *textField) Kind() FieldKind       { return KindText }
-func (f *textField) Validate(*Draft) error { return nil }
-func (f *textField) initCmd() tea.Cmd      { return nil }
-func (f *textField) blur()                 { f.focused = false; f.inner.Blur() }
-func (f *textField) reset(d *Draft)        { f.acc.Set(d.Working(), f.acc.Get(d.Baseline())) }
+func (f *textField) Kind() FieldKind              { return KindText }
+func (f *textField) Validate(*Draft) error        { return nil }
+func (f *textField) initCmd() tea.Cmd             { return nil }
+func (f *textField) blur()                        { f.focused = false; f.inner.Blur() }
+func (f *textField) reset(d *Draft)               { f.acc.Set(d.Working(), f.acc.Get(d.Baseline())) }
+func (f *textField) capturesPrintableInput() bool { return f.focused }
 func (f *textField) availableActions() []keymap.ActionID {
 	return []keymap.ActionID{keymap.ActionConfirm}
 }

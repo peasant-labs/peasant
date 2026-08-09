@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +38,11 @@ type kickstartCommandDeps struct {
 	// readRetention is the external Claude settings read used before Flow mounts.
 	readRetention func() (int, bool)
 	existingUser  func(string) string
+	// alreadyConnected reads the same isolated credential directory the command
+	// was configured with; localIngest returns one runner and its exact
+	// concurrent progress source so Program never observes a different attempt.
+	alreadyConnected func(configDir string) bool
+	localIngest      func(*cobra.Command, string, []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource)
 }
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
@@ -53,6 +59,10 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			return err
 		},
 		readRetention: ftue.ReadClaudeCleanupDays,
+		alreadyConnected: func(configDir string) bool {
+			return villageAlreadyConnected(configDir)
+		},
+		localIngest: kickstartLocalIngest,
 		existingUser: func(configDir string) string {
 			if creds, err := auth.LoadCredentialsFrom(configDir); err == nil && creds != nil && creds.IsValid() {
 				return creds.Username
@@ -502,8 +512,17 @@ func (a *progressAdapter) Snapshot() map[string]ftue.StageProgress {
 // after the user confirms import. The config is re-loaded at call time so it picks
 // up the file the wizard just saved.
 func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRunnerFunc, ftue.ProgressSnapshot) {
+	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
+	return runner, &progressAdapter{state: progress}
+}
+
+// buildFTUEIngestRunnerWithProgress constructs the retained runner together with
+// the exact ProgressState it writes. Guided kickstart consumes the native state
+// through its narrow ProgressSource boundary; the legacy wizard receives the
+// compatibility adapter above. Both presentations therefore observe the same
+// pipeline run rather than parallel counters.
+func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (ftue.IngestRunnerFunc, *ingest.ProgressState) {
 	progState := ingest.NewProgressState()
-	adapter := &progressAdapter{state: progState}
 	return func(ctx context.Context, answers ftue.WizardAnswers) (*ftue.IngestResult, error) {
 		// Suppress log output so it doesn't corrupt the TUI alt-screen.
 		origLogger := slog.Default()
@@ -601,7 +620,7 @@ func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRu
 			Duration:       result.Duration,
 			ProviderCounts: providerCounts,
 		}, nil
-	}, adapter
+	}, progState
 }
 
 func hasRestrictedProviderSelection(selections []ftue.ProviderSelection) bool {

@@ -18,6 +18,8 @@ type ProgressSource interface {
 	Reset()
 }
 
+var _ ProgressSource = (*ingest.ProgressState)(nil)
+
 // Clock is the wall-clock boundary used for whole-attempt and observed-stage
 // elapsed time. Production supplies the real clock and tests may supply a
 // deterministic one.
@@ -30,6 +32,8 @@ type ClockFunc func() time.Time
 
 // Now implements Clock.
 func (f ClockFunc) Now() time.Time { return f() }
+
+var _ Clock = ClockFunc(nil)
 
 // TickFunc is the injected Bubble Tea tick boundary used to poll ProgressSource
 // without blocking ingest or tying deterministic tests to real sleeps.
@@ -82,3 +86,44 @@ type NextStep struct {
 // NextStepsFunc derives completion instructions from the completed local ingest
 // result. It has no command runner, publisher, or other execution authority.
 type NextStepsFunc func(result *ftue.IngestResult) []NextStep
+
+// DefaultNextSteps returns the three honest, display-only actions available
+// after a local kickstart run. In particular, it does not invent a dashboard
+// address: peasant web start is the component that can report the real address
+// after the server has successfully bound and become ready.
+func DefaultNextSteps(_ *ftue.IngestResult) []NextStep {
+	return []NextStep{
+		{
+			Kind:    NextStepWebStart,
+			Title:   "open the local dashboard",
+			Command: "peasant web start",
+			Detail:  "starts the dashboard and prints or opens its actual url",
+		},
+		{
+			Kind:    NextStepVillageLogin,
+			Title:   "connect to a village later",
+			Command: "peasant village login",
+			Detail:  "connects this machine without publishing a transcript",
+		},
+		{
+			Kind:    NextStepVillagePush,
+			Title:   "publish later, explicitly",
+			Command: "peasant village push",
+			Detail:  "starts a separate explicit publish flow",
+		},
+	}
+}
+
+// stageObservation is presentation-only state derived from successive progress
+// snapshots. It deliberately does not feed back into the ingest pipeline.
+type stageObservation struct {
+	startedAt time.Time
+	lastAt    time.Time
+	lastDone  int
+	lastTotal int
+	progress  ingest.StageProgress
+
+	estimateEligible bool
+	estimateValid    bool
+	estimate         time.Duration
+}

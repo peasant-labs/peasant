@@ -258,6 +258,21 @@ func TestFlow_FreeBackNavRetainsState(t *testing.T) {
 	}
 }
 
+func TestFlow_TextInputCapturesPrintableGlobalBindings(t *testing.T) {
+	f, d, _ := newTestFlow(t)
+	baseURL := d.Baseline().Village.URL
+	f = send(f, "space")
+	f = send(f, "tab")
+	f = send(f, "q", "b", "?")
+
+	if got, want := d.Working().Village.URL, baseURL+"qb?"; got != want {
+		t.Fatalf("focused text field captured %q, want %q", got, want)
+	}
+	if f.Exited() || f.Confirming() || f.Helping() {
+		t.Fatal("printable text leaked into quit, back, or help lifecycle handling")
+	}
+}
+
 func TestFlow_HiddenStepDropsEditsAndReceiptReflects(t *testing.T) {
 	f, d, _ := newTestFlow(t)
 	baseURL := d.Baseline().Village.URL

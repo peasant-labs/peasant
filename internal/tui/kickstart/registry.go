@@ -83,8 +83,10 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionSelection,
 			Title: "choose transcripts to import",
 			Guide: sectionGuide(
-				"choose which recorded sessions to import.",
-				"select all or narrow by project, branch, or session.",
+				"choose which recorded sessions become part of your local peasant history.",
+				"tracked means included by the selection saved during an earlier kickstart run.",
+				"imported means transcript data already exists in your local store.",
+				"filters change only this view; hidden selections stay selected.",
 			),
 			Fields: []settings.Field{
 				settings.Tree(FieldSelection, "transcripts", selectionAccessor(), opts.Source,
@@ -95,8 +97,9 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionAutoIngest,
 			Title: "auto-ingest new branches",
 			Guide: sectionGuide(
-				"choose how new branches in selected projects enter local history.",
-				"only fully selected projects are affected.",
+				"decide how future branches enter your saved local selection.",
+				"this applies only to new branches in projects selected in full.",
+				"it never broadens an explicit branch or session selection.",
 			),
 			// Only offered for a narrowed selection: with mode:all every future
 			// branch is already ingested, so the question is meaningless.
@@ -112,9 +115,11 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionPrivacy,
 			Title: "privacy",
-			Guide: sectionGuide(
-				"choose how much sensitive context peasant removes.",
-				"you can change this later.",
+			Guide: sectionGuideWithExample(
+				"see what standard redaction removes before transcripts enter peasant's local store.",
+				privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
+				"examples below use synthetic text and the same redactor as local import.",
+				"standard keeps git remote urls and branch output; maximum removes them.",
 			),
 			Fields: []settings.Field{
 				settings.WithDescription(
@@ -126,8 +131,9 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionLicense,
 			Title: "content license",
 			Guide: sectionGuide(
-				"choose the default license for later shares.",
-				"kickstart does not publish.",
+				"choose the default license for a later explicit publish.",
+				"no license is the default unless your loaded config already chose one.",
+				"no license keeps all rights; anyone who wants to reuse the transcript must ask.",
 			),
 			Fields: []settings.Field{
 				settings.WithDescription(
@@ -139,8 +145,9 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionDestination,
 			Title: "sharing",
 			Guide: sectionGuide(
-				"choose visibility for later explicit pushes.",
-				"saving does not publish.",
+				"choose who may see transcripts after a later explicit publish.",
+				"private means only you; group means group members; public means anyone.",
+				"saving this default does not publish anything.",
 			),
 			// Only meaningful once a village connection exists: the default
 			// visibility governs transcripts PUSHED to that village. With no
@@ -159,8 +166,9 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionRetention,
 			Title: "claude retention",
 			Guide: sectionGuide(
-				"choose how long claude keeps local transcripts.",
-				"applied after save.",
+				"choose how long claude code keeps its source transcript files.",
+				"the selected value is applied after config saves and before local import.",
+				"changing claude retention does not delete transcripts already imported into peasant.",
 			),
 			// Only offered when Claude Code sessions were discovered: the field
 			// edits Claude Code's own cleanup setting, which is meaningless when no
@@ -182,6 +190,10 @@ func BuildRegistry(opts Options) settings.Registry {
 // static. It describes a section without changing its fields or visibility.
 func sectionGuide(intro string, hints ...string) *settings.Guide {
 	return &settings.Guide{Intro: intro, Hints: hints}
+}
+
+func sectionGuideWithExample(intro string, example settings.GuideExampleFunc, hints ...string) *settings.Guide {
+	return &settings.Guide{Intro: intro, Hints: hints, Example: example}
 }
 
 // selectionTreeOptions composes the selection tree's options: the harness facet

@@ -62,6 +62,22 @@ func runKickstartFlow(
 	// pane's body reads for the whole flow; it is closed when the flow returns.
 	db, closeStore := openKickstartStore(cmd)
 	defer closeStore()
+	if deps.localIngest == nil {
+		return fmt.Errorf(
+			"mount guided kickstart for %q: local ingest boundary is nil.\n"+
+				"what: the guided Program cannot start the post-consent local import.\n"+
+				"why: kickstartCommandDeps.localIngest was assembled without the shared runner and progress source.\n"+
+				"where: runKickstartFlow before constructing kickstart.Program.\n"+
+				"when: after opening the buffered draft and before any interactive choice is shown.\n"+
+				"means: no configuration, retention setting, or transcript was changed.\n"+
+				"fix: construct kickstart through BuildKickstartCommand or supply the local ingest boundary.",
+			configPath)
+	}
+	ingestRun, progress := deps.localIngest(cmd, configPath, sessions)
+	alreadyConnected := false
+	if deps.alreadyConnected != nil {
+		alreadyConnected = deps.alreadyConnected(configDirOverride(cmd))
+	}
 
 	programDeps := kickstart.ProgramDeps{
 		Theme:                 th,
@@ -70,8 +86,9 @@ func runKickstartFlow(
 		Preview:               kickstartPreview(cmd, db, th, sessions),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
-		Ingest:                kickstartIngestFunc(cmd, configPath, sessions),
-		AlreadyConnected:      villageAlreadyConnected(),
+		Ingest:                ingestRun,
+		Progress:              progress,
+		AlreadyConnected:      alreadyConnected,
 		Retention:             kickstart.DefaultRetentionWriter(),
 		// The retention value now comes from the flow's retention field, carried
 		// through the committed draft. This fallback stays 0 so a run that never
@@ -219,8 +236,8 @@ func claudeSessionsPresent(inventory ftue.ProviderInventory) bool {
 // villageAlreadyConnected reports whether this machine already holds valid
 // village credentials, so the connect-now step can be skipped (the UAT flagged
 // that it was shown even when already connected).
-func villageAlreadyConnected() bool {
-	creds, err := auth.LoadCredentials()
+func villageAlreadyConnected(configDir string) bool {
+	creds, err := auth.LoadCredentialsFrom(configDir)
 	return err == nil && creds != nil && creds.IsValid()
 }
 
@@ -245,16 +262,17 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 	}
 }
 
-// kickstartIngestFunc builds the post-commit ingest step. It reuses the existing
-// ftue ingest runner (buildFTUEIngestRunner) and the canonical selection matcher:
+// kickstartLocalIngest builds the post-commit ingest step and returns the exact
+// concurrent progress state populated by that runner. It reuses the existing
+// ftue ingest runner core and the canonical selection matcher:
 // after the flow saves config.Selection, this reloads the config, derives which
 // discovered sessions the saved selection admits via ingest.SelectionMatcher (the
 // same matcher ingest, push, discovery, and prune use), and hands them to the
 // existing runner. Mode:all imports everything; mode:selected imports exactly the
 // admitted sessions.
-func kickstartIngestFunc(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) kickstart.IngestFunc {
-	runner, _ := buildFTUEIngestRunner(cmd, configPath)
-	return func(ctx context.Context) (*ftue.IngestResult, error) {
+func kickstartLocalIngest(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource) {
+	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
+	local := func(ctx context.Context) (*ftue.IngestResult, error) {
 		cfg, err := loadConfig(configPath)
 		if err != nil {
 			return nil, err
@@ -262,6 +280,7 @@ func kickstartIngestFunc(cmd *cobra.Command, configPath string, sessions []ftue.
 		answers := deriveKickstartAnswers(cfg, sessions)
 		return runner(ctx, answers)
 	}
+	return local, progress
 }
 
 // deriveKickstartAnswers translates the committed config.Selection into the

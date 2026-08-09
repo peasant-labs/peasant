@@ -119,6 +119,13 @@ func TestRunKickstartFlowPairsRetentionBeforeMount(t *testing.T) {
 
 				selected := false
 				for step := 0; step < 12; step++ {
+					if program.Phase() == kickstart.PhaseVisibility {
+						// Continue locally. The visibility prompt is a guided-only
+						// authentication offer and must not hide the later retention
+						// field this mounted contract is proving.
+						program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+						continue
+					}
 					view := ansiPattern.ReplaceAllString(program.View(), "")
 					if strings.Contains(view, row.SelectedOption) {
 						selected = true
