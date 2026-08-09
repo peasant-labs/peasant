@@ -37,6 +37,10 @@ type treeField struct {
 	// It is cached so sizing never has to walk the full forest for counts.
 	affordanceRows int
 	mounted        bool
+	// forestReady is true only after the mounted Tree accepts a successful load
+	// result. Loading, stale, foreign, and failed messages must never turn the
+	// current forest into a persisted selection.
+	forestReady bool
 
 	// facetKey is the Meta key the side gutter groups by (empty: no facet).
 	facetKey string
@@ -164,6 +168,7 @@ func (f *treeField) initCmd() tea.Cmd {
 	if !f.mounted {
 		return nil
 	}
+	f.forestReady = false
 	var loadCmd tea.Cmd
 	f.tree, loadCmd = f.tree.Load()
 	return tea.Batch(loadCmd, f.tree.Init())
@@ -255,12 +260,14 @@ func (f *treeField) capturesPrintableInput() bool {
 
 func (f *treeField) sync(d *Draft) {}
 
-// handle forwards a message to the live tree, then re-derives the selection
-// from the current forest and writes it back into the draft. The filter key is
-// answered first: it re-points the tree at a narrowed VIEW of the loaded forest
-// rather than reaching the tree as navigation.
+// handle forwards a message to the live tree before considering any Draft
+// write. A selection is derived only after the tree transitions from loading to
+// a successful result. The filter key is answered first: it re-points the tree
+// at a narrowed VIEW of the loaded forest rather than reaching the tree as
+// navigation.
 func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
+	wasLoading := f.tree.Loading()
 	if !f.handleFacetKey(msg) {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
@@ -269,16 +276,26 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		} else {
 			f.tree, cmd = f.tree.Update(msg)
 		}
-		f.captureForest(d)
 	} else if f.hasPreview() {
 		// A facet can move the cursor onto a different row without routing through
 		// PreviewSplit.Update, so explicitly refresh the body it now names.
 		cmd = f.split.Load()
 	}
+	if wasLoading && !f.tree.Loading() {
+		if f.tree.Err() == nil {
+			f.captureForest(d)
+			f.forestReady = true
+		} else {
+			f.forestReady = false
+		}
+	}
 	// The selection is re-derived after a facet change too, so what a commit
 	// would persist is always read from the whole forest - never left behind at
-	// whatever the last narrowed view happened to hold.
-	f.acc.Set(d.Working(), FromTreeNodes(f.selectionRoots()))
+	// whatever the last narrowed view happened to hold. A successfully-loaded
+	// empty forest has no new selection evidence, so it preserves the Draft.
+	if f.forestReady && len(f.full) > 0 {
+		f.acc.Set(d.Working(), FromTreeNodes(f.selectionRoots()))
+	}
 	return cmd
 }
 
@@ -301,14 +318,12 @@ func (f *treeField) handleFacetKey(msg tea.Msg) bool {
 	return true
 }
 
-// captureForest records a freshly-loaded forest as the full one and re-applies
-// the current facet to it. A load result is recognised by the tree's roots no
-// longer being the view the field last installed.
+// captureForest records a successfully-loaded forest as the full one and
+// re-applies the current facet to it. Its caller has already observed the live
+// Tree transition out of loading with no error, so nil roots mean a successful
+// empty scan rather than an absent result.
 func (f *treeField) captureForest(d *Draft) {
 	roots := f.tree.Roots()
-	if len(roots) == 0 || sameNodes(roots, f.view) {
-		return
-	}
 	// A config that existed when the Draft opened has a real saved selection:
 	// annotate it as tracked, then apply the current working selection to the
 	// checkboxes. On a first run there is no saved intent to label; preserve the
@@ -665,11 +680,33 @@ func (f *treeField) Dirty(d *Draft) bool {
 	return !selectionsEqual(w, b)
 }
 
-// Validate blocks the commit when the forest still contains a display-only
-// Conflict node, and otherwise checks the derived selection is internally
-// consistent. It inspects the WHOLE forest, so a conflict hidden by the current
-// facet still blocks.
+// Validate blocks commit until a successful scan has reached this mounted
+// field, then blocks when the forest contains a display-only Conflict node and
+// otherwise checks the derived selection. It inspects the WHOLE forest, so a
+// conflict hidden by the current facet still blocks.
 func (f *treeField) Validate(d *Draft) error {
+	if !f.forestReady {
+		if err := f.tree.Err(); err != nil {
+			return fmt.Errorf(
+				"transcript selection scan failed.\n"+
+					"what: the selection tree could not load the current transcript forest.\n"+
+					"why: the configured selection source returned: %v.\n"+
+					"where: settings.treeField.Validate (field %q).\n"+
+					"when: validating the final review before the atomic config commit.\n"+
+					"means: the existing buffered selection is preserved and no configuration is written.\n"+
+					"fix: resolve the reported scan problem, then restart this settings flow and wait for a successful scan.",
+				err, f.key)
+		}
+		return fmt.Errorf(
+			"transcript selection is not ready.\n"+
+				"what: the selection tree has not received a successful transcript scan result.\n"+
+				"why: the scan is still loading or its result has not reached the mounted field.\n"+
+				"where: settings.treeField.Validate (field %q).\n"+
+				"when: validating the final review before the atomic config commit.\n"+
+				"means: the existing buffered selection is preserved and no configuration is written.\n"+
+				"fix: wait for scanning to finish; if it does not, leave without saving and retry.",
+			f.key)
+	}
 	if HasConflict(f.selectionRoots()) {
 		return fmt.Errorf(
 			"unresolved transcript selection conflict.\n"+
