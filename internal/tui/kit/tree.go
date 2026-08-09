@@ -347,11 +347,10 @@ type TreeSource interface {
 }
 
 // treeLoadedMsg is the internal message a Tree's load command emits when a
-// [TreeSource.Load] returns. gen carries the load generation the command was
-// issued under so [Tree.Update] can drop a stale result (a load whose tree was
-// re-sourced or replaced before it returned) - the same generation-guard
-// pattern the preview slice uses.
+// [TreeSource.Load] returns. owner isolates concrete Tree instances; gen lets
+// that owner drop a stale load after it was re-sourced or replaced.
 type treeLoadedMsg struct {
+	owner asyncOwnerID
 	gen   uint64
 	nodes []*TreeNode
 	err   error
@@ -371,6 +370,7 @@ type Tree struct {
 	keymap  keymap.Keymap
 	src     TreeSource
 	spinner Spinner
+	owner   asyncOwnerID
 
 	roots     []*TreeNode
 	visible   []*TreeNode
@@ -388,9 +388,9 @@ type Tree struct {
 	height  int
 	focused bool
 	filter  TreeFilterState
-	// filterFallback remembers the row under the cursor when search starts. A
-	// query that temporarily yields no rows can therefore clear back to that row;
-	// a still-visible filtered cursor takes precedence.
+	// filterFallback remembers the row and viewport under the cursor when search
+	// starts, so clearing returns to that exact canonical context even when the
+	// projection temporarily showed a same-named row from another project.
 	filterFallback cursorAnchor
 	// projectionAnchor retains the canonical row and its viewport position for
 	// the lifetime of an external roots projection (for example, a harness
@@ -408,6 +408,7 @@ func NewTree(t theme.Theme, src TreeSource) Tree {
 		keymap:   keymap.Default(),
 		src:      src,
 		spinner:  NewSpinner(t, "scanning projects"),
+		owner:    nextAsyncOwnerID(),
 		expanded: map[*TreeNode]bool{},
 		width:    TreeMinSize.Width,
 		height:   TreeMinSize.Height,
@@ -438,12 +439,26 @@ func (t Tree) Init() tea.Cmd {
 	return nil
 }
 
+// OwnsAsync reports whether msg is an asynchronous result or active spinner
+// tick this exact Tree may consume. Result ownership is instance-specific;
+// value copies keep the same immutable owner identity.
+func (t Tree) OwnsAsync(msg tea.Msg) bool {
+	switch m := msg.(type) {
+	case treeLoadedMsg:
+		return t.owner.valid() && m.owner.valid() && m.owner == t.owner
+	case spinner.TickMsg:
+		return t.loading && t.spinner.ownsTick(m)
+	default:
+		return false
+	}
+}
+
 // Load begins (or restarts) a scan: it cancels any in-flight load, opens a
 // fresh cancellable context, bumps the load generation, marks the tree
 // loading, and returns the command that runs [TreeSource.Load] and emits its
-// result tagged with this generation. A result whose generation no longer
-// matches when it arrives is dropped by [Tree.Update] (the stale guard). Batch
-// the returned command with [Tree.Init] to also start the spinner.
+// result tagged with immutable owner identity and this generation. A foreign
+// owner or stale generation is dropped by [Tree.Update]. Batch the returned
+// command with [Tree.Init] to also start the spinner.
 func (t Tree) Load() (Tree, tea.Cmd) {
 	if t.cancel != nil {
 		t.cancel()
@@ -452,6 +467,7 @@ func (t Tree) Load() (Tree, tea.Cmd) {
 	t.cancel = cancel
 	t.gen++
 	gen := t.gen
+	owner := t.owner
 	t.loading = true
 	t.err = nil
 	t.projectionAnchor = cursorAnchor{depth: -1}
@@ -459,7 +475,7 @@ func (t Tree) Load() (Tree, tea.Cmd) {
 	src := t.src
 	cmd := func() tea.Msg {
 		nodes, err := src.Load(ctx)
-		return treeLoadedMsg{gen: gen, nodes: nodes, err: err}
+		return treeLoadedMsg{owner: owner, gen: gen, nodes: nodes, err: err}
 	}
 	return t, cmd
 }
@@ -548,7 +564,7 @@ func (t Tree) containsAnchor(anchor cursorAnchor) bool {
 }
 
 func (t Tree) rowMatchesAnchor(row treeRow, anchor cursorAnchor) bool {
-	return t.canonicalNode(row.node) == anchor.node || (row.node.ID == anchor.id && row.depth == anchor.depth)
+	return anchor.node != nil && t.canonicalNode(row.node) == anchor.node
 }
 
 // Focus gives the Tree keyboard focus.
@@ -598,6 +614,11 @@ func (t Tree) VisibleRoots() []*TreeNode { return t.renderRoots() }
 
 // Cursor reports the current cursor index into the visible (expanded) rows.
 func (t Tree) Cursor() int { return t.cursor }
+
+// ViewportOffset reports the first visible row index in the current projection.
+// It is observable scroll state used by hosts that preserve a canonical cursor
+// across view-only projections.
+func (t Tree) ViewportOffset() int { return t.offset }
 
 // Scope reports the typed Project, Branch, or Session level text search targets.
 func (t Tree) Scope() TreeScope { return t.filter.Scope }
@@ -823,6 +844,12 @@ var _ keymap.Availability = Tree{}
 func (t Tree) Update(msg tea.Msg) (Tree, tea.Cmd) {
 	switch m := msg.(type) {
 	case treeLoadedMsg:
+		// Instance ownership is checked before generation. Two newly-mounted
+		// trees both begin at generation one, so generation alone cannot
+		// distinguish their first completions.
+		if !t.owner.valid() || !m.owner.valid() || m.owner != t.owner {
+			return t, nil
+		}
 		// Stale guard: a result whose generation no longer matches was
 		// re-sourced or replaced before it returned - drop it.
 		if m.gen != t.gen {
@@ -971,9 +998,13 @@ func (t Tree) handleFilterKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 // clearFilter returns to the current unfiltered roots without changing scope,
 // expansion, or any node's checkbox state.
 func (t *Tree) clearFilter() {
+	anchor := t.filterFallback
+	if anchor.depth < 0 {
+		anchor = t.currentAnchor()
+	}
 	t.filter.Query = ""
 	t.filter.Mode = TreeFilterInactive
-	t.applyTextProjection(true)
+	t.applyTextProjectionAt(anchor)
 	t.filterFallback = cursorAnchor{depth: -1}
 }
 
@@ -1169,13 +1200,14 @@ func (t Tree) canonicalNode(node *TreeNode) *TreeNode {
 	return canonicalProjectionOrigin(node)
 }
 
-// cursorAnchor records enough identity to keep the cursor on the same row when
-// a projection changes. Pointer identity is preferred; stable id+depth is a
-// fallback for a shallow ancestor copy.
+// cursorAnchor records canonical pointer identity and depth so projection
+// changes can keep the same row. Shallow projection ancestors resolve through
+// projectionOrigin; display IDs are deliberately excluded because common
+// branch names such as main and develop repeat under different projects.
 type cursorAnchor struct {
-	node  *TreeNode
-	id    string
-	depth int
+	node   *TreeNode
+	depth  int
+	offset int
 }
 
 func (t Tree) currentAnchor() cursorAnchor {
@@ -1184,7 +1216,7 @@ func (t Tree) currentAnchor() cursorAnchor {
 		return cursorAnchor{depth: -1}
 	}
 	row := rows[t.cursor]
-	return cursorAnchor{node: t.canonicalNode(row.node), id: row.node.ID, depth: row.depth}
+	return cursorAnchor{node: t.canonicalNode(row.node), depth: row.depth, offset: t.offset}
 }
 
 // applyTextProjection rebuilds the current-scope text view from the installed
@@ -1198,6 +1230,10 @@ func (t *Tree) applyTextProjection(preserveCursor bool) {
 			anchor = t.filterFallback
 		}
 	}
+	t.applyTextProjectionAt(anchor)
+}
+
+func (t *Tree) applyTextProjectionAt(anchor cursorAnchor) {
 	t.recompute()
 	query := strings.TrimSpace(t.filter.Query)
 	if query == "" {
@@ -1210,10 +1246,12 @@ func (t *Tree) applyTextProjection(preserveCursor bool) {
 	t.recompute()
 	rows := t.visibleRows()
 	t.cursor = 0
-	if preserveCursor && anchor.depth >= 0 {
+	t.offset = 0
+	if anchor.depth >= 0 {
 		for i, row := range rows {
-			if t.canonicalNode(row.node) == anchor.node || (row.node.ID == anchor.id && row.depth == anchor.depth) {
+			if t.canonicalNode(row.node) == anchor.node {
 				t.cursor = i
+				t.offset = anchor.offset
 				break
 			}
 		}

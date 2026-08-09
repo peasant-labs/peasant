@@ -1,0 +1,32 @@
+expectedCaseCount: 4
+expectedRequiredHintCount: 4
+expectedForbiddenModalCount: 2
+requiredHints:
+  - 'backspace: delete'
+  - 'enter: keep filter'
+  - 'esc: clear filter'
+  - 'tab: next field'
+forbiddenModals:
+  - 'discard changes and leave config?'
+  - 'keyboard shortcuts'
+cases:
+  - name: config-search-accepts-quit-letter
+    input: q
+    wantEditing: 'search project: q'
+    wantKept: 'filter project: q'
+    forbiddenHint: 'q: quit'
+  - name: config-search-accepts-back-letter
+    input: b
+    wantEditing: 'search project: b'
+    wantKept: 'filter project: b'
+    forbiddenHint: 'esc: back'
+  - name: config-search-accepts-help-punctuation
+    input: '?'
+    wantEditing: 'search project: ?'
+    wantKept: 'filter project: ?'
+    forbiddenHint: '?: help'
+  - name: config-search-accepts-facet-letter
+    input: f
+    wantEditing: 'search project: f'
+    wantKept: 'filter project: f'
+    forbiddenHint: 'f: filter'

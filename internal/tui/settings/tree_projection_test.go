@@ -16,6 +16,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -26,8 +27,9 @@ var treeProjectionData []byte
 
 const (
 	expectedTreeProjectionSessionCount             = 4
-	expectedTreeProjectionCaseCount                = 13
+	expectedTreeProjectionCaseCount                = 14
 	expectedTreeProjectionAnchorMutationProbeCount = 1
+	expectedTreeProjectionDuplicateProbeCount      = 1
 )
 
 type projectionSession struct {
@@ -46,42 +48,54 @@ type projectionRowAssertion struct {
 }
 
 type projectionCase struct {
-	Name                 string                   `yaml:"name"`
-	Keys                 []string                 `yaml:"keys"`
-	Height               int                      `yaml:"height"`
-	WorkingSelection     *config.SelectionConfig  `yaml:"workingSelection"`
-	ExpectPane           string                   `yaml:"expectPane"`
-	ExpectCursorID       string                   `yaml:"expectCursorID"`
-	ExpectPreviewID      string                   `yaml:"expectPreviewID"`
-	ExpectScope          string                   `yaml:"expectScope"`
-	ExpectMode           string                   `yaml:"expectMode"`
-	ExpectQuery          string                   `yaml:"expectQuery"`
-	ExpectSelected       []string                 `yaml:"expectSelected"`
-	ExpectUnselected     []string                 `yaml:"expectUnselected"`
-	CheckHiddenSelected  bool                     `yaml:"checkHiddenSelected"`
-	ExpectHiddenSelected int                      `yaml:"expectHiddenSelected"`
-	CheckOverflow        bool                     `yaml:"checkOverflow"`
-	ExpectOverflowTop    bool                     `yaml:"expectOverflowTop"`
-	ExpectOverflowBottom bool                     `yaml:"expectOverflowBottom"`
-	AnchorMutationProbe  bool                     `yaml:"anchorMutationProbe"`
-	WantVisibleRows      []string                 `yaml:"wantVisibleRows"`
-	WantMissingRows      []string                 `yaml:"wantMissingRows"`
-	WantViewContains     []string                 `yaml:"wantViewContains"`
-	WantViewMissing      []string                 `yaml:"wantViewMissing"`
-	RowAssertions        []projectionRowAssertion `yaml:"rowAssertions"`
+	Name                    string                   `yaml:"name"`
+	Keys                    []string                 `yaml:"keys"`
+	Height                  int                      `yaml:"height"`
+	WorkingSelection        *config.SelectionConfig  `yaml:"workingSelection"`
+	ExpectPane              string                   `yaml:"expectPane"`
+	ExpectCursorID          string                   `yaml:"expectCursorID"`
+	ExpectPreviewID         string                   `yaml:"expectPreviewID"`
+	ExpectScope             string                   `yaml:"expectScope"`
+	ExpectMode              string                   `yaml:"expectMode"`
+	ExpectQuery             string                   `yaml:"expectQuery"`
+	ExpectSelected          []string                 `yaml:"expectSelected"`
+	ExpectUnselected        []string                 `yaml:"expectUnselected"`
+	CheckHiddenSelected     bool                     `yaml:"checkHiddenSelected"`
+	ExpectHiddenSelected    int                      `yaml:"expectHiddenSelected"`
+	CheckOverflow           bool                     `yaml:"checkOverflow"`
+	ExpectOverflowTop       bool                     `yaml:"expectOverflowTop"`
+	ExpectOverflowBottom    bool                     `yaml:"expectOverflowBottom"`
+	AnchorMutationProbe     bool                     `yaml:"anchorMutationProbe"`
+	DuplicateAnchorProbe    bool                     `yaml:"duplicateAnchorProbe"`
+	SetupKeys               []string                 `yaml:"setupKeys"`
+	FacetProjectionKeys     []string                 `yaml:"facetProjectionKeys"`
+	FacetClearKeys          []string                 `yaml:"facetClearKeys"`
+	ProjectionKeys          []string                 `yaml:"projectionKeys"`
+	ClearKeys               []string                 `yaml:"clearKeys"`
+	AnchorProjectID         string                   `yaml:"anchorProjectID"`
+	SurvivingProjectID      string                   `yaml:"survivingProjectID"`
+	DuplicateBranchID       string                   `yaml:"duplicateBranchID"`
+	ExpectProjectedCursorID string                   `yaml:"expectProjectedCursorID"`
+	ExpectMinimumOffset     int                      `yaml:"expectMinimumOffset"`
+	WantVisibleRows         []string                 `yaml:"wantVisibleRows"`
+	WantMissingRows         []string                 `yaml:"wantMissingRows"`
+	WantViewContains        []string                 `yaml:"wantViewContains"`
+	WantViewMissing         []string                 `yaml:"wantViewMissing"`
+	RowAssertions           []projectionRowAssertion `yaml:"rowAssertions"`
 }
 
 type projectionDocument struct {
-	Fixture                          string                 `yaml:"fixture"`
-	ExpectedSessionCount             int                    `yaml:"expectedSessionCount"`
-	ExpectedCaseCount                int                    `yaml:"expectedCaseCount"`
-	ExpectedAnchorMutationProbeCount int                    `yaml:"expectedAnchorMutationProbeCount"`
-	Width                            int                    `yaml:"width"`
-	Height                           int                    `yaml:"height"`
-	SavedSelection                   config.SelectionConfig `yaml:"savedSelection"`
-	ImportedSessionIDs               []string               `yaml:"importedSessionIDs"`
-	Sessions                         []projectionSession    `yaml:"sessions"`
-	Cases                            []projectionCase       `yaml:"cases"`
+	Fixture                           string                 `yaml:"fixture"`
+	ExpectedSessionCount              int                    `yaml:"expectedSessionCount"`
+	ExpectedCaseCount                 int                    `yaml:"expectedCaseCount"`
+	ExpectedAnchorMutationProbeCount  int                    `yaml:"expectedAnchorMutationProbeCount"`
+	ExpectedDuplicateAnchorProbeCount int                    `yaml:"expectedDuplicateAnchorProbeCount"`
+	Width                             int                    `yaml:"width"`
+	Height                            int                    `yaml:"height"`
+	SavedSelection                    config.SelectionConfig `yaml:"savedSelection"`
+	ImportedSessionIDs                []string               `yaml:"importedSessionIDs"`
+	Sessions                          []projectionSession    `yaml:"sessions"`
+	Cases                             []projectionCase       `yaml:"cases"`
 }
 
 func projectionValuesPresent(values ...[]string) bool {
@@ -129,6 +143,7 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 	}
 	seenCases := map[string]bool{}
 	anchorMutationProbes := 0
+	duplicateAnchorProbes := 0
 	for _, c := range doc.Cases {
 		if c.Name == "" || c.ExpectScope == "" || c.ExpectMode == "" || seenCases[c.Name] ||
 			!projectionValuesPresent(c.Keys, c.ExpectSelected, c.ExpectUnselected, c.WantVisibleRows, c.WantMissingRows, c.WantViewContains, c.WantViewMissing) {
@@ -137,6 +152,15 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 		seenCases[c.Name] = true
 		if c.AnchorMutationProbe {
 			anchorMutationProbes++
+		}
+		if c.DuplicateAnchorProbe {
+			duplicateAnchorProbes++
+			if len(c.SetupKeys) == 0 || len(c.FacetProjectionKeys) == 0 || len(c.FacetClearKeys) == 0 ||
+				len(c.ProjectionKeys) == 0 || len(c.ClearKeys) == 0 ||
+				!projectionValuesPresent(c.SetupKeys, c.FacetProjectionKeys, c.FacetClearKeys, c.ProjectionKeys, c.ClearKeys) || c.AnchorProjectID == "" ||
+				c.SurvivingProjectID == "" || c.DuplicateBranchID == "" || c.ExpectProjectedCursorID == "" || c.ExpectMinimumOffset < 1 {
+				return doc, fmt.Errorf("tree_projection.yaml duplicate-anchor probe %q is incomplete", c.Name)
+			}
 		}
 		if c.WorkingSelection != nil && !c.WorkingSelection.Mode.IsValid() {
 			return doc, fmt.Errorf("tree_projection.yaml case %q has invalid working selection mode %q", c.Name, c.WorkingSelection.Mode)
@@ -154,6 +178,10 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 	if doc.ExpectedAnchorMutationProbeCount != expectedTreeProjectionAnchorMutationProbeCount || anchorMutationProbes != expectedTreeProjectionAnchorMutationProbeCount {
 		return doc, fmt.Errorf("tree_projection.yaml anchor mutation probes: declared=%d actual=%d required=%d",
 			doc.ExpectedAnchorMutationProbeCount, anchorMutationProbes, expectedTreeProjectionAnchorMutationProbeCount)
+	}
+	if doc.ExpectedDuplicateAnchorProbeCount != expectedTreeProjectionDuplicateProbeCount || duplicateAnchorProbes != expectedTreeProjectionDuplicateProbeCount {
+		return doc, fmt.Errorf("tree_projection.yaml duplicate-anchor probes: declared=%d actual=%d required=%d",
+			doc.ExpectedDuplicateAnchorProbeCount, duplicateAnchorProbes, expectedTreeProjectionDuplicateProbeCount)
 	}
 	return doc, nil
 }
@@ -256,6 +284,8 @@ func projectionKey(t *testing.T, value string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
 	case "backspace":
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "ctrl+h":
@@ -440,6 +470,153 @@ func TestTreeProjectionFixtureAnchorProbeDetectsCursorReset(t *testing.T) {
 	}
 }
 
+func projectionBranchUnder(t *testing.T, roots []*kit.TreeNode, projectID, branchID string) *kit.TreeNode {
+	t.Helper()
+	for _, root := range roots {
+		if root.ID != projectID {
+			continue
+		}
+		for _, branch := range root.Children {
+			if branch.ID == branchID {
+				return branch
+			}
+		}
+		t.Fatalf("project %q has no branch %q", projectID, branchID)
+	}
+	t.Fatalf("projection forest has no project %q", projectID)
+	return nil
+}
+
+func projectionHasBranchUnder(roots []*kit.TreeNode, projectID, branchID string) bool {
+	for _, root := range roots {
+		if root.ID != projectID {
+			continue
+		}
+		for _, branch := range root.Children {
+			if branch.ID == branchID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func projectionNodeID(node *kit.TreeNode) string {
+	if node == nil {
+		return ""
+	}
+	return node.ID
+}
+
+func projectionActionAvailable(actions []keymap.ActionID, target keymap.ActionID) bool {
+	for _, action := range actions {
+		if action == target {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTreeProjectionDuplicateBranchRestoresExactCanonicalAnchor(t *testing.T) {
+	doc := loadTreeProjection(t)
+	probes := 0
+	for _, c := range doc.Cases {
+		if !c.DuplicateAnchorProbe {
+			continue
+		}
+		probes++
+		t.Run(c.Name, func(t *testing.T) {
+			flow, draft, field := mountedProjectionFlow(t, doc, c)
+			canonicalRoots := field.tree.Roots()
+			anchoredBranch := projectionBranchUnder(t, canonicalRoots, c.AnchorProjectID, c.DuplicateBranchID)
+			survivingBranch := projectionBranchUnder(t, canonicalRoots, c.SurvivingProjectID, c.DuplicateBranchID)
+			if anchoredBranch == survivingBranch || anchoredBranch.ID != survivingBranch.ID {
+				t.Fatal("duplicate-branch fixture does not contain distinct canonical pointers with one shared ID")
+			}
+
+			flow = driveProjectionFlow(t, flow, c.SetupKeys)
+			current, ok := field.tree.CurrentNode()
+			if !ok || current != anchoredBranch {
+				t.Fatalf("setup cursor=%p/%v want anchored branch pointer=%p", current, ok, anchoredBranch)
+			}
+			originalOffset := field.tree.ViewportOffset()
+			if originalOffset < c.ExpectMinimumOffset {
+				t.Fatalf("setup viewport offset=%d want at least %d", originalOffset, c.ExpectMinimumOffset)
+			}
+			originalCollapsed := projectionActionAvailable(field.tree.AvailableActions(), keymap.ActionExpand)
+			if !originalCollapsed {
+				t.Fatal("setup did not collapse the anchored duplicate branch")
+			}
+			previewBefore, previewOK := field.split.HighlightedID()
+			if !previewOK || previewBefore != c.DuplicateBranchID {
+				t.Fatalf("setup preview=%q/%t want duplicate branch %q", previewBefore, previewOK, c.DuplicateBranchID)
+			}
+			selectionBefore, err := yaml.Marshal(draft.Working().Selection)
+			if err != nil {
+				t.Fatalf("marshal selection before duplicate projection: %v", err)
+			}
+
+			assertProjected := func(route string) {
+				t.Helper()
+				visibleRoots := field.tree.VisibleRoots()
+				if projectionHasBranchUnder(visibleRoots, c.AnchorProjectID, c.DuplicateBranchID) {
+					t.Fatalf("%s projection retained duplicate branch under hidden project %q", route, c.AnchorProjectID)
+				}
+				if !projectionHasBranchUnder(visibleRoots, c.SurvivingProjectID, c.DuplicateBranchID) {
+					t.Fatalf("%s projection dropped duplicate branch under surviving project %q", route, c.SurvivingProjectID)
+				}
+				projected, ok := field.tree.CurrentNode()
+				if !ok || projectionNodeID(projected) != c.ExpectProjectedCursorID || projected == survivingBranch {
+					t.Fatalf("%s projected cursor=%q/%p want project %q, never surviving duplicate %p",
+						route, projectionNodeID(projected), projected, c.ExpectProjectedCursorID, survivingBranch)
+				}
+				projectedPreview, projectedPreviewOK := field.split.HighlightedID()
+				if !projectedPreviewOK || projectedPreview != c.ExpectProjectedCursorID {
+					t.Fatalf("%s projected preview=%q/%t want %q", route, projectedPreview, projectedPreviewOK, c.ExpectProjectedCursorID)
+				}
+			}
+			assertRestored := func(route string) {
+				t.Helper()
+				restored, ok := field.tree.CurrentNode()
+				if !ok || restored != anchoredBranch {
+					t.Fatalf("%s restored cursor=%q/%p/%t want exact anchored branch pointer %q/%p",
+						route, projectionNodeID(restored), restored, ok, anchoredBranch.ID, anchoredBranch)
+				}
+				if got := field.tree.ViewportOffset(); got != originalOffset {
+					t.Fatalf("%s restored viewport offset=%d want exact setup offset=%d", route, got, originalOffset)
+				}
+				if collapsed := projectionActionAvailable(field.tree.AvailableActions(), keymap.ActionExpand); collapsed != originalCollapsed {
+					t.Fatalf("%s restored expansion state=%t want setup state=%t", route, collapsed, originalCollapsed)
+				}
+				previewAfter, previewAfterOK := field.split.HighlightedID()
+				if !previewAfterOK || previewAfter != previewBefore {
+					t.Fatalf("%s restored preview=%q/%t want setup preview=%q", route, previewAfter, previewAfterOK, previewBefore)
+				}
+				selectionAfter, err := yaml.Marshal(draft.Working().Selection)
+				if err != nil {
+					t.Fatalf("marshal selection after %s duplicate projection: %v", route, err)
+				}
+				if !bytes.Equal(selectionAfter, selectionBefore) {
+					t.Fatalf("%s duplicate projection changed selection\nbefore=%s\nafter=%s", route, selectionBefore, selectionAfter)
+				}
+			}
+
+			flow = driveProjectionFlow(t, flow, c.FacetProjectionKeys)
+			assertProjected("facet")
+			flow = driveProjectionFlow(t, flow, c.FacetClearKeys)
+			assertRestored("facet")
+			flow = driveProjectionFlow(t, flow, c.ProjectionKeys)
+			assertProjected("text")
+			flow = driveProjectionFlow(t, flow, c.ClearKeys)
+			_ = flow
+			assertRestored("text")
+		})
+	}
+	if probes != expectedTreeProjectionDuplicateProbeCount {
+		t.Fatalf("duplicate-anchor probes=%d want=%d", probes, expectedTreeProjectionDuplicateProbeCount)
+	}
+}
+
 func stripANSIForSettings(value string) string {
 	var out strings.Builder
 	inEscape := false
@@ -506,5 +683,17 @@ func TestTreeProjectionFixtureEnforcesAnchorMutationProbeCount(t *testing.T) {
 	}
 	if _, err := decodeTreeProjection(mutated); err == nil {
 		t.Fatal("tree projection fixture accepted a mismatched anchor-probe count")
+	}
+}
+
+func TestTreeProjectionFixtureEnforcesDuplicateAnchorProbeCount(t *testing.T) {
+	declared := []byte(fmt.Sprintf("expectedDuplicateAnchorProbeCount: %d", expectedTreeProjectionDuplicateProbeCount))
+	changed := []byte(fmt.Sprintf("expectedDuplicateAnchorProbeCount: %d", expectedTreeProjectionDuplicateProbeCount+1))
+	mutated := bytes.Replace(treeProjectionData, declared, changed, 1)
+	if bytes.Equal(mutated, treeProjectionData) {
+		t.Fatal("tree projection duplicate-anchor count mutation did not alter the fixture")
+	}
+	if _, err := decodeTreeProjection(mutated); err == nil {
+		t.Fatal("tree projection fixture accepted a mismatched duplicate-anchor count")
 	}
 }

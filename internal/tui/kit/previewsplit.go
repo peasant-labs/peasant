@@ -229,6 +229,9 @@ func (p *TreeLeftPane) Update(msg tea.Msg) (LeftPane, tea.Cmd) {
 	return p, cmd
 }
 
+// OwnsAsync reports whether the wrapped Tree owns msg.
+func (p *TreeLeftPane) OwnsAsync(msg tea.Msg) bool { return p.tree.OwnsAsync(msg) }
+
 // View renders the wrapped tree.
 func (p *TreeLeftPane) View() string { return p.tree.View() }
 
@@ -278,18 +281,17 @@ func (f PaneFocus) String() string {
 	}
 }
 
-// previewLoadedMsg is the result of one ContentSource.Content call, tagged
-// with the sequence number of the load that requested it. PreviewSplit
-// compares seq against its current load sequence on receipt and DROPS any
-// result whose seq is stale - a late result for a since-de-highlighted item
-// never overwrites the current preview. It is unexported: tests drive it by
-// running the real load command the split emits, so the guard is exercised
-// end-to-end rather than by hand-built messages.
+// previewLoadedMsg is the result of one ContentSource.Content call, tagged with
+// immutable split ownership and the requesting load sequence. PreviewSplit
+// drops foreign owners before applying its stale-sequence guard, so neither a
+// sibling split nor a since-de-highlighted item can overwrite the preview. It
+// is unexported: tests drive it by running the real load command the split emits.
 type previewLoadedMsg struct {
-	seq  int
-	id   string
-	body PreviewBody
-	err  error
+	owner asyncOwnerID
+	seq   int
+	id    string
+	body  PreviewBody
+	err   error
 }
 
 // PreviewSplit is an embedded (non-floating) two-pane surface: a navigable
@@ -305,6 +307,7 @@ type PreviewSplit struct {
 	theme  theme.Theme
 	keymap keymap.Keymap
 	left   LeftPane
+	owner  asyncOwnerID
 	// source and bodies are the two mutually-exclusive load seams: a
 	// ContentSource yields a flat string the pane lays out, a BodySource yields
 	// a PreviewBody that lays itself out. Exactly one is set by the two
@@ -358,6 +361,7 @@ func newPreviewSplit(t theme.Theme, left LeftPane) PreviewSplit {
 		theme:   t,
 		keymap:  keymap.Default(),
 		left:    left,
+		owner:   nextAsyncOwnerID(),
 		spinner: NewSpinner(t, "loading preview"),
 		ratio:   defaultPreviewRatio,
 		width:   PreviewSplitMinSize.Width,
@@ -414,6 +418,24 @@ func (p PreviewSplit) HighlightedID() (string, bool) { return p.left.Highlighted
 
 // Loading reports whether a preview load is currently in flight.
 func (p PreviewSplit) Loading() bool { return p.loading }
+
+// OwnsAsync reports whether msg belongs to this split's preview loader or to
+// the asynchronous left pane it embeds. Result messages are owner-tagged;
+// spinner ticks remain guarded by the wrapped bubbles spinner identities.
+func (p PreviewSplit) OwnsAsync(msg tea.Msg) bool {
+	switch m := msg.(type) {
+	case previewLoadedMsg:
+		return p.owner.valid() && m.owner.valid() && m.owner == p.owner
+	case spinner.TickMsg:
+		if p.loading && p.spinner.ownsTick(m) {
+			return true
+		}
+	}
+	if left, ok := p.left.(interface{ OwnsAsync(tea.Msg) bool }); ok {
+		return left.OwnsAsync(msg)
+	}
+	return false
+}
 
 // SetSize sets the inner region the split draws into and re-sizes both panes.
 func (p *PreviewSplit) SetSize(width, height int) {
@@ -545,6 +567,12 @@ func (p *PreviewSplit) Load() tea.Cmd { return p.startLoad(true) }
 func (p PreviewSplit) Update(msg tea.Msg) (PreviewSplit, tea.Cmd) {
 	switch m := msg.(type) {
 	case previewLoadedMsg:
+		// Owner identity precedes the stale-sequence check. Two independent
+		// splits both begin at sequence one, so sequence alone cannot isolate
+		// their first results.
+		if !p.owner.valid() || !m.owner.valid() || m.owner != p.owner {
+			return p, nil
+		}
 		if m.seq != p.seq {
 			// Stale: a later highlight superseded this request. Drop it so a
 			// late result never overwrites the current preview.
@@ -662,7 +690,7 @@ func (p *PreviewSplit) startLoad(force bool) tea.Cmd {
 	p.loadErr = nil
 	p.scroll = 0
 	seq := p.seq
-	return tea.Batch(p.loadCmd(seq, id), p.spinner.Tick())
+	return tea.Batch(p.loadCmd(p.owner, seq, id), p.spinner.Tick())
 }
 
 // loadCmd builds the command that fetches one preview off the UI goroutine,
@@ -670,12 +698,12 @@ func (p *PreviewSplit) startLoad(force bool) tea.Cmd {
 // [BodySource] is asked for a structured body; a [ContentSource] is asked for a
 // string, which becomes a [textBody] so both paths reach the pane as one type
 // and are laid out at draw-time width alike.
-func (p PreviewSplit) loadCmd(seq int, id string) tea.Cmd {
+func (p PreviewSplit) loadCmd(owner asyncOwnerID, seq int, id string) tea.Cmd {
 	if p.bodies != nil {
 		src := p.bodies
 		return func() tea.Msg {
 			body, err := src.Body(id)
-			return previewLoadedMsg{seq: seq, id: id, body: body, err: err}
+			return previewLoadedMsg{owner: owner, seq: seq, id: id, body: body, err: err}
 		}
 	}
 	// The width handed to a ContentSource stays a HINT: layout happens in
@@ -685,7 +713,7 @@ func (p PreviewSplit) loadCmd(seq int, id string) tea.Cmd {
 	render := p.bodyRenderer
 	return func() tea.Msg {
 		content, err := src.Content(id, rw)
-		return previewLoadedMsg{seq: seq, id: id, body: textBody{text: content, render: render}, err: err}
+		return previewLoadedMsg{owner: owner, seq: seq, id: id, body: textBody{text: content, render: render}, err: err}
 	}
 }
 

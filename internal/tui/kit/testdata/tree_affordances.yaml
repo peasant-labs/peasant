@@ -163,10 +163,12 @@ cases:
     expectScope: session
     expectMode: inactive
     expectQuery: ""
+    expectCursorID: alpha-ingest
     expectVisibleIDs:
       [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
        project-beta, beta-develop, beta-audit]
     expectOverflowTop: true
+    expectOverflowBottom: true
     wantAvailable: [prev-scope, search-scope, toggle]
     wantUnavailable: [clear-filter, keep-filter, delete-filter]
 

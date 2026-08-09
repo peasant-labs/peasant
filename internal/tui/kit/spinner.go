@@ -67,6 +67,11 @@ var _ Sizeable = (*Spinner)(nil)
 // forwarding.
 func (s Spinner) Tick() tea.Cmd { return s.inner.Tick }
 
+// ownsTick reports whether msg was emitted by this concrete spinner model.
+// Bubbles includes the model ID in every tick so sibling async components can
+// reject each other's animation work before updating.
+func (s Spinner) ownsTick(msg spinner.TickMsg) bool { return msg.ID == s.inner.ID() }
+
 // Update advances the wrapped spinner on its tick message and returns the
 // concrete Spinner plus the command for the next frame. Non-tick messages
 // leave it unchanged.

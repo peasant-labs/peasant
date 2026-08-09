@@ -3,8 +3,9 @@
 # text query, and harness view are intentionally independent axes.
 fixture: faceted
 expectedSessionCount: 4
-expectedCaseCount: 13
+expectedCaseCount: 14
 expectedAnchorMutationProbeCount: 1
+expectedDuplicateAnchorProbeCount: 1
 width: 128
 height: 28
 savedSelection:
@@ -109,6 +110,30 @@ cases:
     rowAssertions:
       - label: ingest pipeline refactor
         wantContains: ["▸", already imported]
+
+  - name: duplicate-branch-projection-restores-the-hidden-canonical-anchor
+    keys: [down, down, down, down, down, down, down, left, f, f, f]
+    setupKeys: [down, down, down, down, down, down, down, left]
+    facetProjectionKeys: [f]
+    facetClearKeys: [f, f]
+    projectionKeys: ["/", l, a, b, s, "/", p, e, a, s, a, n, t, enter]
+    clearKeys: [esc]
+    duplicateAnchorProbe: true
+    anchorProjectID: github.com/peasant-labs/village
+    survivingProjectID: github.com/peasant-labs/peasant
+    duplicateBranchID: develop
+    expectProjectedCursorID: github.com/peasant-labs/peasant
+    expectMinimumOffset: 1
+    height: 12
+    expectPane: left
+    expectCursorID: develop
+    expectPreviewID: develop
+    expectScope: project
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    wantVisibleRows: [share bridge scan]
+    wantMissingRows: [governance audit trigger]
 
   - name: text-filter-and-toggle-mutate-the-canonical-forest-once
     keys: ["]", "]", "/", s, h, a, r, e, enter, down, down, space]

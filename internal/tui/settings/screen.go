@@ -147,13 +147,15 @@ func (s Screen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	if _, ok := msg.(SavedMsg); ok {
 		return s, nil
 	}
-	if s.confirming {
-		return s.updateConfirm(msg)
-	}
-
 	keyMsg, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
+		// Save completion stays frozen above, but a discard confirmation owns
+		// keyboard input only. Component-owned async results must still reach
+		// retained fields while the modal is visible.
 		return s.forwardAsync(msg)
+	}
+	if s.confirming {
+		return s.updateConfirm(msg)
 	}
 	if s.helping {
 		if action, ok := keymap.Match(keymap.Default(), keyMsg, helpAvailability{}); ok {
@@ -163,6 +165,9 @@ func (s Screen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 		}
 		return s, nil
+	}
+	if keyMsg.Text != "" && s.focusedFieldCapturesPrintableInput() {
+		return s.forwardFocused(msg)
 	}
 
 	action, matched := keymap.Match(keymap.Default(), keyMsg, s.availability())
@@ -408,19 +413,20 @@ func (s Screen) forwardFocused(msg tea.Msg) (Screen, tea.Cmd) {
 }
 
 func (s Screen) forwardAsync(msg tea.Msg) (Screen, tea.Cmd) {
-	var cmds []tea.Cmd
-	for _, section := range s.reg.Sections {
-		for _, fld := range section.Fields {
-			if cmd := fld.handle(s.draft, msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-	}
+	cmds := fieldAsyncCommands(s.reg, s.draft, msg)
 	s.recomputeSections()
 	if len(cmds) == 0 {
 		return s, nil
 	}
 	return s, tea.Batch(cmds...)
+}
+
+func (s Screen) focusedFieldCapturesPrintableInput() bool {
+	if s.navFocused || len(s.sections) == 0 || s.section < 0 || s.section >= len(s.sections) ||
+		s.focusField < 0 || s.focusField >= len(s.sections[s.section].Fields) {
+		return false
+	}
+	return s.sections[s.section].Fields[s.focusField].capturesPrintableInput()
 }
 
 func (s *Screen) recomputeSections() {
@@ -486,7 +492,7 @@ func (a screenAvailability) AvailableActions() []keymap.ActionID {
 		keymap.ActionQuit,
 		keymap.ActionHelp,
 	)
-	return dedupeActions(out)
+	return effectiveAvailability(dedupeActions(out), s.focusedFieldCapturesPrintableInput())
 }
 
 // View renders the section jump list and selected section inside one kit Frame.

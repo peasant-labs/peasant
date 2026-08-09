@@ -270,15 +270,41 @@ func (f *treeField) capturesPrintableInput() bool {
 
 func (f *treeField) sync(d *Draft) {}
 
-// handle forwards a message to the live tree before considering any Draft
-// write. A selection is derived only after the tree transitions from loading to
-// a successful result. The filter key is answered first: it re-points the tree
-// at a narrowed VIEW of the loaded forest rather than reaching the tree as
-// navigation.
+// handle accepts focused key input and delegates non-key messages through the
+// same owner-checking async capability. Presentations can route non-key work
+// directly through asyncField; callers using the general Field seam remain
+// isolated because foreign work is rejected before component update.
 func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
+	if _, ok := msg.(tea.KeyPressMsg); ok {
+		return f.handleMessage(d, msg, true)
+	}
+	return f.handleAsync(d, msg)
+}
+
+// handleAsync accepts only result/tick messages owned by this field's Tree or
+// PreviewSplit. A foreign owner is rejected before either component sees it,
+// and Draft changes are derived only when this Tree accepts its own load result.
+func (f *treeField) handleAsync(d *Draft, msg tea.Msg) tea.Cmd {
+	owned := f.tree.OwnsAsync(msg)
+	if f.hasPreview() {
+		owned = f.split.OwnsAsync(msg)
+	}
+	if !owned {
+		return nil
+	}
+	return f.handleMessage(d, msg, false)
+}
+
+var _ asyncField = (*treeField)(nil)
+
+// handleMessage advances the owned component. When allowFacet is true it also
+// handles the synchronous harness-view key before ordinary Tree dispatch.
+func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cmd {
 	var cmd tea.Cmd
 	wasLoading := f.tree.Loading()
-	if !f.handleFacetKey(msg) {
+	treeOwned := f.tree.OwnsAsync(msg)
+	facetHandled := allowFacet && f.handleFacetKey(msg)
+	if !facetHandled {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
 			// loads the body of whatever row the cursor ends on.
@@ -291,7 +317,8 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		// PreviewSplit.Update, so explicitly refresh the body it now names.
 		cmd = f.split.Load()
 	}
-	if wasLoading && !f.tree.Loading() {
+	acceptedTreeLoad := treeOwned && wasLoading && !f.tree.Loading()
+	if acceptedTreeLoad {
 		if f.tree.Err() == nil {
 			f.captureForest(d)
 			f.forestReady = true
@@ -303,7 +330,7 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	// would persist is always read from the whole forest - never left behind at
 	// whatever the last narrowed view happened to hold. A successfully-loaded
 	// empty forest has no new selection evidence, so it preserves the Draft.
-	if f.forestReady && len(f.full) > 0 {
+	if f.forestReady && len(f.full) > 0 && (allowFacet || acceptedTreeLoad) {
 		f.acc.Set(d.Working(), FromTreeNodes(f.selectionRoots()))
 	}
 	return cmd

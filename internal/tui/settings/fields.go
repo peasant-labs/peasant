@@ -97,6 +97,9 @@ func (f *toggleField) build(d *Draft) kit.Toggle {
 }
 
 func (f *toggleField) handle(d *Draft, msg tea.Msg) tea.Cmd {
+	if _, ok := msg.(tea.KeyPressMsg); !ok {
+		return nil
+	}
 	t := f.build(d)
 	t, cmd := t.Update(msg)
 	f.acc.Set(d.Working(), t.On())
@@ -154,6 +157,9 @@ func (f *textField) Dirty(d *Draft) bool {
 }
 
 func (f *textField) handle(d *Draft, msg tea.Msg) tea.Cmd {
+	if _, ok := msg.(tea.KeyPressMsg); !ok {
+		return nil
+	}
 	var cmd tea.Cmd
 	f.inner, cmd = f.inner.Update(msg)
 	f.acc.Set(d.Working(), f.inner.Value())
