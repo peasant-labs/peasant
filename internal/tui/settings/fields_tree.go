@@ -242,10 +242,20 @@ func (f *treeField) availableActions() []keymap.ActionID {
 	} else {
 		actions = f.tree.AvailableActions()
 	}
-	if f.facetKey != "" {
+	if f.facetAvailable() {
 		actions = append(actions, keymap.ActionFilter)
 	}
 	return actions
+}
+
+// facetAvailable keeps facet dispatch and its advertised key in lockstep. A
+// facet has no effect before a successful non-empty load, while search text is
+// being edited, or while the preview pane owns input.
+func (f *treeField) facetAvailable() bool {
+	if f.facetKey == "" || !f.forestReady || len(f.facetValues()) == 0 || f.tree.FilterState().Editing() {
+		return false
+	}
+	return !f.hasPreview() || f.split.ActivePane() == kit.PaneLeft
 }
 
 // capturesPrintableInput is the Flow field-input contract: while the tree pane
@@ -302,7 +312,7 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 // handleFacetKey answers the filter key when a facet is configured, reporting
 // whether it consumed the message.
 func (f *treeField) handleFacetKey(msg tea.Msg) bool {
-	if f.facetKey == "" || f.tree.FilterState().Editing() {
+	if !f.facetAvailable() {
 		return false
 	}
 	keyMsg, ok := msg.(tea.KeyPressMsg)
@@ -324,17 +334,16 @@ func (f *treeField) handleFacetKey(msg tea.Msg) bool {
 // empty scan rather than an absent result.
 func (f *treeField) captureForest(d *Draft) {
 	roots := f.tree.Roots()
-	// A config that existed when the Draft opened has a real saved selection:
-	// annotate it as tracked, then apply the current working selection to the
-	// checkboxes. On a first run there is no saved intent to label; preserve the
-	// source's initial states unless this is a registry rebuild after the user has
-	// already edited the same Draft.
+	// A config that existed when the Draft opened has a real saved selection to
+	// annotate as tracked. WithDraftSelectionState always makes this field the
+	// sole owner of applying the current working selection, including a first-run
+	// Draft whose default is mode:all and a registry rebuilt after user edits.
 	baseline := f.acc.Get(d.Baseline())
 	working := f.acc.Get(d.Working())
 	if f.initializeSelection && d.expectedExists {
 		ApplyTrackedSelection(roots, baseline.ToSelectionConfig(d.Baseline().Selection.AutoIngestNewBranches))
-		ApplyExistingSelection(roots, working.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
-	} else if f.initializeSelection && !selectionsEqual(working, baseline) {
+	}
+	if f.initializeSelection {
 		ApplyExistingSelection(roots, working.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
 	}
 	f.full = roots
@@ -362,7 +371,8 @@ func (f *treeField) selectionRoots() []*kit.TreeNode {
 // leaving the cursor alone when the view did not change.
 func (f *treeField) applyFacet() {
 	next := f.full
-	if value, ok := f.activeFacetValue(); ok {
+	value, projected := f.activeFacetValue()
+	if projected {
 		next = pruneForest(f.full, f.facetKey, value)
 	}
 	if sameNodes(next, f.tree.Roots()) {
@@ -370,7 +380,11 @@ func (f *treeField) applyFacet() {
 		return
 	}
 	f.view = next
-	f.tree = f.tree.WithRoots(next)
+	if projected {
+		f.tree = f.tree.WithProjectedRoots(next)
+	} else {
+		f.tree = f.tree.WithUnprojectedRoots(next)
+	}
 	f.applySize()
 }
 

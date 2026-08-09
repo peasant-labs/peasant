@@ -15,6 +15,12 @@
 #   session-cursor   - cursor moved onto the already-imported session row
 #   preview-focused  - the same row, with input moved to the preview pane
 #   preview-scrolled - the preview focused and scrolled down
+#   search-editing   - a project-scope query is being typed
+#   kept-filter      - a session-scope query remains active after enter
+#   branch-scope     - the branch column is active
+#   session-scope    - the session column is active
+#   overflow-middle  - usable rows exist above and below the viewport
+#   overflow-bottom  - the cursor is at the final usable row
 #
 # previewAssertions names, per captured state, what the preview pane must show:
 # the palette token a highlighted code word carries, the text that must (or must
@@ -24,8 +30,50 @@
 #
 # expectedCaseCount is the row-count guard; expectedHarnessCount pins how many
 # harnesses the listing carries, since the facet cycle length derives from it.
-expectedCaseCount: 11
+# bothThemeStates names the new content states that must have matching-size dark
+# and light captures rather than relying on filename convention alone.
+expectedCaseCount: 23
+expectedSessionCount: 5
 expectedHarnessCount: 2
+expectedBothThemeStateCount: 6
+bothThemeStates:
+  [search-editing, kept-filter, branch-scope, session-scope,
+   overflow-middle, overflow-bottom]
+renderAssertions:
+  expectedRowCount: 11
+  rows:
+    - case: default-dark
+      wantContains:
+        [+ 2 child sessions, already imported, harness, claude code, cursor]
+      wantMissing: [child subagent, grandchild subagent]
+    - case: narrowed-dark
+      wantContains: [+ 2 child sessions, claude code]
+      wantMissing: [cursor session]
+    - case: gutter-hidden-dark
+      wantContains: [+ 2 child sessions, cursor session]
+      wantMissing: [claude code 3]
+    - case: session-cursor-dark
+      wantContains:
+        ["harness: claude code", you, please refactor the ingest pipeline, os.Rename]
+      wantMissing: [imported session]
+    - case: session-cursor-narrow
+      wantContains: ["harness: claude code", please refactor the ingest]
+      wantMissing: [child sessions, already imported]
+    - case: search-editing-dark
+      wantContains:
+        ["search project: a", type to filter, "backspace: delete", "enter: keep filter", "esc: clear filter"]
+    - case: kept-filter-dark
+      wantContains: ["filter session: cursor", "hidden by filters: 2", cursor session]
+      wantMissing: [parent session, imported session]
+    - case: branch-scope-dark
+      wantContains: ["scope: project  [branch]  session"]
+    - case: session-scope-dark
+      wantContains: ["scope: project  branch  [session]"]
+    - case: overflow-middle-dark
+      wantContains: ["↑  ▾", "↓      [✓]"]
+    - case: overflow-bottom-dark
+      wantContains: ["↑ "]
+      wantMissing: [↕, "↓ "]
 # The stored body is markdown, as a recorded first message from a person to a
 # coding agent usually is: the pane renders it rather than showing the raw
 # characters, so the fenced code below is syntax-highlighted in the capture.
@@ -154,3 +202,63 @@ cases:
     theme: dark
     width: 120
     height: 24
+  - name: search-editing-dark
+    state: search-editing
+    theme: dark
+    width: 120
+    height: 24
+  - name: search-editing-light
+    state: search-editing
+    theme: light
+    width: 120
+    height: 24
+  - name: kept-filter-dark
+    state: kept-filter
+    theme: dark
+    width: 120
+    height: 24
+  - name: kept-filter-light
+    state: kept-filter
+    theme: light
+    width: 120
+    height: 24
+  - name: branch-scope-dark
+    state: branch-scope
+    theme: dark
+    width: 120
+    height: 24
+  - name: branch-scope-light
+    state: branch-scope
+    theme: light
+    width: 120
+    height: 24
+  - name: session-scope-dark
+    state: session-scope
+    theme: dark
+    width: 120
+    height: 24
+  - name: session-scope-light
+    state: session-scope
+    theme: light
+    width: 120
+    height: 24
+  - name: overflow-middle-dark
+    state: overflow-middle
+    theme: dark
+    width: 120
+    height: 16
+  - name: overflow-middle-light
+    state: overflow-middle
+    theme: light
+    width: 120
+    height: 16
+  - name: overflow-bottom-dark
+    state: overflow-bottom
+    theme: dark
+    width: 120
+    height: 16
+  - name: overflow-bottom-light
+    state: overflow-bottom
+    theme: light
+    width: 120
+    height: 16

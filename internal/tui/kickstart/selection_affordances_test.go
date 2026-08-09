@@ -21,6 +21,8 @@ import (
 //go:embed testdata/selection_affordances.yaml
 var selectionAffordanceData []byte
 
+const expectedSelectionAffordanceCaseCount = 7
+
 type selectionAffordanceRow struct {
 	Label        string   `yaml:"label"`
 	WantContains []string `yaml:"wantContains"`
@@ -28,11 +30,15 @@ type selectionAffordanceRow struct {
 }
 
 type selectionAffordanceCase struct {
-	Name          string                   `yaml:"name"`
-	Keys          []string                 `yaml:"keys"`
-	WantContains  []string                 `yaml:"wantContains"`
-	WantMissing   []string                 `yaml:"wantMissing"`
-	RowAssertions []selectionAffordanceRow `yaml:"rowAssertions"`
+	Name                    string                   `yaml:"name"`
+	Keys                    []string                 `yaml:"keys"`
+	BeforeLoad              bool                     `yaml:"beforeLoad"`
+	DrainAfterKeys          bool                     `yaml:"drainAfterKeys"`
+	WantBeforeDrainContains []string                 `yaml:"wantBeforeDrainContains"`
+	WantBeforeDrainMissing  []string                 `yaml:"wantBeforeDrainMissing"`
+	WantContains            []string                 `yaml:"wantContains"`
+	WantMissing             []string                 `yaml:"wantMissing"`
+	RowAssertions           []selectionAffordanceRow `yaml:"rowAssertions"`
 }
 
 type selectionAffordanceDocument struct {
@@ -55,20 +61,26 @@ func decodeSelectionAffordances(data []byte) (selectionAffordanceDocument, error
 		}
 		return doc, fmt.Errorf("selection_affordances.yaml must hold exactly one document: %w", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		return doc, fmt.Errorf("selection_affordances.yaml expectedCaseCount=%d but has %d cases", doc.ExpectedCaseCount, len(doc.Cases))
+	if doc.ExpectedCaseCount != expectedSelectionAffordanceCaseCount || len(doc.Cases) != expectedSelectionAffordanceCaseCount {
+		return doc, fmt.Errorf("selection_affordances.yaml cases: declared=%d actual=%d required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), expectedSelectionAffordanceCaseCount)
 	}
 	if !doc.SavedSelection.Mode.IsValid() {
 		return doc, fmt.Errorf("selection_affordances.yaml saved selection mode %q is invalid", doc.SavedSelection.Mode)
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
-		if c.Name == "" || seen[c.Name] || len(c.WantContains)+len(c.WantMissing)+len(c.RowAssertions) == 0 {
+		if c.Name == "" || seen[c.Name] || len(c.WantBeforeDrainContains)+len(c.WantBeforeDrainMissing)+len(c.WantContains)+len(c.WantMissing)+len(c.RowAssertions) == 0 ||
+			!selectionRenderValuesPresent(c.WantBeforeDrainContains, c.WantBeforeDrainMissing, c.WantContains, c.WantMissing) {
 			return doc, fmt.Errorf("selection_affordances.yaml contains an invalid, duplicate, or assertion-free case: %#v", c)
 		}
 		seen[c.Name] = true
+		if c.DrainAfterKeys && !c.BeforeLoad {
+			return doc, fmt.Errorf("selection_affordances.yaml case %q drains after keys without starting before load", c.Name)
+		}
 		for _, row := range c.RowAssertions {
-			if row.Label == "" || len(row.WantContains)+len(row.WantMissing) == 0 {
+			if strings.TrimSpace(row.Label) == "" || len(row.WantContains)+len(row.WantMissing) == 0 ||
+				!selectionRenderValuesPresent(row.WantContains, row.WantMissing) {
 				return doc, fmt.Errorf("selection_affordances.yaml case %q has an empty row assertion", c.Name)
 			}
 		}
@@ -85,7 +97,7 @@ func loadSelectionAffordances(t *testing.T) selectionAffordanceDocument {
 	return doc
 }
 
-func selectionAffordanceProgram(t *testing.T, saved config.SelectionConfig) kickstart.Program {
+func selectionAffordanceProgram(t *testing.T, saved config.SelectionConfig, drainInitial bool) kickstart.Program {
 	t.Helper()
 	renderDoc := loadSelectionRenderDoc(t)
 	th := theme.New(theme.ModeDark)
@@ -111,7 +123,10 @@ func selectionAffordanceProgram(t *testing.T, saved config.SelectionConfig) kick
 	})
 	program.SetSize(132, 30)
 	program = declineOAuth(t, program)
-	return drainProgram(program, program.Init())
+	if drainInitial {
+		program = drainProgram(program, program.Init())
+	}
+	return program
 }
 
 func selectionAffordanceKey(t *testing.T, value string) tea.KeyPressMsg {
@@ -151,7 +166,23 @@ func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
 	for _, c := range doc.Cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			program := driveSelectionAffordanceProgram(t, selectionAffordanceProgram(t, doc.SavedSelection), c.Keys)
+			program := driveSelectionAffordanceProgram(t, selectionAffordanceProgram(t, doc.SavedSelection, !c.BeforeLoad), c.Keys)
+			if c.BeforeLoad {
+				view := stripRender(program.View())
+				for _, want := range c.WantBeforeDrainContains {
+					if !strings.Contains(view, want) {
+						t.Errorf("pre-load selection step must contain %q:\n%s", want, view)
+					}
+				}
+				for _, missing := range c.WantBeforeDrainMissing {
+					if strings.Contains(view, missing) {
+						t.Errorf("pre-load selection step must not contain %q:\n%s", missing, view)
+					}
+				}
+			}
+			if c.DrainAfterKeys {
+				program = drainProgram(program, program.Init())
+			}
 			view := stripRender(program.View())
 			for _, want := range c.WantContains {
 				if !strings.Contains(view, want) {
@@ -199,7 +230,12 @@ func TestSelectionAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestSelectionAffordanceFixtureEnforcesRowCount(t *testing.T) {
-	mutated := bytes.Replace(selectionAffordanceData, []byte("expectedCaseCount: 5"), []byte("expectedCaseCount: 6"), 1)
+	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionAffordanceCaseCount))
+	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedSelectionAffordanceCaseCount+1))
+	mutated := bytes.Replace(selectionAffordanceData, declared, changed, 1)
+	if bytes.Equal(mutated, selectionAffordanceData) {
+		t.Fatal("selection affordance count mutation did not alter the fixture")
+	}
 	if _, err := decodeSelectionAffordances(mutated); err == nil {
 		t.Fatal("selection affordance fixture accepted a mismatched row-count guard")
 	}

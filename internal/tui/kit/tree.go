@@ -392,6 +392,11 @@ type Tree struct {
 	// query that temporarily yields no rows can therefore clear back to that row;
 	// a still-visible filtered cursor takes precedence.
 	filterFallback cursorAnchor
+	// projectionAnchor retains the canonical row and its viewport position for
+	// the lifetime of an external roots projection (for example, a harness
+	// facet), including an intermediate view that hides that row.
+	projectionAnchor      cursorAnchor
+	projectionViewportRow int
 }
 
 // NewTree builds a Tree over theme t that loads its forest from src. It starts
@@ -410,7 +415,8 @@ func NewTree(t theme.Theme, src TreeSource) Tree {
 			Scope: TreeScopeProject,
 			Mode:  TreeFilterInactive,
 		},
-		filterFallback: cursorAnchor{depth: -1},
+		filterFallback:   cursorAnchor{depth: -1},
+		projectionAnchor: cursorAnchor{depth: -1},
 	}
 }
 
@@ -448,6 +454,8 @@ func (t Tree) Load() (Tree, tea.Cmd) {
 	gen := t.gen
 	t.loading = true
 	t.err = nil
+	t.projectionAnchor = cursorAnchor{depth: -1}
+	t.projectionViewportRow = 0
 	src := t.src
 	cmd := func() tea.Msg {
 		nodes, err := src.Load(ctx)
@@ -464,11 +472,83 @@ func (t Tree) Load() (Tree, tea.Cmd) {
 // keeps the full forest for deriving what to persist. It does not re-run a
 // scan; use [Tree.Load] for that.
 func (t Tree) WithRoots(roots []*TreeNode) Tree {
+	t.projectionAnchor = cursorAnchor{depth: -1}
+	t.projectionViewportRow = 0
+	return t.replaceRoots(roots)
+}
+
+func (t Tree) replaceRoots(roots []*TreeNode) Tree {
 	t.roots = roots
 	t.cursor = 0
 	t.offset = 0
 	t.applyTextProjection(false)
 	return t
+}
+
+// WithProjectedRoots replaces the installed view while retaining the current
+// canonical row and its viewport position when that row remains present. It is
+// for view-only projections such as a harness facet; source loads continue to
+// reset to the first row through the normal load path. When the anchored row is
+// absent, the new projection falls back to its first row predictably.
+func (t Tree) WithProjectedRoots(roots []*TreeNode) Tree {
+	t = t.captureProjectionAnchor()
+	return t.replaceRootsAt(roots, t.projectionAnchor, t.projectionViewportRow)
+}
+
+// WithUnprojectedRoots restores the row captured when external projection
+// began, when it exists in roots, then ends that projection lifecycle. An
+// intermediate projection may hide the row without losing the eventual return
+// target.
+func (t Tree) WithUnprojectedRoots(roots []*TreeNode) Tree {
+	t = t.captureProjectionAnchor()
+	anchor := t.projectionAnchor
+	viewportRow := t.projectionViewportRow
+	t = t.replaceRootsAt(roots, anchor, viewportRow)
+	t.projectionAnchor = cursorAnchor{depth: -1}
+	t.projectionViewportRow = 0
+	return t
+}
+
+func (t Tree) captureProjectionAnchor() Tree {
+	current := t.currentAnchor()
+	if current.depth < 0 {
+		return t
+	}
+	if t.projectionAnchor.depth < 0 || t.containsAnchor(t.projectionAnchor) {
+		t.projectionAnchor = current
+		t.projectionViewportRow = t.cursor - t.offset
+	}
+	return t
+}
+
+func (t Tree) replaceRootsAt(roots []*TreeNode, anchor cursorAnchor, viewportRow int) Tree {
+	t = t.replaceRoots(roots)
+	if anchor.depth < 0 {
+		return t
+	}
+	for i, row := range t.visibleRows() {
+		if !t.rowMatchesAnchor(row, anchor) {
+			continue
+		}
+		t.cursor = i
+		t.offset = i - viewportRow
+		t.clampWindow()
+		return t
+	}
+	return t
+}
+
+func (t Tree) containsAnchor(anchor cursorAnchor) bool {
+	for _, row := range t.visibleRows() {
+		if t.rowMatchesAnchor(row, anchor) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) rowMatchesAnchor(row treeRow, anchor cursorAnchor) bool {
+	return t.canonicalNode(row.node) == anchor.node || (row.node.ID == anchor.id && row.depth == anchor.depth)
 }
 
 // Focus gives the Tree keyboard focus.
@@ -566,51 +646,174 @@ func (t Tree) HasConflict() bool {
 	return any
 }
 
-// AvailableActions reports the actions the Tree dispatches in its current
-// state. While loading only Help/Back are live (navigation over an
-// as-yet-empty forest is a no-op but never blocks); once loaded the full
-// navigate/expand/collapse/toggle set is available.
+// AvailableActions reports only actions that can change the Tree in its current
+// state. Loading/failed/empty forests expose no row operations; navigation is
+// edge-aware; and expand, collapse, and selection follow the current row and
+// projected forest shape. Dispatch, footer, and help consume this same set.
 func (t Tree) AvailableActions() []keymap.ActionID {
-	if t.loading {
+	if t.loading || t.err != nil {
 		return []keymap.ActionID{keymap.ActionHelp, keymap.ActionBack}
 	}
 	if t.filter.Editing() {
 		return t.filter.AvailableActions()
 	}
-	actions := []keymap.ActionID{
-		keymap.ActionUp,
-		keymap.ActionDown,
-		keymap.ActionPageUp,
-		keymap.ActionPageDown,
-		keymap.ActionTop,
-		keymap.ActionBottom,
+	actions := make([]keymap.ActionID, 0, 18)
+	rows := t.visibleRows()
+	if t.cursor > 0 && len(rows) > 0 {
+		actions = append(actions, keymap.ActionUp, keymap.ActionPageUp, keymap.ActionTop)
 	}
-	if t.filter.Scope != TreeScopeProject {
-		actions = append(actions, keymap.ActionPrevScope)
+	if t.cursor >= 0 && t.cursor+1 < len(rows) {
+		actions = append(actions, keymap.ActionDown, keymap.ActionPageDown, keymap.ActionBottom)
 	}
-	if t.filter.Scope != TreeScopeSession {
-		actions = append(actions, keymap.ActionNextScope)
+	if len(t.roots) > 0 {
+		if t.filter.Scope != TreeScopeProject {
+			actions = append(actions, keymap.ActionPrevScope)
+		}
+		if t.filter.Scope != TreeScopeSession {
+			actions = append(actions, keymap.ActionNextScope)
+		}
+		actions = append(actions, keymap.ActionSearchScope)
 	}
-	actions = append(actions, keymap.ActionSearchScope)
 	if t.filter.Active() {
 		actions = append(actions, keymap.ActionClearFilter)
 	}
-	actions = append(actions,
-		keymap.ActionNextProject,
-		keymap.ActionPrevProject,
-		keymap.ActionCollapse,
-		keymap.ActionExpand,
-		keymap.ActionCollapseLevel,
-		keymap.ActionExpandLevel,
-		keymap.ActionCollapseAll,
-		keymap.ActionExpandAll,
-		keymap.ActionToggle,
-		keymap.ActionSelectAll,
-		keymap.ActionSelectUnderProject,
-		keymap.ActionHelp,
-		keymap.ActionBack,
-	)
-	return actions
+	if previous, next := t.projectDirections(); previous {
+		actions = append(actions, keymap.ActionPrevProject)
+		if next {
+			actions = append(actions, keymap.ActionNextProject)
+		}
+	} else if next {
+		actions = append(actions, keymap.ActionNextProject)
+	}
+	if node, ok := t.CurrentNode(); ok {
+		if !node.isLeaf() {
+			if t.nodeExpanded(node) {
+				actions = append(actions, keymap.ActionCollapse)
+			} else {
+				actions = append(actions, keymap.ActionExpand)
+			}
+		}
+		if t.subtreeHasSelectable(node) {
+			actions = append(actions, keymap.ActionToggle)
+		}
+		if t.levelCanExpand(node) {
+			actions = append(actions, keymap.ActionExpandLevel)
+		}
+		if t.levelCanCollapse(node) {
+			actions = append(actions, keymap.ActionCollapseLevel)
+		}
+		if t.projectHasUnselected(node) {
+			actions = append(actions, keymap.ActionSelectUnderProject)
+		}
+	}
+	if t.anyInteriorCanExpand() {
+		actions = append(actions, keymap.ActionExpandAll)
+	}
+	if t.anyInteriorCanCollapse() {
+		actions = append(actions, keymap.ActionCollapseAll)
+	}
+	if t.hasSelectableNode() {
+		actions = append(actions, keymap.ActionSelectAll)
+	}
+	return append(actions, keymap.ActionHelp, keymap.ActionBack)
+}
+
+func (t Tree) nodeExpanded(node *TreeNode) bool {
+	if node == nil || node.isLeaf() {
+		return false
+	}
+	expanded, recorded := t.expanded[t.canonicalNode(node)]
+	return !recorded || expanded
+}
+
+func (t Tree) projectDirections() (previous, next bool) {
+	node, ok := t.CurrentNode()
+	if !ok {
+		return false, false
+	}
+	root := t.rootAncestor(node)
+	roots := t.renderRoots()
+	for i, candidate := range roots {
+		if candidate != root {
+			continue
+		}
+		return i > 0, i+1 < len(roots)
+	}
+	return false, false
+}
+
+func (t Tree) subtreeHasSelectable(node *TreeNode) bool {
+	selectable := false
+	walk(node, func(candidate *TreeNode) {
+		if candidate.isLeaf() && candidate.State != Conflict {
+			selectable = true
+		}
+	})
+	return selectable
+}
+
+func (t Tree) hasSelectableNode() bool {
+	for _, root := range t.renderRoots() {
+		if t.subtreeHasSelectable(root) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) projectHasUnselected(node *TreeNode) bool {
+	root := t.rootAncestor(node)
+	unselected := false
+	walk(root, func(candidate *TreeNode) {
+		if candidate.isLeaf() && candidate.State != Conflict && candidate.State != Checked {
+			unselected = true
+		}
+	})
+	return unselected
+}
+
+func (t Tree) levelCanExpand(node *TreeNode) bool {
+	root := t.rootAncestor(node)
+	for _, child := range root.Children {
+		if !child.isLeaf() && !t.nodeExpanded(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) levelCanCollapse(node *TreeNode) bool {
+	root := t.rootAncestor(node)
+	for _, child := range root.Children {
+		if !child.isLeaf() && t.nodeExpanded(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) anyInteriorCanExpand() bool {
+	canExpand := false
+	for _, root := range t.renderRoots() {
+		walk(root, func(node *TreeNode) {
+			if !node.isLeaf() && !t.nodeExpanded(node) {
+				canExpand = true
+			}
+		})
+	}
+	return canExpand
+}
+
+func (t Tree) anyInteriorCanCollapse() bool {
+	canCollapse := false
+	for _, root := range t.renderRoots() {
+		walk(root, func(node *TreeNode) {
+			if !node.isLeaf() && t.nodeExpanded(node) {
+				canCollapse = true
+			}
+		})
+	}
+	return canCollapse
 }
 
 var _ keymap.Availability = Tree{}

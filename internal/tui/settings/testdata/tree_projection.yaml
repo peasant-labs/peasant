@@ -3,7 +3,8 @@
 # text query, and harness view are intentionally independent axes.
 fixture: faceted
 expectedSessionCount: 4
-expectedCaseCount: 11
+expectedCaseCount: 13
+expectedAnchorMutationProbeCount: 1
 width: 128
 height: 28
 savedSelection:
@@ -72,6 +73,43 @@ cases:
     expectHiddenSelected: 1
     wantVisibleRows: [ingest pipeline refactor, share bridge scan]
     wantMissingRows: [commit detector fix, governance audit trigger]
+
+  - name: harness-projection-preserves-a-visible-canonical-cursor-and-offset
+    keys: [down, down, f]
+    anchorMutationProbe: true
+    height: 12
+    expectPane: left
+    expectCursorID: cc-1
+    expectPreviewID: cc-1
+    expectScope: project
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkOverflow: true
+    expectOverflowTop: true
+    expectOverflowBottom: false
+    wantVisibleRows: [ingest pipeline refactor, share bridge scan]
+    wantMissingRows: [commit detector fix, governance audit trigger]
+    rowAssertions:
+      - label: ingest pipeline refactor
+        wantContains: ["▸", already imported]
+
+  - name: clearing-harness-projection-restores-its-canonical-anchor
+    keys: [down, down, f, f, f]
+    expectPane: left
+    expectCursorID: cc-1
+    expectPreviewID: cc-1
+    expectScope: project
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    wantVisibleRows:
+      [ingest pipeline refactor, commit detector fix, share bridge scan,
+       governance audit trigger]
+    rowAssertions:
+      - label: ingest pipeline refactor
+        wantContains: ["▸", already imported]
+
   - name: text-filter-and-toggle-mutate-the-canonical-forest-once
     keys: ["]", "]", "/", s, h, a, r, e, enter, down, down, space]
     expectScope: session

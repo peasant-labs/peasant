@@ -176,6 +176,9 @@ func decodeTreeReadiness(data []byte) (readinessDocument, error) {
 		if c.ExpectedValidation != readinessValidationReady && (!c.AttemptCommit || len(c.WantErrorContains) == 0) {
 			return doc, fmt.Errorf("tree_readiness.yaml non-ready case %q must attempt commit and assert its error", c.Name)
 		}
+		if !projectionValuesPresent(c.WantErrorContains) {
+			return doc, fmt.Errorf("tree_readiness.yaml case %q contains a blank error assertion", c.Name)
+		}
 		if c.MutationProbe {
 			mutationProbes++
 		}
@@ -498,21 +501,36 @@ func TestTreeReadinessFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestTreeReadinessFixtureEnforcesExactCaseCount(t *testing.T) {
-	mutated := bytes.Replace(treeReadinessData, []byte("expectedCaseCount: 7"), []byte("expectedCaseCount: 8"), 1)
+	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeReadinessCaseCount))
+	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeReadinessCaseCount+1))
+	mutated := bytes.Replace(treeReadinessData, declared, changed, 1)
+	if bytes.Equal(mutated, treeReadinessData) {
+		t.Fatal("tree readiness case-count mutation did not alter the fixture")
+	}
 	if _, err := decodeTreeReadiness(mutated); err == nil {
 		t.Fatal("tree readiness fixture accepted a changed declared case count")
 	}
 }
 
 func TestTreeReadinessFixtureEnforcesExactNodeCount(t *testing.T) {
-	mutated := bytes.Replace(treeReadinessData, []byte("expectedNodeCount: 4"), []byte("expectedNodeCount: 5"), 1)
+	declared := []byte(fmt.Sprintf("expectedNodeCount: %d", expectedTreeReadinessNodeCount))
+	changed := []byte(fmt.Sprintf("expectedNodeCount: %d", expectedTreeReadinessNodeCount+1))
+	mutated := bytes.Replace(treeReadinessData, declared, changed, 1)
+	if bytes.Equal(mutated, treeReadinessData) {
+		t.Fatal("tree readiness node-count mutation did not alter the fixture")
+	}
 	if _, err := decodeTreeReadiness(mutated); err == nil {
 		t.Fatal("tree readiness fixture accepted a changed declared node count")
 	}
 }
 
 func TestTreeReadinessFixtureEnforcesExactMutationProbeCount(t *testing.T) {
-	mutated := bytes.Replace(treeReadinessData, []byte("expectedMutationProbeCount: 4"), []byte("expectedMutationProbeCount: 5"), 1)
+	declared := []byte(fmt.Sprintf("expectedMutationProbeCount: %d", expectedTreeReadinessMutationProbeCount))
+	changed := []byte(fmt.Sprintf("expectedMutationProbeCount: %d", expectedTreeReadinessMutationProbeCount+1))
+	mutated := bytes.Replace(treeReadinessData, declared, changed, 1)
+	if bytes.Equal(mutated, treeReadinessData) {
+		t.Fatal("tree readiness mutation-probe count mutation did not alter the fixture")
+	}
 	if _, err := decodeTreeReadiness(mutated); err == nil {
 		t.Fatal("tree readiness fixture accepted a changed declared mutation-probe count")
 	}

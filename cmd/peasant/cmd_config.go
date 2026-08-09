@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
@@ -24,26 +23,6 @@ type configDiscovery struct {
 	inventory ftue.ProviderInventory
 	source    kit.TreeSource
 }
-
-// configSelectionSource applies the loaded selection to a fresh discovery
-// forest before the canonical tree field sees it. This keeps opening the editor
-// read-only: an unchanged saved selection begins clean instead of being replaced
-// by the source's neutral unchecked nodes during asynchronous load.
-type configSelectionSource struct {
-	source    kit.TreeSource
-	selection config.SelectionConfig
-}
-
-func (s configSelectionSource) Load(ctx context.Context) ([]*kit.TreeNode, error) {
-	roots, err := s.source.Load(ctx)
-	if err != nil {
-		return nil, err
-	}
-	settings.ApplyExistingSelection(roots, s.selection)
-	return roots, nil
-}
-
-var _ kit.TreeSource = configSelectionSource{}
 
 // configRetentionFile binds the initial retention value, later writer, and
 // reported path to one strictly opened Claude settings document.
@@ -166,10 +145,7 @@ func buildConfigCommand(deps configCommandDeps) *cobra.Command {
 			}
 
 			registry := kickstart.BuildRegistry(kickstart.Options{
-				Source: configSelectionSource{
-					source:    discovery.source,
-					selection: loaded.Selection,
-				},
+				Source:                discovery.source,
 				VillageConnected:      loaded.Village.Connected,
 				ClaudeSessionsPresent: claudeSessionsPresent(discovery.inventory),
 			})

@@ -110,7 +110,7 @@ cases:
     expectedValidation: ready
     mutationProbe: true
 
-  - name: successful-nonempty-first-scan-derives-source-selection
+  - name: successful-nonempty-first-scan-applies-default-draft-selection
     configExists: false
     sourceResult: forest
     delivery: result-only
@@ -118,11 +118,8 @@ cases:
       mode: all
       autoIngestNewBranches: true
     expectedSelection:
-      mode: selected
+      mode: all
       autoIngestNewBranches: true
-      harnesses:
-        claude-code:
-          sessions: [session-a]
     expectedValidation: ready
 
   - name: commit-before-result-preserves-selection-and-blocks

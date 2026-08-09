@@ -1,7 +1,7 @@
 # Assertions over the canonical kickstart Program/Flow/Registry selection step.
 # Discovery and preview data come from the strict selection_render fixture; this
 # document owns the saved-selection state and interaction expectations.
-expectedCaseCount: 5
+expectedCaseCount: 7
 savedSelection:
   mode: selected
   autoIngestNewBranches: false
@@ -32,9 +32,8 @@ cases:
     keys: ["]", "]"]
     wantContains:
       - "scope: project  branch  [session]"
-      - "→/l: expand"
-      - "←/h: collapse"
       - "ctrl+l: focus right pane"
+    wantMissing: ["→/l: expand", "←/h: collapse"]
 
   - name: search-editing-shows-type-delete-keep-and-clear
     keys: ["/"]
@@ -51,9 +50,27 @@ cases:
       - "keyboard shortcuts"
       - "]            next scope"
       - "/            search scope"
-      - "→/l          expand"
+      - "←/h          collapse"
       - "ctrl+l       focus right pane"
-    wantMissing: ["[            previous scope"]
+    wantMissing: ["[            previous scope", "→/l          expand"]
+
+  - name: leaf-help-omits-no-op-expand-and-collapse-actions
+    keys: ["]", "]", "?"]
+    wantContains:
+      - "keyboard shortcuts"
+      - "space        select"
+      - "/            search scope"
+    wantMissing:
+      - "→/l          expand"
+      - "←/h          collapse"
+
+  - name: pre-load-facet-key-is-unavailable-and-does-not-narrow-after-load
+    beforeLoad: true
+    drainAfterKeys: true
+    keys: [f]
+    wantBeforeDrainContains: [scanning projects]
+    wantBeforeDrainMissing: ["f: filter"]
+    wantContains: [cursor session, "> all 3"]
 
   - name: preview-focus-removes-tree-only-search-from-availability
     keys: [ctrl+l]

@@ -18,6 +18,8 @@ import (
 //go:embed testdata/tree_annotations.yaml
 var treeAnnotationData []byte
 
+const expectedTreeAnnotationCaseCount = 13
+
 // treeAnnotationCase is one rendered session row: the Meta a source attached,
 // the width it renders at, and what its row must and must not say.
 type treeAnnotationCase struct {
@@ -52,8 +54,9 @@ func decodeTreeAnnotations(data []byte) (treeAnnotationDocument, error) {
 		}
 		return doc, fmt.Errorf("tree_annotations.yaml must hold exactly one document: %w", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		return doc, fmt.Errorf("tree_annotations.yaml expectedCaseCount=%d but has %d cases", doc.ExpectedCaseCount, len(doc.Cases))
+	if doc.ExpectedCaseCount != expectedTreeAnnotationCaseCount || len(doc.Cases) != expectedTreeAnnotationCaseCount {
+		return doc, fmt.Errorf("tree_annotations.yaml cases: declared=%d actual=%d required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), expectedTreeAnnotationCaseCount)
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
@@ -61,7 +64,7 @@ func decodeTreeAnnotations(data []byte) (treeAnnotationDocument, error) {
 			return doc, fmt.Errorf("tree_annotations.yaml case name %q is empty or duplicated", c.Name)
 		}
 		seen[c.Name] = true
-		if len(c.WantContains)+len(c.WantMissing) == 0 {
+		if len(c.WantContains)+len(c.WantMissing) == 0 || !treeFixtureValuesPresent(c.WantContains, c.WantMissing) {
 			return doc, fmt.Errorf("tree annotation fixture case %q declares no expected values", c.Name)
 		}
 		if c.Width <= 0 {
@@ -190,7 +193,12 @@ func TestTreeAnnotationFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestTreeAnnotationFixtureEnforcesRowCount(t *testing.T) {
-	mutated := bytes.Replace(treeAnnotationData, []byte("expectedCaseCount: 13"), []byte("expectedCaseCount: 14"), 1)
+	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeAnnotationCaseCount))
+	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeAnnotationCaseCount+1))
+	mutated := bytes.Replace(treeAnnotationData, declared, changed, 1)
+	if bytes.Equal(mutated, treeAnnotationData) {
+		t.Fatal("tree annotation count mutation did not alter the fixture")
+	}
 	if _, err := decodeTreeAnnotations(mutated); err == nil {
 		t.Fatal("tree annotation fixture accepted a mismatched row-count guard")
 	}

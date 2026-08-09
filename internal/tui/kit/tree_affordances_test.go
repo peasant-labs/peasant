@@ -17,20 +17,35 @@ import (
 //go:embed testdata/tree_affordances.yaml
 var treeAffordanceData []byte
 
+const expectedTreeAffordanceCaseCount = 17
+
+type treeAffordanceStart string
+
+const (
+	treeAffordanceLoaded  treeAffordanceStart = ""
+	treeAffordancePreLoad treeAffordanceStart = "pre-load"
+	treeAffordanceEmpty   treeAffordanceStart = "empty"
+)
+
+func (s treeAffordanceStart) valid() bool {
+	return s == treeAffordanceLoaded || s == treeAffordancePreLoad || s == treeAffordanceEmpty
+}
+
 type treeAffordanceCase struct {
-	Name                 string   `yaml:"name"`
-	Keys                 []string `yaml:"keys"`
-	ExpectScope          string   `yaml:"expectScope"`
-	ExpectMode           string   `yaml:"expectMode"`
-	ExpectQuery          string   `yaml:"expectQuery"`
-	ExpectCursorID       string   `yaml:"expectCursorID"`
-	ExpectVisibleIDs     []string `yaml:"expectVisibleIDs"`
-	ExpectOverflowTop    bool     `yaml:"expectOverflowTop"`
-	ExpectOverflowBottom bool     `yaml:"expectOverflowBottom"`
-	WantAvailable        []string `yaml:"wantAvailable"`
-	WantUnavailable      []string `yaml:"wantUnavailable"`
-	WantViewContains     []string `yaml:"wantViewContains"`
-	WantViewMissing      []string `yaml:"wantViewMissing"`
+	Name                 string              `yaml:"name"`
+	Start                treeAffordanceStart `yaml:"start"`
+	Keys                 []string            `yaml:"keys"`
+	ExpectScope          string              `yaml:"expectScope"`
+	ExpectMode           string              `yaml:"expectMode"`
+	ExpectQuery          string              `yaml:"expectQuery"`
+	ExpectCursorID       string              `yaml:"expectCursorID"`
+	ExpectVisibleIDs     []string            `yaml:"expectVisibleIDs"`
+	ExpectOverflowTop    bool                `yaml:"expectOverflowTop"`
+	ExpectOverflowBottom bool                `yaml:"expectOverflowBottom"`
+	WantAvailable        []string            `yaml:"wantAvailable"`
+	WantUnavailable      []string            `yaml:"wantUnavailable"`
+	WantViewContains     []string            `yaml:"wantViewContains"`
+	WantViewMissing      []string            `yaml:"wantViewMissing"`
 }
 
 type treeAffordanceDocument struct {
@@ -39,6 +54,17 @@ type treeAffordanceDocument struct {
 	Height            int                  `yaml:"height"`
 	Forest            []fixtureTreeNode    `yaml:"forest"`
 	Cases             []treeAffordanceCase `yaml:"cases"`
+}
+
+func treeFixtureValuesPresent(values ...[]string) bool {
+	for _, group := range values {
+		for _, value := range group {
+			if strings.TrimSpace(value) == "" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
@@ -55,16 +81,18 @@ func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
 		}
 		return doc, fmt.Errorf("tree_affordances.yaml must hold exactly one document: %w", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		return doc, fmt.Errorf("tree_affordances.yaml expectedCaseCount=%d but has %d cases", doc.ExpectedCaseCount, len(doc.Cases))
+	if doc.ExpectedCaseCount != expectedTreeAffordanceCaseCount || len(doc.Cases) != expectedTreeAffordanceCaseCount {
+		return doc, fmt.Errorf("tree_affordances.yaml cases: declared=%d actual=%d required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), expectedTreeAffordanceCaseCount)
 	}
 	if doc.Width <= 0 || doc.Height <= 0 || len(doc.Forest) == 0 {
 		return doc, fmt.Errorf("tree_affordances.yaml must declare a positive region and non-empty forest")
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
-		if c.Name == "" || seen[c.Name] {
-			return doc, fmt.Errorf("tree_affordances.yaml case name %q is empty or duplicated", c.Name)
+		if c.Name == "" || seen[c.Name] || !c.Start.valid() ||
+			!treeFixtureValuesPresent(c.Keys, c.ExpectVisibleIDs, c.WantAvailable, c.WantUnavailable, c.WantViewContains, c.WantViewMissing) {
+			return doc, fmt.Errorf("tree_affordances.yaml case %q is empty, duplicated, has an invalid start, or contains a blank fixture value", c.Name)
 		}
 		seen[c.Name] = true
 		if c.ExpectScope == "" || c.ExpectMode == "" {
@@ -102,7 +130,18 @@ func TestTree_ScopedSearchAndOverflowAffordances(t *testing.T) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			tr := loadedTreeWithHeight(t, buildForest(t, doc.Forest), doc.Height)
+			roots := buildForest(t, doc.Forest)
+			var tr kit.Tree
+			switch c.Start {
+			case treeAffordanceLoaded:
+				tr = loadedTreeWithHeight(t, roots, doc.Height)
+			case treeAffordancePreLoad:
+				tr = kit.NewTree(darkTheme(), staticSource{roots: roots})
+			case treeAffordanceEmpty:
+				tr = loadedTreeWithHeight(t, nil, doc.Height)
+			default:
+				t.Fatalf("unsupported tree start state %q", c.Start)
+			}
 			tr.SetSize(doc.Width, doc.Height)
 			for _, pressed := range c.Keys {
 				tr, _ = tr.Update(keyPress(t, pressed))
@@ -183,7 +222,12 @@ func TestTreeAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestTreeAffordanceFixtureEnforcesRowCount(t *testing.T) {
-	mutated := bytes.Replace(treeAffordanceData, []byte("expectedCaseCount: 13"), []byte("expectedCaseCount: 14"), 1)
+	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeAffordanceCaseCount))
+	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeAffordanceCaseCount+1))
+	mutated := bytes.Replace(treeAffordanceData, declared, changed, 1)
+	if bytes.Equal(mutated, treeAffordanceData) {
+		t.Fatal("tree affordance count mutation did not alter the fixture")
+	}
 	if _, err := decodeTreeAffordances(mutated); err == nil {
 		t.Fatal("tree affordance fixture accepted a mismatched row-count guard")
 	}

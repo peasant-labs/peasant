@@ -2,7 +2,7 @@
 # case drives the real component from a freshly loaded project -> branch ->
 # session forest. The row-count guard and strict loader make adding or removing
 # a behavior an explicit fixture edit.
-expectedCaseCount: 13
+expectedCaseCount: 17
 width: 52
 height: 4
 forest:
@@ -25,6 +25,41 @@ forest:
         children:
           - {id: beta-audit, label: governance audit}
 cases:
+  - name: pre-load-advertises-no-row-actions
+    start: pre-load
+    keys: []
+    expectScope: project
+    expectMode: inactive
+    wantAvailable: [help, back]
+    wantUnavailable: [down, next-scope, search-scope, toggle, expand, collapse, select-all]
+
+  - name: successful-empty-load-advertises-no-row-actions
+    start: empty
+    keys: []
+    expectScope: project
+    expectMode: inactive
+    wantAvailable: [help, back]
+    wantUnavailable: [down, next-scope, search-scope, toggle, expand, collapse, select-all]
+    wantViewContains: [no projects]
+
+  - name: expanded-interior-advertises-collapse-not-expand
+    keys: []
+    expectScope: project
+    expectMode: inactive
+    expectCursorID: project-alpha
+    expectOverflowBottom: true
+    wantAvailable: [collapse, toggle]
+    wantUnavailable: [expand, up, page-up, top, prev-project]
+
+  - name: collapsed-interior-advertises-expand-not-collapse
+    keys: [left]
+    expectScope: project
+    expectMode: inactive
+    expectCursorID: project-alpha
+    expectVisibleIDs: [project-alpha, project-beta, beta-develop, beta-audit]
+    wantAvailable: [expand, toggle]
+    wantUnavailable: [collapse, up, page-up, top, prev-project]
+
   - name: project-scope-starts-with-bottom-overflow-and-search
     keys: []
     expectScope: project
@@ -61,7 +96,8 @@ cases:
     expectMode: inactive
     expectCursorID: alpha-main
     expectOverflowBottom: true
-    wantAvailable: [prev-scope, next-scope, search-scope, expand, collapse]
+    wantAvailable: [prev-scope, next-scope, search-scope, collapse]
+    wantUnavailable: [expand]
 
   - name: next-scope-navigates-to-session-without-moving-pane-focus
     keys: ["]", "]"]
@@ -70,8 +106,8 @@ cases:
     expectCursorID: alpha-ingest
     expectOverflowTop: true
     expectOverflowBottom: true
-    wantAvailable: [prev-scope, search-scope, expand, collapse]
-    wantUnavailable: [next-scope, focus-pane-left, focus-pane-right]
+    wantAvailable: [prev-scope, search-scope, toggle]
+    wantUnavailable: [next-scope, focus-pane-left, focus-pane-right, expand, collapse]
 
   - name: previous-scope-returns-from-session-to-branch
     keys: ["]", "]", "["]

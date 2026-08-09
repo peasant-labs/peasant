@@ -24,6 +24,12 @@ import (
 //go:embed testdata/tree_projection.yaml
 var treeProjectionData []byte
 
+const (
+	expectedTreeProjectionSessionCount             = 4
+	expectedTreeProjectionCaseCount                = 13
+	expectedTreeProjectionAnchorMutationProbeCount = 1
+)
+
 type projectionSession struct {
 	ID      string `yaml:"id"`
 	Label   string `yaml:"label"`
@@ -42,8 +48,11 @@ type projectionRowAssertion struct {
 type projectionCase struct {
 	Name                 string                   `yaml:"name"`
 	Keys                 []string                 `yaml:"keys"`
+	Height               int                      `yaml:"height"`
 	WorkingSelection     *config.SelectionConfig  `yaml:"workingSelection"`
 	ExpectPane           string                   `yaml:"expectPane"`
+	ExpectCursorID       string                   `yaml:"expectCursorID"`
+	ExpectPreviewID      string                   `yaml:"expectPreviewID"`
 	ExpectScope          string                   `yaml:"expectScope"`
 	ExpectMode           string                   `yaml:"expectMode"`
 	ExpectQuery          string                   `yaml:"expectQuery"`
@@ -51,6 +60,10 @@ type projectionCase struct {
 	ExpectUnselected     []string                 `yaml:"expectUnselected"`
 	CheckHiddenSelected  bool                     `yaml:"checkHiddenSelected"`
 	ExpectHiddenSelected int                      `yaml:"expectHiddenSelected"`
+	CheckOverflow        bool                     `yaml:"checkOverflow"`
+	ExpectOverflowTop    bool                     `yaml:"expectOverflowTop"`
+	ExpectOverflowBottom bool                     `yaml:"expectOverflowBottom"`
+	AnchorMutationProbe  bool                     `yaml:"anchorMutationProbe"`
 	WantVisibleRows      []string                 `yaml:"wantVisibleRows"`
 	WantMissingRows      []string                 `yaml:"wantMissingRows"`
 	WantViewContains     []string                 `yaml:"wantViewContains"`
@@ -59,15 +72,27 @@ type projectionCase struct {
 }
 
 type projectionDocument struct {
-	Fixture              string                 `yaml:"fixture"`
-	ExpectedSessionCount int                    `yaml:"expectedSessionCount"`
-	ExpectedCaseCount    int                    `yaml:"expectedCaseCount"`
-	Width                int                    `yaml:"width"`
-	Height               int                    `yaml:"height"`
-	SavedSelection       config.SelectionConfig `yaml:"savedSelection"`
-	ImportedSessionIDs   []string               `yaml:"importedSessionIDs"`
-	Sessions             []projectionSession    `yaml:"sessions"`
-	Cases                []projectionCase       `yaml:"cases"`
+	Fixture                          string                 `yaml:"fixture"`
+	ExpectedSessionCount             int                    `yaml:"expectedSessionCount"`
+	ExpectedCaseCount                int                    `yaml:"expectedCaseCount"`
+	ExpectedAnchorMutationProbeCount int                    `yaml:"expectedAnchorMutationProbeCount"`
+	Width                            int                    `yaml:"width"`
+	Height                           int                    `yaml:"height"`
+	SavedSelection                   config.SelectionConfig `yaml:"savedSelection"`
+	ImportedSessionIDs               []string               `yaml:"importedSessionIDs"`
+	Sessions                         []projectionSession    `yaml:"sessions"`
+	Cases                            []projectionCase       `yaml:"cases"`
+}
+
+func projectionValuesPresent(values ...[]string) bool {
+	for _, group := range values {
+		for _, value := range group {
+			if strings.TrimSpace(value) == "" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func decodeTreeProjection(data []byte) (projectionDocument, error) {
@@ -84,11 +109,13 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 		}
 		return doc, fmt.Errorf("tree_projection.yaml must hold exactly one document: %w", err)
 	}
-	if doc.ExpectedSessionCount != len(doc.Sessions) || len(doc.Sessions) == 0 {
-		return doc, fmt.Errorf("tree_projection.yaml expectedSessionCount=%d but has %d sessions", doc.ExpectedSessionCount, len(doc.Sessions))
+	if doc.ExpectedSessionCount != expectedTreeProjectionSessionCount || len(doc.Sessions) != expectedTreeProjectionSessionCount {
+		return doc, fmt.Errorf("tree_projection.yaml sessions: declared=%d actual=%d required=%d",
+			doc.ExpectedSessionCount, len(doc.Sessions), expectedTreeProjectionSessionCount)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		return doc, fmt.Errorf("tree_projection.yaml expectedCaseCount=%d but has %d cases", doc.ExpectedCaseCount, len(doc.Cases))
+	if doc.ExpectedCaseCount != expectedTreeProjectionCaseCount || len(doc.Cases) != expectedTreeProjectionCaseCount {
+		return doc, fmt.Errorf("tree_projection.yaml cases: declared=%d actual=%d required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), expectedTreeProjectionCaseCount)
 	}
 	if doc.Fixture == "" || doc.Width <= 0 || doc.Height <= 0 || !doc.SavedSelection.Mode.IsValid() {
 		return doc, fmt.Errorf("tree_projection.yaml must declare a fixture, positive region, and valid saved mode")
@@ -101,22 +128,32 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 		seenSessions[session.ID] = true
 	}
 	seenCases := map[string]bool{}
+	anchorMutationProbes := 0
 	for _, c := range doc.Cases {
-		if c.Name == "" || c.ExpectScope == "" || c.ExpectMode == "" || seenCases[c.Name] {
+		if c.Name == "" || c.ExpectScope == "" || c.ExpectMode == "" || seenCases[c.Name] ||
+			!projectionValuesPresent(c.Keys, c.ExpectSelected, c.ExpectUnselected, c.WantVisibleRows, c.WantMissingRows, c.WantViewContains, c.WantViewMissing) {
 			return doc, fmt.Errorf("tree_projection.yaml contains an invalid or duplicate case: %#v", c)
 		}
 		seenCases[c.Name] = true
+		if c.AnchorMutationProbe {
+			anchorMutationProbes++
+		}
 		if c.WorkingSelection != nil && !c.WorkingSelection.Mode.IsValid() {
 			return doc, fmt.Errorf("tree_projection.yaml case %q has invalid working selection mode %q", c.Name, c.WorkingSelection.Mode)
 		}
-		if len(c.ExpectSelected)+len(c.ExpectUnselected)+len(c.WantVisibleRows)+len(c.WantMissingRows)+len(c.WantViewContains)+len(c.WantViewMissing)+len(c.RowAssertions) == 0 {
+		if len(c.ExpectSelected)+len(c.ExpectUnselected)+len(c.WantVisibleRows)+len(c.WantMissingRows)+len(c.WantViewContains)+len(c.WantViewMissing)+len(c.RowAssertions) == 0 && c.ExpectCursorID == "" && c.ExpectPreviewID == "" && !c.CheckOverflow {
 			return doc, fmt.Errorf("tree_projection.yaml case %q has no observable assertion", c.Name)
 		}
 		for _, row := range c.RowAssertions {
-			if row.Label == "" || len(row.WantContains)+len(row.WantMissing) == 0 {
+			if strings.TrimSpace(row.Label) == "" || len(row.WantContains)+len(row.WantMissing) == 0 ||
+				!projectionValuesPresent(row.WantContains, row.WantMissing) {
 				return doc, fmt.Errorf("tree_projection.yaml case %q has an empty row assertion", c.Name)
 			}
 		}
+	}
+	if doc.ExpectedAnchorMutationProbeCount != expectedTreeProjectionAnchorMutationProbeCount || anchorMutationProbes != expectedTreeProjectionAnchorMutationProbeCount {
+		return doc, fmt.Errorf("tree_projection.yaml anchor mutation probes: declared=%d actual=%d required=%d",
+			doc.ExpectedAnchorMutationProbeCount, anchorMutationProbes, expectedTreeProjectionAnchorMutationProbeCount)
 	}
 	return doc, nil
 }
@@ -199,7 +236,11 @@ func mountedProjectionFlow(t *testing.T, doc projectionDocument, c projectionCas
 		WithPreviewRatio(0.5), WithDraftSelectionState())
 	reg := Registry{Sections: []Section{{Key: "transcripts", Title: "select transcripts", Fields: []Field{field}}}}
 	flow := NewFlow(theme.New(theme.ModeDark), reg, draft)
-	flow.SetSize(doc.Width, doc.Height)
+	height := doc.Height
+	if c.Height > 0 {
+		height = c.Height
+	}
+	flow.SetSize(doc.Width, height)
 	flow = drainInit(flow)
 	return flow, draft, field.(*treeField)
 }
@@ -288,6 +329,28 @@ func TestFlow_TreeProjectionPreservesCanonicalSelection(t *testing.T) {
 			if c.ExpectPane != "" && field.split.ActivePane().String() != c.ExpectPane {
 				t.Errorf("active pane = %s, want %s", field.split.ActivePane(), c.ExpectPane)
 			}
+			if c.ExpectCursorID != "" {
+				node, ok := field.tree.CurrentNode()
+				if !ok || node.ID != c.ExpectCursorID {
+					got := ""
+					if node != nil {
+						got = node.ID
+					}
+					t.Errorf("cursor = %q (present=%t), want %q", got, ok, c.ExpectCursorID)
+				}
+			}
+			if c.ExpectPreviewID != "" {
+				id, ok := field.split.HighlightedID()
+				if !ok || id != c.ExpectPreviewID {
+					t.Errorf("preview identity = %q (present=%t), want %q", id, ok, c.ExpectPreviewID)
+				}
+			}
+			if c.CheckOverflow {
+				overflow := field.tree.Overflow()
+				if overflow.Top != c.ExpectOverflowTop || overflow.Bottom != c.ExpectOverflowBottom {
+					t.Errorf("overflow = %+v, want top=%t bottom=%t", overflow, c.ExpectOverflowTop, c.ExpectOverflowBottom)
+				}
+			}
 
 			selection := draft.Working().Selection
 			for _, id := range c.ExpectSelected {
@@ -348,6 +411,35 @@ func TestFlow_TreeProjectionPreservesCanonicalSelection(t *testing.T) {
 	}
 }
 
+func TestTreeProjectionFixtureAnchorProbeDetectsCursorReset(t *testing.T) {
+	doc := loadTreeProjection(t)
+	probes := 0
+	for _, c := range doc.Cases {
+		if !c.AnchorMutationProbe {
+			continue
+		}
+		probes++
+		if len(c.Keys) < 2 || c.Keys[len(c.Keys)-1] != "f" || c.ExpectCursorID == "" {
+			t.Fatalf("anchor mutation probe %q must navigate to a named cursor before one facet key", c.Name)
+		}
+		flow, _, field := mountedProjectionFlow(t, doc, c)
+		flow = driveProjectionFlow(t, flow, c.Keys[:len(c.Keys)-1])
+		_ = flow
+		values := field.facetValues()
+		if len(values) == 0 {
+			t.Fatalf("anchor mutation probe %q has no facet value", c.Name)
+		}
+		reset := field.tree.WithRoots(pruneForest(field.full, field.facetKey, values[0]))
+		node, ok := reset.CurrentNode()
+		if ok && node.ID == c.ExpectCursorID {
+			t.Fatalf("anchor mutation probe %q would not catch reset-to-first-row projection", c.Name)
+		}
+	}
+	if probes != expectedTreeProjectionAnchorMutationProbeCount {
+		t.Fatalf("anchor mutation probes = %d, want %d", probes, expectedTreeProjectionAnchorMutationProbeCount)
+	}
+}
+
 func stripANSIForSettings(value string) string {
 	var out strings.Builder
 	inEscape := false
@@ -382,8 +474,37 @@ func TestTreeProjectionFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestTreeProjectionFixtureEnforcesRowCount(t *testing.T) {
-	mutated := bytes.Replace(treeProjectionData, []byte("expectedCaseCount: 11"), []byte("expectedCaseCount: 12"), 1)
+	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeProjectionCaseCount))
+	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedTreeProjectionCaseCount+1))
+	mutated := bytes.Replace(treeProjectionData, declared, changed, 1)
+	if bytes.Equal(mutated, treeProjectionData) {
+		t.Fatal("tree projection case-count mutation did not alter the fixture")
+	}
 	if _, err := decodeTreeProjection(mutated); err == nil {
 		t.Fatal("tree projection fixture accepted a mismatched row-count guard")
+	}
+}
+
+func TestTreeProjectionFixtureEnforcesSessionCount(t *testing.T) {
+	declared := []byte(fmt.Sprintf("expectedSessionCount: %d", expectedTreeProjectionSessionCount))
+	changed := []byte(fmt.Sprintf("expectedSessionCount: %d", expectedTreeProjectionSessionCount+1))
+	mutated := bytes.Replace(treeProjectionData, declared, changed, 1)
+	if bytes.Equal(mutated, treeProjectionData) {
+		t.Fatal("tree projection session-count mutation did not alter the fixture")
+	}
+	if _, err := decodeTreeProjection(mutated); err == nil {
+		t.Fatal("tree projection fixture accepted a mismatched session-count guard")
+	}
+}
+
+func TestTreeProjectionFixtureEnforcesAnchorMutationProbeCount(t *testing.T) {
+	declared := []byte(fmt.Sprintf("expectedAnchorMutationProbeCount: %d", expectedTreeProjectionAnchorMutationProbeCount))
+	changed := []byte(fmt.Sprintf("expectedAnchorMutationProbeCount: %d", expectedTreeProjectionAnchorMutationProbeCount+1))
+	mutated := bytes.Replace(treeProjectionData, declared, changed, 1)
+	if bytes.Equal(mutated, treeProjectionData) {
+		t.Fatal("tree projection anchor-probe count mutation did not alter the fixture")
+	}
+	if _, err := decodeTreeProjection(mutated); err == nil {
+		t.Fatal("tree projection fixture accepted a mismatched anchor-probe count")
 	}
 }

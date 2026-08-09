@@ -91,12 +91,17 @@ forest, so selecting a filtered row changes the real buffered choice exactly
 once. Clearing restores the complete forest, expansion state, and the current
 row when it still exists. While a filter remains active, the status line keeps
 the clear path visible, including when preview focus requires returning to the
-tree first.
+tree first. Footer and help entries describe only actions that can run in the
+current state: a leaf does not advertise expand or collapse, edge navigation is
+omitted when it cannot move, and the harness key appears only after its values
+load while the tree pane has focus.
 
 The harness control is view-only: rows found only under an excluded harness are
 hidden, mixed-harness projects remain through included data, and hidden
 selections remain selected and counted. Changing the harness view does not
-rewrite saved selection intent.
+rewrite saved selection intent. A highlighted canonical row keeps its viewport
+anchor when it remains in the projected view; returning to the complete view
+restores that anchor even if an intermediate harness view hid it.
 
 ## Legacy wizard keymap architecture
 
