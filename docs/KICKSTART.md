@@ -24,14 +24,17 @@ Discovery runs before the interactive screen. The guided flow then presents:
    branch, or session. The harness facet filters the same tree without redefining the selection.
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
-4. **Privacy:** review the currently offered Standard redaction policy for locally stored transcripts.
-5. **Content license:** choose the default license for a later explicit share. Saving the default does
-   not publish anything.
+4. **Privacy:** review synthetic examples processed by the real Standard redactor used for locally
+   stored transcripts. Kickstart stops with an actionable error if it cannot validate that proof.
+5. **Content license:** choose the default license for a later explicit share. No license is the
+   default, and saving any default does not publish anything.
 6. **Sharing visibility:** when connected to a Village, choose the default visibility for later
-   explicit pushes. This section is hidden while disconnected.
+   explicit pushes. A disconnected flow offers an optional login at this boundary before continuing
+   locally without the visibility section. Login preserves the buffered draft and publishes nothing.
 7. **Claude retention:** when Claude Code sessions were discovered, choose how long Claude Code keeps
    its local transcript files.
-8. **Review and save:** review the buffered values, then confirm the single config commit.
+8. **Review and save:** review every visible buffered value and the promised local effects, then
+   confirm one config commit. The consent summary states that kickstart publishes nothing.
 
 Each visible section begins with a short guide band before its normal setting fields. Conditional
 sections and their guidance disappear together. The fields, validation, and persisted values are the
@@ -58,6 +61,23 @@ Kickstart buffers edits in a draft. Moving between sections writes nothing. The 
 The order is config first, Claude retention second, local import third. There is no push client,
 publisher, publication receipt, or background sharing step in this path.
 
+While local import runs, kickstart names the real import stages and shows elapsed time. It only offers
+a qualified estimate when completed bounded work supports one. The completion screen remains visible
+until you explicitly leave it. If import fails, the committed configuration and any applied retention
+setting remain in force; retry reruns only local import and does not recommit or reapply either setting.
+
+After a successful import, the completion screen reports that kickstart published nothing and offers
+three separate next steps:
+
+```text
+peasant web start
+peasant village login
+peasant village push
+```
+
+`peasant web start` reports the real local address when it starts. Kickstart does not invent a
+localhost URL. Village login and push remain separate, explicit actions.
+
 Pressing `esc` or `q` opens a leave-without-saving confirmation. Confirming that exit leaves the config
 and Claude settings bytes unchanged and does not run local ingest.
 
@@ -83,9 +103,10 @@ See [TUI keyboard shortcuts](TUI.md#config-screen) for its controls.
 | Leave without saving | `esc` or `q`, then confirm |
 | Show or close help | `?` |
 
-In the selection tree, use left/right or `h`/`l` to collapse and expand, `f` to filter, and the page or
-jump keys shown in the footer. `ctrl+l` moves focus to the preview pane and `ctrl+h` returns focus to
-the tree.
+In the selection tree, use left/right or `h`/`l` to collapse and expand, `f` to cycle the harness view,
+and `/` to start filtering. Type a query and press `enter` to keep the filter or `esc` to clear it.
+The page and jump keys are shown in the footer. `ctrl+l` moves focus to the preview pane and `ctrl+h`
+returns focus to the tree.
 
 ## Reset and standalone boundaries
 
