@@ -35,8 +35,8 @@ const (
 	// PhaseIngest runs the mounted local FTUE ingest boundary ONLY after a
 	// successful commit, preserving the ordering (save, then import).
 	PhaseIngest
-	// PhaseDone is the terminal stage: the program has committed and ingested,
-	// or the user confirmed a no-save exit.
+	// PhaseDone is the persistent terminal stage after local ingest succeeds or
+	// fails, or after the user confirms a no-save exit.
 	PhaseDone
 )
 
@@ -59,8 +59,8 @@ func (p Phase) String() string {
 }
 
 // LoginFunc performs the village OAuth login and returns the authenticated
-// username. It is the existing login runner (internal/auth.Login) injected so the
-// program never reaches for auth or the network itself; a test supplies a fake.
+// username. Production injects the path-aware internal/auth.LoginFrom runner so
+// the program never reaches for auth or the network itself; a test supplies a fake.
 type LoginFunc func(ctx context.Context) (username string, err error)
 
 // IngestFunc runs local transcript ingest after the config is saved and returns
@@ -365,9 +365,9 @@ func (p Program) runLogin() tea.Cmd {
 	}
 }
 
-// enterFlow builds the settings.Flow with the now-known village connection and
-// enters PhaseFlow, returning the flow's async startup command (the tree scan)
-// so the caller can dispatch it.
+// enterFlow opens the already-mounted settings.Flow with the current village
+// connection state and returns its one async startup command (the tree scan) so
+// the caller can dispatch it on first entry.
 func (p Program) enterFlow() (Program, tea.Cmd) {
 	p.phase = PhaseFlow
 	if current := p.flow.CurrentSectionKey(); current != "" {
