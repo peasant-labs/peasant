@@ -1,0 +1,65 @@
+# Assertions over the canonical kickstart Program/Flow/Registry selection step.
+# Discovery and preview data come from the strict selection_render fixture; this
+# document owns the saved-selection state and interaction expectations.
+expectedCaseCount: 5
+savedSelection:
+  mode: selected
+  autoIngestNewBranches: false
+  harnesses:
+    claude-code:
+      sessions: [cc-parent]
+cases:
+  - name: default-distinguishes-saved-imported-and-current
+    keys: []
+    wantContains:
+      - "tracked = included by your previous saved selection"
+      - "imported = already in the local store"
+      - "scope: [project]  branch  session"
+      - "/: search this scope"
+      - "view only"
+      - "mixed projects remain"
+      - "hidden selections stay selected"
+      - "hidden by filters: 0"
+    rowAssertions:
+      - label: parent session
+        wantContains: ["[✓]", tracked]
+        wantMissing: [already imported]
+      - label: imported session
+        wantContains: ["[ ]", already imported]
+        wantMissing: [tracked]
+
+  - name: typed-scope-actions-reach-session-without-changing-expand-bindings
+    keys: ["]", "]"]
+    wantContains:
+      - "scope: project  branch  [session]"
+      - "→/l: expand"
+      - "←/h: collapse"
+      - "ctrl+l: focus right pane"
+
+  - name: search-editing-shows-type-delete-keep-and-clear
+    keys: ["/"]
+    wantContains:
+      - "search project:"
+      - "type to filter"
+      - "backspace: delete"
+      - "enter: keep filter"
+      - "esc: clear filter"
+
+  - name: help-is-derived-from-current-tree-availability
+    keys: ["?"]
+    wantContains:
+      - "keyboard shortcuts"
+      - "]            next scope"
+      - "/            search scope"
+      - "→/l          expand"
+      - "ctrl+l       focus right pane"
+    wantMissing: ["[            previous scope"]
+
+  - name: preview-focus-removes-tree-only-search-from-availability
+    keys: [ctrl+l]
+    wantContains:
+      - ">"
+      - "PgDn: page down"
+    wantMissing:
+      - "/: search this scope"
+      - "space: select"

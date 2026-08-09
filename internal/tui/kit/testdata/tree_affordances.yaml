@@ -1,0 +1,125 @@
+# Scoped search, lifecycle actions, and viewport markers for kit.Tree. Every
+# case drives the real component from a freshly loaded project -> branch ->
+# session forest. The row-count guard and strict loader make adding or removing
+# a behavior an explicit fixture edit.
+expectedCaseCount: 11
+width: 52
+height: 4
+forest:
+  - id: project-alpha
+    label: alpha project
+    children:
+      - id: alpha-main
+        label: main
+        children:
+          - {id: alpha-ingest, label: ingest pipeline}
+      - id: alpha-feature
+        label: feature-search
+        children:
+          - {id: alpha-share, label: share bridge}
+  - id: project-beta
+    label: beta project
+    children:
+      - id: beta-develop
+        label: develop
+        children:
+          - {id: beta-audit, label: governance audit}
+cases:
+  - name: project-scope-starts-with-bottom-overflow-and-search
+    keys: []
+    expectScope: project
+    expectMode: inactive
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
+       project-beta, beta-develop, beta-audit]
+    expectOverflowBottom: true
+    wantAvailable: [next-scope, search-scope]
+    wantUnavailable: [prev-scope, clear-filter]
+    wantViewContains: ["↓"]
+    wantViewMissing: ["↑"]
+
+  - name: page-down-shows-both-overflow-directions
+    keys: [pgdown]
+    expectScope: project
+    expectMode: inactive
+    expectOverflowTop: true
+    expectOverflowBottom: true
+    wantViewContains: ["↑", "↓"]
+
+  - name: bottom-removes-only-the-bottom-overflow-marker
+    keys: [shift+g]
+    expectScope: project
+    expectMode: inactive
+    expectOverflowTop: true
+    expectOverflowBottom: false
+    wantViewContains: ["↑"]
+    wantViewMissing: ["↓"]
+
+  - name: next-scope-navigates-to-branch-without-expanding
+    keys: ["]"]
+    expectScope: branch
+    expectMode: inactive
+    expectCursorID: alpha-main
+    expectOverflowBottom: true
+    wantAvailable: [prev-scope, next-scope, search-scope, expand, collapse]
+
+  - name: next-scope-navigates-to-session-without-moving-pane-focus
+    keys: ["]", "]"]
+    expectScope: session
+    expectMode: inactive
+    expectCursorID: alpha-ingest
+    expectOverflowBottom: true
+    wantAvailable: [prev-scope, search-scope, expand, collapse]
+    wantUnavailable: [next-scope, focus-pane-left, focus-pane-right]
+
+  - name: previous-scope-returns-from-session-to-branch
+    keys: ["]", "]", "["]
+    expectScope: branch
+    expectMode: inactive
+    expectCursorID: alpha-main
+    expectOverflowBottom: true
+
+  - name: project-search-keeps-the-matching-project-subtree
+    keys: ["/", a, l, p, h, a, enter]
+    expectScope: project
+    expectMode: kept
+    expectQuery: alpha
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share]
+    expectOverflowBottom: true
+    wantAvailable: [search-scope, clear-filter, toggle]
+    wantUnavailable: [keep-filter, delete-filter]
+
+  - name: branch-search-preserves-project-context
+    keys: ["]", "/", f, e, a, t, u, r, e, enter]
+    expectScope: branch
+    expectMode: kept
+    expectQuery: feature
+    expectVisibleIDs: [project-alpha, alpha-feature, alpha-share]
+
+  - name: session-search-preserves-project-and-branch-context
+    keys: ["]", "]", "/", a, u, d, i, t, enter]
+    expectScope: session
+    expectMode: kept
+    expectQuery: audit
+    expectVisibleIDs: [project-beta, beta-develop, beta-audit]
+
+  - name: editing-advertises-delete-keep-clear-and-delete-mutates-query
+    keys: ["]", "]", "/", s, h, a, backspace]
+    expectScope: session
+    expectMode: editing
+    expectQuery: sh
+    wantAvailable: [delete-filter, keep-filter, clear-filter]
+    wantUnavailable: [up, down, toggle, search-scope]
+
+  - name: clear-restores-the-complete-forest-and-selection-navigation
+    keys: ["]", "]", "/", a, u, d, i, t, enter, esc]
+    expectScope: session
+    expectMode: inactive
+    expectQuery: ""
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
+       project-beta, beta-develop, beta-audit]
+    expectOverflowBottom: true
+    wantAvailable: [prev-scope, search-scope, toggle]
+    wantUnavailable: [clear-filter, keep-filter, delete-filter]

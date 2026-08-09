@@ -25,6 +25,8 @@ type treeAnnotationCase struct {
 	Label        string   `yaml:"label"`
 	ChildCount   string   `yaml:"childCount"`
 	Ingested     bool     `yaml:"ingested"`
+	Tracked      bool     `yaml:"tracked"`
+	State        string   `yaml:"state"`
 	Width        int      `yaml:"width"`
 	WantContains []string `yaml:"wantContains"`
 	WantMissing  []string `yaml:"wantMissing"`
@@ -59,6 +61,9 @@ func loadTreeAnnotations(t *testing.T) treeAnnotationDocument {
 		if c.Width <= 0 {
 			t.Fatalf("tree annotation fixture case %q declares width %d; a non-positive width renders nothing to assert on", c.Name, c.Width)
 		}
+		if c.State != "" && c.State != "unchecked" && c.State != "checked" {
+			t.Fatalf("tree annotation fixture case %q declares unknown current state %q", c.Name, c.State)
+		}
 	}
 	return doc
 }
@@ -83,10 +88,17 @@ func annotatedForest(c treeAnnotationCase) []*kit.TreeNode {
 	if c.Ingested {
 		meta[kit.MetaIngested] = kit.MetaIngestedValue
 	}
+	if c.Tracked {
+		meta[kit.MetaTracked] = kit.MetaTrackedValue
+	}
+	state := kit.Unchecked
+	if c.State == "checked" {
+		state = kit.Checked
+	}
 	return []*kit.TreeNode{{
 		ID:       "project",
 		Label:    "acme/tool",
-		Children: []*kit.TreeNode{{ID: "sess", Label: c.Label, Meta: meta, State: kit.Unchecked}},
+		Children: []*kit.TreeNode{{ID: "sess", Label: c.Label, Meta: meta, State: state}},
 	}}
 }
 
