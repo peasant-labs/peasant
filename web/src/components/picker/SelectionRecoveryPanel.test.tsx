@@ -38,21 +38,23 @@ describe('SelectionRecoveryPanel', () => {
     render(<SelectionRecoveryPanel {...fixture.summary.selection} />);
 
     const panel = screen.getByRole('status', { name: 'project selection recovery' });
-    expect(within(panel).getByText('Your saved selection hides all projects.')).toBeInTheDocument();
-    const body = panel.querySelector('.cx-teach-body');
+    const exactVisibleText = (text: string) =>
+      within(panel).getByText(
+        (_content, element) => element?.textContent?.replace(/\s+/g, ' ').trim() === text,
+      );
     expect(
-      Array.from(body?.firstElementChild?.children ?? []).map((line) => line.textContent),
-    ).toEqual([
-      'Peasant hides 2 projects and 5 sessions.',
-      'The data stays ingested and indexed.',
-      'The web viewer does not list it.',
-      'It is not available for a future push.',
-      'Peasant did not delete data.',
-      'To change the selection, run peasant kickstart.',
-    ]);
-    expect(
-      Array.from(panel.querySelectorAll('.tabular-nums')).map((count) => count.textContent),
-    ).toEqual(['2 projects', '5 sessions']);
+      within(panel).getByRole('heading', {
+        name: 'Your saved selection hides all projects.',
+      }),
+    ).toBeVisible();
+    expect(exactVisibleText('Peasant hides 2 projects and 5 sessions.')).toBeVisible();
+    expect(within(panel).getByText('2 projects')).toBeVisible();
+    expect(within(panel).getByText('5 sessions')).toBeVisible();
+    expect(within(panel).getByText('The data stays ingested and indexed.')).toBeVisible();
+    expect(within(panel).getByText('The web viewer does not list it.')).toBeVisible();
+    expect(within(panel).getByText('It is not available for a future push.')).toBeVisible();
+    expect(within(panel).getByText('Peasant did not delete data.')).toBeVisible();
+    expect(exactVisibleText('To change the selection, run peasant kickstart.')).toBeVisible();
     for (const identity of fixture.forbiddenIdentities) {
       expect(panel.textContent).not.toContain(identity);
     }
