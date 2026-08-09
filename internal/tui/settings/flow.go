@@ -519,7 +519,22 @@ func (a flowAvailability) AvailableActions() []keymap.ActionID {
 		out = append(out, keymap.ActionPrevField)
 	}
 	out = append(out, keymap.ActionBack, keymap.ActionQuit, keymap.ActionHelp)
-	return dedupeActions(out)
+	out = dedupeActions(out)
+	if !f.focusedFieldCapturesPrintableInput() {
+		return out
+	}
+	// Update forwards printable input to the focused editor before key matching.
+	// Remove every action with a printable binding from the SAME Availability
+	// used by dispatch, footer, and help; filter lifecycle controls such as
+	// backspace, enter, escape, and tab remain visible and live.
+	km := keymap.Default()
+	effective := out[:0]
+	for _, action := range out {
+		if !keymap.HasPrintableBinding(km, action) {
+			effective = append(effective, action)
+		}
+	}
+	return effective
 }
 
 func dedupeActions(in []keymap.ActionID) []keymap.ActionID {

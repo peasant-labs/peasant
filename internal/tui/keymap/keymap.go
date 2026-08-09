@@ -22,6 +22,8 @@
 package keymap
 
 import (
+	"unicode"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
@@ -515,6 +517,28 @@ func Match(km Keymap, msg tea.KeyPressMsg, avail Availability) (ActionID, bool) 
 		}
 	}
 	return ActionUnknown, false
+}
+
+// HasPrintableBinding reports whether action has a key that a focused text
+// editor receives as printable input. It lets a presentation remove shadowed
+// actions from its effective Availability while editing, so dispatch, footer,
+// and help all describe the same keys. "space" is the one printable key whose
+// binding name is not itself a single rune.
+func HasPrintableBinding(km Keymap, action ActionID) bool {
+	binding, ok := km[action]
+	if !ok {
+		return false
+	}
+	for _, name := range binding.Keys() {
+		if name == "space" {
+			return true
+		}
+		runes := []rune(name)
+		if len(runes) == 1 && unicode.IsPrint(runes[0]) {
+			return true
+		}
+	}
+	return false
 }
 
 // mustBinding returns km's binding for action and whether one exists. It
