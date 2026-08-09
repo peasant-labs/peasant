@@ -308,14 +308,16 @@ type SelectionMatcher struct {
 
 // DiscoveryIdentityMultiplicity says whether an identity names one candidate
 // or more than one candidate in the current discovery set. Its zero value is
-// the common single-candidate case, so existing candidate literals remain
-// source compatible. Discovery producers must mark shared remote and name
-// identities as ambiguous before matching them.
+// not trusted as unique. Discovery producers must prove uniqueness explicitly
+// before remote or name evidence can select a candidate.
 type DiscoveryIdentityMultiplicity uint8
 
 const (
+	// DiscoveryIdentityUnproven is the fail-closed zero value. The producer did
+	// not prove that this remote or name identifies one candidate.
+	DiscoveryIdentityUnproven DiscoveryIdentityMultiplicity = iota
 	// DiscoveryIdentityUnique means the identity names one candidate.
-	DiscoveryIdentityUnique DiscoveryIdentityMultiplicity = iota
+	DiscoveryIdentityUnique
 	// DiscoveryIdentityAmbiguous means the identity names multiple candidates.
 	DiscoveryIdentityAmbiguous
 )
@@ -846,12 +848,13 @@ func matchingProjects(projects []projectMatcher, candidate DiscoveryCandidate) [
 			remoteMatches = append(remoteMatches, project)
 		}
 		if len(remoteMatches) > 0 {
-			// Preserve branch-rule conflict semantics for a unique project whose
-			// configuration also carries a name-only entry.
+			// Preserve legacy remote-or-name branch conflict semantics for every
+			// path-unbound entry. Do not append entries already selected by the
+			// same remote.
 			if candidate.NameMultiplicity == DiscoveryIdentityUnique {
 				normalizedName := NormalizeProjectNameForMatch(candidate.ProjectName)
 				for _, project := range projects {
-					if project.gitRemote == "" && !project.pathBound && project.matchesName(normalizedName) {
+					if !project.pathBound && !project.matchesRemote(normalizedRemote) && project.matchesName(normalizedName) {
 						remoteMatches = append(remoteMatches, project)
 					}
 				}

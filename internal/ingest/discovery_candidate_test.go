@@ -72,7 +72,7 @@ func loadDiscoveryCandidateFixtures(t *testing.T) discoveryCandidateFixtures {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("discovery candidate fixture must contain exactly one YAML document: %v", err)
 	}
-	const expectedMatchRows = 21
+	const expectedMatchRows = 25
 	const expectedParityRows = 8
 	if fixtures.DeclaredMatchRows != expectedMatchRows || len(fixtures.MatchCases) != expectedMatchRows {
 		t.Fatalf("discovery match fixture row guard failed: declared=%d actual=%d expected=%d", fixtures.DeclaredMatchRows, len(fixtures.MatchCases), expectedMatchRows)
@@ -189,10 +189,14 @@ func candidateFromFixture(input discoveryCandidateInput) ingest.DiscoveryCandida
 }
 
 func multiplicityFromFixture(value string) ingest.DiscoveryIdentityMultiplicity {
-	if value == "ambiguous" {
+	switch value {
+	case "unique":
+		return ingest.DiscoveryIdentityUnique
+	case "ambiguous":
 		return ingest.DiscoveryIdentityAmbiguous
+	default:
+		return ingest.DiscoveryIdentityUnproven
 	}
-	return ingest.DiscoveryIdentityUnique
 }
 
 func branchMatchFromFixture(expected discoveryExpectedMatch) ingest.BranchMatch {

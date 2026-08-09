@@ -1,4 +1,4 @@
-declared_match_rows: 21
+declared_match_rows: 25
 declared_parity_rows: 8
 match_cases:
   - name: explicit-session-outranks-project-evidence
@@ -81,8 +81,17 @@ match_cases:
       harness: claude-code
       git_remote: https://github.com/example/garden.git
       project_name: garden
-      clone_path: /workspace/garden-a
       remote_multiplicity: ambiguous
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: unproven-legacy-remote-is-rejected-by-default
+    projects:
+      - {git_remote: https://github.com/example/garden.git}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
       session_id: 22222222-2222-4222-8222-222222222222
     expected: rejected
 
@@ -94,6 +103,7 @@ match_cases:
       git_remote: https://github.com/example/garden.git
       project_name: garden
       clone_path: /workspace/garden
+      remote_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -105,6 +115,7 @@ match_cases:
       git_remote: https://github.com/example/garden
       project_name: garden
       clone_path: /workspace/garden
+      remote_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -128,8 +139,18 @@ match_cases:
       harness: claude-code
       project_name: /workspace/garden
       clone_path: /workspace/garden
+      name_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
+
+  - name: unproven-legacy-name-is-rejected-by-default
+    projects:
+      - {name: garden}
+    candidate:
+      harness: claude-code
+      project_name: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
 
   - name: ambiguous-name-is-rejected
     projects:
@@ -217,6 +238,7 @@ match_cases:
       harness: claude-code
       git_remote: https://github.com/example/garden.git
       branch: main
+      remote_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -227,6 +249,36 @@ match_cases:
     candidate:
       harness: claude-code
       project_name: garden
+      name_multiplicity: unique
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: different-remote-name-rule-preserves-legacy-conflict
+    projects:
+      - {git_remote: https://github.com/example/garden.git, branches: [main]}
+      - {git_remote: https://github.com/example/archive.git, name: garden, branches: [release]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      branch: main
+      remote_multiplicity: unique
+      name_multiplicity: unique
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: withheld
+
+  - name: path-bound-different-remote-name-rule-stays-excluded
+    projects:
+      - {git_remote: https://github.com/example/garden.git, branches: [main]}
+      - {git_remote: https://github.com/example/archive.git, name: garden, clone_paths: [/workspace/archive], branches: [release]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden
+      branch: main
+      remote_multiplicity: unique
+      name_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -258,6 +310,7 @@ delegation_parity:
     candidate:
       harness: claude-code
       git_remote: https://github.com/example/garden
+      remote_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -266,6 +319,7 @@ delegation_parity:
     candidate:
       harness: claude-code
       project_name: /workspace/garden
+      name_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -275,6 +329,7 @@ delegation_parity:
       harness: claude-code
       git_remote: https://github.com/example/garden.git
       branch: topic
+      remote_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: rejected
 
@@ -285,6 +340,7 @@ delegation_parity:
       harness: claude-code
       git_remote: https://github.com/example/garden.git
       branch: topic
+      remote_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: selected
 
@@ -297,5 +353,7 @@ delegation_parity:
       git_remote: https://github.com/example/garden.git
       project_name: garden
       branch: main
+      remote_multiplicity: unique
+      name_multiplicity: unique
       session_id: 22222222-2222-4222-8222-222222222222
     expected: withheld
