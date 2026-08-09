@@ -100,7 +100,7 @@ func CompileSelectionMatcher(selection SelectionConfig) ingest.SelectionMatcher 
 	for harness, selected := range selection.Harnesses {
 		b.AddHarness(harness)
 		for _, project := range selected.Projects {
-			b.AddProject(harness, project.GitRemote, project.Name, project.Branches...)
+			b.AddProjectWithClonePaths(harness, project.GitRemote, project.Name, project.ClonePaths, project.Branches...)
 		}
 		for _, sessionID := range selected.Sessions {
 			b.AddSession(harness, sessionID)
@@ -384,13 +384,13 @@ type ProjectSelection struct {
 	// GitRemote is the primary project identifier (e.g., "git@github.com:user/repo.git").
 	GitRemote string `yaml:"gitRemote,omitempty"`
 	// Name is a fallback identifier when no git remote is available (e.g., local project name).
-	// LIMITATION: matching is by folder BASENAME only (internal/ingest.NormalizeProjectNameForMatch),
-	// so this matches EVERY project whose folder shares that basename regardless of
-	// parent path — e.g. `name: garden-app` matches both /home/alice/work/garden-app and
-	// /home/bob/notes/garden-app. If you have two differently-located projects that share a
-	// folder name and want to select only one, use GitRemote instead (an exact,
-	// unambiguous identifier).
+	// Name-only matching uses the folder basename. ClonePaths supplies exact
+	// physical identity when differently located projects share that basename.
 	Name string `yaml:"name,omitempty"`
+	// ClonePaths lists the resolved absolute physical paths for the local clones
+	// selected by this entry. One Git remote can have more than one clone path.
+	// Branches applies to every clone path in the entry.
+	ClonePaths []string `yaml:"clonePaths,omitempty"`
 	// Branches restricts ingestion to specific branches within this project.
 	// Empty means all branches are included.
 	Branches []string `yaml:"branches,omitempty"`

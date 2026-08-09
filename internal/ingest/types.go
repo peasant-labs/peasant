@@ -306,6 +306,34 @@ type SelectionMatcher struct {
 	harnesses map[string]harnessMatcher
 }
 
+// DiscoveryIdentityMultiplicity says whether an identity names one candidate
+// or more than one candidate in the current discovery set. Its zero value is
+// the common single-candidate case, so existing candidate literals remain
+// source compatible. Discovery producers must mark shared remote and name
+// identities as ambiguous before matching them.
+type DiscoveryIdentityMultiplicity uint8
+
+const (
+	// DiscoveryIdentityUnique means the identity names one candidate.
+	DiscoveryIdentityUnique DiscoveryIdentityMultiplicity = iota
+	// DiscoveryIdentityAmbiguous means the identity names multiple candidates.
+	DiscoveryIdentityAmbiguous
+)
+
+// DiscoveryCandidate contains the identity evidence for one discovered
+// session. ClonePath is physical identity data and is separate from display
+// text. An empty ClonePath means that path resolution was unavailable.
+type DiscoveryCandidate struct {
+	Harness            Harness
+	GitRemote          string
+	ProjectName        string
+	ClonePath          ClonePath
+	Branch             string
+	SessionID          SessionID
+	RemoteMultiplicity DiscoveryIdentityMultiplicity
+	NameMultiplicity   DiscoveryIdentityMultiplicity
+}
+
 type harnessMatcher struct {
 	projects []projectMatcher
 	sessions map[string]bool // explicit session IDs
@@ -314,6 +342,12 @@ type harnessMatcher struct {
 type projectMatcher struct {
 	gitRemote string
 	name      string
+	// clonePaths contains resolved absolute physical identities. Empty keeps
+	// the legacy remote/name fallback behavior.
+	clonePaths map[ClonePath]bool
+	// pathBound remains true when clone paths were configured but malformed.
+	// Those entries fail closed instead of becoming legacy remote/name rules.
+	pathBound bool
 	// branches is the set of selected branch names for this project. Empty (nil)
 	// means "all branches" under the current selection semantics. It is consulted ONLY by
 	// MatchBranch; the project-level Matches deliberately ignores branches so
@@ -329,17 +363,16 @@ type projectMatcher struct {
 // entry can be acted on: the normalized forms the matcher compares against are
 // deliberately not what the user reads back in their config.
 type SelectionEntry struct {
-	GitRemote string
-	Name      string
-	Branches  []string
+	GitRemote  string
+	Name       string
+	ClonePaths []ClonePath
+	Branches   []string
 }
 
 // String renders the entry the way the configuration file names it.
 //
-// An entry with neither gitRemote nor name has no arm here because it can never
-// reach one: projectMatcher.identifies returns false for every candidate, so
-// such an entry is never part of a decision anyone renders. A fourth arm would
-// read as covering a case its only caller cannot deliver.
+// A clone-path-only entry renders its physical identity when a branch conflict
+// must identify the configured rule to the terminal user.
 func (e SelectionEntry) String() string {
 	identity := ""
 	switch {
@@ -347,6 +380,8 @@ func (e SelectionEntry) String() string {
 		identity = fmt.Sprintf("gitRemote %q name %q", e.GitRemote, e.Name)
 	case e.Name != "":
 		identity = fmt.Sprintf("name %q", e.Name)
+	case e.GitRemote == "" && len(e.ClonePaths) > 0:
+		identity = fmt.Sprintf("clonePaths %q", e.ClonePaths)
 	default:
 		identity = fmt.Sprintf("gitRemote %q", e.GitRemote)
 	}
@@ -387,21 +422,16 @@ func (d DiscoveryDecision) Conflicting() []SelectionEntry {
 	return entries
 }
 
-// identifies reports whether this project entry matches the session's git
-// remote or project name. p.gitRemote/p.name are already normalized (stored
-// that way by newSelectionMatcher/AddProject); the incoming gitRemote and
-// projectName are normalized here, at the one comparison boundary shared by
-// Matches and MatchBranch, so every caller of SelectionMatcher gets the same
-// forgiving comparison regardless of what raw form it happened to have on
-// hand.
-func (p projectMatcher) identifies(gitRemote, projectName string) bool {
-	if p.gitRemote != "" && gitRemote != "" && p.gitRemote == NormalizeRemoteForMatch(gitRemote) {
-		return true
-	}
-	if p.name != "" && projectName != "" && p.name == NormalizeProjectNameForMatch(projectName) {
-		return true
-	}
-	return false
+func (p projectMatcher) matchesClonePath(clonePath ClonePath) bool {
+	return clonePath != "" && p.clonePaths[clonePath]
+}
+
+func (p projectMatcher) matchesRemote(normalizedRemote string) bool {
+	return normalizedRemote != "" && p.gitRemote != "" && p.gitRemote == normalizedRemote
+}
+
+func (p projectMatcher) matchesName(normalizedName string) bool {
+	return normalizedName != "" && p.name != "" && p.name == normalizedName
 }
 
 // NormalizeProjectNameForMatch normalizes a project "name" for
@@ -419,21 +449,9 @@ func (p projectMatcher) identifies(gitRemote, projectName string) bool {
 // already populate a basename) passes through unchanged, so this is a safe
 // no-op wherever the input was already a real name.
 //
-// LIMITATION (inherent to name-only matching, not fixed by this function):
-// because comparison happens on the basename ALONE, a `name:` selection rule
-// matches EVERY project whose folder basename equals it, regardless of
-// parent path. `name: sample-project` matches both /home/alice/work/sample-project and
-// /home/bob/notes/sample-project — there is no way to disambiguate two differently-
-// located projects that share a folder name from the name alone. This is far
-// better than the pre-fix state (a bare path never matched a short name at
-// all, so name-based selection silently matched nothing), but it is NOT
-// precise: a user with two same-named projects who wants to select only one
-// of them must use `gitRemote:` instead (an exact, unambiguous identifier),
-// not `name:`. Do not attempt to redesign this into a full-path match here —
-// the config's `name` field is deliberately a short, human-typed value, and
-// widening it would break every existing `name:`-based selection. Surface
-// this limitation wherever selection-by-name is user-facing (docs, kickstart
-// wizard copy, CLI flag help).
+// Name alone cannot disambiguate two physical clones with the same basename.
+// Candidate producers mark that evidence as ambiguous, and persisted
+// ClonePaths provides exact identity after the user selects a clone.
 func NormalizeProjectNameForMatch(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -473,9 +491,10 @@ type harnessSelectionInput struct {
 // projectSelectionInput identifies a project by git remote or name for selection matching.
 // Mirrors config.ProjectSelection without importing internal/config.
 type projectSelectionInput struct {
-	GitRemote string
-	Name      string
-	Branches  []string
+	GitRemote  string
+	Name       string
+	ClonePaths []string
+	Branches   []string
 }
 
 // toBranchSet builds a lookup set from a branch-name slice. Returns nil for
@@ -491,6 +510,23 @@ func toBranchSet(branches []string) map[string]bool {
 	return s
 }
 
+func toClonePathSet(paths []string) map[ClonePath]bool {
+	if len(paths) == 0 {
+		return nil
+	}
+	set := make(map[ClonePath]bool, len(paths))
+	for _, path := range paths {
+		if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			continue
+		}
+		set[ClonePath(path)] = true
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
 // newSelectionMatcher builds a matcher from the harness selection map.
 // Used internally and by SelectionMatcherBuilder.
 func newSelectionMatcher(harnesses map[string]harnessSelectionInput) SelectionMatcher {
@@ -503,26 +539,41 @@ func newSelectionMatcher(harnesses map[string]harnessSelectionInput) SelectionMa
 			pm.sessions[sid] = true
 		}
 		for _, proj := range input.Projects {
+			clonePaths := toClonePathSet(proj.ClonePaths)
 			pm.projects = append(pm.projects, projectMatcher{
 				// Normalized ONCE here at construction: the
 				// config side's gitRemote/name are compared against
 				// per-session values normalized the same way at match time
-				// (see projectMatcher.identifies), so an SSH-form config
+				// (see matchingProjects), so an SSH-form config
 				// remote matches a normalized stored remote, and a config
 				// name matches a path-derived stored "name".
-				gitRemote: NormalizeRemoteForMatch(proj.GitRemote),
-				name:      NormalizeProjectNameForMatch(proj.Name),
-				branches:  toBranchSet(proj.Branches),
+				gitRemote:  NormalizeRemoteForMatch(proj.GitRemote),
+				name:       NormalizeProjectNameForMatch(proj.Name),
+				clonePaths: clonePaths,
+				pathBound:  len(proj.ClonePaths) > 0,
+				branches:   toBranchSet(proj.Branches),
 				entry: SelectionEntry{
-					GitRemote: proj.GitRemote,
-					Name:      proj.Name,
-					Branches:  append([]string(nil), proj.Branches...),
+					GitRemote:  proj.GitRemote,
+					Name:       proj.Name,
+					ClonePaths: clonePathSlice(proj.ClonePaths),
+					Branches:   append([]string(nil), proj.Branches...),
 				},
 			})
 		}
 		m.harnesses[harnessName] = pm
 	}
 	return m
+}
+
+func clonePathSlice(paths []string) []ClonePath {
+	if len(paths) == 0 {
+		return nil
+	}
+	result := make([]ClonePath, len(paths))
+	for index, path := range paths {
+		result[index] = ClonePath(path)
+	}
+	return result
 }
 
 // SelectionMatcherBuilder constructs a SelectionMatcher incrementally.
@@ -551,8 +602,19 @@ func (b *SelectionMatcherBuilder) AddHarness(name string) *SelectionMatcherBuild
 // passing no branches means "all branches" (current MVP semantics). Existing
 // three-argument callers (e.g. prune's project-level matching) remain valid.
 func (b *SelectionMatcherBuilder) AddProject(harness, gitRemote, name string, branches ...string) *SelectionMatcherBuilder {
+	return b.AddProjectWithClonePaths(harness, gitRemote, name, nil, branches...)
+}
+
+// AddProjectWithClonePaths adds a project restriction with resolved physical
+// clone identities. Branches applies to every clone path in the entry.
+func (b *SelectionMatcherBuilder) AddProjectWithClonePaths(harness, gitRemote, name string, clonePaths []string, branches ...string) *SelectionMatcherBuilder {
 	p := b.harnesses[harness]
-	p.Projects = append(p.Projects, projectSelectionInput{GitRemote: gitRemote, Name: name, Branches: branches})
+	p.Projects = append(p.Projects, projectSelectionInput{
+		GitRemote:  gitRemote,
+		Name:       name,
+		ClonePaths: append([]string(nil), clonePaths...),
+		Branches:   append([]string(nil), branches...),
+	})
 	b.harnesses[harness] = p
 	return b
 }
@@ -572,31 +634,21 @@ func (b *SelectionMatcherBuilder) Build() SelectionMatcher {
 
 // Matches reports whether a session with the given attributes is selected.
 func (m SelectionMatcher) Matches(harness Harness, gitRemote, projectName string, sessionID SessionID) bool {
-	pm, ok := m.harnesses[harness.String()]
-	if !ok {
-		return false // harness not in selection
-	}
+	return m.MatchesCandidate(DiscoveryCandidate{
+		Harness:            harness,
+		GitRemote:          gitRemote,
+		ProjectName:        projectName,
+		SessionID:          sessionID,
+		RemoteMultiplicity: DiscoveryIdentityUnique,
+		NameMultiplicity:   DiscoveryIdentityUnique,
+	})
+}
 
-	// Harness present with no restrictions → import all for this harness.
-	if len(pm.projects) == 0 && len(pm.sessions) == 0 {
-		return true
-	}
-
-	// Explicit session ID match.
-	if pm.sessions[string(sessionID)] {
-		return true
-	}
-
-	// Project match by git remote or name — delegates to identifies() so
-	// Matches and MatchBranch share the exact same (normalized) comparison
-	// rather than maintaining two copies of it.
-	for _, proj := range pm.projects {
-		if proj.identifies(gitRemote, projectName) {
-			return true
-		}
-	}
-
-	return false
+// MatchesCandidate is the path-aware project-level counterpart to Matches.
+// Branch rules are deliberately ignored, as they were by Matches.
+func (m SelectionMatcher) MatchesCandidate(candidate DiscoveryCandidate) bool {
+	candidate.Branch = ""
+	return m.decideCandidate(candidate, branchPolicy{admitUnknownBranch: true}).Match == BranchMatchYes
 }
 
 // DiscoveryNeedsGit reports whether resolving repository attributes can change
@@ -640,7 +692,21 @@ const (
 // unanimous-reject → No; disagreement → WithheldConflict. The explicit
 // session-ID allowlist and the no-restriction-harness case select unconditionally.
 func (m SelectionMatcher) MatchBranch(harness Harness, gitRemote, projectName, gitBranch string, sessionID SessionID) BranchMatch {
-	return m.decide(harness, gitRemote, projectName, gitBranch, sessionID, branchPolicy{admitUnknownBranch: true}).Match
+	return m.MatchBranchCandidate(DiscoveryCandidate{
+		Harness:            harness,
+		GitRemote:          gitRemote,
+		ProjectName:        projectName,
+		Branch:             gitBranch,
+		SessionID:          sessionID,
+		RemoteMultiplicity: DiscoveryIdentityUnique,
+		NameMultiplicity:   DiscoveryIdentityUnique,
+	})
+}
+
+// MatchBranchCandidate applies stored-row branch semantics with clone-path
+// identity available.
+func (m SelectionMatcher) MatchBranchCandidate(candidate DiscoveryCandidate) BranchMatch {
+	return m.decideCandidate(candidate, branchPolicy{admitUnknownBranch: true}).Match
 }
 
 // MatchDiscovery applies the canonical selection semantics to a newly
@@ -649,13 +715,42 @@ func (m SelectionMatcher) MatchBranch(harness Harness, gitRemote, projectName, g
 // an explicit branch list, a resolved branch outside that list is admitted
 // anyway — that is the "ingest branches I have not listed yet" setting.
 func (m SelectionMatcher) MatchDiscovery(harness Harness, gitRemote, projectName, gitBranch string, sessionID SessionID, autoNewBranches bool) BranchMatch {
-	return m.MatchDiscoveryDecision(harness, gitRemote, projectName, gitBranch, sessionID, autoNewBranches).Match
+	return m.MatchDiscoveryCandidate(DiscoveryCandidate{
+		Harness:            harness,
+		GitRemote:          gitRemote,
+		ProjectName:        projectName,
+		Branch:             gitBranch,
+		SessionID:          sessionID,
+		RemoteMultiplicity: DiscoveryIdentityUnique,
+		NameMultiplicity:   DiscoveryIdentityUnique,
+	}, autoNewBranches)
+}
+
+// MatchDiscoveryCandidate is the authoritative discovery matcher. It uses
+// explicit session ID, exact physical clone path, unique remote, then unique
+// project name evidence, in that order.
+func (m SelectionMatcher) MatchDiscoveryCandidate(candidate DiscoveryCandidate, autoNewBranches bool) BranchMatch {
+	return m.MatchDiscoveryCandidateDecision(candidate, autoNewBranches).Match
 }
 
 // MatchDiscoveryDecision is MatchDiscovery plus the configured entries behind
 // the answer, for callers that must explain a withheld session to the user.
 func (m SelectionMatcher) MatchDiscoveryDecision(harness Harness, gitRemote, projectName, gitBranch string, sessionID SessionID, autoNewBranches bool) DiscoveryDecision {
-	return m.decide(harness, gitRemote, projectName, gitBranch, sessionID, branchPolicy{autoAdmitNewBranches: autoNewBranches})
+	return m.MatchDiscoveryCandidateDecision(DiscoveryCandidate{
+		Harness:            harness,
+		GitRemote:          gitRemote,
+		ProjectName:        projectName,
+		Branch:             gitBranch,
+		SessionID:          sessionID,
+		RemoteMultiplicity: DiscoveryIdentityUnique,
+		NameMultiplicity:   DiscoveryIdentityUnique,
+	}, autoNewBranches)
+}
+
+// MatchDiscoveryCandidateDecision returns the authoritative candidate result
+// together with the configured entries that caused it.
+func (m SelectionMatcher) MatchDiscoveryCandidateDecision(candidate DiscoveryCandidate, autoNewBranches bool) DiscoveryDecision {
+	return m.decideCandidate(candidate, branchPolicy{autoAdmitNewBranches: autoNewBranches})
 }
 
 // branchPolicy names the two axes on which stored-row matching and
@@ -671,8 +766,8 @@ type branchPolicy struct {
 	autoAdmitNewBranches bool
 }
 
-func (m SelectionMatcher) decide(harness Harness, gitRemote, projectName, gitBranch string, sessionID SessionID, policy branchPolicy) DiscoveryDecision {
-	pm, ok := m.harnesses[harness.String()]
+func (m SelectionMatcher) decideCandidate(candidate DiscoveryCandidate, policy branchPolicy) DiscoveryDecision {
+	pm, ok := m.harnesses[candidate.Harness.String()]
 	if !ok {
 		return DiscoveryDecision{Match: BranchMatchNo} // harness not in selection
 	}
@@ -683,21 +778,22 @@ func (m SelectionMatcher) decide(harness Harness, gitRemote, projectName, gitBra
 	}
 
 	// Explicit session ID allowlist → selected, branch-independent.
-	if pm.sessions[string(sessionID)] {
+	if pm.sessions[string(candidate.SessionID)] {
 		return DiscoveryDecision{Match: BranchMatchYes}
 	}
 
-	// Evaluate every project that identifies this session by remote or name.
+	projects := matchingProjects(pm.projects, candidate)
+	if len(projects) == 0 {
+		return DiscoveryDecision{Match: BranchMatchNo}
+	}
+
 	decision := DiscoveryDecision{}
-	for _, proj := range pm.projects {
-		if !proj.identifies(gitRemote, projectName) {
-			continue
-		}
-		admitted := proj.admitsBranch(gitBranch)
-		if len(proj.branches) > 0 && gitBranch == "" && !policy.admitUnknownBranch {
+	for _, proj := range projects {
+		admitted := proj.admitsBranch(candidate.Branch)
+		if len(proj.branches) > 0 && candidate.Branch == "" && !policy.admitUnknownBranch {
 			admitted = false
 		}
-		if len(proj.branches) > 0 && gitBranch != "" && policy.autoAdmitNewBranches {
+		if len(proj.branches) > 0 && candidate.Branch != "" && policy.autoAdmitNewBranches {
 			admitted = true
 		}
 		if admitted {
@@ -717,6 +813,70 @@ func (m SelectionMatcher) decide(harness Harness, gitRemote, projectName, gitBra
 		decision.Match = BranchMatchWithheldConflict // matching projects disagree
 	}
 	return decision
+}
+
+func matchingProjects(projects []projectMatcher, candidate DiscoveryCandidate) []projectMatcher {
+	if candidate.ClonePath != "" {
+		exact := make([]projectMatcher, 0, len(projects))
+		for _, project := range projects {
+			if project.matchesClonePath(candidate.ClonePath) {
+				exact = append(exact, project)
+			}
+		}
+		if len(exact) > 0 {
+			return exact
+		}
+	}
+
+	normalizedRemote := NormalizeRemoteForMatch(candidate.GitRemote)
+	if normalizedRemote != "" {
+		if candidate.RemoteMultiplicity != DiscoveryIdentityUnique {
+			return nil
+		}
+		remoteMatches := make([]projectMatcher, 0, len(projects))
+		remoteIsPathBound := false
+		for _, project := range projects {
+			if !project.matchesRemote(normalizedRemote) {
+				continue
+			}
+			if project.pathBound {
+				remoteIsPathBound = true
+				continue
+			}
+			remoteMatches = append(remoteMatches, project)
+		}
+		if len(remoteMatches) > 0 {
+			// Preserve branch-rule conflict semantics for a unique project whose
+			// configuration also carries a name-only entry.
+			if candidate.NameMultiplicity == DiscoveryIdentityUnique {
+				normalizedName := NormalizeProjectNameForMatch(candidate.ProjectName)
+				for _, project := range projects {
+					if project.gitRemote == "" && !project.pathBound && project.matchesName(normalizedName) {
+						remoteMatches = append(remoteMatches, project)
+					}
+				}
+			}
+			return remoteMatches
+		}
+		if remoteIsPathBound {
+			return nil
+		}
+	}
+
+	if candidate.NameMultiplicity != DiscoveryIdentityUnique {
+		return nil
+	}
+	normalizedName := NormalizeProjectNameForMatch(candidate.ProjectName)
+	if normalizedName == "" {
+		return nil
+	}
+	nameMatches := make([]projectMatcher, 0, len(projects))
+	for _, project := range projects {
+		if !project.pathBound && project.matchesName(normalizedName) {
+			nameMatches = append(nameMatches, project)
+		}
+	}
+	return nameMatches
 }
 
 // PruneResult holds the outcome of a prune operation.

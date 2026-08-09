@@ -1,0 +1,76 @@
+declared_rows: 5
+cases:
+  - name: legacy-selected-entry-without-clone-paths
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: false
+        harnesses:
+          claude-code:
+            projects:
+              - gitRemote: https://github.com/example/garden.git
+                branches: [main]
+    expected_mode: selected
+    expected_project_count: 1
+    expected_clone_paths: []
+    expect_clone_paths_key: false
+
+  - name: selected-non-git-entry-with-one-clone-path
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: false
+        harnesses:
+          opencode:
+            projects:
+              - name: local-notes
+                clonePaths: [/workspace/local-notes]
+    expected_mode: selected
+    expected_project_count: 1
+    expected_clone_paths: [/workspace/local-notes]
+    expect_clone_paths_key: true
+
+  - name: one-remote-keeps-many-clone-paths-and-one-branch-list
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: true
+        harnesses:
+          claude-code:
+            projects:
+              - gitRemote: git@github.com:example/garden.git
+                clonePaths:
+                  - /workspace/garden-primary
+                  - /workspace/garden-release
+                branches: [main, release]
+    expected_mode: selected
+    expected_project_count: 1
+    expected_clone_paths:
+      - /workspace/garden-primary
+      - /workspace/garden-release
+    expect_clone_paths_key: true
+
+  - name: legacy-all-mode-has-no-project-list
+    document: |
+      version: 1
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+    expected_mode: all
+    expected_project_count: 0
+    expected_clone_paths: []
+    expect_clone_paths_key: false
+
+  - name: selected-empty-remains-valid
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: false
+    expected_mode: selected
+    expected_project_count: 0
+    expected_clone_paths: []
+    expect_clone_paths_key: false

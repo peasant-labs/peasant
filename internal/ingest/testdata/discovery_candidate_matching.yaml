@@ -1,0 +1,301 @@
+declared_match_rows: 21
+declared_parity_rows: 8
+match_cases:
+  - name: explicit-session-outranks-project-evidence
+    projects:
+      - {git_remote: https://github.com/example/garden.git, clone_paths: [/workspace/other], branches: [main]}
+    explicit_sessions: [11111111-1111-4111-8111-111111111111]
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/other.git
+      project_name: other
+      clone_path: /workspace/current
+      branch: topic
+      session_id: 11111111-1111-4111-8111-111111111111
+    expected: selected
+
+  - name: exact-clone-path-selects
+    projects:
+      - {git_remote: https://github.com/example/garden.git, clone_paths: [/workspace/garden], branches: [main]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden
+      branch: main
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: exact-path-admission-outranks-remote-rejection
+    projects:
+      - {git_remote: https://github.com/example/garden.git, clone_paths: [/workspace/garden], branches: [main]}
+      - {git_remote: https://github.com/example/garden.git, branches: [release]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden
+      branch: main
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: exact-path-rejection-outranks-remote-admission
+    projects:
+      - {git_remote: https://github.com/example/garden.git, clone_paths: [/workspace/garden], branches: [release]}
+      - {git_remote: https://github.com/example/garden.git}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden
+      branch: main
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: different-clone-of-same-remote-is-rejected
+    projects:
+      - {git_remote: https://github.com/example/garden.git, clone_paths: [/workspace/garden-a]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden-b
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: one-entry-can-select-several-exact-clones
+    projects:
+      - {git_remote: https://github.com/example/garden.git, clone_paths: [/workspace/garden-a, /workspace/garden-b]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden-b
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: ambiguous-legacy-remote-is-rejected
+    projects:
+      - {git_remote: https://github.com/example/garden.git}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden-a
+      remote_multiplicity: ambiguous
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: unique-legacy-remote-is-selected
+    projects:
+      - {git_remote: https://github.com/example/garden.git}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: normalized-remote-forms-match
+    projects:
+      - {git_remote: "git@github.com:example/garden.git"}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden
+      project_name: garden
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: ambiguous-remote-does-not-fall-back-to-name
+    projects:
+      - {git_remote: https://github.com/example/garden.git}
+      - {name: garden}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      clone_path: /workspace/garden-a
+      remote_multiplicity: ambiguous
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: unique-name-is-selected
+    projects:
+      - {name: garden}
+    candidate:
+      harness: claude-code
+      project_name: /workspace/garden
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: ambiguous-name-is-rejected
+    projects:
+      - {name: garden}
+    candidate:
+      harness: claude-code
+      project_name: garden
+      clone_path: /workspace/one/garden
+      name_multiplicity: ambiguous
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: non-git-project-selects-by-exact-path
+    projects:
+      - {name: garden, clone_paths: [/workspace/garden]}
+    candidate:
+      harness: opencode
+      project_name: garden
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: exact-path-respects-pinned-branch
+    projects:
+      - {clone_paths: [/workspace/garden], branches: [main]}
+    candidate:
+      harness: claude-code
+      clone_path: /workspace/garden
+      branch: topic
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: exact-path-auto-admits-new-branch
+    projects:
+      - {clone_paths: [/workspace/garden], branches: [main]}
+    auto_new_branches: true
+    candidate:
+      harness: claude-code
+      clone_path: /workspace/garden
+      branch: topic
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: duplicate-exact-path-branch-rules-can-conflict
+    projects:
+      - {clone_paths: [/workspace/garden], branches: [main]}
+      - {clone_paths: [/workspace/garden], branches: [release]}
+    candidate:
+      harness: claude-code
+      clone_path: /workspace/garden
+      branch: main
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: withheld
+
+  - name: harness-mismatch-is-rejected
+    configured_harness: opencode
+    projects:
+      - {clone_paths: [/workspace/garden]}
+    candidate:
+      harness: claude-code
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: unrestricted-harness-selects-candidate
+    candidate:
+      harness: claude-code
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: explicit-session-does-not-select-sibling
+    explicit_sessions: [11111111-1111-4111-8111-111111111111]
+    candidate:
+      harness: claude-code
+      clone_path: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: duplicate-legacy-remote-rules-all-admit
+    projects:
+      - {git_remote: https://github.com/example/garden.git, branches: [main]}
+      - {git_remote: https://github.com/example/garden.git, branches: [main]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      branch: main
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: duplicate-legacy-name-rules-all-admit
+    projects:
+      - {name: garden}
+      - {name: garden}
+    candidate:
+      harness: claude-code
+      project_name: garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+delegation_parity:
+  - name: missing-harness-parity
+    configured_harness: opencode
+    projects: [{git_remote: https://github.com/example/garden.git}]
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: unrestricted-harness-parity
+    candidate:
+      harness: claude-code
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: explicit-session-parity
+    explicit_sessions: [11111111-1111-4111-8111-111111111111]
+    candidate:
+      harness: claude-code
+      session_id: 11111111-1111-4111-8111-111111111111
+    expected: selected
+
+  - name: normalized-remote-parity
+    projects: [{git_remote: "git@github.com:example/garden.git"}]
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: name-parity
+    projects: [{name: garden}]
+    candidate:
+      harness: claude-code
+      project_name: /workspace/garden
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: pinned-branch-rejection-parity
+    projects: [{git_remote: https://github.com/example/garden.git, branches: [main]}]
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      branch: topic
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: rejected
+
+  - name: auto-new-branch-parity
+    projects: [{git_remote: https://github.com/example/garden.git, branches: [main]}]
+    auto_new_branches: true
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      branch: topic
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: selected
+
+  - name: remote-and-name-conflict-parity
+    projects:
+      - {git_remote: https://github.com/example/garden.git, branches: [main]}
+      - {name: garden, branches: [release]}
+    candidate:
+      harness: claude-code
+      git_remote: https://github.com/example/garden.git
+      project_name: garden
+      branch: main
+      session_id: 22222222-2222-4222-8222-222222222222
+    expected: withheld
