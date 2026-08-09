@@ -102,3 +102,20 @@ func (r Registry) validateVisible(d *Draft) error {
 	}
 	return nil
 }
+
+// consentContext captures the same canonical visible sections and fields the
+// receipt validates after hidden edits converge. The Draft remains private to
+// the context and is exposed to providers only through a detached snapshot.
+func (r Registry) consentContext(d *Draft) ConsentContext {
+	var fields []VisibleConsentField
+	for _, section := range r.visibleSections(d) {
+		for _, field := range section.visibleFields(d) {
+			fields = append(fields, VisibleConsentField{
+				SectionKey: section.Key,
+				FieldKey:   field.Key(),
+				Kind:       field.Kind(),
+			})
+		}
+	}
+	return ConsentContext{draft: d, visibleFields: fields}
+}

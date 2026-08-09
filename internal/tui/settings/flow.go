@@ -58,9 +58,10 @@ type Flow struct {
 type FlowOption func(*Flow)
 
 // WithConsentSummary installs the final consent summary rendered by the guided
-// presentation. The provider reads the live Draft at receipt render time, after
-// hidden edits have been dropped, so it cannot drift from the values a confirm
-// will commit. Dense settings presentations do not use this option.
+// presentation. The provider reads a typed, read-only context at receipt render
+// time, after hidden edits have been dropped, so neither visibility nor values
+// can drift from what a confirm will commit. Dense settings presentations do
+// not use this option.
 func WithConsentSummary(provider ConsentSummaryFunc) FlowOption {
 	return func(f *Flow) { f.consent = provider }
 }

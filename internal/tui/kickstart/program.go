@@ -367,39 +367,63 @@ func (p Program) buildFlow() Program {
 	return p
 }
 
-// consentSummary derives the final explanation from the same live Draft the
-// Flow will commit. Runtime visibility is captured by this Program value when
-// the Flow is built, so hidden destination and retention effects are omitted.
-func (p Program) consentSummary(d *settings.Draft) settings.ConsentSummary {
-	cfg := d.Working()
+// consentSummary derives the final explanation from the Flow's canonical
+// read-only receipt context. Every conditional row is gated by a visible field
+// identity, so this presentation never duplicates Registry When predicates.
+func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSummary, error) {
+	cfg, err := ctx.Config()
+	if err != nil {
+		return settings.ConsentSummary{}, fmt.Errorf(
+			"build kickstart consent summary.\n"+
+				"what: the converged settings draft could not be copied for final review.\n"+
+				"why: %v.\n"+
+				"where: kickstart consent summary at the review and save step.\n"+
+				"when: after hidden settings were reset and before confirmation.\n"+
+				"means: no consent summary was invented and no setting was saved.\n"+
+				"fix: leave without saving, correct the invalid configuration value, and rerun kickstart.", err)
+	}
 	values := make([]string, 0, 5)
-	if cfg.Selection.Mode == config.SelectionModeSelected {
-		values = append(values, "selection: only the buffered projects, branches, and sessions")
-	} else {
-		values = append(values, "selection: all discovered sessions")
+	if ctx.HasVisibleField(SectionSelection, FieldSelection) {
+		if cfg.Selection.Mode == config.SelectionModeSelected {
+			values = append(values, "selection: only the buffered projects, branches, and sessions")
+		} else {
+			values = append(values, "selection: all discovered sessions")
+		}
 	}
-	values = append(values, "publication privacy: "+strings.ToLower(cfg.Redaction.Level.String())+
-		" redaction; local imports remain original unless you run `peasant redact`")
-	if cfg.Push.License == "" {
-		values = append(values, "later publish license: none; all rights remain and reuse requires permission")
-	} else {
-		values = append(values, "later publish license: "+string(cfg.Push.License))
+	if ctx.HasVisibleField(SectionAutoIngest, FieldAutoIngest) {
+		state := "off"
+		if cfg.Selection.AutoIngestNewBranches {
+			state = "on"
+		}
+		values = append(values, "auto-ingest future branches in fully-selected projects: "+state)
 	}
-	if p.connected {
+	if ctx.HasVisibleField(SectionPrivacy, FieldPrivacy) {
+		values = append(values, "publication privacy: "+strings.ToLower(cfg.Redaction.Level.String())+
+			" redaction; local imports remain original unless you run `peasant redact`")
+	}
+	if ctx.HasVisibleField(SectionLicense, FieldLicense) {
+		if cfg.Push.License == "" {
+			values = append(values, "later publish license: none; all rights remain and reuse requires permission")
+		} else {
+			values = append(values, "later publish license: "+string(cfg.Push.License))
+		}
+	}
+	if ctx.HasVisibleField(SectionDestination, FieldVisibility) {
 		values = append(values, "default visibility after a later publish: "+string(cfg.Push.Visibility))
 	}
-	if p.deps.ClaudeSessionsPresent && cfg.ClaudeRetentionDays > 0 {
+	if ctx.HasVisibleField(SectionRetention, FieldRetention) && cfg.ClaudeRetentionDays > 0 {
 		values = append(values, fmt.Sprintf("claude code source retention: %d days", cfg.ClaudeRetentionDays))
 	}
 
 	effects := []string{"save the visible choices to peasant configuration"}
-	if p.deps.ClaudeSessionsPresent && cfg.ClaudeRetentionDays > 0 {
+	if ctx.HasVisibleField(SectionRetention, FieldRetention) && cfg.ClaudeRetentionDays > 0 {
 		effects = append(effects, "apply claude code retention after config saves")
 	}
-	effects = append(effects,
-		"import the selected transcripts into the local peasant store",
-		"publish nothing; sharing requires a later explicit push")
-	return settings.ConsentSummary{Values: values, Effects: effects}
+	if ctx.HasVisibleField(SectionSelection, FieldSelection) {
+		effects = append(effects, "import the selected transcripts into the local peasant store")
+	}
+	effects = append(effects, "publish nothing; sharing requires a later explicit push")
+	return settings.ConsentSummary{Values: values, Effects: effects}, nil
 }
 
 // updateFlow forwards to the settings.Flow. When the flow commits, ingest starts

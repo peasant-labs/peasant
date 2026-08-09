@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	expectedConsentRows = 2
+	expectedConsentRows = 3
 	expectedLoginRows   = 2
 )
 
@@ -38,6 +38,7 @@ func (o loginOutcome) valid() bool { return o == loginSuccess || o == loginFailu
 type consentFixture struct {
 	Name                  string               `yaml:"name"`
 	SelectionMode         config.SelectionMode `yaml:"selectionMode"`
+	AutoIngestNewBranches bool                 `yaml:"autoIngestNewBranches"`
 	License               config.License       `yaml:"license"`
 	Visibility            config.Visibility    `yaml:"visibility"`
 	Connected             bool                 `yaml:"connected"`
@@ -135,6 +136,7 @@ func newConsentProgram(t *testing.T, row consentFixture) (kickstart.Program, *se
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	loaded := config.BaseConfig()
 	loaded.Selection.Mode = row.SelectionMode
+	loaded.Selection.AutoIngestNewBranches = row.AutoIngestNewBranches
 	if row.SelectionMode == config.SelectionModeSelected {
 		loaded.Selection.Harnesses = map[string]config.SelectionHarnessConfig{
 			"claude-code": {Sessions: []string{"fixture-selected-session"}},

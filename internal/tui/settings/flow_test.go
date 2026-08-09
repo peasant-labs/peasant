@@ -299,3 +299,49 @@ func TestFlow_HiddenStepDropsEditsAndReceiptReflects(t *testing.T) {
 		t.Fatalf("receipt did not reflect the dropped edits:\n%s", body)
 	}
 }
+
+func TestFlow_ConsentContextIsConvergedAndReadOnly(t *testing.T) {
+	path, loaded := writeConfigFile(t)
+	draft, err := NewDraft(path, loaded)
+	if err != nil {
+		t.Fatalf("NewDraft: %v", err)
+	}
+	baseURL := draft.Baseline().Village.URL
+	providerCalls := 0
+	flow := NewFlow(theme.New(theme.ModeDark), testRegistry(), draft,
+		WithConsentSummary(func(ctx ConsentContext) (ConsentSummary, error) {
+			providerCalls++
+			if !ctx.HasVisibleField("connection", "connected") {
+				t.Error("consent context omitted the visible connection field")
+			}
+			if ctx.HasVisibleField("advanced", "url") {
+				t.Error("consent context retained a field hidden by converged draft state")
+			}
+			visible := ctx.VisibleFields()
+			if len(visible) != 1 || visible[0].Kind != KindToggle {
+				t.Errorf("visible consent fields = %#v, want one connection toggle", visible)
+			}
+			snapshot, snapshotErr := ctx.Config()
+			if snapshotErr != nil {
+				return ConsentSummary{}, snapshotErr
+			}
+			if snapshot.Village.Connected || snapshot.Village.URL != baseURL {
+				t.Errorf("converged consent snapshot = %#v, want hidden edit reset", snapshot.Village)
+			}
+			snapshot.Village.URL = "https://mutated.example.test"
+			return ConsentSummary{Values: []string{"converged context observed"}}, nil
+		}))
+	flow.SetSize(120, 24)
+
+	flow = send(flow, "space", "tab", "x", "shift+tab", "space", "tab")
+	if !flow.OnReceipt() {
+		t.Fatalf("did not reach receipt; step=%d", flow.Step())
+	}
+	view := flow.View()
+	if providerCalls != 1 || !strings.Contains(view, "converged context observed") {
+		t.Fatalf("consent provider calls/view = %d/%q, want one mounted receipt call", providerCalls, view)
+	}
+	if got := draft.Working().Village.URL; got != baseURL {
+		t.Fatalf("mutating detached consent snapshot changed Draft URL to %q, want %q", got, baseURL)
+	}
+}

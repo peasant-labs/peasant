@@ -1,7 +1,8 @@
-expectedConsentCount: 2
+expectedConsentCount: 3
 consent:
   - name: local-all-no-license
     selectionMode: all
+    autoIngestNewBranches: true
     license: ""
     visibility: private
     connected: false
@@ -14,10 +15,12 @@ consent:
       - import the selected transcripts into the local peasant store
       - publish nothing; sharing requires a later explicit push
     wantMissing:
+      - auto-ingest future branches in fully-selected projects
       - apply claude code retention
       - 'default visibility:'
   - name: selected-connected-retention
     selectionMode: selected
+    autoIngestNewBranches: true
     license: CC-BY-SA-4.0
     visibility: group
     connected: true
@@ -25,6 +28,7 @@ consent:
     retentionDays: 90
     wantContains:
       - 'selection: only the buffered projects, branches, and sessions'
+      - 'auto-ingest future branches in fully-selected projects: on'
       - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: CC-BY-SA-4.0'
       - 'default visibility after a later publish: group'
@@ -33,6 +37,24 @@ consent:
       - apply claude code retention after config saves
       - import the selected transcripts into the local peasant store
       - publish nothing; sharing requires a later explicit push
+  - name: selected-local-manual-future-branches
+    selectionMode: selected
+    autoIngestNewBranches: false
+    license: CC-BY-4.0
+    visibility: public
+    connected: false
+    claudeSessionsPresent: false
+    wantContains:
+      - 'selection: only the buffered projects, branches, and sessions'
+      - 'auto-ingest future branches in fully-selected projects: off'
+      - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
+      - 'later publish license: CC-BY-4.0'
+      - save the visible choices to peasant configuration
+      - import the selected transcripts into the local peasant store
+      - publish nothing; sharing requires a later explicit push
+    wantMissing:
+      - 'default visibility after a later publish:'
+      - apply claude code retention
 
 expectedLoginCount: 2
 login:
