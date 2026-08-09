@@ -128,7 +128,8 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			spinner.Stop()
 
 			// Mount the rebuilt onboarding: the declarative settings.Flow rendered
-			// on the kit, sequenced OAuth -> Flow -> Ingest. This is the default
+			// on the kit, sequenced through optional login/visibility guidance,
+			// local ingest, and persistent completion. This is the default
 			// production entry point (deps.runFlow is wired). The legacy page-based
 			// FTUE wizard is retained as a deprecation candidate and is reached only
 			// when no flow runner is injected (its direct coverage drives
@@ -200,7 +201,7 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 	}
 
 	// 2. Credentials.
-	if err := auth.ClearCredentials(); err != nil {
+	if err := auth.ClearCredentialsFrom(configDirOverride(cmd)); err != nil {
 		return fmt.Errorf("reset credentials: %w", err)
 	}
 

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,5 +155,63 @@ func TestCredentials_IsValid(t *testing.T) {
 				t.Errorf("IsValid() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCredentialsFrom_RoundTripIsolatedFromDefaultStore(t *testing.T) {
+	defaultHome := t.TempDir()
+	customHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", defaultHome)
+	defaultCredentials := &Credentials{
+		APIKey: "default-key", KeyID: "default-key-id", UserID: "default-user-id", Username: "default-user",
+	}
+	customCredentials := &Credentials{
+		APIKey: "custom-key", KeyID: "custom-key-id", UserID: "custom-user-id", Username: "custom-user",
+	}
+	if err := SaveCredentials(defaultCredentials); err != nil {
+		t.Fatalf("seed default credentials: %v", err)
+	}
+	defaultPath := credentialsPathWith("")
+	defaultBefore, err := os.ReadFile(defaultPath)
+	if err != nil {
+		t.Fatalf("read default credentials before custom save: %v", err)
+	}
+
+	if err := SaveCredentialsFrom(customCredentials, customHome); err != nil {
+		t.Fatalf("save custom credentials: %v", err)
+	}
+	customPath := credentialsPathWith(customHome)
+	customLoaded, err := LoadCredentialsFrom(customHome)
+	if err != nil || customLoaded == nil || customLoaded.Username != customCredentials.Username {
+		t.Fatalf("custom credential round trip = %#v, %v", customLoaded, err)
+	}
+	defaultLoaded, err := LoadCredentials()
+	if err != nil || defaultLoaded == nil || defaultLoaded.Username != defaultCredentials.Username {
+		t.Fatalf("default credentials changed after custom save = %#v, %v", defaultLoaded, err)
+	}
+	defaultAfter, err := os.ReadFile(defaultPath)
+	if err != nil {
+		t.Fatalf("read default credentials after custom save: %v", err)
+	}
+	if !bytes.Equal(defaultBefore, defaultAfter) {
+		t.Fatal("custom credential save rewrote the default-profile file")
+	}
+	info, err := os.Stat(customPath)
+	if err != nil {
+		t.Fatalf("stat custom credentials: %v", err)
+	}
+	if info.Mode().Perm() != defaults.PrivateFilePerm {
+		t.Errorf("custom credential permissions = %o, want %o", info.Mode().Perm(), defaults.PrivateFilePerm)
+	}
+
+	if err := ClearCredentialsFrom(customHome); err != nil {
+		t.Fatalf("clear custom credentials: %v", err)
+	}
+	if customLoaded, err = LoadCredentialsFrom(customHome); err != nil || customLoaded != nil {
+		t.Fatalf("custom credentials after clear = %#v, %v, want absent", customLoaded, err)
+	}
+	defaultLoaded, err = LoadCredentials()
+	if err != nil || defaultLoaded == nil || defaultLoaded.Username != defaultCredentials.Username {
+		t.Fatalf("clearing custom credentials changed default store = %#v, %v", defaultLoaded, err)
 	}
 }

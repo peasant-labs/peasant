@@ -25,7 +25,7 @@ import (
 // (the single atomic config commit point) sequenced after an optional village
 // OAuth step and before ingest, all rendered on the kit. It reuses the SAME
 // business logic the legacy wizard drove - discovery (already run into inventory
-// + sessions), the login runner (internal/auth.Login), the ingest pipeline, and
+// + sessions), the path-aware login runner (internal/auth.LoginFrom), the ingest pipeline, and
 // the Claude retention writer - wiring each as an injected seam of
 // kickstart.Program. The legacy FTUE wizard construction remains present in
 // cmd_kickstart.go as a deprecation candidate; this is the entry point the
@@ -242,8 +242,10 @@ func villageAlreadyConnected(configDir string) bool {
 }
 
 // kickstartLoginFunc adapts the existing auth.Login runner to the program's
-// LoginFunc seam, resolving the village URL exactly as `peasant login` does.
+// LoginFunc seam, resolving the village URL and credential store exactly as
+// `peasant login` does.
 func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFunc {
+	configDir := configDirOverride(cmd)
 	return func(ctx context.Context) (string, error) {
 		villageURL := os.Getenv("PEASANT_VILLAGE_URL")
 		if villageURL == "" {
@@ -254,7 +256,7 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 		if villageURL == "" {
 			villageURL = defaults.DefaultVillageURL.String()
 		}
-		creds, err := auth.Login(ctx, villageURL, false)
+		creds, err := auth.LoginFrom(ctx, villageURL, false, configDir)
 		if err != nil {
 			return "", err
 		}

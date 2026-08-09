@@ -19,14 +19,24 @@ import (
 // When forceReauth is true, the village is asked to force GitHub account
 // selection (useful when switching accounts).
 func Login(ctx context.Context, villageURL string, forceReauth bool) (*Credentials, error) {
+	return LoginFrom(ctx, villageURL, forceReauth, "")
+}
+
+// LoginFrom performs Login with every credential-store operation pinned to the
+// same XDG config-home override. The pre-check and successful callback save can
+// therefore never collide with a different default profile.
+func LoginFrom(ctx context.Context, villageURL string, forceReauth bool, xdgConfigHomeOverride string) (*Credentials, error) {
 	if !forceReauth {
-		existing, err := LoadCredentials()
+		existing, err := LoadCredentialsFrom(xdgConfigHomeOverride)
 		if err != nil {
 			return nil, fmt.Errorf("check existing credentials: %w", err)
 		}
 		if existing != nil && existing.IsValid() {
 			return nil, fmt.Errorf("already logged in as %s (use 'peasant logout' first)", existing.Username)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("login cancelled: %w", err)
 	}
 
 	state, err := generateRandomState()
@@ -65,7 +75,7 @@ func Login(ctx context.Context, villageURL string, forceReauth bool) (*Credentia
 		}
 		result.Credentials.VillageURL = villageURL
 		result.Credentials.LinkedAt = time.Now()
-		if err := SaveCredentials(result.Credentials); err != nil {
+		if err := SaveCredentialsFrom(result.Credentials, xdgConfigHomeOverride); err != nil {
 			return nil, fmt.Errorf("save credentials: %w", err)
 		}
 		return result.Credentials, nil
