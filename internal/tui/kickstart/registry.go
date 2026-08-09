@@ -118,15 +118,16 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionPrivacy,
 			Title: "privacy",
 			Guide: sectionGuideWithExample(
-				"see what standard redaction removes before transcripts enter peasant's local store.",
+				"preview standard redaction before a later explicit publication.",
 				privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
-				"examples below use synthetic text and the same redactor as local import.",
+				"local imports remain original unless you explicitly run `peasant redact`.",
+				"examples below use synthetic text and the same redactor as explicit publication.",
 				"standard keeps git remote urls and branch output; maximum removes them.",
 			),
 			Fields: []settings.Field{
 				settings.WithDescription(
 					settings.Radio(FieldPrivacy, "redaction level", privacyAccessor(), privacyOptions()...),
-					"choose how much sensitive data peasant removes before it stores a transcript."),
+					"choose how much sensitive data peasant removes before a later explicit publication; this does not rewrite local imports."),
 			},
 		},
 		{

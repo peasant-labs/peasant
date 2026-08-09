@@ -56,10 +56,18 @@ rows:
     fieldKind: radio
     fieldText: redaction level
     guide:
-      intro: see what standard redaction removes before transcripts enter peasant's local store.
+      intro: preview standard redaction before a later explicit publication.
       hints:
-        - examples below use synthetic text and the same redactor as local import.
+        - local imports remain original unless you explicitly run `peasant redact`.
+        - examples below use synthetic text and the same redactor as explicit publication.
         - standard keeps git remote urls and branch output; maximum removes them.
+    wantContains:
+      - later explicit publication
+      - local imports remain original
+      - peasant redact
+    wantMissing:
+      - before transcripts enter peasant's local store
+      - same redactor as local import
 
   - name: license-guide
     surface: registry-section

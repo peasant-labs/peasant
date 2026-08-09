@@ -82,6 +82,7 @@ type guidedFramingRow struct {
 	Guide                 guideFixture         `yaml:"guide"`
 	WantContains          []string             `yaml:"wantContains"`
 	WantBeforeChoice      []string             `yaml:"wantBeforeChoice"`
+	WantMissing           []string             `yaml:"wantMissing"`
 }
 
 type guidedFramingDoc struct {
@@ -297,6 +298,16 @@ func assertFramingBeforeField(t *testing.T, row guidedFramingRow, view string) {
 		}
 		if at >= fieldAt {
 			t.Errorf("section %q renders guide text %q after its field, want guide before unchanged fields", row.SectionKey, want)
+		}
+	}
+	for _, want := range row.WantContains {
+		if !strings.Contains(plain, want) {
+			t.Errorf("section %q does not render required guidance %q:\n%s", row.SectionKey, want, plain)
+		}
+	}
+	for _, forbidden := range row.WantMissing {
+		if strings.Contains(plain, forbidden) {
+			t.Errorf("section %q renders forbidden guidance %q:\n%s", row.SectionKey, forbidden, plain)
 		}
 	}
 }

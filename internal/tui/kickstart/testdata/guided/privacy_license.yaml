@@ -19,16 +19,16 @@ expectedFailureCount: 4
 failures:
   - name: constructor-failure
     kind: constructor-error
-    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantContains: ['example unavailable', 'unverified output withheld', 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
   - name: unknown-category
     kind: unknown-category
-    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantContains: ['example unavailable', 'unverified output withheld', 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
   - name: missing-claimed-category
     kind: missing-category
-    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantContains: ['example unavailable', 'unverified output withheld', 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
   - name: unchanged-output
     kind: unchanged-output
-    wantContains: ['what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
+    wantContains: ['example unavailable', 'unverified output withheld', 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
 
 expectedLicenseCount: 4
 licenses:

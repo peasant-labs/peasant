@@ -378,7 +378,8 @@ func (p Program) consentSummary(d *settings.Draft) settings.ConsentSummary {
 	} else {
 		values = append(values, "selection: all discovered sessions")
 	}
-	values = append(values, "privacy: "+strings.ToLower(cfg.Redaction.Level.String())+" redaction")
+	values = append(values, "publication privacy: "+strings.ToLower(cfg.Redaction.Level.String())+
+		" redaction; local imports remain original unless you run `peasant redact`")
 	if cfg.Push.License == "" {
 		values = append(values, "later publish license: none; all rights remain and reuse requires permission")
 	} else {

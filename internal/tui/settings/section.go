@@ -4,8 +4,9 @@ import "github.com/peasant-labs/peasant/internal/tui/theme"
 
 // GuideExampleFunc derives one live, presentation-only example from the same
 // theme and draft a guided flow is rendering. Returning an error is fail-closed:
-// the flow renders the actionable error instead of omitting the example or
-// substituting output that did not come from the real behavior being explained.
+// the flow withholds the unverified example and renders the actionable error
+// instead of substituting output that did not come from the real behavior being
+// explained. The error does not make the section's canonical field unavailable.
 type GuideExampleFunc func(theme.Theme, *Draft) (string, error)
 
 // Guide is optional presentation-neutral framing for a [Section]. A guided

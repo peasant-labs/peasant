@@ -22,7 +22,7 @@ sections:
     fieldKey: redaction-level
     fieldKind: radio
     fieldText: redaction level
-    guideIntro: see what standard redaction removes before transcripts enter peasant's local store.
+    guideIntro: preview standard redaction before a later explicit publication.
     hasExample: true
     conditional: false
   - key: license

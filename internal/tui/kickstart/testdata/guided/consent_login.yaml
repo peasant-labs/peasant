@@ -8,7 +8,7 @@ consent:
     claudeSessionsPresent: false
     wantContains:
       - 'selection: all discovered sessions'
-      - 'privacy: standard redaction'
+      - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: none; all rights remain and reuse requires permission'
       - save the visible choices to peasant configuration
       - import the selected transcripts into the local peasant store
@@ -25,7 +25,7 @@ consent:
     retentionDays: 90
     wantContains:
       - 'selection: only the buffered projects, branches, and sessions'
-      - 'privacy: standard redaction'
+      - 'publication privacy: standard redaction; local imports remain original unless you run `peasant redact`'
       - 'later publish license: CC-BY-SA-4.0'
       - 'default visibility after a later publish: group'
       - 'claude code source retention: 90 days'

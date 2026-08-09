@@ -479,7 +479,7 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 		example, err := guide.Example(f.th, f.draft)
 		style := styles.Surface
 		if err != nil {
-			example = err.Error()
+			example = "example unavailable; unverified output withheld\n" + err.Error()
 			style = styles.Danger
 		}
 		for _, line := range splitLines(strings.TrimSpace(example)) {

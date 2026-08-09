@@ -24,8 +24,10 @@ Discovery runs before the interactive screen. The guided flow then presents:
    branch, or session. The harness facet filters the same tree without redefining the selection.
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
-4. **Privacy:** review synthetic examples processed by the real Standard redactor used for locally
-   stored transcripts. Kickstart stops with an actionable error if it cannot validate that proof.
+4. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
+   explicit publication. Local imports remain original unless you explicitly run `peasant redact`.
+   If kickstart cannot validate an example, it withholds that unverified output and displays an
+   actionable error; the settings flow remains available.
 5. **Content license:** choose the default license for a later explicit share. No license is the
    default, and saving any default does not publish anything.
 6. **Sharing visibility:** when connected to a Village, choose the default visibility for later
@@ -60,6 +62,9 @@ Kickstart buffers edits in a draft. Moving between sections writes nothing. The 
 
 The order is config first, Claude retention second, local import third. There is no push client,
 publisher, publication receipt, or background sharing step in this path.
+
+Local import preserves the original recorded transcript content. The configured privacy level protects
+a later explicit publication; use `peasant redact` when you intentionally want to rewrite local data.
 
 While local import runs, kickstart names the real import stages and shows elapsed time. It only offers
 a qualified estimate when completed bounded work supports one. The completion screen remains visible
