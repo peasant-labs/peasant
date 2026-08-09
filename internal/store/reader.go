@@ -298,6 +298,8 @@ type IngestedSessionRow struct {
 	SessionID     string
 	GitRemote     string // host_slugs.git_remote as ingest resolved it ("" when the project has no remote)
 	Branch        string // sessions.git_branch ("" when unknown or non-git)
+	GitWorktree   string // sessions.git_worktree ("" when unknown or non-git)
+	CanonicalCwd  string // projects.canonical_cwd ("" when unknown)
 	Title         string // session_metrics.title ("" when metrics have not been computed)
 	IngestedMs    int64
 	SchemaVersion int
@@ -314,18 +316,22 @@ const sqlAllIngestedSessions = `SELECT
     s.session_id,
     COALESCE(h.git_remote, ''),
     COALESCE(s.git_branch, ''),
+    COALESCE(s.git_worktree, ''),
+    COALESCE(p.canonical_cwd, ''),
     COALESCE(m.title, ''),
     s.ingested_ms,
     s.schema_version
 FROM sessions s
 LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
+LEFT JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN session_metrics m ON s.session_id = m.session_id
 ORDER BY s.start_ms DESC`
 
-// AllIngestedSessions returns the recorded remote, branch, and title for every
-// session in the store, with the ingest timestamp and metadata schema version
-// the diff stage needs. It is the read a re-scan uses to answer "what do I
-// already know about this session" without walking git again.
+// AllIngestedSessions returns the recorded remote, branch, worktree, canonical
+// project directory, and title for every session in the store, with the ingest
+// timestamp and metadata schema version the diff stage needs. It is the read a
+// re-scan uses to answer "what do I already know about this session" without
+// walking git again.
 func (s *Store) AllIngestedSessions(ctx context.Context) ([]IngestedSessionRow, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -340,9 +346,11 @@ func (s *Store) AllIngestedSessions(ctx context.Context) ([]IngestedSessionRow, 
 				SessionID:     stmt.ColumnText(0),
 				GitRemote:     stmt.ColumnText(1),
 				Branch:        stmt.ColumnText(2),
-				Title:         stmt.ColumnText(3),
-				IngestedMs:    stmt.ColumnInt64(4),
-				SchemaVersion: int(stmt.ColumnInt64(5)),
+				GitWorktree:   stmt.ColumnText(3),
+				CanonicalCwd:  stmt.ColumnText(4),
+				Title:         stmt.ColumnText(5),
+				IngestedMs:    stmt.ColumnInt64(6),
+				SchemaVersion: int(stmt.ColumnInt64(7)),
 			})
 			return nil
 		},

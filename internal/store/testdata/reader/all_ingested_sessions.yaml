@@ -1,0 +1,15 @@
+cases:
+  - name: populated_identity_columns
+    sessionId: 50000000-0000-0000-0000-000000000101
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    hostSlug: github.com--acme--ingested-worktree
+    startMs: 1710000000000
+    gitWorktree: /workspace/acme/.worktrees/feature
+    canonicalCwd: /workspace/acme
+  - name: empty_identity_columns
+    sessionId: 50000000-0000-0000-0000-000000000102
+    projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    hostSlug: local--ingested-without-git
+    startMs: 1710000001000
+    gitWorktree: ""
+    canonicalCwd: ""
