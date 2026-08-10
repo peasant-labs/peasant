@@ -238,3 +238,21 @@ completion:
     wantIngestCalls: 1
     wantRetentionCalls: 1
     wantProgressResets: 1
+
+expectedPreambleMutationCount: 3
+preambleMutations:
+  - name: negated-useful-and-optional
+    lines:
+      - these are not useful, not optional next commands after local setup.
+      - open the local dashboard, connect to a village, or explicitly publish later.
+      - kickstart runs none of them.
+  - name: negated-no-auto-execution
+    lines:
+      - these are useful, optional next commands after local setup.
+      - open the local dashboard, connect to a village, or explicitly publish later.
+      - it is false that kickstart runs none of them.
+  - name: hedged-useful-and-optional
+    lines:
+      - these might be useful, optional next commands after local setup.
+      - open the local dashboard, connect to a village, or explicitly publish later.
+      - kickstart runs none of them.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
 
-const expectedMountedJourneyRows = 1
+const (
+	expectedMountedJourneyRows          = 1
+	expectedMountedPreambleMutationRows = 3
+	mountedAcceptedUsefulOptionalLine   = "these are useful, optional next commands after local setup."
+	mountedAcceptedPurposeLine          = "open the local dashboard, connect to a village, or explicitly publish later."
+	mountedAcceptedNoExecutionLine      = "kickstart runs none of them."
+)
 
 type mountedJourneyFixture struct {
 	Name               string   `yaml:"name"`
@@ -37,9 +44,16 @@ type mountedJourneyFixture struct {
 	WantTerminalCalls  int      `yaml:"wantTerminalCalls"`
 }
 
+type mountedPreambleMutationFixture struct {
+	Name  string   `yaml:"name"`
+	Lines []string `yaml:"lines"`
+}
+
 type mountedJourneyDocument struct {
-	ExpectedRowCount int                     `yaml:"expectedRowCount"`
-	Rows             []mountedJourneyFixture `yaml:"rows"`
+	ExpectedRowCount              int                              `yaml:"expectedRowCount"`
+	Rows                          []mountedJourneyFixture          `yaml:"rows"`
+	ExpectedPreambleMutationCount int                              `yaml:"expectedPreambleMutationCount"`
+	PreambleMutations             []mountedPreambleMutationFixture `yaml:"preambleMutations"`
 }
 
 //go:embed testdata/kickstart_guided_journey.yaml
@@ -68,16 +82,60 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 			len(row.CompletionCopy) != 4 || len(row.ForbiddenCopy) == 0 || row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
 			t.Fatalf("mounted journey row is incomplete or duplicated: %#v", row)
 		}
-		preambleMeaning := strings.ToLower(strings.Join(row.CompletionPreamble, "\n"))
-		if !strings.Contains(preambleMeaning, "useful") || !strings.Contains(preambleMeaning, "optional") ||
-			!strings.Contains(preambleMeaning, "after local setup") || !strings.Contains(preambleMeaning, "open the local dashboard") ||
-			!strings.Contains(preambleMeaning, "connect to a village") || !strings.Contains(preambleMeaning, "explicitly publish later") ||
-			!strings.Contains(preambleMeaning, "kickstart runs none of them") {
-			t.Fatalf("mounted journey row does not pin useful, optional, display-only completion grounding: %#v", row.CompletionPreamble)
+		if err := validateMountedCompletionPreamble(row.CompletionPreamble); err != nil {
+			t.Fatalf("mounted journey row does not declare the accepted completion preamble: %v", err)
 		}
 		seen[row.Name] = true
 	}
+	if document.ExpectedPreambleMutationCount != expectedMountedPreambleMutationRows ||
+		len(document.PreambleMutations) != expectedMountedPreambleMutationRows {
+		t.Fatalf("mounted preamble mutation rows: declared=%d actual=%d required=%d",
+			document.ExpectedPreambleMutationCount, len(document.PreambleMutations), expectedMountedPreambleMutationRows)
+	}
+	mutationNames := map[string]bool{}
+	for _, row := range document.PreambleMutations {
+		if strings.TrimSpace(row.Name) == "" || mutationNames[row.Name] || len(row.Lines) != 3 {
+			t.Fatalf("mounted preamble mutation row is incomplete or duplicated: %#v", row)
+		}
+		mutationNames[row.Name] = true
+	}
 	return document
+}
+
+func validateMountedCompletionPreamble(lines []string) error {
+	expected := mountedAcceptedCompletionPreambleLines()
+	if len(lines) != len(expected) {
+		return fmt.Errorf("preamble lines=%d required=%d", len(lines), len(expected))
+	}
+	for index, line := range lines {
+		if line != expected[index] {
+			return fmt.Errorf("preamble line %d=%q required=%q", index+1, line, expected[index])
+		}
+	}
+	return nil
+}
+
+func mountedAcceptedCompletionPreambleLines() []string {
+	return []string{
+		mountedAcceptedUsefulOptionalLine,
+		mountedAcceptedPurposeLine,
+		mountedAcceptedNoExecutionLine,
+	}
+}
+
+func TestMountedJourneyFixtureRejectsKeywordPreservingPreambleMutations(t *testing.T) {
+	for _, mutation := range loadMountedJourneyDocument(t).PreambleMutations {
+		mutation := mutation
+		t.Run(mutation.Name, func(t *testing.T) {
+			if err := validateMountedCompletionPreamble(mutation.Lines); err == nil {
+				t.Fatal("mounted fixture accepted a keyword-preserving completion preamble mutation")
+			}
+			mutatedRender := strings.Join(append(append([]string(nil), mutation.Lines...), "peasant web start"), "\n")
+			if err := validateMountedRenderedCompletionPreamble(mutatedRender, "peasant web start"); err == nil {
+				t.Fatal("mounted render accepted a keyword-preserving completion preamble mutation")
+			}
+		})
+	}
 }
 
 func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *testing.T) {
@@ -217,23 +275,25 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 				case <-time.After(2 * time.Second):
 					t.Fatal("mounted local ingest did not complete after release")
 				}
-				completion := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
+				completion := ansiPattern.ReplaceAllString(program.View(), "")
 				assertMountedCompletionPreamble(t, completion, row)
+				completionLower := strings.ToLower(completion)
 				for _, want := range row.CompletionCopy {
-					if !strings.Contains(completion, strings.ToLower(want)) {
+					if !strings.Contains(completionLower, strings.ToLower(want)) {
 						t.Errorf("mounted completion does not contain %q:\n%s", want, completion)
 					}
 				}
 				for _, forbidden := range row.ForbiddenCopy {
-					if strings.Contains(completion, strings.ToLower(forbidden)) {
+					if strings.Contains(completionLower, strings.ToLower(forbidden)) {
 						t.Errorf("mounted completion fabricates %q:\n%s", forbidden, completion)
 					}
 				}
 				program, _ = program.Update(tea.WindowSizeMsg{Width: 181, Height: 51})
-				persistentCompletion := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
+				persistentCompletion := ansiPattern.ReplaceAllString(program.View(), "")
 				assertMountedCompletionPreamble(t, persistentCompletion, row)
+				persistentCompletionLower := strings.ToLower(persistentCompletion)
 				for _, want := range row.CompletionCopy {
-					if !strings.Contains(persistentCompletion, strings.ToLower(want)) {
+					if !strings.Contains(persistentCompletionLower, strings.ToLower(want)) {
 						t.Errorf("mounted completion did not persist %q after resize:\n%s", want, persistentCompletion)
 					}
 				}
@@ -253,21 +313,38 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 
 func assertMountedCompletionPreamble(t *testing.T, view string, row mountedJourneyFixture) {
 	t.Helper()
+	if err := validateMountedRenderedCompletionPreamble(view, row.CompletionCopy[0]); err != nil {
+		t.Fatalf("mounted completion preamble is invalid: %v\n%s", err, view)
+	}
+}
+
+func validateMountedRenderedCompletionPreamble(view, firstCommand string) error {
+	lines := strings.Split(view, "\n")
 	previous := -1
-	for _, line := range row.CompletionPreamble {
-		at := strings.Index(view, strings.ToLower(line))
+	for _, expected := range mountedAcceptedCompletionPreambleLines() {
+		at := mountedExactRenderedLineIndex(lines, expected)
 		if at < 0 {
-			t.Fatalf("mounted completion does not contain preamble line %q:\n%s", line, view)
+			return fmt.Errorf("mounted completion does not contain exact preamble line %q", expected)
 		}
 		if at <= previous {
-			t.Fatalf("mounted completion preamble is out of order at %q:\n%s", line, view)
+			return fmt.Errorf("mounted completion preamble is out of order at %q", expected)
 		}
 		previous = at
 	}
-	firstCommand := strings.Index(view, strings.ToLower(row.CompletionCopy[0]))
-	if firstCommand < 0 || previous >= firstCommand {
-		t.Fatalf("mounted completion preamble must precede its command list:\n%s", view)
+	firstCommandAt := mountedExactRenderedLineIndex(lines, firstCommand)
+	if firstCommandAt < 0 || previous >= firstCommandAt {
+		return fmt.Errorf("mounted completion preamble must precede its command list")
 	}
+	return nil
+}
+
+func mountedExactRenderedLineIndex(lines []string, want string) int {
+	for index, line := range lines {
+		if line == want {
+			return index
+		}
+	}
+	return -1
 }
 
 func drainMountedKickstartStartup(program kickstart.Program, command tea.Cmd) kickstart.Program {

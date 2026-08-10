@@ -31,6 +31,11 @@ const (
 	expectedLatestCompletedFocusRows = 1
 	expectedCompletionRows           = 3
 	expectedCompletionPreambleLines  = 3
+	expectedPreambleMutationRows     = 3
+
+	acceptedCompletionUsefulOptionalLine = "these are useful, optional next commands after local setup."
+	acceptedCompletionPurposeLine        = "open the local dashboard, connect to a village, or explicitly publish later."
+	acceptedCompletionNoExecutionLine    = "kickstart runs none of them."
 )
 
 type progressFocusProbe string
@@ -90,15 +95,22 @@ type completionFixture struct {
 	WantProgressResets      int      `yaml:"wantProgressResets"`
 }
 
+type completionPreambleMutationFixture struct {
+	Name  string   `yaml:"name"`
+	Lines []string `yaml:"lines"`
+}
+
 type progressCompletionDocument struct {
-	ExpectedProgressCount             int                 `yaml:"expectedProgressCount"`
-	ExpectedFocusPriorityCount        int                 `yaml:"expectedFocusPriorityCount"`
-	ExpectedLatestActiveFocusCount    int                 `yaml:"expectedLatestActiveFocusCount"`
-	ExpectedFailedFocusCount          int                 `yaml:"expectedFailedFocusCount"`
-	ExpectedLatestCompletedFocusCount int                 `yaml:"expectedLatestCompletedFocusCount"`
-	Progress                          []progressFixture   `yaml:"progress"`
-	ExpectedCompletionCount           int                 `yaml:"expectedCompletionCount"`
-	Completion                        []completionFixture `yaml:"completion"`
+	ExpectedProgressCount             int                                 `yaml:"expectedProgressCount"`
+	ExpectedFocusPriorityCount        int                                 `yaml:"expectedFocusPriorityCount"`
+	ExpectedLatestActiveFocusCount    int                                 `yaml:"expectedLatestActiveFocusCount"`
+	ExpectedFailedFocusCount          int                                 `yaml:"expectedFailedFocusCount"`
+	ExpectedLatestCompletedFocusCount int                                 `yaml:"expectedLatestCompletedFocusCount"`
+	Progress                          []progressFixture                   `yaml:"progress"`
+	ExpectedCompletionCount           int                                 `yaml:"expectedCompletionCount"`
+	Completion                        []completionFixture                 `yaml:"completion"`
+	ExpectedPreambleMutationCount     int                                 `yaml:"expectedPreambleMutationCount"`
+	PreambleMutations                 []completionPreambleMutationFixture `yaml:"preambleMutations"`
 }
 
 //go:embed testdata/guided/progress_completion.yaml
@@ -184,26 +196,40 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 			t.Fatalf("failed completion row %q expects a next-command preamble without a command list", row.Name)
 		}
 	}
+	if document.ExpectedPreambleMutationCount != expectedPreambleMutationRows ||
+		len(document.PreambleMutations) != expectedPreambleMutationRows {
+		t.Fatalf("completion preamble mutation rows: declared=%d actual=%d required=%d",
+			document.ExpectedPreambleMutationCount, len(document.PreambleMutations), expectedPreambleMutationRows)
+	}
+	mutationNames := map[string]bool{}
+	for _, row := range document.PreambleMutations {
+		if strings.TrimSpace(row.Name) == "" || mutationNames[row.Name] || len(row.Lines) != expectedCompletionPreambleLines {
+			t.Fatalf("completion preamble mutation row is incomplete or duplicated: %#v", row)
+		}
+		mutationNames[row.Name] = true
+	}
 	return document
 }
 
 func validateCompletionPreamble(lines []string) error {
-	if len(lines) != expectedCompletionPreambleLines {
-		return fmt.Errorf("preamble lines=%d required=%d", len(lines), expectedCompletionPreambleLines)
+	expected := acceptedCompletionPreambleLines()
+	if len(lines) != len(expected) {
+		return fmt.Errorf("preamble lines=%d required=%d", len(lines), len(expected))
 	}
-	meaning := strings.ToLower(strings.Join(lines, "\n"))
-	if !strings.Contains(meaning, "useful") || !strings.Contains(meaning, "optional") ||
-		!strings.Contains(meaning, "after local setup") {
-		return fmt.Errorf("preamble does not ground the commands as useful and optional after local setup")
-	}
-	if !strings.Contains(meaning, "open the local dashboard") || !strings.Contains(meaning, "connect to a village") ||
-		!strings.Contains(meaning, "explicitly publish later") {
-		return fmt.Errorf("preamble does not explain the dashboard, village, and later publication choices")
-	}
-	if !strings.Contains(meaning, "kickstart runs none of them") {
-		return fmt.Errorf("preamble does not say kickstart runs none of the commands")
+	for index, line := range lines {
+		if line != expected[index] {
+			return fmt.Errorf("preamble line %d=%q required=%q", index+1, line, expected[index])
+		}
 	}
 	return nil
+}
+
+func acceptedCompletionPreambleLines() []string {
+	return []string{
+		acceptedCompletionUsefulOptionalLine,
+		acceptedCompletionPurposeLine,
+		acceptedCompletionNoExecutionLine,
+	}
 }
 
 func validateProgressCompletionRowCounts(document progressCompletionDocument) error {
@@ -270,15 +296,17 @@ func TestProgressCompletionFixturePinsExactCounts(t *testing.T) {
 	if err := validateCompletionPreamble(missingPreamble); err == nil {
 		t.Fatal("completion fixture accepted a removed preamble line")
 	}
-	weakenedMeaning := append([]string(nil), document.Completion[0].WantPreamble...)
-	weakenedMeaning[0] = "these are next commands after local setup."
-	if err := validateCompletionPreamble(weakenedMeaning); err == nil {
-		t.Fatal("completion fixture accepted removal of useful and optional meaning")
-	}
-	weakenedMeaning = append([]string(nil), document.Completion[0].WantPreamble...)
-	weakenedMeaning[2] = "choose any command when ready."
-	if err := validateCompletionPreamble(weakenedMeaning); err == nil {
-		t.Fatal("completion fixture accepted removal of no-auto-execution meaning")
+	for _, mutation := range document.PreambleMutations {
+		mutation := mutation
+		t.Run("completion-preamble-"+mutation.Name, func(t *testing.T) {
+			if err := validateCompletionPreamble(mutation.Lines); err == nil {
+				t.Fatal("completion fixture accepted a keyword-preserving semantic mutation")
+			}
+			mutatedRender := strings.Join(append(append([]string(nil), mutation.Lines...), "peasant web start"), "\n")
+			if err := validateRenderedCompletionPreamble(mutatedRender); err == nil {
+				t.Fatal("completion render accepted a keyword-preserving semantic mutation")
+			}
+		})
 	}
 }
 
@@ -625,8 +653,11 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 				}
 			}
 
-			view := strings.ToLower(stripRender(program.View()))
-			assertCompletionPreamble(t, view, row.WantPreamble)
+			rendered := stripRender(program.View())
+			if len(row.WantPreamble) > 0 {
+				assertCompletionPreamble(t, rendered)
+			}
+			view := strings.ToLower(rendered)
 			for _, want := range row.WantContains {
 				if !strings.Contains(view, strings.ToLower(want)) {
 					t.Errorf("completion does not contain %q:\n%s", want, view)
@@ -660,26 +691,40 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 	}
 }
 
-func assertCompletionPreamble(t *testing.T, view string, preamble []string) {
+func assertCompletionPreamble(t *testing.T, view string) {
 	t.Helper()
-	if len(preamble) == 0 {
-		return
+	if err := validateRenderedCompletionPreamble(view); err != nil {
+		t.Fatalf("completion preamble is invalid: %v\n%s", err, view)
 	}
+}
+
+func validateRenderedCompletionPreamble(view string) error {
+	lines := strings.Split(view, "\n")
 	previous := -1
-	for _, line := range preamble {
-		at := strings.Index(view, strings.ToLower(line))
+	for _, expected := range acceptedCompletionPreambleLines() {
+		at := exactRenderedLineIndex(lines, expected)
 		if at < 0 {
-			t.Fatalf("completion does not contain preamble line %q:\n%s", line, view)
+			return fmt.Errorf("completion does not contain exact preamble line %q", expected)
 		}
 		if at <= previous {
-			t.Fatalf("completion preamble is out of order at %q:\n%s", line, view)
+			return fmt.Errorf("completion preamble is out of order at %q", expected)
 		}
 		previous = at
 	}
-	firstCommand := strings.Index(view, "peasant web start")
+	firstCommand := exactRenderedLineIndex(lines, "peasant web start")
 	if firstCommand < 0 || previous >= firstCommand {
-		t.Fatalf("completion preamble must appear immediately before the command list:\n%s", view)
+		return fmt.Errorf("completion preamble must appear before the command list")
 	}
+	return nil
+}
+
+func exactRenderedLineIndex(lines []string, want string) int {
+	for index, line := range lines {
+		if line == want {
+			return index
+		}
+	}
+	return -1
 }
 
 func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {

@@ -105,8 +105,11 @@ func TestProgramValidatesTypedNextStepProvider(t *testing.T) {
 			})
 			program = drainProgram(program, program.Init())
 			program, _ = advanceToCommit(program)
-			view := strings.ToLower(stripRender(program.View()))
-			assertCompletionPreamble(t, view, row.WantPreamble)
+			rendered := stripRender(program.View())
+			if row.Valid {
+				assertCompletionPreamble(t, rendered)
+			}
+			view := strings.ToLower(rendered)
 			for _, want := range row.WantContains {
 				if !strings.Contains(view, strings.ToLower(want)) {
 					t.Errorf("completion does not contain %q:\n%s", want, view)
