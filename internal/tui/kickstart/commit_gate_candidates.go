@@ -55,6 +55,18 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 	for _, key := range projectOrder {
 		project := projects[key]
 		representative := projectRepresentative(project.rows)
+		// The gate drops unresolved rows because they cannot become project
+		// candidates, but their complete-cohort ambiguity must survive that
+		// projection. Only expose a pathless fallback that the scanner proved
+		// unique before filtering; exact clone and session evidence stays below.
+		gitRemote := ""
+		if representative.Candidate.RemoteMultiplicity == ingest.DiscoveryIdentityUnique {
+			gitRemote = representative.Listing.GitRemote
+		}
+		projectName := ""
+		if representative.Candidate.NameMultiplicity == ingest.DiscoveryIdentityUnique {
+			projectName = representative.Listing.ProjectName
+		}
 		rows := append([]PreparedSessionListing(nil), project.rows...)
 		sort.SliceStable(rows, func(i, j int) bool {
 			return rows[i].Listing.SessionID < rows[j].Listing.SessionID
@@ -83,8 +95,8 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 		candidates = append(candidates, selectionprojection.ProjectCandidate{
 			ParentProjectID: selectionprojection.ParentProjectID(project.identity.String()),
 			Harness:         project.identity.Harness,
-			GitRemote:       representative.Listing.GitRemote,
-			ProjectName:     representative.Listing.ProjectName,
+			GitRemote:       gitRemote,
+			ProjectName:     projectName,
 			ClonePath:       project.identity.ClonePath,
 			Descendants:     descendants,
 		})

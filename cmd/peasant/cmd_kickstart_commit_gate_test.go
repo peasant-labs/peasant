@@ -22,11 +22,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
-	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
 const expectedKickstartCommitGateCaseCount = 12
+const expectedKickstartCommitGateCandidateCaseCount = 2
+const expectedKickstartCommitGateCandidateCheckCount = 3
 
 const (
 	commitGateParentSessionID = "11111111-1111-4111-8111-111111111111"
@@ -46,6 +48,14 @@ const (
 	commitGateSelectionAll            commitGateSelection = "all"
 	commitGateSelectionEmpty          commitGateSelection = "empty"
 	commitGateSelectionExplicitParent commitGateSelection = "explicit-parent"
+	commitGateSelectionWholeProject   commitGateSelection = "whole-project"
+)
+
+type commitGatePathState string
+
+const (
+	commitGatePathDirectory commitGatePathState = "directory"
+	commitGatePathMissing   commitGatePathState = "missing"
 )
 
 type commitGateKey string
@@ -53,6 +63,7 @@ type commitGateKey string
 const (
 	commitGateKeySelectAll commitGateKey = "a"
 	commitGateKeyDown      commitGateKey = "j"
+	commitGateKeyRight     commitGateKey = "right"
 	commitGateKeySpace     commitGateKey = "space"
 	commitGateKeyLeft      commitGateKey = "left"
 	commitGateKeyEnter     commitGateKey = "enter"
@@ -62,26 +73,30 @@ const (
 )
 
 type kickstartCommitGateDocument struct {
-	DeclaredCaseCount int                       `yaml:"declaredCaseCount"`
-	MessageLines      []string                  `yaml:"messageLines"`
-	Paths             []kickstartGatePath       `yaml:"paths"`
-	Listings          []kickstartGateListing    `yaml:"listings"`
-	Cases             []kickstartCommitGateCase `yaml:"cases"`
+	DeclaredCaseCount           int                          `yaml:"declaredCaseCount"`
+	DeclaredCandidateCaseCount  int                          `yaml:"declaredCandidateCaseCount"`
+	DeclaredCandidateCheckCount int                          `yaml:"declaredCandidateCheckCount"`
+	MessageBlock                string                       `yaml:"messageBlock"`
+	Paths                       []kickstartGatePath          `yaml:"paths"`
+	Listings                    []kickstartGateListing       `yaml:"listings"`
+	Cases                       []kickstartCommitGateCase    `yaml:"cases"`
+	CandidateCases              []kickstartGateCandidateCase `yaml:"candidateCases"`
 }
 
 type kickstartGatePath struct {
-	Key string `yaml:"key"`
+	Key   string              `yaml:"key"`
+	State commitGatePathState `yaml:"state"`
 }
 
 type kickstartGateListing struct {
-	Harness     string   `yaml:"harness"`
-	ProjectName string   `yaml:"projectName"`
-	GitRemote   string   `yaml:"gitRemote"`
-	PathKey     string   `yaml:"pathKey"`
-	Branch      string   `yaml:"branch"`
-	SessionID   string   `yaml:"sessionId"`
-	Title       string   `yaml:"title"`
-	SubagentIDs []string `yaml:"subagentIds"`
+	Harness     defaults.Harness `yaml:"harness"`
+	ProjectName string           `yaml:"projectName"`
+	GitRemote   string           `yaml:"gitRemote"`
+	PathKey     string           `yaml:"pathKey"`
+	Branch      string           `yaml:"branch"`
+	SessionID   string           `yaml:"sessionId"`
+	Title       string           `yaml:"title"`
+	SubagentIDs []string         `yaml:"subagentIds"`
 }
 
 type kickstartCommitGateCase struct {
@@ -94,6 +109,49 @@ type kickstartCommitGateCase struct {
 	ExpectCommit     bool                `yaml:"expectCommit"`
 	ExpectExit       bool                `yaml:"expectExit"`
 	ExpectSelection  commitGateSelection `yaml:"expectSelection"`
+}
+
+type commitGateExpectedGate string
+
+const (
+	commitGateExpectedNone              commitGateExpectedGate = "none"
+	commitGateExpectedConfirmNoProjects commitGateExpectedGate = "confirm-no-projects"
+)
+
+type kickstartGateCandidateCase struct {
+	Name                   string                           `yaml:"name"`
+	ExpectedCandidateCount int                              `yaml:"expectedCandidateCount"`
+	Paths                  []kickstartGatePath              `yaml:"paths"`
+	Listings               []kickstartGateListing           `yaml:"listings"`
+	ExpectedCandidates     []kickstartGateExpectedCandidate `yaml:"expectedCandidates"`
+	GateChecks             []kickstartGateCandidateCheck    `yaml:"gateChecks"`
+}
+
+type kickstartGateExpectedCandidate struct {
+	Harness     defaults.Harness                  `yaml:"harness"`
+	PathKey     string                            `yaml:"pathKey"`
+	GitRemote   string                            `yaml:"gitRemote"`
+	ProjectName string                            `yaml:"projectName"`
+	Descendants []kickstartGateExpectedDescendant `yaml:"descendants"`
+}
+
+type kickstartGateExpectedDescendant struct {
+	SessionID       string `yaml:"sessionId"`
+	ParentSessionID string `yaml:"parentSessionId"`
+}
+
+type kickstartGateCandidateCheck struct {
+	Name                       string                          `yaml:"name"`
+	Selection                  kickstartGateCandidateSelection `yaml:"selection"`
+	ExpectedEditorProjectCount int                             `yaml:"expectedEditorProjectCount"`
+	ExpectedGate               commitGateExpectedGate          `yaml:"expectedGate"`
+}
+
+type kickstartGateCandidateSelection struct {
+	Harness     defaults.Harness `yaml:"harness"`
+	GitRemote   string           `yaml:"gitRemote"`
+	ProjectName string           `yaml:"projectName"`
+	PathKey     string           `yaml:"pathKey"`
 }
 
 //go:embed testdata/kickstart_commit_gate.yaml
@@ -122,44 +180,30 @@ func loadKickstartCommitGateDocument(t *testing.T) kickstartCommitGateDocument {
 			expectedKickstartCommitGateCaseCount,
 		)
 	}
+	if document.DeclaredCandidateCaseCount != expectedKickstartCommitGateCandidateCaseCount ||
+		len(document.CandidateCases) != expectedKickstartCommitGateCandidateCaseCount {
+		t.Fatalf(
+			"declaredCandidateCaseCount=%d and actual candidate cases=%d; both must equal required count %d",
+			document.DeclaredCandidateCaseCount,
+			len(document.CandidateCases),
+			expectedKickstartCommitGateCandidateCaseCount,
+		)
+	}
 	validateKickstartCommitGateDocument(t, document)
 	return document
 }
 
 func validateKickstartCommitGateDocument(t *testing.T, document kickstartCommitGateDocument) {
 	t.Helper()
-	if len(document.MessageLines) != 6 {
-		t.Fatalf("messageLines has %d rows, want the six accepted sentences", len(document.MessageLines))
+	messageLines := strings.Split(document.MessageBlock, "\n")
+	if len(messageLines) != 6 || strings.Join(messageLines, "\n") != document.MessageBlock {
+		t.Fatalf("messageBlock has %d rows, want one ordered block with the six accepted sentences", len(messageLines))
 	}
-	pathKeys := make(map[string]struct{}, len(document.Paths))
-	for _, path := range document.Paths {
-		if path.Key == "" || filepath.IsAbs(path.Key) || filepath.Clean(path.Key) != path.Key {
-			t.Fatalf("fixture has unsafe path key %q", path.Key)
-		}
-		if _, duplicate := pathKeys[path.Key]; duplicate {
-			t.Fatalf("fixture repeats path key %q", path.Key)
-		}
-		pathKeys[path.Key] = struct{}{}
-	}
+	pathKeys := validateKickstartGatePaths(t, "mounted lifecycle", document.Paths)
 	if len(document.Listings) < 2 {
 		t.Fatal("fixture must include an available parent and nested descendant")
 	}
-	listingIDs := make(map[string]struct{}, len(document.Listings))
-	for _, listing := range document.Listings {
-		if listing.Harness == "" || listing.SessionID == "" {
-			t.Fatalf("fixture listing lacks harness or session ID: %#v", listing)
-		}
-		if _, ok := pathKeys[listing.PathKey]; !ok {
-			t.Fatalf("fixture listing %q references unknown path key %q", listing.SessionID, listing.PathKey)
-		}
-		if _, err := ingest.NewSessionID(listing.SessionID); err != nil {
-			t.Fatalf("fixture listing has invalid session ID %q: %v", listing.SessionID, err)
-		}
-		if _, duplicate := listingIDs[listing.SessionID]; duplicate {
-			t.Fatalf("fixture repeats session ID %q", listing.SessionID)
-		}
-		listingIDs[listing.SessionID] = struct{}{}
-	}
+	validateKickstartGateListings(t, "mounted lifecycle", document.Listings, pathKeys)
 
 	caseNames := make(map[string]struct{}, len(document.Cases))
 	pairs := make(map[string]int, len(document.Cases))
@@ -207,6 +251,135 @@ func validateKickstartCommitGateDocument(t *testing.T, document kickstartCommitG
 		outcomeCounts["back"] != 2 || outcomeCounts["cancel"] != 2 || outcomeCounts["interrupt"] != 2 {
 		t.Fatalf("fixture must cover every confirmation outcome once per run state; got %v", outcomeCounts)
 	}
+
+	checkCount := 0
+	candidateNames := make(map[string]struct{}, len(document.CandidateCases))
+	for _, candidateCase := range document.CandidateCases {
+		validateKickstartGateCandidateCase(t, candidateCase, candidateNames)
+		checkCount += len(candidateCase.GateChecks)
+	}
+	if document.DeclaredCandidateCheckCount != expectedKickstartCommitGateCandidateCheckCount ||
+		checkCount != expectedKickstartCommitGateCandidateCheckCount {
+		t.Fatalf(
+			"declaredCandidateCheckCount=%d and actual checks=%d; both must equal required count %d",
+			document.DeclaredCandidateCheckCount,
+			checkCount,
+			expectedKickstartCommitGateCandidateCheckCount,
+		)
+	}
+}
+
+func validateKickstartGatePaths(t *testing.T, scope string, paths []kickstartGatePath) map[string]commitGatePathState {
+	t.Helper()
+	if len(paths) == 0 {
+		t.Fatalf("%s fixture has no paths", scope)
+	}
+	pathStates := make(map[string]commitGatePathState, len(paths))
+	for _, path := range paths {
+		if path.Key == "" || filepath.IsAbs(path.Key) || filepath.Clean(path.Key) != path.Key || strings.HasPrefix(path.Key, "..") {
+			t.Fatalf("%s fixture has unsafe path key %q", scope, path.Key)
+		}
+		if path.State != commitGatePathDirectory && path.State != commitGatePathMissing {
+			t.Fatalf("%s fixture path %q has unknown state %q", scope, path.Key, path.State)
+		}
+		if _, duplicate := pathStates[path.Key]; duplicate {
+			t.Fatalf("%s fixture repeats path key %q", scope, path.Key)
+		}
+		pathStates[path.Key] = path.State
+	}
+	return pathStates
+}
+
+func validateKickstartGateListings(
+	t *testing.T,
+	scope string,
+	listings []kickstartGateListing,
+	pathStates map[string]commitGatePathState,
+) {
+	t.Helper()
+	listingIDs := make(map[string]struct{}, len(listings))
+	for _, listing := range listings {
+		if !listing.Harness.IsKnown() || listing.SessionID == "" || listing.PathKey == "" {
+			t.Fatalf("%s fixture listing lacks a known harness, session ID, or path: %#v", scope, listing)
+		}
+		if _, ok := pathStates[listing.PathKey]; !ok {
+			t.Fatalf("%s fixture listing %q references unknown path key %q", scope, listing.SessionID, listing.PathKey)
+		}
+		if _, err := ingest.NewSessionID(listing.SessionID); err != nil {
+			t.Fatalf("%s fixture listing has invalid session ID %q: %v", scope, listing.SessionID, err)
+		}
+		if _, duplicate := listingIDs[listing.SessionID]; duplicate {
+			t.Fatalf("%s fixture repeats session ID %q", scope, listing.SessionID)
+		}
+		listingIDs[listing.SessionID] = struct{}{}
+		for _, childID := range listing.SubagentIDs {
+			if _, err := ingest.NewSessionID(childID); err != nil {
+				t.Fatalf("%s fixture listing %q has invalid child session ID %q: %v", scope, listing.SessionID, childID, err)
+			}
+		}
+	}
+}
+
+func validateKickstartGateCandidateCase(
+	t *testing.T,
+	testCase kickstartGateCandidateCase,
+	seen map[string]struct{},
+) {
+	t.Helper()
+	if strings.TrimSpace(testCase.Name) == "" {
+		t.Fatal("candidate fixture case has an empty name")
+	}
+	if _, duplicate := seen[testCase.Name]; duplicate {
+		t.Fatalf("candidate fixture repeats case name %q", testCase.Name)
+	}
+	seen[testCase.Name] = struct{}{}
+	if testCase.ExpectedCandidateCount != len(testCase.ExpectedCandidates) || testCase.ExpectedCandidateCount == 0 {
+		t.Fatalf(
+			"candidate fixture %q expectedCandidateCount=%d but has %d expected candidates",
+			testCase.Name,
+			testCase.ExpectedCandidateCount,
+			len(testCase.ExpectedCandidates),
+		)
+	}
+	pathStates := validateKickstartGatePaths(t, testCase.Name, testCase.Paths)
+	validateKickstartGateListings(t, testCase.Name, testCase.Listings, pathStates)
+	for _, expected := range testCase.ExpectedCandidates {
+		if !expected.Harness.IsKnown() || pathStates[expected.PathKey] != commitGatePathDirectory || len(expected.Descendants) == 0 {
+			t.Fatalf("candidate fixture %q has an incomplete expected candidate: %#v", testCase.Name, expected)
+		}
+		for _, descendant := range expected.Descendants {
+			if _, err := ingest.NewSessionID(descendant.SessionID); err != nil {
+				t.Fatalf("candidate fixture %q has invalid expected session ID %q: %v", testCase.Name, descendant.SessionID, err)
+			}
+			if descendant.ParentSessionID != "" {
+				if _, err := ingest.NewSessionID(descendant.ParentSessionID); err != nil {
+					t.Fatalf("candidate fixture %q has invalid expected parent session ID %q: %v", testCase.Name, descendant.ParentSessionID, err)
+				}
+			}
+		}
+	}
+	if len(testCase.GateChecks) == 0 {
+		t.Fatalf("candidate fixture %q has no editor and gate checks", testCase.Name)
+	}
+	checkNames := make(map[string]struct{}, len(testCase.GateChecks))
+	for _, check := range testCase.GateChecks {
+		if strings.TrimSpace(check.Name) == "" || !check.Selection.Harness.IsKnown() {
+			t.Fatalf("candidate fixture %q has an incomplete gate check: %#v", testCase.Name, check)
+		}
+		if _, duplicate := checkNames[check.Name]; duplicate {
+			t.Fatalf("candidate fixture %q repeats gate check %q", testCase.Name, check.Name)
+		}
+		checkNames[check.Name] = struct{}{}
+		if check.Selection.PathKey != "" && pathStates[check.Selection.PathKey] != commitGatePathDirectory {
+			t.Fatalf("candidate fixture %q check %q uses unavailable path %q", testCase.Name, check.Name, check.Selection.PathKey)
+		}
+		if check.ExpectedEditorProjectCount < 0 || check.ExpectedEditorProjectCount > testCase.ExpectedCandidateCount {
+			t.Fatalf("candidate fixture %q check %q has invalid editor project count %d", testCase.Name, check.Name, check.ExpectedEditorProjectCount)
+		}
+		if !check.ExpectedGate.valid() {
+			t.Fatalf("candidate fixture %q check %q has unknown gate %q", testCase.Name, check.Name, check.ExpectedGate)
+		}
+	}
 }
 
 func (s commitGateRunState) valid() bool {
@@ -215,7 +388,7 @@ func (s commitGateRunState) valid() bool {
 
 func (s commitGateSelection) valid() bool {
 	switch s {
-	case commitGateSelectionAll, commitGateSelectionEmpty, commitGateSelectionExplicitParent:
+	case commitGateSelectionAll, commitGateSelectionEmpty, commitGateSelectionExplicitParent, commitGateSelectionWholeProject:
 		return true
 	default:
 		return false
@@ -224,12 +397,23 @@ func (s commitGateSelection) valid() bool {
 
 func (k commitGateKey) valid() bool {
 	switch k {
-	case commitGateKeySelectAll, commitGateKeyDown, commitGateKeySpace, commitGateKeyLeft,
+	case commitGateKeySelectAll, commitGateKeyDown, commitGateKeyRight, commitGateKeySpace, commitGateKeyLeft,
 		commitGateKeyEnter, commitGateKeyBack, commitGateKeyCancel, commitGateKeyInterrupt:
 		return true
 	default:
 		return false
 	}
+}
+
+func (g commitGateExpectedGate) valid() bool {
+	return g == commitGateExpectedNone || g == commitGateExpectedConfirmNoProjects
+}
+
+func (g commitGateExpectedGate) value() settings.CommitGate {
+	if g == commitGateExpectedConfirmNoProjects {
+		return settings.CommitGateConfirmNoProjects
+	}
+	return settings.CommitGateNone
 }
 
 func commitGateOutcome(testCase kickstartCommitGateCase) string {
@@ -256,48 +440,147 @@ func commitGateOutcome(testCase kickstartCommitGateCase) string {
 	}
 }
 
-func TestKickstartCommitGateCandidateCohortUsesStablePhysicalIdentity(t *testing.T) {
+func TestKickstartCommitGateCandidateCohortsPreservePhysicalIdentityAndAmbiguity(t *testing.T) {
 	t.Parallel()
 	document := loadKickstartCommitGateDocument(t)
-	paths := materializeKickstartGatePaths(t, document.Paths)
-	listings := kickstartGateListings(document.Listings, paths)
-	source := kickstart.NewScannerTreeSource(
-		listings,
-		kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
-	)
+	for _, testCase := range document.CandidateCases {
+		testCase := testCase
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			paths := materializeKickstartGatePaths(t, testCase.Paths)
+			listings := kickstartGateListings(testCase.Listings, paths)
+			source := kickstart.NewScannerTreeSource(
+				listings,
+				kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
+			)
 
-	candidates := source.CommitGateCandidates()
-	if len(candidates) != 1 {
-		t.Fatalf("commit-gate candidate projects = %d, want 1 physical project", len(candidates))
+			candidates := source.CommitGateCandidates()
+			assertKickstartGateCandidates(t, candidates, testCase.ExpectedCandidates, paths)
+			for _, check := range testCase.GateChecks {
+				check := check
+				t.Run(check.Name, func(t *testing.T) {
+					selection := kickstartGateCandidateSelectionConfig(check.Selection, paths)
+					roots, err := source.Load(t.Context())
+					if err != nil {
+						t.Fatalf("load production scanner tree: %v", err)
+					}
+					settings.PrepopulateSelection(roots, selection)
+					if got := selectedKickstartGateEditorProjects(roots); got != check.ExpectedEditorProjectCount {
+						t.Fatalf("checked editor projects=%d, want %d", got, check.ExpectedEditorProjectCount)
+					}
+					gotGate := settings.NewCommitGateEvaluator(candidates)(selection)
+					if gotGate != check.ExpectedGate.value() {
+						t.Fatalf("commit gate=%d, want %d", gotGate, check.ExpectedGate.value())
+					}
+				})
+			}
+		})
 	}
-	candidate := candidates[0]
-	physicalPath := ingest.ClonePath(paths["worktree"])
-	wantParentID := selectionprojection.ParentProjectID((kickstart.ProjectIdentity{
-		Harness:   ingest.Harness(defaults.HarnessClaudeCode),
-		ClonePath: physicalPath,
-	}).String())
-	if candidate.ParentProjectID != wantParentID {
-		t.Fatalf("ParentProjectID = %q, want stable ProjectIdentity %q", candidate.ParentProjectID, wantParentID)
+}
+
+func assertKickstartGateCandidates(
+	t *testing.T,
+	candidates []selectionprojection.ProjectCandidate,
+	expected []kickstartGateExpectedCandidate,
+	paths map[string]string,
+) {
+	t.Helper()
+	if len(candidates) != len(expected) {
+		t.Fatalf("commit-gate candidate projects=%d, want %d", len(candidates), len(expected))
 	}
-	if candidate.ClonePath != physicalPath {
-		t.Fatalf("project fallback ClonePath = %q, want resolved path %q", candidate.ClonePath, physicalPath)
+	byParentID := make(map[selectionprojection.ParentProjectID]selectionprojection.ProjectCandidate, len(candidates))
+	for _, candidate := range candidates {
+		if _, duplicate := byParentID[candidate.ParentProjectID]; duplicate {
+			t.Fatalf("commit-gate candidates repeat ParentProjectID %q", candidate.ParentProjectID)
+		}
+		byParentID[candidate.ParentProjectID] = candidate
 	}
-	if len(candidate.Descendants) != 2 {
-		t.Fatalf("candidate descendants = %d, want complete parent and child cohort", len(candidate.Descendants))
+	for _, want := range expected {
+		physicalPath := ingest.ClonePath(paths[want.PathKey])
+		wantParentID := selectionprojection.ParentProjectID((kickstart.ProjectIdentity{
+			Harness:   ingest.Harness(want.Harness),
+			ClonePath: physicalPath,
+		}).String())
+		candidate, ok := byParentID[wantParentID]
+		if !ok {
+			t.Fatalf("missing candidate for stable ParentProjectID %q", wantParentID)
+		}
+		if candidate.Harness != ingest.Harness(want.Harness) || candidate.ClonePath != physicalPath {
+			t.Fatalf("candidate carrier=(%q,%q), want (%q,%q)", candidate.Harness, candidate.ClonePath, want.Harness, physicalPath)
+		}
+		if candidate.GitRemote != want.GitRemote || candidate.ProjectName != want.ProjectName {
+			t.Fatalf(
+				"candidate fallback identity=(%q,%q), want (%q,%q)",
+				candidate.GitRemote,
+				candidate.ProjectName,
+				want.GitRemote,
+				want.ProjectName,
+			)
+		}
+		assertKickstartGateDescendants(t, candidate.Descendants, want.Descendants, physicalPath)
 	}
-	descendants := append([]selectionprojection.SessionCandidate(nil), candidate.Descendants...)
-	sort.Slice(descendants, func(i, j int) bool { return descendants[i].SessionID < descendants[j].SessionID })
-	if descendants[0].SessionID != ingest.SessionID(commitGateParentSessionID) || descendants[0].ParentSessionID != "" {
-		t.Fatalf("parent descendant identity = %#v", descendants[0])
+}
+
+func assertKickstartGateDescendants(
+	t *testing.T,
+	got []selectionprojection.SessionCandidate,
+	want []kickstartGateExpectedDescendant,
+	physicalPath ingest.ClonePath,
+) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("candidate descendants=%d, want %d", len(got), len(want))
 	}
-	if descendants[1].SessionID != ingest.SessionID(commitGateChildSessionID) || descendants[1].ParentSessionID != ingest.SessionID(commitGateParentSessionID) {
-		t.Fatalf("nested descendant identity = %#v", descendants[1])
-	}
-	for _, descendant := range descendants {
-		if descendant.ClonePath != physicalPath {
-			t.Fatalf("session %q ClonePath = %q, want per-session resolved path %q", descendant.SessionID, descendant.ClonePath, physicalPath)
+	got = append([]selectionprojection.SessionCandidate(nil), got...)
+	sort.Slice(got, func(i, j int) bool { return got[i].SessionID < got[j].SessionID })
+	want = append([]kickstartGateExpectedDescendant(nil), want...)
+	sort.Slice(want, func(i, j int) bool { return want[i].SessionID < want[j].SessionID })
+	for index, expected := range want {
+		if got[index].SessionID != ingest.SessionID(expected.SessionID) ||
+			got[index].ParentSessionID != ingest.SessionID(expected.ParentSessionID) ||
+			got[index].ClonePath != physicalPath {
+			t.Fatalf(
+				"descendant[%d]=(%q,%q,%q), want (%q,%q,%q)",
+				index,
+				got[index].SessionID,
+				got[index].ParentSessionID,
+				got[index].ClonePath,
+				expected.SessionID,
+				expected.ParentSessionID,
+				physicalPath,
+			)
 		}
 	}
+}
+
+func kickstartGateCandidateSelectionConfig(
+	selection kickstartGateCandidateSelection,
+	paths map[string]string,
+) config.SelectionConfig {
+	project := config.ProjectSelection{
+		GitRemote: selection.GitRemote,
+		Name:      selection.ProjectName,
+	}
+	if selection.PathKey != "" {
+		project.ClonePaths = []string{paths[selection.PathKey]}
+	}
+	return config.SelectionConfig{
+		Mode:                  config.SelectionModeSelected,
+		AutoIngestNewBranches: true,
+		Harnesses: map[string]config.SelectionHarnessConfig{
+			selection.Harness.String(): {Projects: []config.ProjectSelection{project}},
+		},
+	}
+}
+
+func selectedKickstartGateEditorProjects(roots []*kit.TreeNode) int {
+	selected := 0
+	for _, root := range roots {
+		if root.State != kit.Unchecked {
+			selected++
+		}
+	}
+	return selected
 }
 
 func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
@@ -309,7 +592,7 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 			paths := materializeKickstartGatePaths(t, document.Paths)
 			listings := kickstartGateListings(document.Listings, paths)
 			configPath := filepath.Join(t.TempDir(), "config.yaml")
-			seedKickstartGateConfig(t, configPath, testCase.RunState, testCase.InitialSelection)
+			seedKickstartGateConfig(t, configPath, testCase.RunState, testCase.InitialSelection, paths)
 			before := snapshotKickstartGateFile(t, configPath)
 
 			var ingestCalls int
@@ -343,11 +626,10 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 					if mounted.Program().Confirming() {
 						return fmt.Errorf("no-project save used the no-save exit modal")
 					}
-					view := ansiPattern.ReplaceAllString(mounted.Program().View(), "")
-					for _, line := range document.MessageLines {
-						if !strings.Contains(view, line) {
-							return fmt.Errorf("confirmation does not contain accepted sentence %q; view:\n%s", line, view)
-						}
+					view := normalizeKickstartGateTerminalBlock(mounted.Program().View())
+					message := normalizeKickstartGateTerminalBlock(document.MessageBlock)
+					if !strings.Contains(view, message) {
+						return fmt.Errorf("confirmation does not contain the accepted ordered message block; view:\n%s", view)
 					}
 				}
 				for _, key := range testCase.AnswerKeys {
@@ -359,40 +641,12 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 				return nil
 			}
 
-			switch testCase.RunState {
-			case commitGateFirstRun:
-				configured := config.BaseConfig()
-				configured.Selection = kickstartGateSelection(testCase.InitialSelection)
-				draft, err := settings.NewDraft(configPath, configured)
-				if err != nil {
-					t.Fatalf("open first-run draft: %v", err)
-				}
-				source := kickstart.NewScannerTreeSource(
-					listings,
-					kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
-				)
-				model := kickstart.NewModel(kickstart.NewProgram(kickstart.ProgramDeps{
-					Theme:            theme.New(theme.ModeDark),
-					Draft:            draft,
-					Source:           source,
-					CommitGate:       settings.NewCommitGateEvaluator(source.CommitGateCandidates()),
-					Ingest:           flowIngest,
-					AlreadyConnected: true,
-					Context:          t.Context(),
-				}))
-				if err := driveFlow(model); err != nil {
-					t.Fatalf("run first mounted kickstart flow: %v", err)
-				}
-			case commitGateLaterRun:
-				deps := defaultKickstartCommandDeps()
-				deps.flowIngest = flowIngest
-				deps.runFlow = driveFlow
-				cmd := mountTestCmd(t, t.TempDir())
-				if err := runKickstartFlow(cmd, deps, configPath, ftue.ProviderInventory{}, listings); err != nil {
-					t.Fatalf("run later mounted kickstart flow: %v", err)
-				}
-			default:
-				t.Fatalf("unknown run state %q", testCase.RunState)
+			deps := defaultKickstartCommandDeps()
+			deps.flowIngest = flowIngest
+			deps.runFlow = driveFlow
+			cmd := mountTestCmd(t, t.TempDir())
+			if err := runKickstartFlow(cmd, deps, configPath, ftue.ProviderInventory{}, listings); err != nil {
+				t.Fatalf("run %s mounted kickstart flow: %v", testCase.RunState, err)
 			}
 			program := mounted.Program()
 			if program.Committed() != testCase.ExpectCommit {
@@ -409,7 +663,7 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 				t.Fatalf("ingest calls=%d, want %d", ingestCalls, wantIngestCalls)
 			}
 			if testCase.ExpectCommit {
-				assertKickstartGateCommittedSelection(t, configPath, testCase.ExpectSelection)
+				assertKickstartGateCommittedSelection(t, configPath, testCase.ExpectSelection, paths)
 				return
 			}
 			after := snapshotKickstartGateFile(t, configPath)
@@ -426,14 +680,18 @@ func materializeKickstartGatePaths(t *testing.T, fixtures []kickstartGatePath) m
 	paths := make(map[string]string, len(fixtures))
 	for _, fixture := range fixtures {
 		path := filepath.Join(root, fixture.Key)
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			t.Fatalf("create physical path %q: %v", fixture.Key, err)
+		if fixture.State == commitGatePathDirectory {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatalf("create physical path %q: %v", fixture.Key, err)
+			}
+			resolved, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatalf("resolve physical path %q: %v", fixture.Key, err)
+			}
+			path = resolved
 		}
-		resolved, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			t.Fatalf("resolve physical path %q: %v", fixture.Key, err)
-		}
-		paths[fixture.Key], err = filepath.Abs(resolved)
+		var err error
+		paths[fixture.Key], err = filepath.Abs(path)
 		if err != nil {
 			t.Fatalf("make physical path %q absolute: %v", fixture.Key, err)
 		}
@@ -445,7 +703,7 @@ func kickstartGateListings(fixtures []kickstartGateListing, paths map[string]str
 	listings := make([]ftue.SessionListing, 0, len(fixtures))
 	for _, fixture := range fixtures {
 		listings = append(listings, ftue.SessionListing{
-			Harness:     fixture.Harness,
+			Harness:     fixture.Harness.String(),
 			ProjectName: fixture.ProjectName,
 			GitRemote:   fixture.GitRemote,
 			Branch:      fixture.Branch,
@@ -463,31 +721,47 @@ func seedKickstartGateConfig(
 	path string,
 	runState commitGateRunState,
 	selection commitGateSelection,
+	paths map[string]string,
 ) {
 	t.Helper()
 	if runState == commitGateFirstRun {
 		return
 	}
 	configured := config.BaseConfig()
-	configured.Selection = kickstartGateSelection(selection)
+	configured.Selection = kickstartGateSelection(selection, paths)
 	if err := config.SaveAtomic(path, configured); err != nil {
 		t.Fatalf("seed later-run config: %v", err)
 	}
 }
 
-func kickstartGateSelection(selection commitGateSelection) config.SelectionConfig {
+func kickstartGateSelection(selection commitGateSelection, paths map[string]string) config.SelectionConfig {
 	switch selection {
 	case commitGateSelectionAll:
 		return config.SelectionConfig{Mode: config.SelectionModeAll, AutoIngestNewBranches: true}
 	case commitGateSelectionExplicitParent:
 		return config.SelectionConfig{
-			Mode: config.SelectionModeSelected,
+			Mode:                  config.SelectionModeSelected,
+			AutoIngestNewBranches: true,
 			Harnesses: map[string]config.SelectionHarnessConfig{
 				string(defaults.HarnessClaudeCode): {Sessions: []string{commitGateParentSessionID}},
 			},
 		}
+	case commitGateSelectionWholeProject:
+		return config.SelectionConfig{
+			Mode:                  config.SelectionModeSelected,
+			AutoIngestNewBranches: true,
+			Harnesses: map[string]config.SelectionHarnessConfig{
+				defaults.HarnessClaudeCode.String(): {
+					Projects: []config.ProjectSelection{{
+						GitRemote:  "git@github.com:acme/tool.git",
+						Name:       "acme/tool",
+						ClonePaths: []string{paths["worktree"]},
+					}},
+				},
+			},
+		}
 	case commitGateSelectionEmpty:
-		return config.SelectionConfig{Mode: config.SelectionModeSelected}
+		return config.SelectionConfig{Mode: config.SelectionModeSelected, AutoIngestNewBranches: true}
 	default:
 		return config.SelectionConfig{}
 	}
@@ -558,6 +832,8 @@ func kickstartGateKeyMessage(t *testing.T, key commitGateKey) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'a', Text: "a"}
 	case commitGateKeyDown:
 		return tea.KeyPressMsg{Code: 'j', Text: "j"}
+	case commitGateKeyRight:
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	case commitGateKeySpace:
 		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	case commitGateKeyLeft:
@@ -599,6 +875,7 @@ func assertKickstartGateCommittedSelection(
 	t *testing.T,
 	path string,
 	want commitGateSelection,
+	paths map[string]string,
 ) {
 	t.Helper()
 	content, err := os.ReadFile(path)
@@ -610,10 +887,19 @@ func assertKickstartGateCommittedSelection(
 		t.Fatalf("parse committed config: %v", err)
 	}
 	got := normalizeKickstartGateSelection(configured.Selection)
-	expected := normalizeKickstartGateSelection(kickstartGateSelection(want))
+	expected := normalizeKickstartGateSelection(kickstartGateSelection(want, paths))
 	if !reflect.DeepEqual(got, expected) {
 		t.Fatalf("committed selection mismatch\n got: %#v\nwant: %#v", got, expected)
 	}
+}
+
+func normalizeKickstartGateTerminalBlock(value string) string {
+	value = ansiPattern.ReplaceAllString(value, "")
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	for index := range lines {
+		lines[index] = strings.TrimSpace(lines[index])
+	}
+	return strings.Join(lines, "\n")
 }
 
 func normalizeKickstartGateSelection(selection config.SelectionConfig) config.SelectionConfig {
