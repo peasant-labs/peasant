@@ -135,7 +135,7 @@ func prepareLegacyStoredEvidence(
 
 func appendLegacyPathRule(projects []config.ProjectSelection, clonePath ingest.ClonePath) []config.ProjectSelection {
 	for _, project := range projects {
-		if len(project.ClonePaths) == 1 && project.ClonePaths[0] == clonePath.String() {
+		if len(project.ClonePaths) == 1 && ingest.ClonePath(project.ClonePaths[0]) == clonePath {
 			return projects
 		}
 	}
