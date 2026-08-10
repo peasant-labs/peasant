@@ -143,6 +143,13 @@ func screenAsyncTextAccessor() Accessor[string] {
 	}
 }
 
+func screenAsyncToggleAccessor() Accessor[bool] {
+	return Accessor[bool]{
+		Get: func(cfg *config.Config) bool { return cfg.Selection.AutoIngestNewBranches },
+		Set: func(cfg *config.Config, value bool) { cfg.Selection.AutoIngestNewBranches = value },
+	}
+}
+
 func marshalScreenWorking(t *testing.T, draft *Draft) []byte {
 	t.Helper()
 	data, err := yaml.Marshal(draft.Working())
@@ -206,6 +213,10 @@ func mountedScreenAsyncCase(t *testing.T, row screenAsyncCase) (Screen, *Draft, 
 	text := Text("village-url", "village url", screenAsyncTextAccessor())
 	if _, ok := text.(asyncField); ok {
 		t.Fatal("ordinary Text field unexpectedly implements asyncField")
+	}
+	toggle := Toggle("auto-ingest", "auto-ingest", screenAsyncToggleAccessor())
+	if _, ok := toggle.(asyncField); ok {
+		t.Fatal("ordinary Toggle field unexpectedly implements asyncField")
 	}
 	registry := Registry{Sections: []Section{
 		{Key: "selection", Title: "selection", Fields: []Field{tree}},

@@ -14,9 +14,10 @@ type asyncField interface {
 	handleAsync(*Draft, tea.Msg) tea.Cmd
 }
 
-// fieldAsyncCommands forwards msg only to mounted fields that explicitly own
-// asynchronous work. It is deliberately package-private and field-specific,
-// not a generic event bus.
+// fieldAsyncCommands is the sole non-key delivery boundary: it forwards msg
+// only to mounted fields that explicitly own asynchronous work. It is
+// deliberately package-private and field-specific, not a generic event bus;
+// ordinary Field.handle methods remain a synchronous key-input contract.
 func fieldAsyncCommands(reg Registry, draft *Draft, msg tea.Msg) []tea.Cmd {
 	var commands []tea.Cmd
 	for _, section := range reg.Sections {

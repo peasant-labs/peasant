@@ -645,7 +645,7 @@ func screenHiddenValidationRegistry(t *testing.T, draft *Draft) Registry {
 	selection.when = func(*Draft) bool { return false }
 	selection.mount(theme.New(theme.ModeDark))
 	for _, message := range runAll(selection.initCmd()) {
-		selection.handle(draft, message)
+		selection.handleAsync(draft, message)
 	}
 	if err := selection.Validate(draft); err == nil {
 		t.Fatal("hidden validation fixture did not load a real conflicting tree")

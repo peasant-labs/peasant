@@ -111,8 +111,10 @@ type Field interface {
 	// (re-)entry to a step so the component reflects the draft, including after
 	// an edit was dropped).
 	sync(d *Draft)
-	// handle dispatches one message to the field's live component and writes
-	// any resulting value change back into d.
+	// handle dispatches one synchronous key message to the field's live
+	// component and writes any resulting value change back into d. Flow and
+	// Screen route every non-key message exclusively through the private
+	// asyncField capability instead of this general field hook.
 	handle(d *Draft, msg tea.Msg) tea.Cmd
 	// render draws the field's control at the given inner width.
 	render(d *Draft, styles theme.Styles, width int) string
