@@ -78,6 +78,9 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 		if !fixture.Harness.IsKnown() {
 			return nil, fmt.Errorf("committed fixture %s case %q has unknown harness %q; use a canonical harness identifier", allIngestedSessionsFixturePath, fixture.Name, fixture.Harness)
 		}
+		if _, err := ingest.NewProjectHash(fixture.ProjectHash); err != nil {
+			return nil, fmt.Errorf("committed fixture %s case %q has invalid projectHash %q: %w; use a canonical project hash", allIngestedSessionsFixturePath, fixture.Name, fixture.ProjectHash, err)
+		}
 		if _, exists := seenNames[fixture.Name]; exists {
 			return nil, fmt.Errorf("committed fixture %s repeats case name %q; use a unique name for each scenario", allIngestedSessionsFixturePath, fixture.Name)
 		}
@@ -178,6 +181,7 @@ func TestAllIngestedSessionsReadsCompleteRows(t *testing.T) {
 		want := IngestedSessionRow{
 			SessionID:     fixture.SessionID,
 			Harness:       fixture.Harness.String(),
+			ProjectHash:   fixture.ProjectHash,
 			GitRemote:     fixture.GitRemote,
 			Branch:        fixture.Branch,
 			GitWorktree:   fixture.GitWorktree,
@@ -189,6 +193,16 @@ func TestAllIngestedSessionsReadsCompleteRows(t *testing.T) {
 		if row != want {
 			t.Errorf("%s: AllIngestedSessions row = %+v, want %+v", fixture.Name, row, want)
 		}
+	}
+}
+
+func TestAllIngestedSessionsFixtureRejectsUnknownProjectHashKey(t *testing.T) {
+	mutated := bytes.Replace(allIngestedSessionsFixtureData, []byte("projectHash:"), []byte("projectIdentity:"), 1)
+	if bytes.Equal(mutated, allIngestedSessionsFixtureData) {
+		t.Fatal("all-ingested-sessions fixture has no projectHash key to mutate")
+	}
+	if _, err := loadAllIngestedSessionFixtures(mutated); err == nil {
+		t.Fatal("all-ingested-sessions fixture loader accepted an unknown project identity key")
 	}
 }
 
@@ -256,6 +270,9 @@ func TestAllIngestedSessionsKeepsSessionsWithoutMetrics(t *testing.T) {
 	}
 	if row.Harness != defaults.HarnessOpenCode.String() {
 		t.Errorf("harness = %q, want %q for a session with no metrics row", row.Harness, defaults.HarnessOpenCode)
+	}
+	if wantProjectHash := repeatHex(t, 2); row.ProjectHash != wantProjectHash {
+		t.Errorf("project hash = %q, want %q for a session with no metrics row", row.ProjectHash, wantProjectHash)
 	}
 	if row.Title != "" {
 		t.Errorf("title = %q, want empty for a session with no metrics row", row.Title)

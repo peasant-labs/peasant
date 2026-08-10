@@ -488,6 +488,7 @@ func assertMountedLegacyStoredRows(
 		want := store.IngestedSessionRow{
 			SessionID:     fixture.SessionID,
 			Harness:       fixture.Harness.String(),
+			ProjectHash:   fixture.ProjectHash,
 			GitRemote:     fixture.GitRemote,
 			Branch:        fixture.Branch,
 			GitWorktree:   mountedLegacyOptionalPath(paths, fixture.GitWorktreePathKey),

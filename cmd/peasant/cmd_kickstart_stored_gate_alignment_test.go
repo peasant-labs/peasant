@@ -25,6 +25,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -32,8 +33,8 @@ import (
 )
 
 const (
-	kickstartStoredGateCaseCount       = 4
-	kickstartStoredGateStoredRowCount  = 4
+	kickstartStoredGateCaseCount       = 8
+	kickstartStoredGateStoredRowCount  = 9
 	kickstartStoredGateScannerRowCount = 1
 	kickstartStoredGateHostSlug        = "github.com-example-kickstart-stored-gate"
 )
@@ -41,10 +42,14 @@ const (
 type kickstartStoredGateBehavior string
 
 const (
-	kickstartStoredGateExplicit    kickstartStoredGateBehavior = "stored-explicit"
-	kickstartStoredGateUnresolved  kickstartStoredGateBehavior = "stored-unresolved-explicit"
-	kickstartStoredGateEmpty       kickstartStoredGateBehavior = "empty-control"
-	kickstartStoredGateReadFailure kickstartStoredGateBehavior = "store-read-failure"
+	kickstartStoredGateExplicit     kickstartStoredGateBehavior = "stored-explicit"
+	kickstartStoredGateUnresolved   kickstartStoredGateBehavior = "stored-unresolved-explicit"
+	kickstartStoredGateClone        kickstartStoredGateBehavior = "stored-canonical-clone"
+	kickstartStoredGateUniqueName   kickstartStoredGateBehavior = "stored-unique-name"
+	kickstartStoredGateNameConflict kickstartStoredGateBehavior = "stored-ambiguous-name"
+	kickstartStoredGateEmpty        kickstartStoredGateBehavior = "empty-control"
+	kickstartStoredGateReadFailure  kickstartStoredGateBehavior = "store-read-failure"
+	kickstartStoredGateInvalidHash  kickstartStoredGateBehavior = "store-invalid-project-hash"
 )
 
 type kickstartStoredGateStoreState string
@@ -52,13 +57,15 @@ type kickstartStoredGateStoreState string
 const (
 	kickstartStoredGateReadable     kickstartStoredGateStoreState = "readable"
 	kickstartStoredGateQueryFailure kickstartStoredGateStoreState = "query-failure"
+	kickstartStoredGateHashInvalid  kickstartStoredGateStoreState = "invalid-project-hash"
 )
 
-type kickstartStoredGatePathSource string
+type kickstartStoredGateSelectionKind string
 
 const (
-	kickstartStoredGateGitWorktree  kickstartStoredGatePathSource = "git-worktree"
-	kickstartStoredGateCanonicalCwd kickstartStoredGatePathSource = "canonical-cwd"
+	kickstartStoredGateSelectSession kickstartStoredGateSelectionKind = "explicit-session"
+	kickstartStoredGateSelectClone   kickstartStoredGateSelectionKind = "clone-path"
+	kickstartStoredGateSelectName    kickstartStoredGateSelectionKind = "project-name"
 )
 
 type kickstartStoredGateOutcome string
@@ -80,7 +87,8 @@ type kickstartStoredGateCase struct {
 	Name                    string                        `yaml:"name"`
 	Behavior                kickstartStoredGateBehavior   `yaml:"behavior"`
 	StoreState              kickstartStoredGateStoreState `yaml:"storeState"`
-	SelectedSessionID       string                        `yaml:"selectedSessionId"`
+	CorruptProjectHash      string                        `yaml:"corruptProjectHash"`
+	Selection               kickstartStoredGateSelection  `yaml:"selection"`
 	Paths                   []kickstartGatePath           `yaml:"paths"`
 	StoredRows              []kickstartStoredGateRow      `yaml:"storedRows"`
 	ScannerRows             []kickstartStoredGateRow      `yaml:"scannerRows"`
@@ -92,14 +100,22 @@ type kickstartStoredGateCase struct {
 	ExpectedPushSessionIDs  []string                      `yaml:"expectedPushSessionIds"`
 }
 
+type kickstartStoredGateSelection struct {
+	Kind         kickstartStoredGateSelectionKind `yaml:"kind"`
+	SessionID    string                           `yaml:"sessionId"`
+	ProjectName  string                           `yaml:"projectName"`
+	ClonePathKey string                           `yaml:"clonePathKey"`
+}
+
 type kickstartStoredGateRow struct {
-	Harness     defaults.Harness              `yaml:"harness"`
-	SessionID   string                        `yaml:"sessionId"`
-	ProjectName string                        `yaml:"projectName"`
-	GitRemote   string                        `yaml:"gitRemote"`
-	Branch      string                        `yaml:"branch"`
-	PathKey     string                        `yaml:"pathKey"`
-	PathSource  kickstartStoredGatePathSource `yaml:"pathSource"`
+	Harness          defaults.Harness `yaml:"harness"`
+	SessionID        string           `yaml:"sessionId"`
+	ProjectHash      string           `yaml:"projectHash"`
+	ProjectName      string           `yaml:"projectName"`
+	GitRemote        string           `yaml:"gitRemote"`
+	Branch           string           `yaml:"branch"`
+	CanonicalPathKey string           `yaml:"canonicalPathKey"`
+	WorktreePathKey  string           `yaml:"worktreePathKey"`
 }
 
 //go:embed testdata/kickstart_stored_gate_alignment.yaml
@@ -145,10 +161,8 @@ func validateKickstartStoredGateDocument(t *testing.T, document kickstartStoredG
 			t.Fatalf("stored gate fixture repeats behavior %q", testCase.Behavior)
 		}
 		seenBehaviors[testCase.Behavior] = struct{}{}
-		if _, err := ingest.NewSessionID(testCase.SelectedSessionID); err != nil {
-			t.Fatalf("stored gate fixture case %q has invalid selected session ID %q: %v", testCase.Name, testCase.SelectedSessionID, err)
-		}
 		pathStates := validateKickstartGatePaths(t, testCase.Name, testCase.Paths)
+		validateKickstartStoredGateSelection(t, testCase.Name, testCase.Selection, pathStates)
 		validateKickstartStoredGateRows(
 			t,
 			testCase.Name,
@@ -171,12 +185,44 @@ func validateKickstartStoredGateDocument(t *testing.T, document kickstartStoredG
 	for _, behavior := range []kickstartStoredGateBehavior{
 		kickstartStoredGateExplicit,
 		kickstartStoredGateUnresolved,
+		kickstartStoredGateClone,
+		kickstartStoredGateUniqueName,
+		kickstartStoredGateNameConflict,
 		kickstartStoredGateEmpty,
 		kickstartStoredGateReadFailure,
+		kickstartStoredGateInvalidHash,
 	} {
 		if _, ok := seenBehaviors[behavior]; !ok {
 			t.Fatalf("stored gate fixture does not cover behavior %q", behavior)
 		}
+	}
+}
+
+func validateKickstartStoredGateSelection(
+	t *testing.T,
+	caseName string,
+	selection kickstartStoredGateSelection,
+	pathStates map[string]commitGatePathState,
+) {
+	t.Helper()
+	switch selection.Kind {
+	case kickstartStoredGateSelectSession:
+		if _, err := ingest.NewSessionID(selection.SessionID); err != nil {
+			t.Fatalf("stored gate fixture case %q has invalid selected session ID %q: %v", caseName, selection.SessionID, err)
+		}
+		if selection.ProjectName != "" || selection.ClonePathKey != "" {
+			t.Fatalf("stored gate fixture case %q explicit-session selection includes project fields: %#v", caseName, selection)
+		}
+	case kickstartStoredGateSelectClone:
+		if selection.SessionID != "" || selection.ProjectName != "" || pathStates[selection.ClonePathKey] != commitGatePathDirectory {
+			t.Fatalf("stored gate fixture case %q has invalid clone-path selection: %#v", caseName, selection)
+		}
+	case kickstartStoredGateSelectName:
+		if selection.SessionID != "" || strings.TrimSpace(selection.ProjectName) == "" || selection.ClonePathKey != "" {
+			t.Fatalf("stored gate fixture case %q has invalid project-name selection: %#v", caseName, selection)
+		}
+	default:
+		t.Fatalf("stored gate fixture case %q has unknown selection kind %q", caseName, selection.Kind)
 	}
 }
 
@@ -191,7 +237,7 @@ func validateKickstartStoredGateRows(
 	t.Helper()
 	seen := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		if !row.Harness.IsKnown() || row.ProjectName == "" || row.GitRemote == "" || row.Branch == "" {
+		if !row.Harness.IsKnown() || row.ProjectName == "" || row.Branch == "" {
 			t.Fatalf("stored gate fixture case %q has an incomplete row: %#v", caseName, row)
 		}
 		if _, err := ingest.NewSessionID(row.SessionID); err != nil {
@@ -201,16 +247,26 @@ func validateKickstartStoredGateRows(
 			t.Fatalf("stored gate fixture case %q repeats row session ID %q", caseName, row.SessionID)
 		}
 		seen[row.SessionID] = struct{}{}
-		pathState := pathStates[row.PathKey]
-		if pathState != commitGatePathDirectory && !(allowMissing && pathState == commitGatePathMissing) {
-			t.Fatalf("stored gate fixture case %q row %q uses unavailable path %q", caseName, row.SessionID, row.PathKey)
-		}
 		if stored {
-			if row.PathSource != kickstartStoredGateGitWorktree && row.PathSource != kickstartStoredGateCanonicalCwd {
-				t.Fatalf("stored gate fixture case %q row %q has unknown path source %q", caseName, row.SessionID, row.PathSource)
+			if _, err := ingest.NewProjectHash(row.ProjectHash); err != nil {
+				t.Fatalf("stored gate fixture case %q row %q has invalid project hash %q: %v", caseName, row.SessionID, row.ProjectHash, err)
 			}
-		} else if row.PathSource != "" {
-			t.Fatalf("stored gate fixture case %q scanner row %q must not define pathSource", caseName, row.SessionID)
+			if row.CanonicalPathKey == "" {
+				t.Fatalf("stored gate fixture case %q row %q has no canonical path carrier", caseName, row.SessionID)
+			}
+			for _, pathKey := range []string{row.CanonicalPathKey, row.WorktreePathKey} {
+				if pathKey == "" {
+					continue
+				}
+				pathState := pathStates[pathKey]
+				if pathState != commitGatePathDirectory && !(allowMissing && pathState == commitGatePathMissing) {
+					t.Fatalf("stored gate fixture case %q row %q uses unavailable path %q", caseName, row.SessionID, pathKey)
+				}
+			}
+		} else {
+			if row.ProjectHash != "" || row.CanonicalPathKey != "" || pathStates[row.WorktreePathKey] != commitGatePathDirectory {
+				t.Fatalf("stored gate fixture case %q scanner row %q has invalid scanner-only identity fields: %#v", caseName, row.SessionID, row)
+			}
 		}
 	}
 }
@@ -220,42 +276,75 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 	switch testCase.Behavior {
 	case kickstartStoredGateExplicit:
 		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateNone ||
+			testCase.Selection.Kind != kickstartStoredGateSelectSession ||
 			len(testCase.StoredRows) != 2 || len(testCase.ScannerRows) != 1 ||
 			testCase.ExpectedCandidateCount != 2 || testCase.ExpectedDescendantCount != 2 ||
 			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 1 ||
-			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.SelectedSessionID {
+			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.Selection.SessionID {
 			t.Fatalf("stored gate fixture alignment case %q does not encode the required cross-surface outcome", testCase.Name)
 		}
-		if testCase.StoredRows[0].SessionID != testCase.SelectedSessionID {
+		if testCase.StoredRows[0].SessionID != testCase.Selection.SessionID {
 			t.Fatalf("stored gate fixture alignment case %q must select its DB-only first row", testCase.Name)
 		}
 		if testCase.ScannerRows[0].SessionID != testCase.StoredRows[1].SessionID ||
-			testCase.ScannerRows[0].PathKey != testCase.StoredRows[1].PathKey {
+			testCase.ScannerRows[0].WorktreePathKey != testCase.StoredRows[1].WorktreePathKey {
 			t.Fatalf("stored gate fixture alignment case %q must duplicate the unselected sibling across scanner and store", testCase.Name)
 		}
-		if testCase.ScannerRows[0].SessionID == testCase.SelectedSessionID {
+		if testCase.ScannerRows[0].SessionID == testCase.Selection.SessionID {
 			t.Fatalf("stored gate fixture alignment case %q selected session must remain absent from scanner discovery", testCase.Name)
 		}
 		if testCase.StoredRows[0].GitRemote != testCase.StoredRows[1].GitRemote ||
-			testCase.StoredRows[0].PathKey == testCase.StoredRows[1].PathKey {
+			testCase.StoredRows[0].CanonicalPathKey == testCase.StoredRows[1].CanonicalPathKey ||
+			testCase.StoredRows[0].WorktreePathKey == testCase.StoredRows[1].WorktreePathKey {
 			t.Fatalf("stored gate fixture alignment case %q must contain distinct same-remote physical clones", testCase.Name)
 		}
 	case kickstartStoredGateUnresolved:
 		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateNone ||
+			testCase.Selection.Kind != kickstartStoredGateSelectSession ||
 			len(testCase.StoredRows) != 1 || len(testCase.ScannerRows) != 0 ||
-			testCase.StoredRows[0].SessionID != testCase.SelectedSessionID ||
-			testCase.StoredRows[0].PathSource != kickstartStoredGateGitWorktree ||
-			len(testCase.Paths) != 1 || testCase.Paths[0].State != commitGatePathMissing ||
+			testCase.StoredRows[0].SessionID != testCase.Selection.SessionID ||
+			len(testCase.Paths) != 2 || testCase.Paths[0].State != commitGatePathMissing || testCase.Paths[1].State != commitGatePathMissing ||
 			testCase.ExpectedCandidateCount != 1 || testCase.ExpectedDescendantCount != 1 ||
 			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 1 ||
-			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.SelectedSessionID {
+			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.Selection.SessionID {
 			t.Fatalf("stored gate fixture unresolved case %q does not retain exact session evidence without path matching", testCase.Name)
+		}
+	case kickstartStoredGateClone:
+		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateNone ||
+			testCase.Selection.Kind != kickstartStoredGateSelectClone || len(testCase.StoredRows) != 1 || len(testCase.ScannerRows) != 0 ||
+			testCase.StoredRows[0].CanonicalPathKey != testCase.Selection.ClonePathKey || testCase.StoredRows[0].WorktreePathKey == "" ||
+			testCase.StoredRows[0].CanonicalPathKey == testCase.StoredRows[0].WorktreePathKey ||
+			testCase.ExpectedCandidateCount != 1 || testCase.ExpectedDescendantCount != 1 ||
+			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 0 || len(testCase.ExpectedPushSessionIDs) != 0 {
+			t.Fatalf("stored gate fixture clone case %q does not preserve distinct parent and descendant carriers", testCase.Name)
+		}
+	case kickstartStoredGateUniqueName:
+		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateNone ||
+			testCase.Selection.Kind != kickstartStoredGateSelectName || len(testCase.StoredRows) != 1 || len(testCase.ScannerRows) != 0 ||
+			testCase.StoredRows[0].GitRemote != "" || testCase.StoredRows[0].WorktreePathKey != "" ||
+			filepath.Base(testCase.StoredRows[0].CanonicalPathKey) != testCase.Selection.ProjectName ||
+			testCase.ExpectedCandidateCount != 1 || testCase.ExpectedDescendantCount != 1 ||
+			testCase.ExpectedViewerProjects != 1 || testCase.ExpectedViewerSessions != 1 ||
+			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.StoredRows[0].SessionID {
+			t.Fatalf("stored gate fixture unique-name case %q does not align DB-only non-Git behavior", testCase.Name)
+		}
+	case kickstartStoredGateNameConflict:
+		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateConfirm ||
+			testCase.Selection.Kind != kickstartStoredGateSelectName || len(testCase.StoredRows) != 2 || len(testCase.ScannerRows) != 0 ||
+			testCase.StoredRows[0].ProjectHash == testCase.StoredRows[1].ProjectHash ||
+			testCase.StoredRows[0].CanonicalPathKey == testCase.StoredRows[1].CanonicalPathKey ||
+			filepath.Base(testCase.StoredRows[0].CanonicalPathKey) != testCase.Selection.ProjectName ||
+			filepath.Base(testCase.StoredRows[1].CanonicalPathKey) != testCase.Selection.ProjectName ||
+			testCase.ExpectedCandidateCount != 2 || testCase.ExpectedDescendantCount != 2 ||
+			testCase.ExpectedViewerProjects != 0 || testCase.ExpectedViewerSessions != 0 || len(testCase.ExpectedPushSessionIDs) != 0 {
+			t.Fatalf("stored gate fixture same-name case %q does not encode fail-closed physical ambiguity", testCase.Name)
 		}
 	case kickstartStoredGateEmpty:
 		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateConfirm ||
+			testCase.Selection.Kind != kickstartStoredGateSelectSession ||
 			len(testCase.StoredRows) != 1 || len(testCase.ScannerRows) != 0 ||
-			testCase.StoredRows[0].PathSource != kickstartStoredGateCanonicalCwd ||
-			testCase.StoredRows[0].SessionID == testCase.SelectedSessionID ||
+			testCase.StoredRows[0].WorktreePathKey != "" ||
+			testCase.StoredRows[0].SessionID == testCase.Selection.SessionID ||
 			testCase.ExpectedCandidateCount != 1 || testCase.ExpectedDescendantCount != 1 ||
 			testCase.ExpectedViewerProjects != 0 || testCase.ExpectedViewerSessions != 0 ||
 			len(testCase.ExpectedPushSessionIDs) != 0 {
@@ -263,22 +352,39 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 		}
 	case kickstartStoredGateReadFailure:
 		if testCase.StoreState != kickstartStoredGateQueryFailure || testCase.ExpectedGate != kickstartStoredGateError ||
+			testCase.Selection.Kind != kickstartStoredGateSelectSession ||
 			len(testCase.StoredRows) != 0 || len(testCase.ScannerRows) != 0 ||
 			testCase.ExpectedCandidateCount != 0 || testCase.ExpectedDescendantCount != 0 ||
 			testCase.ExpectedViewerProjects != 0 || testCase.ExpectedViewerSessions != 0 ||
 			len(testCase.ExpectedPushSessionIDs) != 0 {
 			t.Fatalf("stored gate fixture failure case %q does not encode fail-closed selected-mode behavior", testCase.Name)
 		}
+	case kickstartStoredGateInvalidHash:
+		if testCase.StoreState != kickstartStoredGateHashInvalid || testCase.ExpectedGate != kickstartStoredGateError ||
+			testCase.Selection.Kind != kickstartStoredGateSelectSession || len(testCase.StoredRows) != 1 || len(testCase.ScannerRows) != 0 ||
+			strings.TrimSpace(testCase.CorruptProjectHash) == "" || testCase.CorruptProjectHash == testCase.StoredRows[0].ProjectHash ||
+			testCase.ExpectedCandidateCount != 0 || testCase.ExpectedDescendantCount != 0 ||
+			testCase.ExpectedViewerProjects != 0 || testCase.ExpectedViewerSessions != 0 || len(testCase.ExpectedPushSessionIDs) != 0 {
+			t.Fatalf("stored gate fixture invalid-hash case %q does not encode boundary rejection", testCase.Name)
+		}
+		if _, err := ingest.NewProjectHash(testCase.CorruptProjectHash); err == nil {
+			t.Fatalf("stored gate fixture invalid-hash case %q uses valid corruption value %q", testCase.Name, testCase.CorruptProjectHash)
+		}
+	}
+	if testCase.Behavior != kickstartStoredGateInvalidHash && testCase.CorruptProjectHash != "" {
+		t.Fatalf("stored gate fixture case %q has unexpected corruptProjectHash %q", testCase.Name, testCase.CorruptProjectHash)
 	}
 }
 
 func (b kickstartStoredGateBehavior) valid() bool {
 	return b == kickstartStoredGateExplicit || b == kickstartStoredGateUnresolved ||
-		b == kickstartStoredGateEmpty || b == kickstartStoredGateReadFailure
+		b == kickstartStoredGateClone || b == kickstartStoredGateUniqueName ||
+		b == kickstartStoredGateNameConflict || b == kickstartStoredGateEmpty ||
+		b == kickstartStoredGateReadFailure || b == kickstartStoredGateInvalidHash
 }
 
 func (s kickstartStoredGateStoreState) valid() bool {
-	return s == kickstartStoredGateReadable || s == kickstartStoredGateQueryFailure
+	return s == kickstartStoredGateReadable || s == kickstartStoredGateQueryFailure || s == kickstartStoredGateHashInvalid
 }
 
 func (o kickstartStoredGateOutcome) valid() bool {
@@ -319,13 +425,7 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 
 	configured := config.BaseConfig()
 	configured.Output.BasePath = world.OutputBase
-	configured.Selection = config.SelectionConfig{
-		Mode:                  config.SelectionModeSelected,
-		AutoIngestNewBranches: true,
-		Harnesses: map[string]config.SelectionHarnessConfig{
-			defaults.HarnessClaudeCode.String(): {Sessions: []string{testCase.SelectedSessionID}},
-		},
-	}
+	configured.Selection = kickstartStoredGateSelectionConfig(t, testCase.Selection, world.Paths)
 	if err := config.SaveAtomic(world.ConfigPath, configured); err != nil {
 		t.Fatalf("save stored gate config: %v", err)
 	}
@@ -339,7 +439,7 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 	}
 	entries := make([]ingest.StoreEntry, 0, len(testCase.StoredRows))
 	for index, row := range testCase.StoredRows {
-		projectPath := world.Paths[row.PathKey]
+		canonicalPath := world.Paths[row.CanonicalPathKey]
 		entry := makeCmdStoreEntry(
 			t,
 			row.SessionID,
@@ -347,13 +447,21 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 			row.GitRemote,
 			row.Branch,
 			1_706_000_000_000+int64(index)*60_000,
-			projectPath,
+			canonicalPath,
 		)
+		projectHash, err := ingest.NewProjectHash(row.ProjectHash)
+		if err != nil {
+			db.Close()
+			t.Fatalf("construct stored gate project hash: %v", err)
+		}
 		entry.Metadata.ModelHarness = row.Harness
-		entry.Metadata.Project.Name = row.ProjectName
+		entry.Metadata.Project = ingest.ProjectInfo{Hash: projectHash, Name: row.ProjectName, FilePath: canonicalPath}
 		entry.Session.Harness = row.Harness
-		if row.PathSource == kickstartStoredGateCanonicalCwd {
+		if row.WorktreePathKey == "" {
 			entry.Metadata.Git.Worktree = nil
+		} else {
+			worktree := world.Paths[row.WorktreePathKey]
+			entry.Metadata.Git.Worktree = &worktree
 		}
 		entries = append(entries, entry)
 	}
@@ -377,10 +485,61 @@ func seedKickstartStoredGateWorld(t *testing.T, testCase kickstartStoredGateCase
 		}
 		db.Pool().Put(conn)
 	}
+	if testCase.StoreState == kickstartStoredGateHashInvalid {
+		conn, err := db.Pool().Take(t.Context())
+		if err != nil {
+			db.Close()
+			t.Fatalf("take stored gate database connection for project-hash corruption: %v", err)
+		}
+		if err := sqlitex.ExecuteTransient(conn, `PRAGMA foreign_keys = OFF`, nil); err != nil {
+			db.Pool().Put(conn)
+			db.Close()
+			t.Fatalf("disable foreign keys for stored gate corruption fixture: %v", err)
+		}
+		err = sqlitex.ExecuteTransient(conn, `UPDATE sessions SET project_hash = ?`, &sqlitex.ExecOptions{
+			Args: []any{testCase.CorruptProjectHash},
+		})
+		changed := conn.Changes()
+		db.Pool().Put(conn)
+		if err != nil {
+			db.Close()
+			t.Fatalf("corrupt stored gate project hash: %v", err)
+		}
+		if changed != 1 {
+			db.Close()
+			t.Fatalf("corrupt stored gate project hash changed %d rows, want 1", changed)
+		}
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close stored gate database after seeding: %v", err)
 	}
 	return world
+}
+
+func kickstartStoredGateSelectionConfig(
+	t *testing.T,
+	selection kickstartStoredGateSelection,
+	paths map[string]string,
+) config.SelectionConfig {
+	t.Helper()
+	harness := config.SelectionHarnessConfig{}
+	switch selection.Kind {
+	case kickstartStoredGateSelectSession:
+		harness.Sessions = []string{selection.SessionID}
+	case kickstartStoredGateSelectClone:
+		harness.Projects = []config.ProjectSelection{{ClonePaths: []string{paths[selection.ClonePathKey]}}}
+	case kickstartStoredGateSelectName:
+		harness.Projects = []config.ProjectSelection{{Name: selection.ProjectName}}
+	default:
+		t.Fatalf("build stored gate config from unknown selection kind %q", selection.Kind)
+	}
+	return config.SelectionConfig{
+		Mode:                  config.SelectionModeSelected,
+		AutoIngestNewBranches: true,
+		Harnesses: map[string]config.SelectionHarnessConfig{
+			defaults.HarnessClaudeCode.String(): harness,
+		},
+	}
 }
 
 func writeKickstartStoredGateMetadata(t *testing.T, outputBase string, entries []ingest.StoreEntry) {
@@ -415,7 +574,7 @@ func kickstartStoredGateListings(testCase kickstartStoredGateCase, paths map[str
 			Branch:      row.Branch,
 			SessionID:   row.SessionID,
 			Title:       row.ProjectName,
-			WorkingDir:  paths[row.PathKey],
+			WorkingDir:  paths[row.WorktreePathKey],
 		})
 	}
 	return listings
@@ -470,7 +629,7 @@ func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
 				listings,
 			)
 			if testCase.ExpectedGate == kickstartStoredGateError {
-				assertKickstartStoredGateFailure(t, err, flowMounted, ingestCalls, before, world.ConfigPath)
+				assertKickstartStoredGateFailure(t, testCase, err, flowMounted, ingestCalls, before, world.ConfigPath)
 				return
 			}
 			if err != nil {
@@ -505,6 +664,7 @@ func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
 
 func assertKickstartStoredGateFailure(
 	t *testing.T,
+	testCase kickstartStoredGateCase,
 	err error,
 	flowMounted bool,
 	ingestCalls int,
@@ -527,6 +687,9 @@ func assertKickstartStoredGateFailure(
 		if !strings.Contains(message, field) {
 			t.Fatalf("stored gate evidence error lacks %q: %v", field, err)
 		}
+	}
+	if testCase.Behavior == kickstartStoredGateInvalidHash && !strings.Contains(message, "invalid project hash") {
+		t.Fatalf("stored gate project-hash error does not identify the invalid boundary value: %v", err)
 	}
 }
 
@@ -557,37 +720,32 @@ func assertKickstartStoredGateCandidates(
 	if len(candidates) != testCase.ExpectedCandidateCount {
 		t.Fatalf("stored gate candidates=%d, want %d", len(candidates), testCase.ExpectedCandidateCount)
 	}
+	rowsBySession := make(map[string]kickstartStoredGateRow, len(testCase.StoredRows))
+	for _, row := range testCase.StoredRows {
+		rowsBySession[row.SessionID] = row
+	}
 	descendants := make(map[string]int)
 	for _, candidate := range candidates {
-		if candidate.Harness != ingest.Harness(defaults.HarnessClaudeCode) {
-			t.Fatalf("stored gate candidate harness=%q, want %q", candidate.Harness, defaults.HarnessClaudeCode)
+		if len(candidate.Descendants) != 1 {
+			t.Fatalf("stored gate candidate for parent %q has %d descendants, want one direct stored carrier", candidate.ParentProjectID, len(candidate.Descendants))
 		}
-		unresolved := testCase.Behavior == kickstartStoredGateUnresolved
-		if unresolved {
-			if candidate.ClonePath != "" || candidate.GitRemote != "" || candidate.ProjectName != "" {
-				t.Fatalf("unresolved stored session gained project matching evidence: %#v", candidate)
-			}
-			wantParentID := "stored-session:" + candidate.Harness.String() + ":" + testCase.SelectedSessionID
-			if string(candidate.ParentProjectID) != wantParentID {
-				t.Fatalf("unresolved stored gate ParentProjectID=%q, want stable synthetic identity %q", candidate.ParentProjectID, wantParentID)
-			}
-		} else {
-			if candidate.ClonePath == "" {
-				t.Fatal("stored gate readable candidate lost its resolved physical path")
-			}
-			wantParentID := (kickstart.ProjectIdentity{Harness: candidate.Harness, ClonePath: candidate.ClonePath}).String()
-			if string(candidate.ParentProjectID) != wantParentID {
-				t.Fatalf("stored gate ParentProjectID=%q, want stable ProjectIdentity %q", candidate.ParentProjectID, wantParentID)
-			}
+		descendant := candidate.Descendants[0]
+		row, ok := rowsBySession[descendant.SessionID.String()]
+		if !ok {
+			t.Fatalf("stored gate retained scanner-only candidate for session %q after union deduplication", descendant.SessionID)
 		}
-		if testCase.Behavior == kickstartStoredGateExplicit && candidate.GitRemote != "" {
-			t.Fatalf("same-remote stored gate candidate retained ambiguous fallback %q", candidate.GitRemote)
+		descendants[descendant.SessionID.String()]++
+		wantProjectPath := resolvedKickstartStoredGateFixturePath(testCase.Paths, world.Paths, row.CanonicalPathKey)
+		wantSessionPath := resolvedKickstartStoredGateFixturePath(testCase.Paths, world.Paths, row.WorktreePathKey)
+		if candidate.ParentProjectID != selectionprojection.ParentProjectID(row.ProjectHash) ||
+			candidate.Harness != ingest.Harness(row.Harness) ||
+			candidate.GitRemote != row.GitRemote ||
+			candidate.ProjectName != world.Paths[row.CanonicalPathKey] ||
+			candidate.ClonePath != wantProjectPath {
+			t.Fatalf("stored gate project carrier for session %q = %#v, want hash=%q harness=%q remote=%q name=%q clone=%q", row.SessionID, candidate, row.ProjectHash, row.Harness, row.GitRemote, world.Paths[row.CanonicalPathKey], wantProjectPath)
 		}
-		for _, descendant := range candidate.Descendants {
-			descendants[descendant.SessionID.String()]++
-			if descendant.ClonePath != candidate.ClonePath || descendant.ParentSessionID != "" {
-				t.Fatalf("stored gate descendant carrier=%#v, want project clone path and no guessed parent", descendant)
-			}
+		if descendant.Branch != row.Branch || descendant.ClonePath != wantSessionPath || descendant.ParentSessionID != "" {
+			t.Fatalf("stored gate descendant carrier for session %q = %#v, want branch=%q worktree=%q and no stored parent-session carrier", row.SessionID, descendant, row.Branch, wantSessionPath)
 		}
 	}
 	if len(descendants) != testCase.ExpectedDescendantCount {
@@ -598,6 +756,22 @@ func assertKickstartStoredGateCandidates(
 			t.Fatalf("stored gate session %q appears %d times after scanner/store deduplication, want once", row.SessionID, descendants[row.SessionID])
 		}
 	}
+}
+
+func resolvedKickstartStoredGateFixturePath(
+	paths []kickstartGatePath,
+	materialized map[string]string,
+	key string,
+) ingest.ClonePath {
+	if key == "" {
+		return ""
+	}
+	for _, path := range paths {
+		if path.Key == key && path.State == commitGatePathDirectory {
+			return ingest.ClonePath(materialized[key])
+		}
+	}
+	return ""
 }
 
 func assertKickstartStoredGateCrossSurfaces(t *testing.T, testCase kickstartStoredGateCase, world kickstartStoredGateWorld) {
