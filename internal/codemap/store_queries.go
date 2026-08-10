@@ -25,7 +25,8 @@ const (
 	// sqlSessionsForProject lists the project's sessions, newest first.
 	sqlSessionsForProject = `SELECT
 	s.session_id, s.start_ms, s.end_ms, COALESCE(s.git_branch, ''), s.model_harness,
-    COALESCE(p.canonical_remote, ''), COALESCE(p.canonical_cwd, '')
+    COALESCE(p.canonical_remote, ''), COALESCE(p.canonical_cwd, ''),
+    COALESCE(s.git_worktree, ''), COALESCE(s.parent_id, '')
 FROM sessions s
 LEFT JOIN projects p ON p.project_hash = s.project_hash
 WHERE s.project_hash = ?
@@ -153,6 +154,8 @@ type sessionRow struct {
 	harness     string
 	gitRemote   string
 	projectName string
+	gitWorktree string
+	parentID    string
 }
 
 // metricRow is the session_metrics subset the payloads consume.
@@ -304,6 +307,8 @@ func (s *Service) querySessions(ctx context.Context, projectHash schema.ProjectH
 				harness:     stmt.ColumnText(4),
 				gitRemote:   stmt.ColumnText(5),
 				projectName: stmt.ColumnText(6),
+				gitWorktree: stmt.ColumnText(7),
+				parentID:    stmt.ColumnText(8),
 			})
 			return nil
 		},

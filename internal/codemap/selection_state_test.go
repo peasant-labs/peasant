@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/codegraph"
@@ -30,25 +31,21 @@ var selectionStateYAML []byte
 //go:embed testdata/selection_state_manifest.yaml
 var selectionStateManifestYAML []byte
 
-// selectionStateHarness is the fixed harness every fixture project seeds
-// under and every allowlist entry targets — the case-by-case variable is the
-// SELECTION, not the harness, so it stays a Go constant rather than a YAML field.
-const selectionStateHarness = "claude-code"
-
 type selectionStateInput struct {
-	Selection selectionStateSelection `yaml:"selection"`
+	Selection config.SelectionConfig  `yaml:"selection"`
 	Projects  []selectionStateProject `yaml:"projects"`
 }
 
-type selectionStateSelection struct {
-	Mode                string   `yaml:"mode"`
-	AllowedProjectNames []string `yaml:"allowed_project_names"`
-	AllowedSessions     []string `yaml:"allowed_sessions"`
+type selectionStateProject struct {
+	CWD      string                  `yaml:"cwd"`
+	Sessions []selectionStateSession `yaml:"sessions"`
 }
 
-type selectionStateProject struct {
-	CWD      string   `yaml:"cwd"`
-	Sessions []string `yaml:"sessions"`
+type selectionStateSession struct {
+	ID          string `yaml:"id"`
+	Branch      string `yaml:"branch"`
+	GitWorktree string `yaml:"git_worktree"`
+	ParentID    string `yaml:"parent_id"`
 }
 
 type selectionStateExpected struct {
@@ -56,9 +53,25 @@ type selectionStateExpected struct {
 	HiddenProjects      int  `yaml:"hidden_projects"`
 	HiddenSessions      int  `yaml:"hidden_sessions"`
 	VisibleProjectCount int  `yaml:"visible_project_count"`
+	VisibleSessionCount int  `yaml:"visible_session_count"`
 }
 
-const selectionStateExpectedCaseCount = 3
+const selectionStateExpectedCaseCount = 7
+
+// selectionStatePathResolver treats the fixture's clean absolute paths as
+// already-resolved physical identities. Production uses
+// ingest.NewPhysicalPathResolver; this seam keeps store-backed fixture cases
+// independent from the test runner's filesystem.
+type selectionStatePathResolver struct{}
+
+var _ ingest.PathIdentityResolver = selectionStatePathResolver{}
+
+func (selectionStatePathResolver) Resolve(dir string) (ingest.ClonePath, error) {
+	if dir == "" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return "", fmt.Errorf("fixture path resolver: path %q is not a clean absolute directory identity", dir)
+	}
+	return ingest.ClonePath(dir), nil
+}
 
 // decodeSelectionStateCorpus is the pure (no *testing.T) loader, split out so
 // TestSelectionStateFixtureGuards can drive it directly with mutated bytes —
@@ -129,18 +142,9 @@ func TestSelectionStateFixtureGuards(t *testing.T) {
 // sessionvisibility.Policy via the same config.SelectionConfig +
 // sessionvisibility.New path production code uses (never a hand-rolled
 // double of the matcher logic).
-func buildSelectionPolicy(t *testing.T, sel selectionStateSelection) sessionvisibility.Policy {
+func buildSelectionPolicy(t *testing.T, sel config.SelectionConfig) sessionvisibility.Policy {
 	t.Helper()
-	mode := config.SelectionMode(sel.Mode)
-	cfg := config.SelectionConfig{Mode: mode}
-	if mode == config.SelectionModeSelected {
-		harnessCfg := config.SelectionHarnessConfig{Sessions: sel.AllowedSessions}
-		for _, name := range sel.AllowedProjectNames {
-			harnessCfg.Projects = append(harnessCfg.Projects, config.ProjectSelection{Name: name})
-		}
-		cfg.Harnesses = map[string]config.SelectionHarnessConfig{selectionStateHarness: harnessCfg}
-	}
-	policy, err := sessionvisibility.New(cfg)
+	policy, err := sessionvisibility.New(sel)
 	if err != nil {
 		t.Fatalf("selection policy: %v", err)
 	}
@@ -163,12 +167,16 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 			base := fxBase()
 			for pIndex, project := range fixtureCase.Input.Projects {
 				projectHash := schema.ProjectHash(fmt.Sprintf("%02d%062x", pIndex+1, pIndex+1))
-				for sIndex, sessionID := range project.Sessions {
+				for sIndex, session := range project.Sessions {
 					startMs := base + int64(pIndex*100+sIndex+1)*1000
 					endMs := startMs + 500
 					ingestedMs := endMs + 1
+					sessionID, sessionIDErr := schema.NewSessionID(session.ID)
+					if sessionIDErr != nil {
+						t.Fatalf("fixture session ID %q: %v", session.ID, sessionIDErr)
+					}
 					meta := &schema.UnifiedMetadata{
-						SessionID:    schema.SessionID(sessionID),
+						SessionID:    sessionID,
 						ModelHarness: defaults.HarnessClaudeCode,
 						Model:        testutil.TestModel,
 						HostSlug:     schema.HostSlug(testutil.TestHostSlug),
@@ -176,14 +184,35 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 						Timestamp:    schema.TimestampInfo{Start: startMs, End: endMs, Ingested: &ingestedMs},
 						Source:       schema.SourceInfo{FilePath: "/selection.jsonl", Format: schema.SourceFormatJSONL},
 					}
+					if session.Branch != "" {
+						branch := session.Branch
+						meta.Git.Branch = &branch
+					}
+					if session.GitWorktree != "" {
+						worktree := session.GitWorktree
+						meta.Git.Worktree = &worktree
+					}
+					if session.ParentID != "" {
+						parentID, parentIDErr := schema.NewSessionID(session.ParentID)
+						if parentIDErr != nil {
+							t.Fatalf("fixture parent session ID %q: %v", session.ParentID, parentIDErr)
+						}
+						meta.ParentUUID = &parentID
+					}
 					if err := database.InsertSessions(context.Background(), []ingest.StoreEntry{{Metadata: meta}}); err != nil {
-						t.Fatalf("seed project %s session %s: %v", project.CWD, sessionID, err)
+						t.Fatalf("seed project %s session %s: %v", project.CWD, session.ID, err)
 					}
 				}
 			}
 
 			policy := buildSelectionPolicy(t, fixtureCase.Input.Selection)
-			service := codemap.NewService(database, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder(), policy)
+			service := codemap.NewService(
+				database,
+				func(string) gitops.Repository { return noRepo() },
+				codegraph.NewGraphBuilder(),
+				policy,
+				codemap.WithPathIdentityResolver(selectionStatePathResolver{}),
+			)
 			result, err := service.ProjectSummaries(context.Background())
 			if err != nil {
 				t.Fatalf("ProjectSummaries: %v", err)
@@ -200,6 +229,13 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 			}
 			if len(result.Projects) != fixtureCase.Expected.VisibleProjectCount {
 				t.Errorf("len(Projects) = %d, want %d", len(result.Projects), fixtureCase.Expected.VisibleProjectCount)
+			}
+			visibleSessionCount := 0
+			for _, project := range result.Projects {
+				visibleSessionCount += project.Sessions
+			}
+			if visibleSessionCount != fixtureCase.Expected.VisibleSessionCount {
+				t.Errorf("visible project session count = %d, want %d", visibleSessionCount, fixtureCase.Expected.VisibleSessionCount)
 			}
 		})
 	}

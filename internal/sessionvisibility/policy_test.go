@@ -169,3 +169,10 @@ func TestZeroPolicyFailsClosed(t *testing.T) {
 		t.Fatalf("zero policy Visible = %v, %v; want false and actionable error", visible, err)
 	}
 }
+
+func TestZeroPolicyProjectionInputsFailClosed(t *testing.T) {
+	mode, matcher, err := (sessionvisibility.Policy{}).ProjectionInputs()
+	if err == nil || mode != "" || matcher != nil {
+		t.Fatalf("zero policy ProjectionInputs = %q, %v, %v; want empty mode, nil matcher, and actionable error", mode, matcher, err)
+	}
+}

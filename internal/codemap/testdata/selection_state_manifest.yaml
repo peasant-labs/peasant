@@ -1,5 +1,9 @@
-expectedCaseCount: 3
+expectedCaseCount: 7
 requiredNames:
   - all_mode_selection_inactive_nothing_hidden
   - selected_mode_hides_one_project_entirely
   - selected_mode_hides_some_sessions_without_hiding_the_project_row
+  - selected_mode_hides_every_stored_project
+  - explicitly_selected_parent_admits_nested_child
+  - session_worktree_overrides_project_cwd
+  - project_cwd_fallback_admits_session_without_worktree
