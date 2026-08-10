@@ -1,9 +1,15 @@
 # Flow chrome golden matrix: each flow state is rendered in both themes at both
 # a roomy and a constrained terminal size, proving the frame, footer, fields,
 # receipt, and exit-confirm overlay draw within their region (and fall back
-# safely when constrained) in both palettes. expectedCaseCount guards the
-# matrix cannot silently drop a state, theme, or size.
+# safely when constrained) in both palettes. The declarations are checked
+# against independent Go constants, so coordinated edits cannot silently drop
+# a state, theme, size, or one side of an 80x24 viewport theme pair.
 expectedCaseCount: 20
+expectedViewportStateCount: 3
+expectedViewportThemeCount: 2
+expectedViewportCaseCount: 6
+viewportWidth: 80
+viewportHeight: 24
 cases:
   - {name: step-dark-80x10, state: step, theme: dark, width: 80, height: 10}
   - {name: step-light-80x10, state: step, theme: light, width: 80, height: 10}
