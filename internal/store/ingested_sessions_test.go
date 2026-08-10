@@ -30,13 +30,14 @@ type allIngestedSessionsFixtures struct {
 }
 
 type allIngestedSessionFixture struct {
-	Name         string `yaml:"name"`
-	SessionID    string `yaml:"sessionId"`
-	ProjectHash  string `yaml:"projectHash"`
-	HostSlug     string `yaml:"hostSlug"`
-	StartMs      int64  `yaml:"startMs"`
-	GitWorktree  string `yaml:"gitWorktree"`
-	CanonicalCwd string `yaml:"canonicalCwd"`
+	Name         string           `yaml:"name"`
+	SessionID    string           `yaml:"sessionId"`
+	Harness      defaults.Harness `yaml:"harness"`
+	ProjectHash  string           `yaml:"projectHash"`
+	HostSlug     string           `yaml:"hostSlug"`
+	StartMs      int64            `yaml:"startMs"`
+	GitWorktree  string           `yaml:"gitWorktree"`
+	CanonicalCwd string           `yaml:"canonicalCwd"`
 }
 
 func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, error) {
@@ -60,11 +61,15 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 
 	seenNames := make(map[string]struct{}, len(fixtures.Cases))
 	seenSessionIDs := make(map[string]struct{}, len(fixtures.Cases))
+	seenHarnesses := make(map[defaults.Harness]struct{}, len(fixtures.Cases))
 	hasPopulatedColumns := false
 	hasEmptyColumns := false
 	for i, fixture := range fixtures.Cases {
-		if fixture.Name == "" || fixture.SessionID == "" || fixture.ProjectHash == "" || fixture.HostSlug == "" || fixture.StartMs <= 0 {
-			return nil, fmt.Errorf("committed fixture %s case %d is incomplete; populate its name, sessionId, projectHash, hostSlug, and positive startMs", allIngestedSessionsFixturePath, i)
+		if fixture.Name == "" || fixture.SessionID == "" || fixture.Harness == "" || fixture.ProjectHash == "" || fixture.HostSlug == "" || fixture.StartMs <= 0 {
+			return nil, fmt.Errorf("committed fixture %s case %d is incomplete; populate its name, sessionId, harness, projectHash, hostSlug, and positive startMs", allIngestedSessionsFixturePath, i)
+		}
+		if !fixture.Harness.IsKnown() {
+			return nil, fmt.Errorf("committed fixture %s case %q has unknown harness %q; use a canonical harness identifier", allIngestedSessionsFixturePath, fixture.Name, fixture.Harness)
 		}
 		if _, exists := seenNames[fixture.Name]; exists {
 			return nil, fmt.Errorf("committed fixture %s repeats case name %q; use a unique name for each scenario", allIngestedSessionsFixturePath, fixture.Name)
@@ -74,6 +79,7 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 			return nil, fmt.Errorf("committed fixture %s repeats sessionId %q; use a unique stored session for each scenario", allIngestedSessionsFixturePath, fixture.SessionID)
 		}
 		seenSessionIDs[fixture.SessionID] = struct{}{}
+		seenHarnesses[fixture.Harness] = struct{}{}
 		switch {
 		case fixture.GitWorktree != "" && fixture.CanonicalCwd != "":
 			hasPopulatedColumns = true
@@ -86,10 +92,13 @@ func loadAllIngestedSessionFixtures(data []byte) ([]allIngestedSessionFixture, e
 	if !hasPopulatedColumns || !hasEmptyColumns {
 		return nil, fmt.Errorf("committed fixture %s must include one populated identity row and one empty identity row; keep both read behaviors covered", allIngestedSessionsFixturePath)
 	}
+	if len(seenHarnesses) != allIngestedSessionsFixtureCaseCount {
+		return nil, fmt.Errorf("committed fixture %s defines %d distinct harnesses, want exactly %d; use a different harness per row so harness readback cannot pass with a fixed value", allIngestedSessionsFixturePath, len(seenHarnesses), allIngestedSessionsFixtureCaseCount)
+	}
 	return fixtures.Cases, nil
 }
 
-func TestAllIngestedSessionsReadsWorktreeAndCanonicalCwd(t *testing.T) {
+func TestAllIngestedSessionsReadsHarnessWorktreeAndCanonicalCwd(t *testing.T) {
 	t.Parallel()
 	fixtures, err := loadAllIngestedSessionFixtures(allIngestedSessionsFixtureData)
 	if err != nil {
@@ -104,7 +113,7 @@ func TestAllIngestedSessionsReadsWorktreeAndCanonicalCwd(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	for _, fixture := range fixtures {
-		entry := makeStoreEntry(t, fixture.SessionID, fixture.ProjectHash, fixture.HostSlug, defaults.HarnessClaudeCode, fixture.StartMs, 0, 0)
+		entry := makeStoreEntry(t, fixture.SessionID, fixture.ProjectHash, fixture.HostSlug, fixture.Harness, fixture.StartMs, 0, 0)
 		entry.Metadata.Project.FilePath = fixture.CanonicalCwd
 		if fixture.GitWorktree != "" {
 			worktree := fixture.GitWorktree
@@ -131,6 +140,9 @@ func TestAllIngestedSessionsReadsWorktreeAndCanonicalCwd(t *testing.T) {
 		if !ok {
 			t.Errorf("%s: session %s is missing from AllIngestedSessions", fixture.Name, fixture.SessionID)
 			continue
+		}
+		if row.Harness != fixture.Harness.String() {
+			t.Errorf("%s: Harness = %q, want %q", fixture.Name, row.Harness, fixture.Harness)
 		}
 		if row.GitWorktree != fixture.GitWorktree {
 			t.Errorf("%s: GitWorktree = %q, want %q", fixture.Name, row.GitWorktree, fixture.GitWorktree)

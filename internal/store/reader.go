@@ -296,6 +296,7 @@ func (s *Store) AllSessionIDs(ctx context.Context) ([]string, error) {
 // plus the two columns the diff stage classifies a discovered source against.
 type IngestedSessionRow struct {
 	SessionID     string
+	Harness       string // sessions.model_harness
 	GitRemote     string // host_slugs.git_remote as ingest resolved it ("" when the project has no remote)
 	Branch        string // sessions.git_branch ("" when unknown or non-git)
 	GitWorktree   string // sessions.git_worktree ("" when unknown or non-git)
@@ -314,6 +315,7 @@ type IngestedSessionRow struct {
 // the host slug row exists.
 const sqlAllIngestedSessions = `SELECT
     s.session_id,
+    s.model_harness,
     COALESCE(h.git_remote, ''),
     COALESCE(s.git_branch, ''),
     COALESCE(s.git_worktree, ''),
@@ -327,11 +329,11 @@ LEFT JOIN projects p ON s.project_hash = p.project_hash
 LEFT JOIN session_metrics m ON s.session_id = m.session_id
 ORDER BY s.start_ms DESC`
 
-// AllIngestedSessions returns the recorded remote, branch, worktree, canonical
-// project directory, and title for every session in the store, with the ingest
-// timestamp and metadata schema version the diff stage needs. It is the read a
-// re-scan uses to answer "what do I already know about this session" without
-// walking git again.
+// AllIngestedSessions returns the recorded harness, remote, branch, worktree,
+// canonical project directory, and title for every session in the store, with
+// the ingest timestamp and metadata schema version the diff stage needs. It is
+// the read a re-scan uses to answer "what do I already know about this session"
+// without walking git again.
 func (s *Store) AllIngestedSessions(ctx context.Context) ([]IngestedSessionRow, error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
@@ -344,13 +346,14 @@ func (s *Store) AllIngestedSessions(ctx context.Context) ([]IngestedSessionRow, 
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			rows = append(rows, IngestedSessionRow{
 				SessionID:     stmt.ColumnText(0),
-				GitRemote:     stmt.ColumnText(1),
-				Branch:        stmt.ColumnText(2),
-				GitWorktree:   stmt.ColumnText(3),
-				CanonicalCwd:  stmt.ColumnText(4),
-				Title:         stmt.ColumnText(5),
-				IngestedMs:    stmt.ColumnInt64(6),
-				SchemaVersion: int(stmt.ColumnInt64(7)),
+				Harness:       stmt.ColumnText(1),
+				GitRemote:     stmt.ColumnText(2),
+				Branch:        stmt.ColumnText(3),
+				GitWorktree:   stmt.ColumnText(4),
+				CanonicalCwd:  stmt.ColumnText(5),
+				Title:         stmt.ColumnText(6),
+				IngestedMs:    stmt.ColumnInt64(7),
+				SchemaVersion: int(stmt.ColumnInt64(8)),
 			})
 			return nil
 		},
