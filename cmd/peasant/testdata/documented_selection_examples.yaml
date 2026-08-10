@@ -1,0 +1,37 @@
+declared_cases: 3
+cases:
+  - name: README selection configuration
+    document: README.md
+    marker: selection-config
+    kind: config
+    expected_selection:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: https://github.com/example/atlas.git
+              clonePaths:
+                - /projects/atlas
+                - /projects/atlas-review
+              branches:
+                - main
+                - release
+          sessions:
+            - 11111111-1111-4111-8111-111111111111
+
+  - name: kickstart command examples
+    document: docs/KICKSTART.md
+    marker: kickstart-commands
+    kind: commands
+    commands:
+      - [peasant, kickstart]
+      - [peasant, kickstart, --reset]
+
+  - name: manual unselected prune commands
+    document: docs/KICKSTART.md
+    marker: unselected-prune-commands
+    kind: commands
+    commands:
+      - [peasant, prune, --unselected, --dry-run]
+      - [peasant, prune, --unselected]

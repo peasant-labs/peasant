@@ -4,6 +4,7 @@
 transcripts from the configured harness paths, lets you choose work by project, saves the reviewed
 configuration, ingests the exact selected sessions, and can publish them to Village.
 
+<!-- verified-example: kickstart-commands -->
 ```bash
 peasant kickstart
 peasant kickstart --reset
@@ -11,8 +12,81 @@ peasant kickstart --reset
 
 `--reset` removes Peasant configuration, credentials, database, ingested data, and state before
 starting again. Without `--reset`, kickstart loads the resolved `--config` or `--config-dir` file and
-mutates that configuration. Unrelated settings, custom source paths, and other loaded values are
-preserved; kickstart does not rebuild the file from defaults or silently write a different path.
+changes that configuration. It preserves unrelated settings, custom source paths, and other loaded
+values. Kickstart does not rebuild the file from defaults or silently write a different path.
+
+## Restore saved choices
+
+On a later run, kickstart restores each available saved project, branch, and explicit session choice.
+It applies these saved choices after the first successful project-tree load. If the tree refreshes
+during the same run, it keeps edits that you already made on the screen.
+
+A project that Peasant finds for the first time starts clear. This is also true after you used
+**Select all projects** on an earlier run. That action saves only the projects on the current screen.
+It does not select projects that Peasant finds later.
+
+A new branch in a selected project follows the saved `autoIngestNewBranches` value:
+
+- `true` lets discovery include a branch that is not in the saved branch list.
+- `false` keeps discovery on the saved branch list. A project choice with no branch list still means
+  all branches in that selected project.
+
+Kickstart keeps a saved project, clone path, branch, or session when the current scan cannot offer it
+for editing. Another visible edit does not remove the unavailable choice. Kickstart removes an
+available choice only after you clear it and save. If an unavailable branch belongs to an available
+project, clearing that project and saving removes the branch with its parent.
+
+## Physical clone identity
+
+Peasant identifies a local clone with a resolved absolute physical path. It resolves symbolic links
+before it compares or saves the path. A symbolic link and its target identify the same clone.
+
+One Git remote entry can contain several `clonePaths`. One shared `branches` list applies to every
+path in that entry. Peasant can use a Git remote or project name only when the current scan finds one
+physical clone with that value. Peasant does not use a remote or name alone to choose between
+ambiguous clones. An old selection entry without `clonePaths` stays readable and follows the same
+uniqueness rule.
+
+For a project with no Git remote, Peasant uses the resolved path as identity. Kickstart shows the
+project name with a short path when it must distinguish equal names. See the
+[Selection index example](../README.md#selection-index) for the saved YAML shape.
+
+## Convert an old all-projects setting
+
+An old `selection.mode: all` value contains no exact project list. On the next kickstart run, Peasant
+prepares an exact `selected` list in memory. It uses sessions that are in the local store at the time
+of that run.
+
+- A scanned project starts selected only when Peasant can match it to a current stored session by
+  harness and resolved physical path.
+- A newly scanned project with no matching stored session starts clear.
+- A stored session whose project is not available in the scan stays saved as an explicit session ID.
+- The saved `autoIngestNewBranches` value does not change.
+
+The conversion does not write the config when the screen opens. It writes only after you review and
+confirm the final save. If you decline or cancel, the file stays unchanged and the conversion runs
+again on the next kickstart run. Peasant does not have an old project snapshot. It cannot reconstruct
+which projects existed when the old setting was written.
+
+## Save with no effective project
+
+Before the final write, kickstart checks the current selection against the projects and sessions that
+are available in the scan. It asks for confirmation only when no effective project and no available
+selected child session remain. An available explicit session or selected child makes its parent
+project effective and suppresses this warning. An unavailable saved child stays in the config, but it
+does not create an unknown project row or suppress the warning.
+
+The confirmation states these effects:
+
+- Existing projects stay ingested and indexed.
+- The web viewer does not list them.
+- They are not available for a future push until you change the selection.
+- Peasant does not delete data.
+
+The No choice is selected by default. Kickstart asks again on every run that reaches this state.
+Choosing No or Back returns without a write. If you cancel, kickstart exits without a write. These
+paths do not start ingest. Yes saves the no-project choice through the normal atomic config write. It
+does not delete existing data.
 
 ## Mounted flow
 
@@ -30,7 +104,7 @@ The mounted journey is:
 3. Narrow scope in one two-column page. The left column is **Project -> Branch -> Session** and the
    right column is the single global **Harnesses** filter. Harness filtering intersects the selected
    project scope; it does not erase or widen branch/session choices.
-4. Choose whether newly discovered branches in fully selected projects should be included later.
+4. Choose whether a new branch in a selected project can be included later.
 5. Review the Standard redaction explanation and choose the schema-owned content license.
 6. Optionally update Claude Code transcript retention.
 7. Choose local-only, private Village publication, or public Village publication. Private is the
@@ -39,8 +113,33 @@ The mounted journey is:
 8. Review the complete selection and give final consent.
 9. Run the ordered journey and review its completion receipt or exact retry targets.
 
-Changing project selection controls future discovery. It does not delete already stored transcripts
-and does not delete or unpublish Village copies.
+## Viewer lists and stored data
+
+Home, Map, and the command palette read one effective project summary. If one available child session
+is selected, its stored parent project appears in that summary. Showing the parent does not select its
+sibling sessions. The normal push chooser still offers only sessions that the saved selection admits.
+
+When the saved selection hides every stored project, Home and Map show one recovery panel. The panel
+shows aggregate hidden project and session counts. It does not show project names, session IDs, or
+paths. It states that the data stays ingested and indexed, is absent from the web viewer, and is not
+available for a future push. It also states that Peasant did not delete data. The panel provides a
+copyable `peasant kickstart` command. A store with no recorded projects keeps the first-use ingest
+message instead.
+
+Selection scopes discovery, viewer lists, and future push choices. It is not an access-control rule
+for stored history. A direct link to a stored session or canonical project still resolves. Saving a
+narrow selection does not delete files or database rows, and it does not unpublish Village copies.
+
+To remove stored sessions that no longer match the selection, use the manual prune command. Preview
+the deletion first. The second command starts the normal prune confirmation.
+
+<!-- verified-example: unselected-prune-commands -->
+```bash
+peasant prune --unselected --dry-run
+peasant prune --unselected
+```
+
+This manual command is the deletion path for unselected stored sessions. Kickstart never runs it.
 
 ## Redaction policy
 
