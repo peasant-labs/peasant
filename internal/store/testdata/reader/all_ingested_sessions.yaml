@@ -5,13 +5,23 @@ cases:
     projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     hostSlug: github.com--acme--ingested-worktree
     startMs: 1710000000000
+    gitRemote: https://github.com/acme/ingested-worktree.git
+    branch: feature/harness-carrier
     gitWorktree: /workspace/acme/.worktrees/feature
     canonicalCwd: /workspace/acme
+    title: Preserve the stored harness
+    ingestedMs: 1710000123456
+    schemaVersion: 2
   - name: empty_identity_columns
     sessionId: 50000000-0000-0000-0000-000000000102
     harness: opencode
     projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     hostSlug: local--ingested-without-git
     startMs: 1710000001000
+    gitRemote: ""
+    branch: ""
     gitWorktree: ""
     canonicalCwd: ""
+    title: ""
+    ingestedMs: 1710001123456
+    schemaVersion: 1
