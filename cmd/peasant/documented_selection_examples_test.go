@@ -28,9 +28,20 @@ const (
 	documentedExampleCommands documentedExampleKind = "commands"
 )
 
+const (
+	expectedDocumentedSelectionCases  = 3
+	expectedDocumentedFlagHelpEntries = 1
+	documentedPruneExampleDocument    = "docs/KICKSTART.md"
+	documentedPruneExampleMarker      = "unselected-prune-commands"
+	documentedPruneCommand            = "prune"
+	documentedPruneFlag               = "unselected"
+	documentedPruneGeneratedDocument  = "docs/cli/peasant_prune.md"
+)
+
 type documentedSelectionExamples struct {
-	DeclaredCases int                              `yaml:"declared_cases"`
-	Cases         []documentedSelectionExampleCase `yaml:"cases"`
+	DeclaredCases           int                              `yaml:"declared_cases"`
+	DeclaredFlagHelpEntries int                              `yaml:"declared_flag_help_entries"`
+	Cases                   []documentedSelectionExampleCase `yaml:"cases"`
 }
 
 type documentedSelectionExampleCase struct {
@@ -63,12 +74,14 @@ func loadDocumentedSelectionExamples(t *testing.T) documentedSelectionExamples {
 		t.Fatalf("documented selection examples must contain exactly one YAML document: %v", err)
 	}
 
-	const expectedCases = 3
-	if document.DeclaredCases != expectedCases || len(document.Cases) != expectedCases {
-		t.Fatalf("documented selection example row guard failed: declared=%d actual=%d expected=%d", document.DeclaredCases, len(document.Cases), expectedCases)
+	if document.DeclaredCases != expectedDocumentedSelectionCases || len(document.Cases) != expectedDocumentedSelectionCases {
+		t.Fatalf("documented selection example row guard failed: declared=%d actual=%d expected=%d", document.DeclaredCases, len(document.Cases), expectedDocumentedSelectionCases)
 	}
-	seenNames := make(map[string]struct{}, expectedCases)
-	seenMarkers := make(map[string]struct{}, expectedCases)
+	seenNames := make(map[string]struct{}, expectedDocumentedSelectionCases)
+	seenMarkers := make(map[string]struct{}, expectedDocumentedSelectionCases)
+	flagHelpEntries := 0
+	pruneCommandCases := 0
+	pruneFlagHelpEntries := 0
 	for index, testCase := range document.Cases {
 		if strings.TrimSpace(testCase.Name) == "" || strings.TrimSpace(testCase.Document) == "" || strings.TrimSpace(testCase.Marker) == "" {
 			t.Fatalf("documented selection example row %d needs a name, document, and marker", index)
@@ -85,6 +98,10 @@ func loadDocumentedSelectionExamples(t *testing.T) documentedSelectionExamples {
 			t.Fatalf("documented selection examples repeat marker %q in %q", testCase.Marker, testCase.Document)
 		}
 		seenMarkers[markerKey] = struct{}{}
+		isPruneCommandCase := testCase.Document == documentedPruneExampleDocument && testCase.Marker == documentedPruneExampleMarker
+		if isPruneCommandCase {
+			pruneCommandCases++
+		}
 
 		switch testCase.Kind {
 		case documentedExampleConfig:
@@ -95,12 +112,34 @@ func loadDocumentedSelectionExamples(t *testing.T) documentedSelectionExamples {
 			if testCase.ExpectedSelection != nil || len(testCase.Commands) == 0 {
 				t.Fatalf("documented command example %q needs commands and no expected_selection", testCase.Name)
 			}
-			if help := testCase.FlagHelp; help != nil && (help.Command == "" || help.Flag == "" || help.Usage == "" || help.GeneratedDocument == "") {
-				t.Fatalf("documented command example %q has incomplete flag_help", testCase.Name)
+			if help := testCase.FlagHelp; help != nil {
+				flagHelpEntries++
+				if !isPruneCommandCase {
+					t.Fatalf("documented command example %q has flag_help outside the prune command case", testCase.Name)
+				}
+				pruneFlagHelpEntries++
+				if strings.TrimSpace(help.Command) == "" || strings.TrimSpace(help.Flag) == "" || strings.TrimSpace(help.Usage) == "" || strings.TrimSpace(help.GeneratedDocument) == "" {
+					t.Fatalf("documented command example %q has incomplete flag_help", testCase.Name)
+				}
+				if help.Command != documentedPruneCommand || help.Flag != documentedPruneFlag {
+					t.Fatalf("documented prune flag_help names command %q and flag %q, want command %q and flag %q", help.Command, help.Flag, documentedPruneCommand, documentedPruneFlag)
+				}
+				if filepath.IsAbs(help.GeneratedDocument) || !filepath.IsLocal(help.GeneratedDocument) {
+					t.Fatalf("documented prune flag_help has non-local generated document path %q", help.GeneratedDocument)
+				}
+				if help.GeneratedDocument != documentedPruneGeneratedDocument {
+					t.Fatalf("documented prune flag_help generated document = %q, want %q", help.GeneratedDocument, documentedPruneGeneratedDocument)
+				}
 			}
 		default:
 			t.Fatalf("documented selection example %q has unknown kind %q", testCase.Name, testCase.Kind)
 		}
+	}
+	if document.DeclaredFlagHelpEntries != expectedDocumentedFlagHelpEntries || flagHelpEntries != expectedDocumentedFlagHelpEntries {
+		t.Fatalf("documented flag_help row guard failed: declared=%d actual=%d expected=%d", document.DeclaredFlagHelpEntries, flagHelpEntries, expectedDocumentedFlagHelpEntries)
+	}
+	if pruneCommandCases != 1 || pruneFlagHelpEntries != 1 {
+		t.Fatalf("documented prune command case needs exactly one flag_help entry: cases=%d help_entries=%d", pruneCommandCases, pruneFlagHelpEntries)
 	}
 	return document
 }
@@ -141,7 +180,7 @@ func TestDocumentedSelectionExamplesParseThroughProductionBoundaries(t *testing.
 			case documentedExampleCommands:
 				assertDocumentedCommands(t, block, testCase.Commands)
 				if testCase.FlagHelp != nil {
-					assertDocumentedFlagHelp(t, repositoryRoot, *testCase.FlagHelp)
+					assertDocumentedFlagHelp(t, repositoryRoot, testCase.Commands, *testCase.FlagHelp)
 				}
 			}
 		})
@@ -199,8 +238,20 @@ func parseDocumentedCommand(t *testing.T, argv []string) {
 	}
 }
 
-func assertDocumentedFlagHelp(t *testing.T, repositoryRoot string, expected documentedFlagHelp) {
+func assertDocumentedFlagHelp(t *testing.T, repositoryRoot string, commands [][]string, expected documentedFlagHelp) {
 	t.Helper()
+	flagArgument := "--" + expected.Flag
+	linkedToDocumentedCommand := false
+	for _, argv := range commands {
+		if len(argv) >= 3 && argv[0] == "peasant" && argv[1] == expected.Command && slices.Contains(argv[2:], flagArgument) {
+			linkedToDocumentedCommand = true
+			break
+		}
+	}
+	if !linkedToDocumentedCommand {
+		t.Fatalf("documented --%s help is not linked to a peasant %s argv in the same fixture case", expected.Flag, expected.Command)
+	}
+
 	root := documentedCommandRoot()
 	command, _, err := root.Find([]string{expected.Command})
 	if err != nil {
@@ -218,8 +269,17 @@ func assertDocumentedFlagHelp(t *testing.T, repositoryRoot string, expected docu
 	if err != nil {
 		t.Fatalf("read generated CLI document %q: %v", expected.GeneratedDocument, err)
 	}
-	if !strings.Contains(string(generated), expected.Usage) {
-		t.Fatalf("generated CLI document %q does not contain production --%s help %q", expected.GeneratedDocument, expected.Flag, expected.Usage)
+	var generatedFlagLines []string
+	for _, line := range strings.Split(string(generated), "\n") {
+		fields := strings.Fields(line)
+		flagIndex := slices.Index(fields, flagArgument)
+		if flagIndex >= 0 {
+			generatedFlagLines = append(generatedFlagLines, strings.Join(fields[flagIndex:], " "))
+		}
+	}
+	wantGeneratedLine := flagArgument + " " + expected.Usage
+	if len(generatedFlagLines) != 1 || generatedFlagLines[0] != wantGeneratedLine {
+		t.Fatalf("generated CLI document %q has --%s help lines %q, want exactly %q", expected.GeneratedDocument, expected.Flag, generatedFlagLines, wantGeneratedLine)
 	}
 }
 

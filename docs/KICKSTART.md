@@ -70,11 +70,14 @@ which projects existed when the old setting was written.
 
 ## Save with no effective project
 
-Before the final write, kickstart checks the current selection against the projects and sessions that
-are available in the scan. It asks for confirmation only when no effective project and no available
-selected child session remain. An available explicit session or selected child makes its parent
-project effective and suppresses this warning. An unavailable saved child stays in the config, but it
-does not create an unknown project row or suppress the warning.
+Before the final write, kickstart checks the current selection against evidence from the current
+discovery scan and the local session store. It asks for confirmation only when no effective project
+and no available selected child session remain. A selected child with canonical project evidence
+makes its parent project effective. A selected explicit session that is already in the local store can
+also suppress the warning even when the discovery scan cannot find its project or path. Peasant keeps
+its exact descendant identity and does not guess a project identity. A saved choice that is absent
+from both the scan and the local store stays in the config, but it cannot suppress the warning or
+create an unknown project row.
 
 The confirmation states these effects:
 

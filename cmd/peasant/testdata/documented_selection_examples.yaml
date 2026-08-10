@@ -1,4 +1,5 @@
 declared_cases: 3
+declared_flag_help_entries: 1
 cases:
   - name: README selection configuration
     document: README.md
