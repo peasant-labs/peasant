@@ -1,4 +1,8 @@
-expectedProgressCount: 8
+expectedProgressCount: 11
+expectedFocusPriorityCount: 3
+expectedLatestActiveFocusCount: 1
+expectedFailedFocusCount: 1
+expectedLatestCompletedFocusCount: 1
 progress:
   - name: stable-monotonic-total
     observations:
@@ -108,6 +112,63 @@ progress:
           - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
           - {stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}
     wantContains: ['local import elapsed: 1s', 'report 1/2 failed', 'observed elapsed: 1s', 'estimate unavailable']
+  - name: latest-active-stage-owns-detail
+    focusProbe: latest-active
+    observations:
+      - advanceSeconds: 0
+        stages:
+          - {stage: EXTRACT+WRITE, started: true, done: 0, total: 10}
+      - advanceSeconds: 2
+        stages:
+          - {stage: EXTRACT+WRITE, started: true, done: 4, total: 10}
+          - {stage: INDEX, started: true, done: 1, total: 10}
+      - advanceSeconds: 3
+        stages:
+          - {stage: EXTRACT+WRITE, started: true, done: 6, total: 10}
+          - {stage: INDEX, started: true, done: 3, total: 10}
+    wantContains: ['extract+write 6/10', 'index 3/10']
+    wantFocusStage: INDEX
+    wantFocusElapsed: 'observed elapsed: 3s'
+    wantFocusEstimate: estimate unavailable
+  - name: latest-failure-wins-over-active-and-completed
+    focusProbe: failed-before-active
+    observations:
+      - advanceSeconds: 0
+        stages:
+          - {stage: DISCOVER, started: true, done: 0, total: 2}
+          - {stage: DIFF, started: true, done: 0, total: 2}
+      - advanceSeconds: 2
+        stages:
+          - {stage: DISCOVER, started: true, done: 2, total: 2, ended: true}
+          - {stage: DIFF, started: true, done: 1, total: 2}
+          - {stage: REPORT, started: true, done: 0, total: 10}
+      - advanceSeconds: 3
+        stages:
+          - {stage: DISCOVER, started: true, done: 2, total: 2, ended: true}
+          - {stage: DIFF, started: true, done: 1, total: 2, ended: true, hasErr: true}
+          - {stage: REPORT, started: true, done: 4, total: 10}
+    wantContains: ['discover 2/2', 'diff 1/2 failed', 'report 4/10']
+    wantFocusStage: DIFF
+    wantFocusElapsed: 'observed elapsed: 5s'
+    wantFocusEstimate: estimate unavailable
+  - name: latest-completed-stage-owns-detail
+    focusProbe: latest-completed
+    observations:
+      - advanceSeconds: 0
+        stages:
+          - {stage: DIFF, started: true, done: 0, total: 2}
+      - advanceSeconds: 2
+        stages:
+          - {stage: DIFF, started: true, done: 2, total: 2, ended: true}
+          - {stage: INDEX, started: true, done: 0, total: 3}
+      - advanceSeconds: 3
+        stages:
+          - {stage: DIFF, started: true, done: 2, total: 2, ended: true}
+          - {stage: INDEX, started: true, done: 3, total: 3, ended: true}
+    wantContains: ['diff 2/2', 'index 3/3']
+    wantFocusStage: INDEX
+    wantFocusElapsed: 'observed elapsed: 3s'
+    wantFocusEstimate: estimate unavailable
 
 expectedCompletionCount: 3
 completion:

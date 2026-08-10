@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,9 +24,25 @@ import (
 )
 
 const (
-	expectedProgressRows   = 8
-	expectedCompletionRows = 3
+	expectedProgressRows             = 11
+	expectedProgressFocusRows        = 3
+	expectedLatestActiveFocusRows    = 1
+	expectedFailedFocusRows          = 1
+	expectedLatestCompletedFocusRows = 1
+	expectedCompletionRows           = 3
 )
+
+type progressFocusProbe string
+
+const (
+	progressFocusLatestActive    progressFocusProbe = "latest-active"
+	progressFocusFailed          progressFocusProbe = "failed-before-active"
+	progressFocusLatestCompleted progressFocusProbe = "latest-completed"
+)
+
+func (p progressFocusProbe) valid() bool {
+	return p == progressFocusLatestActive || p == progressFocusFailed || p == progressFocusLatestCompleted
+}
 
 type progressStageFixture struct {
 	Stage   ingest.Stage `yaml:"stage"`
@@ -43,12 +60,16 @@ type progressObservationFixture struct {
 
 type progressFixture struct {
 	Name                    string                       `yaml:"name"`
+	FocusProbe              progressFocusProbe           `yaml:"focusProbe"`
 	TerminalWidth           int                          `yaml:"terminalWidth"`
 	TerminalHeight          int                          `yaml:"terminalHeight"`
 	LegacyUnboundedOverflow bool                         `yaml:"legacyUnboundedOverflow"`
 	Observations            []progressObservationFixture `yaml:"observations"`
 	WantContains            []string                     `yaml:"wantContains"`
 	WantMissing             []string                     `yaml:"wantMissing"`
+	WantFocusStage          ingest.Stage                 `yaml:"wantFocusStage"`
+	WantFocusElapsed        string                       `yaml:"wantFocusElapsed"`
+	WantFocusEstimate       string                       `yaml:"wantFocusEstimate"`
 }
 
 type completionFixture struct {
@@ -68,10 +89,14 @@ type completionFixture struct {
 }
 
 type progressCompletionDocument struct {
-	ExpectedProgressCount   int                 `yaml:"expectedProgressCount"`
-	Progress                []progressFixture   `yaml:"progress"`
-	ExpectedCompletionCount int                 `yaml:"expectedCompletionCount"`
-	Completion              []completionFixture `yaml:"completion"`
+	ExpectedProgressCount             int                 `yaml:"expectedProgressCount"`
+	ExpectedFocusPriorityCount        int                 `yaml:"expectedFocusPriorityCount"`
+	ExpectedLatestActiveFocusCount    int                 `yaml:"expectedLatestActiveFocusCount"`
+	ExpectedFailedFocusCount          int                 `yaml:"expectedFailedFocusCount"`
+	ExpectedLatestCompletedFocusCount int                 `yaml:"expectedLatestCompletedFocusCount"`
+	Progress                          []progressFixture   `yaml:"progress"`
+	ExpectedCompletionCount           int                 `yaml:"expectedCompletionCount"`
+	Completion                        []completionFixture `yaml:"completion"`
 }
 
 //go:embed testdata/guided/progress_completion.yaml
@@ -81,24 +106,29 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 	t.Helper()
 	var document progressCompletionDocument
 	decodeSingleKnownFieldsDocument(t, "testdata/guided/progress_completion.yaml", progressCompletionData, &document)
-	if document.ExpectedProgressCount != expectedProgressRows || len(document.Progress) != expectedProgressRows {
-		t.Fatalf("progress rows: declared=%d actual=%d required=%d",
-			document.ExpectedProgressCount, len(document.Progress), expectedProgressRows)
-	}
-	if document.ExpectedCompletionCount != expectedCompletionRows || len(document.Completion) != expectedCompletionRows {
-		t.Fatalf("completion rows: declared=%d actual=%d required=%d",
-			document.ExpectedCompletionCount, len(document.Completion), expectedCompletionRows)
+	if err := validateProgressCompletionRowCounts(document); err != nil {
+		t.Fatal(err)
 	}
 	validStages := make(map[ingest.Stage]bool, len(ingest.StageOrder))
 	for _, stage := range ingest.StageOrder {
 		validStages[stage] = true
 	}
 	progressNames := map[string]bool{}
+	focusCounts := map[progressFocusProbe]int{}
 	for _, row := range document.Progress {
 		if strings.TrimSpace(row.Name) == "" || progressNames[row.Name] || len(row.Observations) < 2 || len(row.WantContains) == 0 {
 			t.Fatalf("progress row is incomplete or duplicated: %#v", row)
 		}
 		progressNames[row.Name] = true
+		if row.FocusProbe != "" {
+			if !row.FocusProbe.valid() || !validStages[row.WantFocusStage] ||
+				strings.TrimSpace(row.WantFocusElapsed) == "" || strings.TrimSpace(row.WantFocusEstimate) == "" {
+				t.Fatalf("progress focus row %q is incomplete or invalid: %#v", row.Name, row)
+			}
+			focusCounts[row.FocusProbe]++
+		} else if row.WantFocusStage != "" || row.WantFocusElapsed != "" || row.WantFocusEstimate != "" {
+			t.Fatalf("progress row %q has focus expectations without a typed focus probe", row.Name)
+		}
 		for observationIndex, observation := range row.Observations {
 			if observation.AdvanceSeconds < 0 || len(observation.Stages) == 0 {
 				t.Fatalf("progress row %q observation %d is empty or moves time backwards", row.Name, observationIndex)
@@ -110,6 +140,9 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 				}
 				seenStages[stage.Stage] = true
 			}
+		}
+		if row.FocusProbe != "" && !seenProgressStage(row.Observations[len(row.Observations)-1].Stages, row.WantFocusStage) {
+			t.Fatalf("progress focus row %q does not include target stage %s in its final observation", row.Name, row.WantFocusStage)
 		}
 		if row.LegacyUnboundedOverflow {
 			if row.TerminalWidth != 80 || row.TerminalHeight != 24 {
@@ -127,6 +160,9 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 			}
 		}
 	}
+	if err := validateProgressFocusCounts(document, focusCounts); err != nil {
+		t.Fatal(err)
+	}
 	completionNames := map[string]bool{}
 	for _, row := range document.Completion {
 		if strings.TrimSpace(row.Name) == "" || completionNames[row.Name] || len(row.AttemptErrors) == 0 || len(row.WantContains) == 0 ||
@@ -140,6 +176,67 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 		}
 	}
 	return document
+}
+
+func validateProgressCompletionRowCounts(document progressCompletionDocument) error {
+	if document.ExpectedProgressCount != expectedProgressRows || len(document.Progress) != expectedProgressRows {
+		return fmt.Errorf("progress rows: declared=%d actual=%d required=%d",
+			document.ExpectedProgressCount, len(document.Progress), expectedProgressRows)
+	}
+	if document.ExpectedCompletionCount != expectedCompletionRows || len(document.Completion) != expectedCompletionRows {
+		return fmt.Errorf("completion rows: declared=%d actual=%d required=%d",
+			document.ExpectedCompletionCount, len(document.Completion), expectedCompletionRows)
+	}
+	return nil
+}
+
+func validateProgressFocusCounts(document progressCompletionDocument, focusCounts map[progressFocusProbe]int) error {
+	if document.ExpectedFocusPriorityCount != expectedProgressFocusRows ||
+		focusCounts[progressFocusLatestActive]+focusCounts[progressFocusFailed]+focusCounts[progressFocusLatestCompleted] != expectedProgressFocusRows ||
+		document.ExpectedLatestActiveFocusCount != expectedLatestActiveFocusRows ||
+		focusCounts[progressFocusLatestActive] != expectedLatestActiveFocusRows ||
+		document.ExpectedFailedFocusCount != expectedFailedFocusRows ||
+		focusCounts[progressFocusFailed] != expectedFailedFocusRows ||
+		document.ExpectedLatestCompletedFocusCount != expectedLatestCompletedFocusRows ||
+		focusCounts[progressFocusLatestCompleted] != expectedLatestCompletedFocusRows {
+		return fmt.Errorf("progress focus probes are not pinned: declared=%d active=%d failed=%d completed=%d",
+			document.ExpectedFocusPriorityCount, focusCounts[progressFocusLatestActive],
+			focusCounts[progressFocusFailed], focusCounts[progressFocusLatestCompleted])
+	}
+	return nil
+}
+
+func countProgressFocusProbes(rows []progressFixture) map[progressFocusProbe]int {
+	counts := map[progressFocusProbe]int{}
+	for _, row := range rows {
+		if row.FocusProbe != "" {
+			counts[row.FocusProbe]++
+		}
+	}
+	return counts
+}
+
+func TestProgressCompletionFixturePinsExactCounts(t *testing.T) {
+	document := loadProgressCompletionDocument(t)
+	rowMutation := document
+	rowMutation.ExpectedProgressCount--
+	rowMutation.Progress = append([]progressFixture(nil), rowMutation.Progress[:len(rowMutation.Progress)-1]...)
+	if err := validateProgressCompletionRowCounts(rowMutation); err == nil {
+		t.Fatal("progress fixture accepted a row removal coordinated with its declared total")
+	}
+
+	focusMutation := document
+	focusMutation.ExpectedFocusPriorityCount--
+	focusMutation.ExpectedLatestCompletedFocusCount--
+	focusMutation.Progress = nil
+	for _, row := range document.Progress {
+		if row.FocusProbe != progressFocusLatestCompleted {
+			focusMutation.Progress = append(focusMutation.Progress, row)
+		}
+	}
+	if err := validateProgressFocusCounts(focusMutation, countProgressFocusProbes(focusMutation.Progress)); err == nil {
+		t.Fatal("progress fixture accepted a focus-probe removal coordinated with its declarations")
+	}
 }
 
 func seenProgressStage(stages []progressStageFixture, want ingest.Stage) bool {
@@ -319,6 +416,7 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 					t.Errorf("progress view contains unsupported estimate %q:\n%s", missing, view)
 				}
 			}
+			assertProgressFocusDetail(t, row, rendered)
 			if row.TerminalHeight > 0 {
 				if lines := renderedLineCount(rendered); lines > row.TerminalHeight {
 					t.Errorf("progress view uses %d lines, exceeds mounted height %d:\n%s", lines, row.TerminalHeight, rendered)
@@ -332,6 +430,38 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func assertProgressFocusDetail(t *testing.T, row progressFixture, rendered string) {
+	t.Helper()
+	if row.FocusProbe == "" {
+		return
+	}
+	lines := strings.Split(strings.ToLower(rendered), "\n")
+	wantStage := strings.ToLower(row.WantFocusStage.String()) + " "
+	stageLine := -1
+	detailLines := 0
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, wantStage) {
+			stageLine = index
+		}
+		if strings.Contains(trimmed, "observed elapsed:") {
+			detailLines++
+		}
+	}
+	if stageLine < 0 || stageLine+2 >= len(lines) {
+		t.Fatalf("focus probe %q cannot find complete detail after %s:\n%s", row.FocusProbe, row.WantFocusStage, rendered)
+	}
+	if !strings.Contains(lines[stageLine+1], strings.ToLower(row.WantFocusElapsed)) ||
+		!strings.Contains(lines[stageLine+2], strings.ToLower(row.WantFocusEstimate)) {
+		t.Fatalf("focus probe %q attached detail to the wrong stage or timing; want %s then %q/%q:\n%s",
+			row.FocusProbe, row.WantFocusStage, row.WantFocusElapsed, row.WantFocusEstimate, rendered)
+	}
+	if detailLines != 1 {
+		t.Fatalf("focus probe %q rendered %d expanded stage details, want exactly one:\n%s",
+			row.FocusProbe, detailLines, rendered)
 	}
 }
 
