@@ -496,9 +496,12 @@ func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 }
 
 // updateVisibility offers authentication exactly where its consequence becomes
-// understandable: before the sharing visibility choice. Declining resumes the
-// typed Flow transition that brought the user here. Success updates the live
-// visibility state on the retained registry, then opens the mounted sharing step.
+// understandable: before the sharing visibility choice. The modal exclusively
+// owns keys and loginDoneMsg, while every other non-key message continues to the
+// retained Flow and, during authentication, the owner-tagged login spinner.
+// Declining resumes the typed Flow transition that brought the user here.
+// Success updates the live visibility state on the retained registry, then opens
+// the mounted sharing step.
 func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
 	case loginDoneMsg:
@@ -557,12 +560,25 @@ func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 		p.spinner = p.spinner.SetLabel("connecting to village")
 		return p, tea.Batch(p.runLogin(), p.spinner.Tick())
 	default:
-		if p.authInFlt {
-			var cmd tea.Cmd
-			p.spinner, cmd = p.spinner.Update(msg)
-			return p, cmd
+		var commands []tea.Cmd
+		if p.flowBuilt {
+			var command tea.Cmd
+			p.flow, command = p.flow.Update(msg)
+			if command != nil {
+				commands = append(commands, command)
+			}
 		}
-		return p, nil
+		if p.authInFlt {
+			var command tea.Cmd
+			p.spinner, command = p.spinner.Update(msg)
+			if command != nil {
+				commands = append(commands, command)
+			}
+		}
+		if len(commands) == 0 {
+			return p, nil
+		}
+		return p, tea.Batch(commands...)
 	}
 }
 

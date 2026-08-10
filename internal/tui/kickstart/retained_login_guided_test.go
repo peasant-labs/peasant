@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
 
@@ -23,7 +24,13 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
-const expectedRetainedLoginCases = 2
+const (
+	expectedRetainedLoginCases                 = 4
+	expectedRetainedPromptDeliveries           = 1
+	expectedRetainedAuthInFlightDeliveries     = 1
+	expectedRetainedAfterLoginDeliveries       = 1
+	expectedRetainedLoginCommitAfterDeliveries = 3
+)
 
 type retainedLoginScenario string
 
@@ -36,9 +43,22 @@ func (s retainedLoginScenario) valid() bool {
 	return s == retainedLoginPreservePresentation || s == retainedLoginPendingTreeResult
 }
 
+type retainedLoginDelivery string
+
+const (
+	retainedDeliveryVisibilityPrompt retainedLoginDelivery = "visibility-prompt"
+	retainedDeliveryAuthInFlight     retainedLoginDelivery = "auth-in-flight"
+	retainedDeliveryAfterLogin       retainedLoginDelivery = "after-login"
+)
+
+func (d retainedLoginDelivery) valid() bool {
+	return d == retainedDeliveryVisibilityPrompt || d == retainedDeliveryAuthInFlight || d == retainedDeliveryAfterLogin
+}
+
 type retainedLoginCase struct {
 	Name                string                 `yaml:"name"`
 	Scenario            retainedLoginScenario  `yaml:"scenario"`
+	Delivery            retainedLoginDelivery  `yaml:"delivery"`
 	Fixture             string                 `yaml:"fixture"`
 	Width               int                    `yaml:"width"`
 	Height              int                    `yaml:"height"`
@@ -54,8 +74,12 @@ type retainedLoginCase struct {
 }
 
 type retainedLoginDocument struct {
-	ExpectedCaseCount int                 `yaml:"expectedCaseCount"`
-	Cases             []retainedLoginCase `yaml:"cases"`
+	ExpectedCaseCount                int                 `yaml:"expectedCaseCount"`
+	ExpectedPromptDeliveries         int                 `yaml:"expectedPromptDeliveries"`
+	ExpectedAuthInFlightDeliveries   int                 `yaml:"expectedAuthInFlightDeliveries"`
+	ExpectedAfterLoginDeliveries     int                 `yaml:"expectedAfterLoginDeliveries"`
+	ExpectedCommitAfterDeliveryCount int                 `yaml:"expectedCommitAfterDeliveryCount"`
+	Cases                            []retainedLoginCase `yaml:"cases"`
 }
 
 //go:embed testdata/guided/retained_login.yaml
@@ -89,6 +113,8 @@ func loadRetainedLoginDocument(t *testing.T) retainedLoginDocument {
 		t.Fatal(err)
 	}
 	names := map[string]bool{}
+	deliveryCounts := map[retainedLoginDelivery]int{}
+	commitAfterDeliveryCount := 0
 	for _, row := range document.Cases {
 		if strings.TrimSpace(row.Name) == "" || names[row.Name] || !row.Scenario.valid() ||
 			strings.TrimSpace(row.Fixture) == "" || row.Width <= 0 || row.Height <= 0 ||
@@ -99,14 +125,30 @@ func loadRetainedLoginDocument(t *testing.T) retainedLoginDocument {
 		names[row.Name] = true
 		switch row.Scenario {
 		case retainedLoginPreservePresentation:
-			if len(row.BeforeLoginKeys) == 0 || row.ExpectedPreviewID == "" || len(row.StateLineLabels) == 0 || row.CommitAfterDelivery {
+			if row.Delivery != "" || len(row.BeforeLoginKeys) == 0 || row.ExpectedPreviewID == "" || len(row.StateLineLabels) == 0 || row.CommitAfterDelivery {
 				t.Fatalf("retained presentation row %q does not pin interactive state", row.Name)
 			}
 		case retainedLoginPendingTreeResult:
-			if len(row.BeforeLoginKeys) != 0 || row.ExpectedPreviewID != "" || len(row.StateLineLabels) != 0 || !row.CommitAfterDelivery {
+			if !row.Delivery.valid() || len(row.BeforeLoginKeys) != 0 || row.ExpectedPreviewID != "" || len(row.StateLineLabels) != 0 || !row.CommitAfterDelivery {
 				t.Fatalf("pending tree row %q mixes incompatible presentation expectations", row.Name)
 			}
+			deliveryCounts[row.Delivery]++
+			commitAfterDeliveryCount++
 		}
+	}
+	if document.ExpectedPromptDeliveries != expectedRetainedPromptDeliveries ||
+		deliveryCounts[retainedDeliveryVisibilityPrompt] != expectedRetainedPromptDeliveries ||
+		document.ExpectedAuthInFlightDeliveries != expectedRetainedAuthInFlightDeliveries ||
+		deliveryCounts[retainedDeliveryAuthInFlight] != expectedRetainedAuthInFlightDeliveries ||
+		document.ExpectedAfterLoginDeliveries != expectedRetainedAfterLoginDeliveries ||
+		deliveryCounts[retainedDeliveryAfterLogin] != expectedRetainedAfterLoginDeliveries {
+		t.Fatalf("retained login delivery counts are not pinned: prompt=%d auth=%d after=%d",
+			deliveryCounts[retainedDeliveryVisibilityPrompt], deliveryCounts[retainedDeliveryAuthInFlight], deliveryCounts[retainedDeliveryAfterLogin])
+	}
+	if document.ExpectedCommitAfterDeliveryCount != expectedRetainedLoginCommitAfterDeliveries ||
+		commitAfterDeliveryCount != expectedRetainedLoginCommitAfterDeliveries {
+		t.Fatalf("retained login commit rows: declared=%d actual=%d required=%d",
+			document.ExpectedCommitAfterDeliveryCount, commitAfterDeliveryCount, expectedRetainedLoginCommitAfterDeliveries)
 	}
 	return document
 }
@@ -126,7 +168,12 @@ func TestRetainedLoginFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestRetainedLoginFixtureEnforcesExactRowCount(t *testing.T) {
-	mutated := bytes.Replace(retainedLoginData, []byte("expectedCaseCount: 2"), []byte("expectedCaseCount: 3"), 1)
+	declared := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedRetainedLoginCases))
+	changed := []byte(fmt.Sprintf("expectedCaseCount: %d", expectedRetainedLoginCases+1))
+	mutated := bytes.Replace(retainedLoginData, declared, changed, 1)
+	if bytes.Equal(mutated, retainedLoginData) {
+		t.Fatal("retained login row-count mutation did not alter the fixture")
+	}
 	if _, err := decodeRetainedLoginDocument(mutated); err == nil {
 		t.Fatal("retained login fixture accepted a mismatched row-count guard")
 	}
@@ -207,27 +254,71 @@ func enterRetainedVisibility(t *testing.T, program kickstart.Program) kickstart.
 
 func completeRetainedVisibilityLogin(t *testing.T, program kickstart.Program) kickstart.Program {
 	t.Helper()
+	program, result := beginRetainedVisibilityLogin(t, program)
+	return finishRetainedVisibilityLogin(t, program, result)
+}
+
+func beginRetainedVisibilityLogin(t *testing.T, program kickstart.Program) (kickstart.Program, tea.Msg) {
+	t.Helper()
 	program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if command == nil {
 		t.Fatal("accepting retained visibility login produced no login command")
 	}
-	transitioned := false
-	for _, message := range collectMsgs(command) {
-		before := program.Phase()
-		var next tea.Cmd
-		program, next = program.Update(message)
-		if before == kickstart.PhaseVisibility && program.Phase() == kickstart.PhaseFlow {
-			transitioned = true
-			if next != nil {
-				t.Fatal("successful visibility login restarted the mounted settings flow")
-			}
-		}
+	message := command()
+	batch, ok := message.(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatalf("visibility login command=%T, want non-empty tea.BatchMsg", message)
 	}
-	if !transitioned || !program.Connected() {
+	var loginResult tea.Msg
+	spinnerTicks := 0
+	for _, child := range batch {
+		if child == nil {
+			continue
+		}
+		message := child()
+		if _, ok := message.(spinner.TickMsg); ok {
+			spinnerTicks++
+			var next tea.Cmd
+			program, next = program.Update(message)
+			if next == nil {
+				t.Fatal("visibility auth spinner did not continue while login result was withheld")
+			}
+			continue
+		}
+		if loginResult != nil {
+			t.Fatalf("visibility login batch produced multiple non-spinner results: %T and %T", loginResult, message)
+		}
+		loginResult = message
+	}
+	if loginResult == nil || spinnerTicks != 1 || program.Phase() != kickstart.PhaseVisibility ||
+		!strings.Contains(stripRender(program.View()), "connecting to village") {
+		t.Fatalf("visibility login did not remain mounted while its result was withheld; result=%T ticks=%d phase=%s view:\n%s",
+			loginResult, spinnerTicks, program.Phase(), stripRender(program.View()))
+	}
+	return program, loginResult
+}
+
+func finishRetainedVisibilityLogin(t *testing.T, program kickstart.Program, result tea.Msg) kickstart.Program {
+	t.Helper()
+	var next tea.Cmd
+	program, next = program.Update(result)
+	if next != nil {
+		t.Fatal("successful visibility login restarted the mounted settings flow")
+	}
+	if !program.Connected() || program.Phase() != kickstart.PhaseFlow {
 		t.Fatalf("visibility login did not enter the connected flow; connected=%t phase=%s", program.Connected(), program.Phase())
 	}
 	return program
+}
+
+func retainedWorkingBytes(t *testing.T, draft *settings.Draft) []byte {
+	t.Helper()
+	data, err := yaml.Marshal(draft.Working())
+	if err != nil {
+		t.Fatalf("marshal retained working draft: %v", err)
+	}
+	return data
 }
 
 func returnToRetainedSelection(t *testing.T, program kickstart.Program) kickstart.Program {
@@ -341,10 +432,31 @@ func TestVisibilityLoginRetainsMountedSelectionStateAndAsyncDelivery(t *testing.
 					t.Fatalf("held startup command loaded source %d times before delivery, want 0", source.Loads())
 				}
 				program = enterRetainedVisibility(t, program)
-				program = completeRetainedVisibilityLogin(t, program)
-				// Deliver the original Flow.Init result while sharing is current.
-				// The retained selection field, not the focused sharing radio, owns it.
-				program = runFlowInitOnce(t, program, initialFlowCommand)
+				beforeWorking := retainedWorkingBytes(t, draft)
+				switch row.Delivery {
+				case retainedDeliveryVisibilityPrompt:
+					program = runFlowInitOnce(t, program, initialFlowCommand)
+					if program.Phase() != kickstart.PhaseVisibility {
+						t.Fatalf("tree delivery closed visibility prompt; phase=%s", program.Phase())
+					}
+					program = completeRetainedVisibilityLogin(t, program)
+				case retainedDeliveryAuthInFlight:
+					var loginResult tea.Msg
+					program, loginResult = beginRetainedVisibilityLogin(t, program)
+					program = runFlowInitOnce(t, program, initialFlowCommand)
+					if program.Phase() != kickstart.PhaseVisibility || !strings.Contains(stripRender(program.View()), "connecting to village") {
+						t.Fatalf("tree delivery interrupted visibility auth; phase=%s view:\n%s", program.Phase(), stripRender(program.View()))
+					}
+					program = finishRetainedVisibilityLogin(t, program, loginResult)
+				case retainedDeliveryAfterLogin:
+					program = completeRetainedVisibilityLogin(t, program)
+					program = runFlowInitOnce(t, program, initialFlowCommand)
+				default:
+					t.Fatalf("unsupported retained login delivery %q", row.Delivery)
+				}
+				if afterWorking := retainedWorkingBytes(t, draft); !bytes.Equal(beforeWorking, afterWorking) {
+					t.Fatalf("owned tree result changed buffered Draft bytes\nbefore=%s\nafter=%s", beforeWorking, afterWorking)
+				}
 				program = returnToRetainedSelection(t, program)
 				assertRetainedView(t, row, program.View())
 				if !reflect.DeepEqual(draft.Working().Selection, row.ExpectedSelection) {

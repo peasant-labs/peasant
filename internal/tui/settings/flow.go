@@ -265,19 +265,18 @@ func (f *Flow) commit() tea.Cmd {
 	return tea.Quit
 }
 
-// Update dispatches a message. Key handling order enforces the ratified
-// semantics: the exit modal is answered first; esc always opens that modal;
-// step navigation is next; everything else goes to the focused field.
+// Update dispatches a message. A modal owns keyboard input, but component-owned
+// asynchronous work reaches its mounted field before modal key handling. After
+// that barrier, esc opens the exit modal, step navigation follows, and every
+// remaining key goes to the focused field.
 func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
-	if f.confirming {
-		return f.updateConfirm(msg)
-	}
 	keyMsg, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
-		// Async results belong to mounted fields, not the currently-visible step.
-		// Forward to every field exactly as Screen does so a tree or preview can
-		// finish loading while a later section is current.
+		// Async results belong to mounted fields, not the current step or modal.
 		return f.forwardAsync(msg)
+	}
+	if f.confirming {
+		return f.updateConfirm(msg)
 	}
 	if f.helping {
 		// While the help overlay is up, ? or esc closes it and every other key
@@ -366,18 +365,11 @@ func (f Flow) forwardToFields(msg tea.Msg) (Flow, tea.Cmd) {
 	return f, cmd
 }
 
-// forwardAsync gives every mounted field a non-key message. Field components
-// retain their own generation and instance guards, so only the owner consumes
-// a tree, preview, or spinner result while unrelated fields remain unchanged.
+// forwardAsync uses the private async capability rather than the general Field
+// handler. Immutable component owner IDs and generation guards select the one
+// recipient without invoking synchronous fields on foreign work.
 func (f Flow) forwardAsync(msg tea.Msg) (Flow, tea.Cmd) {
-	var cmds []tea.Cmd
-	for _, section := range f.reg.Sections {
-		for _, field := range section.Fields {
-			if cmd := field.handle(f.draft, msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-	}
+	cmds := fieldAsyncCommands(f.reg, f.draft, msg)
 	f.recompute()
 	if len(cmds) == 0 {
 		return f, nil
@@ -705,22 +697,7 @@ func (a flowAvailability) AvailableActions() []keymap.ActionID {
 		out = append(out, keymap.ActionPrevField)
 	}
 	out = append(out, keymap.ActionBack, keymap.ActionQuit, keymap.ActionHelp)
-	out = dedupeActions(out)
-	if !f.focusedFieldCapturesPrintableInput() {
-		return out
-	}
-	// Update forwards printable input to the focused editor before key matching.
-	// Remove every action with a printable binding from the SAME Availability
-	// used by dispatch, footer, and help; filter lifecycle controls such as
-	// backspace, enter, escape, and tab remain visible and live.
-	km := keymap.Default()
-	effective := out[:0]
-	for _, action := range out {
-		if !keymap.HasPrintableBinding(km, action) {
-			effective = append(effective, action)
-		}
-	}
-	return effective
+	return effectiveAvailability(dedupeActions(out), f.focusedFieldCapturesPrintableInput())
 }
 
 type flowViewportKeyAvailability struct{}
