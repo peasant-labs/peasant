@@ -35,3 +35,8 @@ cases:
     commands:
       - [peasant, prune, --unselected, --dry-run]
       - [peasant, prune, --unselected]
+    flag_help:
+      command: prune
+      flag: unselected
+      usage: Prune sessions not selected by harness, project, clone, or explicit session ID. Branch filters are not applied (requires selection.mode=selected)
+      generated_document: docs/cli/peasant_prune.md

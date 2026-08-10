@@ -192,7 +192,7 @@ func BuildPruneCommand() *cobra.Command {
 	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this date (YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&all, "all", false, "Prune all sessions")
-	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not matching the selection config (requires selection.mode=selected)")
+	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not selected by harness, project, clone, or explicit session ID. Branch filters are not applied (requires selection.mode=selected)")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip interactive confirmation (for scripts/CI)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without deleting")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output results as JSON")

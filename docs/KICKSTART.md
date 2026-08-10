@@ -115,8 +115,8 @@ The mounted journey is:
 
 ## Viewer lists and stored data
 
-Home, Map, and the command palette read one effective project summary. If one available child session
-is selected, its stored parent project appears in that summary. Showing the parent does not select its
+Home, Map, and the command palette show the same project list. If one available child session is
+selected, its stored parent project appears in that list. Showing the parent does not select its
 sibling sessions. The normal push chooser still offers only sessions that the saved selection admits.
 
 When the saved selection hides every stored project, Home and Map show one recovery panel. The panel
@@ -130,8 +130,13 @@ Selection scopes discovery, viewer lists, and future push choices. It is not an 
 for stored history. A direct link to a stored session or canonical project still resolves. Saving a
 narrow selection does not delete files or database rows, and it does not unpublish Village copies.
 
-To remove stored sessions that no longer match the selection, use the manual prune command. Preview
-the deletion first. The second command starts the normal prune confirmation.
+`peasant prune --unselected` is a separate destructive command. It requires
+`selection.mode: selected`. It checks harness, project, clone, and explicit session ID rules. It does
+not apply branch rules. A stored session stays when its project or clone is selected, even if its
+branch is not in the saved branch list. An explicitly selected session also stays.
+
+Preview the deletion first. The second command shows the deletion preview and asks for confirmation
+before it permanently deletes the listed sessions from the local database and filesystem.
 
 <!-- verified-example: unselected-prune-commands -->
 ```bash
@@ -139,7 +144,7 @@ peasant prune --unselected --dry-run
 peasant prune --unselected
 ```
 
-This manual command is the deletion path for unselected stored sessions. Kickstart never runs it.
+Kickstart never runs this command. Changing the selection does not delete stored data.
 
 ## Redaction policy
 

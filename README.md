@@ -463,8 +463,8 @@ config file for a single run.
 
 ### Selection index
 
-The kickstart wizard saves the selected projects, branches, and sessions in `config.yaml`. This
-selection index controls future discovery, viewer lists, and normal push choices.
+The kickstart wizard saves the selection index in `config.yaml`. This example shows its persisted
+shape.
 
 <!-- verified-example: selection-config -->
 ```yaml
@@ -487,51 +487,26 @@ selection:
 
 Kickstart writes the real `clonePaths` values. The paths in this example are sample paths.
 
-| `selection.mode` | Behavior |
-|-------------------|----------|
-| `all` (default before kickstart) | Include all sessions from enabled harnesses. The next kickstart run prepares an exact `selected` list from current stored-session evidence. |
-| `selected` | Include only sessions that match the saved project, branch, or session choices. |
+| Field or value | Purpose |
+|----------------|---------|
+| `mode: all` | Do not apply a selection filter. |
+| `mode: selected` | Apply the rules under `harnesses`. |
+| `autoIngestNewBranches` | Store the choice for newly found branches. |
+| `harnesses` | Group project and explicit session rules by recording harness. |
+| `projects[].gitRemote` / `name` | Store the project label fields. |
+| `projects[].clonePaths` | Store the resolved physical clone paths for one project entry. |
+| `projects[].branches` | Store an optional branch list. An empty list means all branches for the entry. |
+| `sessions` | Store explicit session IDs. |
 
-On a later kickstart run, available saved projects, branches, and sessions start selected. A project
-that Peasant finds for the first time starts clear. A new branch in a selected project follows the
-saved `autoIngestNewBranches` value. Kickstart applies the saved checks after the first successful
-tree load. A refresh in the same run keeps edits that are already on the screen.
+Use the kickstart guide for each user job:
 
-Kickstart also keeps saved choices that are not available during the scan. A missing project, clone
-path, branch, or session stays saved when you change a different choice. An available choice is
-removed only when you clear it and save. An unavailable branch is removed only when its available
-parent project is cleared and saved. `peasant kickstart --reset` removes the selection with all other
-local Peasant data.
-
-Peasant identifies a clone with its resolved absolute physical path. Symbolic links resolve to the
-same identity as their target. One Git remote entry can contain several `clonePaths`. Its one
-`branches` list applies to all those paths. Peasant can use a remote or project name only when the
-current scan finds one physical clone with that value. It never chooses between ambiguous clones by
-remote or name alone. Old entries without `clonePaths` stay valid under this rule.
-
-For an old `mode: all` file, kickstart builds the first exact list in memory. It uses sessions that
-are in the local store at the time of the run. Scanned projects with matching stored sessions start
-selected. New scanned projects start clear. Stored sessions that the scan cannot match stay saved by
-session ID. The conversion preserves `autoIngestNewBranches` and writes only after the user confirms
-the final save. Peasant cannot reconstruct which projects existed when the old file was created.
-
-Kickstart asks for confirmation when no effective project and no available selected child remain.
-The No choice is the default, and kickstart asks again on every run in this state. Choosing No or
-Back, or cancelling the flow, keeps the config unchanged and starts no ingest. Yes saves the choice
-but does not delete stored data. An available selected child session makes its parent project
-effective, so that case does not show the warning.
-
-Home, Map, and the command palette use one effective project summary. An available selected child
-shows its parent project in that summary. This does not select sibling sessions or make them available
-for a normal push. If the selection hides every stored project, Home and Map show aggregate hidden
-project and session counts and a copyable `peasant kickstart` command. They do not show hidden names
-or paths.
-
-Selection limits discovery, lists, and normal future push choices. It is not an access-control rule
-for stored data. A direct link to a stored session or canonical project still resolves. Saving a
-narrower selection does not delete data. To delete stored sessions because they are unselected, run
-`peasant prune --unselected` manually. The `--session` CLI flag overrides the selection index for one
-ingest run.
+| User job | Guide |
+|----------|-------|
+| Run kickstart again or change saved choices | [Restore saved choices](docs/KICKSTART.md#restore-saved-choices) |
+| Understand `clonePaths` and local clone identity | [Physical clone identity](docs/KICKSTART.md#physical-clone-identity) |
+| Open a config that uses `mode: all` | [Convert an old all-projects setting](docs/KICKSTART.md#convert-an-old-all-projects-setting) |
+| Save when no selected work is available | [Save with no effective project](docs/KICKSTART.md#save-with-no-effective-project) |
+| Understand project lists, push choices, direct links, and manual deletion | [Viewer lists and stored data](docs/KICKSTART.md#viewer-lists-and-stored-data) |
 
 ## Web dashboard
 

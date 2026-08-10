@@ -40,6 +40,14 @@ type documentedSelectionExampleCase struct {
 	Kind              documentedExampleKind   `yaml:"kind"`
 	ExpectedSelection *config.SelectionConfig `yaml:"expected_selection,omitempty"`
 	Commands          [][]string              `yaml:"commands,omitempty"`
+	FlagHelp          *documentedFlagHelp     `yaml:"flag_help,omitempty"`
+}
+
+type documentedFlagHelp struct {
+	Command           string `yaml:"command"`
+	Flag              string `yaml:"flag"`
+	Usage             string `yaml:"usage"`
+	GeneratedDocument string `yaml:"generated_document"`
 }
 
 func loadDocumentedSelectionExamples(t *testing.T) documentedSelectionExamples {
@@ -80,12 +88,15 @@ func loadDocumentedSelectionExamples(t *testing.T) documentedSelectionExamples {
 
 		switch testCase.Kind {
 		case documentedExampleConfig:
-			if testCase.ExpectedSelection == nil || len(testCase.Commands) != 0 {
-				t.Fatalf("documented config example %q needs expected_selection and no commands", testCase.Name)
+			if testCase.ExpectedSelection == nil || len(testCase.Commands) != 0 || testCase.FlagHelp != nil {
+				t.Fatalf("documented config example %q needs expected_selection and no command fields", testCase.Name)
 			}
 		case documentedExampleCommands:
 			if testCase.ExpectedSelection != nil || len(testCase.Commands) == 0 {
 				t.Fatalf("documented command example %q needs commands and no expected_selection", testCase.Name)
+			}
+			if help := testCase.FlagHelp; help != nil && (help.Command == "" || help.Flag == "" || help.Usage == "" || help.GeneratedDocument == "") {
+				t.Fatalf("documented command example %q has incomplete flag_help", testCase.Name)
 			}
 		default:
 			t.Fatalf("documented selection example %q has unknown kind %q", testCase.Name, testCase.Kind)
@@ -129,6 +140,9 @@ func TestDocumentedSelectionExamplesParseThroughProductionBoundaries(t *testing.
 				}
 			case documentedExampleCommands:
 				assertDocumentedCommands(t, block, testCase.Commands)
+				if testCase.FlagHelp != nil {
+					assertDocumentedFlagHelp(t, repositoryRoot, *testCase.FlagHelp)
+				}
 			}
 		})
 	}
@@ -173,12 +187,7 @@ func parseDocumentedCommand(t *testing.T, argv []string) {
 	if len(argv) < 2 || argv[0] != "peasant" {
 		t.Fatalf("documented command argv = %q, want peasant plus a subcommand", argv)
 	}
-	root := &cobra.Command{Use: "peasant", SilenceErrors: true, SilenceUsage: true}
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	for _, build := range commands {
-		root.AddCommand(build())
-	}
+	root := documentedCommandRoot()
 	args := append([]string(nil), argv[1:]...)
 	root.SetArgs(append(args, "--help"))
 	executed, err := root.ExecuteC()
@@ -188,4 +197,38 @@ func parseDocumentedCommand(t *testing.T, argv []string) {
 	if executed.Name() != argv[1] {
 		t.Fatalf("documented command %q resolved to %q, want %q", strings.Join(argv, " "), executed.Name(), argv[1])
 	}
+}
+
+func assertDocumentedFlagHelp(t *testing.T, repositoryRoot string, expected documentedFlagHelp) {
+	t.Helper()
+	root := documentedCommandRoot()
+	command, _, err := root.Find([]string{expected.Command})
+	if err != nil {
+		t.Fatalf("find production command %q for documented flag help: %v", expected.Command, err)
+	}
+	flag := command.Flags().Lookup(expected.Flag)
+	if flag == nil {
+		t.Fatalf("production command %q has no --%s flag", expected.Command, expected.Flag)
+	}
+	if flag.Usage != expected.Usage {
+		t.Fatalf("production --%s help = %q, want %q", expected.Flag, flag.Usage, expected.Usage)
+	}
+	generatedPath := filepath.Join(repositoryRoot, filepath.FromSlash(expected.GeneratedDocument))
+	generated, err := os.ReadFile(generatedPath)
+	if err != nil {
+		t.Fatalf("read generated CLI document %q: %v", expected.GeneratedDocument, err)
+	}
+	if !strings.Contains(string(generated), expected.Usage) {
+		t.Fatalf("generated CLI document %q does not contain production --%s help %q", expected.GeneratedDocument, expected.Flag, expected.Usage)
+	}
+}
+
+func documentedCommandRoot() *cobra.Command {
+	root := &cobra.Command{Use: "peasant", SilenceErrors: true, SilenceUsage: true}
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	for _, build := range commands {
+		root.AddCommand(build())
+	}
+	return root
 }
