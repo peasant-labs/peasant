@@ -1,5 +1,5 @@
 declared_projection_rows: 12
-declared_gate_rows: 4
+declared_gate_rows: 8
 
 projection_cases:
   - name: whole-project-selected
@@ -262,9 +262,21 @@ gate_cases:
   - name: gate-is-suppressed-by-available-explicit-session
     projection_case: explicit-session-under-stored-parent
     expected: none
+  - name: gate-is-suppressed-by-available-nested-descendant
+    projection_case: child-of-explicitly-selected-parent
+    expected: none
+  - name: gate-is-suppressed-by-available-selected-branch
+    projection_case: branch-with-session-worktree-override
+    expected: none
   - name: gate-fires-when-all-saved-descendants-are-unavailable
     projection_case: unavailable-saved-descendant
     expected: confirm_no_projects
+  - name: gate-fires-for-complete-ambiguous-candidate-cohort
+    projection_case: no-selected-descendant-and-unproven-identity
+    expected: confirm_no_projects
   - name: gate-is-suppressed-by-a-non-empty-project-selection
     projection_case: whole-project-selected
+    expected: none
+  - name: gate-is-suppressed-by-mode-all-candidate-cohort
+    projection_case: mode-all-complete-cohort
     expected: none

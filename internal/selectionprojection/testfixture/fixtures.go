@@ -18,7 +18,7 @@ import (
 
 const (
 	expectedProjectionRows = 12
-	expectedGateRows       = 4
+	expectedGateRows       = 8
 )
 
 //go:embed testdata/effective_projects.yaml
@@ -225,15 +225,15 @@ func (a ProjectAdmission) ProductionAdmission() (selectionprojection.ProjectAdmi
 }
 
 func (f EffectiveProjectFixtures) validate() error {
-	projectionNames := make(map[string]struct{}, len(f.ProjectionCases))
+	projectionCases := make(map[string]ProjectionCase, len(f.ProjectionCases))
 	for _, projectionCase := range f.ProjectionCases {
 		if strings.TrimSpace(projectionCase.Name) == "" {
 			return errors.New("validate effective-project fixtures: projection case name is empty")
 		}
-		if _, duplicate := projectionNames[projectionCase.Name]; duplicate {
+		if _, duplicate := projectionCases[projectionCase.Name]; duplicate {
 			return fmt.Errorf("validate effective-project fixtures: duplicate projection case %q", projectionCase.Name)
 		}
-		projectionNames[projectionCase.Name] = struct{}{}
+		projectionCases[projectionCase.Name] = projectionCase
 		if !projectionCase.Selection.Mode.IsValid() {
 			return fmt.Errorf("validate effective-project fixture %q: unknown selection mode %q", projectionCase.Name, projectionCase.Selection.Mode)
 		}
@@ -243,6 +243,7 @@ func (f EffectiveProjectFixtures) validate() error {
 	}
 
 	gateNames := make(map[string]struct{}, len(f.GateCases))
+	gateProjectionCases := make(map[string]string, len(f.GateCases))
 	for _, gateCase := range f.GateCases {
 		if strings.TrimSpace(gateCase.Name) == "" {
 			return errors.New("validate effective-project fixtures: gate case name is empty")
@@ -251,11 +252,39 @@ func (f EffectiveProjectFixtures) validate() error {
 			return fmt.Errorf("validate effective-project fixtures: duplicate gate case %q", gateCase.Name)
 		}
 		gateNames[gateCase.Name] = struct{}{}
-		if _, ok := projectionNames[gateCase.ProjectionCase]; !ok {
+		projectionCase, ok := projectionCases[gateCase.ProjectionCase]
+		if !ok {
 			return fmt.Errorf("validate effective-project gate fixture %q: unknown projection_case %q", gateCase.Name, gateCase.ProjectionCase)
 		}
+		if firstGate, duplicate := gateProjectionCases[gateCase.ProjectionCase]; duplicate {
+			return fmt.Errorf(
+				"validate effective-project gate fixture %q: projection_case %q is already used by gate case %q",
+				gateCase.Name,
+				gateCase.ProjectionCase,
+				firstGate,
+			)
+		}
+		gateProjectionCases[gateCase.ProjectionCase] = gateCase.Name
 		switch gateCase.Expected {
-		case GateExpectationNone, GateExpectationConfirmNoProjects:
+		case GateExpectationNone:
+			if len(projectionCase.Expected) == 0 {
+				return fmt.Errorf(
+					"validate effective-project gate fixture %q: expected %q but projection_case %q has no effective projects",
+					gateCase.Name,
+					gateCase.Expected,
+					gateCase.ProjectionCase,
+				)
+			}
+		case GateExpectationConfirmNoProjects:
+			if len(projectionCase.Expected) != 0 {
+				return fmt.Errorf(
+					"validate effective-project gate fixture %q: expected %q but projection_case %q has %d effective projects",
+					gateCase.Name,
+					gateCase.Expected,
+					gateCase.ProjectionCase,
+					len(projectionCase.Expected),
+				)
+			}
 		default:
 			return fmt.Errorf("validate effective-project gate fixture %q: unknown expected decision %q", gateCase.Name, gateCase.Expected)
 		}
