@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -56,11 +57,23 @@ type treeField struct {
 	// field only learns its theme at mount.
 	previewBody func(theme.Theme) kit.BodyRenderer
 	split       kit.PreviewSplit
+	// restoreSelection enables the kickstart selection editor's one-time saved
+	// baseline application. Other generic Tree users keep the source-provided
+	// states they already own.
+	restoreSelection bool
 
 	// full is the whole forest the source last loaded; view is the (possibly
 	// narrowed) forest the tree currently renders, sharing full's leaf pointers.
 	full []*kit.TreeNode
 	view []*kit.TreeNode
+
+	// baselineApplied records the first successful selected-mode source load when
+	// restoreSelection is enabled. That load alone restores Draft.Baseline; a
+	// later load restores Draft.Working instead, so a refresh cannot overwrite
+	// edits already made on screen. Legacy mode all waits for its conversion
+	// boundary and does not set this flag.
+	baselineApplied bool
+	unmatched       UnmatchedBaseline
 }
 
 // TreeOption configures a tree field at construction.
@@ -106,6 +119,14 @@ func WithPreviewBodySource(src kit.BodySource) TreeOption {
 // has one.
 func WithPreviewBody(build func(theme.Theme) kit.BodyRenderer) TreeOption {
 	return func(f *treeField) { f.previewBody = build }
+}
+
+// WithSelectionRestoration applies the saved selected-mode configuration after
+// the first successful source load and before deriving the working value. It is
+// opt-in because generic Tree sources may own meaningful initial node states;
+// kickstart uses it for its selection editor.
+func WithSelectionRestoration() TreeOption {
+	return func(f *treeField) { f.restoreSelection = true }
 }
 
 // Tree builds the selection-tree field bound to acc, loading its forest from
@@ -196,6 +217,7 @@ func (f *treeField) sync(d *Draft) {}
 // rather than reaching the tree as navigation.
 func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
+	wasLoading := f.tree.Loading()
 	if !f.handleFacetKey(msg) {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
@@ -204,12 +226,44 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		} else {
 			f.tree, cmd = f.tree.Update(msg)
 		}
-		f.captureForest()
+		loadSucceeded := wasLoading && !f.tree.Loading() && f.tree.Err() == nil
+		f.captureForest(loadSucceeded)
+	}
+
+	// A spinner tick, an in-flight load, or a failed load must not replace the
+	// draft with an empty derived selection. Restoration waits for the first
+	// successful result.
+	if f.tree.Loading() || f.tree.Err() != nil {
+		return cmd
+	}
+
+	loadSucceeded := wasLoading && !f.tree.Loading()
+	if f.restoreSelection && loadSucceeded {
+		selection := d.Working().Selection
+		firstSuccessfulLoad := !f.baselineApplied
+		if firstSuccessfulLoad {
+			selection = d.Baseline().Selection
+		}
+		if selection.Mode != config.SelectionModeSelected {
+			// Legacy mode all is converted by the kickstart conversion boundary.
+			// Until then, keep it intact and never compile it as a selected-mode
+			// matcher merely because a tree finished loading.
+			return cmd
+		} else {
+			f.unmatched = PrepopulateSelection(f.selectionRoots(), selection)
+			if firstSuccessfulLoad {
+				f.baselineApplied = true
+			}
+		}
+	}
+	if f.restoreSelection && !f.baselineApplied {
+		return cmd
 	}
 	// The selection is re-derived after a facet change too, so what a commit
 	// would persist is always read from the whole forest - never left behind at
 	// whatever the last narrowed view happened to hold.
-	f.acc.Set(d.Working(), FromTreeNodes(f.selectionRoots()))
+	derived := FromTreeNodes(f.selectionRoots())
+	f.acc.Set(d.Working(), MergeSelection(derived, f.unmatched))
 	return cmd
 }
 
@@ -235,8 +289,14 @@ func (f *treeField) handleFacetKey(msg tea.Msg) bool {
 // captureForest records a freshly-loaded forest as the full one and re-applies
 // the current facet to it. A load result is recognised by the tree's roots no
 // longer being the view the field last installed.
-func (f *treeField) captureForest() {
+func (f *treeField) captureForest(force bool) {
 	roots := f.tree.Roots()
+	if force {
+		f.full = roots
+		f.view = roots
+		f.applyFacet()
+		return
+	}
 	if len(roots) == 0 || sameNodes(roots, f.view) {
 		return
 	}
@@ -605,7 +665,8 @@ func selectionsEqual(a, b TreeSelection) bool {
 		for _, ap := range ac.Projects {
 			found := false
 			for _, bp := range bc.Projects {
-				if ap.GitRemote == bp.GitRemote && ap.Name == bp.Name && sameSet(ap.Branches, bp.Branches) {
+				if ap.GitRemote == bp.GitRemote && ap.Name == bp.Name &&
+					sameSet(ap.ClonePaths, bp.ClonePaths) && sameSet(ap.Branches, bp.Branches) {
 					found = true
 					break
 				}

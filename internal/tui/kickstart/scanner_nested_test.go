@@ -46,7 +46,7 @@ func loadNestedListings(t *testing.T) nestedListingsDoc {
 func nestedForest(t *testing.T) ([]*kit.TreeNode, nestedListingsDoc) {
 	t.Helper()
 	doc := loadNestedListings(t)
-	src := kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested))
+	src := kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested))
 	roots, err := src.Load(context.Background())
 	if err != nil {
 		t.Fatalf("scanner load: %v", err)

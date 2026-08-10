@@ -1,0 +1,293 @@
+# Pure restoration and merge cases. All working directories are pre-resolved
+# fixture identities; real symlink and missing-directory behavior is tested with
+# the production resolver and temporary directories.
+expectedCaseCount: 15
+cases:
+  - name: restore-exact-clone-whole-project
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: exact-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: release, sessionId: exact-release}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+    expectInitiallyChecked: [exact-main, exact-release]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+
+  - name: new-project-starts-clear
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: known}
+      - {harness: claude-code, projectName: new-tool, gitRemote: "git@github.com:acme/new-tool.git", workingDir: /fixtures/team-a/new-tool, branch: main, sessionId: new}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+    expectInitiallyChecked: [known]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+
+  - name: new-branch-stays-clear-when-policy-is-off
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: branch-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: branch-feature}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+    expectInitiallyChecked: [branch-main]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+
+  - name: new-branch-follows-enabled-policy
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: auto-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: feature, sessionId: auto-feature}
+    saved:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main]}
+    expectInitiallyChecked: [auto-feature, auto-main]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [feature, main]}
+
+  - name: explicit-branches-survive-when-all-visible-branches-are-checked
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: only-visible-branch}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main, unavailable]}
+    expectInitiallyChecked: [only-visible-branch]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main, unavailable]}
+
+  - name: unavailable-choices-survive-another-edit
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: old-visible}
+      - {harness: claude-code, projectName: other, gitRemote: "git@github.com:acme/other.git", workingDir: /fixtures/team-a/other, branch: main, sessionId: new-visible}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+            - {gitRemote: "git@github.com:acme/missing.git", clonePaths: [/fixtures/missing/tool], branches: [gone]}
+          sessions: [missing-session]
+    expectInitiallyChecked: [old-visible]
+    clearProjectPaths: [/fixtures/team-a/tool]
+    selectProjectPaths: [/fixtures/team-a/other]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/fixtures/team-a/other]}
+            - {gitRemote: "git@github.com:acme/missing.git", clonePaths: [/fixtures/missing/tool], branches: [gone]}
+          sessions: [missing-session]
+
+  - name: explicit-clear-removes-available-choice
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: clear-me}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool]}
+    expectInitiallyChecked: [clear-me]
+    clearProjectPaths: [/fixtures/team-a/tool]
+    expected: {mode: selected, autoIngestNewBranches: false}
+
+  - name: explicit-branch-clear-keeps-only-unavailable-branch
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: branch-clear-main}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: release, sessionId: branch-clear-release}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main, release, gone]}
+    expectInitiallyChecked: [branch-clear-main, branch-clear-release]
+    clearBranches:
+      - {clonePath: /fixtures/team-a/tool, branch: release}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [gone, main]}
+
+  - name: clearing-available-project-does-not-recreate-it-for-an-unavailable-branch
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: clear-project-main}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool], branches: [main, gone]}
+    expectInitiallyChecked: [clear-project-main]
+    clearProjectPaths: [/fixtures/team-a/tool]
+    expected: {mode: selected, autoIngestNewBranches: false}
+
+  - name: clearing-available-clone-keeps-only-the-unavailable-clone
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: clear-visible-clone}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool, /fixtures/missing/tool], branches: [main, gone]}
+    expectInitiallyChecked: [clear-visible-clone]
+    clearProjectPaths: [/fixtures/team-a/tool]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/missing/tool], branches: [gone, main]}
+
+  - name: duplicate-name-restores-by-exact-path
+    listings:
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-a/app, branch: main, sessionId: app-a}
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-b/app, branch: main, sessionId: app-b}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app, clonePaths: [/fixtures/team-b/app]}
+    expectInitiallyChecked: [app-b]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app, clonePaths: [/fixtures/team-b/app]}
+
+  - name: ambiguous-pathless-name-selects-nothing
+    listings:
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-a/app, branch: main, sessionId: ambiguous-name-a}
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-b/app, branch: main, sessionId: ambiguous-name-b}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app}
+    expectInitiallyChecked: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app}
+
+  - name: ambiguous-pathless-remote-selects-nothing
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: ambiguous-remote-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: main, sessionId: ambiguous-remote-b}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git"}
+    expectInitiallyChecked: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git"}
+
+  - name: select-all-saves-exact-current-clones
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: select-all-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: release, sessionId: select-all-b}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    expectInitiallyChecked: []
+    selectAll: true
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/team-a/tool, /fixtures/team-b/tool]}
+
+  - name: explicit-session-wins-over-ambiguous-remote
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: explicit-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: main, sessionId: explicit-b}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: main, sessionId: sibling-b}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [explicit-b]
+    expectInitiallyChecked: [explicit-b]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [explicit-b]

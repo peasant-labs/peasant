@@ -68,6 +68,7 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: parent session
     sessionId: cc-parent
     subagentIds: [cc-child]
@@ -75,6 +76,7 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: child subagent
     sessionId: cc-child
     subagentIds: [cc-grandchild]
@@ -82,18 +84,21 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: grandchild subagent
     sessionId: cc-grandchild
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: imported session
     sessionId: cc-imported
   - harness: cursor
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/cursor/acme-tool
     title: cursor session
     sessionId: cur-1
 ingested:

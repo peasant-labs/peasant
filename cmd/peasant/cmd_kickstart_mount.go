@@ -61,9 +61,13 @@ func runKickstartFlow(
 	defer closeStore()
 
 	programDeps := kickstart.ProgramDeps{
-		Theme:                 th,
-		Draft:                 draft,
-		Source:                kickstart.NewScannerTreeSource(sessions, kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db))),
+		Theme: th,
+		Draft: draft,
+		Source: kickstart.NewScannerTreeSource(
+			sessions,
+			kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
+			kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
+		),
 		Preview:               kickstartPreview(cmd, db, th, sessions),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),

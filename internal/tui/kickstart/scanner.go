@@ -2,14 +2,42 @@ package kickstart
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 )
+
+// ProjectIdentity is the stable identity of one available scanner project.
+// Display labels, remotes, and project names are deliberately excluded: two
+// harnesses or two physical clones are different editor projects even when
+// their labels are identical.
+type ProjectIdentity struct {
+	Harness   ingest.Harness
+	ClonePath ingest.ClonePath
+}
+
+// String returns an unambiguous tree key. The harness is length-prefixed so a
+// path cannot collide with a different harness/path pair. This value is identity
+// data and is never rendered as row text.
+func (i ProjectIdentity) String() string {
+	if !i.available() {
+		return ""
+	}
+	harness := i.Harness.String()
+	return strconv.Itoa(len(harness)) + ":" + harness + i.ClonePath.String()
+}
+
+func (i ProjectIdentity) available() bool {
+	return i.Harness != "" && i.ClonePath != ""
+}
 
 // ScannerTreeSource is the REAL kit.TreeSource the mounted kickstart tree loads
 // from: it folds the flat provider discovery listing the legacy wizard already
@@ -29,6 +57,7 @@ import (
 type ScannerTreeSource struct {
 	sessions []ftue.SessionListing
 	ingested map[string]bool
+	resolver ingest.PathIdentityResolver
 }
 
 // ScannerOption configures a ScannerTreeSource at construction.
@@ -52,12 +81,27 @@ func WithIngestedSessionIDs(ids []string) ScannerOption {
 	}
 }
 
+// WithPathIdentityResolver injects the boundary that turns scanner working
+// directories into physical clone identities. Production passes
+// ingest.NewPhysicalPathResolver; deterministic fixture tests can inject a
+// resolver over their pre-resolved paths.
+func WithPathIdentityResolver(resolver ingest.PathIdentityResolver) ScannerOption {
+	return func(s *ScannerTreeSource) {
+		if resolver != nil {
+			s.resolver = resolver
+		}
+	}
+}
+
 // NewScannerTreeSource builds a TreeSource over an already-discovered session
 // listing. The listing is copied defensively so a later mutation of the caller's
 // slice cannot change what a load returns.
 func NewScannerTreeSource(sessions []ftue.SessionListing, opts ...ScannerOption) *ScannerTreeSource {
 	cp := append([]ftue.SessionListing(nil), sessions...)
-	src := &ScannerTreeSource{sessions: cp}
+	src := &ScannerTreeSource{
+		sessions: cp,
+		resolver: ingest.NewPhysicalPathResolver(),
+	}
 	for _, opt := range opts {
 		opt(src)
 	}
@@ -66,24 +110,131 @@ func NewScannerTreeSource(sessions []ftue.SessionListing, opts ...ScannerOption)
 
 var _ kit.TreeSource = (*ScannerTreeSource)(nil)
 
-// Load returns the forest. It never fails - discovery errors are already folded
-// into the empty/partial listing upstream (the legacy wizard shows zero counts
-// rather than failing), so a barren listing yields an empty forest, not an error.
+// Load resolves the complete discovery cohort before it builds any tree nodes.
+// A listing whose working directory is empty, missing, or otherwise unresolved
+// is unavailable for this load and therefore does not become a project row. It
+// still participates in ambiguity annotation, so another clone can never use a
+// remote or name fallback when physical uniqueness was not proved. Per-listing
+// resolution failures keep the existing partial-scan behavior: the available
+// forest still loads, and saved unavailable choices remain in the editor's
+// unmatched baseline.
 func (s *ScannerTreeSource) Load(_ context.Context) ([]*kit.TreeNode, error) {
-	return BuildForest(s.sessions, s.ingested), nil
+	return buildForest(prepareScannerCohort(s.sessions, s.resolver), s.ingested), nil
 }
 
-// BuildForest folds a flat session listing into the ordered
+type scannerListing struct {
+	listing   ftue.SessionListing
+	identity  ProjectIdentity
+	candidate ingest.DiscoveryCandidate
+}
+
+type scannerBranchAgg struct {
+	node     *kit.TreeNode
+	sessions []scannerListing
+}
+
+type scannerProjectAgg struct {
+	identity ProjectIdentity
+	rows     []scannerListing
+	order    []string
+	branches map[string]*scannerBranchAgg
+}
+
+type multiplicityKey struct {
+	harness ingest.Harness
+	text    string
+}
+
+type identityCohort struct {
+	identities map[string]struct{}
+	unresolved bool
+}
+
+// prepareScannerCohort resolves every non-empty WorkingDir first, then annotates
+// every listing from the complete cohort. Session count never affects
+// multiplicity: each normalized remote/name counts distinct ProjectIdentity
+// values only.
+func prepareScannerCohort(sessions []ftue.SessionListing, resolver ingest.PathIdentityResolver) []scannerListing {
+	cohort := make([]scannerListing, len(sessions))
+	remoteCohorts := map[multiplicityKey]*identityCohort{}
+	nameCohorts := map[multiplicityKey]*identityCohort{}
+
+	for index, listing := range sessions {
+		harness := ingest.Harness(listing.Harness)
+		row := scannerListing{
+			listing: listing,
+			candidate: ingest.DiscoveryCandidate{
+				Harness:     harness,
+				GitRemote:   listing.GitRemote,
+				ProjectName: listing.ProjectName,
+				Branch:      listing.Branch,
+				SessionID:   ingest.SessionID(listing.SessionID),
+			},
+		}
+		if listing.WorkingDir != "" && resolver != nil {
+			if clonePath, err := resolver.Resolve(listing.WorkingDir); err == nil && clonePath != "" {
+				row.identity = ProjectIdentity{Harness: harness, ClonePath: clonePath}
+				row.candidate.ClonePath = clonePath
+			}
+		}
+		cohort[index] = row
+		addCohortIdentity(remoteCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeRemoteForMatch(listing.GitRemote)}, row.identity)
+		addCohortIdentity(nameCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeProjectNameForMatch(listing.ProjectName)}, row.identity)
+	}
+
+	for index := range cohort {
+		row := &cohort[index]
+		row.candidate.RemoteMultiplicity = cohortMultiplicity(
+			remoteCohorts,
+			multiplicityKey{harness: row.candidate.Harness, text: ingest.NormalizeRemoteForMatch(row.candidate.GitRemote)},
+		)
+		row.candidate.NameMultiplicity = cohortMultiplicity(
+			nameCohorts,
+			multiplicityKey{harness: row.candidate.Harness, text: ingest.NormalizeProjectNameForMatch(row.candidate.ProjectName)},
+		)
+	}
+	return cohort
+}
+
+func addCohortIdentity(cohorts map[multiplicityKey]*identityCohort, key multiplicityKey, identity ProjectIdentity) {
+	if key.text == "" {
+		return
+	}
+	cohort := cohorts[key]
+	if cohort == nil {
+		cohort = &identityCohort{identities: map[string]struct{}{}}
+		cohorts[key] = cohort
+	}
+	if !identity.available() {
+		cohort.unresolved = true
+		return
+	}
+	cohort.identities[identity.String()] = struct{}{}
+}
+
+func cohortMultiplicity(cohorts map[multiplicityKey]*identityCohort, key multiplicityKey) ingest.DiscoveryIdentityMultiplicity {
+	// Empty identity text cannot match. Mark it explicitly unique so every
+	// candidate is fully annotated without granting any matching evidence.
+	if key.text == "" {
+		return ingest.DiscoveryIdentityUnique
+	}
+	cohort := cohorts[key]
+	if cohort != nil && !cohort.unresolved && len(cohort.identities) == 1 {
+		return ingest.DiscoveryIdentityUnique
+	}
+	return ingest.DiscoveryIdentityAmbiguous
+}
+
+// buildForest folds a fully resolved and annotated scanner cohort into the ordered
 // PROJECT -> BRANCH -> SESSION forest, matching the original FTUE
 // ProjectScopePage hierarchy: project-first, with NO harness grouping axis (the
 // harness is a property of an individual session, carried on the node, not a
 // top-level bucket). Grouping keys:
 //
-//   - project node: keyed by git remote URL when known, else by project name, so
-//     every session of one project groups together regardless of which harness
-//     recorded it; the remote is carried in Meta so the round-trip recovers
-//     ProjectSelection.GitRemote vs Name. Its LABEL is the canonical
-//     projectlabel.Label form ("github:owner/repo"), never the filesystem path.
+//   - project node: keyed only by ProjectIdentity (harness + resolved physical
+//     path). Remote/name/multiplicity metadata is carried separately for the
+//     canonical matcher and config round-trip. A remote label never becomes an
+//     identity key.
 //   - branch node: keyed by branch (or "(unknown branch)" when discovery could
 //     not resolve one) with the branch carried in Meta.
 //   - session node: keyed by the raw session ID, carrying its harness in Meta so
@@ -106,12 +257,13 @@ func (s *ScannerTreeSource) Load(_ context.Context) ([]*kit.TreeNode, error) {
 // Ordering is deterministic (lexicographic within each level, sessions by
 // import state then date then ID) so the rendered tree and any golden capture
 // are stable across runs.
-func BuildForest(sessions []ftue.SessionListing, ingested map[string]bool) []*kit.TreeNode {
+func buildForest(cohort []scannerListing, ingested map[string]bool) []*kit.TreeNode {
 	// Index every session by id, and record which ids are children so a session
 	// is added as a top-level node only when it is nobody's subagent.
-	byID := make(map[string]ftue.SessionListing, len(sessions))
+	byID := make(map[string]ftue.SessionListing, len(cohort))
 	childIDs := map[string]bool{}
-	for _, sess := range sessions {
+	for _, row := range cohort {
+		sess := row.listing
 		if sess.SessionID == "" {
 			continue
 		}
@@ -123,21 +275,18 @@ func BuildForest(sessions []ftue.SessionListing, ingested map[string]bool) []*ki
 		}
 	}
 
-	type branchAgg struct {
-		node     *kit.TreeNode
-		sessions []ftue.SessionListing
-	}
-	type projectAgg struct {
-		node     *kit.TreeNode
-		order    []string
-		branches map[string]*branchAgg
-	}
-
 	projectOrder := []string{}
-	projects := map[string]*projectAgg{}
+	projects := map[string]*scannerProjectAgg{}
 
-	for _, sess := range sessions {
+	for _, row := range cohort {
+		sess := row.listing
 		if sess.SessionID == "" {
+			continue
+		}
+		// A project row cannot exist without a resolved physical identity. The
+		// saved counterpart remains in UnmatchedBaseline and can return when the
+		// directory becomes available again.
+		if !row.identity.available() {
 			continue
 		}
 		// A child (subagent) session is summarised on its parent's row, so it
@@ -145,25 +294,14 @@ func BuildForest(sessions []ftue.SessionListing, ingested map[string]bool) []*ki
 		if childIDs[sess.SessionID] {
 			continue
 		}
-		pKey := sess.GitRemote
-		if pKey == "" {
-			pKey = "name:" + sess.ProjectName
-		}
+		pKey := row.identity.String()
 		p, ok := projects[pKey]
 		if !ok {
-			meta := map[string]string{}
-			if sess.GitRemote != "" {
-				meta[settings.MetaRemote] = sess.GitRemote
-			}
-			label := projectLabel(sess)
-			node := &kit.TreeNode{ID: pKey, Label: label}
-			if len(meta) > 0 {
-				node.Meta = meta
-			}
-			p = &projectAgg{node: node, branches: map[string]*branchAgg{}}
+			p = &scannerProjectAgg{identity: row.identity, branches: map[string]*scannerBranchAgg{}}
 			projects[pKey] = p
 			projectOrder = append(projectOrder, pKey)
 		}
+		p.rows = append(p.rows, row)
 
 		bKey := sess.Branch
 		branchLabel := sess.Branch
@@ -178,51 +316,191 @@ func BuildForest(sessions []ftue.SessionListing, ingested map[string]bool) []*ki
 				Label: branchLabel,
 				Meta:  map[string]string{settings.MetaBranch: bKey},
 			}
-			b = &branchAgg{node: node}
+			b = &scannerBranchAgg{node: node}
 			p.branches[bKey] = b
 			p.order = append(p.order, bKey)
 		}
-		b.sessions = append(b.sessions, sess)
+		b.sessions = append(b.sessions, row)
 	}
 
 	var roots []*kit.TreeNode
 	sort.Strings(projectOrder)
+	projectLabels := scannerProjectLabels(projectOrder, projects)
 	for _, pKey := range projectOrder {
 		p := projects[pKey]
+		representative := projectRepresentative(p.rows)
+		pNode := &kit.TreeNode{
+			ID:    p.identity.String(),
+			Label: projectLabels[pKey],
+			Meta:  scannerProjectMeta(representative, p.identity),
+		}
 		sort.Strings(p.order)
 		for _, bKey := range p.order {
 			b := p.branches[bKey]
 			sortListings(b.sessions)
-			for _, sess := range groupByImportState(b.sessions, ingested) {
-				b.node.Children = append(b.node.Children, sessionNode(sess, byID, ingested))
+			for _, row := range groupByImportState(b.sessions, ingested) {
+				b.node.Children = append(b.node.Children, sessionNode(row, byID, ingested))
 			}
-			p.node.Children = append(p.node.Children, b.node)
+			pNode.Children = append(pNode.Children, b.node)
 		}
-		roots = append(roots, p.node)
+		roots = append(roots, pNode)
 	}
 	return roots
 }
 
-// projectLabel is the project row text: the canonical projectlabel.Label form
-// ("github:owner/repo" when a remote is known), falling back to the discovery
-// project name and finally an explicit placeholder so a row is never blank. It
-// deliberately does NOT surface the filesystem path.
-func projectLabel(sess ftue.SessionListing) string {
-	fallback := sess.ProjectName
+func projectRepresentative(rows []scannerListing) scannerListing {
+	if len(rows) == 0 {
+		return scannerListing{}
+	}
+	ordered := append([]scannerListing(nil), rows...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := ordered[i].listing, ordered[j].listing
+		if (left.GitRemote == "") != (right.GitRemote == "") {
+			return left.GitRemote != ""
+		}
+		if left.GitRemote != right.GitRemote {
+			return left.GitRemote < right.GitRemote
+		}
+		if (left.ProjectName == "") != (right.ProjectName == "") {
+			return left.ProjectName != ""
+		}
+		if left.ProjectName != right.ProjectName {
+			return left.ProjectName < right.ProjectName
+		}
+		return left.SessionID < right.SessionID
+	})
+	return ordered[0]
+}
+
+func scannerProjectMeta(row scannerListing, identity ProjectIdentity) map[string]string {
+	meta := map[string]string{
+		settings.MetaProjectIdentity:    identity.String(),
+		settings.MetaProjectHarness:     identity.Harness.String(),
+		settings.MetaClonePath:          identity.ClonePath.String(),
+		settings.MetaRemoteMultiplicity: multiplicityText(row.candidate.RemoteMultiplicity),
+		settings.MetaNameMultiplicity:   multiplicityText(row.candidate.NameMultiplicity),
+	}
+	if row.listing.GitRemote != "" {
+		meta[settings.MetaRemote] = row.listing.GitRemote
+	}
+	if projectName := ingest.NormalizeProjectNameForMatch(row.listing.ProjectName); projectName != "" {
+		meta[settings.MetaProjectName] = projectName
+	}
+	return meta
+}
+
+func multiplicityText(value ingest.DiscoveryIdentityMultiplicity) string {
+	switch value {
+	case ingest.DiscoveryIdentityUnique:
+		return settings.MetaMultiplicityUnique
+	case ingest.DiscoveryIdentityAmbiguous:
+		return settings.MetaMultiplicityAmbiguous
+	default:
+		return settings.MetaMultiplicityUnproven
+	}
+}
+
+// scannerProjectLabels keeps identity and row text separate. Git projects use
+// their canonical remote label. Non-Git projects use the shortest path suffix
+// that distinguishes equal names in this load, so common duplicate names remain
+// clear without rendering an absolute physical path by default.
+func scannerProjectLabels(order []string, projects map[string]*scannerProjectAgg) map[string]string {
+	labels := make(map[string]string, len(order))
+	nonGitByName := map[string][]string{}
+	for _, key := range order {
+		representative := projectRepresentative(projects[key].rows)
+		if representative.listing.GitRemote != "" {
+			labels[key] = projectlabel.Label(representative.listing.GitRemote, projectFallbackName(representative.listing))
+			continue
+		}
+		name := projectFallbackName(representative.listing)
+		nonGitByName[name] = append(nonGitByName[name], key)
+	}
+	for name, keys := range nonGitByName {
+		paths := make([]ingest.ClonePath, len(keys))
+		for index, key := range keys {
+			paths[index] = projects[key].identity.ClonePath
+		}
+		for index, key := range keys {
+			shortPath := shortestDistinctCloneSuffix(paths[index], paths)
+			if shortPath == "" {
+				labels[key] = name
+				continue
+			}
+			labels[key] = fmt.Sprintf("%s (%s)", name, shortPath)
+		}
+	}
+	return labels
+}
+
+func projectFallbackName(sess ftue.SessionListing) string {
+	fallback := ingest.NormalizeProjectNameForMatch(sess.ProjectName)
 	if fallback == "" {
 		fallback = "(unknown project)"
 	}
-	return projectlabel.Label(sess.GitRemote, fallback)
+	return fallback
+}
+
+func shortestDistinctCloneSuffix(clonePath ingest.ClonePath, cohort []ingest.ClonePath) string {
+	parts := clonePathParts(clonePath)
+	if len(parts) == 0 {
+		return ""
+	}
+	width := 2
+	if len(parts) < width {
+		width = len(parts)
+	}
+	for width < len(parts) && !cloneSuffixUnique(parts, width, clonePath, cohort) {
+		width++
+	}
+	suffix := filepath.Join(parts[len(parts)-width:]...)
+	if width == len(parts) && len(parts) > 2 {
+		return "…" + string(filepath.Separator) + suffix
+	}
+	return suffix
+}
+
+func clonePathParts(clonePath ingest.ClonePath) []string {
+	if clonePath == "" {
+		return nil
+	}
+	clean := filepath.Clean(clonePath.String())
+	volume := filepath.VolumeName(clean)
+	remainder := strings.TrimPrefix(clean, volume)
+	parts := strings.FieldsFunc(remainder, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	if volume != "" {
+		parts = append([]string{volume}, parts...)
+	}
+	return parts
+}
+
+func cloneSuffixUnique(parts []string, width int, own ingest.ClonePath, cohort []ingest.ClonePath) bool {
+	suffix := filepath.Join(parts[len(parts)-width:]...)
+	for _, candidate := range cohort {
+		if candidate == own {
+			continue
+		}
+		candidateParts := clonePathParts(candidate)
+		if len(candidateParts) < width {
+			continue
+		}
+		if filepath.Join(candidateParts[len(candidateParts)-width:]...) == suffix {
+			return false
+		}
+	}
+	return true
 }
 
 // sortListings orders a worktree's sessions by date (oldest first), then by ID
 // for a stable tie-break, so a rebuilt forest is byte-stable across runs.
-func sortListings(ss []ftue.SessionListing) {
+func sortListings(ss []scannerListing) {
 	sort.SliceStable(ss, func(i, j int) bool {
-		if !ss[i].Date.Equal(ss[j].Date) {
-			return ss[i].Date.Before(ss[j].Date)
+		if !ss[i].listing.Date.Equal(ss[j].listing.Date) {
+			return ss[i].listing.Date.Before(ss[j].listing.Date)
 		}
-		return ss[i].SessionID < ss[j].SessionID
+		return ss[i].listing.SessionID < ss[j].listing.SessionID
 	})
 }
 
@@ -238,16 +516,16 @@ func sessionLabel(sess ftue.SessionListing) string {
 // groupByImportState returns the sessions with the not-yet-imported ones first
 // and the already-imported ones after, preserving the incoming order within
 // each group so the result stays deterministic.
-func groupByImportState(sessions []ftue.SessionListing, ingested map[string]bool) []ftue.SessionListing {
-	out := make([]ftue.SessionListing, 0, len(sessions))
-	for _, sess := range sessions {
-		if !ingested[sess.SessionID] {
-			out = append(out, sess)
+func groupByImportState(sessions []scannerListing, ingested map[string]bool) []scannerListing {
+	out := make([]scannerListing, 0, len(sessions))
+	for _, row := range sessions {
+		if !ingested[row.listing.SessionID] {
+			out = append(out, row)
 		}
 	}
-	for _, sess := range sessions {
-		if ingested[sess.SessionID] {
-			out = append(out, sess)
+	for _, row := range sessions {
+		if ingested[row.listing.SessionID] {
+			out = append(out, row)
 		}
 	}
 	return out
@@ -257,8 +535,21 @@ func groupByImportState(sessions []ftue.SessionListing, ingested map[string]bool
 // Meta, the settings.MetaIngested flag when the store already holds it, and
 // settings.MetaChildCount when the session spawned subagents, so the row
 // summarises its children as a count rather than nesting another level.
-func sessionNode(sess ftue.SessionListing, byID map[string]ftue.SessionListing, ingested map[string]bool) *kit.TreeNode {
-	meta := map[string]string{settings.MetaHarness: sess.Harness}
+func sessionNode(row scannerListing, byID map[string]ftue.SessionListing, ingested map[string]bool) *kit.TreeNode {
+	sess := row.listing
+	meta := map[string]string{
+		settings.MetaHarness:            sess.Harness,
+		settings.MetaProjectIdentity:    row.identity.String(),
+		settings.MetaClonePath:          row.candidate.ClonePath.String(),
+		settings.MetaRemoteMultiplicity: multiplicityText(row.candidate.RemoteMultiplicity),
+		settings.MetaNameMultiplicity:   multiplicityText(row.candidate.NameMultiplicity),
+	}
+	if sess.GitRemote != "" {
+		meta[settings.MetaRemote] = sess.GitRemote
+	}
+	if sess.ProjectName != "" {
+		meta[settings.MetaProjectName] = sess.ProjectName
+	}
 	if ingested[sess.SessionID] {
 		meta[settings.MetaIngested] = settings.MetaIngestedValue
 	}

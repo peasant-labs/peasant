@@ -89,19 +89,31 @@ func TestApplyExistingSelection_MatcherParity(t *testing.T) {
 	}
 }
 
-// TestApplyExistingSelection_All pre-checks the whole forest for mode all.
-func TestApplyExistingSelection_All(t *testing.T) {
+// TestPrepopulateSelection_AllWaitsForConversion proves legacy mode all is not
+// compiled or applied as though it were a selected allowlist. The conversion
+// boundary must first provide exact selected projects.
+func TestPrepopulateSelection_AllWaitsForConversion(t *testing.T) {
 	roots, err := scannerfix.Load("standard")
 	if err != nil {
 		t.Fatalf("load standard fixture: %v", err)
 	}
-	ApplyExistingSelection(roots, config.SelectionConfig{Mode: config.SelectionModeAll})
+	for _, root := range roots {
+		setTreeState(root, kit.Unchecked)
+	}
+	unmatched := PrepopulateSelection(roots, config.SelectionConfig{Mode: config.SelectionModeAll})
 	for _, r := range roots {
-		if r.State != kit.Checked {
-			t.Fatalf("provider %s not checked under mode all: %v", r.ID, r.State)
+		if r.State != kit.Unchecked {
+			t.Fatalf("provider %s changed before mode-all conversion: %v", r.ID, r.State)
 		}
 	}
-	if got := FromTreeNodes(roots); got.Mode != config.SelectionModeAll {
-		t.Fatalf("derived mode = %q, want all", got.Mode)
+	if len(unmatched.Harnesses) != 0 {
+		t.Fatalf("mode-all prepopulation returned a selected unmatched baseline: %#v", unmatched)
+	}
+}
+
+func setTreeState(node *kit.TreeNode, state kit.TriState) {
+	node.State = state
+	for _, child := range node.Children {
+		setTreeState(child, state)
 	}
 }

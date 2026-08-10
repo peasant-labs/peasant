@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,16 +19,16 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
-// This file is the kickstart rebuild's acceptance oracle. It drives the NEW
+// This file is the kickstart rebuild's acceptance oracle. It drives the new
 // selection round-trip - the same settings.FromTreeNodes derivation the rebuilt
-// tree field uses, wrapped by kickstart.DeriveSelection's ratified root-check
-// policy - and the NEW atomic commit path (settings.Draft.Commit, the single A5
-// commit point) over the SAME semantic scenarios the current onboarding wizard's
+// tree field uses, wrapped by kickstart.DeriveSelection's exact-current-list
+// policy - and the atomic settings.Draft.Commit path over the same semantic
+// scenarios the current onboarding wizard's
 // goldens were captured from (internal/tui/ftue/testdata/equivalence). For every
 // scenario the persisted config.SelectionConfig must be FIELD-EQUIVALENT
 // (order-insensitive within lists, byte-layout-independent) to the captured
-// golden, with the ONE ratified divergence - root-check -> mode:all standing
-// policy - measured against the divergence target instead.
+// golden, with the exact-current-clone-list transition measured against the
+// divergence target instead.
 //
 // The scenario corpus is READ from the ftue fixtures rather than duplicated, so
 // this oracle and the legacy-capture oracle can never drift: a golden edited on
@@ -80,9 +81,10 @@ type goldenHarness struct {
 }
 
 type goldenProject struct {
-	GitRemote string   `yaml:"gitRemote,omitempty"`
-	Name      string   `yaml:"name,omitempty"`
-	Branches  []string `yaml:"branches,omitempty"`
+	GitRemote  string   `yaml:"gitRemote,omitempty"`
+	Name       string   `yaml:"name,omitempty"`
+	ClonePaths []string `yaml:"clonePaths,omitempty"`
+	Branches   []string `yaml:"branches,omitempty"`
 }
 
 func (g goldenSelection) toConfig() config.SelectionConfig {
@@ -93,9 +95,10 @@ func (g goldenSelection) toConfig() config.SelectionConfig {
 			var projects []config.ProjectSelection
 			for _, p := range h.Projects {
 				projects = append(projects, config.ProjectSelection{
-					GitRemote: p.GitRemote,
-					Name:      p.Name,
-					Branches:  p.Branches,
+					GitRemote:  p.GitRemote,
+					Name:       p.Name,
+					ClonePaths: p.ClonePaths,
+					Branches:   p.Branches,
 				})
 			}
 			harnesses[name] = config.SelectionHarnessConfig{Projects: projects, Sessions: h.Sessions}
@@ -301,6 +304,12 @@ func normalizeSelection(sel config.SelectionConfig) config.SelectionConfig {
 	for name, h := range sel.Harnesses {
 		projects := append([]config.ProjectSelection(nil), h.Projects...)
 		for i := range projects {
+			clonePaths := append([]string(nil), projects[i].ClonePaths...)
+			sort.Strings(clonePaths)
+			if len(clonePaths) == 0 {
+				clonePaths = nil
+			}
+			projects[i].ClonePaths = clonePaths
 			branches := append([]string(nil), projects[i].Branches...)
 			sort.Strings(branches)
 			if len(branches) == 0 {
@@ -312,7 +321,10 @@ func normalizeSelection(sel config.SelectionConfig) config.SelectionConfig {
 			if projects[i].GitRemote != projects[j].GitRemote {
 				return projects[i].GitRemote < projects[j].GitRemote
 			}
-			return projects[i].Name < projects[j].Name
+			if projects[i].Name != projects[j].Name {
+				return projects[i].Name < projects[j].Name
+			}
+			return strings.Join(projects[i].ClonePaths, "\x00") < strings.Join(projects[j].ClonePaths, "\x00")
 		})
 		sessions := append([]string(nil), h.Sessions...)
 		sort.Strings(sessions)
@@ -335,13 +347,24 @@ func assertFieldEquivalent(t *testing.T, scenario string, got, want config.Selec
 	}
 }
 
+func withoutClonePaths(selection config.SelectionConfig) config.SelectionConfig {
+	copy := normalizeSelection(selection)
+	for harness, configured := range copy.Harnesses {
+		for index := range configured.Projects {
+			configured.Projects[index].ClonePaths = nil
+		}
+		copy.Harnesses[harness] = configured
+	}
+	return copy
+}
+
 // --- the oracle ---------------------------------------------------------------
 
 // commitSelection drives the rebuilt kickstart's persistence path end-to-end: it
 // derives the SelectionConfig from the checked forest via kickstart.DeriveSelection
-// (the tree field's own round-trip plus the ratified root-check policy), writes it
-// into a settings.Draft over a real on-disk config, commits atomically through the
-// single A5 commit point, and re-reads the file. The returned value is exactly
+// (the tree field's own round-trip plus the exact-current-list policy), writes it
+// into a settings.Draft over a real on-disk config, commits atomically, and
+// re-reads the file. The returned value is exactly
 // what a user's config.yaml would hold after completing kickstart.
 func commitSelection(t *testing.T, roots []*kit.TreeNode, autoIngest bool) config.SelectionConfig {
 	t.Helper()
@@ -378,9 +401,10 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
-// TestKickstartEquivalence_LegacyGoldens is the field-equivalence proof: for
-// every captured golden scenario, the rebuilt kickstart persists a SelectionConfig
-// field-equivalent to what the current wizard writes.
+// TestKickstartEquivalence_LegacyGoldens proves every pre-existing selection
+// field remains equivalent after removing the one additive identity field. Any
+// project selection must also carry a clone path; explicit-session-only rows do
+// not invent a project.
 func TestKickstartEquivalence_LegacyGoldens(t *testing.T) {
 	t.Parallel()
 	scenarios := loadScenarios(t, legacyGoldensRelPath, legacyGoldenFloor)
@@ -394,16 +418,22 @@ func TestKickstartEquivalence_LegacyGoldens(t *testing.T) {
 			roots := loadInventory(t)
 			applyScopes(roots, scenario.Scopes)
 			got := commitSelection(t, roots, scenario.AutoIngestNewBranches)
-			assertFieldEquivalent(t, scenario.Name, got, scenario.Golden.toConfig())
+			assertFieldEquivalent(t, scenario.Name, withoutClonePaths(got), scenario.Golden.toConfig())
+			for harness, configured := range got.Harnesses {
+				for _, project := range configured.Projects {
+					if len(project.ClonePaths) == 0 {
+						t.Errorf("scenario %q project for %q has no physical clone path: %#v", scenario.Name, harness, project)
+					}
+				}
+			}
 		})
 	}
 }
 
-// TestKickstartEquivalence_RatifiedDivergence pins the ONE ratified behaviour
-// change: root-check (selecting every project) persists mode:all as a standing
-// policy - future projects auto-included - NOT the current wizard's enumerated
-// mode:selected. The rebuild is measured against ratifiedExpected, and the test
-// proves the divergence is live by asserting the target differs from the golden.
+// TestKickstartEquivalence_RatifiedDivergence pins the physical-identity change:
+// selecting every current project remains mode:selected but includes each exact
+// resolver-produced clone path. The legacy wizard's pathless golden stays as the
+// non-vacuity control.
 func TestKickstartEquivalence_RatifiedDivergence(t *testing.T) {
 	t.Parallel()
 	scenarios := loadScenarios(t, ratifiedDivergenceRelPath, ratifiedDivergenceFloor)
@@ -424,8 +454,13 @@ func TestKickstartEquivalence_RatifiedDivergence(t *testing.T) {
 			target := scenario.RatifiedExpected.toConfig()
 			assertFieldEquivalent(t, scenario.Name, got, target)
 
-			if target.Mode != config.SelectionModeAll {
-				t.Errorf("ratified target mode = %q, want %q", target.Mode, config.SelectionModeAll)
+			if target.Mode != config.SelectionModeSelected {
+				t.Errorf("exact-list target mode = %q, want %q", target.Mode, config.SelectionModeSelected)
+			}
+			for harness, configured := range target.Harnesses {
+				if len(configured.Projects) != 1 || len(configured.Projects[0].ClonePaths) != 1 {
+					t.Errorf("exact-list target for %q lacks one physical clone path: %#v", harness, configured)
+				}
 			}
 			if reflect.DeepEqual(normalizeSelection(got), normalizeSelection(scenario.Golden.toConfig())) {
 				t.Fatalf("the ratified divergence is vacuous: the rebuild emitted the legacy golden, not the ratified target")

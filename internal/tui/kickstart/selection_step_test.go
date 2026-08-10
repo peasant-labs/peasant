@@ -22,7 +22,7 @@ func selectionStepView(t *testing.T, width, height int) string {
 	preview := kickstart.NewListingPreview(theme.New(theme.ModeDark), doc.Listings, turnsFromPrompts(stored))
 
 	p, _ := newTestProgram(t, kickstart.ProgramDeps{
-		Source:  kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested)),
+		Source:  kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested)),
 		Preview: preview,
 	})
 	p.SetSize(width, height)
@@ -85,7 +85,7 @@ func TestSelectionStep_PreviewFollowsTheCursor(t *testing.T) {
 	preview := kickstart.NewListingPreview(theme.New(theme.ModeDark), doc.Listings, turnsFromPrompts(stored))
 
 	p, _ := newTestProgram(t, kickstart.ProgramDeps{
-		Source:  kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested)),
+		Source:  kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested)),
 		Preview: preview,
 	})
 	p.SetSize(120, 30)
