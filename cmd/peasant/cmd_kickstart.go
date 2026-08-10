@@ -311,6 +311,7 @@ func ftueDiscoverWith(
 			projectName := d.ProjectName
 			title := d.Title
 			branchName := d.Branch // prefer per-session branch from session data
+			workingDir := d.CWD
 			var gitRemote string
 			// claudeProjectDir is the decoded project directory for a Claude
 			// session, kept so the git resolution below can read its remote.
@@ -342,6 +343,9 @@ func ftueDiscoverWith(
 				if title == "" {
 					title = record.Title
 				}
+				if workingDir == "" {
+					workingDir = record.workingDirectory()
+				}
 			} else {
 				gitRemote, branchName = resolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
 			}
@@ -355,7 +359,7 @@ func ftueDiscoverWith(
 				Date:        date,
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
-				WorkingDir:  d.CWD,
+				WorkingDir:  workingDir,
 			})
 		}
 		discovery.SessionCount = rootCount
