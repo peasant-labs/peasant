@@ -25,7 +25,7 @@ const (
 )
 
 // seedPruneSession inserts a session with minimal data for prune tests.
-func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash string, provider defaults.Harness, startMs int64) {
+func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash string, provider defaults.Harness, startMs int64, worktrees ...string) {
 	t.Helper()
 	ingested := startMs + 120000
 	entry := ingest.StoreEntry{
@@ -50,6 +50,9 @@ func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash strin
 				Format:   schema.SourceFormatJSONL,
 			},
 		},
+	}
+	if len(worktrees) > 0 {
+		entry.Metadata.Git.Worktree = &worktrees[0]
 	}
 	if err := s.InsertSessions(context.Background(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("seedPruneSession(%s): %v", sessionID, err)
@@ -156,6 +159,30 @@ func TestStore_QueryPrunableSessions_BySessionID(t *testing.T) {
 	}
 	if rows[0].SessionID != schema.SessionID(pruneSessionB) {
 		t.Errorf("expected session B, got %s", rows[0].SessionID)
+	}
+	if rows[0].ProjectHash != pruneProjectI {
+		t.Errorf("ProjectHash = %q, want %q", rows[0].ProjectHash, pruneProjectI)
+	}
+	if rows[0].ProjectPath != "/test/project" {
+		t.Errorf("ProjectPath = %q, want canonical cwd fallback %q", rows[0].ProjectPath, "/test/project")
+	}
+}
+
+func TestStore_QueryPrunableSessions_PrefersSessionWorktree(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	worktree := "/test/project-worktree"
+	seedPruneSession(t, s, pruneSessionA, pruneProjectH, defaults.HarnessClaudeCode, 1700000000000, worktree)
+
+	rows, err := s.QueryPrunableSessions(context.Background(), ingest.PruneFilter{All: true})
+	if err != nil {
+		t.Fatalf("QueryPrunableSessions: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("QueryPrunableSessions returned %d rows, want 1", len(rows))
+	}
+	if rows[0].ProjectPath != worktree {
+		t.Errorf("ProjectPath = %q, want session worktree %q", rows[0].ProjectPath, worktree)
 	}
 }
 

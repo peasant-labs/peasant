@@ -292,7 +292,13 @@ func BuildPushCommand() *cobra.Command {
 				// filter; push everything otherwise eligible).
 				if cfg.Selection.Mode == config.SelectionModeSelected {
 					matcher := cfg.SelectionMatcher()
-					runCfg.Selection = &matcher
+					selection, selectionErr := preparePushSelection(
+						ctx, db, matcher, ingest.NewPhysicalPathResolver(),
+					)
+					if selectionErr != nil {
+						return selectionErr
+					}
+					runCfg.Selection = selection
 				}
 
 				// Run the push wizard for interactive confirmation.
@@ -1546,7 +1552,7 @@ func printErrorSummaryTable(w io.Writer, result *push.PushResult) {
 
 // buildPushWizardSessions assembles the exact []push.PushWizardSession the TUI
 // will display: it runs the SHARED base query (QueryPushCandidates), partitions
-// the rows with the branch-aware selection matcher (WizardCandidates — kept
+// the rows with command-prepared branch-aware decisions (WizardCandidates — kept
 // first, then withheld/Locked), and attaches per-session metadata for the
 // redaction-status column.
 //
@@ -1560,7 +1566,7 @@ func buildPushWizardSessions(
 	fs ingest.FileSystem,
 	outputBasePath string,
 	q push.PushCandidateQuery,
-	selection *ingest.SelectionMatcher,
+	selection *push.SessionSelection,
 ) ([]push.PushWizardSession, error) {
 	sessions, err := push.QueryPushCandidates(ctx, db, q)
 	if err != nil {
@@ -1599,7 +1605,7 @@ func runPushWizard(
 	fs ingest.FileSystem,
 	outputBasePath string,
 	q push.PushCandidateQuery,
-	selection *ingest.SelectionMatcher,
+	selection *push.SessionSelection,
 ) ([]string, error) {
 	wizSessions, err := buildPushWizardSessions(ctx, db, fs, outputBasePath, q, selection)
 	if err != nil {
@@ -1623,6 +1629,47 @@ func runPushWizard(
 	}
 
 	return result.SelectedSessionIDs(), nil
+}
+
+// preparePushSelection reads every pushable row before pushed-at, provider,
+// wizard, or repository filtering can narrow the cohort. This makes --force an
+// eligibility switch only: it cannot change clone multiplicity or widen the
+// configured selection.
+func preparePushSelection(
+	ctx context.Context,
+	store push.CandidateStore,
+	matcher ingest.SelectionMatcher,
+	resolver ingest.PathIdentityResolver,
+) (*push.SessionSelection, error) {
+	rows, err := store.AllPushableSessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("prepare push selection: read the complete stored-session cohort before matching clones: %w; nothing was uploaded; repair the local analytics store and retry", err)
+	}
+	inputs := make([]selectionCandidateInput, len(rows))
+	for index, row := range rows {
+		branch := ""
+		if row.GitBranch != nil {
+			branch = *row.GitBranch
+		}
+		inputs[index] = selectionCandidateInput{
+			Harness:     ingest.Harness(row.ModelHarness),
+			GitRemote:   row.GitRemote,
+			ProjectName: row.ProjectName,
+			ProjectHash: row.ProjectHash,
+			ProjectPath: row.ProjectPath,
+			Branch:      branch,
+			SessionID:   ingest.SessionID(row.SessionID),
+		}
+	}
+	candidates, err := prepareSelectionCandidates(ctx, inputs, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("prepare push selection: resolve the complete stored-session cohort before matching clones: %w; nothing was uploaded; retry the command", err)
+	}
+	decisions := make(map[ingest.SessionID]ingest.BranchMatch, len(candidates))
+	for _, candidate := range candidates {
+		decisions[candidate.SessionID] = matcher.MatchBranchCandidate(candidate)
+	}
+	return push.NewSessionSelection(decisions), nil
 }
 
 // pushCandidates reads the sessions this run would publish, using the same query

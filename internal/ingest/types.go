@@ -252,8 +252,10 @@ type PruneFilter struct {
 type PruneSessionRow struct {
 	SessionID   SessionID
 	Harness     Harness
+	ProjectHash string
 	ProjectName string
 	GitRemote   string // git remote URL from host_slugs table (may be empty)
+	ProjectPath string // raw session worktree, falling back to the project's canonical cwd
 	StartMs     int64
 	TurnCount   int
 	OutputPath  string // host_slug used to construct filesystem path
@@ -284,7 +286,9 @@ func (p PrunePlan) SessionIDs() []SessionID {
 	return ids
 }
 
-// IsSelectedBy reports whether this session matches the given selection config.
+// IsSelectedBy reports whether this session matches the given selection config
+// using the legacy positional matcher. Clone-aware command paths must resolve
+// ProjectPath across the complete row cohort and call MatchesCandidate instead.
 // A session is selected if its provider appears in the config AND either:
 //   - the provider has no project/session restrictions (import all), OR
 //   - the session's git remote matches a project's gitRemote, OR

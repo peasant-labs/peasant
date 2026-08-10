@@ -114,6 +114,11 @@ type PipelineConfig struct {
 	// at or after this time are processed.
 	// nil means no time-based filter (backward compatible).
 	Since *time.Time
+	// PrepareSessionFilter receives the complete discovered-session cohort once,
+	// immediately after DISCOVER and before any SessionFilter call. It lets a
+	// filter establish cohort-wide identity multiplicity without per-session lazy
+	// matching. nil means no preparation is required.
+	PrepareSessionFilter func(context.Context, []DiscoveredSession) error
 	// SessionFilter optionally restricts which discovered sessions are processed.
 	// Called during the FILTER stage after DISCOVER and DIFF. Returns true to
 	// include the session. nil means no filter (all sessions pass).
@@ -326,6 +331,11 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 		return nil, fmt.Errorf("pipeline discover: %w", err)
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(allSessions), Total: len(allSessions)})
+	if p.config.PrepareSessionFilter != nil {
+		if err := p.config.PrepareSessionFilter(ctx, allSessions); err != nil {
+			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
+		}
+	}
 
 	// Pre-DIFF: bulk-load session locations from DB to avoid per-session queries
 	// in findMetadataPath. A single SELECT ... WHERE session_id IN (...) replaces
