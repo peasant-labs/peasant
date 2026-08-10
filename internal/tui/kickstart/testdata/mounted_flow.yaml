@@ -1,0 +1,75 @@
+# Mounted kickstart cases use relative path keys. The test materializes them in
+# a real temporary filesystem before it mounts the production flow and scanner.
+expectedCaseCount: 2
+cases:
+  - name: selected-clone-edit-refresh-save
+    operation: edit-refresh-save
+    paths:
+      - {key: clone-a, state: directory}
+      - {key: clone-b, state: directory}
+      - {key: clone-b-link, state: symlink, target: clone-b}
+      - {key: clone-c, state: directory}
+      - {key: vanished-clone, state: moved, target: moved-clone}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: clone-a-session, title: clone a session}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-b-link, branch: main, sessionId: clone-b-session, title: clone b session}
+      - {harness: claude-code, projectName: moved, gitRemote: "git@github.com:acme/moved.git", pathKey: vanished-clone, branch: main, sessionId: vanished-session, title: unavailable session}
+      - {harness: claude-code, projectName: moved, gitRemote: "git@github.com:acme/moved.git", pathKey: clone-c, branch: main, sessionId: clone-c-session, title: clone c session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - harness: claude-code
+          gitRemote: "git@github.com:acme/tool.git"
+          pathKeys: [clone-b]
+        - harness: claude-code
+          gitRemote: "git@github.com:acme/moved.git"
+          pathKeys: [vanished-clone]
+      sessions:
+        - {harness: claude-code, ids: [unavailable-session]}
+    expect:
+      roots:
+        - {pathKey: clone-a, remoteMultiplicity: ambiguous, nameMultiplicity: ambiguous}
+        - {pathKey: clone-b, remoteMultiplicity: ambiguous, nameMultiplicity: ambiguous}
+        - {pathKey: clone-c, remoteMultiplicity: ambiguous, nameMultiplicity: ambiguous}
+      sameRemotePathKeys: [clone-a, clone-b]
+      editorSessions: [clone-a-session, clone-b-session, clone-c-session]
+      unavailableListings: [vanished-session]
+      initiallyCheckedSessions: [clone-b-session]
+      initiallyUncheckedSessions: [clone-a-session, clone-c-session]
+      editRootPathKey: clone-a
+      afterRefreshCheckedSessions: [clone-a-session, clone-b-session]
+      afterRefreshUncheckedSessions: [clone-c-session]
+      loadCount: 2
+      saved:
+        mode: selected
+        autoIngestNewBranches: false
+        projects:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            pathKeys: [clone-a, clone-b]
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/moved.git"
+            pathKeys: [vanished-clone]
+        sessions:
+          - {harness: claude-code, ids: [unavailable-session]}
+
+  - name: mode-all-bypasses-selected-restoration
+    operation: load-only
+    paths:
+      - {key: all-project, state: directory}
+    listings:
+      - {harness: claude-code, projectName: all-project, gitRemote: "git@github.com:acme/all-project.git", pathKey: all-project, branch: main, sessionId: all-session, title: all mode session}
+    saved:
+      mode: all
+      autoIngestNewBranches: true
+    expect:
+      roots:
+        - {pathKey: all-project, remoteMultiplicity: unique, nameMultiplicity: unique}
+      editorSessions: [all-session]
+      initiallyCheckedSessions: []
+      initiallyUncheckedSessions: [all-session]
+      loadCount: 1
+      saved:
+        mode: all
+        autoIngestNewBranches: true
