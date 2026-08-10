@@ -1,0 +1,111 @@
+declared_cases: 6
+declared_sessions: 10
+cases:
+  - name: selected physical clone excludes the same-remote sibling
+    selection_kind: clone-path
+    selected_clone: selected-clone
+    rows:
+      - role: selected-clone
+        session_id: 10000000-0000-4000-8000-000000000001
+        clone: selected-clone
+        git_remote: git@github.com:example/shared.git
+        project_name: shared
+        branch: main
+        expected_push: true
+        expected_prune_delete: false
+      - role: same-remote-sibling
+        session_id: 10000000-0000-4000-8000-000000000002
+        clone: sibling-clone
+        git_remote: git@github.com:example/shared.git
+        project_name: shared
+        branch: main
+        expected_push: false
+        expected_prune_delete: true
+
+  - name: explicit session does not widen to its sibling
+    selection_kind: explicit-session
+    selected_session: 20000000-0000-4000-8000-000000000001
+    rows:
+      - role: explicit-session
+        session_id: 20000000-0000-4000-8000-000000000001
+        clone: explicit-parent
+        git_remote: git@github.com:example/explicit.git
+        project_name: explicit
+        branch: main
+        expected_push: true
+        expected_prune_delete: false
+      - role: explicit-session-sibling
+        session_id: 20000000-0000-4000-8000-000000000002
+        clone: explicit-parent
+        git_remote: git@github.com:example/explicit.git
+        project_name: explicit
+        branch: main
+        expected_push: false
+        expected_prune_delete: true
+
+  - name: force changes eligibility but not clone selection
+    selection_kind: clone-path
+    selected_clone: force-selected
+    force: true
+    rows:
+      - role: force-selected-clone
+        session_id: 30000000-0000-4000-8000-000000000001
+        clone: force-selected
+        git_remote: git@github.com:example/force.git
+        project_name: force
+        branch: main
+        pushed: true
+        expected_push: true
+        expected_prune_delete: false
+      - role: force-same-remote-sibling
+        session_id: 30000000-0000-4000-8000-000000000002
+        clone: force-sibling
+        git_remote: git@github.com:example/force.git
+        project_name: force
+        branch: main
+        pushed: true
+        expected_push: false
+        expected_prune_delete: true
+
+  - name: remote alone selects neither of two physical clones
+    selection_kind: remote
+    rows:
+      - role: ambiguous-remote-clone-a
+        session_id: 40000000-0000-4000-8000-000000000001
+        clone: ambiguous-a
+        git_remote: git@github.com:example/ambiguous.git
+        project_name: ambiguous
+        branch: main
+        expected_push: false
+        expected_prune_delete: true
+      - role: ambiguous-remote-clone-b
+        session_id: 40000000-0000-4000-8000-000000000002
+        clone: ambiguous-b
+        git_remote: git@github.com:example/ambiguous.git
+        project_name: ambiguous
+        branch: main
+        expected_push: false
+        expected_prune_delete: true
+
+  - name: one physical clone proves unique remote evidence
+    selection_kind: remote
+    rows:
+      - role: unique-remote
+        session_id: 50000000-0000-4000-8000-000000000001
+        clone: unique-remote
+        git_remote: git@github.com:example/unique.git
+        project_name: unique
+        branch: main
+        expected_push: true
+        expected_prune_delete: false
+
+  - name: one non-git clone proves unique name evidence
+    selection_kind: name
+    rows:
+      - role: unique-name
+        session_id: 60000000-0000-4000-8000-000000000001
+        clone: unique-name
+        project_name: unique-name
+        branch: main
+        expected_push: true
+        expected_prune_delete: false
