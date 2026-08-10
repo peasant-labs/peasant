@@ -474,6 +474,7 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok &&
 		!p.Connected() && !p.visibilityAsked && p.deps.Login != nil &&
+		!p.flow.Confirming() && !p.flow.Helping() &&
 		p.flow.CurrentSectionKey() == SectionLicense {
 		if action, matched := keymap.Match(keymap.Default(), keyMsg,
 			programActionAvailability{keymap.ActionNextField}); matched && action == keymap.ActionNextField {
