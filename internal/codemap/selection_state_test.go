@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,8 +38,9 @@ type selectionStateInput struct {
 }
 
 type selectionStateProject struct {
-	CWD      string                  `yaml:"cwd"`
-	Sessions []selectionStateSession `yaml:"sessions"`
+	CWD       string                  `yaml:"cwd"`
+	GitRemote string                  `yaml:"git_remote"`
+	Sessions  []selectionStateSession `yaml:"sessions"`
 }
 
 type selectionStateSession struct {
@@ -56,7 +58,7 @@ type selectionStateExpected struct {
 	VisibleSessionCount int  `yaml:"visible_session_count"`
 }
 
-const selectionStateExpectedCaseCount = 7
+const selectionStateExpectedCaseCount = 9
 
 // selectionStatePathResolver treats the fixture's clean absolute paths as
 // already-resolved physical identities. Production uses
@@ -192,6 +194,10 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 						worktree := session.GitWorktree
 						meta.Git.Worktree = &worktree
 					}
+					if project.GitRemote != "" {
+						remote := project.GitRemote
+						meta.Git.Remote = &remote
+					}
 					if session.ParentID != "" {
 						parentID, parentIDErr := schema.NewSessionID(session.ParentID)
 						if parentIDErr != nil {
@@ -217,6 +223,7 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ProjectSummaries: %v", err)
 			}
+			assertProjectSummariesRESTShape(t, result)
 
 			if result.Selection.Active != fixtureCase.Expected.Active {
 				t.Errorf("Selection.Active = %v, want %v", result.Selection.Active, fixtureCase.Expected.Active)
@@ -238,5 +245,27 @@ func TestProjectSummaries_SelectionState(t *testing.T) {
 				t.Errorf("visible project session count = %d, want %d", visibleSessionCount, fixtureCase.Expected.VisibleSessionCount)
 			}
 		})
+	}
+}
+
+func assertProjectSummariesRESTShape(t *testing.T, result *codemap.ProjectSummariesResult) {
+	t.Helper()
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal ProjectSummariesResult: %v", err)
+	}
+	var topLevel map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &topLevel); err != nil {
+		t.Fatalf("decode ProjectSummariesResult JSON: %v", err)
+	}
+	if len(topLevel) != 2 || topLevel["projects"] == nil || topLevel["selection"] == nil {
+		t.Fatalf("ProjectSummariesResult fields = %v, want exactly projects and selection", topLevel)
+	}
+	var selection map[string]json.RawMessage
+	if err := json.Unmarshal(topLevel["selection"], &selection); err != nil {
+		t.Fatalf("decode ProjectSummariesResult.selection JSON: %v", err)
+	}
+	if len(selection) != 3 || selection["active"] == nil || selection["hiddenProjects"] == nil || selection["hiddenSessions"] == nil {
+		t.Fatalf("ProjectSummariesResult.selection fields = %v, want exactly active, hiddenProjects, and hiddenSessions", selection)
 	}
 }

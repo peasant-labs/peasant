@@ -216,15 +216,16 @@ func (s *Service) ProjectSummaries(ctx context.Context) (*ProjectSummariesResult
 		config.SelectionConfig{Mode: mode},
 		projectionCandidates,
 	)
-	visibleSessions, err := effectiveProjectSummarySessions(effective)
+	projectVisibility, err := collectProjectSummaryVisibility(effective)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, cohort := range cohorts {
 		projectID := selectionprojection.ParentProjectID(cohort.project.hash.String())
-		visible := visibleProjectSessions(cohort.sessions, visibleSessions[projectID])
-		row, err := s.projectSummary(ctx, cohort.project, visible)
+		visible := visibleProjectSessions(cohort.sessions, projectVisibility.visibleSessions[projectID])
+		_, parentEffective := projectVisibility.effectiveParents[projectID]
+		row, err := s.projectSummary(ctx, cohort.project, visible, parentEffective)
 		if err != nil {
 			return nil, err
 		}
@@ -309,24 +310,49 @@ func projectSummaryCandidate(
 	}, nil
 }
 
-func effectiveProjectSummarySessions(effective []selectionprojection.EffectiveProject) (map[selectionprojection.ParentProjectID]map[string]struct{}, error) {
-	visible := make(map[selectionprojection.ParentProjectID]map[string]struct{})
+type projectSummaryVisibility struct {
+	effectiveParents map[selectionprojection.ParentProjectID]struct{}
+	visibleSessions  map[selectionprojection.ParentProjectID]map[string]struct{}
+}
+
+func collectProjectSummaryVisibility(effective []selectionprojection.EffectiveProject) (projectSummaryVisibility, error) {
+	visibility := projectSummaryVisibility{
+		effectiveParents: make(map[selectionprojection.ParentProjectID]struct{}),
+		visibleSessions:  make(map[selectionprojection.ParentProjectID]map[string]struct{}),
+	}
 	for _, project := range effective {
 		if len(project.Candidate.Descendants) != 1 {
-			return nil, fmt.Errorf(
+			return projectSummaryVisibility{}, fmt.Errorf(
 				"codemap: collect project-summary visibility for parent %q: EffectiveProjects returned %d descendants for a one-session viewer candidate, so exact hidden-session counts cannot be produced safely; update Peasant and retry",
 				project.Candidate.ParentProjectID,
 				len(project.Candidate.Descendants),
 			)
 		}
-		projectSessions := visible[project.Candidate.ParentProjectID]
+		visibility.effectiveParents[project.Candidate.ParentProjectID] = struct{}{}
+		switch project.SelectedDescendantCount {
+		case 0:
+			// The selected canonical project can remain effective while this
+			// candidate's preferred session worktree belongs to a sibling clone.
+			// Keep the parent row without treating that sibling as selected.
+			continue
+		case 1:
+			// The carrier has exactly one descendant, so a selected count of one
+			// is the only proof that this session itself is visible.
+		default:
+			return projectSummaryVisibility{}, fmt.Errorf(
+				"codemap: collect project-summary visibility for parent %q: EffectiveProjects selected descendant count %d is outside the expected 0..1 range for a one-session viewer candidate; no project list was returned because parent effectiveness cannot safely prove sibling-session visibility; update Peasant and retry",
+				project.Candidate.ParentProjectID,
+				project.SelectedDescendantCount,
+			)
+		}
+		projectSessions := visibility.visibleSessions[project.Candidate.ParentProjectID]
 		if projectSessions == nil {
 			projectSessions = make(map[string]struct{})
-			visible[project.Candidate.ParentProjectID] = projectSessions
+			visibility.visibleSessions[project.Candidate.ParentProjectID] = projectSessions
 		}
 		projectSessions[project.Candidate.Descendants[0].SessionID.String()] = struct{}{}
 	}
-	return visible, nil
+	return visibility, nil
 }
 
 func visibleProjectSessions(sessions []sessionRow, visible map[string]struct{}) []sessionRow {
@@ -339,12 +365,14 @@ func visibleProjectSessions(sessions []sessionRow, visible map[string]struct{}) 
 	return result
 }
 
-// projectSummary measures one project's already-projected visible sessions:
-// recorded activity from the store, coverage against the tracked files at
-// HEAD, and the open-branch count. ProjectSummaries supplies this slice from
-// the same EffectiveProjects pass that computes hidden counts.
-func (s *Service) projectSummary(ctx context.Context, p projectRow, sessions []sessionRow) (*schema.ProjectSummary, error) {
-	if len(sessions) == 0 {
+// projectSummary measures one effective project's already-projected visible
+// sessions: recorded activity from the store, coverage against the tracked
+// files at HEAD, and the open-branch count. An effective selected parent can
+// remain a row with zero sessions when every available descendant belongs to
+// an unselected sibling clone. ProjectSummaries supplies both signals from the
+// same EffectiveProjects pass that computes hidden counts.
+func (s *Service) projectSummary(ctx context.Context, p projectRow, sessions []sessionRow, parentEffective bool) (*schema.ProjectSummary, error) {
+	if !parentEffective {
 		return nil, nil
 	}
 	tasks, err := s.loadTasks(ctx, p.cwd, sessions)

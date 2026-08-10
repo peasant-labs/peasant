@@ -1,4 +1,4 @@
-expectedCaseCount: 7
+expectedCaseCount: 9
 requiredNames:
   - all_mode_selection_inactive_nothing_hidden
   - selected_mode_hides_one_project_entirely
@@ -7,3 +7,5 @@ requiredNames:
   - explicitly_selected_parent_admits_nested_child
   - session_worktree_overrides_project_cwd
   - project_cwd_fallback_admits_session_without_worktree
+  - canonical_clone_selection_does_not_widen_sibling_worktree
+  - selected_canonical_parent_remains_visible_without_selected_descendants

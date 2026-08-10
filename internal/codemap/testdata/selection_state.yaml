@@ -124,3 +124,42 @@ cases:
           sessions:
             - {id: "abababab-7777-4777-8777-777777777777"}
     expected: {active: true, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 1}
+
+  - name: canonical_clone_selection_does_not_widen_sibling_worktree
+    classification: must-pass
+    provenance: {source: bug, ref: sibling-session-visibility-widening}
+    mutation: {description: treat parent-only effectiveness as descendant visibility so the sibling clone session leaks into the summary}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - gitRemote: https://github.com/example/shared.git
+                clonePaths: [/work/shared-clone-a]
+      projects:
+        - cwd: /work/shared-clone-a
+          git_remote: https://github.com/example/shared.git
+          sessions:
+            - {id: "cdcdcdcd-8888-4888-8888-888888888881"}
+            - {id: "cdcdcdcd-8888-4888-8888-888888888882", git_worktree: /work/shared-clone-b}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 1}
+
+  - name: selected_canonical_parent_remains_visible_without_selected_descendants
+    classification: must-pass
+    provenance: {source: requirement, ref: effective-parent-separate-from-descendants}
+    mutation: {description: derive parent visibility only from selected descendant IDs so the selected canonical parent disappears}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - gitRemote: https://github.com/example/parent-only.git
+                clonePaths: [/work/parent-clone-a]
+      projects:
+        - cwd: /work/parent-clone-a
+          git_remote: https://github.com/example/parent-only.git
+          sessions:
+            - {id: "dededede-9999-4999-8999-999999999999", git_worktree: /work/parent-clone-b}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 0}
