@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
@@ -28,6 +29,7 @@ type kickstartCommandDeps struct {
 	getwd        func() (string, error)
 	run          func(ftue.WizardModel) error
 	runFlow      func(tea.Model) error
+	flowIngest   kickstart.IngestFunc
 	existingUser func(string) string
 }
 

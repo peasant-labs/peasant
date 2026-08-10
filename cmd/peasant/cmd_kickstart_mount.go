@@ -77,18 +77,25 @@ func runKickstartFlow(
 	// written to config.yaml); the flow carries it to the retention writer.
 	seedRetentionChoice(draft)
 
+	source := kickstart.NewScannerTreeSource(
+		sessions,
+		kickstart.WithPathIdentityResolver(identityResolver),
+		kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
+	)
+	flowIngest := kickstartIngestFunc(cmd, configPath, sessions)
+	if deps.flowIngest != nil {
+		flowIngest = deps.flowIngest
+	}
+
 	programDeps := kickstart.ProgramDeps{
-		Theme: th,
-		Draft: draft,
-		Source: kickstart.NewScannerTreeSource(
-			sessions,
-			kickstart.WithPathIdentityResolver(identityResolver),
-			kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
-		),
+		Theme:                 th,
+		Draft:                 draft,
+		Source:                source,
+		CommitGate:            settings.NewCommitGateEvaluator(source.CommitGateCandidates()),
 		Preview:               kickstartPreview(cmd, db, th, sessions),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
-		Ingest:                kickstartIngestFunc(cmd, configPath, sessions),
+		Ingest:                flowIngest,
 		AlreadyConnected:      villageAlreadyConnected(),
 		Retention:             kickstart.DefaultRetentionWriter(),
 		// The retention value now comes from the flow's retention field, carried

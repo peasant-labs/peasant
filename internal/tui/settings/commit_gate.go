@@ -6,6 +6,14 @@ import (
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
 )
 
+const noProjectsConfirmationEffects = "You selected no projects.\n" +
+	"Your existing projects stay ingested and indexed.\n" +
+	"The web viewer will not list them.\n" +
+	"You cannot select them for a future push until you change this selection.\n" +
+	"Peasant does not delete data."
+
+const noProjectsConfirmationQuestion = "Save this choice?"
+
 // CommitGate names the action required before a settings draft can commit.
 type CommitGate uint8
 
@@ -16,6 +24,38 @@ const (
 	// with no effective project or available selected descendant.
 	CommitGateConfirmNoProjects
 )
+
+// CommitGateEvaluator evaluates the current draft selection immediately before
+// its single atomic commit point.
+type CommitGateEvaluator func(config.SelectionConfig) CommitGate
+
+// NewCommitGateEvaluator snapshots one complete available project cohort and
+// returns the evaluator mounted by kickstart. The evaluator compiles the
+// canonical selected-mode matcher and always delegates the decision to
+// EvaluateCommitGate; callers never run matcher methods or create gate logic of
+// their own.
+func NewCommitGateEvaluator(candidates []selectionprojection.ProjectCandidate) CommitGateEvaluator {
+	snapshot := cloneProjectCandidates(candidates)
+	return func(selection config.SelectionConfig) CommitGate {
+		var matcher *ingest.SelectionMatcher
+		if selection.Mode == config.SelectionModeSelected {
+			compiled := config.CompileSelectionMatcher(selection)
+			matcher = &compiled
+		}
+		return EvaluateCommitGate(selection, snapshot, matcher)
+	}
+}
+
+// FlowOption configures an optional Flow behavior without changing existing
+// settings flows that do not need a save gate.
+type FlowOption func(*Flow)
+
+// WithCommitGate mounts evaluator at the receipt's save action.
+func WithCommitGate(evaluator CommitGateEvaluator) FlowOption {
+	return func(flow *Flow) {
+		flow.commitGate = evaluator
+	}
+}
 
 // EvaluateCommitGate evaluates the complete available project cohort through
 // the shared effective-project projection. EffectiveProjects promotes every
@@ -33,4 +73,12 @@ func EvaluateCommitGate(
 		return CommitGateNone
 	}
 	return CommitGateConfirmNoProjects
+}
+
+func cloneProjectCandidates(candidates []selectionprojection.ProjectCandidate) []selectionprojection.ProjectCandidate {
+	cloned := append([]selectionprojection.ProjectCandidate(nil), candidates...)
+	for index := range cloned {
+		cloned[index].Descendants = append([]selectionprojection.SessionCandidate(nil), candidates[index].Descendants...)
+	}
+	return cloned
 }
