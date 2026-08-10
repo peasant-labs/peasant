@@ -1,6 +1,8 @@
 expectedRowCount: 1
 rows:
   - name: mounted-local-completion
+    terminalWidth: 80
+    terminalHeight: 24
     connectCopy:
       - local mode keeps all data on this machine
       - connecting sends nothing until a later explicit publish
@@ -16,33 +18,33 @@ rows:
       - 'estimate:'
       - kickstart complete
     completionPreamble:
-      - these are useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
     completionCopy:
+      - open the local dashboard
       - peasant web start
       - starts the dashboard and prints or opens its actual url
+      - connect to a village later
       - peasant village login
+      - connects this machine without publishing a transcript
+      - publish later, explicitly
       - peasant village push
+      - starts a separate explicit publish flow
     forbiddenCopy:
       - http://localhost:8690
     wantIngestCalls: 1
     wantTerminalCalls: 1
 
-expectedPreambleMutationCount: 3
+expectedPreambleMutationCount: 4
 preambleMutations:
-  - name: negated-useful-and-optional
+  - name: not-useful
     lines:
-      - these are not useful, not optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these not useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+  - name: not-optional
+    lines:
+      - these useful but not optional next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
   - name: negated-no-auto-execution
     lines:
-      - these are useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - it is false that kickstart runs none of them.
-  - name: hedged-useful-and-optional
+      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; it is false that kickstart runs none of them.
+  - name: hedged-usefulness
     lines:
-      - these might be useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these potentially useful next steps might let you open the local dashboard, connect to a village, or explicitly publish later; kickstart might run none of them.

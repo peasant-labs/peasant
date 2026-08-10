@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -1018,11 +1019,14 @@ func (p Program) viewDone() string {
 			lines = append(lines, styles.Danger.Render(line))
 		}
 	} else {
-		lines = append(lines,
-			styles.Base.Render("these are useful, optional next commands after local setup."),
-			styles.Muted.Render("open the local dashboard, connect to a village, or explicitly publish later."),
-			styles.Muted.Render("kickstart runs none of them."),
-			"")
+		preamble := "these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+		if p.width > 0 {
+			preamble = ansi.Wrap(preamble, p.width, "")
+		}
+		for _, line := range strings.Split(preamble, "\n") {
+			lines = append(lines, styles.Base.Render(line))
+		}
+		lines = append(lines, "")
 		for _, kind := range p.nextSteps {
 			step, present := canonicalNextStep(kind)
 			if !present {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -30,12 +31,10 @@ const (
 	expectedFailedFocusRows          = 1
 	expectedLatestCompletedFocusRows = 1
 	expectedCompletionRows           = 3
-	expectedCompletionPreambleLines  = 3
-	expectedPreambleMutationRows     = 3
+	expectedCompletionPreambleLines  = 1
+	expectedPreambleMutationRows     = 4
 
-	acceptedCompletionUsefulOptionalLine = "these are useful, optional next commands after local setup."
-	acceptedCompletionPurposeLine        = "open the local dashboard, connect to a village, or explicitly publish later."
-	acceptedCompletionNoExecutionLine    = "kickstart runs none of them."
+	acceptedCompletionPreambleLine = "these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
 )
 
 type progressFocusProbe string
@@ -80,6 +79,8 @@ type progressFixture struct {
 
 type completionFixture struct {
 	Name                    string   `yaml:"name"`
+	TerminalWidth           int      `yaml:"terminalWidth"`
+	TerminalHeight          int      `yaml:"terminalHeight"`
 	AttemptErrors           []string `yaml:"attemptErrors"`
 	RetentionError          string   `yaml:"retentionError"`
 	MutateConfigBeforeRetry bool     `yaml:"mutateConfigBeforeRetry"`
@@ -192,6 +193,9 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 			if err := validateCompletionPreamble(row.WantPreamble); err != nil {
 				t.Fatalf("completion row %q has invalid next-command preamble: %v", row.Name, err)
 			}
+			if row.TerminalWidth != 80 || row.TerminalHeight != 24 {
+				t.Fatalf("successful completion row %q must exercise the mounted 80x24 terminal", row.Name)
+			}
 		} else if len(row.WantPreamble) != 0 {
 			t.Fatalf("failed completion row %q expects a next-command preamble without a command list", row.Name)
 		}
@@ -225,11 +229,7 @@ func validateCompletionPreamble(lines []string) error {
 }
 
 func acceptedCompletionPreambleLines() []string {
-	return []string{
-		acceptedCompletionUsefulOptionalLine,
-		acceptedCompletionPurposeLine,
-		acceptedCompletionNoExecutionLine,
-	}
+	return []string{acceptedCompletionPreambleLine}
 }
 
 func validateProgressCompletionRowCounts(document progressCompletionDocument) error {
@@ -302,7 +302,8 @@ func TestProgressCompletionFixturePinsExactCounts(t *testing.T) {
 			if err := validateCompletionPreamble(mutation.Lines); err == nil {
 				t.Fatal("completion fixture accepted a keyword-preserving semantic mutation")
 			}
-			mutatedRender := strings.Join(append(append([]string(nil), mutation.Lines...), "peasant web start"), "\n")
+			mutatedRender := strings.Join(append(append([]string{"next steps"}, mutation.Lines...),
+				"open the local dashboard", "peasant web start"), "\n")
 			if err := validateRenderedCompletionPreamble(mutatedRender); err == nil {
 				t.Fatal("completion render accepted a keyword-preserving semantic mutation")
 			}
@@ -653,9 +654,17 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 				}
 			}
 
+			if len(row.WantPreamble) > 0 {
+				program.SetSize(row.TerminalWidth, row.TerminalHeight)
+			}
 			rendered := stripRender(program.View())
 			if len(row.WantPreamble) > 0 {
 				assertCompletionPreamble(t, rendered)
+				assertCompletionLinesFitWidth(t, rendered, row.TerminalWidth)
+				if lines := renderedLineCount(rendered); lines > row.TerminalHeight {
+					t.Errorf("completion view uses %d lines, exceeds mounted height %d:\n%s",
+						lines, row.TerminalHeight, rendered)
+				}
 			}
 			view := strings.ToLower(rendered)
 			for _, want := range row.WantContains {
@@ -698,22 +707,31 @@ func assertCompletionPreamble(t *testing.T, view string) {
 	}
 }
 
+func assertCompletionLinesFitWidth(t *testing.T, view string, width int) {
+	t.Helper()
+	for index, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("completion line %d uses %d cells, exceeds mounted width %d: %q",
+				index+1, got, width, line)
+		}
+	}
+}
+
 func validateRenderedCompletionPreamble(view string) error {
 	lines := strings.Split(view, "\n")
-	previous := -1
-	for _, expected := range acceptedCompletionPreambleLines() {
-		at := exactRenderedLineIndex(lines, expected)
-		if at < 0 {
-			return fmt.Errorf("completion does not contain exact preamble line %q", expected)
-		}
-		if at <= previous {
-			return fmt.Errorf("completion preamble is out of order at %q", expected)
-		}
-		previous = at
+	nextSteps := exactRenderedLineIndex(lines, "next steps")
+	firstTitle := exactRenderedLineIndex(lines, "open the local dashboard")
+	if nextSteps < 0 || firstTitle <= nextSteps {
+		return fmt.Errorf("completion preamble must appear between the next-steps heading and command list")
 	}
-	firstCommand := exactRenderedLineIndex(lines, "peasant web start")
-	if firstCommand < 0 || previous >= firstCommand {
-		return fmt.Errorf("completion preamble must appear before the command list")
+	var renderedPreamble []string
+	for _, line := range lines[nextSteps+1 : firstTitle] {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			renderedPreamble = append(renderedPreamble, trimmed)
+		}
+	}
+	if got := strings.Join(renderedPreamble, " "); got != acceptedCompletionPreambleLine {
+		return fmt.Errorf("completion preamble=%q required=%q", got, acceptedCompletionPreambleLine)
 	}
 	return nil
 }

@@ -72,9 +72,9 @@ a qualified estimate when completed bounded work supports one. The completion sc
 until you explicitly leave it. If import fails, the committed configuration and any applied retention
 setting remain in force; retry reruns only local import and does not recommit or reapply either setting.
 
-After a successful import, the completion screen reports that kickstart published nothing and grounds
-three useful, optional next commands after local setup. They cover opening the local dashboard,
-connecting to a Village, or explicitly publishing later; kickstart runs none of them:
+After a successful import, the completion screen reports that kickstart published nothing and introduces
+the command list with: "these useful next steps let you open the local dashboard, connect to a
+village, or explicitly publish later; kickstart runs none of them."
 
 ```text
 peasant web start

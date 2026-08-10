@@ -173,24 +173,31 @@ progress:
 expectedCompletionCount: 3
 completion:
   - name: successful-local-import
+    terminalWidth: 80
+    terminalHeight: 24
     attemptErrors: [""]
     wantPreamble:
-      - these are useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
     wantContains:
       - config saved
       - local import completed
+      - open the local dashboard
       - peasant web start
       - starts the dashboard and prints or opens its actual url
+      - connect to a village later
       - peasant village login
+      - connects this machine without publishing a transcript
+      - publish later, explicitly
       - peasant village push
+      - starts a separate explicit publish flow
       - kickstart published nothing
     wantMissing: ['http://localhost:8690']
     wantIngestCalls: 1
     wantRetentionCalls: 1
     wantProgressResets: 1
   - name: retry-local-import-only
+    terminalWidth: 80
+    terminalHeight: 24
     attemptErrors: [synthetic local import failure, ""]
     mutateConfigBeforeRetry: true
     useRealProgress: true
@@ -208,14 +215,18 @@ completion:
       - 'report 1/2'
       - stale prior-attempt progress
     wantPreamble:
-      - these are useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
     wantContains:
       - local import completed
+      - open the local dashboard
       - peasant web start
+      - starts the dashboard and prints or opens its actual url
+      - connect to a village later
       - peasant village login
+      - connects this machine without publishing a transcript
+      - publish later, explicitly
       - peasant village push
+      - starts a separate explicit publish flow
     wantMissing: ['http://localhost:8690']
     wantIngestCalls: 2
     wantRetentionCalls: 1
@@ -239,20 +250,17 @@ completion:
     wantRetentionCalls: 1
     wantProgressResets: 1
 
-expectedPreambleMutationCount: 3
+expectedPreambleMutationCount: 4
 preambleMutations:
-  - name: negated-useful-and-optional
+  - name: not-useful
     lines:
-      - these are not useful, not optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these not useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+  - name: not-optional
+    lines:
+      - these useful but not optional next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
   - name: negated-no-auto-execution
     lines:
-      - these are useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - it is false that kickstart runs none of them.
-  - name: hedged-useful-and-optional
+      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; it is false that kickstart runs none of them.
+  - name: hedged-usefulness
     lines:
-      - these might be useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these potentially useful next steps might let you open the local dashboard, connect to a village, or explicitly publish later; kickstart might run none of them.

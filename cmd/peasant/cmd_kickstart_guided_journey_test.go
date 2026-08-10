@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -25,14 +26,14 @@ import (
 
 const (
 	expectedMountedJourneyRows          = 1
-	expectedMountedPreambleMutationRows = 3
-	mountedAcceptedUsefulOptionalLine   = "these are useful, optional next commands after local setup."
-	mountedAcceptedPurposeLine          = "open the local dashboard, connect to a village, or explicitly publish later."
-	mountedAcceptedNoExecutionLine      = "kickstart runs none of them."
+	expectedMountedPreambleMutationRows = 4
+	mountedAcceptedPreambleLine         = "these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
 )
 
 type mountedJourneyFixture struct {
 	Name               string   `yaml:"name"`
+	TerminalWidth      int      `yaml:"terminalWidth"`
+	TerminalHeight     int      `yaml:"terminalHeight"`
 	ConnectCopy        []string `yaml:"connectCopy"`
 	ConsentCopy        []string `yaml:"consentCopy"`
 	ProgressCopy       []string `yaml:"progressCopy"`
@@ -78,8 +79,9 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 	seen := map[string]bool{}
 	for _, row := range document.Rows {
 		if strings.TrimSpace(row.Name) == "" || seen[row.Name] || len(row.ConnectCopy) != 2 || len(row.ConsentCopy) == 0 ||
-			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 || len(row.CompletionPreamble) != 3 ||
-			len(row.CompletionCopy) != 4 || len(row.ForbiddenCopy) == 0 || row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
+			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 || len(row.CompletionPreamble) != 1 ||
+			len(row.CompletionCopy) != 9 || len(row.ForbiddenCopy) == 0 || row.TerminalWidth != 80 || row.TerminalHeight != 24 ||
+			row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
 			t.Fatalf("mounted journey row is incomplete or duplicated: %#v", row)
 		}
 		if err := validateMountedCompletionPreamble(row.CompletionPreamble); err != nil {
@@ -94,7 +96,7 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 	}
 	mutationNames := map[string]bool{}
 	for _, row := range document.PreambleMutations {
-		if strings.TrimSpace(row.Name) == "" || mutationNames[row.Name] || len(row.Lines) != 3 {
+		if strings.TrimSpace(row.Name) == "" || mutationNames[row.Name] || len(row.Lines) != 1 {
 			t.Fatalf("mounted preamble mutation row is incomplete or duplicated: %#v", row)
 		}
 		mutationNames[row.Name] = true
@@ -116,11 +118,7 @@ func validateMountedCompletionPreamble(lines []string) error {
 }
 
 func mountedAcceptedCompletionPreambleLines() []string {
-	return []string{
-		mountedAcceptedUsefulOptionalLine,
-		mountedAcceptedPurposeLine,
-		mountedAcceptedNoExecutionLine,
-	}
+	return []string{mountedAcceptedPreambleLine}
 }
 
 func TestMountedJourneyFixtureRejectsKeywordPreservingPreambleMutations(t *testing.T) {
@@ -130,8 +128,9 @@ func TestMountedJourneyFixtureRejectsKeywordPreservingPreambleMutations(t *testi
 			if err := validateMountedCompletionPreamble(mutation.Lines); err == nil {
 				t.Fatal("mounted fixture accepted a keyword-preserving completion preamble mutation")
 			}
-			mutatedRender := strings.Join(append(append([]string(nil), mutation.Lines...), "peasant web start"), "\n")
-			if err := validateMountedRenderedCompletionPreamble(mutatedRender, "peasant web start"); err == nil {
+			mutatedRender := strings.Join(append(append([]string{"next steps"}, mutation.Lines...),
+				"open the local dashboard", "peasant web start"), "\n")
+			if err := validateMountedRenderedCompletionPreamble(mutatedRender, "open the local dashboard"); err == nil {
 				t.Fatal("mounted render accepted a keyword-preserving completion preamble mutation")
 			}
 		})
@@ -184,7 +183,7 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 					t.Fatalf("mounted journey received %T, want kickstart.Model", model)
 				}
 				program := mounted.Program()
-				program.SetSize(180, 50)
+				program.SetSize(row.TerminalWidth, row.TerminalHeight)
 				connectView := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
 				choiceAt := strings.Index(connectView, "connect to a village now?")
 				for _, want := range row.ConnectCopy {
@@ -277,6 +276,11 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 				}
 				completion := ansiPattern.ReplaceAllString(program.View(), "")
 				assertMountedCompletionPreamble(t, completion, row)
+				assertMountedCompletionLinesFitWidth(t, completion, row.TerminalWidth)
+				if lines := len(strings.Split(completion, "\n")); lines > row.TerminalHeight {
+					t.Errorf("mounted completion uses %d lines, exceeds mounted height %d:\n%s",
+						lines, row.TerminalHeight, completion)
+				}
 				completionLower := strings.ToLower(completion)
 				for _, want := range row.CompletionCopy {
 					if !strings.Contains(completionLower, strings.ToLower(want)) {
@@ -288,7 +292,7 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 						t.Errorf("mounted completion fabricates %q:\n%s", forbidden, completion)
 					}
 				}
-				program, _ = program.Update(tea.WindowSizeMsg{Width: 181, Height: 51})
+				program, _ = program.Update(tea.WindowSizeMsg{Width: row.TerminalWidth + 1, Height: row.TerminalHeight})
 				persistentCompletion := ansiPattern.ReplaceAllString(program.View(), "")
 				assertMountedCompletionPreamble(t, persistentCompletion, row)
 				persistentCompletionLower := strings.ToLower(persistentCompletion)
@@ -316,24 +320,36 @@ func assertMountedCompletionPreamble(t *testing.T, view string, row mountedJourn
 	if err := validateMountedRenderedCompletionPreamble(view, row.CompletionCopy[0]); err != nil {
 		t.Fatalf("mounted completion preamble is invalid: %v\n%s", err, view)
 	}
+	if err := validateMountedCommandLayout(view, row.CompletionCopy); err != nil {
+		t.Fatalf("mounted completion command layout is invalid: %v\n%s", err, view)
+	}
+}
+
+func assertMountedCompletionLinesFitWidth(t *testing.T, view string, width int) {
+	t.Helper()
+	for index, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("mounted completion line %d uses %d cells, exceeds mounted width %d: %q",
+				index+1, got, width, line)
+		}
+	}
 }
 
 func validateMountedRenderedCompletionPreamble(view, firstCommand string) error {
 	lines := strings.Split(view, "\n")
-	previous := -1
-	for _, expected := range mountedAcceptedCompletionPreambleLines() {
-		at := mountedExactRenderedLineIndex(lines, expected)
-		if at < 0 {
-			return fmt.Errorf("mounted completion does not contain exact preamble line %q", expected)
-		}
-		if at <= previous {
-			return fmt.Errorf("mounted completion preamble is out of order at %q", expected)
-		}
-		previous = at
-	}
+	nextSteps := mountedExactRenderedLineIndex(lines, "next steps")
 	firstCommandAt := mountedExactRenderedLineIndex(lines, firstCommand)
-	if firstCommandAt < 0 || previous >= firstCommandAt {
-		return fmt.Errorf("mounted completion preamble must precede its command list")
+	if nextSteps < 0 || firstCommandAt <= nextSteps {
+		return fmt.Errorf("mounted completion preamble must appear between the next-steps heading and command list")
+	}
+	var renderedPreamble []string
+	for _, line := range lines[nextSteps+1 : firstCommandAt] {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			renderedPreamble = append(renderedPreamble, trimmed)
+		}
+	}
+	if got := strings.Join(renderedPreamble, " "); got != mountedAcceptedPreambleLine {
+		return fmt.Errorf("mounted completion preamble=%q required=%q", got, mountedAcceptedPreambleLine)
 	}
 	return nil
 }
@@ -345,6 +361,22 @@ func mountedExactRenderedLineIndex(lines []string, want string) int {
 		}
 	}
 	return -1
+}
+
+func validateMountedCommandLayout(view string, expected []string) error {
+	lines := strings.Split(view, "\n")
+	previous := -1
+	for _, want := range expected {
+		at := mountedExactRenderedLineIndex(lines, want)
+		if at < 0 {
+			return fmt.Errorf("mounted completion does not contain exact command-layout line %q", want)
+		}
+		if at <= previous {
+			return fmt.Errorf("mounted completion command-layout line %q is out of order", want)
+		}
+		previous = at
+	}
+	return nil
 }
 
 func drainMountedKickstartStartup(program kickstart.Program, command tea.Cmd) kickstart.Program {

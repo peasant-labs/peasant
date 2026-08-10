@@ -4,17 +4,17 @@ rows:
     valid: true
     kinds: [web-start, village-login, village-push]
     wantPreamble:
-      - these are useful, optional next commands after local setup.
-      - open the local dashboard, connect to a village, or explicitly publish later.
-      - kickstart runs none of them.
+      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
     wantContains:
       - open the local dashboard
       - peasant web start
       - starts the dashboard and prints or opens its actual url
       - connect to a village later
       - peasant village login
+      - connects this machine without publishing a transcript
       - publish later, explicitly
       - peasant village push
+      - starts a separate explicit publish flow
     wantMissing: ['http://localhost:8690', completion guidance unavailable]
   - name: unknown-kind
     valid: false
