@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -43,7 +44,30 @@ func runKickstartFlow(
 	if err != nil {
 		loaded = config.BaseConfig()
 	}
-	draft, err := settings.NewDraft(configPath, loaded)
+	th := theme.New(themeModeFor(loaded))
+
+	// One store handle serves both the already-imported marks and the preview
+	// pane's body reads for the whole flow. A legacy all-projects policy also
+	// reads its complete stored-session identity evidence through this handle.
+	// It is closed when the flow returns.
+	db, closeStore, storeOpenErr := openKickstartStoreWithError(cmd)
+	defer closeStore()
+	if storeOpenErr != nil && loaded.Selection.Mode == config.SelectionModeAll {
+		return fmt.Errorf(
+			"prepare legacy project selection: %w.\n"+
+				"what: Peasant could not open the stored sessions needed to build exact project choices.\n"+
+				"why: Peasant could not read the local session store as a Peasant database.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while converting the saved all-projects setting.\n"+
+				"meaning: Peasant did not change the saved setting or start setup.\n"+
+				"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", storeOpenErr)
+	}
+	identityResolver := ingest.NewPhysicalPathResolver()
+	flowConfig, err := prepareKickstartFlowConfig(ctx, loaded, sessions, db, identityResolver)
+	if err != nil {
+		return err
+	}
+	draft, err := settings.NewDraft(configPath, flowConfig)
 	if err != nil {
 		return err
 	}
@@ -53,19 +77,12 @@ func runKickstartFlow(
 	// written to config.yaml); the flow carries it to the retention writer.
 	seedRetentionChoice(draft)
 
-	th := theme.New(themeModeFor(loaded))
-
-	// One store handle serves both the already-imported marks and the preview
-	// pane's body reads for the whole flow; it is closed when the flow returns.
-	db, closeStore := openKickstartStore(cmd)
-	defer closeStore()
-
 	programDeps := kickstart.ProgramDeps{
 		Theme: th,
 		Draft: draft,
 		Source: kickstart.NewScannerTreeSource(
 			sessions,
-			kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
+			kickstart.WithPathIdentityResolver(identityResolver),
 			kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
 		),
 		Preview:               kickstartPreview(cmd, db, th, sessions),
@@ -85,20 +102,85 @@ func runKickstartFlow(
 	return deps.runFlow(model)
 }
 
+// prepareKickstartFlowConfig replaces a legacy mode-all policy only in the
+// in-memory draft baseline. It reads every stored session, builds exact physical
+// project choices through kickstart.ConvertLegacyAll, and carries unresolved
+// stored session IDs into the selected-mode baseline. The config file is not
+// changed here. settings.Draft.Commit remains the only write, after the user
+// reviews and saves the flow.
+func prepareKickstartFlowConfig(
+	ctx context.Context,
+	loaded *config.Config,
+	sessions []ftue.SessionListing,
+	db *store.Store,
+	resolver ingest.PathIdentityResolver,
+) (*config.Config, error) {
+	if loaded.Selection.Mode != config.SelectionModeAll {
+		return loaded, nil
+	}
+
+	var stored []store.IngestedSessionRow
+	if db != nil {
+		var err error
+		stored, err = db.AllIngestedSessions(ctx)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"prepare legacy project selection: %w.\n"+
+					"what: Peasant could not read the stored sessions needed to build exact project choices.\n"+
+					"why: the local session store query failed.\n"+
+					"where: runKickstartFlow, before the selection screen opened.\n"+
+					"when: while converting the saved all-projects setting.\n"+
+					"meaning: Peasant did not change the saved setting or start setup.\n"+
+					"fix: check that the Peasant data directory is readable, then run `peasant kickstart` again.", err)
+		}
+	}
+
+	conversion, err := kickstart.ConvertLegacyAll(
+		sessions,
+		stored,
+		resolver,
+		loaded.Selection.AutoIngestNewBranches,
+	)
+	if err != nil {
+		return nil, err
+	}
+	merged := settings.MergeSelection(settings.TreeSelection{
+		Mode:      conversion.Initial.Mode,
+		Harnesses: conversion.Initial.Harnesses,
+	}, conversion.Unmatched)
+	selection := conversion.Initial
+	selection.Harnesses = merged.Harnesses
+	converted := *loaded
+	converted.Selection = selection
+	return &converted, nil
+}
+
 // openKickstartStore opens the local store for the duration of the flow, plus
 // the func that closes it. It is best-effort: on a first run the store may not
 // exist yet, and any open problem yields a nil store and a no-op close, so
 // onboarding runs without the marks and preview bodies it would have provided.
 func openKickstartStore(cmd *cobra.Command) (*store.Store, func()) {
+	db, closeStore, _ := openKickstartStoreWithError(cmd)
+	return db, closeStore
+}
+
+// openKickstartStoreWithError is the exact store-open boundary used by legacy
+// conversion. The compatibility wrapper above keeps preview and imported-mark
+// reads best-effort, while conversion can reject an unreadable existing store
+// instead of mistaking unavailable evidence for an empty store.
+func openKickstartStoreWithError(cmd *cobra.Command) (*store.Store, func(), error) {
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, func() {}
+		if os.IsNotExist(err) {
+			return nil, func() {}, nil
+		}
+		return nil, func() {}, err
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
-		return nil, func() {}
+		return nil, func() {}, err
 	}
-	return db, func() { _ = db.Close() }
+	return db, func() { _ = db.Close() }, nil
 }
 
 // ingestedSessionIDs reads the session ids the local store already holds so the
