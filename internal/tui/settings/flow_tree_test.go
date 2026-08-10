@@ -142,6 +142,27 @@ func TestFlow_TreeFieldRestoresSavedSelectionOnFirstSuccessfulLoad(t *testing.T)
 	}
 }
 
+func TestFlow_GenericTreeKeepsGenericSelectAllHelp(t *testing.T) {
+	path, loaded := writeConfigFile(t)
+	loaded.Selection.Mode = config.SelectionModeSelected
+	draft, err := NewDraft(path, loaded)
+	if err != nil {
+		t.Fatalf("NewDraft: %v", err)
+	}
+	flow := NewFlow(theme.New(theme.ModeDark), treeRegistry(scannerfix.NewFixtureTreeSource("standard")), draft)
+	flow.SetSize(100, 20)
+	flow = drainInit(flow)
+	flow = send(flow, "?")
+
+	view := flow.View()
+	if !strings.Contains(view, "select all") {
+		t.Fatalf("generic tree footer lost select-all help:\n%s", view)
+	}
+	if strings.Contains(view, "select all projects") {
+		t.Fatalf("generic tree inherited kickstart-only project wording:\n%s", view)
+	}
+}
+
 func TestFlow_TreeFieldRefreshPreservesCurrentEdits(t *testing.T) {
 	path, loaded := writeConfigFile(t)
 	loaded.Selection = config.SelectionConfig{

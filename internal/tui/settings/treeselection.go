@@ -95,12 +95,19 @@ const (
 	MetaChildCount = kit.MetaChildCount
 )
 
-// metaExplicitBranchSelection marks a project whose saved rule names branches.
-// When every currently available named branch is checked, the tree normally
-// rolls the project up to Checked, which is otherwise indistinguishable from an
-// unrestricted whole-project rule. This marker keeps the saved branch policy
-// explicit across a no-edit save. It is editor state only and is never persisted.
-const metaExplicitBranchSelection = "explicitBranchSelection"
+// Selection provenance markers preserve the grain of saved rules when rollup
+// makes every currently available child look like one checked parent. They are
+// editor state only and are never persisted.
+const (
+	// metaExplicitBranchSelection marks a project whose saved rule names
+	// branches. It prevents a no-edit save from widening that rule to every
+	// branch when all currently available named branches happen to be checked.
+	metaExplicitBranchSelection = "explicitBranchSelection"
+	// metaExplicitSessionSelection marks a session selected only by its explicit
+	// saved ID. It prevents a no-edit save from widening one or all currently
+	// available sessions into a branch or whole-project rule.
+	metaExplicitSessionSelection = "explicitSessionSelection"
+)
 
 // metaRemote and metaBranch are short unexported aliases of the exported
 // MetaRemote / MetaBranch keys, used by the round-trip call sites in this file
@@ -319,11 +326,13 @@ func projectBuildKey(remote, name, identity string, pathBound bool) string {
 	if normalized := ingest.NormalizeRemoteForMatch(remote); normalized != "" {
 		return "remote:" + normalized
 	}
-	if normalized := ingest.NormalizeProjectNameForMatch(name); normalized != "" {
-		return "name:" + normalized
-	}
+	// A remote-empty project with a resolved path is one physical non-Git
+	// project. Equal display names do not create a shared branch policy.
 	if pathBound {
 		return "identity:" + identity
+	}
+	if normalized := ingest.NormalizeProjectNameForMatch(name); normalized != "" {
+		return "name:" + normalized
 	}
 	return "unidentified:" + identity
 }
@@ -391,18 +400,29 @@ func fromProjectFirstForest(roots []*kit.TreeNode) TreeSelection {
 		}
 		switch project.State {
 		case kit.Checked:
-			if metaOf(project, metaExplicitBranchSelection) == "true" {
+			switch {
+			case checkedOnlyByExplicitSessions(project):
+				collectExplicitSessionIDs(project, get)
+			case metaOf(project, metaExplicitBranchSelection) == "true":
 				for _, branch := range project.Children {
+					if checkedOnlyByExplicitSessions(branch) {
+						collectExplicitSessionIDs(branch, get)
+						continue
+					}
 					addBranch(project, branch, remote, name, branchOf(branch))
 				}
-			} else {
+			default:
 				addProjectAllBranches(project, remote, name)
 			}
 		case kit.Partial:
 			for _, branch := range project.Children {
 				switch branch.State {
 				case kit.Checked:
-					addBranch(project, branch, remote, name, branchOf(branch))
+					if checkedOnlyByExplicitSessions(branch) {
+						collectExplicitSessionIDs(branch, get)
+					} else {
+						addBranch(project, branch, remote, name, branchOf(branch))
+					}
 				case kit.Partial:
 					for _, session := range branch.Children {
 						collectCheckedSessionIDs(session, get)
@@ -435,6 +455,41 @@ func fromProjectFirstForest(roots []*kit.TreeNode) TreeSelection {
 		ts.Harnesses = nil
 	}
 	return ts
+}
+
+// checkedOnlyByExplicitSessions reports whether every checked session in scope
+// was restored or selected at session grain. It is used only when rollup has
+// made scope Checked; a scope with no session nodes is never session-scoped.
+func checkedOnlyByExplicitSessions(scope *kit.TreeNode) bool {
+	found := false
+	onlyExplicit := true
+	var walk func(*kit.TreeNode)
+	walk = func(node *kit.TreeNode) {
+		if harnessOf(node) != "" && node.State == kit.Checked {
+			found = true
+			if metaOf(node, metaExplicitSessionSelection) != "true" {
+				onlyExplicit = false
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(scope)
+	return found && onlyExplicit
+}
+
+func collectExplicitSessionIDs(scope *kit.TreeNode, get func(string) *harnessBuild) {
+	var walk func(*kit.TreeNode)
+	walk = func(node *kit.TreeNode) {
+		if harness := harnessOf(node); harness != "" && node.State == kit.Checked && metaOf(node, metaExplicitSessionSelection) == "true" {
+			get(harness).sessions = appendUniqueString(get(harness).sessions, node.ID)
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(scope)
 }
 
 // collectCheckedSessionIDs adds the ids of the Checked sessions in a session
@@ -630,6 +685,7 @@ func PrepopulateSelection(roots []*kit.TreeNode, sel config.SelectionConfig) Unm
 
 	projects := availableProjectsFromForest(roots)
 	markExplicitBranchSelections(sel, projects)
+	markExplicitSessionSelections(sel, projects)
 	matcher := config.CompileSelectionMatcher(sel)
 	for projectIndex := range projects {
 		project := &projects[projectIndex]
@@ -649,6 +705,69 @@ func PrepopulateSelection(roots []*kit.TreeNode, sel config.SelectionConfig) Unm
 		rollup(root)
 	}
 	return unmatchedSelection(sel, projects)
+}
+
+// markExplicitSessionSelections records which available sessions rely only on
+// their explicit saved IDs. A duplicate explicit ID that is also admitted by a
+// project rule does not need session provenance because removing it would not
+// narrow the saved selection.
+func markExplicitSessionSelections(sel config.SelectionConfig, projects []availableProject) {
+	explicit := map[string]map[string]struct{}{}
+	projectHarnesses := map[string]config.SelectionHarnessConfig{}
+	for harness, configured := range sel.Harnesses {
+		if len(configured.Sessions) > 0 {
+			explicit[harness] = map[string]struct{}{}
+			for _, sessionID := range configured.Sessions {
+				explicit[harness][sessionID] = struct{}{}
+			}
+		}
+		if len(configured.Projects) > 0 {
+			projectHarnesses[harness] = config.SelectionHarnessConfig{Projects: configured.Projects}
+		}
+	}
+	projectMatcher := config.CompileSelectionMatcher(config.SelectionConfig{
+		Mode:                  config.SelectionModeSelected,
+		AutoIngestNewBranches: sel.AutoIngestNewBranches,
+		Harnesses:             projectHarnesses,
+	})
+	for projectIndex := range projects {
+		project := &projects[projectIndex]
+		for sessionIndex := range project.sessions {
+			session := &project.sessions[sessionIndex]
+			if session.node.Meta != nil {
+				delete(session.node.Meta, metaExplicitSessionSelection)
+			}
+			if _, selected := explicit[session.candidate.Harness.String()][session.node.ID]; !selected {
+				continue
+			}
+			if projectMatcher.MatchDiscoveryCandidate(session.candidate, sel.AutoIngestNewBranches) == ingest.BranchMatchYes {
+				continue
+			}
+			if session.node.Meta == nil {
+				session.node.Meta = map[string]string{}
+			}
+			session.node.Meta[metaExplicitSessionSelection] = "true"
+		}
+	}
+}
+
+func setExplicitSessionIntent(scope *kit.TreeNode, explicit bool) {
+	if scope == nil {
+		return
+	}
+	if harnessOf(scope) != "" {
+		if scope.Meta == nil {
+			scope.Meta = map[string]string{}
+		}
+		if explicit {
+			scope.Meta[metaExplicitSessionSelection] = "true"
+		} else {
+			delete(scope.Meta, metaExplicitSessionSelection)
+		}
+	}
+	for _, child := range scope.Children {
+		setExplicitSessionIntent(child, explicit)
+	}
 }
 
 // markExplicitBranchSelections preserves the distinction between a configured
@@ -1077,12 +1196,17 @@ func mergeProjectKey(project config.ProjectSelection) string {
 	if remote := ingest.NormalizeRemoteForMatch(project.GitRemote); remote != "" {
 		return fmt.Sprintf("remote:%s|path:%t", remote, pathBound)
 	}
-	if name := ingest.NormalizeProjectNameForMatch(project.Name); name != "" {
-		return fmt.Sprintf("name:%s|path:%t", name, pathBound)
+	// A path-bound non-Git entry is identified by its exact physical path set.
+	// Name fallback is reserved for legacy entries that have no path evidence.
+	if pathBound {
+		paths := append([]string(nil), project.ClonePaths...)
+		sort.Strings(paths)
+		return fmt.Sprintf("clone:%v", paths)
 	}
-	paths := append([]string(nil), project.ClonePaths...)
-	sort.Strings(paths)
-	return fmt.Sprintf("clone:%v|path:%t", paths, pathBound)
+	if name := ingest.NormalizeProjectNameForMatch(project.Name); name != "" {
+		return "name:" + name
+	}
+	return "unidentified"
 }
 
 func mergeBranches(existing, incoming []string) []string {

@@ -102,6 +102,10 @@ type Field interface {
 	blur()
 	setSize(width, height int)
 	availableActions() []keymap.ActionID
+	// actionKeymap returns the bindings and contextual help text for this field.
+	// Keys remain app-wide; a field may make one action's scope explicit in its
+	// help description.
+	actionKeymap() keymap.Keymap
 	// sync pulls d's current value into the field's live component (used on
 	// (re-)entry to a step so the component reflects the draft, including after
 	// an edit was dropped).
@@ -128,6 +132,9 @@ type baseField struct {
 func (b baseField) Key() string         { return b.key }
 func (b baseField) Label() string       { return b.label }
 func (b baseField) Description() string { return b.desc }
+func (b baseField) actionKeymap() keymap.Keymap {
+	return keymap.Default()
+}
 
 func (b baseField) When(d *Draft) bool {
 	if b.when == nil {

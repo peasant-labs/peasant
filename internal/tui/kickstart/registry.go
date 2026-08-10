@@ -172,6 +172,7 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 		settings.WithFacet(settings.MetaHarness, "harness"),
 		settings.WithFacetDisplay(harnessFacetLabel),
 		settings.WithSelectionRestoration(),
+		settings.WithSelectAllHelp("select all projects"),
 	}
 	if opts.Preview != nil {
 		out = append(out, settings.WithPreviewBodySource(opts.Preview))

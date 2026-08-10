@@ -233,7 +233,7 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 	if f.helping {
 		// While the help overlay is up, ? or esc closes it and every other key
 		// is swallowed so it cannot leak into the underlying step.
-		if action, ok := keymap.Match(keymap.Default(), keyMsg, helpAvailability{}); ok {
+		if action, ok := keymap.Match(f.actionKeymap(), keyMsg, helpAvailability{}); ok {
 			switch action {
 			case keymap.ActionHelp, keymap.ActionBack:
 				f.helping = false
@@ -241,7 +241,7 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 		}
 		return f, nil
 	}
-	action, ok := keymap.Match(keymap.Default(), keyMsg, f.availability())
+	action, ok := keymap.Match(f.actionKeymap(), keyMsg, f.availability())
 	if ok {
 		switch action {
 		case keymap.ActionHelp:
@@ -312,7 +312,7 @@ func (f Flow) View() string {
 	frame.SetContent(f.body(frame.InnerWidth(), frame.InnerHeight()))
 	base := frame.View()
 	if f.helping {
-		return f.overlay.Push(helpLayer{th: f.th, entries: keymap.HelpEntries(keymap.Default(), f.availability())}).View(base)
+		return f.overlay.Push(helpLayer{th: f.th, entries: keymap.HelpEntries(f.actionKeymap(), f.availability())}).View(base)
 	}
 	if f.confirming {
 		f.confirm.SetSize(kit.ConfirmMinSize.Width, kit.ConfirmMinSize.Height)
@@ -360,7 +360,14 @@ func (f Flow) title() string {
 }
 
 func (f Flow) footer() string {
-	return keymap.FooterView(f.th, keymap.Default(), f.availability())
+	return keymap.FooterView(f.th, f.actionKeymap(), f.availability())
+}
+
+func (f Flow) actionKeymap() keymap.Keymap {
+	if !f.OnReceipt() && f.focusField >= 0 && f.focusField < len(f.steps[f.cur].Fields) {
+		return f.steps[f.cur].Fields[f.focusField].actionKeymap()
+	}
+	return keymap.Default()
 }
 
 // body renders the current step's fields, or the receipt.

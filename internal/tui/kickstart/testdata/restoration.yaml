@@ -1,7 +1,7 @@
 # Pure restoration and merge cases. All working directories are pre-resolved
 # fixture identities; real symlink and missing-directory behavior is tested with
 # the production resolver and temporary directories.
-expectedCaseCount: 15
+expectedCaseCount: 18
 cases:
   - name: restore-exact-clone-whole-project
     listings:
@@ -218,6 +218,30 @@ cases:
           projects:
             - {name: app, clonePaths: [/fixtures/team-b/app]}
 
+  - name: duplicate-non-git-paths-keep-separate-branch-policies
+    listings:
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-a/app, branch: main, sessionId: app-a-main}
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-a/app, branch: release, sessionId: app-a-release}
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-b/app, branch: main, sessionId: app-b-main}
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-b/app, branch: release, sessionId: app-b-release}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app, clonePaths: [/fixtures/team-a/app]}
+            - {name: app, clonePaths: [/fixtures/team-b/app], branches: [release, unavailable]}
+    expectInitiallyChecked: [app-a-main, app-a-release, app-b-release]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app, clonePaths: [/fixtures/team-a/app]}
+            - {name: app, clonePaths: [/fixtures/team-b/app], branches: [release, unavailable]}
+
   - name: ambiguous-pathless-name-selects-nothing
     listings:
       - {harness: claude-code, projectName: app, workingDir: /fixtures/team-a/app, branch: main, sessionId: ambiguous-name-a}
@@ -291,3 +315,43 @@ cases:
       harnesses:
         claude-code:
           sessions: [explicit-b]
+
+  - name: sole-explicit-session-stays-session-scoped
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: sole-explicit}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [sole-explicit]
+    expectInitiallyChecked: [sole-explicit]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [sole-explicit]
+
+  - name: all-current-explicit-sessions-stay-session-scoped
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: explicit-current-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: explicit-current-b}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [explicit-current-a, explicit-current-b]
+    expectInitiallyChecked: [explicit-current-a, explicit-current-b]
+    laterListings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: explicit-current-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: explicit-current-b}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main, sessionId: future-sibling}
+    expectLaterChecked: [explicit-current-a, explicit-current-b]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [explicit-current-a, explicit-current-b]

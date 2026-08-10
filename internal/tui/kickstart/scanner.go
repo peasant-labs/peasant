@@ -119,23 +119,27 @@ var _ kit.TreeSource = (*ScannerTreeSource)(nil)
 // forest still loads, and saved unavailable choices remain in the editor's
 // unmatched baseline.
 func (s *ScannerTreeSource) Load(_ context.Context) ([]*kit.TreeNode, error) {
-	return buildForest(prepareScannerCohort(s.sessions, s.resolver), s.ingested), nil
+	return buildForest(PrepareSessionListings(s.sessions, s.resolver), s.ingested), nil
 }
 
-type scannerListing struct {
-	listing   ftue.SessionListing
-	identity  ProjectIdentity
-	candidate ingest.DiscoveryCandidate
+// PreparedSessionListing carries one discovered session together with the
+// physical project identity and complete-cohort multiplicity evidence used by
+// every kickstart matcher call. The scanner tree and post-save ingest callback
+// consume this same value so they cannot disagree about clone identity.
+type PreparedSessionListing struct {
+	Listing         ftue.SessionListing
+	ProjectIdentity ProjectIdentity
+	Candidate       ingest.DiscoveryCandidate
 }
 
 type scannerBranchAgg struct {
 	node     *kit.TreeNode
-	sessions []scannerListing
+	sessions []PreparedSessionListing
 }
 
 type scannerProjectAgg struct {
 	identity ProjectIdentity
-	rows     []scannerListing
+	rows     []PreparedSessionListing
 	order    []string
 	branches map[string]*scannerBranchAgg
 }
@@ -150,20 +154,22 @@ type identityCohort struct {
 	unresolved bool
 }
 
-// prepareScannerCohort resolves every non-empty WorkingDir first, then annotates
+// PrepareSessionListings resolves every non-empty WorkingDir first, then annotates
 // every listing from the complete cohort. Session count never affects
 // multiplicity: each normalized remote/name counts distinct ProjectIdentity
-// values only.
-func prepareScannerCohort(sessions []ftue.SessionListing, resolver ingest.PathIdentityResolver) []scannerListing {
-	cohort := make([]scannerListing, len(sessions))
+// values only. A listing with unresolved path evidence remains in the returned
+// cohort so an explicit session ID can still match, but it cannot become a
+// scanner project row or enable remote/name fallback.
+func PrepareSessionListings(sessions []ftue.SessionListing, resolver ingest.PathIdentityResolver) []PreparedSessionListing {
+	cohort := make([]PreparedSessionListing, len(sessions))
 	remoteCohorts := map[multiplicityKey]*identityCohort{}
 	nameCohorts := map[multiplicityKey]*identityCohort{}
 
 	for index, listing := range sessions {
 		harness := ingest.Harness(listing.Harness)
-		row := scannerListing{
-			listing: listing,
-			candidate: ingest.DiscoveryCandidate{
+		row := PreparedSessionListing{
+			Listing: listing,
+			Candidate: ingest.DiscoveryCandidate{
 				Harness:     harness,
 				GitRemote:   listing.GitRemote,
 				ProjectName: listing.ProjectName,
@@ -173,24 +179,24 @@ func prepareScannerCohort(sessions []ftue.SessionListing, resolver ingest.PathId
 		}
 		if listing.WorkingDir != "" && resolver != nil {
 			if clonePath, err := resolver.Resolve(listing.WorkingDir); err == nil && clonePath != "" {
-				row.identity = ProjectIdentity{Harness: harness, ClonePath: clonePath}
-				row.candidate.ClonePath = clonePath
+				row.ProjectIdentity = ProjectIdentity{Harness: harness, ClonePath: clonePath}
+				row.Candidate.ClonePath = clonePath
 			}
 		}
 		cohort[index] = row
-		addCohortIdentity(remoteCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeRemoteForMatch(listing.GitRemote)}, row.identity)
-		addCohortIdentity(nameCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeProjectNameForMatch(listing.ProjectName)}, row.identity)
+		addCohortIdentity(remoteCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeRemoteForMatch(listing.GitRemote)}, row.ProjectIdentity)
+		addCohortIdentity(nameCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeProjectNameForMatch(listing.ProjectName)}, row.ProjectIdentity)
 	}
 
 	for index := range cohort {
 		row := &cohort[index]
-		row.candidate.RemoteMultiplicity = cohortMultiplicity(
+		row.Candidate.RemoteMultiplicity = cohortMultiplicity(
 			remoteCohorts,
-			multiplicityKey{harness: row.candidate.Harness, text: ingest.NormalizeRemoteForMatch(row.candidate.GitRemote)},
+			multiplicityKey{harness: row.Candidate.Harness, text: ingest.NormalizeRemoteForMatch(row.Candidate.GitRemote)},
 		)
-		row.candidate.NameMultiplicity = cohortMultiplicity(
+		row.Candidate.NameMultiplicity = cohortMultiplicity(
 			nameCohorts,
-			multiplicityKey{harness: row.candidate.Harness, text: ingest.NormalizeProjectNameForMatch(row.candidate.ProjectName)},
+			multiplicityKey{harness: row.Candidate.Harness, text: ingest.NormalizeProjectNameForMatch(row.Candidate.ProjectName)},
 		)
 	}
 	return cohort
@@ -257,13 +263,13 @@ func cohortMultiplicity(cohorts map[multiplicityKey]*identityCohort, key multipl
 // Ordering is deterministic (lexicographic within each level, sessions by
 // import state then date then ID) so the rendered tree and any golden capture
 // are stable across runs.
-func buildForest(cohort []scannerListing, ingested map[string]bool) []*kit.TreeNode {
+func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*kit.TreeNode {
 	// Index every session by id, and record which ids are children so a session
 	// is added as a top-level node only when it is nobody's subagent.
 	byID := make(map[string]ftue.SessionListing, len(cohort))
 	childIDs := map[string]bool{}
 	for _, row := range cohort {
-		sess := row.listing
+		sess := row.Listing
 		if sess.SessionID == "" {
 			continue
 		}
@@ -279,14 +285,14 @@ func buildForest(cohort []scannerListing, ingested map[string]bool) []*kit.TreeN
 	projects := map[string]*scannerProjectAgg{}
 
 	for _, row := range cohort {
-		sess := row.listing
+		sess := row.Listing
 		if sess.SessionID == "" {
 			continue
 		}
 		// A project row cannot exist without a resolved physical identity. The
 		// saved counterpart remains in UnmatchedBaseline and can return when the
 		// directory becomes available again.
-		if !row.identity.available() {
+		if !row.ProjectIdentity.available() {
 			continue
 		}
 		// A child (subagent) session is summarised on its parent's row, so it
@@ -294,10 +300,10 @@ func buildForest(cohort []scannerListing, ingested map[string]bool) []*kit.TreeN
 		if childIDs[sess.SessionID] {
 			continue
 		}
-		pKey := row.identity.String()
+		pKey := row.ProjectIdentity.String()
 		p, ok := projects[pKey]
 		if !ok {
-			p = &scannerProjectAgg{identity: row.identity, branches: map[string]*scannerBranchAgg{}}
+			p = &scannerProjectAgg{identity: row.ProjectIdentity, branches: map[string]*scannerBranchAgg{}}
 			projects[pKey] = p
 			projectOrder = append(projectOrder, pKey)
 		}
@@ -348,13 +354,13 @@ func buildForest(cohort []scannerListing, ingested map[string]bool) []*kit.TreeN
 	return roots
 }
 
-func projectRepresentative(rows []scannerListing) scannerListing {
+func projectRepresentative(rows []PreparedSessionListing) PreparedSessionListing {
 	if len(rows) == 0 {
-		return scannerListing{}
+		return PreparedSessionListing{}
 	}
-	ordered := append([]scannerListing(nil), rows...)
+	ordered := append([]PreparedSessionListing(nil), rows...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		left, right := ordered[i].listing, ordered[j].listing
+		left, right := ordered[i].Listing, ordered[j].Listing
 		if (left.GitRemote == "") != (right.GitRemote == "") {
 			return left.GitRemote != ""
 		}
@@ -372,18 +378,18 @@ func projectRepresentative(rows []scannerListing) scannerListing {
 	return ordered[0]
 }
 
-func scannerProjectMeta(row scannerListing, identity ProjectIdentity) map[string]string {
+func scannerProjectMeta(row PreparedSessionListing, identity ProjectIdentity) map[string]string {
 	meta := map[string]string{
 		settings.MetaProjectIdentity:    identity.String(),
 		settings.MetaProjectHarness:     identity.Harness.String(),
 		settings.MetaClonePath:          identity.ClonePath.String(),
-		settings.MetaRemoteMultiplicity: multiplicityText(row.candidate.RemoteMultiplicity),
-		settings.MetaNameMultiplicity:   multiplicityText(row.candidate.NameMultiplicity),
+		settings.MetaRemoteMultiplicity: multiplicityText(row.Candidate.RemoteMultiplicity),
+		settings.MetaNameMultiplicity:   multiplicityText(row.Candidate.NameMultiplicity),
 	}
-	if row.listing.GitRemote != "" {
-		meta[settings.MetaRemote] = row.listing.GitRemote
+	if row.Listing.GitRemote != "" {
+		meta[settings.MetaRemote] = row.Listing.GitRemote
 	}
-	if projectName := ingest.NormalizeProjectNameForMatch(row.listing.ProjectName); projectName != "" {
+	if projectName := ingest.NormalizeProjectNameForMatch(row.Listing.ProjectName); projectName != "" {
 		meta[settings.MetaProjectName] = projectName
 	}
 	return meta
@@ -409,11 +415,11 @@ func scannerProjectLabels(order []string, projects map[string]*scannerProjectAgg
 	nonGitByName := map[string][]string{}
 	for _, key := range order {
 		representative := projectRepresentative(projects[key].rows)
-		if representative.listing.GitRemote != "" {
-			labels[key] = projectlabel.Label(representative.listing.GitRemote, projectFallbackName(representative.listing))
+		if representative.Listing.GitRemote != "" {
+			labels[key] = projectlabel.Label(representative.Listing.GitRemote, projectFallbackName(representative.Listing))
 			continue
 		}
-		name := projectFallbackName(representative.listing)
+		name := projectFallbackName(representative.Listing)
 		nonGitByName[name] = append(nonGitByName[name], key)
 	}
 	for name, keys := range nonGitByName {
@@ -495,12 +501,12 @@ func cloneSuffixUnique(parts []string, width int, own ingest.ClonePath, cohort [
 
 // sortListings orders a worktree's sessions by date (oldest first), then by ID
 // for a stable tie-break, so a rebuilt forest is byte-stable across runs.
-func sortListings(ss []scannerListing) {
+func sortListings(ss []PreparedSessionListing) {
 	sort.SliceStable(ss, func(i, j int) bool {
-		if !ss[i].listing.Date.Equal(ss[j].listing.Date) {
-			return ss[i].listing.Date.Before(ss[j].listing.Date)
+		if !ss[i].Listing.Date.Equal(ss[j].Listing.Date) {
+			return ss[i].Listing.Date.Before(ss[j].Listing.Date)
 		}
-		return ss[i].listing.SessionID < ss[j].listing.SessionID
+		return ss[i].Listing.SessionID < ss[j].Listing.SessionID
 	})
 }
 
@@ -516,15 +522,15 @@ func sessionLabel(sess ftue.SessionListing) string {
 // groupByImportState returns the sessions with the not-yet-imported ones first
 // and the already-imported ones after, preserving the incoming order within
 // each group so the result stays deterministic.
-func groupByImportState(sessions []scannerListing, ingested map[string]bool) []scannerListing {
-	out := make([]scannerListing, 0, len(sessions))
+func groupByImportState(sessions []PreparedSessionListing, ingested map[string]bool) []PreparedSessionListing {
+	out := make([]PreparedSessionListing, 0, len(sessions))
 	for _, row := range sessions {
-		if !ingested[row.listing.SessionID] {
+		if !ingested[row.Listing.SessionID] {
 			out = append(out, row)
 		}
 	}
 	for _, row := range sessions {
-		if ingested[row.listing.SessionID] {
+		if ingested[row.Listing.SessionID] {
 			out = append(out, row)
 		}
 	}
@@ -535,14 +541,14 @@ func groupByImportState(sessions []scannerListing, ingested map[string]bool) []s
 // Meta, the settings.MetaIngested flag when the store already holds it, and
 // settings.MetaChildCount when the session spawned subagents, so the row
 // summarises its children as a count rather than nesting another level.
-func sessionNode(row scannerListing, byID map[string]ftue.SessionListing, ingested map[string]bool) *kit.TreeNode {
-	sess := row.listing
+func sessionNode(row PreparedSessionListing, byID map[string]ftue.SessionListing, ingested map[string]bool) *kit.TreeNode {
+	sess := row.Listing
 	meta := map[string]string{
 		settings.MetaHarness:            sess.Harness,
-		settings.MetaProjectIdentity:    row.identity.String(),
-		settings.MetaClonePath:          row.candidate.ClonePath.String(),
-		settings.MetaRemoteMultiplicity: multiplicityText(row.candidate.RemoteMultiplicity),
-		settings.MetaNameMultiplicity:   multiplicityText(row.candidate.NameMultiplicity),
+		settings.MetaProjectIdentity:    row.ProjectIdentity.String(),
+		settings.MetaClonePath:          row.Candidate.ClonePath.String(),
+		settings.MetaRemoteMultiplicity: multiplicityText(row.Candidate.RemoteMultiplicity),
+		settings.MetaNameMultiplicity:   multiplicityText(row.Candidate.NameMultiplicity),
 	}
 	if sess.GitRemote != "" {
 		meta[settings.MetaRemote] = sess.GitRemote

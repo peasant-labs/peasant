@@ -1,13 +1,13 @@
 package kickstart_test
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -31,20 +31,30 @@ type listingsDoc struct {
 	Listings             []ftue.SessionListing `yaml:"listings"`
 }
 
+//go:embed testdata/listings.yaml
+var listingsData []byte
+
 func loadListings(t *testing.T) listingsDoc {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "listings.yaml"))
-	if err != nil {
-		t.Fatalf("read listings fixture: %v", err)
-	}
 	var doc listingsDoc
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := decodeStrictFixture(listingsData, &doc); err != nil {
 		t.Fatalf("decode listings fixture: %v", err)
 	}
-	if doc.ExpectedListingCount != len(doc.Listings) {
+	if doc.ExpectedListingCount != len(doc.Listings) || len(doc.Listings) == 0 {
 		t.Fatalf("expectedListingCount=%d but %d listings present", doc.ExpectedListingCount, len(doc.Listings))
 	}
 	return doc
+}
+
+func TestListingsFixtureRejectsUnknownCloneIdentityKey(t *testing.T) {
+	malformed := bytes.Replace(listingsData, []byte("workingDir:"), []byte("workingDirectoryTypo:"), 1)
+	if bytes.Equal(malformed, listingsData) {
+		t.Fatal("listings fixture has no workingDir key to mutate")
+	}
+	var document listingsDoc
+	if err := decodeStrictFixture(malformed, &document); err == nil {
+		t.Fatal("listings fixture decoder accepted an unknown clone-identity key")
+	}
 }
 
 // forestCounts walks the PROJECT -> BRANCH -> SESSION forest and returns

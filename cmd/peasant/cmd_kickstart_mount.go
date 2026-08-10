@@ -234,12 +234,25 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 // admitted sessions.
 func kickstartIngestFunc(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) kickstart.IngestFunc {
 	runner, _ := buildFTUEIngestRunner(cmd, configPath)
+	return kickstartIngestFuncWithRunner(configPath, sessions, ingest.NewPhysicalPathResolver(), runner)
+}
+
+// kickstartIngestFuncWithRunner builds the same post-save callback with its
+// filesystem identity boundary and ingest runner injected. Production supplies
+// the physical resolver and real pipeline runner; focused mounted tests replace
+// only those dependencies and exercise this callback unchanged.
+func kickstartIngestFuncWithRunner(
+	configPath string,
+	sessions []ftue.SessionListing,
+	resolver ingest.PathIdentityResolver,
+	runner ftue.IngestRunnerFunc,
+) kickstart.IngestFunc {
 	return func(ctx context.Context) (*ftue.IngestResult, error) {
 		cfg, err := loadConfig(configPath)
 		if err != nil {
 			return nil, err
 		}
-		answers := deriveKickstartAnswers(cfg, sessions)
+		answers := deriveKickstartAnswers(cfg, sessions, resolver)
 		return runner(ctx, answers)
 	}
 }
@@ -247,7 +260,11 @@ func kickstartIngestFunc(cmd *cobra.Command, configPath string, sessions []ftue.
 // deriveKickstartAnswers translates the committed config.Selection into the
 // ftue.WizardAnswers the existing ingest runner consumes, reusing the canonical
 // selection matcher so kickstart imports exactly what the saved selection admits.
-func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) ftue.WizardAnswers {
+func deriveKickstartAnswers(
+	cfg *config.Config,
+	sessions []ftue.SessionListing,
+	resolver ingest.PathIdentityResolver,
+) ftue.WizardAnswers {
 	// Mode:all - import every discovered provider's sessions.
 	if cfg.Selection.Mode != config.SelectionModeSelected {
 		harnesses := map[string]bool{}
@@ -264,13 +281,11 @@ func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) 
 	matcher := config.CompileSelectionMatcher(cfg.Selection)
 	selectedHarnesses := map[string]bool{}
 	var selected []ftue.SessionListing
-	for _, s := range sessions {
-		match := matcher.MatchDiscovery(
-			ingest.Harness(s.Harness), s.GitRemote, s.ProjectName, s.Branch,
-			ingest.SessionID(s.SessionID), cfg.Selection.AutoIngestNewBranches)
+	for _, prepared := range kickstart.PrepareSessionListings(sessions, resolver) {
+		match := matcher.MatchDiscoveryCandidate(prepared.Candidate, cfg.Selection.AutoIngestNewBranches)
 		if match == ingest.BranchMatchYes {
-			selected = append(selected, s)
-			selectedHarnesses[s.Harness] = true
+			selected = append(selected, prepared.Listing)
+			selectedHarnesses[prepared.Listing.Harness] = true
 		}
 	}
 	var provs []ftue.ProviderSelection

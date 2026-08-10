@@ -1,6 +1,7 @@
 package kickstart_test
 
 import (
+	_ "embed"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,7 +10,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
@@ -50,11 +50,19 @@ type equivalenceDoc struct {
 
 type equivalenceScenario struct {
 	Name                  string           `yaml:"name"`
+	Doc                   string           `yaml:"doc"`
 	Oracle                string           `yaml:"oracle"`
+	WantImport            bool             `yaml:"wantImport"`
 	AutoIngestNewBranches bool             `yaml:"autoIngestNewBranches"`
+	Providers             []providerInput  `yaml:"providers"`
 	Scopes                []scopeInput     `yaml:"scopes"`
 	Golden                goldenSelection  `yaml:"golden"`
 	RatifiedExpected      *goldenSelection `yaml:"ratifiedExpected,omitempty"`
+}
+
+type providerInput struct {
+	Harness   string `yaml:"harness"`
+	ImportAll bool   `yaml:"importAll"`
 }
 
 type scopeInput struct {
@@ -118,7 +126,7 @@ func loadScenarios(t *testing.T, relPath string, floor int) []equivalenceScenari
 		t.Fatalf("read scenario corpus %q: %v", relPath, err)
 	}
 	var doc equivalenceDoc
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := decodeStrictFixture(data, &doc); err != nil {
 		t.Fatalf("decode scenario corpus %q: %v", relPath, err)
 	}
 	if doc.ExpectedScenarioCount != len(doc.Scenarios) {
@@ -138,11 +146,7 @@ func loadScenarios(t *testing.T, relPath string, floor int) []equivalenceScenari
 // inline forest. The fixture is authored in the kickstart package's testdata.
 func loadInventory(t *testing.T) []*kit.TreeNode {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "inventory.yaml"))
-	if err != nil {
-		t.Fatalf("read inventory fixture: %v", err)
-	}
-	roots, err := parseForest(data)
+	roots, err := parseForest(inventoryData)
 	if err != nil {
 		t.Fatalf("parse inventory fixture: %v", err)
 	}
@@ -163,9 +167,12 @@ type fixtureDoc struct {
 	Roots             []fixtureNode `yaml:"roots"`
 }
 
+//go:embed testdata/inventory.yaml
+var inventoryData []byte
+
 func parseForest(data []byte) ([]*kit.TreeNode, error) {
 	var doc fixtureDoc
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := decodeStrictFixture(data, &doc); err != nil {
 		return nil, err
 	}
 	count := 0

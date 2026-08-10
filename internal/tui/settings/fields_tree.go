@@ -61,6 +61,9 @@ type treeField struct {
 	// baseline application. Other generic Tree users keep the source-provided
 	// states they already own.
 	restoreSelection bool
+	// selectAllHelp narrows the generic select-all action's user-facing scope.
+	// The key and action ID remain canonical.
+	selectAllHelp string
 
 	// full is the whole forest the source last loaded; view is the (possibly
 	// narrowed) forest the tree currently renders, sharing full's leaf pointers.
@@ -127,6 +130,13 @@ func WithPreviewBody(build func(theme.Theme) kit.BodyRenderer) TreeOption {
 // kickstart uses it for its selection editor.
 func WithSelectionRestoration() TreeOption {
 	return func(f *treeField) { f.restoreSelection = true }
+}
+
+// WithSelectAllHelp gives this tree a scope-specific description for the
+// canonical select-all action. It changes no key binding and leaves unrelated
+// trees on the generic "select all" wording.
+func WithSelectAllHelp(description string) TreeOption {
+	return func(f *treeField) { f.selectAllHelp = description }
 }
 
 // Tree builds the selection-tree field bound to acc, loading its forest from
@@ -209,6 +219,21 @@ func (f *treeField) availableActions() []keymap.ActionID {
 	return actions
 }
 
+func (f *treeField) actionKeymap() keymap.Keymap {
+	km := keymap.Default()
+	if f.selectAllHelp == "" {
+		return km
+	}
+	binding, ok := km[keymap.ActionSelectAll]
+	if !ok {
+		return km
+	}
+	help := binding.Help()
+	binding.SetHelp(help.Key, f.selectAllHelp)
+	km[keymap.ActionSelectAll] = binding
+	return km
+}
+
 func (f *treeField) sync(d *Draft) {}
 
 // handle forwards a message to the live tree, then re-derives the selection
@@ -218,6 +243,7 @@ func (f *treeField) sync(d *Draft) {}
 func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	wasLoading := f.tree.Loading()
+	intent := f.captureSelectionIntent(msg)
 	if !f.handleFacetKey(msg) {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
@@ -228,6 +254,7 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		}
 		loadSucceeded := wasLoading && !f.tree.Loading() && f.tree.Err() == nil
 		f.captureForest(loadSucceeded)
+		f.applySelectionIntent(intent)
 	}
 
 	// A spinner tick, an in-flight load, or a failed load must not replace the
@@ -265,6 +292,86 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	derived := FromTreeNodes(f.selectionRoots())
 	f.acc.Set(d.Working(), MergeSelection(derived, f.unmatched))
 	return cmd
+}
+
+type treeSelectionIntent struct {
+	action  keymap.ActionID
+	scope   *kit.TreeNode
+	checked bool
+}
+
+// captureSelectionIntent records the user-selected grain before the kit tree
+// mutates node state. A session action remains an explicit session rule. A
+// branch, project, or select-all action deliberately promotes that scope to a
+// project rule and clears restored session-only provenance beneath it.
+func (f *treeField) captureSelectionIntent(msg tea.Msg) treeSelectionIntent {
+	keyMsg, ok := msg.(tea.KeyPressMsg)
+	if !ok || f.tree.Loading() {
+		return treeSelectionIntent{}
+	}
+	action, matched := keymap.Match(keymap.Default(), keyMsg, availList(f.availableActions()))
+	if !matched {
+		return treeSelectionIntent{}
+	}
+	intent := treeSelectionIntent{action: action}
+	switch action {
+	case keymap.ActionToggle:
+		if node, found := f.tree.CurrentNode(); found {
+			intent.scope = node
+			intent.checked = node.State != kit.Checked
+		}
+	case keymap.ActionSelectAll:
+		// applySelectionIntent uses the same current tree view the kit action
+		// mutates, so a narrowed facet does not change hidden session provenance.
+	case keymap.ActionSelectUnderProject:
+		if node, found := f.tree.CurrentNode(); found {
+			intent.scope = rootContaining(f.tree.Roots(), node)
+		}
+	default:
+		return treeSelectionIntent{}
+	}
+	return intent
+}
+
+func (f *treeField) applySelectionIntent(intent treeSelectionIntent) {
+	switch intent.action {
+	case keymap.ActionToggle:
+		if intent.scope == nil {
+			return
+		}
+		if harnessOf(intent.scope) != "" {
+			setExplicitSessionIntent(intent.scope, intent.checked)
+			return
+		}
+		setExplicitSessionIntent(intent.scope, false)
+	case keymap.ActionSelectAll:
+		for _, root := range f.tree.Roots() {
+			setExplicitSessionIntent(root, false)
+		}
+	case keymap.ActionSelectUnderProject:
+		setExplicitSessionIntent(intent.scope, false)
+	}
+}
+
+func rootContaining(roots []*kit.TreeNode, target *kit.TreeNode) *kit.TreeNode {
+	for _, root := range roots {
+		if nodeContains(root, target) {
+			return root
+		}
+	}
+	return nil
+}
+
+func nodeContains(root, target *kit.TreeNode) bool {
+	if root == target {
+		return true
+	}
+	for _, child := range root.Children {
+		if nodeContains(child, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleFacetKey answers the filter key when a facet is configured, reporting

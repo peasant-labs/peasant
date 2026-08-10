@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -35,6 +36,8 @@ type restorationCase struct {
 	SelectProjectPaths     []string               `yaml:"selectProjectPaths"`
 	ClearBranches          []restorationBranch    `yaml:"clearBranches"`
 	SelectAll              bool                   `yaml:"selectAll"`
+	LaterListings          []ftue.SessionListing  `yaml:"laterListings"`
+	ExpectLaterChecked     []string               `yaml:"expectLaterChecked"`
 	Expected               config.SelectionConfig `yaml:"expected"`
 }
 
@@ -74,6 +77,9 @@ func loadRestorationDocument(t *testing.T) restorationDocument {
 		})
 		if len(testCase.Listings) == 0 {
 			t.Fatalf("restoration case %q has no scanner listings", testCase.Name)
+		}
+		if (len(testCase.LaterListings) == 0) != (len(testCase.ExpectLaterChecked) == 0) {
+			t.Fatalf("restoration case %q must set laterListings and expectLaterChecked together", testCase.Name)
 		}
 	}
 	return document
@@ -121,6 +127,17 @@ func TestPrepopulateSelection_RestorationAndMergeMatrix(t *testing.T) {
 			want := normalizedSelection(testCase.Expected)
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("merged selection mismatch\n got: %#v\nwant: %#v", got, want)
+			}
+
+			if len(testCase.LaterListings) > 0 {
+				laterRoots, err := kickstart.NewScannerTreeSource(testCase.LaterListings, withFixturePathResolver()).Load(context.Background())
+				if err != nil {
+					t.Fatalf("later scanner load: %v", err)
+				}
+				settings.PrepopulateSelection(laterRoots, got)
+				if later := checkedSessionIDs(laterRoots); !reflect.DeepEqual(later, sortedCopy(testCase.ExpectLaterChecked)) {
+					t.Fatalf("later checked sessions = %v, want %v", later, sortedCopy(testCase.ExpectLaterChecked))
+				}
 			}
 		})
 	}
@@ -171,6 +188,107 @@ func TestMountedProgramRestoresSavedSelectionThroughProductionRegistry(t *testin
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mounted selection restoration mismatch\n got: %#v\nwant: %#v", got, want)
 	}
+}
+
+func TestMountedKickstartNoEditSaveKeepsExplicitSessionsScoped(t *testing.T) {
+	testCase := restorationCaseNamed(t, loadRestorationDocument(t), "all-current-explicit-sessions-stay-session-scoped")
+	configured := config.BaseConfig()
+	configured.Selection = testCase.Saved
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.SaveAtomic(path, configured); err != nil {
+		t.Fatalf("save explicit-session config: %v", err)
+	}
+	draft, err := settings.NewDraft(path, configured)
+	if err != nil {
+		t.Fatalf("open draft: %v", err)
+	}
+	program := kickstart.NewProgram(kickstart.ProgramDeps{
+		Theme:  theme.New(theme.ModeDark),
+		Draft:  draft,
+		Source: kickstart.NewScannerTreeSource(testCase.Listings, withFixturePathResolver()),
+	})
+	program.SetSize(100, 24)
+	program = declineOAuth(t, program)
+	program = drainProgram(program, program.Init())
+	program, _ = advanceToCommit(program)
+	if !program.Committed() {
+		t.Fatalf("explicit-session no-edit save did not commit: phase=%s", program.Phase())
+	}
+
+	reloaded, err := config.Parse(mustReadFile(t, path))
+	if err != nil {
+		t.Fatalf("parse explicit-session config: %v", err)
+	}
+	want := normalizedSelection(testCase.Expected)
+	if got := normalizedSelection(reloaded.Selection); !reflect.DeepEqual(got, want) {
+		t.Fatalf("explicit-session no-edit save widened its grain\n got: %#v\nwant: %#v", got, want)
+	}
+	laterRoots, err := kickstart.NewScannerTreeSource(testCase.LaterListings, withFixturePathResolver()).Load(context.Background())
+	if err != nil {
+		t.Fatalf("load later scanner cohort: %v", err)
+	}
+	settings.PrepopulateSelection(laterRoots, reloaded.Selection)
+	if got := checkedSessionIDs(laterRoots); !reflect.DeepEqual(got, sortedCopy(testCase.ExpectLaterChecked)) {
+		t.Fatalf("later checked sessions = %v, want %v", got, sortedCopy(testCase.ExpectLaterChecked))
+	}
+}
+
+func TestMountedKickstartSelectAllNamesProjectScopeAndCommitsCurrentClones(t *testing.T) {
+	testCase := restorationCaseNamed(t, loadRestorationDocument(t), "select-all-saves-exact-current-clones")
+
+	configured := config.BaseConfig()
+	configured.Selection = testCase.Saved
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.SaveAtomic(path, configured); err != nil {
+		t.Fatalf("save selected config: %v", err)
+	}
+	draft, err := settings.NewDraft(path, configured)
+	if err != nil {
+		t.Fatalf("open draft: %v", err)
+	}
+	program := kickstart.NewProgram(kickstart.ProgramDeps{
+		Theme:  theme.New(theme.ModeDark),
+		Draft:  draft,
+		Source: kickstart.NewScannerTreeSource(testCase.Listings, withFixturePathResolver()),
+	})
+	program.SetSize(120, 28)
+	program = declineOAuth(t, program)
+	program = drainProgram(program, program.Init())
+
+	program = pressAndDrain(program, '?')
+	if view := program.View(); !strings.Contains(view, "select all projects") {
+		t.Fatalf("kickstart selection help does not name project scope:\n%s", view)
+	}
+	program = pressAndDrain(program, '?')
+	program = pressAndDrain(program, 'a')
+	gotWorking := normalizedSelection(draft.Working().Selection)
+	want := normalizedSelection(testCase.Expected)
+	if !reflect.DeepEqual(gotWorking, want) {
+		t.Fatalf("mounted select-all working selection mismatch\n got: %#v\nwant: %#v", gotWorking, want)
+	}
+
+	program, _ = advanceToCommit(program)
+	if !program.Committed() {
+		t.Fatalf("mounted select-all did not commit: phase=%s", program.Phase())
+	}
+	reloaded, err := config.Parse(mustReadFile(t, path))
+	if err != nil {
+		t.Fatalf("parse committed selection: %v", err)
+	}
+	if got := normalizedSelection(reloaded.Selection); !reflect.DeepEqual(got, want) {
+		t.Fatalf("mounted select-all committed selection mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func restorationCaseNamed(t *testing.T, document restorationDocument, name string) restorationCase {
+	t.Helper()
+	for _, testCase := range document.Cases {
+		if testCase.Name == name {
+			return testCase
+		}
+	}
+	t.Fatalf("restoration fixture has no case %q", name)
+	return restorationCase{}
 }
 
 func setBranchState(t *testing.T, roots []*kit.TreeNode, target restorationBranch, state kit.TriState) {
