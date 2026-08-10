@@ -1,0 +1,105 @@
+declaredCases: 4
+declaredStoredRows: 4
+declaredScannerRows: 1
+cases:
+  - name: db-only explicit session aligns gate viewer and push
+    behavior: stored-explicit
+    storeState: readable
+    selectedSessionId: 71000000-0000-4000-8000-000000000001
+    paths:
+      - key: selected-clone
+        state: directory
+      - key: sibling-clone
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 71000000-0000-4000-8000-000000000001
+        projectName: stored-alignment
+        gitRemote: git@github.com:example/stored-alignment.git
+        branch: main
+        pathKey: selected-clone
+        pathSource: git-worktree
+      - harness: claude-code
+        sessionId: 71000000-0000-4000-8000-000000000002
+        projectName: stored-alignment
+        gitRemote: git@github.com:example/stored-alignment.git
+        branch: topic
+        pathKey: sibling-clone
+        pathSource: git-worktree
+    scannerRows:
+      - harness: claude-code
+        sessionId: 71000000-0000-4000-8000-000000000002
+        projectName: stored-alignment
+        gitRemote: git@github.com:example/stored-alignment.git
+        branch: topic
+        pathKey: sibling-clone
+    expectedGate: none
+    expectedCandidateCount: 2
+    expectedDescendantCount: 2
+    expectedViewerProjects: 1
+    expectedViewerSessions: 1
+    expectedPushSessionIds:
+      - 71000000-0000-4000-8000-000000000001
+
+  - name: unresolved stored explicit session remains available without project fallback
+    behavior: stored-unresolved-explicit
+    storeState: readable
+    selectedSessionId: 74000000-0000-4000-8000-000000000001
+    paths:
+      - key: unavailable-worktree
+        state: missing
+    storedRows:
+      - harness: claude-code
+        sessionId: 74000000-0000-4000-8000-000000000001
+        projectName: unavailable-stored-alignment
+        gitRemote: git@github.com:example/unavailable-stored-alignment.git
+        branch: main
+        pathKey: unavailable-worktree
+        pathSource: git-worktree
+    scannerRows: []
+    expectedGate: none
+    expectedCandidateCount: 1
+    expectedDescendantCount: 1
+    expectedViewerProjects: 1
+    expectedViewerSessions: 1
+    expectedPushSessionIds:
+      - 74000000-0000-4000-8000-000000000001
+
+  - name: no effective stored or scanner descendant confirms
+    behavior: empty-control
+    storeState: readable
+    selectedSessionId: 72000000-0000-4000-8000-000000000099
+    paths:
+      - key: canonical-only
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 72000000-0000-4000-8000-000000000001
+        projectName: stored-control
+        gitRemote: git@github.com:example/stored-control.git
+        branch: main
+        pathKey: canonical-only
+        pathSource: canonical-cwd
+    scannerRows: []
+    expectedGate: confirm-no-projects
+    expectedCandidateCount: 1
+    expectedDescendantCount: 1
+    expectedViewerProjects: 0
+    expectedViewerSessions: 0
+    expectedPushSessionIds: []
+
+  - name: selected mode rejects a stored evidence query failure
+    behavior: store-read-failure
+    storeState: query-failure
+    selectedSessionId: 73000000-0000-4000-8000-000000000001
+    paths:
+      - key: unused
+        state: directory
+    storedRows: []
+    scannerRows: []
+    expectedGate: error
+    expectedCandidateCount: 0
+    expectedDescendantCount: 0
+    expectedViewerProjects: 0
+    expectedViewerSessions: 0
+    expectedPushSessionIds: []

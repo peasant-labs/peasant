@@ -454,7 +454,10 @@ func TestKickstartCommitGateCandidateCohortsPreservePhysicalIdentityAndAmbiguity
 				kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
 			)
 
-			candidates := source.CommitGateCandidates()
+			candidates, err := source.CommitGateCandidates(nil)
+			if err != nil {
+				t.Fatalf("prepare scanner-only commit-gate candidates: %v", err)
+			}
 			assertKickstartGateCandidates(t, candidates, testCase.ExpectedCandidates, paths)
 			for _, check := range testCase.GateChecks {
 				check := check

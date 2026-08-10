@@ -46,24 +46,21 @@ func runKickstartFlow(
 	}
 	th := theme.New(themeModeFor(loaded))
 
-	// One store handle serves both the already-imported marks and the preview
-	// pane's body reads for the whole flow. A legacy all-projects policy also
-	// reads its complete stored-session identity evidence through this handle.
-	// It is closed when the flow returns.
+	// One store handle serves the stored-session snapshot, already-imported marks,
+	// and preview bodies for the whole flow. The snapshot feeds both legacy
+	// conversion and the scanner/store union used by the save gate. It is closed
+	// when the flow returns.
 	db, closeStore, storeOpenErr := openKickstartStoreWithError(cmd)
 	defer closeStore()
-	if storeOpenErr != nil && loaded.Selection.Mode == config.SelectionModeAll {
-		return fmt.Errorf(
-			"prepare legacy project selection: %w.\n"+
-				"what: Peasant could not open the stored sessions needed to build exact project choices.\n"+
-				"why: Peasant could not read the local session store as a Peasant database.\n"+
-				"where: runKickstartFlow, before the selection screen opened.\n"+
-				"when: while converting the saved all-projects setting.\n"+
-				"meaning: Peasant did not change the saved setting or start setup.\n"+
-				"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", storeOpenErr)
+	if storeOpenErr != nil {
+		return kickstartStoreOpenError(loaded.Selection.Mode, storeOpenErr)
+	}
+	storedSessions, err := readKickstartStoredSessions(ctx, db)
+	if err != nil {
+		return kickstartStoreReadError(loaded.Selection.Mode, err)
 	}
 	identityResolver := ingest.NewPhysicalPathResolver()
-	flowConfig, err := prepareKickstartFlowConfig(ctx, loaded, sessions, db, identityResolver)
+	flowConfig, err := prepareKickstartFlowConfig(loaded, sessions, storedSessions, identityResolver)
 	if err != nil {
 		return err
 	}
@@ -82,6 +79,17 @@ func runKickstartFlow(
 		kickstart.WithPathIdentityResolver(identityResolver),
 		kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
 	)
+	commitGateCandidates, err := source.CommitGateCandidates(storedSessions)
+	if err != nil {
+		return fmt.Errorf(
+			"prepare project save evidence: %w.\n"+
+				"what: Peasant could not build the complete project and session evidence for the save check.\n"+
+				"why: a locally stored session has identity data that Peasant cannot validate safely.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while joining scanner and stored-session evidence for the no-project confirmation.\n"+
+				"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
+				"fix: run `peasant ingest verify`, repair the reported stored session, then run `peasant kickstart` again.", err)
+	}
 	flowIngest := kickstartIngestFunc(cmd, configPath, sessions)
 	if deps.flowIngest != nil {
 		flowIngest = deps.flowIngest
@@ -91,7 +99,7 @@ func runKickstartFlow(
 		Theme:                 th,
 		Draft:                 draft,
 		Source:                source,
-		CommitGate:            settings.NewCommitGateEvaluator(source.CommitGateCandidates()),
+		CommitGate:            settings.NewCommitGateEvaluator(commitGateCandidates),
 		Preview:               kickstartPreview(cmd, db, th, sessions),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
@@ -110,36 +118,20 @@ func runKickstartFlow(
 }
 
 // prepareKickstartFlowConfig replaces a legacy mode-all policy only in the
-// in-memory draft baseline. It reads every stored session, builds exact physical
-// project choices through kickstart.ConvertLegacyAll, and carries unresolved
-// stored session IDs into the selected-mode baseline. The config file is not
-// changed here. settings.Draft.Commit remains the only write, after the user
-// reviews and saves the flow.
+// in-memory draft baseline. It receives the same complete stored-session
+// snapshot the save gate uses, builds exact physical project choices through
+// kickstart.ConvertLegacyAll, and carries unresolved stored session IDs into the
+// selected-mode baseline. The config file is not changed here.
+// settings.Draft.Commit remains the only write, after the user reviews and saves
+// the flow.
 func prepareKickstartFlowConfig(
-	ctx context.Context,
 	loaded *config.Config,
 	sessions []ftue.SessionListing,
-	db *store.Store,
+	stored []store.IngestedSessionRow,
 	resolver ingest.PathIdentityResolver,
 ) (*config.Config, error) {
 	if loaded.Selection.Mode != config.SelectionModeAll {
 		return loaded, nil
-	}
-
-	var stored []store.IngestedSessionRow
-	if db != nil {
-		var err error
-		stored, err = db.AllIngestedSessions(ctx)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"prepare legacy project selection: %w.\n"+
-					"what: Peasant could not read the stored sessions needed to build exact project choices.\n"+
-					"why: the local session store query failed.\n"+
-					"where: runKickstartFlow, before the selection screen opened.\n"+
-					"when: while converting the saved all-projects setting.\n"+
-					"meaning: Peasant did not change the saved setting or start setup.\n"+
-					"fix: check that the Peasant data directory is readable, then run `peasant kickstart` again.", err)
-		}
 	}
 
 	conversion, err := kickstart.ConvertLegacyAll(
@@ -162,6 +154,55 @@ func prepareKickstartFlowConfig(
 	return &converted, nil
 }
 
+func readKickstartStoredSessions(ctx context.Context, db *store.Store) ([]store.IngestedSessionRow, error) {
+	if db == nil {
+		return nil, nil
+	}
+	return db.AllIngestedSessions(ctx)
+}
+
+func kickstartStoreOpenError(mode config.SelectionMode, err error) error {
+	if mode == config.SelectionModeAll {
+		return fmt.Errorf(
+			"prepare legacy project selection: %w.\n"+
+				"what: Peasant could not open the stored sessions needed to build exact project choices.\n"+
+				"why: Peasant could not read the local session store as a Peasant database.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while converting the saved all-projects setting.\n"+
+				"meaning: Peasant did not change the saved setting or start setup.\n"+
+				"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+	}
+	return fmt.Errorf(
+		"prepare saved project availability: %w.\n"+
+			"what: Peasant could not open the stored sessions needed to verify the saved project choice.\n"+
+			"why: Peasant could not read the local session store as a Peasant database.\n"+
+			"where: runKickstartFlow, before the selection screen opened.\n"+
+			"when: while aligning the no-project save check with the web viewer and push chooser.\n"+
+			"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
+			"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+}
+
+func kickstartStoreReadError(mode config.SelectionMode, err error) error {
+	if mode == config.SelectionModeAll {
+		return fmt.Errorf(
+			"prepare legacy project selection: %w.\n"+
+				"what: Peasant could not read the stored sessions needed to build exact project choices.\n"+
+				"why: the local session store query failed.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while converting the saved all-projects setting.\n"+
+				"meaning: Peasant did not change the saved setting or start setup.\n"+
+				"fix: check that the Peasant data directory is readable, then run `peasant kickstart` again.", err)
+	}
+	return fmt.Errorf(
+		"prepare saved project availability: %w.\n"+
+			"what: Peasant could not read the stored sessions needed to verify the saved project choice.\n"+
+			"why: the local session store query failed.\n"+
+			"where: runKickstartFlow, before the selection screen opened.\n"+
+			"when: while aligning the no-project save check with the web viewer and push chooser.\n"+
+			"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
+			"fix: run `peasant ingest verify`, repair the local session store, then run `peasant kickstart` again.", err)
+}
+
 // openKickstartStore opens the local store for the duration of the flow, plus
 // the func that closes it. It is best-effort: on a first run the store may not
 // exist yet, and any open problem yields a nil store and a no-op close, so
@@ -172,9 +213,10 @@ func openKickstartStore(cmd *cobra.Command) (*store.Store, func()) {
 }
 
 // openKickstartStoreWithError is the exact store-open boundary used by legacy
-// conversion. The compatibility wrapper above keeps preview and imported-mark
-// reads best-effort, while conversion can reject an unreadable existing store
-// instead of mistaking unavailable evidence for an empty store.
+// conversion and the save gate. The compatibility wrapper above keeps callers
+// that only need preview reads best-effort, while runKickstartFlow rejects an
+// unreadable existing store instead of mistaking unavailable evidence for an
+// empty store.
 func openKickstartStoreWithError(cmd *cobra.Command) (*store.Store, func(), error) {
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if _, err := os.Stat(dbPath); err != nil {
