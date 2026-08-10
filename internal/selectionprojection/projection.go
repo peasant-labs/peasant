@@ -235,16 +235,36 @@ func projectAdmission(matcher *ingest.SelectionMatcher, project preparedProject)
 func descendantAdmission(matcher *ingest.SelectionMatcher, descendant preparedDescendant) ProjectAdmission {
 	projectCandidate := descendant.Direct
 	projectCandidate.SessionID = ""
-	if admission := projectRuleAdmission(matcher, projectCandidate); admission != ProjectNotEffective {
-		return admission
+	admission := ProjectNotEffective
+	admission = moreSpecificAdmission(admission, projectRuleAdmission(matcher, projectCandidate))
+	if explicitSessionSelected(matcher, descendant.Direct) {
+		admission = moreSpecificAdmission(admission, ProjectEffectiveExplicitSession)
 	}
-	if matcher.MatchBranchCandidate(descendant.Direct) == ingest.BranchMatchYes {
-		return ProjectEffectiveExplicitSession
+	if descendant.HasParent && explicitSessionSelected(matcher, descendant.Parent) {
+		admission = moreSpecificAdmission(admission, ProjectEffectiveNestedDescendant)
 	}
-	if descendant.HasParent && matcher.MatchBranchCandidate(descendant.Parent) == ingest.BranchMatchYes {
-		return ProjectEffectiveNestedDescendant
+	return admission
+}
+
+func explicitSessionSelected(matcher *ingest.SelectionMatcher, candidate ingest.DiscoveryCandidate) bool {
+	if candidate.SessionID == "" {
+		return false
 	}
-	return ProjectNotEffective
+
+	// Remove project evidence so the canonical matcher can answer only from the
+	// session ID. The empty-session control distinguishes a real explicit entry
+	// from an unrestricted harness, which admits both probes.
+	candidate.GitRemote = ""
+	candidate.ProjectName = ""
+	candidate.ClonePath = ""
+	candidate.Branch = ""
+	candidate.RemoteMultiplicity = ingest.DiscoveryIdentityUnique
+	candidate.NameMultiplicity = ingest.DiscoveryIdentityUnique
+	if matcher.MatchBranchCandidate(candidate) != ingest.BranchMatchYes {
+		return false
+	}
+	candidate.SessionID = ""
+	return matcher.MatchBranchCandidate(candidate) != ingest.BranchMatchYes
 }
 
 func projectRuleAdmission(matcher *ingest.SelectionMatcher, candidate ingest.DiscoveryCandidate) ProjectAdmission {

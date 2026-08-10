@@ -1,4 +1,4 @@
-declared_projection_rows: 9
+declared_projection_rows: 12
 declared_gate_rows: 4
 
 projection_cases:
@@ -24,6 +24,26 @@ projection_cases:
         admission: whole_project
         selected_descendant_count: 2
 
+  - name: unique-remote-only-selection
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: https://github.com/example/remote-only.git
+    candidates:
+      - parent_project_id: project-remote-only
+        harness: claude-code
+        git_remote: github.com/example/remote-only
+        clone_path: /workspace/remote-only
+        descendants:
+          - session_id: 13131313-1313-4313-8313-131313131313
+            branch: main
+    expected:
+      - parent_project_id: project-remote-only
+        admission: whole_project
+        selected_descendant_count: 1
+
   - name: branch-with-session-worktree-override
     selection:
       mode: selected
@@ -47,6 +67,53 @@ projection_cases:
       - parent_project_id: project-branch
         admission: branch
         selected_descendant_count: 1
+
+  - name: branch-and-explicit-session-prefers-explicit
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - clonePaths: [/workspace/overlap-explicit]
+              branches: [main]
+          sessions: [99999999-9999-4999-8999-999999999999]
+    candidates:
+      - parent_project_id: project-overlap-explicit
+        harness: claude-code
+        project_name: overlap-explicit
+        clone_path: /workspace/overlap-explicit
+        descendants:
+          - session_id: 99999999-9999-4999-8999-999999999999
+            branch: main
+    expected:
+      - parent_project_id: project-overlap-explicit
+        admission: explicit_session
+        selected_descendant_count: 1
+
+  - name: branch-and-selected-parent-prefers-nested
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - clonePaths: [/workspace/overlap-nested]
+              branches: [main]
+          sessions: [12121212-1212-4212-8212-121212121210]
+    candidates:
+      - parent_project_id: project-overlap-nested
+        harness: claude-code
+        project_name: overlap-nested
+        clone_path: /workspace/overlap-nested
+        descendants:
+          - session_id: 12121212-1212-4212-8212-121212121210
+            branch: main
+          - session_id: 12121212-1212-4212-8212-121212121211
+            parent_session_id: 12121212-1212-4212-8212-121212121210
+            branch: main
+    expected:
+      - parent_project_id: project-overlap-nested
+        admission: nested_descendant
+        selected_descendant_count: 2
 
   - name: explicit-session-under-stored-parent
     selection:

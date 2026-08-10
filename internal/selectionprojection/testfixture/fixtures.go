@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	expectedProjectionRows = 9
+	expectedProjectionRows = 12
 	expectedGateRows       = 4
 )
 
