@@ -40,6 +40,7 @@ type nextStepFixture struct {
 	Name         string                `yaml:"name"`
 	Valid        bool                  `yaml:"valid"`
 	Kinds        []nextStepFixtureKind `yaml:"kinds"`
+	WantPreamble []string              `yaml:"wantPreamble"`
 	WantContains []string              `yaml:"wantContains"`
 	WantMissing  []string              `yaml:"wantMissing"`
 }
@@ -71,6 +72,13 @@ func loadNextStepDocument(t *testing.T) nextStepDocument {
 				t.Fatalf("next-step row %q has unsupported fixture kind %q", row.Name, kind)
 			}
 		}
+		if row.Valid {
+			if err := validateCompletionPreamble(row.WantPreamble); err != nil {
+				t.Fatalf("next-step row %q has invalid completion preamble: %v", row.Name, err)
+			}
+		} else if len(row.WantPreamble) != 0 {
+			t.Fatalf("invalid next-step row %q expects a preamble without a command list", row.Name)
+		}
 	}
 	return document
 }
@@ -98,6 +106,7 @@ func TestProgramValidatesTypedNextStepProvider(t *testing.T) {
 			program = drainProgram(program, program.Init())
 			program, _ = advanceToCommit(program)
 			view := strings.ToLower(stripRender(program.View()))
+			assertCompletionPreamble(t, view, row.WantPreamble)
 			for _, want := range row.WantContains {
 				if !strings.Contains(view, strings.ToLower(want)) {
 					t.Errorf("completion does not contain %q:\n%s", want, view)

@@ -25,15 +25,16 @@ import (
 const expectedMountedJourneyRows = 1
 
 type mountedJourneyFixture struct {
-	Name              string   `yaml:"name"`
-	ConnectCopy       []string `yaml:"connectCopy"`
-	ConsentCopy       []string `yaml:"consentCopy"`
-	ProgressCopy      []string `yaml:"progressCopy"`
-	ProgressForbidden []string `yaml:"progressForbidden"`
-	CompletionCopy    []string `yaml:"completionCopy"`
-	ForbiddenCopy     []string `yaml:"forbiddenCopy"`
-	WantIngestCalls   int      `yaml:"wantIngestCalls"`
-	WantTerminalCalls int      `yaml:"wantTerminalCalls"`
+	Name               string   `yaml:"name"`
+	ConnectCopy        []string `yaml:"connectCopy"`
+	ConsentCopy        []string `yaml:"consentCopy"`
+	ProgressCopy       []string `yaml:"progressCopy"`
+	ProgressForbidden  []string `yaml:"progressForbidden"`
+	CompletionPreamble []string `yaml:"completionPreamble"`
+	CompletionCopy     []string `yaml:"completionCopy"`
+	ForbiddenCopy      []string `yaml:"forbiddenCopy"`
+	WantIngestCalls    int      `yaml:"wantIngestCalls"`
+	WantTerminalCalls  int      `yaml:"wantTerminalCalls"`
 }
 
 type mountedJourneyDocument struct {
@@ -63,9 +64,16 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 	seen := map[string]bool{}
 	for _, row := range document.Rows {
 		if strings.TrimSpace(row.Name) == "" || seen[row.Name] || len(row.ConnectCopy) != 2 || len(row.ConsentCopy) == 0 ||
-			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 ||
+			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 || len(row.CompletionPreamble) != 3 ||
 			len(row.CompletionCopy) != 4 || len(row.ForbiddenCopy) == 0 || row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
 			t.Fatalf("mounted journey row is incomplete or duplicated: %#v", row)
+		}
+		preambleMeaning := strings.ToLower(strings.Join(row.CompletionPreamble, "\n"))
+		if !strings.Contains(preambleMeaning, "useful") || !strings.Contains(preambleMeaning, "optional") ||
+			!strings.Contains(preambleMeaning, "after local setup") || !strings.Contains(preambleMeaning, "open the local dashboard") ||
+			!strings.Contains(preambleMeaning, "connect to a village") || !strings.Contains(preambleMeaning, "explicitly publish later") ||
+			!strings.Contains(preambleMeaning, "kickstart runs none of them") {
+			t.Fatalf("mounted journey row does not pin useful, optional, display-only completion grounding: %#v", row.CompletionPreamble)
 		}
 		seen[row.Name] = true
 	}
@@ -210,6 +218,7 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 					t.Fatal("mounted local ingest did not complete after release")
 				}
 				completion := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
+				assertMountedCompletionPreamble(t, completion, row)
 				for _, want := range row.CompletionCopy {
 					if !strings.Contains(completion, strings.ToLower(want)) {
 						t.Errorf("mounted completion does not contain %q:\n%s", want, completion)
@@ -222,6 +231,7 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 				}
 				program, _ = program.Update(tea.WindowSizeMsg{Width: 181, Height: 51})
 				persistentCompletion := strings.ToLower(ansiPattern.ReplaceAllString(program.View(), ""))
+				assertMountedCompletionPreamble(t, persistentCompletion, row)
 				for _, want := range row.CompletionCopy {
 					if !strings.Contains(persistentCompletion, strings.ToLower(want)) {
 						t.Errorf("mounted completion did not persist %q after resize:\n%s", want, persistentCompletion)
@@ -238,6 +248,25 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 					ingestCalls, terminalCalls, row.WantIngestCalls, row.WantTerminalCalls)
 			}
 		})
+	}
+}
+
+func assertMountedCompletionPreamble(t *testing.T, view string, row mountedJourneyFixture) {
+	t.Helper()
+	previous := -1
+	for _, line := range row.CompletionPreamble {
+		at := strings.Index(view, strings.ToLower(line))
+		if at < 0 {
+			t.Fatalf("mounted completion does not contain preamble line %q:\n%s", line, view)
+		}
+		if at <= previous {
+			t.Fatalf("mounted completion preamble is out of order at %q:\n%s", line, view)
+		}
+		previous = at
+	}
+	firstCommand := strings.Index(view, strings.ToLower(row.CompletionCopy[0]))
+	if firstCommand < 0 || previous >= firstCommand {
+		t.Fatalf("mounted completion preamble must precede its command list:\n%s", view)
 	}
 }
 

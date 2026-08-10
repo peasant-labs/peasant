@@ -30,6 +30,7 @@ const (
 	expectedFailedFocusRows          = 1
 	expectedLatestCompletedFocusRows = 1
 	expectedCompletionRows           = 3
+	expectedCompletionPreambleLines  = 3
 )
 
 type progressFocusProbe string
@@ -81,6 +82,7 @@ type completionFixture struct {
 	WantFailureContains     []string `yaml:"wantFailureContains"`
 	WantRetryContains       []string `yaml:"wantRetryContains"`
 	WantRetryMissing        []string `yaml:"wantRetryMissing"`
+	WantPreamble            []string `yaml:"wantPreamble"`
 	WantContains            []string `yaml:"wantContains"`
 	WantMissing             []string `yaml:"wantMissing"`
 	WantIngestCalls         int      `yaml:"wantIngestCalls"`
@@ -174,8 +176,34 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 			len(row.WantRetryMissing) == 0 || !row.MutateConfigBeforeRetry || !row.UseRealProgress) {
 			t.Fatalf("retry completion row %q does not prove failure truth, volatile reset, and no recommit", row.Name)
 		}
+		if row.AttemptErrors[len(row.AttemptErrors)-1] == "" {
+			if err := validateCompletionPreamble(row.WantPreamble); err != nil {
+				t.Fatalf("completion row %q has invalid next-command preamble: %v", row.Name, err)
+			}
+		} else if len(row.WantPreamble) != 0 {
+			t.Fatalf("failed completion row %q expects a next-command preamble without a command list", row.Name)
+		}
 	}
 	return document
+}
+
+func validateCompletionPreamble(lines []string) error {
+	if len(lines) != expectedCompletionPreambleLines {
+		return fmt.Errorf("preamble lines=%d required=%d", len(lines), expectedCompletionPreambleLines)
+	}
+	meaning := strings.ToLower(strings.Join(lines, "\n"))
+	if !strings.Contains(meaning, "useful") || !strings.Contains(meaning, "optional") ||
+		!strings.Contains(meaning, "after local setup") {
+		return fmt.Errorf("preamble does not ground the commands as useful and optional after local setup")
+	}
+	if !strings.Contains(meaning, "open the local dashboard") || !strings.Contains(meaning, "connect to a village") ||
+		!strings.Contains(meaning, "explicitly publish later") {
+		return fmt.Errorf("preamble does not explain the dashboard, village, and later publication choices")
+	}
+	if !strings.Contains(meaning, "kickstart runs none of them") {
+		return fmt.Errorf("preamble does not say kickstart runs none of the commands")
+	}
+	return nil
 }
 
 func validateProgressCompletionRowCounts(document progressCompletionDocument) error {
@@ -236,6 +264,21 @@ func TestProgressCompletionFixturePinsExactCounts(t *testing.T) {
 	}
 	if err := validateProgressFocusCounts(focusMutation, countProgressFocusProbes(focusMutation.Progress)); err == nil {
 		t.Fatal("progress fixture accepted a focus-probe removal coordinated with its declarations")
+	}
+
+	missingPreamble := append([]string(nil), document.Completion[0].WantPreamble[1:]...)
+	if err := validateCompletionPreamble(missingPreamble); err == nil {
+		t.Fatal("completion fixture accepted a removed preamble line")
+	}
+	weakenedMeaning := append([]string(nil), document.Completion[0].WantPreamble...)
+	weakenedMeaning[0] = "these are next commands after local setup."
+	if err := validateCompletionPreamble(weakenedMeaning); err == nil {
+		t.Fatal("completion fixture accepted removal of useful and optional meaning")
+	}
+	weakenedMeaning = append([]string(nil), document.Completion[0].WantPreamble...)
+	weakenedMeaning[2] = "choose any command when ready."
+	if err := validateCompletionPreamble(weakenedMeaning); err == nil {
+		t.Fatal("completion fixture accepted removal of no-auto-execution meaning")
 	}
 }
 
@@ -583,6 +626,7 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 			}
 
 			view := strings.ToLower(stripRender(program.View()))
+			assertCompletionPreamble(t, view, row.WantPreamble)
 			for _, want := range row.WantContains {
 				if !strings.Contains(view, strings.ToLower(want)) {
 					t.Errorf("completion does not contain %q:\n%s", want, view)
@@ -613,6 +657,28 @@ func TestProgramCompletionPersistsAndRetryRunsOnlyLocalImport(t *testing.T) {
 				t.Fatal("explicit completion exit did not request tea.Quit")
 			}
 		})
+	}
+}
+
+func assertCompletionPreamble(t *testing.T, view string, preamble []string) {
+	t.Helper()
+	if len(preamble) == 0 {
+		return
+	}
+	previous := -1
+	for _, line := range preamble {
+		at := strings.Index(view, strings.ToLower(line))
+		if at < 0 {
+			t.Fatalf("completion does not contain preamble line %q:\n%s", line, view)
+		}
+		if at <= previous {
+			t.Fatalf("completion preamble is out of order at %q:\n%s", line, view)
+		}
+		previous = at
+	}
+	firstCommand := strings.Index(view, "peasant web start")
+	if firstCommand < 0 || previous >= firstCommand {
+		t.Fatalf("completion preamble must appear immediately before the command list:\n%s", view)
 	}
 }
 

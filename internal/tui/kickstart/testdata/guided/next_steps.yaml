@@ -3,6 +3,10 @@ rows:
   - name: canonical-catalog
     valid: true
     kinds: [web-start, village-login, village-push]
+    wantPreamble:
+      - these are useful, optional next commands after local setup.
+      - open the local dashboard, connect to a village, or explicitly publish later.
+      - kickstart runs none of them.
     wantContains:
       - open the local dashboard
       - peasant web start

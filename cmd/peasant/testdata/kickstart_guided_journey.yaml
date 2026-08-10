@@ -15,6 +15,10 @@ rows:
     progressForbidden:
       - 'estimate:'
       - kickstart complete
+    completionPreamble:
+      - these are useful, optional next commands after local setup.
+      - open the local dashboard, connect to a village, or explicitly publish later.
+      - kickstart runs none of them.
     completionCopy:
       - peasant web start
       - starts the dashboard and prints or opens its actual url

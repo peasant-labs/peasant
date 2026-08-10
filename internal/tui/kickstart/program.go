@@ -1018,6 +1018,11 @@ func (p Program) viewDone() string {
 			lines = append(lines, styles.Danger.Render(line))
 		}
 	} else {
+		lines = append(lines,
+			styles.Base.Render("these are useful, optional next commands after local setup."),
+			styles.Muted.Render("open the local dashboard, connect to a village, or explicitly publish later."),
+			styles.Muted.Render("kickstart runs none of them."),
+			"")
 		for _, kind := range p.nextSteps {
 			step, present := canonicalNextStep(kind)
 			if !present {
