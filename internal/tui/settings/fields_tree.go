@@ -2,6 +2,7 @@ package settings
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -77,6 +79,7 @@ type treeField struct {
 	// boundary and does not set this flag.
 	baselineApplied bool
 	unmatched       UnmatchedBaseline
+	reconcileErr    error
 }
 
 // TreeOption configures a tree field at construction.
@@ -244,6 +247,16 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	wasLoading := f.tree.Loading()
 	intent := f.captureSelectionIntent(msg)
+	var before selectableState
+	exactAction := f.restoreSelection && f.baselineApplied && intent.action != keymap.ActionUnknown && isProjectFirstForest(f.tree.Roots())
+	if exactAction {
+		var err error
+		before, err = f.snapshotSelectableState(intent)
+		if err != nil {
+			f.reconcileErr = f.actionableReconcileError(intent, err)
+			return nil
+		}
+	}
 	if !f.handleFacetKey(msg) {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
@@ -254,7 +267,6 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		}
 		loadSucceeded := wasLoading && !f.tree.Loading() && f.tree.Err() == nil
 		f.captureForest(loadSucceeded)
-		f.applySelectionIntent(intent)
 	}
 
 	// A spinner tick, an in-flight load, or a failed load must not replace the
@@ -281,17 +293,468 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 			if firstSuccessfulLoad {
 				f.baselineApplied = true
 			}
+			f.reconcileErr = nil
 		}
+		return cmd
 	}
 	if f.restoreSelection && !f.baselineApplied {
 		return cmd
 	}
+	if f.restoreSelection && isProjectFirstForest(f.selectionRoots()) && intent.action == keymap.ActionUnknown {
+		// Draft.Working is authoritative for the kickstart selection editor.
+		// Navigation, preview, facet, spinner, and expansion messages change only
+		// the view and must never round-trip the complete forest into the draft.
+		return cmd
+	}
+	if exactAction {
+		after, err := f.snapshotSelectableState(intent)
+		if err != nil {
+			f.restoreSelectableState(before)
+			f.reconcileErr = f.actionableReconcileError(intent, err)
+			return cmd
+		}
+		scopes, err := changedSelectionScopes(intent, before, after, f.selectionRoots())
+		if err != nil {
+			f.restoreSelectableState(before)
+			f.reconcileErr = f.actionableReconcileError(intent, err)
+			return cmd
+		}
+		if len(scopes) == 0 {
+			return cmd
+		}
+		current := f.acc.Get(d.Working())
+		next, changed, err := reconcileTouchedSelection(current, f.unmatched, scopes, d.Working().Selection.AutoIngestNewBranches)
+		if err != nil {
+			f.restoreSelectableState(before)
+			f.reconcileErr = f.actionableReconcileError(intent, err)
+			return cmd
+		}
+		if changed {
+			f.acc.Set(d.Working(), next)
+		}
+		// Reapply the canonical matcher after the reducer succeeds. This updates
+		// the private branch/session provenance markers from the value that would
+		// actually be saved, never from a merely recognized key action.
+		f.unmatched = PrepopulateSelection(f.selectionRoots(), next.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
+		f.reconcileErr = nil
+		return cmd
+	}
+	f.applySelectionIntent(intent)
 	// The selection is re-derived after a facet change too, so what a commit
 	// would persist is always read from the whole forest - never left behind at
 	// whatever the last narrowed view happened to hold.
 	derived := FromTreeNodes(f.selectionRoots())
 	f.acc.Set(d.Working(), MergeSelection(derived, f.unmatched))
 	return cmd
+}
+
+type selectableNodeKey struct {
+	projectIdentity string
+	harness         string
+	clonePath       string
+	branch          string
+	sessionID       string
+}
+
+type selectableNodeState struct {
+	node                   *kit.TreeNode
+	state                  kit.TriState
+	explicitBranchValue    string
+	explicitBranchPresent  bool
+	explicitSessionValue   string
+	explicitSessionPresent bool
+}
+
+type selectableState map[selectableNodeKey]selectableNodeState
+
+// snapshotSelectableState captures only the semantic subtree the recognized
+// action can mutate. Display labels, cursor state, expansion, and facet state
+// are deliberately outside this transient rollback snapshot.
+func (f *treeField) snapshotSelectableState(intent treeSelectionIntent) (selectableState, error) {
+	state := selectableState{}
+	roots := f.tree.Roots()
+	switch intent.action {
+	case keymap.ActionToggle:
+		if intent.scope == nil {
+			return nil, fmt.Errorf("toggle has no current tree node")
+		}
+		root := rootContaining(roots, intent.scope)
+		if root == nil {
+			return nil, fmt.Errorf("toggle node %q is not contained by a visible project root", intent.scope.ID)
+		}
+		branch := branchContaining(root, intent.scope)
+		if intent.scope == root {
+			return snapshotProjectState(state, root)
+		}
+		if branch == nil {
+			return nil, fmt.Errorf("toggle node %q has no branch ancestor", intent.scope.ID)
+		}
+		if intent.scope == branch {
+			return snapshotBranchState(state, root, branch)
+		}
+		return snapshotSessionState(state, root, branch, intent.scope)
+	case keymap.ActionSelectUnderProject:
+		if intent.scope == nil {
+			return nil, fmt.Errorf("select-under-project has no visible project root")
+		}
+		return snapshotProjectState(state, intent.scope)
+	case keymap.ActionSelectAll:
+		if len(roots) == 0 {
+			return nil, fmt.Errorf("select-all has no visible project roots")
+		}
+		for _, root := range roots {
+			if _, err := snapshotProjectState(state, root); err != nil {
+				return nil, err
+			}
+		}
+		return state, nil
+	default:
+		return nil, fmt.Errorf("action %q is not a selectable tree action", intent.action)
+	}
+}
+
+func snapshotProjectState(state selectableState, root *kit.TreeNode) (selectableState, error) {
+	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
+		return nil, err
+	}
+	for _, branch := range root.Children {
+		if _, err := snapshotBranchState(state, root, branch); err != nil {
+			return nil, err
+		}
+	}
+	return state, nil
+}
+
+func snapshotBranchState(state selectableState, root, branch *kit.TreeNode) (selectableState, error) {
+	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	branchName, err := exactBranchName(branch)
+	if err != nil {
+		return nil, err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
+		return nil, err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branchName}, branch); err != nil {
+		return nil, err
+	}
+	for _, session := range branch.Children {
+		if err := snapshotSessionTree(state, root, branchName, session); err != nil {
+			return nil, err
+		}
+	}
+	return state, nil
+}
+
+func snapshotSessionState(state selectableState, root, branch, session *kit.TreeNode) (selectableState, error) {
+	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	branchName, err := exactBranchName(branch)
+	if err != nil {
+		return nil, err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
+		return nil, err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branchName}, branch); err != nil {
+		return nil, err
+	}
+	if err := snapshotOneSession(state, identity, harness, clonePath, branchName, session); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func snapshotSessionTree(state selectableState, root *kit.TreeNode, branch string, session *kit.TreeNode) error {
+	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
+	if err != nil {
+		return err
+	}
+	if err := snapshotOneSession(state, identity, harness, clonePath, branch, session); err != nil {
+		return err
+	}
+	for _, child := range session.Children {
+		if err := snapshotSessionTree(state, root, branch, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func snapshotOneSession(state selectableState, identity, harness, clonePath, branch string, session *kit.TreeNode) error {
+	if sessionHarness := harnessOf(session); sessionHarness == "" || sessionHarness != harness {
+		return fmt.Errorf("session %q carries harness %q, want project harness %q", session.ID, sessionHarness, harness)
+	}
+	if sessionIdentity := metaOf(session, MetaProjectIdentity); sessionIdentity != "" && sessionIdentity != identity {
+		return fmt.Errorf("session %q carries project identity %q, want %q", session.ID, sessionIdentity, identity)
+	}
+	if sessionPath := metaOf(session, MetaClonePath); sessionPath != "" && sessionPath != clonePath {
+		return fmt.Errorf("session %q carries clone path %q, want %q", session.ID, sessionPath, clonePath)
+	}
+	if session.ID == "" || strings.TrimSpace(session.ID) != session.ID {
+		return fmt.Errorf("session node %q has no normalized session identity", session.ID)
+	}
+	return addSelectableState(state, selectableNodeKey{
+		projectIdentity: identity,
+		harness:         harness,
+		clonePath:       clonePath,
+		branch:          branch,
+		sessionID:       session.ID,
+	}, session)
+}
+
+func addSelectableState(state selectableState, key selectableNodeKey, node *kit.TreeNode) error {
+	if prior, duplicate := state[key]; duplicate && prior.node != node {
+		return fmt.Errorf("duplicate selectable identity %+v is carried by nodes %q and %q", key, prior.node.ID, node.ID)
+	}
+	branchValue, branchPresent := markerValue(node, metaExplicitBranchSelection)
+	sessionValue, sessionPresent := markerValue(node, metaExplicitSessionSelection)
+	state[key] = selectableNodeState{
+		node:                   node,
+		state:                  node.State,
+		explicitBranchValue:    branchValue,
+		explicitBranchPresent:  branchPresent,
+		explicitSessionValue:   sessionValue,
+		explicitSessionPresent: sessionPresent,
+	}
+	return nil
+}
+
+func markerValue(node *kit.TreeNode, key string) (string, bool) {
+	if node.Meta == nil {
+		return "", false
+	}
+	value, present := node.Meta[key]
+	return value, present
+}
+
+func exactProjectNodeIdentity(root *kit.TreeNode) (string, string, string, error) {
+	identity := metaOf(root, MetaProjectIdentity)
+	harness := metaOf(root, MetaProjectHarness)
+	clonePath := metaOf(root, MetaClonePath)
+	switch {
+	case identity == "":
+		return "", "", "", fmt.Errorf("project node %q has no stable project identity", root.ID)
+	case root.ID != identity:
+		return "", "", "", fmt.Errorf("project node ID %q does not match identity %q", root.ID, identity)
+	case harness == "" || !ingest.Harness(harness).IsKnown():
+		return "", "", "", fmt.Errorf("project %q carries unknown harness %q", identity, harness)
+	case clonePath == "":
+		return "", "", "", fmt.Errorf("project %q has no exact physical clone path", identity)
+	case strings.TrimSpace(clonePath) != clonePath || !filepath.IsAbs(clonePath) || filepath.Clean(clonePath) != clonePath:
+		return "", "", "", fmt.Errorf("project %q carries non-exact clone path %q", identity, clonePath)
+	}
+	return identity, harness, clonePath, nil
+}
+
+func exactBranchName(branch *kit.TreeNode) (string, error) {
+	name := metaOf(branch, MetaBranch)
+	if name == "" {
+		return "", fmt.Errorf("branch node %q has no exact branch identity", branch.ID)
+	}
+	if name == "(unknown branch)" {
+		return "", fmt.Errorf("branch node %q is the unknown-branch display placeholder and cannot form an exact denial", branch.ID)
+	}
+	if strings.TrimSpace(name) != name {
+		return "", fmt.Errorf("branch node %q carries non-normalized branch %q", branch.ID, name)
+	}
+	return name, nil
+}
+
+func branchContaining(root, target *kit.TreeNode) *kit.TreeNode {
+	for _, branch := range root.Children {
+		if nodeContains(branch, target) {
+			return branch
+		}
+	}
+	return nil
+}
+
+func changedSelectionScopes(intent treeSelectionIntent, before, after selectableState, fullRoots []*kit.TreeNode) ([]selectionScope, error) {
+	if len(before) != len(after) {
+		return nil, fmt.Errorf("selectable identity set changed size from %d to %d during %s", len(before), len(after), intent.action)
+	}
+	changed := map[selectableNodeKey]bool{}
+	for key, old := range before {
+		current, ok := after[key]
+		if !ok {
+			return nil, fmt.Errorf("selectable identity %+v disappeared during %s", key, intent.action)
+		}
+		if old.state != kit.Conflict && current.state != kit.Conflict && old.state != current.state {
+			changed[key] = true
+		}
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+
+	rootByIdentity := map[string]*kit.TreeNode{}
+	for _, root := range fullRoots {
+		identity := metaOf(root, MetaProjectIdentity)
+		if identity == "" {
+			continue
+		}
+		if _, duplicate := rootByIdentity[identity]; duplicate {
+			return nil, fmt.Errorf("full forest repeats project identity %q", identity)
+		}
+		rootByIdentity[identity] = root
+	}
+
+	makeScope := func(key selectableNodeKey, kind selectionScopeKind, selected bool) (selectionScope, error) {
+		root := rootByIdentity[key.projectIdentity]
+		if root == nil {
+			return selectionScope{}, fmt.Errorf("changed project identity %q is absent from the complete forest", key.projectIdentity)
+		}
+		return selectionScope{
+			kind:            kind,
+			root:            root,
+			projectIdentity: key.projectIdentity,
+			harness:         key.harness,
+			clonePath:       ingest.ClonePath(key.clonePath),
+			branch:          key.branch,
+			sessionID:       key.sessionID,
+			selected:        selected,
+		}, nil
+	}
+
+	switch intent.action {
+	case keymap.ActionToggle:
+		var targetKey selectableNodeKey
+		found := false
+		for key, old := range before {
+			if old.node == intent.scope {
+				targetKey, found = key, true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("toggle target %q has no selectable semantic identity", intent.scope.ID)
+		}
+		kind := selectionScopeProject
+		if targetKey.sessionID != "" {
+			kind = selectionScopeSession
+			if _, err := ingest.NewSessionID(targetKey.sessionID); err != nil {
+				return nil, fmt.Errorf("session node %q cannot form an exact session exclusion: %w", targetKey.sessionID, err)
+			}
+		} else if targetKey.branch != "" {
+			kind = selectionScopeBranch
+		}
+		scope, err := makeScope(targetKey, kind, intent.checked)
+		if err != nil {
+			return nil, err
+		}
+		return []selectionScope{scope}, nil
+	case keymap.ActionSelectUnderProject:
+		for key := range before {
+			if key.branch == "" && key.sessionID == "" {
+				scope, err := makeScope(key, selectionScopeProject, true)
+				if err != nil {
+					return nil, err
+				}
+				return []selectionScope{scope}, nil
+			}
+		}
+		return nil, fmt.Errorf("select-under-project has no exact project scope")
+	case keymap.ActionSelectAll:
+		changedProjects := map[string]bool{}
+		for key := range changed {
+			changedProjects[key.projectIdentity] = true
+		}
+		var scopes []selectionScope
+		for _, root := range fullRoots {
+			identity := metaOf(root, MetaProjectIdentity)
+			if !changedProjects[identity] {
+				continue
+			}
+			var projectKey selectableNodeKey
+			for key := range before {
+				if key.projectIdentity == identity && key.branch == "" && key.sessionID == "" {
+					projectKey = key
+					break
+				}
+			}
+			selected, err := changedProjectTarget(identity, changed, after)
+			if err != nil {
+				return nil, err
+			}
+			scope, err := makeScope(projectKey, selectionScopeProject, selected)
+			if err != nil {
+				return nil, err
+			}
+			scopes = append(scopes, scope)
+		}
+		return scopes, nil
+	default:
+		return nil, fmt.Errorf("action %q cannot produce selection scopes", intent.action)
+	}
+}
+
+func changedProjectTarget(identity string, changed map[selectableNodeKey]bool, after selectableState) (bool, error) {
+	found := false
+	selected := false
+	for key := range changed {
+		if key.projectIdentity != identity || key.sessionID == "" {
+			continue
+		}
+		state := after[key].state
+		if state != kit.Checked && state != kit.Unchecked {
+			return false, fmt.Errorf("changed session %q ended in non-binary state %s", key.sessionID, state)
+		}
+		value := state == kit.Checked
+		if found && value != selected {
+			return false, fmt.Errorf("select-all produced mixed targets under project %q", identity)
+		}
+		found, selected = true, value
+	}
+	if !found {
+		return false, fmt.Errorf("select-all changed project %q without changing a selectable session", identity)
+	}
+	return selected, nil
+}
+
+func (f *treeField) restoreSelectableState(before selectableState) {
+	for _, old := range before {
+		old.node.State = old.state
+		restoreMarker(old.node, metaExplicitBranchSelection, old.explicitBranchValue, old.explicitBranchPresent)
+		restoreMarker(old.node, metaExplicitSessionSelection, old.explicitSessionValue, old.explicitSessionPresent)
+	}
+	for _, root := range f.full {
+		rollup(root)
+	}
+}
+
+func restoreMarker(node *kit.TreeNode, key, value string, present bool) {
+	if present {
+		if node.Meta == nil {
+			node.Meta = map[string]string{}
+		}
+		node.Meta[key] = value
+		return
+	}
+	if node.Meta != nil {
+		delete(node.Meta, key)
+	}
+}
+
+func (f *treeField) actionableReconcileError(intent treeSelectionIntent, cause error) error {
+	return fmt.Errorf(
+		"transcript selection change was rolled back.\n"+
+			"what: Peasant could not apply the %q action to selection %q.\n"+
+			"why: the exact project, branch, or session scope could not be reconciled safely: %v.\n"+
+			"where: settings.treeField.handle and reconcileTouchedSelection (field %q).\n"+
+			"when: while applying the tree action before updating the settings draft.\n"+
+			"meaning: the tree state and private markers were restored, and the saved draft was not changed.\n"+
+			"fix: refresh the selection and retry; if the same scope fails again, rerun kickstart after updating Peasant.",
+		intent.action, f.label, cause, f.key,
+	)
 }
 
 type treeSelectionIntent struct {
@@ -624,6 +1087,9 @@ func (f *treeField) Dirty(d *Draft) bool {
 // consistent. It inspects the WHOLE forest, so a conflict hidden by the current
 // facet still blocks.
 func (f *treeField) Validate(d *Draft) error {
+	if f.reconcileErr != nil {
+		return f.reconcileErr
+	}
 	if HasConflict(f.selectionRoots()) {
 		return fmt.Errorf(
 			"unresolved transcript selection conflict.\n"+
@@ -765,6 +1231,21 @@ func selectionsEqual(a, b TreeSelection) bool {
 		}
 		if !sameSet(ac.Sessions, bc.Sessions) {
 			return false
+		}
+		if !sameSet(ac.Exclusions.Sessions, bc.Exclusions.Sessions) || len(ac.Exclusions.Branches) != len(bc.Exclusions.Branches) {
+			return false
+		}
+		for _, exclusion := range ac.Exclusions.Branches {
+			found := false
+			for _, other := range bc.Exclusions.Branches {
+				if exclusion.ClonePath == other.ClonePath && sameSet(exclusion.Branches, other.Branches) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
 		}
 		if len(ac.Projects) != len(bc.Projects) {
 			return false

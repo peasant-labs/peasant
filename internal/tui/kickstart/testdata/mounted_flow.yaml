@@ -47,7 +47,10 @@ cases:
         projects:
           - harness: claude-code
             gitRemote: "git@github.com:acme/tool.git"
-            pathKeys: [clone-a, clone-b]
+            pathKeys: [clone-a]
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            pathKeys: [clone-b]
           - harness: claude-code
             gitRemote: "git@github.com:acme/moved.git"
             pathKeys: [vanished-clone]

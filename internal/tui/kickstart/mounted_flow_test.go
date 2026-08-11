@@ -76,10 +76,12 @@ type mountedListingFixture struct {
 }
 
 type mountedSelectionFixture struct {
-	Mode                  config.SelectionMode    `yaml:"mode"`
-	AutoIngestNewBranches bool                    `yaml:"autoIngestNewBranches"`
-	Projects              []mountedProjectFixture `yaml:"projects"`
-	Sessions              []mountedSessionFixture `yaml:"sessions"`
+	Mode                  config.SelectionMode            `yaml:"mode"`
+	AutoIngestNewBranches bool                            `yaml:"autoIngestNewBranches"`
+	Projects              []mountedProjectFixture         `yaml:"projects"`
+	Sessions              []mountedSessionFixture         `yaml:"sessions"`
+	BranchExclusions      []mountedBranchExclusionFixture `yaml:"branchExclusions"`
+	SessionExclusions     []mountedSessionFixture         `yaml:"sessionExclusions"`
 }
 
 type mountedProjectFixture struct {
@@ -93,6 +95,12 @@ type mountedProjectFixture struct {
 type mountedSessionFixture struct {
 	Harness string   `yaml:"harness"`
 	IDs     []string `yaml:"ids"`
+}
+
+type mountedBranchExclusionFixture struct {
+	Harness  string   `yaml:"harness"`
+	PathKey  string   `yaml:"pathKey"`
+	Branches []string `yaml:"branches"`
 }
 
 type mountedFlowExpectation struct {
@@ -231,6 +239,17 @@ func validateMountedSelectionPaths(t *testing.T, caseName string, pathKeys map[s
 	for _, sessions := range selection.Sessions {
 		if sessions.Harness == "" || len(sessions.IDs) == 0 {
 			t.Fatalf("mounted flow case %q has an incomplete explicit-session fixture", caseName)
+		}
+	}
+	for _, exclusion := range selection.BranchExclusions {
+		if exclusion.Harness == "" || len(exclusion.Branches) == 0 {
+			t.Fatalf("mounted flow case %q has an incomplete branch-exclusion fixture", caseName)
+		}
+		requireMountedPathReference(t, caseName, pathKeys, exclusion.PathKey)
+	}
+	for _, sessions := range selection.SessionExclusions {
+		if sessions.Harness == "" || len(sessions.IDs) == 0 {
+			t.Fatalf("mounted flow case %q has an incomplete session-exclusion fixture", caseName)
 		}
 	}
 }
@@ -417,7 +436,7 @@ func mountedSelection(fixture mountedSelectionFixture, paths map[string]string) 
 		Mode:                  fixture.Mode,
 		AutoIngestNewBranches: fixture.AutoIngestNewBranches,
 	}
-	if len(fixture.Projects) == 0 && len(fixture.Sessions) == 0 {
+	if len(fixture.Projects) == 0 && len(fixture.Sessions) == 0 && len(fixture.BranchExclusions) == 0 && len(fixture.SessionExclusions) == 0 {
 		return selection
 	}
 	selection.Harnesses = map[string]config.SelectionHarnessConfig{}
@@ -437,6 +456,19 @@ func mountedSelection(fixture mountedSelectionFixture, paths map[string]string) 
 	for _, sessions := range fixture.Sessions {
 		harness := selection.Harnesses[sessions.Harness]
 		harness.Sessions = append(harness.Sessions, sessions.IDs...)
+		selection.Harnesses[sessions.Harness] = harness
+	}
+	for _, exclusion := range fixture.BranchExclusions {
+		harness := selection.Harnesses[exclusion.Harness]
+		harness.Exclusions.Branches = append(harness.Exclusions.Branches, config.BranchExclusion{
+			ClonePath: paths[exclusion.PathKey],
+			Branches:  append([]string(nil), exclusion.Branches...),
+		})
+		selection.Harnesses[exclusion.Harness] = harness
+	}
+	for _, sessions := range fixture.SessionExclusions {
+		harness := selection.Harnesses[sessions.Harness]
+		harness.Exclusions.Sessions = append(harness.Exclusions.Sessions, sessions.IDs...)
 		selection.Harnesses[sessions.Harness] = harness
 	}
 	return selection
@@ -634,6 +666,13 @@ func cloneMountedSelection(selection config.SelectionConfig) config.SelectionCon
 			project.ClonePaths = append([]string(nil), project.ClonePaths...)
 			project.Branches = append([]string(nil), project.Branches...)
 			cloned.Projects = append(cloned.Projects, project)
+		}
+		cloned.Exclusions.Sessions = append([]string(nil), configured.Exclusions.Sessions...)
+		for _, exclusion := range configured.Exclusions.Branches {
+			cloned.Exclusions.Branches = append(cloned.Exclusions.Branches, config.BranchExclusion{
+				ClonePath: exclusion.ClonePath,
+				Branches:  append([]string(nil), exclusion.Branches...),
+			})
 		}
 		copy.Harnesses[harness] = cloned
 	}

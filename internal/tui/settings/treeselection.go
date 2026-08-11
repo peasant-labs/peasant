@@ -2,7 +2,9 @@ package settings
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -94,6 +96,25 @@ const (
 	// from the discovery listing, not from the tree.
 	MetaChildCount = kit.MetaChildCount
 )
+
+type selectionScopeKind uint8
+
+const (
+	selectionScopeProject selectionScopeKind = iota
+	selectionScopeBranch
+	selectionScopeSession
+)
+
+type selectionScope struct {
+	kind            selectionScopeKind
+	root            *kit.TreeNode
+	projectIdentity string
+	harness         string
+	clonePath       ingest.ClonePath
+	branch          string
+	sessionID       string
+	selected        bool
+}
 
 // Selection provenance markers preserve the grain of saved rules when rollup
 // makes every currently available child look like one checked parent. They are
@@ -971,7 +992,7 @@ func unmatchedSelection(sel config.SelectionConfig, projects []availableProject)
 	}
 
 	for harness, configured := range sel.Harnesses {
-		residual := config.SelectionHarnessConfig{}
+		residual := config.SelectionHarnessConfig{Exclusions: cloneSelectionExclusions(configured.Exclusions)}
 		for _, sessionID := range configured.Sessions {
 			if _, available := availableSessions[harness][sessionID]; !available {
 				residual.Sessions = appendUniqueString(residual.Sessions, sessionID)
@@ -1045,7 +1066,7 @@ func unmatchedSelection(sel config.SelectionConfig, projects []availableProject)
 				}
 			}
 		}
-		if len(residual.Projects) > 0 || len(residual.Sessions) > 0 {
+		if harnessSelectionPresent(residual) {
 			unmatched.Harnesses[harness] = residual
 		}
 	}
@@ -1113,7 +1134,8 @@ func MergeSelection(current TreeSelection, unmatched UnmatchedBaseline) TreeSele
 		for _, project := range residual.Projects {
 			result.Projects = mergeProjectSelection(result.Projects, project)
 		}
-		if len(result.Projects) > 0 || len(result.Sessions) > 0 {
+		result.Exclusions = mergeSelectionExclusions(result.Exclusions, residual.Exclusions)
+		if harnessSelectionPresent(result) {
 			merged.Harnesses[harness] = result
 		}
 	}
@@ -1142,14 +1164,15 @@ func sameAvailableProject(current, target config.ProjectSelection) bool {
 }
 
 func cloneHarnessMap(source map[string]config.SelectionHarnessConfig) map[string]config.SelectionHarnessConfig {
-	if len(source) == 0 {
+	if source == nil {
 		return nil
 	}
 	result := make(map[string]config.SelectionHarnessConfig, len(source))
 	for harness, configured := range source {
-		copy := config.SelectionHarnessConfig{Sessions: append([]string(nil), configured.Sessions...)}
-		for _, project := range configured.Projects {
-			copy.Projects = append(copy.Projects, cloneProjectSelection(project))
+		copy := config.SelectionHarnessConfig{
+			Projects:   cloneProjectSelections(configured.Projects),
+			Sessions:   cloneStrings(configured.Sessions),
+			Exclusions: cloneSelectionExclusions(configured.Exclusions),
 		}
 		result[harness] = copy
 	}
@@ -1157,9 +1180,78 @@ func cloneHarnessMap(source map[string]config.SelectionHarnessConfig) map[string
 }
 
 func cloneProjectSelection(project config.ProjectSelection) config.ProjectSelection {
-	project.ClonePaths = append([]string(nil), project.ClonePaths...)
-	project.Branches = append([]string(nil), project.Branches...)
+	project.ClonePaths = cloneStrings(project.ClonePaths)
+	project.Branches = cloneStrings(project.Branches)
 	return project
+}
+
+func cloneProjectSelections(projects []config.ProjectSelection) []config.ProjectSelection {
+	if projects == nil {
+		return nil
+	}
+	result := make([]config.ProjectSelection, len(projects))
+	for index, project := range projects {
+		result[index] = cloneProjectSelection(project)
+	}
+	return result
+}
+
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	result := make([]string, len(values))
+	copy(result, values)
+	return result
+}
+
+func cloneSelectionExclusions(exclusions config.SelectionExclusions) config.SelectionExclusions {
+	result := config.SelectionExclusions{Sessions: cloneStrings(exclusions.Sessions)}
+	if exclusions.Branches != nil {
+		result.Branches = make([]config.BranchExclusion, len(exclusions.Branches))
+		for index, exclusion := range exclusions.Branches {
+			result.Branches[index] = config.BranchExclusion{
+				ClonePath: exclusion.ClonePath,
+				Branches:  cloneStrings(exclusion.Branches),
+			}
+		}
+	}
+	return result
+}
+
+func mergeSelectionExclusions(current, residual config.SelectionExclusions) config.SelectionExclusions {
+	if len(current.Branches) == 0 && len(current.Sessions) == 0 {
+		return cloneSelectionExclusions(residual)
+	}
+	result := cloneSelectionExclusions(current)
+	for _, sessionID := range residual.Sessions {
+		result.Sessions = appendUniqueString(result.Sessions, sessionID)
+	}
+	for _, incoming := range residual.Branches {
+		found := false
+		for index := range result.Branches {
+			if result.Branches[index].ClonePath != incoming.ClonePath {
+				continue
+			}
+			for _, branch := range incoming.Branches {
+				result.Branches[index].Branches = appendUniqueString(result.Branches[index].Branches, branch)
+			}
+			found = true
+			break
+		}
+		if !found {
+			result.Branches = append(result.Branches, config.BranchExclusion{
+				ClonePath: incoming.ClonePath,
+				Branches:  cloneStrings(incoming.Branches),
+			})
+		}
+	}
+	return result
+}
+
+func harnessSelectionPresent(configured config.SelectionHarnessConfig) bool {
+	return len(configured.Projects) > 0 || len(configured.Sessions) > 0 ||
+		len(configured.Exclusions.Branches) > 0 || len(configured.Exclusions.Sessions) > 0
 }
 
 func appendUniqueString(values []string, value string) []string {
@@ -1219,6 +1311,372 @@ func mergeBranches(existing, incoming []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// reconcileTouchedSelection applies only the exact semantic scopes whose live
+// tree state changed. Current is the source of truth, including choices absent
+// from the scanner, so unrelated fragments never pass through a lossy forest
+// derivation or remote-keyed merge.
+func reconcileTouchedSelection(
+	current TreeSelection,
+	_ UnmatchedBaseline,
+	scopes []selectionScope,
+	autoIngestNewBranches bool,
+) (TreeSelection, bool, error) {
+	if current.Mode != config.SelectionModeSelected {
+		return current, false, fmt.Errorf("exact tree reconciliation requires selected mode, got %q", current.Mode)
+	}
+	next := TreeSelection{Mode: current.Mode, Harnesses: cloneHarnessMap(current.Harnesses)}
+	for _, scope := range scopes {
+		if err := reconcileSelectionScope(&next, scope, autoIngestNewBranches); err != nil {
+			return current, false, err
+		}
+	}
+	groupTouchedProjectSelections(&next, scopes)
+	if err := next.Validate(); err != nil {
+		return current, false, fmt.Errorf("validate reconciled exact selection: %w", err)
+	}
+	if reflect.DeepEqual(next, current) {
+		return current, false, nil
+	}
+	return next, true, nil
+}
+
+// groupTouchedProjectSelections retains the established select-all shape when
+// every path in a same-remote, same-policy group was explicitly touched. A
+// single-path action cannot pull an unrelated sibling into this grouping.
+func groupTouchedProjectSelections(selection *TreeSelection, scopes []selectionScope) {
+	touched := map[string]map[string]bool{}
+	for _, scope := range scopes {
+		if scope.kind != selectionScopeProject || !scope.selected {
+			continue
+		}
+		if touched[scope.harness] == nil {
+			touched[scope.harness] = map[string]bool{}
+		}
+		touched[scope.harness][scope.clonePath.String()] = true
+	}
+	for harness, paths := range touched {
+		if len(paths) < 2 {
+			continue
+		}
+		configured := selection.Harnesses[harness]
+		firstByKey := map[string]int{}
+		var grouped []config.ProjectSelection
+		for _, project := range configured.Projects {
+			allTouched := len(project.ClonePaths) > 0
+			for _, clonePath := range project.ClonePaths {
+				if !paths[clonePath] {
+					allTouched = false
+					break
+				}
+			}
+			remote := ingest.NormalizeRemoteForMatch(project.GitRemote)
+			if !allTouched || remote == "" {
+				grouped = append(grouped, project)
+				continue
+			}
+			key := remote + "\x00" + branchPolicyKey(project.Branches)
+			if index, found := firstByKey[key]; found {
+				for _, clonePath := range project.ClonePaths {
+					grouped[index].ClonePaths = appendUniqueString(grouped[index].ClonePaths, clonePath)
+				}
+				continue
+			}
+			firstByKey[key] = len(grouped)
+			grouped = append(grouped, project)
+		}
+		configured.Projects = grouped
+		selection.Harnesses[harness] = configured
+	}
+}
+
+func branchPolicyKey(branches []string) string {
+	if len(branches) == 0 {
+		return "all"
+	}
+	return strings.Join(branches, "\x00")
+}
+
+func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoIngestNewBranches bool) error {
+	if scope.root == nil || scope.projectIdentity == "" || scope.harness == "" || scope.clonePath == "" {
+		return fmt.Errorf("exact scope is incomplete: project=%q harness=%q clonePath=%q", scope.projectIdentity, scope.harness, scope.clonePath)
+	}
+	if metaOf(scope.root, MetaProjectIdentity) != scope.projectIdentity || metaOf(scope.root, MetaClonePath) != scope.clonePath.String() {
+		return fmt.Errorf("exact scope %q no longer matches its full-forest project node", scope.projectIdentity)
+	}
+	if next.Harnesses == nil {
+		next.Harnesses = map[string]config.SelectionHarnessConfig{}
+	}
+	configured, existed := next.Harnesses[scope.harness]
+	wasUnrestricted := existed && len(configured.Projects) == 0 && len(configured.Sessions) == 0
+	candidates, err := candidatesForSelectionScope(scope)
+	if err != nil {
+		return err
+	}
+
+	switch scope.kind {
+	case selectionScopeProject:
+		if scope.selected {
+			replacement := projectReplacement(configured.Projects, scope, nil, true)
+			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
+			for _, candidate := range candidates {
+				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
+				configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, string(candidate.SessionID))
+				configured.Exclusions.Branches = removeBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), candidate.Branch)
+			}
+		} else {
+			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), nil)
+			for _, candidate := range candidates {
+				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
+			}
+			for _, candidate := range candidates {
+				if positiveSelectionAdmits(*next, scope.harness, configured, candidate, autoIngestNewBranches, wasUnrestricted) {
+					configured.Exclusions.Branches = addBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), candidate.Branch)
+				}
+			}
+		}
+	case selectionScopeBranch:
+		if scope.branch == "" {
+			return fmt.Errorf("branch scope for project %q has an empty branch", scope.projectIdentity)
+		}
+		if scope.selected {
+			replacement := projectReplacement(configured.Projects, scope, []string{scope.branch}, false)
+			configured.Projects = spliceExactProjectPath(configured.Projects, scope.clonePath.String(), &replacement)
+			configured.Exclusions.Branches = removeBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), scope.branch)
+			for _, candidate := range candidates {
+				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
+				configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, string(candidate.SessionID))
+			}
+		} else {
+			configured.Projects = removeExplicitBranchFromExactProject(configured.Projects, scope.clonePath.String(), scope.branch)
+			for _, candidate := range candidates {
+				configured.Sessions = removeString(configured.Sessions, string(candidate.SessionID))
+			}
+			if len(configured.Projects) > 0 || wasUnrestricted {
+				configured.Exclusions.Branches = addBranchExclusion(configured.Exclusions.Branches, scope.clonePath.String(), scope.branch)
+			}
+		}
+	case selectionScopeSession:
+		if scope.sessionID == "" || len(candidates) != 1 {
+			return fmt.Errorf("session scope for project %q resolved %d candidates for session %q", scope.projectIdentity, len(candidates), scope.sessionID)
+		}
+		candidate := candidates[0]
+		configured.Sessions = removeString(configured.Sessions, scope.sessionID)
+		if scope.selected {
+			configured.Exclusions.Sessions = removeString(configured.Exclusions.Sessions, scope.sessionID)
+			if !positiveProjectSelectionAdmits(*next, scope.harness, configured, candidate, autoIngestNewBranches, wasUnrestricted) {
+				configured.Sessions = appendUniqueString(configured.Sessions, scope.sessionID)
+			}
+		} else if positiveSelectionAdmits(*next, scope.harness, configured, candidate, autoIngestNewBranches, wasUnrestricted) {
+			configured.Exclusions.Sessions = appendUniqueString(configured.Exclusions.Sessions, scope.sessionID)
+		}
+	default:
+		return fmt.Errorf("exact scope for project %q has unknown kind %d", scope.projectIdentity, scope.kind)
+	}
+
+	if len(configured.Projects) == 0 && len(configured.Sessions) == 0 && !wasUnrestricted {
+		if len(configured.Exclusions.Branches) > 0 || len(configured.Exclusions.Sessions) > 0 {
+			return fmt.Errorf("clearing the final positive choice for harness %q would leave unrelated exclusions without a positive selection", scope.harness)
+		}
+		delete(next.Harnesses, scope.harness)
+	} else {
+		next.Harnesses[scope.harness] = configured
+	}
+	if len(next.Harnesses) == 0 {
+		next.Harnesses = nil
+	}
+
+	matcher := config.CompileSelectionMatcher(next.ToSelectionConfig(autoIngestNewBranches))
+	for _, candidate := range candidates {
+		selected := matcher.MatchDiscoveryCandidate(candidate, autoIngestNewBranches) == ingest.BranchMatchYes
+		if selected != scope.selected {
+			if scope.selected && matcher.ExcludesCandidate(candidate) {
+				return fmt.Errorf("session %q remains denied by a broader exact branch exclusion; reselect the branch before selecting this session", candidate.SessionID)
+			}
+			return fmt.Errorf("exact %s scope for project %q resolved selected=%v, want %v", selectionScopeName(scope.kind), scope.projectIdentity, selected, scope.selected)
+		}
+	}
+	return nil
+}
+
+func removeExplicitBranchFromExactProject(projects []config.ProjectSelection, clonePath, branch string) []config.ProjectSelection {
+	project, found := exactProjectTemplate(projects, clonePath)
+	if !found || len(project.Branches) == 0 || !containsString(project.Branches, branch) {
+		return projects
+	}
+	project.Branches = removeString(project.Branches, branch)
+	if len(project.Branches) == 0 {
+		return spliceExactProjectPath(projects, clonePath, nil)
+	}
+	project.ClonePaths = []string{clonePath}
+	return spliceExactProjectPath(projects, clonePath, &project)
+}
+
+func selectionScopeName(kind selectionScopeKind) string {
+	switch kind {
+	case selectionScopeProject:
+		return "project"
+	case selectionScopeBranch:
+		return "branch"
+	case selectionScopeSession:
+		return "session"
+	default:
+		return "unknown"
+	}
+}
+
+func candidatesForSelectionScope(scope selectionScope) ([]ingest.DiscoveryCandidate, error) {
+	projects := availableProjectsFromForest([]*kit.TreeNode{scope.root})
+	if len(projects) != 1 {
+		return nil, fmt.Errorf("project %q resolved %d available project records, want one", scope.projectIdentity, len(projects))
+	}
+	project := projects[0]
+	if project.harness.String() != scope.harness || project.clonePath != scope.clonePath {
+		return nil, fmt.Errorf("project %q resolved harness/path %q/%q, want %q/%q", scope.projectIdentity, project.harness, project.clonePath, scope.harness, scope.clonePath)
+	}
+	var candidates []ingest.DiscoveryCandidate
+	for _, session := range project.sessions {
+		candidate := session.candidate
+		switch scope.kind {
+		case selectionScopeProject:
+			candidates = append(candidates, candidate)
+		case selectionScopeBranch:
+			if candidate.Branch == scope.branch {
+				candidates = append(candidates, candidate)
+			}
+		case selectionScopeSession:
+			if string(candidate.SessionID) == scope.sessionID && candidate.Branch == scope.branch {
+				candidates = append(candidates, candidate)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("exact %s scope for project %q has no visible session candidate", selectionScopeName(scope.kind), scope.projectIdentity)
+	}
+	return candidates, nil
+}
+
+func projectReplacement(projects []config.ProjectSelection, scope selectionScope, branches []string, unrestricted bool) config.ProjectSelection {
+	replacement, found := exactProjectTemplate(projects, scope.clonePath.String())
+	if !found {
+		replacement = projectSelectionFor(scope.root, nil)
+	}
+	replacement.ClonePaths = []string{scope.clonePath.String()}
+	if unrestricted {
+		replacement.Branches = nil
+		return replacement
+	}
+	if found && len(replacement.Branches) == 0 {
+		return replacement
+	}
+	for _, branch := range branches {
+		replacement.Branches = appendUniqueString(replacement.Branches, branch)
+	}
+	return replacement
+}
+
+func exactProjectTemplate(projects []config.ProjectSelection, clonePath string) (config.ProjectSelection, bool) {
+	for _, project := range projects {
+		if containsString(project.ClonePaths, clonePath) {
+			return cloneProjectSelection(project), true
+		}
+	}
+	return config.ProjectSelection{}, false
+}
+
+func spliceExactProjectPath(projects []config.ProjectSelection, clonePath string, replacement *config.ProjectSelection) []config.ProjectSelection {
+	var result []config.ProjectSelection
+	if projects != nil {
+		result = make([]config.ProjectSelection, 0, len(projects)+1)
+	}
+	anchored := false
+	for _, project := range projects {
+		if !containsString(project.ClonePaths, clonePath) {
+			result = append(result, cloneProjectSelection(project))
+			continue
+		}
+		residual := cloneProjectSelection(project)
+		residual.ClonePaths = removeString(residual.ClonePaths, clonePath)
+		if len(residual.ClonePaths) > 0 {
+			result = append(result, residual)
+		}
+		if !anchored && replacement != nil {
+			result = append(result, cloneProjectSelection(*replacement))
+		}
+		anchored = true
+	}
+	if !anchored && replacement != nil {
+		result = append(result, cloneProjectSelection(*replacement))
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func addBranchExclusion(exclusions []config.BranchExclusion, clonePath, branch string) []config.BranchExclusion {
+	branch = strings.TrimSpace(branch)
+	for index := range exclusions {
+		if exclusions[index].ClonePath == clonePath {
+			exclusions[index].Branches = appendUniqueString(exclusions[index].Branches, branch)
+			return exclusions
+		}
+	}
+	return append(exclusions, config.BranchExclusion{ClonePath: clonePath, Branches: []string{branch}})
+}
+
+func removeBranchExclusion(exclusions []config.BranchExclusion, clonePath, branch string) []config.BranchExclusion {
+	for index := range exclusions {
+		if exclusions[index].ClonePath != clonePath {
+			continue
+		}
+		exclusions[index].Branches = removeString(exclusions[index].Branches, branch)
+		if len(exclusions[index].Branches) == 0 {
+			result := append(exclusions[:index:index], exclusions[index+1:]...)
+			if len(result) == 0 {
+				return nil
+			}
+			return result
+		}
+		return exclusions
+	}
+	return exclusions
+}
+
+func removeString(values []string, target string) []string {
+	if values == nil {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != target {
+			result = append(result, value)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func positiveSelectionAdmits(selection TreeSelection, harness string, configured config.SelectionHarnessConfig, candidate ingest.DiscoveryCandidate, autoIngestNewBranches, allowUnrestricted bool) bool {
+	if len(configured.Projects) == 0 && len(configured.Sessions) == 0 && !allowUnrestricted {
+		return false
+	}
+	positive := TreeSelection{Mode: selection.Mode, Harnesses: cloneHarnessMap(selection.Harnesses)}
+	configured.Exclusions = config.SelectionExclusions{}
+	if positive.Harnesses == nil {
+		positive.Harnesses = map[string]config.SelectionHarnessConfig{}
+	}
+	positive.Harnesses[harness] = configured
+	matcher := config.CompileSelectionMatcher(positive.ToSelectionConfig(autoIngestNewBranches))
+	return matcher.MatchDiscoveryCandidate(candidate, autoIngestNewBranches) == ingest.BranchMatchYes
+}
+
+func positiveProjectSelectionAdmits(selection TreeSelection, harness string, configured config.SelectionHarnessConfig, candidate ingest.DiscoveryCandidate, autoIngestNewBranches, allowUnrestricted bool) bool {
+	configured.Sessions = nil
+	return positiveSelectionAdmits(selection, harness, configured, candidate, autoIngestNewBranches, allowUnrestricted)
 }
 
 // rollup recomputes an interior node's state from its children (leaves keep the
