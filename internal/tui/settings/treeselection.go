@@ -50,8 +50,10 @@ type TreeSelection struct {
 const (
 	MetaRemote = "remote"
 	MetaBranch = "branch"
-	// MetaProjectIdentity carries the scanner's stable harness + physical-path
-	// identity. It is never a display label.
+	// MetaProjectIdentity carries the scanner's stable root identity. For Git
+	// scanner roots it is harness + transient repository common-directory path;
+	// exact worktree identity remains in MetaClonePath on descendants. It is
+	// never a display label or persisted config field.
 	MetaProjectIdentity = "projectIdentity"
 	// MetaProjectHarness carries the harness component of a project identity on
 	// the project root. Session leaves continue to use MetaHarness.
@@ -62,6 +64,9 @@ const (
 	MetaProjectName = "projectName"
 	// MetaClonePath carries a resolver-produced physical identity path.
 	MetaClonePath = "clonePath"
+	// MetaRepositoryPath carries the transient Git common-directory grouping
+	// path. It never enters config.SelectionConfig.
+	MetaRepositoryPath = "repositoryPath"
 	// MetaRemoteMultiplicity and MetaNameMultiplicity carry the complete-cohort
 	// uniqueness proof used by DiscoveryCandidate matching.
 	MetaRemoteMultiplicity = "remoteMultiplicity"
@@ -323,11 +328,26 @@ func isExactProjectFirstForest(roots []*kit.TreeNode) bool {
 	for _, root := range roots {
 		if metaOf(root, MetaProjectIdentity) == "" ||
 			metaOf(root, MetaProjectHarness) == "" ||
-			metaOf(root, MetaClonePath) == "" {
+			!rootCarriesExactSessionPath(root) {
 			return false
 		}
 	}
 	return true
+}
+
+func rootCarriesExactSessionPath(root *kit.TreeNode) bool {
+	found := false
+	valid := true
+	walkNodes(root, func(node *kit.TreeNode) {
+		if harnessOf(node) == "" {
+			return
+		}
+		found = true
+		if metaOf(node, MetaClonePath) == "" {
+			valid = false
+		}
+	})
+	return found && valid
 }
 
 // harnessesUnder returns the distinct harnesses of every session node in n's
@@ -351,55 +371,9 @@ func harnessesUnder(n *kit.TreeNode) []string {
 	return order
 }
 
-// harnessBuild accumulates one harness's allowlist while the project-first
-// forest is walked. Physical clones of one normalized remote/name merge into a
-// single ProjectSelection with an exact ClonePaths list and one shared branch
-// policy.
-type harnessBuild struct {
-	order    []string
-	projects map[string]*projectBuild
+type projectFirstHarnessBuild struct {
+	projects []config.ProjectSelection
 	sessions []string
-}
-
-type projectBuild struct {
-	selection   config.ProjectSelection
-	branches    map[string]struct{}
-	allBranches bool
-}
-
-func projectBuildKey(remote, name, identity string, pathBound bool) string {
-	if normalized := ingest.NormalizeRemoteForMatch(remote); normalized != "" {
-		return "remote:" + normalized
-	}
-	// A remote-empty project with a resolved path is one physical non-Git
-	// project. Equal display names do not create a shared branch policy.
-	if pathBound {
-		return "identity:" + identity
-	}
-	if normalized := ingest.NormalizeProjectNameForMatch(name); normalized != "" {
-		return "name:" + normalized
-	}
-	return "unidentified:" + identity
-}
-
-func (hb *harnessBuild) project(remote, name string, clonePath ingest.ClonePath, identity string) *projectBuild {
-	if hb.projects == nil {
-		hb.projects = map[string]*projectBuild{}
-	}
-	key := projectBuildKey(remote, name, identity, clonePath != "")
-	pb, ok := hb.projects[key]
-	if !ok {
-		pb = &projectBuild{
-			selection: config.ProjectSelection{GitRemote: remote, Name: name},
-			branches:  map[string]struct{}{},
-		}
-		hb.projects[key] = pb
-		hb.order = append(hb.order, key)
-	}
-	if clonePath != "" && !containsString(pb.selection.ClonePaths, clonePath.String()) {
-		pb.selection.ClonePaths = append(pb.selection.ClonePaths, clonePath.String())
-	}
-	return pb
 }
 
 // fromProjectFirstForest derives the harness-keyed TreeSelection from a
@@ -408,93 +382,96 @@ func (hb *harnessBuild) project(remote, name string, clonePath ingest.ClonePath,
 // shape persists Mode=selected with the exact current physical-clone list. A
 // project discovered on a later run therefore starts clear.
 func fromProjectFirstForest(roots []*kit.TreeNode) TreeSelection {
-	builds := map[string]*harnessBuild{}
+	builds := map[string]*projectFirstHarnessBuild{}
 	order := []string{}
-	get := func(h string) *harnessBuild {
+	get := func(h string) *projectFirstHarnessBuild {
 		hb, ok := builds[h]
 		if !ok {
-			hb = &harnessBuild{}
+			hb = &projectFirstHarnessBuild{}
 			builds[h] = hb
 			order = append(order, h)
 		}
 		return hb
 	}
-	addProjectAllBranches := func(project *kit.TreeNode, remote, name string) {
-		for _, h := range harnessesUnder(project) {
-			pb := get(h).project(remote, name, clonePathOf(project), projectIdentityOf(project))
-			pb.allBranches = true
-			pb.branches = nil
-		}
-	}
-	addBranch := func(project, scope *kit.TreeNode, remote, name, branch string) {
-		for _, h := range harnessesUnder(scope) {
-			pb := get(h).project(remote, name, clonePathOf(project), projectIdentityOf(project))
-			if !pb.allBranches {
-				pb.branches[branch] = struct{}{}
-			}
-		}
-	}
-	for _, project := range roots {
-		if project.State == kit.Unchecked || project.State == kit.Conflict {
+	for _, project := range availableProjectsFromForest(roots) {
+		if len(project.sessions) == 0 {
 			continue
 		}
-		remote := gitRemoteOf(project)
-		name := projectNameOf(project)
-		if remote != "" {
-			name = ""
+		build := get(project.harness.String())
+		allChecked := true
+		allCheckedExplicit := true
+		checkedCount := 0
+		explicitBranch := false
+		branchOrder := []string{}
+		branchSessions := map[string][]availableSession{}
+		for _, session := range project.sessions {
+			branch := session.candidate.Branch
+			if _, known := branchSessions[branch]; !known {
+				branchOrder = append(branchOrder, branch)
+			}
+			branchSessions[branch] = append(branchSessions[branch], session)
+			if session.node.State != kit.Checked {
+				allChecked = false
+				continue
+			}
+			checkedCount++
+			if metaOf(session.node, metaExplicitSessionSelection) != "true" {
+				allCheckedExplicit = false
+			}
+			if metaOf(session.node, metaExplicitBranchSelection) == "true" {
+				explicitBranch = true
+			}
 		}
-		switch project.State {
-		case kit.Checked:
-			switch {
-			case checkedOnlyByExplicitSessions(project):
-				collectExplicitSessionIDs(project, get)
-			case metaOf(project, metaExplicitBranchSelection) == "true":
-				for _, branch := range project.Children {
-					if checkedOnlyByExplicitSessions(branch) {
-						collectExplicitSessionIDs(branch, get)
-						continue
-					}
-					addBranch(project, branch, remote, name, branchOf(branch))
-				}
-			default:
-				addProjectAllBranches(project, remote, name)
+		if checkedCount == 0 {
+			continue
+		}
+		if allChecked && allCheckedExplicit {
+			for _, session := range project.sessions {
+				build.sessions = appendUniqueString(build.sessions, session.node.ID)
 			}
-		case kit.Partial:
-			for _, branch := range project.Children {
-				switch branch.State {
-				case kit.Checked:
-					if checkedOnlyByExplicitSessions(branch) {
-						collectExplicitSessionIDs(branch, get)
-					} else {
-						addBranch(project, branch, remote, name, branchOf(branch))
-					}
-				case kit.Partial:
-					for _, session := range branch.Children {
-						collectCheckedSessionIDs(session, get)
-					}
+			continue
+		}
+
+		var branches []string
+		if allChecked && !explicitBranch {
+			build.projects = appendEquivalentProjectSelection(build.projects, availableProjectSelection(project, nil))
+			continue
+		}
+		for _, branch := range branchOrder {
+			sessions := branchSessions[branch]
+			branchChecked := len(sessions) > 0
+			branchExplicitOnly := true
+			for _, session := range sessions {
+				if session.node.State != kit.Checked {
+					branchChecked = false
+					continue
+				}
+				if metaOf(session.node, metaExplicitSessionSelection) != "true" {
+					branchExplicitOnly = false
 				}
 			}
+			if branchChecked && !branchExplicitOnly {
+				branches = appendUniqueString(branches, branch)
+				continue
+			}
+			for _, session := range sessions {
+				if session.node.State == kit.Checked {
+					build.sessions = appendUniqueString(build.sessions, session.node.ID)
+				}
+			}
+		}
+		if len(branches) > 0 {
+			sort.Strings(branches)
+			build.projects = appendEquivalentProjectSelection(build.projects, availableProjectSelection(project, branches))
 		}
 	}
 	ts := TreeSelection{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{}}
 	for _, h := range order {
 		hb := builds[h]
-		var projects []config.ProjectSelection
-		for _, key := range hb.order {
-			pb := hb.projects[key]
-			selection := pb.selection
-			if !pb.allBranches {
-				for branch := range pb.branches {
-					selection.Branches = append(selection.Branches, branch)
-				}
-				sort.Strings(selection.Branches)
-			}
-			projects = append(projects, selection)
-		}
-		if len(projects) == 0 && len(hb.sessions) == 0 {
+		if len(hb.projects) == 0 && len(hb.sessions) == 0 {
 			continue
 		}
-		ts.Harnesses[h] = config.SelectionHarnessConfig{Projects: projects, Sessions: hb.sessions}
+		ts.Harnesses[h] = config.SelectionHarnessConfig{Projects: hb.projects, Sessions: hb.sessions}
 	}
 	if len(ts.Harnesses) == 0 {
 		ts.Harnesses = nil
@@ -502,68 +479,46 @@ func fromProjectFirstForest(roots []*kit.TreeNode) TreeSelection {
 	return ts
 }
 
-// checkedOnlyByExplicitSessions reports whether every checked session in scope
-// was restored or selected at session grain. It is used only when rollup has
-// made scope Checked; a scope with no session nodes is never session-scoped.
-func checkedOnlyByExplicitSessions(scope *kit.TreeNode) bool {
-	found := false
-	onlyExplicit := true
-	var walk func(*kit.TreeNode)
-	walk = func(node *kit.TreeNode) {
-		if harnessOf(node) != "" && node.State == kit.Checked {
-			found = true
-			if metaOf(node, metaExplicitSessionSelection) != "true" {
-				onlyExplicit = false
-			}
-		}
-		for _, child := range node.Children {
-			walk(child)
-		}
+func availableProjectSelection(project availableProject, branches []string) config.ProjectSelection {
+	selection := config.ProjectSelection{GitRemote: project.gitRemote, Branches: cloneStrings(branches)}
+	if selection.GitRemote == "" {
+		selection.Name = project.projectName
 	}
-	walk(scope)
-	return found && onlyExplicit
+	if project.clonePath != "" {
+		selection.ClonePaths = []string{project.clonePath.String()}
+	}
+	return selection
 }
 
-func collectExplicitSessionIDs(scope *kit.TreeNode, get func(string) *harnessBuild) {
-	var walk func(*kit.TreeNode)
-	walk = func(node *kit.TreeNode) {
-		if harness := harnessOf(node); harness != "" && node.State == kit.Checked && metaOf(node, metaExplicitSessionSelection) == "true" {
-			get(harness).sessions = appendUniqueString(get(harness).sessions, node.ID)
+func appendEquivalentProjectSelection(projects []config.ProjectSelection, incoming config.ProjectSelection) []config.ProjectSelection {
+	key := equivalentProjectSelectionKey(incoming)
+	for index := range projects {
+		if equivalentProjectSelectionKey(projects[index]) != key {
+			continue
 		}
-		for _, child := range node.Children {
-			walk(child)
+		if incoming.GitRemote != "" && (projects[index].GitRemote == "" || incoming.GitRemote < projects[index].GitRemote) {
+			projects[index].GitRemote = incoming.GitRemote
 		}
+		for _, clonePath := range incoming.ClonePaths {
+			projects[index].ClonePaths = appendUniqueString(projects[index].ClonePaths, clonePath)
+		}
+		sort.Strings(projects[index].ClonePaths)
+		return projects
 	}
-	walk(scope)
+	return append(projects, cloneProjectSelection(incoming))
 }
 
-// collectCheckedSessionIDs adds the ids of the Checked sessions in a session
-// subtree to their harness allowlists. A session may nest child (subagent)
-// sessions, so the walk is recursive: a Checked session contributes its whole
-// subtree (every nested session id), while a Partial session is not itself
-// wholly chosen and the walk descends to find the Checked sessions within it. A
-// flat session leaf (no children) is Checked or Unchecked, so this reduces to
-// "add a checked leaf's id" and preserves the original round-trip.
-func collectCheckedSessionIDs(n *kit.TreeNode, get func(string) *harnessBuild) {
-	switch n.State {
-	case kit.Checked:
-		addSubtreeSessionIDs(n, get)
-	case kit.Partial:
-		for _, c := range n.Children {
-			collectCheckedSessionIDs(c, get)
-		}
+func equivalentProjectSelectionKey(project config.ProjectSelection) string {
+	policy := branchPolicyKey(project.Branches)
+	if remote := ingest.NormalizeRemoteForMatch(project.GitRemote); remote != "" {
+		return "remote:" + remote + "\x00" + policy
 	}
-}
-
-// addSubtreeSessionIDs adds every session node id in n's subtree (n included) to
-// its harness allowlist, keyed by the MetaHarness each node carries.
-func addSubtreeSessionIDs(n *kit.TreeNode, get func(string) *harnessBuild) {
-	if h := harnessOf(n); h != "" {
-		get(h).sessions = append(get(h).sessions, n.ID)
+	if len(project.ClonePaths) > 0 {
+		paths := append([]string(nil), project.ClonePaths...)
+		sort.Strings(paths)
+		return "clone:" + strings.Join(paths, "\x00") + "\x00" + policy
 	}
-	for _, c := range n.Children {
-		addSubtreeSessionIDs(c, get)
-	}
+	return "name:" + ingest.NormalizeProjectNameForMatch(project.Name) + "\x00" + policy
 }
 
 func containsString(ss []string, s string) bool {
@@ -839,9 +794,11 @@ func setExplicitSessionIntent(scope *kit.TreeNode, explicit bool) {
 // Checked and a no-edit save widens its Branches list to nil.
 func markExplicitBranchSelections(sel config.SelectionConfig, projects []availableProject) {
 	for _, project := range projects {
-		if project.node.Meta != nil {
-			delete(project.node.Meta, metaExplicitBranchSelection)
-		}
+		walkNodes(project.node, func(node *kit.TreeNode) {
+			if node.Meta != nil {
+				delete(node.Meta, metaExplicitBranchSelection)
+			}
+		})
 	}
 	for harness, configured := range sel.Harnesses {
 		for _, configuredProject := range configured.Projects {
@@ -849,10 +806,12 @@ func markExplicitBranchSelections(sel config.SelectionConfig, projects []availab
 				continue
 			}
 			for _, project := range matchingAvailableProjects(harness, configuredProject, projects) {
-				if project.node.Meta == nil {
-					project.node.Meta = map[string]string{}
+				for _, session := range project.sessions {
+					if session.node.Meta == nil {
+						session.node.Meta = map[string]string{}
+					}
+					session.node.Meta[metaExplicitBranchSelection] = "true"
 				}
-				project.node.Meta[metaExplicitBranchSelection] = "true"
 			}
 		}
 	}
@@ -862,31 +821,17 @@ func availableProjectsFromForest(roots []*kit.TreeNode) []availableProject {
 	var projects []availableProject
 	if isProjectFirstForest(roots) {
 		for _, projectNode := range roots {
-			harness := ingest.Harness(metaOf(projectNode, MetaProjectHarness))
-			if harness == "" {
-				if harnesses := harnessesUnder(projectNode); len(harnesses) > 0 {
-					harness = ingest.Harness(harnesses[0])
-				}
-			}
-			project := availableProject{
-				node:               projectNode,
-				harness:            harness,
-				identity:           projectIdentityOf(projectNode),
-				gitRemote:          gitRemoteOf(projectNode),
-				projectName:        projectNameOf(projectNode),
-				clonePath:          clonePathOf(projectNode),
-				remoteMultiplicity: multiplicityOf(projectNode, MetaRemoteMultiplicity),
-				nameMultiplicity:   multiplicityOf(projectNode, MetaNameMultiplicity),
-				branches:           map[string]struct{}{},
-			}
+			byPath := map[string]*availableProject{}
+			var order []string
 			for _, branchNode := range projectNode.Children {
 				branch := branchOf(branchNode)
-				project.branches[branch] = struct{}{}
 				for _, sessionNode := range branchNode.Children {
-					appendAvailableSessions(&project, sessionNode, branch)
+					appendAvailableSessionsByPath(&byPath, &order, projectNode, branchNode, sessionNode, branch, "")
 				}
 			}
-			projects = append(projects, project)
+			for _, key := range order {
+				projects = append(projects, *byPath[key])
+			}
 		}
 	} else {
 		for _, provider := range roots {
@@ -918,7 +863,52 @@ func availableProjectsFromForest(roots []*kit.TreeNode) []availableProject {
 	return projects
 }
 
-func appendAvailableSessions(project *availableProject, node *kit.TreeNode, branch string) {
+func appendAvailableSessionsByPath(
+	byPath *map[string]*availableProject,
+	order *[]string,
+	projectNode, branchNode, node *kit.TreeNode,
+	branch string,
+	inheritedPath ingest.ClonePath,
+) {
+	harness := ingest.Harness(metaOf(projectNode, MetaProjectHarness))
+	if value := harnessOf(node); value != "" {
+		harness = ingest.Harness(value)
+	}
+	clonePath := clonePathOf(node)
+	if clonePath == "" {
+		clonePath = inheritedPath
+	}
+	if clonePath == "" {
+		clonePath = clonePathOf(branchNode)
+	}
+	if clonePath == "" {
+		clonePath = clonePathOf(projectNode)
+	}
+	key := harness.String() + "\x00" + clonePath.String()
+	project := (*byPath)[key]
+	if project == nil {
+		project = &availableProject{
+			node:               projectNode,
+			harness:            harness,
+			identity:           projectIdentityOf(projectNode),
+			gitRemote:          gitRemoteOf(projectNode),
+			projectName:        projectNameOf(projectNode),
+			clonePath:          clonePath,
+			remoteMultiplicity: multiplicityOf(projectNode, MetaRemoteMultiplicity),
+			nameMultiplicity:   multiplicityOf(projectNode, MetaNameMultiplicity),
+			branches:           map[string]struct{}{},
+		}
+		(*byPath)[key] = project
+		*order = append(*order, key)
+	}
+	project.branches[branch] = struct{}{}
+	appendAvailableSession(project, node, branch)
+	for _, child := range node.Children {
+		appendAvailableSessionsByPath(byPath, order, projectNode, branchNode, child, branch, clonePath)
+	}
+}
+
+func appendAvailableSession(project *availableProject, node *kit.TreeNode, branch string) {
 	harness := project.harness
 	if value := harnessOf(node); value != "" {
 		harness = ingest.Harness(value)
@@ -948,6 +938,10 @@ func appendAvailableSessions(project *availableProject, node *kit.TreeNode, bran
 			NameMultiplicity:   multiplicityOf(node, MetaNameMultiplicity),
 		},
 	})
+}
+
+func appendAvailableSessions(project *availableProject, node *kit.TreeNode, branch string) {
+	appendAvailableSession(project, node, branch)
 	for _, child := range node.Children {
 		appendAvailableSessions(project, child, branch)
 	}
@@ -1482,8 +1476,8 @@ func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoInge
 	if scope.root == nil || scope.projectIdentity == "" || scope.harness == "" || scope.clonePath == "" {
 		return fmt.Errorf("exact scope is incomplete: project=%q harness=%q clonePath=%q", scope.projectIdentity, scope.harness, scope.clonePath)
 	}
-	if metaOf(scope.root, MetaProjectIdentity) != scope.projectIdentity || metaOf(scope.root, MetaClonePath) != scope.clonePath.String() {
-		return fmt.Errorf("exact scope %q no longer matches its full-forest project node", scope.projectIdentity)
+	if metaOf(scope.root, MetaProjectIdentity) != scope.projectIdentity {
+		return fmt.Errorf("exact scope %q no longer matches its full-forest repository node", scope.projectIdentity)
 	}
 	if next.Harnesses == nil {
 		next.Harnesses = map[string]config.SelectionHarnessConfig{}
@@ -1608,13 +1602,16 @@ func selectionScopeName(kind selectionScopeKind) string {
 
 func candidatesForSelectionScope(scope selectionScope) ([]ingest.DiscoveryCandidate, error) {
 	projects := availableProjectsFromForest([]*kit.TreeNode{scope.root})
-	if len(projects) != 1 {
-		return nil, fmt.Errorf("project %q resolved %d available project records, want one", scope.projectIdentity, len(projects))
+	var matching []availableProject
+	for _, project := range projects {
+		if project.harness == ingest.Harness(scope.harness) && project.clonePath == scope.clonePath {
+			matching = append(matching, project)
+		}
 	}
-	project := projects[0]
-	if project.harness.String() != scope.harness || project.clonePath != scope.clonePath {
-		return nil, fmt.Errorf("project %q resolved harness/path %q/%q, want %q/%q", scope.projectIdentity, project.harness, project.clonePath, scope.harness, scope.clonePath)
+	if len(matching) != 1 {
+		return nil, fmt.Errorf("repository project %q resolved %d available records for harness/path %q/%q, want one", scope.projectIdentity, len(matching), scope.harness, scope.clonePath)
 	}
+	project := matching[0]
 	var candidates []ingest.DiscoveryCandidate
 	for _, session := range project.sessions {
 		candidate := session.candidate

@@ -15,6 +15,15 @@ type ClonePath string
 // String returns the resolved physical path.
 func (p ClonePath) String() string { return string(p) }
 
+// RepositoryPath is a transient, resolved physical Git common-directory
+// identity. Linked worktrees of one repository share this value, while
+// independent clones do not. It is grouping evidence only: persisted selection
+// and every destructive or publishing boundary continue to use ClonePath.
+type RepositoryPath string
+
+// String returns the resolved physical Git common-directory path.
+func (p RepositoryPath) String() string { return string(p) }
+
 // PathIdentityResolver resolves a directory spelling to its physical clone
 // identity.
 type PathIdentityResolver interface {

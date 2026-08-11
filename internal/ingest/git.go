@@ -25,10 +25,53 @@ type GitResolver interface {
 	WalkUpRemoteURL(ctx context.Context, dir string) (remoteURL string, resolvedDir string, err error)
 }
 
+// RepositoryPathResolver resolves a physical worktree path to Git's shared
+// common-directory identity. Callers must retain the original ClonePath for
+// matching and persistence; RepositoryPath is only a repository-cohort key.
+type RepositoryPathResolver interface {
+	ResolveRepositoryPath(ctx context.Context, dir ClonePath) (RepositoryPath, error)
+}
+
 // ExecGitResolver shells out to git using exec.Command (argument-list form, NEVER sh -c).
 type ExecGitResolver struct{}
 
 var _ GitResolver = (*ExecGitResolver)(nil)
+var _ RepositoryPathResolver = (*ExecGitResolver)(nil)
+
+// NewGitRepositoryPathResolver returns the production Git common-directory
+// resolver.
+func NewGitRepositoryPathResolver() RepositoryPathResolver {
+	return &ExecGitResolver{}
+}
+
+// ResolveRepositoryPath asks Git for the absolute common directory shared by
+// the main checkout and all linked worktrees, then resolves that directory
+// physically. Git owns interpretation of .git directories, gitdir files,
+// relative pointers, bare repositories, and separate-git-dir layouts.
+func (g *ExecGitResolver) ResolveRepositoryPath(ctx context.Context, dir ClonePath) (RepositoryPath, error) {
+	if dir == "" {
+		return "", fmt.Errorf(
+			"resolve repository identity: what: Peasant could not identify a Git repository; why: the physical worktree path is empty; where: ExecGitResolver.ResolveRepositoryPath in internal/ingest/git.go; when: while grouping discovered project worktrees; meaning: this worktree cannot be grouped with related worktrees; fix: resolve the project directory to a ClonePath before asking for its repository identity")
+	}
+	commonDir, err := runGit(ctx, "git", "-C", dir.String(), "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf(
+			"resolve repository identity for %q: what: Peasant could not read Git's common directory; why: git rev-parse failed: %w; where: ExecGitResolver.ResolveRepositoryPath in internal/ingest/git.go; when: while grouping discovered project worktrees; meaning: this worktree will need a fail-safe path identity instead of repository grouping; fix: verify the directory is an accessible Git worktree and retry",
+			dir,
+			err,
+		)
+	}
+	physical, err := NewPhysicalPathResolver().Resolve(commonDir)
+	if err != nil {
+		return "", fmt.Errorf(
+			"resolve repository identity for %q: what: Peasant could not normalize Git's common directory %q; why: physical path resolution failed: %w; where: ExecGitResolver.ResolveRepositoryPath in internal/ingest/git.go; when: after git rev-parse identified the repository; meaning: this worktree will need a fail-safe path identity instead of repository grouping; fix: restore access to the Git common directory and retry",
+			dir,
+			commonDir,
+			err,
+		)
+	}
+	return RepositoryPath(physical.String()), nil
+}
 
 // ResolveRepositoryRoot returns Git's canonical worktree root for dir.
 func (g *ExecGitResolver) ResolveRepositoryRoot(ctx context.Context, dir string) (string, error) {

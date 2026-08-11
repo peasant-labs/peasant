@@ -85,9 +85,11 @@ type touchedFieldCase struct {
 	ProjectIdentity      string                 `yaml:"projectIdentity"`
 	Harness              string                 `yaml:"harness"`
 	ClonePath            string                 `yaml:"clonePath"`
+	LinkedClonePath      string                 `yaml:"linkedClonePath"`
 	GitRemote            string                 `yaml:"gitRemote"`
 	Branch               string                 `yaml:"branch"`
 	SessionID            string                 `yaml:"sessionId"`
+	LinkedSessionID      string                 `yaml:"linkedSessionId"`
 	Keys                 []touchedFieldKey      `yaml:"keys"`
 	ExpectedSessionState string                 `yaml:"expectedSessionState"`
 	ExpectedSetCount     int                    `yaml:"expectedSetCount"`
@@ -153,6 +155,9 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 		}
 		if _, ok := touchedTriState(testCase.ExpectedSessionState); !ok {
 			t.Fatalf("field case %q has unknown expected state %q", testCase.Name, testCase.ExpectedSessionState)
+		}
+		if (testCase.LinkedClonePath == "") != (testCase.LinkedSessionID == "") {
+			t.Fatalf("field case %q must set linkedClonePath and linkedSessionId together", testCase.Name)
 		}
 	}
 	return document
@@ -365,7 +370,7 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 }
 
 func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
-	return &kit.TreeNode{
+	root := &kit.TreeNode{
 		ID: testCase.ProjectIdentity,
 		Meta: map[string]string{
 			MetaProjectIdentity: testCase.ProjectIdentity,
@@ -386,6 +391,19 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 			}},
 		}},
 	}
+	if testCase.LinkedClonePath != "" {
+		delete(root.Meta, MetaClonePath)
+		root.Children[0].Children = append(root.Children[0].Children, &kit.TreeNode{
+			ID: testCase.LinkedSessionID,
+			Meta: map[string]string{
+				MetaHarness:         testCase.Harness,
+				MetaProjectIdentity: testCase.ProjectIdentity,
+				MetaClonePath:       testCase.LinkedClonePath,
+				MetaRemote:          testCase.GitRemote,
+			},
+		})
+	}
+	return root
 }
 
 func touchedFieldKeyPress(key touchedFieldKey) string {

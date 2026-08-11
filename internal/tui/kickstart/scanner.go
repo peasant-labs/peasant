@@ -39,6 +39,28 @@ func (i ProjectIdentity) available() bool {
 	return i.Harness != "" && i.ClonePath != ""
 }
 
+// RepositoryIdentity is the transient scanner-root identity shared by linked
+// worktrees. ProjectIdentity remains the exact worktree identity used by saved
+// selection and exclusions.
+type RepositoryIdentity struct {
+	Harness        ingest.Harness
+	RepositoryPath ingest.RepositoryPath
+}
+
+// String returns an unambiguous repository-root key. It is never persisted or
+// rendered as row text.
+func (i RepositoryIdentity) String() string {
+	if !i.available() {
+		return ""
+	}
+	harness := i.Harness.String()
+	return strconv.Itoa(len(harness)) + ":" + harness + i.RepositoryPath.String()
+}
+
+func (i RepositoryIdentity) available() bool {
+	return i.Harness != "" && i.RepositoryPath != ""
+}
+
 // ScannerTreeSource is the REAL kit.TreeSource the mounted kickstart tree loads
 // from: it folds the flat provider discovery listing the legacy wizard already
 // produced (internal/tui/ftue discovery, the exact SessionListing rows the old
@@ -55,9 +77,10 @@ func (i ProjectIdentity) available() bool {
 // persisted (harness-keyed) SelectionConfig, so a selection made over this
 // project-first forest round-trips without a parallel model.
 type ScannerTreeSource struct {
-	sessions []ftue.SessionListing
-	ingested map[string]bool
-	resolver ingest.PathIdentityResolver
+	sessions           []ftue.SessionListing
+	ingested           map[string]bool
+	resolver           ingest.PathIdentityResolver
+	repositoryResolver ingest.RepositoryPathResolver
 }
 
 // ScannerOption configures a ScannerTreeSource at construction.
@@ -93,14 +116,26 @@ func WithPathIdentityResolver(resolver ingest.PathIdentityResolver) ScannerOptio
 	}
 }
 
+// WithRepositoryPathResolver injects the Git common-directory boundary used
+// only for scanner grouping and remote/name multiplicity. Exact worktree paths
+// still come from WithPathIdentityResolver.
+func WithRepositoryPathResolver(resolver ingest.RepositoryPathResolver) ScannerOption {
+	return func(s *ScannerTreeSource) {
+		if resolver != nil {
+			s.repositoryResolver = resolver
+		}
+	}
+}
+
 // NewScannerTreeSource builds a TreeSource over an already-discovered session
 // listing. The listing is copied defensively so a later mutation of the caller's
 // slice cannot change what a load returns.
 func NewScannerTreeSource(sessions []ftue.SessionListing, opts ...ScannerOption) *ScannerTreeSource {
 	cp := append([]ftue.SessionListing(nil), sessions...)
 	src := &ScannerTreeSource{
-		sessions: cp,
-		resolver: ingest.NewPhysicalPathResolver(),
+		sessions:           cp,
+		resolver:           ingest.NewPhysicalPathResolver(),
+		repositoryResolver: ingest.NewGitRepositoryPathResolver(),
 	}
 	for _, opt := range opts {
 		opt(src)
@@ -118,8 +153,8 @@ var _ kit.TreeSource = (*ScannerTreeSource)(nil)
 // resolution failures keep the existing partial-scan behavior: the available
 // forest still loads, and saved unavailable choices remain in the editor's
 // unmatched baseline.
-func (s *ScannerTreeSource) Load(_ context.Context) ([]*kit.TreeNode, error) {
-	return buildForest(PrepareSessionListings(s.sessions, s.resolver), s.ingested), nil
+func (s *ScannerTreeSource) Load(ctx context.Context) ([]*kit.TreeNode, error) {
+	return buildForest(prepareSessionListings(ctx, s.sessions, s.resolver, s.repositoryResolver), s.ingested), nil
 }
 
 // PreparedSessionListing carries one discovered session together with the
@@ -127,9 +162,10 @@ func (s *ScannerTreeSource) Load(_ context.Context) ([]*kit.TreeNode, error) {
 // every kickstart matcher call. The scanner tree and post-save ingest callback
 // consume this same value so they cannot disagree about clone identity.
 type PreparedSessionListing struct {
-	Listing         ftue.SessionListing
-	ProjectIdentity ProjectIdentity
-	Candidate       ingest.DiscoveryCandidate
+	Listing            ftue.SessionListing
+	ProjectIdentity    ProjectIdentity
+	RepositoryIdentity RepositoryIdentity
+	Candidate          ingest.DiscoveryCandidate
 }
 
 type scannerBranchAgg struct {
@@ -138,7 +174,7 @@ type scannerBranchAgg struct {
 }
 
 type scannerProjectAgg struct {
-	identity ProjectIdentity
+	identity RepositoryIdentity
 	rows     []PreparedSessionListing
 	order    []string
 	branches map[string]*scannerBranchAgg
@@ -156,14 +192,25 @@ type identityCohort struct {
 
 // PrepareSessionListings resolves every non-empty WorkingDir first, then annotates
 // every listing from the complete cohort. Session count never affects
-// multiplicity: each normalized remote/name counts distinct ProjectIdentity
-// values only. A listing with unresolved path evidence remains in the returned
-// cohort so an explicit session ID can still match, but it cannot become a
-// scanner project row or enable remote/name fallback.
+// multiplicity: each normalized remote/name counts distinct RepositoryIdentity
+// values only. ProjectIdentity remains the exact worktree carrier on each row.
+// A listing with unresolved path evidence remains in the returned cohort so an
+// explicit session ID can still match, but it cannot become a scanner project
+// row or enable remote/name fallback.
 func PrepareSessionListings(sessions []ftue.SessionListing, resolver ingest.PathIdentityResolver) []PreparedSessionListing {
+	return prepareSessionListings(context.Background(), sessions, resolver, ingest.NewGitRepositoryPathResolver())
+}
+
+func prepareSessionListings(
+	ctx context.Context,
+	sessions []ftue.SessionListing,
+	resolver ingest.PathIdentityResolver,
+	repositoryResolver ingest.RepositoryPathResolver,
+) []PreparedSessionListing {
 	cohort := make([]PreparedSessionListing, len(sessions))
 	remoteCohorts := map[multiplicityKey]*identityCohort{}
 	nameCohorts := map[multiplicityKey]*identityCohort{}
+	repositoryPaths := map[ingest.ClonePath]ingest.RepositoryPath{}
 
 	for index, listing := range sessions {
 		harness := ingest.Harness(listing.Harness)
@@ -181,11 +228,22 @@ func PrepareSessionListings(sessions []ftue.SessionListing, resolver ingest.Path
 			if clonePath, err := resolver.Resolve(listing.WorkingDir); err == nil && clonePath != "" {
 				row.ProjectIdentity = ProjectIdentity{Harness: harness, ClonePath: clonePath}
 				row.Candidate.ClonePath = clonePath
+				repositoryPath, resolved := repositoryPaths[clonePath]
+				if !resolved {
+					repositoryPath = ingest.RepositoryPath(clonePath.String())
+					if repositoryResolver != nil {
+						if commonPath, commonErr := repositoryResolver.ResolveRepositoryPath(ctx, clonePath); commonErr == nil && commonPath != "" {
+							repositoryPath = commonPath
+						}
+					}
+					repositoryPaths[clonePath] = repositoryPath
+				}
+				row.RepositoryIdentity = RepositoryIdentity{Harness: harness, RepositoryPath: repositoryPath}
 			}
 		}
 		cohort[index] = row
-		addCohortIdentity(remoteCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeRemoteForMatch(listing.GitRemote)}, row.ProjectIdentity)
-		addCohortIdentity(nameCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeProjectNameForMatch(listing.ProjectName)}, row.ProjectIdentity)
+		addCohortIdentity(remoteCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeRemoteForMatch(listing.GitRemote)}, row.RepositoryIdentity)
+		addCohortIdentity(nameCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeProjectNameForMatch(listing.ProjectName)}, row.RepositoryIdentity)
 	}
 
 	for index := range cohort {
@@ -202,7 +260,7 @@ func PrepareSessionListings(sessions []ftue.SessionListing, resolver ingest.Path
 	return cohort
 }
 
-func addCohortIdentity(cohorts map[multiplicityKey]*identityCohort, key multiplicityKey, identity ProjectIdentity) {
+func addCohortIdentity(cohorts map[multiplicityKey]*identityCohort, key multiplicityKey, identity RepositoryIdentity) {
 	if key.text == "" {
 		return
 	}
@@ -237,10 +295,11 @@ func cohortMultiplicity(cohorts map[multiplicityKey]*identityCohort, key multipl
 // harness is a property of an individual session, carried on the node, not a
 // top-level bucket). Grouping keys:
 //
-//   - project node: keyed only by ProjectIdentity (harness + resolved physical
-//     path). Remote/name/multiplicity metadata is carried separately for the
-//     canonical matcher and config round-trip. A remote label never becomes an
-//     identity key.
+//   - project node: keyed only by RepositoryIdentity (harness + transient Git
+//     common-directory path, with exact ClonePath as the fail-safe non-Git
+//     fallback). Remote/name/multiplicity metadata is carried separately for
+//     the canonical matcher and config round-trip. A remote label never becomes
+//     an identity key.
 //   - branch node: keyed by branch (or "(unknown branch)" when discovery could
 //     not resolve one) with the branch carried in Meta.
 //   - session node: keyed by the raw session ID, carrying its harness in Meta so
@@ -292,7 +351,7 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 		// A project row cannot exist without a resolved physical identity. The
 		// saved counterpart remains in UnmatchedBaseline and can return when the
 		// directory becomes available again.
-		if !row.ProjectIdentity.available() {
+		if !row.ProjectIdentity.available() || !row.RepositoryIdentity.available() {
 			continue
 		}
 		// A child (subagent) session is summarised on its parent's row, so it
@@ -300,10 +359,10 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 		if childIDs[sess.SessionID] {
 			continue
 		}
-		pKey := row.ProjectIdentity.String()
+		pKey := row.RepositoryIdentity.String()
 		p, ok := projects[pKey]
 		if !ok {
-			p = &scannerProjectAgg{identity: row.ProjectIdentity, branches: map[string]*scannerBranchAgg{}}
+			p = &scannerProjectAgg{identity: row.RepositoryIdentity, branches: map[string]*scannerBranchAgg{}}
 			projects[pKey] = p
 			projectOrder = append(projectOrder, pKey)
 		}
@@ -338,12 +397,13 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 		pNode := &kit.TreeNode{
 			ID:    p.identity.String(),
 			Label: projectLabels[pKey],
-			Meta:  scannerProjectMeta(representative, p.identity),
+			Meta:  scannerProjectMeta(representative, p.identity, p.rows),
 		}
 		sort.Strings(p.order)
 		for _, bKey := range p.order {
 			b := p.branches[bKey]
 			sortListings(b.sessions)
+			annotateScannerScopeMeta(b.node, p.identity, b.sessions)
 			for _, row := range groupByImportState(b.sessions, ingested) {
 				b.node.Children = append(b.node.Children, sessionNode(row, byID, ingested))
 			}
@@ -378,13 +438,16 @@ func projectRepresentative(rows []PreparedSessionListing) PreparedSessionListing
 	return ordered[0]
 }
 
-func scannerProjectMeta(row PreparedSessionListing, identity ProjectIdentity) map[string]string {
+func scannerProjectMeta(row PreparedSessionListing, identity RepositoryIdentity, rows []PreparedSessionListing) map[string]string {
 	meta := map[string]string{
 		settings.MetaProjectIdentity:    identity.String(),
 		settings.MetaProjectHarness:     identity.Harness.String(),
-		settings.MetaClonePath:          identity.ClonePath.String(),
+		settings.MetaRepositoryPath:     identity.RepositoryPath.String(),
 		settings.MetaRemoteMultiplicity: multiplicityText(row.Candidate.RemoteMultiplicity),
 		settings.MetaNameMultiplicity:   multiplicityText(row.Candidate.NameMultiplicity),
+	}
+	if clonePath, unique := uniqueScannerClonePath(rows); unique {
+		meta[settings.MetaClonePath] = clonePath.String()
 	}
 	if row.Listing.GitRemote != "" {
 		meta[settings.MetaRemote] = row.Listing.GitRemote
@@ -393,6 +456,38 @@ func scannerProjectMeta(row PreparedSessionListing, identity ProjectIdentity) ma
 		meta[settings.MetaProjectName] = projectName
 	}
 	return meta
+}
+
+func annotateScannerScopeMeta(node *kit.TreeNode, identity RepositoryIdentity, rows []PreparedSessionListing) {
+	if node.Meta == nil {
+		node.Meta = map[string]string{}
+	}
+	node.Meta[settings.MetaProjectIdentity] = identity.String()
+	node.Meta[settings.MetaProjectHarness] = identity.Harness.String()
+	node.Meta[settings.MetaRepositoryPath] = identity.RepositoryPath.String()
+	if clonePath, unique := uniqueScannerClonePath(rows); unique {
+		node.Meta[settings.MetaClonePath] = clonePath.String()
+	} else {
+		delete(node.Meta, settings.MetaClonePath)
+	}
+}
+
+func uniqueScannerClonePath(rows []PreparedSessionListing) (ingest.ClonePath, bool) {
+	var clonePath ingest.ClonePath
+	for _, row := range rows {
+		candidate := row.Candidate.ClonePath
+		if candidate == "" {
+			return "", false
+		}
+		if clonePath == "" {
+			clonePath = candidate
+			continue
+		}
+		if candidate != clonePath {
+			return "", false
+		}
+	}
+	return clonePath, clonePath != ""
 }
 
 func multiplicityText(value ingest.DiscoveryIdentityMultiplicity) string {
@@ -425,7 +520,7 @@ func scannerProjectLabels(order []string, projects map[string]*scannerProjectAgg
 	for name, keys := range nonGitByName {
 		paths := make([]ingest.ClonePath, len(keys))
 		for index, key := range keys {
-			paths[index] = projects[key].identity.ClonePath
+			paths[index] = ingest.ClonePath(projects[key].identity.RepositoryPath.String())
 		}
 		for index, key := range keys {
 			shortPath := shortestDistinctCloneSuffix(paths[index], paths)
@@ -499,8 +594,9 @@ func cloneSuffixUnique(parts []string, width int, own ingest.ClonePath, cohort [
 	return true
 }
 
-// sortListings orders a worktree's sessions by date (oldest first), then by ID
-// for a stable tie-break, so a rebuilt forest is byte-stable across runs.
+// sortListings orders a branch's sessions by date (oldest first), then by ID
+// for a stable tie-break, so a rebuilt forest is byte-stable across runs. One
+// branch can contain exact session paths from several linked worktrees.
 func sortListings(ss []PreparedSessionListing) {
 	sort.SliceStable(ss, func(i, j int) bool {
 		if !ss[i].Listing.Date.Equal(ss[j].Listing.Date) {
@@ -545,8 +641,9 @@ func sessionNode(row PreparedSessionListing, byID map[string]ftue.SessionListing
 	sess := row.Listing
 	meta := map[string]string{
 		settings.MetaHarness:            sess.Harness,
-		settings.MetaProjectIdentity:    row.ProjectIdentity.String(),
+		settings.MetaProjectIdentity:    row.RepositoryIdentity.String(),
 		settings.MetaClonePath:          row.Candidate.ClonePath.String(),
+		settings.MetaRepositoryPath:     row.RepositoryIdentity.RepositoryPath.String(),
 		settings.MetaRemoteMultiplicity: multiplicityText(row.Candidate.RemoteMultiplicity),
 		settings.MetaNameMultiplicity:   multiplicityText(row.Candidate.NameMultiplicity),
 	}

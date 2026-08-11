@@ -1,5 +1,5 @@
-declared_projection_rows: 14
-declared_gate_rows: 10
+declared_projection_rows: 16
+declared_gate_rows: 12
 
 projection_cases:
   - name: whole-project-selected
@@ -43,6 +43,63 @@ projection_cases:
       - parent_project_id: project-remote-only
         admission: whole_project
         selected_descendant_count: 1
+
+  - name: linked-worktrees-share-remote-multiplicity
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: https://github.com/example/linked.git
+    candidates:
+      - parent_project_id: project-linked
+        harness: claude-code
+        git_remote: git@github.com:example/linked.git
+        project_name: linked
+        repository_path: /workspace/repos/linked.git
+        descendants:
+          - session_id: 14141414-1414-4414-8414-141414141411
+            branch: main
+            clone_path: /workspace/linked-main
+            repository_path: /workspace/repos/linked.git
+          - session_id: 14141414-1414-4414-8414-141414141412
+            branch: review
+            clone_path: /workspace/linked-review
+            repository_path: /workspace/repos/linked.git
+    expected:
+      - parent_project_id: project-linked
+        admission: whole_project
+        selected_descendant_count: 2
+
+  - name: independent-repositories-keep-remote-ambiguous
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: https://github.com/example/independent.git
+    candidates:
+      - parent_project_id: project-independent-a
+        harness: claude-code
+        git_remote: git@github.com:example/independent.git
+        project_name: independent
+        repository_path: /workspace/repos/independent-a.git
+        descendants:
+          - session_id: 15151515-1515-4515-8515-151515151511
+            branch: main
+            clone_path: /workspace/independent-a
+            repository_path: /workspace/repos/independent-a.git
+      - parent_project_id: project-independent-b
+        harness: claude-code
+        git_remote: https://github.com/example/independent.git
+        project_name: independent
+        repository_path: /workspace/repos/independent-b.git
+        descendants:
+          - session_id: 15151515-1515-4515-8515-151515151512
+            branch: main
+            clone_path: /workspace/independent-b
+            repository_path: /workspace/repos/independent-b.git
+    expected: []
 
   - name: branch-with-session-worktree-override
     selection:
@@ -325,4 +382,10 @@ gate_cases:
     expected: confirm_no_projects
   - name: gate-fires-when-project-admitted-session-is-exactly-denied
     projection_case: exact-session-deny-overrides-project-admission
+    expected: confirm_no_projects
+  - name: gate-is-suppressed-by-linked-worktree-repository
+    projection_case: linked-worktrees-share-remote-multiplicity
+    expected: none
+  - name: gate-fires-for-independent-repository-ambiguity
+    projection_case: independent-repositories-keep-remote-ambiguous
     expected: confirm_no_projects

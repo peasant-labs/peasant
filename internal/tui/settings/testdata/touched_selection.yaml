@@ -1,5 +1,5 @@
 expectedCaseCount: 11
-expectedFieldCaseCount: 6
+expectedFieldCaseCount: 7
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -19,6 +19,7 @@ expectedFieldNames:
   - unknown-branch-rolls-back
   - invalid-session-id-rolls-back
   - load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
+  - grouped-satisfied-select-under-is-a-true-no-op
 fieldCases:
   - name: conflict-toggle-is-a-true-no-op
     current:
@@ -126,6 +127,27 @@ fieldCases:
     sessionId: 11111111-1111-4111-8111-111111111111
     keys: [down, spinner, filter, collapse, refresh]
     withPreview: true
+    expectedSessionState: checked
+    expectedSetCount: 0
+    expectReconcileError: false
+
+  - name: grouped-satisfied-select-under-is-a-true-no-op
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a, /fixtures/a-linked]}
+    projectIdentity: repository-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    linkedClonePath: /fixtures/a-linked
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    linkedSessionId: 22222222-2222-4222-8222-222222222222
+    keys: [select-under]
     expectedSessionState: checked
     expectedSetCount: 0
     expectReconcileError: false

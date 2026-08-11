@@ -60,9 +60,10 @@ type mountedFlowCase struct {
 }
 
 type mountedPathFixture struct {
-	Key    string           `yaml:"key"`
-	State  mountedPathState `yaml:"state"`
-	Target string           `yaml:"target"`
+	Key           string           `yaml:"key"`
+	State         mountedPathState `yaml:"state"`
+	Target        string           `yaml:"target"`
+	RepositoryKey string           `yaml:"repositoryKey"`
 }
 
 type mountedListingFixture struct {
@@ -183,6 +184,11 @@ func validateMountedFlowCase(t *testing.T, testCase mountedFlowCase) {
 			pathKeys[path.Target] = struct{}{}
 		} else if path.Target != "" {
 			t.Fatalf("mounted flow case %q directory %q must not define a target", testCase.Name, path.Key)
+		}
+	}
+	for _, path := range testCase.Paths {
+		if path.RepositoryKey != "" {
+			requireMountedPathReference(t, testCase.Name, pathKeys, path.RepositoryKey)
 		}
 	}
 	for _, listing := range testCase.Listings {

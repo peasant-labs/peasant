@@ -83,9 +83,15 @@ func prepareCohort(candidates []ProjectCandidate) []preparedProject {
 	remoteMultiplicity := make(map[string]*identityMultiplicity)
 	nameMultiplicity := make(map[string]*identityMultiplicity)
 	for _, candidate := range candidates {
-		recordCandidateIdentity(remoteMultiplicity, nameMultiplicity, candidate, candidate.ClonePath)
+		recordCandidateIdentity(remoteMultiplicity, nameMultiplicity, candidate, candidate.ClonePath, candidate.RepositoryPath)
 		for _, descendant := range candidate.Descendants {
-			recordCandidateIdentity(remoteMultiplicity, nameMultiplicity, candidate, effectiveClonePath(candidate, descendant))
+			recordCandidateIdentity(
+				remoteMultiplicity,
+				nameMultiplicity,
+				candidate,
+				effectiveClonePath(candidate, descendant),
+				effectiveRepositoryPath(candidate, descendant),
+			)
 		}
 	}
 
@@ -130,13 +136,21 @@ func recordCandidateIdentity(
 	nameMultiplicity map[string]*identityMultiplicity,
 	candidate ProjectCandidate,
 	clonePath ingest.ClonePath,
+	repositoryPath ingest.RepositoryPath,
 ) {
-	identity, proven := candidateIdentity(candidate, clonePath)
+	identity, proven := candidateIdentity(candidate, clonePath, repositoryPath)
 	recordIdentity(remoteMultiplicity, ingest.NormalizeRemoteForMatch(candidate.GitRemote), identity, proven)
 	recordIdentity(nameMultiplicity, ingest.NormalizeProjectNameForMatch(candidate.ProjectName), identity, proven)
 }
 
-func candidateIdentity(candidate ProjectCandidate, clonePath ingest.ClonePath) (cohortIdentity, bool) {
+func candidateIdentity(candidate ProjectCandidate, clonePath ingest.ClonePath, repositoryPath ingest.RepositoryPath) (cohortIdentity, bool) {
+	if repositoryPath != "" {
+		return cohortIdentity{
+			Harness: candidate.Harness,
+			Kind:    cohortIdentityPhysicalPath,
+			Value:   repositoryPath.String(),
+		}, true
+	}
 	if clonePath != "" {
 		return cohortIdentity{
 			Harness: candidate.Harness,
@@ -193,6 +207,13 @@ func effectiveClonePath(project ProjectCandidate, descendant SessionCandidate) i
 		return descendant.ClonePath
 	}
 	return project.ClonePath
+}
+
+func effectiveRepositoryPath(project ProjectCandidate, descendant SessionCandidate) ingest.RepositoryPath {
+	if descendant.RepositoryPath != "" {
+		return descendant.RepositoryPath
+	}
+	return project.RepositoryPath
 }
 
 func discoveryCandidate(

@@ -542,12 +542,11 @@ func (f *treeField) snapshotSelectableState(intent treeSelectionIntent) (selecta
 }
 
 func snapshotProjectState(state selectableState, root *kit.TreeNode) (selectableState, error) {
-	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
-	if err != nil {
+	if _, _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
-	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
-		return nil, err
+	if len(root.Children) == 0 {
+		return nil, fmt.Errorf("project node %q has no exact branch descendants", root.ID)
 	}
 	for _, branch := range root.Children {
 		if _, err := snapshotBranchState(state, root, branch); err != nil {
@@ -558,22 +557,18 @@ func snapshotProjectState(state selectableState, root *kit.TreeNode) (selectable
 }
 
 func snapshotBranchState(state selectableState, root, branch *kit.TreeNode) (selectableState, error) {
-	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
-	if err != nil {
+	if _, _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
 	branchName, err := exactBranchName(branch)
 	if err != nil {
 		return nil, err
 	}
-	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
-		return nil, err
-	}
-	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branchName}, branch); err != nil {
-		return nil, err
+	if len(branch.Children) == 0 {
+		return nil, fmt.Errorf("branch node %q has no exact session descendants", branch.ID)
 	}
 	for _, session := range branch.Children {
-		if err := snapshotSessionTree(state, root, branchName, session); err != nil {
+		if err := snapshotSessionTree(state, root, branch, branchName, session); err != nil {
 			return nil, err
 		}
 	}
@@ -581,36 +576,35 @@ func snapshotBranchState(state selectableState, root, branch *kit.TreeNode) (sel
 }
 
 func snapshotSessionState(state selectableState, root, branch, session *kit.TreeNode) (selectableState, error) {
-	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
-	if err != nil {
+	if _, _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
 	branchName, err := exactBranchName(branch)
 	if err != nil {
 		return nil, err
 	}
-	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
-		return nil, err
-	}
-	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branchName}, branch); err != nil {
-		return nil, err
-	}
-	if err := snapshotOneSession(state, identity, harness, clonePath, branchName, session); err != nil {
+	if err := snapshotSessionTree(state, root, branch, branchName, session); err != nil {
 		return nil, err
 	}
 	return state, nil
 }
 
-func snapshotSessionTree(state selectableState, root *kit.TreeNode, branch string, session *kit.TreeNode) error {
-	identity, harness, clonePath, err := exactProjectNodeIdentity(root)
+func snapshotSessionTree(state selectableState, root, branchNode *kit.TreeNode, branch string, session *kit.TreeNode) error {
+	identity, harness, clonePath, err := exactSessionNodeIdentity(root, session)
 	if err != nil {
+		return err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath}, root); err != nil {
+		return err
+	}
+	if err := addSelectableState(state, selectableNodeKey{projectIdentity: identity, harness: harness, clonePath: clonePath, branch: branch}, branchNode); err != nil {
 		return err
 	}
 	if err := snapshotOneSession(state, identity, harness, clonePath, branch, session); err != nil {
 		return err
 	}
 	for _, child := range session.Children {
-		if err := snapshotSessionTree(state, root, branch, child); err != nil {
+		if err := snapshotSessionTree(state, root, branchNode, branch, child); err != nil {
 			return err
 		}
 	}
@@ -664,21 +658,37 @@ func markerValue(node *kit.TreeNode, key string) (string, bool) {
 	return value, present
 }
 
-func exactProjectNodeIdentity(root *kit.TreeNode) (string, string, string, error) {
+func exactProjectRootIdentity(root *kit.TreeNode) (string, string, error) {
 	identity := metaOf(root, MetaProjectIdentity)
 	harness := metaOf(root, MetaProjectHarness)
-	clonePath := metaOf(root, MetaClonePath)
 	switch {
 	case identity == "":
-		return "", "", "", fmt.Errorf("project node %q has no stable project identity", root.ID)
+		return "", "", fmt.Errorf("project node %q has no stable project identity", root.ID)
 	case root.ID != identity:
-		return "", "", "", fmt.Errorf("project node ID %q does not match identity %q", root.ID, identity)
+		return "", "", fmt.Errorf("project node ID %q does not match identity %q", root.ID, identity)
 	case harness == "" || !ingest.Harness(harness).IsKnown():
-		return "", "", "", fmt.Errorf("project %q carries unknown harness %q", identity, harness)
-	case clonePath == "":
-		return "", "", "", fmt.Errorf("project %q has no exact physical clone path", identity)
-	case strings.TrimSpace(clonePath) != clonePath || !filepath.IsAbs(clonePath) || filepath.Clean(clonePath) != clonePath:
-		return "", "", "", fmt.Errorf("project %q carries non-exact clone path %q", identity, clonePath)
+		return "", "", fmt.Errorf("project %q carries unknown harness %q", identity, harness)
+	}
+	return identity, harness, nil
+}
+
+func exactSessionNodeIdentity(root, session *kit.TreeNode) (string, string, string, error) {
+	identity, harness, err := exactProjectRootIdentity(root)
+	if err != nil {
+		return "", "", "", err
+	}
+	if sessionHarness := harnessOf(session); sessionHarness == "" || sessionHarness != harness {
+		return "", "", "", fmt.Errorf("session %q carries harness %q, want project harness %q", session.ID, sessionHarness, harness)
+	}
+	if sessionIdentity := metaOf(session, MetaProjectIdentity); sessionIdentity != "" && sessionIdentity != identity {
+		return "", "", "", fmt.Errorf("session %q carries project identity %q, want %q", session.ID, sessionIdentity, identity)
+	}
+	clonePath := metaOf(session, MetaClonePath)
+	if clonePath == "" {
+		return "", "", "", fmt.Errorf("session %q under project %q has no exact physical clone path", session.ID, identity)
+	}
+	if strings.TrimSpace(clonePath) != clonePath || !filepath.IsAbs(clonePath) || filepath.Clean(clonePath) != clonePath {
+		return "", "", "", fmt.Errorf("session %q under project %q carries non-exact clone path %q", session.ID, identity, clonePath)
 	}
 	return identity, harness, clonePath, nil
 }
@@ -755,61 +765,74 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 
 	switch intent.action {
 	case keymap.ActionToggle:
-		var targetKey selectableNodeKey
-		found := false
+		var targetKeys []selectableNodeKey
 		for key, old := range before {
 			if old.node == intent.scope {
-				targetKey, found = key, true
-				break
+				targetKeys = append(targetKeys, key)
 			}
 		}
-		if !found {
+		if len(targetKeys) == 0 {
 			return nil, fmt.Errorf("toggle target %q has no selectable semantic identity", intent.scope.ID)
 		}
-		kind := selectionScopeProject
-		if targetKey.sessionID != "" {
-			kind = selectionScopeSession
-			if _, err := ingest.NewSessionID(targetKey.sessionID); err != nil {
-				return nil, fmt.Errorf("session node %q cannot form an exact session exclusion: %w", targetKey.sessionID, err)
+		sortSelectableNodeKeys(targetKeys)
+		var scopes []selectionScope
+		for _, targetKey := range targetKeys {
+			kind := selectionScopeProject
+			if targetKey.sessionID != "" {
+				kind = selectionScopeSession
+				if _, err := ingest.NewSessionID(targetKey.sessionID); err != nil {
+					return nil, fmt.Errorf("session node %q cannot form an exact session exclusion: %w", targetKey.sessionID, err)
+				}
+			} else if targetKey.branch != "" {
+				kind = selectionScopeBranch
 			}
-		} else if targetKey.branch != "" {
-			kind = selectionScopeBranch
+			scope, err := makeScope(targetKey, kind, intent.checked)
+			if err != nil {
+				return nil, err
+			}
+			scopes = append(scopes, scope)
 		}
-		scope, err := makeScope(targetKey, kind, intent.checked)
-		if err != nil {
-			return nil, err
-		}
-		return []selectionScope{scope}, nil
+		return scopes, nil
 	case keymap.ActionSelectUnderProject:
+		var keys []selectableNodeKey
 		for key := range before {
 			if key.branch == "" && key.sessionID == "" {
-				scope, err := makeScope(key, selectionScopeProject, true)
-				if err != nil {
-					return nil, err
-				}
-				return []selectionScope{scope}, nil
+				keys = append(keys, key)
 			}
 		}
-		return nil, fmt.Errorf("select-under-project has no exact project scope")
-	case keymap.ActionSelectAll:
-		changedProjects := map[string]bool{}
-		for key := range changed {
-			changedProjects[key.projectIdentity] = true
+		if len(keys) == 0 {
+			return nil, fmt.Errorf("select-under-project has no exact project scope")
 		}
-		var scopes []selectionScope
-		for _, root := range fullRoots {
-			identity := metaOf(root, MetaProjectIdentity)
-			if !changedProjects[identity] {
+		sortSelectableNodeKeys(keys)
+		scopes := make([]selectionScope, 0, len(keys))
+		for _, key := range keys {
+			scope, err := makeScope(key, selectionScopeProject, true)
+			if err != nil {
+				return nil, err
+			}
+			scopes = append(scopes, scope)
+		}
+		return scopes, nil
+	case keymap.ActionSelectAll:
+		changedProjects := map[selectableNodeKey]bool{}
+		for key := range changed {
+			if key.sessionID == "" {
 				continue
 			}
-			var projectKey selectableNodeKey
-			for key := range before {
-				if key.projectIdentity == identity && key.branch == "" && key.sessionID == "" {
-					projectKey = key
-					break
-				}
-			}
-			selected, err := changedProjectTarget(identity, changed, after)
+			changedProjects[selectableNodeKey{
+				projectIdentity: key.projectIdentity,
+				harness:         key.harness,
+				clonePath:       key.clonePath,
+			}] = true
+		}
+		keys := make([]selectableNodeKey, 0, len(changedProjects))
+		for key := range changedProjects {
+			keys = append(keys, key)
+		}
+		sortSelectableNodeKeys(keys)
+		var scopes []selectionScope
+		for _, projectKey := range keys {
+			selected, err := changedProjectTarget(projectKey, changed, after)
 			if err != nil {
 				return nil, err
 			}
@@ -825,11 +848,30 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 	}
 }
 
-func changedProjectTarget(identity string, changed map[selectableNodeKey]bool, after selectableState) (bool, error) {
+func sortSelectableNodeKeys(keys []selectableNodeKey) {
+	sort.Slice(keys, func(i, j int) bool {
+		left, right := keys[i], keys[j]
+		if left.projectIdentity != right.projectIdentity {
+			return left.projectIdentity < right.projectIdentity
+		}
+		if left.harness != right.harness {
+			return left.harness < right.harness
+		}
+		if left.clonePath != right.clonePath {
+			return left.clonePath < right.clonePath
+		}
+		if left.branch != right.branch {
+			return left.branch < right.branch
+		}
+		return left.sessionID < right.sessionID
+	})
+}
+
+func changedProjectTarget(project selectableNodeKey, changed map[selectableNodeKey]bool, after selectableState) (bool, error) {
 	found := false
 	selected := false
 	for key := range changed {
-		if key.projectIdentity != identity || key.sessionID == "" {
+		if key.projectIdentity != project.projectIdentity || key.harness != project.harness || key.clonePath != project.clonePath || key.sessionID == "" {
 			continue
 		}
 		state := after[key].state
@@ -838,12 +880,12 @@ func changedProjectTarget(identity string, changed map[selectableNodeKey]bool, a
 		}
 		value := state == kit.Checked
 		if found && value != selected {
-			return false, fmt.Errorf("select-all produced mixed targets under project %q", identity)
+			return false, fmt.Errorf("select-all produced mixed targets under project %q path %q", project.projectIdentity, project.clonePath)
 		}
 		found, selected = true, value
 	}
 	if !found {
-		return false, fmt.Errorf("select-all changed project %q without changing a selectable session", identity)
+		return false, fmt.Errorf("select-all changed project %q path %q without changing a selectable session", project.projectIdentity, project.clonePath)
 	}
 	return selected, nil
 }

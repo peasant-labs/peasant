@@ -2,7 +2,9 @@ package kickstart_test
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
+	"fmt"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -80,6 +82,26 @@ func loadMountedTouchedDocument(t *testing.T) mountedTouchedDocument {
 		if len(testCase.Paths) == 0 || len(testCase.Listings) == 0 || len(testCase.Actions) == 0 {
 			t.Fatalf("case %q requires paths, listings, and actions", testCase.Name)
 		}
+		pathKeys := map[string]struct{}{}
+		for _, path := range testCase.Paths {
+			validateMountedPathKey(t, testCase.Name, path.Key)
+			if _, duplicate := pathKeys[path.Key]; duplicate {
+				t.Fatalf("case %q repeats path key %q", testCase.Name, path.Key)
+			}
+			pathKeys[path.Key] = struct{}{}
+			if path.Target != "" {
+				validateMountedPathKey(t, testCase.Name, path.Target)
+				pathKeys[path.Target] = struct{}{}
+			}
+		}
+		for _, path := range testCase.Paths {
+			if path.RepositoryKey != "" {
+				requireMountedPathReference(t, testCase.Name, pathKeys, path.RepositoryKey)
+			}
+		}
+		for _, listing := range testCase.Listings {
+			requireMountedPathReference(t, testCase.Name, pathKeys, listing.PathKey)
+		}
 		for _, action := range testCase.Actions {
 			if !validMountedTouchedAction(action) {
 				t.Fatalf("case %q has unknown action %q", testCase.Name, action)
@@ -117,6 +139,7 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 			realScanner := kickstart.NewScannerTreeSource(
 				mountedListings(testCase.Listings, paths),
 				kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
+				kickstart.WithRepositoryPathResolver(mountedRepositoryResolver(t, testCase.Paths, paths)),
 			)
 			source := &mountedRecordingTreeSource{inner: realScanner}
 			program := kickstart.NewProgram(kickstart.ProgramDeps{
@@ -150,6 +173,40 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 		})
 	}
 }
+
+type mountedRepositoryPathResolver map[ingest.ClonePath]ingest.RepositoryPath
+
+func (r mountedRepositoryPathResolver) ResolveRepositoryPath(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryPath, error) {
+	path, ok := r[clonePath]
+	if !ok {
+		return "", fmt.Errorf("mounted fixture has no repository identity for clone %q", clonePath)
+	}
+	return path, nil
+}
+
+func mountedRepositoryResolver(t *testing.T, fixtures []mountedPathFixture, paths map[string]string) mountedRepositoryPathResolver {
+	t.Helper()
+	resolver := ingest.NewPhysicalPathResolver()
+	result := mountedRepositoryPathResolver{}
+	for _, fixture := range fixtures {
+		clonePath, err := resolver.Resolve(paths[fixture.Key])
+		if err != nil {
+			continue
+		}
+		repositoryKey := fixture.RepositoryKey
+		if repositoryKey == "" {
+			repositoryKey = fixture.Key
+		}
+		repositoryPath, err := resolver.Resolve(paths[repositoryKey])
+		if err != nil {
+			t.Fatalf("resolve mounted repository key %q for clone %q: %v", repositoryKey, fixture.Key, err)
+		}
+		result[clonePath] = ingest.RepositoryPath(repositoryPath.String())
+	}
+	return result
+}
+
+var _ ingest.RepositoryPathResolver = mountedRepositoryPathResolver{}
 
 func mountedTouchedRune(action mountedTouchedAction) rune {
 	switch action {

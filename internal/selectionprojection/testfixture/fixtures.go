@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	expectedProjectionRows = 14
-	expectedGateRows       = 10
+	expectedProjectionRows = 16
+	expectedGateRows       = 12
 )
 
 //go:embed testdata/effective_projects.yaml
@@ -48,6 +48,7 @@ type ProjectCandidate struct {
 	GitRemote       string             `yaml:"git_remote"`
 	ProjectName     string             `yaml:"project_name"`
 	ClonePath       string             `yaml:"clone_path"`
+	RepositoryPath  string             `yaml:"repository_path"`
 	Descendants     []SessionCandidate `yaml:"descendants"`
 }
 
@@ -57,6 +58,7 @@ type SessionCandidate struct {
 	Branch          string `yaml:"branch"`
 	ParentSessionID string `yaml:"parent_session_id"`
 	ClonePath       string `yaml:"clone_path"`
+	RepositoryPath  string `yaml:"repository_path"`
 }
 
 // ProjectAdmission is the closed fixture spelling of a production admission.
@@ -162,6 +164,7 @@ func (c ProjectionCase) ProductionCandidates() ([]selectionprojection.ProjectCan
 				Branch:          session.Branch,
 				ParentSessionID: parentSessionID,
 				ClonePath:       ingest.ClonePath(session.ClonePath),
+				RepositoryPath:  ingest.RepositoryPath(session.RepositoryPath),
 			}
 		}
 		result[projectIndex] = selectionprojection.ProjectCandidate{
@@ -170,6 +173,7 @@ func (c ProjectionCase) ProductionCandidates() ([]selectionprojection.ProjectCan
 			GitRemote:       project.GitRemote,
 			ProjectName:     project.ProjectName,
 			ClonePath:       ingest.ClonePath(project.ClonePath),
+			RepositoryPath:  ingest.RepositoryPath(project.RepositoryPath),
 			Descendants:     descendants,
 		}
 	}
@@ -312,6 +316,9 @@ func (c ProjectionCase) validate() error {
 		if err := validateClonePath(c.Name, candidate.ParentProjectID, "clone_path", candidate.ClonePath); err != nil {
 			return err
 		}
+		if err := validateClonePath(c.Name, candidate.ParentProjectID, "repository_path", candidate.RepositoryPath); err != nil {
+			return err
+		}
 		projectSessionIDs := make(map[string]struct{}, len(candidate.Descendants))
 		for sessionIndex, session := range candidate.Descendants {
 			if strings.TrimSpace(session.SessionID) == "" {
@@ -323,6 +330,9 @@ func (c ProjectionCase) validate() error {
 			allSessionIDs[session.SessionID] = candidate.ParentProjectID
 			projectSessionIDs[session.SessionID] = struct{}{}
 			if err := validateClonePath(c.Name, candidate.ParentProjectID, "descendant clone_path", session.ClonePath); err != nil {
+				return err
+			}
+			if err := validateClonePath(c.Name, candidate.ParentProjectID, "descendant repository_path", session.RepositoryPath); err != nil {
 				return err
 			}
 		}
