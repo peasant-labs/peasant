@@ -32,6 +32,7 @@ type Candidate struct {
 	Harness     ingest.Harness
 	GitRemote   string
 	ProjectName string
+	ClonePath   ingest.ClonePath
 	GitBranch   string
 }
 
@@ -92,7 +93,16 @@ func (p Policy) Visible(candidate Candidate) (bool, error) {
 		return true, nil
 	}
 
-	switch p.matcher.MatchBranch(candidate.Harness, candidate.GitRemote, candidate.ProjectName, candidate.GitBranch, candidate.SessionID) {
+	switch p.matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{
+		SessionID:          candidate.SessionID,
+		Harness:            candidate.Harness,
+		GitRemote:          candidate.GitRemote,
+		ProjectName:        candidate.ProjectName,
+		ClonePath:          candidate.ClonePath,
+		Branch:             candidate.GitBranch,
+		RemoteMultiplicity: ingest.DiscoveryIdentityUnique,
+		NameMultiplicity:   ingest.DiscoveryIdentityUnique,
+	}) {
 	case ingest.BranchMatchYes:
 		return true, nil
 	case ingest.BranchMatchNo:

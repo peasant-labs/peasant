@@ -20,12 +20,13 @@ const (
 	// session_metrics is LEFT JOINed because sessions may not have metrics yet.
 	// V23+: host_slug is obtained via JOIN host_slugs on opaque_host_id; project display
 	// name is canonical_cwd (or project_hash as fallback) since project_name no longer exists.
-	// Column order: 0=session_id, 1=model_harness, 2=project_name, 3=git_remote, 4=start_ms, 5=turn_count, 6=host_slug, 7=project_hash, 8=project_path
+	// Column order: 0=session_id, 1=model_harness, 2=project_name, 3=git_remote, 4=start_ms, 5=turn_count, 6=host_slug, 7=project_hash, 8=project_path, 9=git_branch
 	sqlQueryPrunableSessions = `SELECT
     s.session_id, s.model_harness,
     COALESCE(p.canonical_cwd, p.project_hash, ''), COALESCE(h.git_remote, ''),
     s.start_ms, COALESCE(m.turn_count, 0), h.host_slug,
-    s.project_hash, COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, '')
+    s.project_hash, COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, ''),
+    COALESCE(s.git_branch, '')
 FROM sessions s
 LEFT JOIN session_metrics m ON s.session_id = m.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
@@ -85,7 +86,7 @@ func (s *Store) QueryPrunableSessions(ctx context.Context, filter ingest.PruneFi
 			// Provider is validated at write time by the sessions table CHECK constraint.
 			// Column order: 0=session_id, 1=model_harness, 2=project_name, 3=git_remote,
 			//               4=start_ms, 5=turn_count, 6=host_slug,
-			//               7=project_hash, 8=project_path
+			//               7=project_hash, 8=project_path, 9=git_branch
 			rows = append(rows, ingest.PruneSessionRow{
 				SessionID:   ingest.SessionID(stmt.ColumnText(0)),
 				Harness:     ingest.Harness(stmt.ColumnText(1)),
@@ -96,6 +97,7 @@ func (s *Store) QueryPrunableSessions(ctx context.Context, filter ingest.PruneFi
 				OutputPath:  stmt.ColumnText(6), // host_slug used to construct path later
 				ProjectHash: stmt.ColumnText(7),
 				ProjectPath: stmt.ColumnText(8),
+				GitBranch:   stmt.ColumnText(9),
 			})
 			return nil
 		},

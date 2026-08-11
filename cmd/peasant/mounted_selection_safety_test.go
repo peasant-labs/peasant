@@ -13,10 +13,12 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -25,8 +27,8 @@ import (
 var mountedSelectionSafetyYAML []byte
 
 const (
-	mountedSelectionCaseCount    = 6
-	mountedSelectionSessionCount = 10
+	mountedSelectionCaseCount    = 8
+	mountedSelectionSessionCount = 14
 	mountedSelectionHostSlug     = "github.com-example-mounted-selection"
 )
 
@@ -59,6 +61,10 @@ const (
 	mountedRoleAmbiguousRemoteCloneB  mountedSelectionRole = "ambiguous-remote-clone-b"
 	mountedRoleUniqueRemote           mountedSelectionRole = "unique-remote"
 	mountedRoleUniqueName             mountedSelectionRole = "unique-name"
+	mountedRoleExactBranchDenied      mountedSelectionRole = "exact-branch-denied"
+	mountedRoleSiblingBranchAllowed   mountedSelectionRole = "sibling-branch-allowed"
+	mountedRoleProjectSessionDenied   mountedSelectionRole = "project-session-denied"
+	mountedRoleProjectSessionAllowed  mountedSelectionRole = "project-session-allowed"
 )
 
 var allMountedSelectionRoles = []mountedSelectionRole{
@@ -72,6 +78,15 @@ var allMountedSelectionRoles = []mountedSelectionRole{
 	mountedRoleAmbiguousRemoteCloneB,
 	mountedRoleUniqueRemote,
 	mountedRoleUniqueName,
+	mountedRoleExactBranchDenied,
+	mountedRoleSiblingBranchAllowed,
+	mountedRoleProjectSessionDenied,
+	mountedRoleProjectSessionAllowed,
+}
+
+var requiredMountedExclusionCases = []string{
+	"auto new branches keeps one exact branch denied",
+	"project admission keeps one exact session denied",
 }
 
 type mountedSelectionSafetyDocument struct {
@@ -81,12 +96,20 @@ type mountedSelectionSafetyDocument struct {
 }
 
 type mountedSelectionSafetyCase struct {
-	Name            string                `yaml:"name"`
-	SelectionKind   mountedSelectionKind  `yaml:"selection_kind"`
-	SelectedClone   string                `yaml:"selected_clone"`
-	SelectedSession string                `yaml:"selected_session"`
-	Force           bool                  `yaml:"force"`
-	Rows            []mountedSelectionRow `yaml:"rows"`
+	Name              string                   `yaml:"name"`
+	SelectionKind     mountedSelectionKind     `yaml:"selection_kind"`
+	SelectedClone     string                   `yaml:"selected_clone"`
+	SelectedSession   string                   `yaml:"selected_session"`
+	Force             bool                     `yaml:"force"`
+	AutoNewBranches   bool                     `yaml:"auto_new_branches"`
+	BranchExclusions  []mountedBranchExclusion `yaml:"branch_exclusions"`
+	SessionExclusions []string                 `yaml:"session_exclusions"`
+	Rows              []mountedSelectionRow    `yaml:"rows"`
+}
+
+type mountedBranchExclusion struct {
+	Clone    string   `yaml:"clone"`
+	Branches []string `yaml:"branches"`
 }
 
 type mountedSelectionRow struct {
@@ -147,6 +170,8 @@ func decodeMountedSelectionSafety(source []byte) (mountedSelectionSafetyDocument
 		}
 		selectedCloneFound := false
 		selectedSessionFound := false
+		caseClones := make(map[string]bool, len(fixture.Rows))
+		caseSessions := make(map[string]bool, len(fixture.Rows))
 		for rowIndex, row := range fixture.Rows {
 			rowCount++
 			if !allowedRoles[row.Role] || seenRoles[row.Role] {
@@ -157,6 +182,8 @@ func decodeMountedSelectionSafety(source []byte) (mountedSelectionSafetyDocument
 				return document, fmt.Errorf("mounted selection safety fixture case %q rows[%d] has an empty or duplicate session ID %q", fixture.Name, rowIndex, row.SessionID)
 			}
 			seenSessions[row.SessionID] = true
+			caseSessions[row.SessionID] = true
+			caseClones[row.Clone] = true
 			if _, err := ingest.NewSessionID(row.SessionID); err != nil {
 				return document, fmt.Errorf("mounted selection safety fixture case %q rows[%d] has invalid session ID %q: %w", fixture.Name, rowIndex, row.SessionID, err)
 			}
@@ -170,6 +197,16 @@ func decodeMountedSelectionSafety(source []byte) (mountedSelectionSafetyDocument
 			selectedSessionFound = selectedSessionFound || row.SessionID == fixture.SelectedSession
 			if fixture.Force && !row.Pushed {
 				return document, fmt.Errorf("mounted selection safety fixture force case %q rows[%d] must start already pushed so --force changes eligibility", fixture.Name, rowIndex)
+			}
+		}
+		for exclusionIndex, exclusion := range fixture.BranchExclusions {
+			if !caseClones[exclusion.Clone] || len(exclusion.Branches) == 0 {
+				return document, fmt.Errorf("mounted selection safety fixture case %q branch_exclusions[%d] must name a row clone and at least one branch", fixture.Name, exclusionIndex)
+			}
+		}
+		for exclusionIndex, sessionID := range fixture.SessionExclusions {
+			if !caseSessions[sessionID] {
+				return document, fmt.Errorf("mounted selection safety fixture case %q session_exclusions[%d] names unavailable session %q", fixture.Name, exclusionIndex, sessionID)
 			}
 		}
 		switch fixture.SelectionKind {
@@ -207,6 +244,11 @@ func decodeMountedSelectionSafety(source []byte) (mountedSelectionSafetyDocument
 	for _, role := range allMountedSelectionRoles {
 		if !seenRoles[role] {
 			return document, fmt.Errorf("mounted selection safety fixture does not cover role %q", role)
+		}
+	}
+	for _, required := range requiredMountedExclusionCases {
+		if !seenCases[required] {
+			return document, fmt.Errorf("mounted selection safety fixture is missing required exact-exclusion case %q", required)
 		}
 	}
 	return document, nil
@@ -278,8 +320,16 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 	default:
 		t.Fatalf("unsupported mounted selection kind %q", fixture.SelectionKind)
 	}
+	for _, exclusion := range fixture.BranchExclusions {
+		harnessSelection.Exclusions.Branches = append(harnessSelection.Exclusions.Branches, config.BranchExclusion{
+			ClonePath: world.ClonePaths[exclusion.Clone],
+			Branches:  append([]string(nil), exclusion.Branches...),
+		})
+	}
+	harnessSelection.Exclusions.Sessions = append([]string(nil), fixture.SessionExclusions...)
 	cfg.Selection = config.SelectionConfig{
-		Mode: config.SelectionModeSelected,
+		Mode:                  config.SelectionModeSelected,
+		AutoIngestNewBranches: fixture.AutoNewBranches,
 		Harnesses: map[string]config.SelectionHarnessConfig{
 			defaults.HarnessClaudeCode.String(): harnessSelection,
 		},
@@ -350,6 +400,33 @@ func seedMountedSelectionWorld(t *testing.T, fixture mountedSelectionSafetyCase)
 		seedPublicationCursorsForTest(t, world.DBPath, pushedIDs, 1_800_000_000_000)
 	}
 	return world
+}
+
+func mountedViewerIDs(t *testing.T, world mountedSelectionWorld) map[string]bool {
+	t.Helper()
+	cfg, err := loadConfig(world.ConfigPath)
+	if err != nil {
+		t.Fatalf("load mounted viewer config: %v", err)
+	}
+	policy, err := sessionvisibility.New(cfg.Selection)
+	if err != nil {
+		t.Fatalf("build mounted viewer policy: %v", err)
+	}
+	db, err := store.Open(world.DBPath)
+	if err != nil {
+		t.Fatalf("open mounted viewer store: %v", err)
+	}
+	defer db.Close()
+	provider := api.NewStoreDataProvider(db, policy)
+	sessions, err := provider.Sessions(t.Context())
+	if err != nil {
+		t.Fatalf("list mounted viewer sessions: %v", err)
+	}
+	visible := make(map[string]bool, len(sessions))
+	for _, session := range sessions {
+		visible[session.ID.String()] = true
+	}
+	return visible
 }
 
 func mountedExpectedIDs(fixture mountedSelectionSafetyCase, include func(mountedSelectionRow) bool) map[string]bool {
@@ -508,7 +585,7 @@ func mountedPipelineIDs(t *testing.T, fixture mountedSelectionSafetyCase, world 
 	return ids
 }
 
-func TestMountedPushChooserPipelineAndPruneKeepTheCloneBoundary(t *testing.T) {
+func TestMountedSelectionPushChooserPipelineAndPruneKeepTheCloneBoundary(t *testing.T) {
 	fixtures := loadMountedSelectionSafety(t)
 	for _, fixture := range fixtures.Cases {
 		fixture := fixture
@@ -516,12 +593,29 @@ func TestMountedPushChooserPipelineAndPruneKeepTheCloneBoundary(t *testing.T) {
 			t.Parallel()
 			world := seedMountedSelectionWorld(t, fixture)
 			wantPushed := mountedExpectedIDs(fixture, func(row mountedSelectionRow) bool { return row.ExpectedPush })
+			if len(fixture.BranchExclusions) > 0 || len(fixture.SessionExclusions) > 0 {
+				viewerIDs := mountedViewerIDs(t, world)
+				assertMountedIDSet(t, "mounted viewer", viewerIDs, wantPushed)
+			}
 
 			chooserIDs := mountedChooserIDs(t, fixture, world)
 			assertMountedIDSet(t, "mounted chooser selected", chooserIDs, wantPushed)
 
 			pipelineIDs := mountedPipelineIDs(t, fixture, world)
 			assertMountedIDSet(t, "mounted push pipeline", pipelineIDs, wantPushed)
+
+			beforePrune, err := store.Open(world.DBPath)
+			if err != nil {
+				t.Fatalf("open mounted selection store before manual prune: %v", err)
+			}
+			allBeforePrune, queryErr := beforePrune.QueryPrunableSessions(t.Context(), ingest.PruneFilter{All: true})
+			beforePrune.Close()
+			if queryErr != nil {
+				t.Fatalf("query mounted selection store before manual prune: %v", queryErr)
+			}
+			if len(allBeforePrune) != len(fixture.Rows) {
+				t.Fatalf("non-destructive viewer/push paths left %d stored sessions, want all %d before manual prune", len(allBeforePrune), len(fixture.Rows))
+			}
 
 			pruneOutput, _, err := executePruneCmdWithConfig(
 				t,

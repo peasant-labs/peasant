@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,8 @@ type directLinkSelectionRow struct {
 	ProjectHash    string         `yaml:"project_hash"`
 	ProjectName    string         `yaml:"project_name"`
 	ProjectDisplay string         `yaml:"project_display"`
+	Clone          string         `yaml:"clone"`
+	GitBranch      string         `yaml:"git_branch"`
 	HostSlug       string         `yaml:"host_slug"`
 	StartMs        int64          `yaml:"start_ms"`
 	TokensIn       int            `yaml:"tokens_in"`
@@ -111,7 +115,7 @@ func decodeDirectLinkSelection(source []byte) (directLinkSelectionFixture, error
 			return fixture, fmt.Errorf("direct-link selection fixture rows[%d] repeats project hash %q; the hidden deep link must belong to another project", index, row.ProjectHash)
 		}
 		seenProjects[row.ProjectHash] = true
-		if row.ProjectName == "" || row.ProjectDisplay == "" || row.HostSlug == "" || row.StartMs <= 0 || row.TokensIn <= 0 || row.TokensOut <= 0 || row.TurnCount <= 0 || row.DurationMs <= 0 {
+		if row.ProjectName == "" || row.ProjectDisplay == "" || row.Clone == "" || row.GitBranch == "" || row.HostSlug == "" || row.StartMs <= 0 || row.TokensIn <= 0 || row.TokensOut <= 0 || row.TurnCount <= 0 || row.DurationMs <= 0 {
 			return fixture, fmt.Errorf("direct-link selection fixture rows[%d] is incomplete", index)
 		}
 	}
@@ -181,8 +185,14 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 
 	db := openTestStore(t)
 	entries := make([]ingest.StoreEntry, 0, len(fixture.Rows))
+	clonePaths := make(map[directLinkRole]string, len(fixture.Rows))
 	for _, row := range fixture.Rows {
-		entries = append(entries, makeStoreEntry(
+		clonePath := filepath.Join(t.TempDir(), row.Clone)
+		if err := os.MkdirAll(clonePath, 0o755); err != nil {
+			t.Fatalf("create direct-link fixture clone %q: %v", row.Clone, err)
+		}
+		clonePaths[row.Role] = clonePath
+		entry := makeStoreEntry(
 			t,
 			row.SessionID,
 			row.ProjectHash,
@@ -195,7 +205,11 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 			row.TurnCount,
 			row.ToolCallCount,
 			row.DurationMs,
-		))
+		)
+		entry.Metadata.Git.Worktree = &clonePath
+		branch := row.GitBranch
+		entry.Metadata.Git.Branch = &branch
+		entries = append(entries, entry)
 	}
 	if err := db.InsertSessions(t.Context(), entries); err != nil {
 		t.Fatalf("seed mounted direct-link sessions: %v", err)
@@ -203,7 +217,13 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 	policy, err := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{
-			fixture.Harness: {Sessions: []string{listed.SessionID}},
+			fixture.Harness: {
+				Projects: []config.ProjectSelection{
+					{ClonePaths: []string{clonePaths[directLinkListedSelection]}},
+					{ClonePaths: []string{clonePaths[directLinkHiddenHistory]}},
+				},
+				Exclusions: config.SelectionExclusions{Sessions: []string{hidden.SessionID}},
+			},
 		},
 	})
 	if err != nil {

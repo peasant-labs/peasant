@@ -192,7 +192,7 @@ func BuildPruneCommand() *cobra.Command {
 	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this date (YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&all, "all", false, "Prune all sessions")
-	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not selected by harness, project, clone, or explicit session ID. Branch filters are not applied (requires selection.mode=selected)")
+	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not selected by harness, project, clone, branch, or explicit session rules (requires selection.mode=selected)")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip interactive confirmation (for scripts/CI)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without deleting")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output results as JSON")
@@ -218,6 +218,7 @@ func unselectedPruneSessions(
 			ProjectName: row.ProjectName,
 			ProjectHash: row.ProjectHash,
 			ProjectPath: row.ProjectPath,
+			Branch:      row.GitBranch,
 			SessionID:   row.SessionID,
 		}
 	}
@@ -227,7 +228,7 @@ func unselectedPruneSessions(
 	}
 	unselected := make([]ingest.PruneSessionRow, 0, len(rows))
 	for index, candidate := range candidates {
-		if !matcher.MatchesCandidate(candidate) {
+		if matcher.MatchBranchCandidate(candidate) != ingest.BranchMatchYes {
 			unselected = append(unselected, rows[index])
 		}
 	}

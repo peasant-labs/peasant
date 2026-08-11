@@ -95,24 +95,28 @@ func (n conflictNotice) axes() []testutil.FixtureField {
 type selectionGitPolicy string
 
 const (
-	gitPolicyHarnessAbsent   selectionGitPolicy = "harness-absent"
-	gitPolicyNoProjects      selectionGitPolicy = "no-project-entries"
-	gitPolicyProjectEvidence selectionGitPolicy = "prepare-project-evidence"
+	gitPolicyHarnessAbsent      selectionGitPolicy = "harness-absent"
+	gitPolicyNoProjects         selectionGitPolicy = "no-project-entries"
+	gitPolicyProjectEvidence    selectionGitPolicy = "prepare-project-evidence"
+	expectedSelectionFilterRows                    = 10
 )
 
 type selectionFilterFixture struct {
-	Name             string                    `yaml:"name"`
-	Harness          ingest.Harness            `yaml:"harness"`
-	Configured       string                    `yaml:"configured_harness"`
-	Projects         []config.ProjectSelection `yaml:"projects"`
-	ExplicitSessions []string                  `yaml:"explicit_sessions"`
-	ProjectName      string                    `yaml:"project_name"`
-	SessionID        string                    `yaml:"session_id"`
-	SecondSessionID  string                    `yaml:"second_session_id"`
-	OriginalRoot     string                    `yaml:"original_root"`
-	GitPolicy        selectionGitPolicy        `yaml:"git_policy"`
-	ExpectedMatch    testutil.SelectionOutcome `yaml:"expected_match"`
-	ExpectedGitCalls int                       `yaml:"expected_git_calls"`
+	Name             string                     `yaml:"name"`
+	Harness          ingest.Harness             `yaml:"harness"`
+	Configured       string                     `yaml:"configured_harness"`
+	Projects         []config.ProjectSelection  `yaml:"projects"`
+	ExplicitSessions []string                   `yaml:"explicit_sessions"`
+	Exclusions       config.SelectionExclusions `yaml:"exclusions"`
+	AutoNewBranches  bool                       `yaml:"auto_new_branches"`
+	ProjectName      string                     `yaml:"project_name"`
+	SessionID        string                     `yaml:"session_id"`
+	SecondSessionID  string                     `yaml:"second_session_id"`
+	OriginalRoot     string                     `yaml:"original_root"`
+	GitPolicy        selectionGitPolicy         `yaml:"git_policy"`
+	ExpectedMatch    testutil.SelectionOutcome  `yaml:"expected_match"`
+	ExpectedExcluded bool                       `yaml:"expected_exact_exclusion"`
+	ExpectedGitCalls int                        `yaml:"expected_git_calls"`
 }
 
 // derivedGitPolicy computes the cohort preparation policy from configuration.
@@ -120,7 +124,7 @@ func (f selectionFilterFixture) derivedGitPolicy() selectionGitPolicy {
 	switch {
 	case f.Harness.String() != f.Configured:
 		return gitPolicyHarnessAbsent
-	case len(f.Projects) == 0:
+	case len(f.Projects) == 0 && len(f.Exclusions.Branches) == 0:
 		return gitPolicyNoProjects
 	default:
 		return gitPolicyProjectEvidence
@@ -184,7 +188,13 @@ var allSelectionFilterCoverage = []selectionFilterCoverage{
 	{gitPolicyNoProjects, testutil.SelectionSelected},
 	{gitPolicyNoProjects, testutil.SelectionRejected},
 	{gitPolicyProjectEvidence, testutil.SelectionSelected},
+	{gitPolicyProjectEvidence, testutil.SelectionRejected},
 	{gitPolicyProjectEvidence, testutil.SelectionWithheld},
+}
+
+var requiredExactExclusionFilterCases = []string{
+	"auto-new-branches-keeps-an-exact-branch-denied",
+	"exact-session-denial-skips-git",
 }
 
 func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
@@ -202,8 +212,8 @@ func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
 	// Floor EQUALS the row count: deleting a row and decrementing the
 	// declaration still trips it, so the corpus only ratchets up. The pair
 	// coverage below is the second layer, for a swap at the same count.
-	if fixtures.DeclaredRows != len(fixtures.Cases) || fixtures.DeclaredRows < 8 {
-		t.Fatalf("selection filter fixture row guard failed: declared=%d actual=%d minimum=8", fixtures.DeclaredRows, len(fixtures.Cases))
+	if fixtures.DeclaredRows != expectedSelectionFilterRows || len(fixtures.Cases) != expectedSelectionFilterRows {
+		t.Fatalf("selection filter fixture row guard failed: declared=%d actual=%d expected=%d", fixtures.DeclaredRows, len(fixtures.Cases), expectedSelectionFilterRows)
 	}
 	seen := make(map[string]struct{}, len(fixtures.Cases))
 	observed := make([]selectionFilterCoverage, 0, len(fixtures.Cases))
@@ -228,6 +238,11 @@ func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
 			t.Fatalf("selection filter fixture name %q is duplicated; every case must name exactly one scenario", fixture.Name)
 		}
 		seen[fixture.Name] = struct{}{}
+	}
+	for _, required := range requiredExactExclusionFilterCases {
+		if _, ok := seen[required]; !ok {
+			t.Fatalf("selection filter fixture is missing required exact-exclusion case %q", required)
+		}
 	}
 	// Derived coverage instead of a row-count floor: a floor is decremented by
 	// the same edit that removes the row it protected, while an uncovered
@@ -369,8 +384,8 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			cfg := config.BaseConfig()
-			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
-				fixture.Configured: {Projects: fixture.Projects, Sessions: fixture.ExplicitSessions},
+			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, AutoIngestNewBranches: fixture.AutoNewBranches, Harnesses: map[string]config.SelectionHarnessConfig{
+				fixture.Configured: {Projects: fixture.Projects, Sessions: fixture.ExplicitSessions, Exclusions: fixture.Exclusions},
 			}}
 			git := &countingGitResolver{StubGitResolver: &testutil.StubGitResolver{Remote: "https://github.com/acme/tool.git", BranchName: "main"}}
 			filter, recorder := buildSelectionFilterWithResolver(cfg, git, fixturePathIdentityResolver{})
@@ -395,6 +410,9 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 			wantSelected := fixture.ExpectedMatch == testutil.SelectionSelected
 			if got := filter.Match(session); got != wantSelected {
 				t.Fatalf("selection result = %v, want %v (expected_match %q)", got, wantSelected, fixture.ExpectedMatch)
+			}
+			if got := filter.Excludes(session); got != fixture.ExpectedExcluded {
+				t.Fatalf("exact exclusion result = %v, want %v", got, fixture.ExpectedExcluded)
 			}
 			if fixture.SecondSessionID != "" {
 				if got := filter.Match(cohort[1]); got != wantSelected {

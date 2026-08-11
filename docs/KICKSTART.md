@@ -31,6 +31,10 @@ A new branch in a selected project follows the saved `autoIngestNewBranches` val
 - `false` keeps discovery on the saved branch list. A project choice with no branch list still means
   all branches in that selected project.
 
+An exact branch exclusion still wins when `autoIngestNewBranches` is `true`. Clearing one available
+branch records a denial for that physical clone and branch. It does not disable automatic discovery
+for another branch or a sibling clone.
+
 Kickstart keeps a saved project, clone path, branch, or session when the current scan cannot offer it
 for editing. Another visible edit does not remove the unavailable choice. Kickstart removes an
 available choice only after you clear it and save. If an unavailable branch belongs to an available
@@ -45,11 +49,42 @@ One Git remote entry can contain several `clonePaths`. One shared `branches` lis
 path in that entry. Peasant can use a Git remote or project name only when the current scan finds one
 physical clone with that value. Peasant does not use a remote or name alone to choose between
 ambiguous clones. An old selection entry without `clonePaths` stays readable and follows the same
-uniqueness rule.
+uniqueness rule until kickstart migrates it from stored clone evidence.
 
 For a project with no Git remote, Peasant uses the resolved path as identity. Kickstart shows the
 project name with a short path when it must distinguish equal names. See the
 [Selection index example](../README.md#selection-index) for the saved YAML shape.
+
+## Exact exclusions
+
+Each harness can store exact branch and session exclusions. Peasant applies positive project and
+session rules first. It then applies these exact exclusions.
+
+- A branch exclusion contains one resolved `clonePath` and one or more branch names. It does not
+  exclude the same branch in another clone.
+- A session exclusion contains one exact session ID. It still excludes that session when a project
+  rule admits the session.
+- Selecting the branch or session again removes its exclusion.
+
+Harvest, viewer lists, the save gate, push, and `peasant prune --unselected` use the same matcher.
+Direct links to stored history remain available. An exclusion changes discovery. It does not delete
+local data.
+
+## Convert old pathless selected rules
+
+An old `selection.mode: selected` entry can identify a project by name or Git remote without a
+`clonePaths` list. On the next kickstart run, Peasant compares that entry with sessions in the local
+store. It migrates every matching stored physical clone to exact paths. A matching clone found only
+by the current scanner starts clear.
+
+When several pathless rules match one stored clone, Peasant intersects their finite branch lists.
+An unrestricted rule does not widen a finite rule. If no branch satisfies all matching rules,
+Peasant omits that clone. Same-remote Git clones share one entry only when their effective branch
+policy is equal. Unresolved stored sessions remain exact session choices only when the combined
+branch policy admits them.
+
+This migration runs in memory before the project editor opens. Peasant writes the exact paths only
+after you confirm the final save. No, Back, quit, or cancel leaves the old file unchanged.
 
 ## Convert an old all-projects setting
 
@@ -134,9 +169,9 @@ for stored history. A direct link to a stored session or canonical project still
 narrow selection does not delete files or database rows, and it does not unpublish Village copies.
 
 `peasant prune --unselected` is a separate destructive command. It requires
-`selection.mode: selected`. It checks harness, project, clone, and explicit session ID rules. It does
-not apply branch rules. A stored session stays when its project or clone is selected, even if its
-branch is not in the saved branch list. An explicitly selected session also stays.
+`selection.mode: selected`. It checks harness, project, clone, branch, explicit session, and exact
+exclusion rules. A stored session stays only when the complete saved selection admits its recorded
+branch and exact identity.
 
 Preview the deletion first. The second command shows the deletion preview and asks for confirmation
 before it permanently deletes the listed sessions from the local database and filesystem.

@@ -216,12 +216,13 @@ func discoveryCandidate(
 
 func projectAdmission(matcher *ingest.SelectionMatcher, project preparedProject) (ProjectAdmission, int) {
 	admission := ProjectNotEffective
-	if projectRuleAdmission(matcher, project.Project) == ProjectEffectiveWholeProject {
-		admission = ProjectEffectiveWholeProject
-	}
+	allDescendantsDenied := len(project.Descendants) > 0
 
 	selectedDescendants := 0
 	for _, descendant := range project.Descendants {
+		if !matcher.ExcludesCandidate(descendant.Direct) {
+			allDescendantsDenied = false
+		}
 		candidateAdmission := descendantAdmission(matcher, descendant)
 		if candidateAdmission == ProjectNotEffective {
 			continue
@@ -229,10 +230,23 @@ func projectAdmission(matcher *ingest.SelectionMatcher, project preparedProject)
 		selectedDescendants++
 		admission = moreSpecificAdmission(admission, candidateAdmission)
 	}
+	// A selected project can remain effective when a non-denied available
+	// descendant belongs to another clone, but exact denial of every available
+	// descendant must not leave a parent-only row or suppress the no-project gate.
+	if !allDescendantsDenied && projectRuleAdmission(matcher, project.Project) == ProjectEffectiveWholeProject {
+		admission = moreSpecificAdmission(admission, ProjectEffectiveWholeProject)
+	}
 	return admission, selectedDescendants
 }
 
 func descendantAdmission(matcher *ingest.SelectionMatcher, descendant preparedDescendant) ProjectAdmission {
+	// Exact denial applies to the original session/path/branch evidence before
+	// project admission clears the session ID or a selected parent can admit the
+	// child. This keeps viewer projection and the save gate on the matcher's
+	// positive-then-deny contract.
+	if matcher.ExcludesCandidate(descendant.Direct) {
+		return ProjectNotEffective
+	}
 	projectCandidate := descendant.Direct
 	projectCandidate.SessionID = ""
 	admission := ProjectNotEffective

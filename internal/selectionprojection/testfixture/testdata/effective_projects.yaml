@@ -1,5 +1,5 @@
-declared_projection_rows: 12
-declared_gate_rows: 8
+declared_projection_rows: 14
+declared_gate_rows: 10
 
 projection_cases:
   - name: whole-project-selected
@@ -220,6 +220,46 @@ projection_cases:
             branch: release
     expected: []
 
+  - name: exact-branch-deny-overrides-project-admission
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - clonePaths: [/workspace/deny-branch]
+          exclusions:
+            branches:
+              - clonePath: /workspace/deny-branch
+                branches: [main]
+    candidates:
+      - parent_project_id: project-denied-branch
+        harness: claude-code
+        project_name: deny-branch
+        clone_path: /workspace/deny-branch
+        descendants:
+          - session_id: 78787878-7878-4878-8878-787878787878
+            branch: main
+    expected: []
+
+  - name: exact-session-deny-overrides-project-admission
+    selection:
+      mode: selected
+      harnesses:
+        claude-code:
+          projects:
+            - clonePaths: [/workspace/deny-session]
+          exclusions:
+            sessions: [79797979-7979-4979-8979-797979797979]
+    candidates:
+      - parent_project_id: project-denied-session
+        harness: claude-code
+        project_name: deny-session
+        clone_path: /workspace/deny-session
+        descendants:
+          - session_id: 79797979-7979-4979-8979-797979797979
+            branch: release
+    expected: []
+
   - name: mode-all-complete-cohort
     selection:
       mode: all
@@ -280,3 +320,9 @@ gate_cases:
   - name: gate-is-suppressed-by-mode-all-candidate-cohort
     projection_case: mode-all-complete-cohort
     expected: none
+  - name: gate-fires-when-project-admitted-branch-is-exactly-denied
+    projection_case: exact-branch-deny-overrides-project-admission
+    expected: confirm_no_projects
+  - name: gate-fires-when-project-admitted-session-is-exactly-denied
+    projection_case: exact-session-deny-overrides-project-admission
+    expected: confirm_no_projects

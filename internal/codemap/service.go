@@ -285,6 +285,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 				Harness:     defaults.Harness(r.harness),
 				GitRemote:   r.gitRemote,
 				ProjectName: r.projectName,
+				ClonePath:   s.resolveSessionClonePath(r.gitWorktree, r.projectName),
 				GitBranch:   r.gitBranch,
 			})
 			if visibilityErr != nil {

@@ -124,6 +124,11 @@ type PipelineConfig struct {
 	// include the session. nil means no filter (all sessions pass).
 	// Typically built from the config selection index by the CLI layer.
 	SessionFilter func(DiscoveredSession) bool
+	// SessionExclusionFilter reports whether exact prepared deny evidence applies
+	// to a session. It runs for roots and children before parent inheritance, so a
+	// selected parent cannot re-admit an exactly denied child. nil means no exact
+	// exclusion filter.
+	SessionExclusionFilter func(DiscoveredSession) bool
 }
 
 // Discoverer discovers sessions from configured sources.
@@ -357,32 +362,6 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	diffResult := p.diff(allSessions)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
 
-	// DryRun: skip extract/write/cleanup; return diff results as SessionResults.
-	if p.config.DryRun {
-		result := &PipelineResult{
-			Duration: time.Since(start),
-		}
-		for _, entry := range diffResult.Sessions {
-			result.Sessions = append(result.Sessions, SessionResult{
-				SessionID:  entry.Session.SessionID,
-				Harness:    entry.Session.Harness,
-				ParentUUID: entry.Session.ParentUUID,
-				Status:     entry.Status,
-			})
-			switch entry.Status {
-			case DiffNew:
-				result.Summary.New++
-			case DiffUpdated:
-				result.Summary.Updated++
-			case DiffUnchanged:
-				result.Summary.Unchanged++
-			case DiffActive:
-				result.Summary.Active++
-			}
-		}
-		return result, nil
-	}
-
 	// Stage 3: FILTER + Stage 4a: EXTRACT + WRITE
 	//
 	// Pre-pass: identify active sessions that are required as parents by
@@ -412,6 +391,18 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	var sessionResults []SessionResult
 	var indexSessions []indexedMeta // sessions to index after write
 	var toProcessEntries []DiffEntry
+	dryRunSessions := make([]SessionResult, 0, len(diffResult.Sessions))
+	recordDryRun := func(entry DiffEntry, status DiffStatus) {
+		if !p.config.DryRun {
+			return
+		}
+		dryRunSessions = append(dryRunSessions, SessionResult{
+			SessionID:  entry.Session.SessionID,
+			Harness:    entry.Session.Harness,
+			ParentUUID: entry.Session.ParentUUID,
+			Status:     status,
+		})
+	}
 
 	// Track which root sessions passed the selection filter so subagents
 	// can inherit their parent's fate (rejected parent → rejected children).
@@ -420,6 +411,20 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	for _, entry := range diffResult.Sessions {
 		// AllowedSessionIDs filter: skip sessions not in the allowed set.
 		if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[entry.Session.SessionID] {
+			recordDryRun(entry, DiffUnchanged)
+			sessionResults = append(sessionResults, SessionResult{
+				SessionID:  entry.Session.SessionID,
+				Harness:    entry.Session.Harness,
+				ParentUUID: entry.Session.ParentUUID,
+				Status:     DiffUnchanged,
+			})
+			continue
+		}
+
+		// Exact child denials take precedence over inherited parent admission.
+		// The callback is lookup-only over the cohort prepared after discovery.
+		if p.config.SessionExclusionFilter != nil && p.config.SessionExclusionFilter(entry.Session) {
+			recordDryRun(entry, DiffUnchanged)
 			sessionResults = append(sessionResults, SessionResult{
 				SessionID:  entry.Session.SessionID,
 				Harness:    entry.Session.Harness,
@@ -435,6 +440,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 		if p.config.SessionFilter != nil {
 			if entry.Session.ParentUUID == nil {
 				if !p.config.SessionFilter(entry.Session) {
+					recordDryRun(entry, DiffUnchanged)
 					sessionResults = append(sessionResults, SessionResult{
 						SessionID:  entry.Session.SessionID,
 						Harness:    entry.Session.Harness,
@@ -445,6 +451,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 				}
 				filterPassedParents[entry.Session.SessionID] = true
 			} else if !filterPassedParents[*entry.Session.ParentUUID] {
+				recordDryRun(entry, DiffUnchanged)
 				sessionResults = append(sessionResults, SessionResult{
 					SessionID:  entry.Session.SessionID,
 					Harness:    entry.Session.Harness,
@@ -462,6 +469,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 				sessionTime = entry.Session.CreatedAt
 			}
 			if sessionTime.Before(*p.config.Since) {
+				recordDryRun(entry, DiffUnchanged)
 				sessionResults = append(sessionResults, SessionResult{
 					SessionID:  entry.Session.SessionID,
 					Harness:    entry.Session.Harness,
@@ -474,6 +482,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 
 		switch entry.Status {
 		case DiffUnchanged:
+			recordDryRun(entry, DiffUnchanged)
 			sessionResults = append(sessionResults, SessionResult{
 				SessionID:  entry.Session.SessionID,
 				Harness:    entry.Session.Harness,
@@ -481,6 +490,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 				Status:     DiffUnchanged,
 			})
 		case DiffActive:
+			recordDryRun(entry, DiffActive)
 			if !p.config.IncludeActive && !requiredParents[entry.Session.SessionID] {
 				sessionResults = append(sessionResults, SessionResult{
 					SessionID:  entry.Session.SessionID,
@@ -492,8 +502,32 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 				toProcessEntries = append(toProcessEntries, entry)
 			}
 		default: // DiffNew, DiffUpdated
+			recordDryRun(entry, entry.Status)
 			toProcessEntries = append(toProcessEntries, entry)
 		}
+	}
+
+	// Dry-run uses the same allowed-session, time, positive-selection, exact-
+	// denial, and parent-inheritance decisions as a real run. It stops only after
+	// that shared FILTER pass and performs no extraction, write, or store action.
+	if p.config.DryRun {
+		result := &PipelineResult{
+			Duration: time.Since(start),
+			Sessions: dryRunSessions,
+		}
+		for _, session := range dryRunSessions {
+			switch session.Status {
+			case DiffNew:
+				result.Summary.New++
+			case DiffUpdated:
+				result.Summary.Updated++
+			case DiffUnchanged:
+				result.Summary.Unchanged++
+			case DiffActive:
+				result.Summary.Active++
+			}
+		}
+		return result, nil
 	}
 
 	// Stage 4a: EXTRACT + WRITE — parallel pool, one goroutine per root session.

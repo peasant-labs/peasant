@@ -120,7 +120,8 @@ ORDER BY v.target_session_id, v.type_id,
     s.model_harness,
     COALESCE(s.git_branch, ''),
     COALESCE(p.canonical_remote, ''),
-    COALESCE(p.canonical_cwd, '')
+    COALESCE(p.canonical_cwd, ''),
+    COALESCE(s.git_worktree, '')
 FROM session_entries_fts f
 JOIN session_entries e ON e.rowid = f.rowid
 JOIN sessions s        ON s.session_id = f.session_id
@@ -189,6 +190,7 @@ type searchRow struct {
 	gitBranch   string
 	gitRemote   string
 	projectName string
+	gitWorktree string
 }
 
 // querySearch runs one deterministic page of the FTS5 MATCH query. match is
@@ -222,6 +224,7 @@ func (s *Service) querySearch(ctx context.Context, match string, limit, offset i
 				gitBranch:   stmt.ColumnText(8),
 				gitRemote:   stmt.ColumnText(9),
 				projectName: stmt.ColumnText(10),
+				gitWorktree: stmt.ColumnText(11),
 			})
 			return nil
 		},

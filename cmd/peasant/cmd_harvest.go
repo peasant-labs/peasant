@@ -396,6 +396,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
+		pipelineCfg.SessionExclusionFilter = selectionFilter.Excludes
 		selectionConflicts = recorder
 	}
 
@@ -1130,6 +1131,7 @@ func (r *selectionConflictRecorder) notice(w io.Writer, configPath string) {
 type preparedHarvestSelection struct {
 	candidate ingest.DiscoveryCandidate
 	decision  ingest.DiscoveryDecision
+	excluded  bool
 	session   ingest.DiscoveredSession
 }
 
@@ -1156,7 +1158,7 @@ func buildSelectionFilterWithResolver(
 	recorder := &selectionConflictRecorder{}
 	projectHarnesses := make(map[ingest.Harness]bool)
 	for harness, selection := range cfg.Selection.Harnesses {
-		if len(selection.Projects) > 0 {
+		if len(selection.Projects) > 0 || len(selection.Exclusions.Branches) > 0 {
 			projectHarnesses[ingest.Harness(harness)] = true
 		}
 	}
@@ -1185,7 +1187,7 @@ func (f *harvestSelectionFilter) Prepare(ctx context.Context, sessions []ingest.
 		projectPath := discoveredSessionProjectPath(session)
 		branch := session.Branch
 		gitRemote := ""
-		if f.projectHarnesses[session.Harness] && f.git != nil {
+		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && f.git != nil {
 			dir := discoveredSessionGitDirectory(session, projectPath)
 			if dir != "" {
 				gitCtx, ok := resolvedGit[dir]
@@ -1225,10 +1227,19 @@ func (f *harvestSelectionFilter) Prepare(ctx context.Context, sessions []ingest.
 		f.prepared[candidate.SessionID] = preparedHarvestSelection{
 			candidate: candidate,
 			decision:  f.matcher.MatchDiscoveryCandidateDecision(candidate, f.autoIngestNewBranches),
+			excluded:  f.matcher.ExcludesCandidate(candidate),
 			session:   sessions[index],
 		}
 	}
 	return nil
+}
+
+// Excludes reports the exact-denial result cached during complete-cohort
+// preparation. An unknown session fails closed so a child outside that cohort
+// cannot inherit a selected parent's result.
+func (f *harvestSelectionFilter) Excludes(session ingest.DiscoveredSession) bool {
+	prepared, ok := f.prepared[session.SessionID]
+	return !ok || prepared.excluded
 }
 
 func (f *harvestSelectionFilter) Match(session ingest.DiscoveredSession) bool {

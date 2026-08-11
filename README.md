@@ -483,6 +483,13 @@ selection:
             - release
       sessions:
         - 11111111-1111-4111-8111-111111111111
+      exclusions:
+        branches:
+          - clonePath: /projects/atlas-review
+            branches:
+              - experiment
+        sessions:
+          - 22222222-2222-4222-8222-222222222222
 ```
 
 Kickstart writes the real `clonePaths` values. The paths in this example are sample paths.
@@ -497,6 +504,8 @@ Kickstart writes the real `clonePaths` values. The paths in this example are sam
 | `projects[].clonePaths` | Store the resolved physical clone paths for one project entry. |
 | `projects[].branches` | Store an optional branch list. An empty list means all branches for the entry. |
 | `sessions` | Store explicit session IDs. |
+| `exclusions.branches` | Deny named branches only for one exact physical clone path. |
+| `exclusions.sessions` | Deny exact session IDs for one recording harness. |
 
 Use the kickstart guide for each user job:
 
@@ -504,6 +513,8 @@ Use the kickstart guide for each user job:
 |----------|-------|
 | Run kickstart again or change saved choices | [Restore saved choices](docs/KICKSTART.md#restore-saved-choices) |
 | Understand `clonePaths` and local clone identity | [Physical clone identity](docs/KICKSTART.md#physical-clone-identity) |
+| Understand exact branch and session exclusions | [Exact exclusions](docs/KICKSTART.md#exact-exclusions) |
+| Open an old selected entry without `clonePaths` | [Convert old pathless selected rules](docs/KICKSTART.md#convert-old-pathless-selected-rules) |
 | Open a config that uses `mode: all` | [Convert an old all-projects setting](docs/KICKSTART.md#convert-an-old-all-projects-setting) |
 | Save when no selected work is available | [Save with no effective project](docs/KICKSTART.md#save-with-no-effective-project) |
 | Understand project lists, push choices, direct links, and manual deletion | [Viewer lists and stored data](docs/KICKSTART.md#viewer-lists-and-stored-data) |

@@ -793,6 +793,8 @@ func TestStore_AllSessions(t *testing.T) {
 		makeStoreEntry(t, "22222222-2222-2222-2222-222222222222", hash1, "github.com-user-repo1", defaults.HarnessClaudeCode, 1700000060000, 2000, 800),
 		makeStoreEntry(t, "33333333-3333-3333-3333-333333333333", hash2, "github.com-user-repo2", defaults.HarnessOpenCode, 1700000120000, 3000, 1200),
 	}
+	worktree := "/home/test/project-worktree"
+	entries[2].Metadata.Git.Worktree = &worktree
 
 	if err := s.InsertSessions(ctx, entries); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
@@ -835,6 +837,9 @@ func TestStore_AllSessions(t *testing.T) {
 	// V23+: ProjectName = canonical_cwd = Project.FilePath from StoreEntry.
 	if r.ProjectName != "/home/test/project" {
 		t.Errorf("row[0] project_name: expected %q, got %q", "/home/test/project", r.ProjectName)
+	}
+	if r.GitWorktree != worktree {
+		t.Errorf("row[0] git_worktree: expected %q, got %q", worktree, r.GitWorktree)
 	}
 	if r.InputTokens != 3000 {
 		t.Errorf("row[0] input_tokens: expected 3000, got %d", r.InputTokens)

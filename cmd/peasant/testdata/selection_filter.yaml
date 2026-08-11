@@ -13,7 +13,7 @@
 # rows share (resolves, withheld); rendered-entry shape coverage distinguishes two
 # of them. The base two-pinned-entries conflict shares its observable behavior
 # with the variants, so the declared row-count floor is its independent guard.
-declared_rows: 8
+declared_rows: 10
 cases:
   - name: non-selected-harness-skips-git
     harness: opencode
@@ -111,6 +111,33 @@ cases:
     git_policy: "prepare-project-evidence"
     expected_match: "withheld"
     expected_git_calls: 2
+
+  - name: auto-new-branches-keeps-an-exact-branch-denied
+    harness: claude-code
+    configured_harness: claude-code
+    exclusions:
+      branches:
+        - clonePath: /workspace/tool
+          branches: [main]
+    auto_new_branches: true
+    session_id: 33333333-3333-4333-8333-333333333333
+    original_root: /workspace/tool
+    git_policy: "prepare-project-evidence"
+    expected_match: "rejected"
+    expected_exact_exclusion: true
+    expected_git_calls: 2
+
+  - name: exact-session-denial-skips-git
+    harness: claude-code
+    configured_harness: claude-code
+    exclusions:
+      sessions: [55555555-5555-4555-8555-555555555555]
+    session_id: 55555555-5555-4555-8555-555555555555
+    original_root: /workspace/tool
+    git_policy: "no-project-entries"
+    expected_match: "rejected"
+    expected_exact_exclusion: true
+    expected_git_calls: 0
 
 # mounted_conflict drives the real `peasant harvest` command against a real git
 # repository so the withheld-conflict notice is proven where the user sees it,

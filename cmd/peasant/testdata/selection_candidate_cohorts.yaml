@@ -1,5 +1,5 @@
-declared_cases: 9
-declared_rows: 16
+declared_cases: 11
+declared_rows: 20
 cases:
   - name: exact clone path selects one clone of an ambiguous remote
     harness: claude-code
@@ -233,6 +233,68 @@ cases:
         project_path: /raw/inert
         resolved_path: /physical/inert
         expected_clone_path: /physical/inert
+        expected_remote_multiplicity: unique
+        expected_name_multiplicity: unique
+        expected_branch_match: selected
+        expected_project_match: true
+
+  - name: exact branch exclusion keeps sibling branch selected
+    harness: claude-code
+    projects:
+      - clonePaths: [/physical/deny-branch]
+    exclusions:
+      branches:
+        - clonePath: /physical/deny-branch
+          branches: [main]
+    rows:
+      - session_id: 13131313-1313-4313-8313-131313131311
+        project_name: deny-branch
+        project_hash: hash-deny-branch
+        project_path: /raw/deny-branch
+        resolved_path: /physical/deny-branch
+        branch: main
+        expected_clone_path: /physical/deny-branch
+        expected_remote_multiplicity: unique
+        expected_name_multiplicity: unique
+        expected_branch_match: rejected
+        expected_project_match: true
+      - session_id: 13131313-1313-4313-8313-131313131312
+        project_name: deny-branch
+        project_hash: hash-deny-branch
+        project_path: /raw/deny-branch
+        resolved_path: /physical/deny-branch
+        branch: release
+        expected_clone_path: /physical/deny-branch
+        expected_remote_multiplicity: unique
+        expected_name_multiplicity: unique
+        expected_branch_match: selected
+        expected_project_match: true
+
+  - name: exact session exclusion overrides project admission
+    harness: claude-code
+    projects:
+      - clonePaths: [/physical/deny-session]
+    exclusions:
+      sessions: [14141414-1414-4414-8414-141414141411]
+    rows:
+      - session_id: 14141414-1414-4414-8414-141414141411
+        project_name: deny-session
+        project_hash: hash-deny-session
+        project_path: /raw/deny-session
+        resolved_path: /physical/deny-session
+        branch: main
+        expected_clone_path: /physical/deny-session
+        expected_remote_multiplicity: unique
+        expected_name_multiplicity: unique
+        expected_branch_match: rejected
+        expected_project_match: false
+      - session_id: 14141414-1414-4414-8414-141414141412
+        project_name: deny-session
+        project_hash: hash-deny-session
+        project_path: /raw/deny-session
+        resolved_path: /physical/deny-session
+        branch: main
+        expected_clone_path: /physical/deny-session
         expected_remote_multiplicity: unique
         expected_name_multiplicity: unique
         expected_branch_match: selected

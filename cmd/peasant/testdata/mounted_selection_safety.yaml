@@ -1,5 +1,5 @@
-declared_cases: 6
-declared_sessions: 10
+declared_cases: 8
+declared_sessions: 14
 cases:
   - name: selected physical clone excludes the same-remote sibling
     selection_kind: clone-path
@@ -106,6 +106,53 @@ cases:
         session_id: 60000000-0000-4000-8000-000000000001
         clone: unique-name
         project_name: unique-name
+        branch: main
+        expected_push: true
+        expected_prune_delete: false
+
+  - name: auto new branches keeps one exact branch denied
+    selection_kind: clone-path
+    selected_clone: branch-boundary
+    auto_new_branches: true
+    branch_exclusions:
+      - clone: branch-boundary
+        branches: [main]
+    rows:
+      - role: exact-branch-denied
+        session_id: 70000000-0000-4000-8000-000000000001
+        clone: branch-boundary
+        git_remote: git@github.com:example/branch-boundary.git
+        project_name: branch-boundary
+        branch: main
+        expected_push: false
+        expected_prune_delete: true
+      - role: sibling-branch-allowed
+        session_id: 70000000-0000-4000-8000-000000000002
+        clone: branch-boundary
+        git_remote: git@github.com:example/branch-boundary.git
+        project_name: branch-boundary
+        branch: release
+        expected_push: true
+        expected_prune_delete: false
+
+  - name: project admission keeps one exact session denied
+    selection_kind: clone-path
+    selected_clone: session-boundary
+    session_exclusions: [80000000-0000-4000-8000-000000000001]
+    rows:
+      - role: project-session-denied
+        session_id: 80000000-0000-4000-8000-000000000001
+        clone: session-boundary
+        git_remote: git@github.com:example/session-boundary.git
+        project_name: session-boundary
+        branch: main
+        expected_push: false
+        expected_prune_delete: true
+      - role: project-session-allowed
+        session_id: 80000000-0000-4000-8000-000000000002
+        clone: session-boundary
+        git_remote: git@github.com:example/session-boundary.git
+        project_name: session-boundary
         branch: main
         expected_push: true
         expected_prune_delete: false

@@ -132,3 +132,32 @@ cases:
       sessions:
         - {id: 11111111-1111-1111-1111-111111111111, content: emptyneedle}
     expected: {session_ids: [], results_non_null: true}
+
+  - name: exact_branch_exclusion_uses_stored_worktree
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-exact-branch-deny}
+    mutation: {description: rank an exactly denied branch above an allowed sibling branch in the same stored worktree}
+    input:
+      query: branchneedle
+      limit: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {clonePaths: [/workspace/search-deny]}
+            exclusions:
+              branches:
+                - {clonePath: /workspace/search-deny, branches: [main]}
+      sessions:
+        - id: 66666666-6666-4666-8666-666666666661
+          content: "branchneedle branchneedle branchneedle"
+          git_branch: main
+          git_worktree: /workspace/search-deny
+        - id: 66666666-6666-4666-8666-666666666662
+          content: branchneedle
+          git_branch: release
+          git_worktree: /workspace/search-deny
+    expected:
+      session_ids: [66666666-6666-4666-8666-666666666662]
+      results_non_null: true

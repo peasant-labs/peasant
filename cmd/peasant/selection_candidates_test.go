@@ -38,12 +38,23 @@ type selectionCandidateFixtureDocument struct {
 }
 
 type selectionCandidateFixtureCase struct {
-	Name             string                    `yaml:"name"`
-	Harness          ingest.Harness            `yaml:"harness"`
-	Projects         []config.ProjectSelection `yaml:"projects"`
-	ExplicitSessions []string                  `yaml:"explicit_sessions"`
-	Rows             []selectionCandidateRow   `yaml:"rows"`
+	Name             string                     `yaml:"name"`
+	Harness          ingest.Harness             `yaml:"harness"`
+	Projects         []config.ProjectSelection  `yaml:"projects"`
+	ExplicitSessions []string                   `yaml:"explicit_sessions"`
+	Exclusions       config.SelectionExclusions `yaml:"exclusions"`
+	Rows             []selectionCandidateRow    `yaml:"rows"`
 }
+
+var requiredSelectionCandidateExclusionCases = []string{
+	"exact branch exclusion keeps sibling branch selected",
+	"exact session exclusion overrides project admission",
+}
+
+const (
+	expectedSelectionCandidateCases = 11
+	expectedSelectionCandidateRows  = 20
+)
 
 type selectionCandidateRow struct {
 	SessionID                  string                       `yaml:"session_id"`
@@ -73,8 +84,8 @@ func loadSelectionCandidateFixtures(t *testing.T) selectionCandidateFixtureDocum
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("selection candidate fixtures must contain exactly one YAML document: %v", err)
 	}
-	if document.DeclaredCases != len(document.Cases) || document.DeclaredCases < 9 {
-		t.Fatalf("selection candidate case guard failed: declared=%d actual=%d minimum=9", document.DeclaredCases, len(document.Cases))
+	if document.DeclaredCases != expectedSelectionCandidateCases || len(document.Cases) != expectedSelectionCandidateCases {
+		t.Fatalf("selection candidate case guard failed: declared=%d actual=%d expected=%d", document.DeclaredCases, len(document.Cases), expectedSelectionCandidateCases)
 	}
 	rows := 0
 	seenCases := make(map[string]bool, len(document.Cases))
@@ -116,8 +127,13 @@ func loadSelectionCandidateFixtures(t *testing.T) selectionCandidateFixtureDocum
 			candidateMultiplicity(t, fixture.Name, row.ExpectedNameMultiplicity)
 		}
 	}
-	if document.DeclaredRows != rows || document.DeclaredRows < 16 {
-		t.Fatalf("selection candidate row guard failed: declared=%d actual=%d minimum=16", document.DeclaredRows, rows)
+	if document.DeclaredRows != expectedSelectionCandidateRows || rows != expectedSelectionCandidateRows {
+		t.Fatalf("selection candidate row guard failed: declared=%d actual=%d expected=%d", document.DeclaredRows, rows, expectedSelectionCandidateRows)
+	}
+	for _, required := range requiredSelectionCandidateExclusionCases {
+		if !seenCases[required] {
+			t.Fatalf("selection candidate fixture is missing required exact-exclusion case %q", required)
+		}
 	}
 	testutil.RequireClosedSetCoverage(t, "selection candidate", "branch outcome", testutil.AllSelectionOutcomes, outcomes)
 	testutil.RequireClosedSetCoverage(t, "selection candidate", "identity multiplicity", allCandidateMultiplicities, multiplicities)
@@ -201,6 +217,7 @@ func TestSelectionCandidateCohortsDriveCommandBoundaries(t *testing.T) {
 					ProjectName: row.ProjectName,
 					ProjectPath: row.ProjectPath,
 					GitRemote:   row.GitRemote,
+					GitBranch:   row.Branch,
 				}
 			}
 
@@ -209,8 +226,9 @@ func TestSelectionCandidateCohortsDriveCommandBoundaries(t *testing.T) {
 				Mode: config.SelectionModeSelected,
 				Harnesses: map[string]config.SelectionHarnessConfig{
 					fixture.Harness.String(): {
-						Projects: fixture.Projects,
-						Sessions: fixture.ExplicitSessions,
+						Projects:   fixture.Projects,
+						Sessions:   fixture.ExplicitSessions,
+						Exclusions: fixture.Exclusions,
 					},
 				},
 			}
@@ -256,7 +274,8 @@ func TestSelectionCandidateCohortsDriveCommandBoundaries(t *testing.T) {
 				unselectedIDs[row.SessionID.String()] = true
 			}
 			for _, row := range fixture.Rows {
-				if got, want := unselectedIDs[row.SessionID], !row.ExpectedProjectMatch; got != want {
+				wantDecision := row.ExpectedBranchMatch.BranchMatch(t, "selection candidate", fixture.Name)
+				if got, want := unselectedIDs[row.SessionID], wantDecision != ingest.BranchMatchYes; got != want {
 					t.Errorf("session %s prune-unselected membership = %v, want %v", row.SessionID, got, want)
 				}
 			}

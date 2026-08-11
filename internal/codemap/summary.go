@@ -114,6 +114,7 @@ func (s *Service) projectHasVisibleSession(ctx context.Context, projectHash sche
 			Harness:     defaults.Harness(session.harness),
 			GitRemote:   session.gitRemote,
 			ProjectName: session.projectName,
+			ClonePath:   s.resolveSessionClonePath(session.gitWorktree, session.projectName),
 			GitBranch:   session.gitBranch,
 		})
 		if visibilityErr != nil {
@@ -264,6 +265,13 @@ func (s *Service) resolveClonePath(raw string) ingest.ClonePath {
 		return ""
 	}
 	return resolved
+}
+
+func (s *Service) resolveSessionClonePath(gitWorktree, projectName string) ingest.ClonePath {
+	if gitWorktree != "" {
+		return s.resolveClonePath(gitWorktree)
+	}
+	return s.resolveClonePath(projectName)
 }
 
 func projectSummaryCandidate(

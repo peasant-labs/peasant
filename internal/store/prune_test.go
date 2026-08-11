@@ -25,7 +25,7 @@ const (
 )
 
 // seedPruneSession inserts a session with minimal data for prune tests.
-func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash string, provider defaults.Harness, startMs int64, worktrees ...string) {
+func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash string, provider defaults.Harness, startMs int64, gitValues ...string) {
 	t.Helper()
 	ingested := startMs + 120000
 	entry := ingest.StoreEntry{
@@ -51,8 +51,11 @@ func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash strin
 			},
 		},
 	}
-	if len(worktrees) > 0 {
-		entry.Metadata.Git.Worktree = &worktrees[0]
+	if len(gitValues) > 0 {
+		entry.Metadata.Git.Worktree = &gitValues[0]
+	}
+	if len(gitValues) > 1 {
+		entry.Metadata.Git.Branch = &gitValues[1]
 	}
 	if err := s.InsertSessions(context.Background(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("seedPruneSession(%s): %v", sessionID, err)
@@ -172,7 +175,8 @@ func TestStore_QueryPrunableSessions_PrefersSessionWorktree(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	worktree := "/test/project-worktree"
-	seedPruneSession(t, s, pruneSessionA, pruneProjectH, defaults.HarnessClaudeCode, 1700000000000, worktree)
+	branch := "release"
+	seedPruneSession(t, s, pruneSessionA, pruneProjectH, defaults.HarnessClaudeCode, 1700000000000, worktree, branch)
 
 	rows, err := s.QueryPrunableSessions(context.Background(), ingest.PruneFilter{All: true})
 	if err != nil {
@@ -183,6 +187,9 @@ func TestStore_QueryPrunableSessions_PrefersSessionWorktree(t *testing.T) {
 	}
 	if rows[0].ProjectPath != worktree {
 		t.Errorf("ProjectPath = %q, want session worktree %q", rows[0].ProjectPath, worktree)
+	}
+	if rows[0].GitBranch != branch {
+		t.Errorf("GitBranch = %q, want recorded branch %q", rows[0].GitBranch, branch)
 	}
 }
 

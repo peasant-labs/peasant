@@ -8,6 +8,8 @@ rows:
     project_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     project_name: listed-project
     project_display: /home/test/listed-project
+    clone: listed-clone
+    git_branch: main
     host_slug: github.com-example-listed
     start_ms: 1705276800000
     tokens_in: 1000
@@ -20,6 +22,8 @@ rows:
     project_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     project_name: hidden-project
     project_display: /home/test/hidden-project
+    clone: hidden-clone
+    git_branch: main
     host_slug: github.com-example-hidden
     start_ms: 1705276860000
     tokens_in: 2000

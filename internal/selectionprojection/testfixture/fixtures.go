@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	expectedProjectionRows = 12
-	expectedGateRows       = 8
+	expectedProjectionRows = 14
+	expectedGateRows       = 10
 )
 
 //go:embed testdata/effective_projects.yaml

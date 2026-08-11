@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -31,6 +32,9 @@ var requiredPolicyBehaviorNames = []string{
 	"mixed_harness_does_not_cross_select",
 	"selected_branch",
 	"excluded_branch",
+	"exact_branch_exclusion",
+	"branch_exclusion_does_not_cross_clone_boundary",
+	"project_admitted_exact_session_exclusion",
 	"conflicting_branch_rules",
 	// Real-data-shaped regression coverage (SSH/SCP/ssh:// config
 	// remotes vs the normalized bare stored form; a short config name vs a
@@ -63,6 +67,7 @@ type candidateFixture struct {
 	ProjectName string `yaml:"project_name"`
 	GitRemote   string `yaml:"git_remote"`
 	GitBranch   string `yaml:"git_branch"`
+	ClonePath   string `yaml:"clone_path"`
 }
 
 func loadPolicyFixture(data []byte) (policyFixture, error) {
@@ -91,6 +96,9 @@ func loadPolicyFixture(data []byte) (policyFixture, error) {
 		if (tc.Result == "error") != (tc.ErrorContains != "") {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q must set error_contains if and only if result is error", tc.Name)
 		}
+		if tc.Candidate.ClonePath != "" && (!filepath.IsAbs(tc.Candidate.ClonePath) || filepath.Clean(tc.Candidate.ClonePath) != tc.Candidate.ClonePath) {
+			return policyFixture{}, fmt.Errorf("policy fixture case %q has non-exact clone_path %q", tc.Name, tc.Candidate.ClonePath)
+		}
 	}
 	for _, required := range requiredPolicyBehaviorNames {
 		if _, ok := names[required]; !ok {
@@ -116,6 +124,7 @@ func TestPolicyFixture(t *testing.T) {
 				Harness:     defaults.Harness(tc.Candidate.Harness),
 				GitRemote:   tc.Candidate.GitRemote,
 				ProjectName: tc.Candidate.ProjectName,
+				ClonePath:   ingest.ClonePath(tc.Candidate.ClonePath),
 				GitBranch:   tc.Candidate.GitBranch,
 			})
 			if tc.Result == "error" {

@@ -58,6 +58,9 @@ type SessionRow struct {
 
 	// CanonicalRemote is the git remote URL from the projects table (nullable).
 	CanonicalRemote *string
+	// GitWorktree is the session's recorded worktree path. It is empty when the
+	// session predates worktree capture or did not come from Git.
+	GitWorktree string
 }
 
 // DashboardRow holds global aggregate metrics from daily_summary.
@@ -125,7 +128,8 @@ const (
 	// title(16), outcome(17), scope(18), files_touched(19), lines_changed(20),
 	// retry_loops(21), retry_tokens_wasted(22), within_session_reverts(23),
 	// signal_density(24), spec_quality_score(25), exploration_ratio(26),
-	// scope_breadth(27), discovery_turns(28), parent_id(29), canonical_remote(30)
+	// scope_breadth(27), discovery_turns(28), parent_id(29), canonical_remote(30),
+	// git_worktree(31)
 	//
 	// V23+: sessions stores opaque_host_id FK, but we JOIN host_slugs and return
 	// the human-readable h.host_slug at col 3 for backward-compatible SessionRow.HostSlug.
@@ -144,7 +148,8 @@ const (
     m.signal_density, m.spec_quality_score, m.exploration_ratio,
     m.scope_breadth, m.discovery_turns,
     s.parent_id,
-    p.canonical_remote
+    p.canonical_remote,
+    COALESCE(s.git_worktree, '')
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
@@ -153,10 +158,10 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 	sqlSessionByID = sqlAllSessions + ` WHERE s.session_id = ?`
 
 	// sqlSessionDetailByID extends sqlAllSessions with extra columns for the detail view.
-	// Columns 0-30: same as sqlAllSessions (scanned by scanSessionRow).
-	// Column 31: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
-	// Column 32: s.pushed_at (nullable)
-	// Column 33: p.canonical_cwd (project working dir, replaces project_path)
+	// Columns 0-31: same as sqlAllSessions (scanned by scanSessionRow).
+	// Column 32: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
+	// Column 33: s.pushed_at (nullable)
+	// Column 34: p.canonical_cwd (project working dir, replaces project_path)
 	sqlSessionDetailByID = `SELECT
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
@@ -170,6 +175,7 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
     m.scope_breadth, m.discovery_turns,
     s.parent_id,
     p.canonical_remote,
+    COALESCE(s.git_worktree, ''),
     h.git_remote, s.pushed_at, COALESCE(p.canonical_cwd, '')
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
@@ -902,23 +908,23 @@ func TruncateToRunes(s string, maxRunes int) string {
 // ---------------------------------------------------------------------------
 
 // scanSessionDetailRow reads a SessionDetailRow from the current statement.
-// Columns 0-30 are scanned by scanSessionRow; columns 31-33 are the extra detail fields.
+// Columns 0-31 are scanned by scanSessionRow; columns 32-34 are the extra detail fields.
 func scanSessionDetailRow(stmt *sqlite.Stmt) SessionDetailRow {
 	row := SessionDetailRow{
 		SessionRow: scanSessionRow(stmt),
 	}
-	// Column 31: h.git_remote (nullable)
-	if stmt.ColumnType(31) != sqlite.TypeNull {
-		v := stmt.ColumnText(31)
+	// Column 32: h.git_remote (nullable)
+	if stmt.ColumnType(32) != sqlite.TypeNull {
+		v := stmt.ColumnText(32)
 		row.GitRemote = &v
 	}
-	// Column 32: s.pushed_at (nullable)
-	if stmt.ColumnType(32) != sqlite.TypeNull {
-		v := stmt.ColumnInt64(32)
+	// Column 33: s.pushed_at (nullable)
+	if stmt.ColumnType(33) != sqlite.TypeNull {
+		v := stmt.ColumnInt64(33)
 		row.PushedAt = &v
 	}
-	// Column 33: p.canonical_cwd (V23+: was project_path)
-	row.ProjectPath = stmt.ColumnText(33)
+	// Column 34: p.canonical_cwd (V23+: was project_path)
+	row.ProjectPath = stmt.ColumnText(34)
 	return row
 }
 
@@ -1007,6 +1013,9 @@ func scanSessionRow(stmt *sqlite.Stmt) SessionRow {
 		v := stmt.ColumnText(30)
 		row.CanonicalRemote = &v
 	}
+
+	// Column 31: s.git_worktree (COALESCE'd to an empty string)
+	row.GitWorktree = stmt.ColumnText(31)
 
 	return row
 }
