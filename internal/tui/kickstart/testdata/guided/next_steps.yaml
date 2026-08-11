@@ -2,10 +2,13 @@ expectedRowCount: 4
 rows:
   - name: canonical-catalog
     valid: true
-    kinds: [web-start, village-login, village-push]
+    kinds: [config, web-start, village-login, village-push]
     wantPreamble:
-      - these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
+      - these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.
     wantContains:
+      - modify configuration interactively
+      - peasant config
+      - opens the settings editor without importing or publishing
       - open the local dashboard
       - peasant web start
       - starts the dashboard and prints or opens its actual url
@@ -20,14 +23,14 @@ rows:
     valid: false
     kinds: [unknown]
     wantContains: [completion guidance unavailable, 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
-    wantMissing: [peasant web start, peasant village login, peasant village push]
+    wantMissing: [peasant config, peasant web start, peasant village login, peasant village push]
   - name: empty-provider-result
     valid: false
     kinds: []
     wantContains: [completion guidance unavailable, no actions, 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
-    wantMissing: [peasant web start, peasant village login, peasant village push]
+    wantMissing: [peasant config, peasant web start, peasant village login, peasant village push]
   - name: duplicate-kind
     valid: false
     kinds: [web-start, web-start]
     wantContains: [completion guidance unavailable, repeats, 'what:', 'why:', 'where:', 'when:', 'means:', 'fix:']
-    wantMissing: [peasant web start, peasant village login, peasant village push]
+    wantMissing: [peasant config, peasant web start, peasant village login, peasant village push]

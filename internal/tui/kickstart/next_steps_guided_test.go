@@ -16,6 +16,7 @@ type nextStepFixtureKind string
 
 const (
 	fixtureNextStepUnknown      nextStepFixtureKind = "unknown"
+	fixtureNextStepConfig       nextStepFixtureKind = "config"
 	fixtureNextStepWebStart     nextStepFixtureKind = "web-start"
 	fixtureNextStepVillageLogin nextStepFixtureKind = "village-login"
 	fixtureNextStepVillagePush  nextStepFixtureKind = "village-push"
@@ -25,6 +26,8 @@ func (k nextStepFixtureKind) programKind() (kickstart.NextStepKind, bool) {
 	switch k {
 	case fixtureNextStepUnknown:
 		return kickstart.NextStepUnknown, true
+	case fixtureNextStepConfig:
+		return kickstart.NextStepConfig, true
 	case fixtureNextStepWebStart:
 		return kickstart.NextStepWebStart, true
 	case fixtureNextStepVillageLogin:

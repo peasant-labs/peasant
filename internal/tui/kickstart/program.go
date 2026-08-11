@@ -1019,7 +1019,7 @@ func (p Program) viewDone() string {
 			lines = append(lines, styles.Danger.Render(line))
 		}
 	} else {
-		preamble := "these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+		preamble := "these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
 		if p.width > 0 {
 			preamble = ansi.Wrap(preamble, p.width, "")
 		}

@@ -76,17 +76,19 @@ until you explicitly leave it. If import fails, the committed configuration and 
 setting remain in force; retry reruns only local import and does not recommit or reapply either setting.
 
 After a successful import, the completion screen reports that kickstart published nothing and introduces
-the command list with: "these useful next steps let you open the local dashboard, connect to a
-village, or explicitly publish later; kickstart runs none of them."
+the command list with: "these useful next steps let you modify config, open the local dashboard,
+connect to a village, or explicitly publish later; kickstart runs none of them."
 
 ```text
+peasant config
 peasant web start
 peasant village login
 peasant village push
 ```
 
-`peasant web start` reports the real local address when it starts. Kickstart does not invent a
-localhost URL. Village login and push remain separate, explicit actions.
+`peasant config` opens the interactive settings editor without importing or publishing. `peasant web
+start` reports the real local address when it starts, so kickstart does not invent a localhost URL.
+Village login and push remain separate, explicit actions.
 
 Pressing `esc` or `q` opens a leave-without-saving confirmation. Confirming that exit leaves the config
 and Claude settings bytes unchanged and does not run local ingest.

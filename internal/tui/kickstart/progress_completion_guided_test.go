@@ -34,7 +34,7 @@ const (
 	expectedCompletionPreambleLines  = 1
 	expectedPreambleMutationRows     = 4
 
-	acceptedCompletionPreambleLine = "these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+	acceptedCompletionPreambleLine = "these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
 )
 
 type progressFocusProbe string
@@ -303,7 +303,7 @@ func TestProgressCompletionFixturePinsExactCounts(t *testing.T) {
 				t.Fatal("completion fixture accepted a keyword-preserving semantic mutation")
 			}
 			mutatedRender := strings.Join(append(append([]string{"next steps"}, mutation.Lines...),
-				"open the local dashboard", "peasant web start"), "\n")
+				"modify configuration interactively", "peasant config"), "\n")
 			if err := validateRenderedCompletionPreamble(mutatedRender); err == nil {
 				t.Fatal("completion render accepted a keyword-preserving semantic mutation")
 			}
@@ -720,7 +720,7 @@ func assertCompletionLinesFitWidth(t *testing.T, view string, width int) {
 func validateRenderedCompletionPreamble(view string) error {
 	lines := strings.Split(view, "\n")
 	nextSteps := exactRenderedLineIndex(lines, "next steps")
-	firstTitle := exactRenderedLineIndex(lines, "open the local dashboard")
+	firstTitle := exactRenderedLineIndex(lines, "modify configuration interactively")
 	if nextSteps < 0 || firstTitle <= nextSteps {
 		return fmt.Errorf("completion preamble must appear between the next-steps heading and command list")
 	}

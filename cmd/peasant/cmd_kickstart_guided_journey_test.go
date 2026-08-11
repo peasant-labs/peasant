@@ -27,7 +27,7 @@ import (
 const (
 	expectedMountedJourneyRows          = 1
 	expectedMountedPreambleMutationRows = 4
-	mountedAcceptedPreambleLine         = "these useful next steps let you open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
+	mountedAcceptedPreambleLine         = "these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them."
 )
 
 type mountedJourneyFixture struct {
@@ -80,7 +80,7 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 	for _, row := range document.Rows {
 		if strings.TrimSpace(row.Name) == "" || seen[row.Name] || len(row.ConnectCopy) != 2 || len(row.ConsentCopy) == 0 ||
 			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 || len(row.CompletionPreamble) != 1 ||
-			len(row.CompletionCopy) != 9 || len(row.ForbiddenCopy) == 0 || row.TerminalWidth != 80 || row.TerminalHeight != 24 ||
+			len(row.CompletionCopy) != 12 || len(row.ForbiddenCopy) == 0 || row.TerminalWidth != 80 || row.TerminalHeight != 24 ||
 			row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
 			t.Fatalf("mounted journey row is incomplete or duplicated: %#v", row)
 		}
@@ -129,8 +129,8 @@ func TestMountedJourneyFixtureRejectsKeywordPreservingPreambleMutations(t *testi
 				t.Fatal("mounted fixture accepted a keyword-preserving completion preamble mutation")
 			}
 			mutatedRender := strings.Join(append(append([]string{"next steps"}, mutation.Lines...),
-				"open the local dashboard", "peasant web start"), "\n")
-			if err := validateMountedRenderedCompletionPreamble(mutatedRender, "open the local dashboard"); err == nil {
+				"modify configuration interactively", "peasant config"), "\n")
+			if err := validateMountedRenderedCompletionPreamble(mutatedRender, "modify configuration interactively"); err == nil {
 				t.Fatal("mounted render accepted a keyword-preserving completion preamble mutation")
 			}
 		})

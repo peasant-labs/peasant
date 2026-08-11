@@ -46,6 +46,7 @@ type NextStepKind int
 
 const (
 	NextStepUnknown NextStepKind = iota
+	NextStepConfig
 	NextStepWebStart
 	NextStepVillageLogin
 	NextStepVillagePush
@@ -54,7 +55,7 @@ const (
 // IsValid reports whether k identifies one of the completion actions.
 func (k NextStepKind) IsValid() bool {
 	switch k {
-	case NextStepWebStart, NextStepVillageLogin, NextStepVillagePush:
+	case NextStepConfig, NextStepWebStart, NextStepVillageLogin, NextStepVillagePush:
 		return true
 	default:
 		return false
@@ -64,6 +65,8 @@ func (k NextStepKind) IsValid() bool {
 // String returns the stable lower-case identity for k.
 func (k NextStepKind) String() string {
 	switch k {
+	case NextStepConfig:
+		return "config"
 	case NextStepWebStart:
 		return "web-start"
 	case NextStepVillageLogin:
@@ -90,12 +93,13 @@ type nextStepDetails struct {
 // publisher, or other execution authority.
 type NextStepsFunc func(result *ftue.IngestResult) []NextStepKind
 
-// DefaultNextSteps returns the three honest, display-only actions available
+// DefaultNextSteps returns the four honest, display-only actions available
 // after a local kickstart run. In particular, it does not invent a dashboard
 // address: peasant web start is the component that can report the real address
 // after the server has successfully bound and become ready.
 func DefaultNextSteps(_ *ftue.IngestResult) []NextStepKind {
 	return []NextStepKind{
+		NextStepConfig,
 		NextStepWebStart,
 		NextStepVillageLogin,
 		NextStepVillagePush,
@@ -104,6 +108,12 @@ func DefaultNextSteps(_ *ftue.IngestResult) []NextStepKind {
 
 func canonicalNextStep(kind NextStepKind) (nextStepDetails, bool) {
 	switch kind {
+	case NextStepConfig:
+		return nextStepDetails{
+			title:   "modify configuration interactively",
+			command: "peasant config",
+			detail:  "opens the settings editor without importing or publishing",
+		}, true
 	case NextStepWebStart:
 		return nextStepDetails{
 			title:   "open the local dashboard",
