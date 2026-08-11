@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,7 @@ const (
 	requiredGuideRenderCases     = 4
 	requiredGuideExampleLines    = 5
 	requiredGuideValidationCases = 6
+	requiredGuideErrorCases      = 1
 )
 
 type guideFixtureKind string
@@ -70,10 +72,17 @@ type guideValidationCase struct {
 	WantFragment string           `yaml:"wantFragment"`
 }
 
+type guideErrorCase struct {
+	Name        string `yaml:"name"`
+	Error       string `yaml:"error"`
+	WantVisible string `yaml:"wantVisible"`
+}
+
 type guideRenderDocument struct {
 	ExpectedRenderCaseCount     int                       `yaml:"expectedRenderCaseCount"`
 	ExpectedExampleLineCount    int                       `yaml:"expectedExampleLineCount"`
 	ExpectedValidationCaseCount int                       `yaml:"expectedValidationCaseCount"`
+	ExpectedErrorCaseCount      int                       `yaml:"expectedErrorCaseCount"`
 	Heading                     string                    `yaml:"heading"`
 	Intro                       string                    `yaml:"intro"`
 	Hint                        string                    `yaml:"hint"`
@@ -83,6 +92,7 @@ type guideRenderDocument struct {
 	ExampleLines                []guideExampleFixtureLine `yaml:"exampleLines"`
 	RenderCases                 []guideRenderCase         `yaml:"renderCases"`
 	ValidationCases             []guideValidationCase     `yaml:"validationCases"`
+	ErrorCases                  []guideErrorCase          `yaml:"errorCases"`
 }
 
 //go:embed testdata/guide_render.yaml
@@ -113,6 +123,10 @@ func decodeGuideRenderDocument(data []byte) (guideRenderDocument, error) {
 	if document.ExpectedValidationCaseCount != requiredGuideValidationCases || len(document.ValidationCases) != requiredGuideValidationCases {
 		return document, fmt.Errorf("guide validation rows: declared=%d actual=%d required=%d",
 			document.ExpectedValidationCaseCount, len(document.ValidationCases), requiredGuideValidationCases)
+	}
+	if document.ExpectedErrorCaseCount != requiredGuideErrorCases || len(document.ErrorCases) != requiredGuideErrorCases {
+		return document, fmt.Errorf("guide error rows: declared=%d actual=%d required=%d",
+			document.ExpectedErrorCaseCount, len(document.ErrorCases), requiredGuideErrorCases)
 	}
 	if strings.TrimSpace(document.Heading) == "" || strings.TrimSpace(document.Intro) == "" ||
 		strings.TrimSpace(document.Hint) == "" || strings.TrimSpace(document.Description) == "" ||
@@ -146,6 +160,13 @@ func decodeGuideRenderDocument(data []byte) (guideRenderDocument, error) {
 		if _, ok := row.Kind.productionKind(); !ok {
 			return document, fmt.Errorf("guide validation row %q has unsupported kind %q", row.Name, row.Kind)
 		}
+	}
+	errorNames := map[string]bool{}
+	for _, row := range document.ErrorCases {
+		if strings.TrimSpace(row.Name) == "" || errorNames[row.Name] || row.Error == "" || strings.TrimSpace(row.WantVisible) == "" {
+			return document, fmt.Errorf("guide error row is incomplete or duplicated: %#v", row)
+		}
+		errorNames[row.Name] = true
 	}
 	return document, nil
 }
@@ -368,6 +389,38 @@ func TestGuideExampleContractRejectsInvalidTypedLines(t *testing.T) {
 	}
 }
 
+func TestGuideProviderErrorsCannotEmitTerminalControls(t *testing.T) {
+	document := loadGuideRenderDocument(t)
+	for _, row := range document.ErrorCases {
+		row := row
+		t.Run(row.Name, func(t *testing.T) {
+			draft, err := NewDraft("/tmp/guide-error/config.yaml", config.BaseConfig())
+			if err != nil {
+				t.Fatalf("open guide-error draft: %v", err)
+			}
+			registry := guideRenderRegistry(document, productionGuideLines(t, document.ExampleLines))
+			registry.Sections[0].Guide.Example = func(*Draft) ([]GuideExampleLine, error) {
+				return nil, fmt.Errorf("%s", row.Error)
+			}
+			flow := NewFlow(theme.New(theme.ModeDark), registry, draft)
+			flow.SetSize(80, 24)
+			raw := flow.View()
+			plain := ansi.Strip(raw)
+			if !strings.Contains(plain, row.WantVisible) {
+				t.Errorf("sanitized provider error omits %q:\n%s", row.WantVisible, plain)
+			}
+			for _, value := range plain {
+				if value != '\n' && unicode.IsControl(value) {
+					t.Errorf("sanitized provider error retained terminal control U+%04X in %q", value, plain)
+				}
+			}
+			if strings.Contains(raw, "\x1b[31m") {
+				t.Errorf("sanitized provider error retained provider ANSI styling: %q", raw)
+			}
+		})
+	}
+}
+
 func TestGuideRenderFixtureRejectsCoordinatedCaseRemoval(t *testing.T) {
 	mutated := mutateGuideRenderFixture(t, guideRenderFixtureData, []byte("expectedRenderCaseCount: 4"), []byte("expectedRenderCaseCount: 3"))
 	mutated = mutateGuideRenderFixture(t, mutated, []byte("  - {name: light-wide, theme: light, width: 72}\n"), nil)
@@ -381,5 +434,25 @@ func TestGuideRenderFixtureRejectsCoordinatedValidationRemoval(t *testing.T) {
 	mutated = mutateGuideRenderFixture(t, mutated, []byte("  - {name: embedded-tab, kind: after, text: \"left\\tright\", wantFragment: terminal control character}\n"), nil)
 	if _, err := decodeGuideRenderDocument(mutated); err == nil {
 		t.Fatal("guide render fixture accepted a validation row removal coordinated with its declared count")
+	}
+}
+
+func TestGuideRenderFixtureRejectsUnknownFields(t *testing.T) {
+	mutated := append(append([]byte(nil), guideRenderFixtureData...), []byte("\nunknownField: true\n")...)
+	if bytes.Equal(mutated, guideRenderFixtureData) {
+		t.Fatal("guide-render unknown-field mutation did not alter the fixture")
+	}
+	if _, err := decodeGuideRenderDocument(mutated); err == nil {
+		t.Fatal("guide-render fixture accepted an unknown field")
+	}
+}
+
+func TestGuideRenderFixtureRejectsTrailingDocuments(t *testing.T) {
+	mutated := append(append([]byte(nil), guideRenderFixtureData...), []byte("\n---\n{}\n")...)
+	if bytes.Equal(mutated, guideRenderFixtureData) {
+		t.Fatal("guide-render trailing-document mutation did not alter the fixture")
+	}
+	if _, err := decodeGuideRenderDocument(mutated); err == nil {
+		t.Fatal("guide-render fixture accepted a trailing document")
 	}
 }

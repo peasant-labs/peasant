@@ -107,9 +107,9 @@ func (l selectionCommandLayout) valid() bool {
 func (l selectionCommandLayout) dimensions() (int, int) {
 	switch l {
 	case selectionCommandLayoutNarrow:
-		return 80, 20
+		return 80, 24
 	case selectionCommandLayoutWide:
-		return 120, 24
+		return 120, 40
 	default:
 		return 0, 0
 	}
@@ -521,6 +521,59 @@ func TestKickstartCommandMountsNonEmptySelectionInteraction(t *testing.T) {
 	}
 }
 
+func TestConfigCommandMountsGlobalSearchToggleAndSave(t *testing.T) {
+	t.Parallel()
+
+	doc := loadSelectionCommand(t)
+	for _, c := range doc.Cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath, before := seedSelectionCommandConfig(t, dir, c.InitialSelection)
+			terminalCalls := 0
+			deps := defaultConfigCommandDeps()
+			deps.discover = func(context.Context, string, string) configDiscovery {
+				return configDiscovery{source: kickstart.NewScannerTreeSource(c.Listings)}
+			}
+			deps.openRetention = func() (configRetentionFile, error) {
+				return selectionCommandRetentionFile{path: filepath.Join(dir, "claude-settings.json")}, nil
+			}
+			deps.run = func(model tea.Model) (tea.Model, error) {
+				terminalCalls++
+				model = drainSelectionCommandModel(t, model, model.Init())
+				model = updateSelectionCommandModel(t, model, tea.WindowSizeMsg{Width: 120, Height: 40})
+				model = updateSelectionCommandModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+				model = driveSelectionCommandInputs(t, model, c.SelectionInputs)
+				view := selectionCommandView(model)
+				assertMountedSelectionSearch(t, view)
+				assertSelectionCommandRows(t, view, c.RowAssertions)
+				if after, err := os.ReadFile(configPath); err != nil || !bytes.Equal(after, before) {
+					t.Fatalf("buffered config selection changed bytes before save: readErr=%v", err)
+				}
+				return updateSelectionCommandModel(t, model, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}), nil
+			}
+
+			if _, err := executeWithDataDir(t, buildConfigCommand(deps), dir, nil); err != nil {
+				t.Fatalf("run mounted config selection command: %v", err)
+			}
+			if terminalCalls != 1 {
+				t.Fatalf("config selection terminal calls = %d, want 1", terminalCalls)
+			}
+			persistedBytes, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatalf("read saved config selection: %v", err)
+			}
+			persisted, err := config.Parse(persistedBytes)
+			if err != nil {
+				t.Fatalf("parse saved config selection: %v", err)
+			}
+			if !reflect.DeepEqual(persisted.Selection, c.ExpectedSelection) {
+				t.Fatalf("saved config selection = %#v, want %#v", persisted.Selection, c.ExpectedSelection)
+			}
+		})
+	}
+}
+
 type selectionCommandRetentionFile struct{ path string }
 
 func (f selectionCommandRetentionFile) Path() string             { return f.path }
@@ -603,6 +656,8 @@ func assertSelectionCommandRender(t *testing.T, renderCase selectionCommandRende
 }
 
 func TestSelectionCommands_RenderGolden(t *testing.T) {
+	t.Parallel()
+
 	doc := loadSelectionCommand(t)
 	selectionCase := doc.Cases[0]
 	for _, renderCase := range doc.RenderCases {
@@ -730,6 +785,8 @@ func TestSelectionCommandFixturePinsSessionCount(t *testing.T) {
 }
 
 func TestSelectionCommandFixturePinsMutationProbeCount(t *testing.T) {
+	t.Parallel()
+
 	mutated := mutateSelectionCommandCount(t, "expectedMutationProbeCount", expectedSelectionCommandMutationProbeCount)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted a changed mutation-probe count")
@@ -737,6 +794,8 @@ func TestSelectionCommandFixturePinsMutationProbeCount(t *testing.T) {
 }
 
 func TestSelectionCommandFixturePinsRenderCaseCount(t *testing.T) {
+	t.Parallel()
+
 	mutated := mutateSelectionCommandCount(t, "expectedRenderCaseCount", expectedSelectionCommandRenderCaseCount)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted a changed render-case count")
@@ -744,6 +803,8 @@ func TestSelectionCommandFixturePinsRenderCaseCount(t *testing.T) {
 }
 
 func TestSelectionCommandFixturePinsRenderMatrix(t *testing.T) {
+	t.Parallel()
+
 	mutated := bytes.Replace(selectionCommandData, []byte("surface: kickstart"), []byte("surface: config"), 1)
 	if bytes.Equal(mutated, selectionCommandData) {
 		t.Fatal("selection command render-matrix mutation did not alter the fixture")

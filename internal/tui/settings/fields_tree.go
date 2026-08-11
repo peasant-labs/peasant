@@ -480,8 +480,8 @@ func (f *treeField) render(_ *Draft, _ theme.Styles, width int) string {
 // searchBar is the selection field's only explanatory chrome. Its text remains
 // stable across lifecycle states; the current query is always visible, and an
 // editing tree pane gets the existing selected style plus a cursor glyph. Kept
-// queries use the header style, while preview focus removes the editing cursor
-// and mutes the line so there is one unambiguous input owner.
+// queries use the header style. Preview focus removes the editing cursor, while
+// a non-empty active query remains header-styled so its filter stays visible.
 func (f *treeField) searchBar(width int) string {
 	styles := f.th.Styles()
 	state := f.tree.FilterState()
@@ -494,7 +494,7 @@ func (f *treeField) searchBar(width int) string {
 		line += "▏"
 		style = styles.Selected
 	}
-	return fitCell(style, line, width)
+	return kit.FitLineTail(style, line, width)
 }
 
 func (f *treeField) searchHasFocus() bool {
@@ -581,7 +581,7 @@ func (f *treeField) gutterLines(height int) []string {
 	}
 	styles := f.th.Styles()
 	values := f.facetValues()
-	lines := []string{fitCell(styles.Header, f.facetLabel, gw)}
+	lines := []string{kit.FitLine(styles.Header, f.facetLabel, gw)}
 	for i, text := range f.gutterRowTexts(values) {
 		style := styles.Muted
 		marker := "  "
@@ -589,10 +589,10 @@ func (f *treeField) gutterLines(height int) []string {
 			style = styles.Selected
 			marker = "> "
 		}
-		lines = append(lines, fitCell(style, marker+text, gw))
+		lines = append(lines, kit.FitLine(style, marker+text, gw))
 	}
 	for len(lines) < height {
-		lines = append(lines, fitCell(styles.Base, "", gw))
+		lines = append(lines, kit.FitLine(styles.Base, "", gw))
 	}
 	return lines[:height]
 }
@@ -638,12 +638,13 @@ func (f *treeField) Validate(d *Draft) error {
 	if HasConflict(f.selectionRoots()) {
 		return fmt.Errorf(
 			"unresolved transcript selection conflict.\n"+
-				"what: the selection %q still contains an entry whose backing project or worktree no longer exists.\n"+
+				"what: the transcript selection still contains an entry whose backing project or worktree no longer exists.\n"+
 				"why: a saved selection points at something the current scan cannot reconcile, so its true state is ambiguous.\n"+
 				"where: settings.treeField.Validate (field %q).\n"+
+				"when: validating the final review before the atomic config commit.\n"+
 				"means: the settings flow will not persist an ambiguous selection.\n"+
 				"fix: resolve the highlighted conflicting entry (re-check or clear it) and confirm again.",
-			f.label, f.key)
+			f.key)
 	}
 	return f.acc.Get(d.Working()).Validate()
 }
@@ -710,31 +711,6 @@ func sameNodes(a, b []*kit.TreeNode) bool {
 		}
 	}
 	return true
-}
-
-// fitCell truncates then pads a plain string to exactly width cells and styles
-// the whole run, so a column's background is unbroken.
-func fitCell(style lipgloss.Style, s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	clipped := clip(s, width)
-	if pad := width - lipgloss.Width(clipped); pad > 0 {
-		clipped += spaceRun(pad)
-	}
-	return style.Render(clipped)
-}
-
-// spaceRun returns n spaces (n<=0 yields "").
-func spaceRun(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	out := make([]byte, n)
-	for i := range out {
-		out[i] = ' '
-	}
-	return string(out)
 }
 
 // joinColumns lays a fixed-width left column beside a body, line for line. Each

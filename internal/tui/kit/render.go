@@ -80,6 +80,56 @@ func FitLine(style lipgloss.Style, s string, width int) string {
 	return style.Render(padLine(clipped, width))
 }
 
+// FitLineTail truncates then pads one PLAIN-TEXT line to exactly width terminal
+// cells while retaining its latest complete grapheme clusters. When clipping
+// leaves room, a leading ellipsis makes the omitted prefix visible; a one-cell
+// region keeps the final cluster itself, which lets an editing row retain its
+// caret. Like [FitLine], it applies style exactly once after fitting.
+func FitLineTail(style lipgloss.Style, s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	clipped := s
+	stringWidth := ansi.StringWidth(s)
+	if stringWidth > width {
+		prefix := "…"
+		prefixWidth := ansi.StringWidth(prefix)
+		if width <= prefixWidth {
+			prefix = ""
+			prefixWidth = 0
+		}
+		clipped = completeTailCandidate(s, stringWidth, width, prefix)
+		// Reserving the ellipsis can put the requested cut inside a wide
+		// grapheme. Keeping that grapheme whole then drops it, which can leave
+		// the candidate under-filled. In that boundary case, prefer the maximal
+		// complete suffix without an ellipsis when it retains more trailing
+		// content cells.
+		if prefix != "" && ansi.StringWidth(clipped) < width {
+			suffix := completeTailCandidate(s, stringWidth, width, "")
+			trailingWidth := ansi.StringWidth(clipped) - prefixWidth
+			if ansi.StringWidth(suffix) > trailingWidth {
+				clipped = suffix
+			}
+		}
+	}
+	return style.Render(padLine(clipped, width))
+}
+
+// completeTailCandidate returns the latest complete grapheme clusters that fit
+// in width after prefix. TruncateLeft keeps a cluster whole when the requested
+// cut lands inside it; advancing the cut prevents that preservation from
+// overflowing the requested cell budget.
+func completeTailCandidate(s string, stringWidth, width int, prefix string) string {
+	prefixWidth := ansi.StringWidth(prefix)
+	remove := stringWidth - (width - prefixWidth)
+	clipped := ansi.TruncateLeft(s, remove, prefix)
+	for ansi.StringWidth(clipped) > width && remove < stringWidth {
+		remove++
+		clipped = ansi.TruncateLeft(s, remove, prefix)
+	}
+	return clipped
+}
+
 // fitLine preserves the private helper used throughout the component
 // implementations while exposing FitLine to presentation packages that need
 // the same fixed-row contract.
@@ -123,6 +173,25 @@ func fitRenderedLine(style lipgloss.Style, rendered string, width int) string {
 	clipped = strings.ReplaceAll(clipped, "\x1b[m", restore)
 	clipped = strings.ReplaceAll(clipped, "\x1b[0m", restore)
 	return prefix + clipped + padding + suffix
+}
+
+// trimLastGraphemeCluster removes exactly one user-perceived character from s.
+// Search input is plain text, but FirstGraphemeCluster also gives the same
+// width vocabulary used by the canonical fitting helpers above.
+func trimLastGraphemeCluster(s string) string {
+	if s == "" {
+		return ""
+	}
+	lastStart := 0
+	for offset := 0; offset < len(s); {
+		cluster, _ := ansi.FirstGraphemeCluster(s[offset:], ansi.GraphemeWidth)
+		if cluster == "" {
+			return s[:lastStart]
+		}
+		lastStart = offset
+		offset += len(cluster)
+	}
+	return s[:lastStart]
 }
 
 // spaces returns n space characters (n<=0 yields "").

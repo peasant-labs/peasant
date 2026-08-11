@@ -4,10 +4,10 @@
 # in AvailableActions order), a pressed key label (resolved via
 # msgForKeyString in helpers_test.go), and the expected (action, ok) result.
 #
-# The first 18 rows (one per ActionID) are the full-enum-coverage guard: the
-# test asserts the union of every wantAction across wantOK=true rows equals
-# keymap.AllActions() exactly, so an ActionID added to the enum without a
-# passing dispatch row here fails that guard, not just this row count.
+# The successful rows collectively cover the full ActionID enum. The test
+# asserts that their wantAction union equals keymap.AllActions() exactly, so an
+# ActionID added to the enum without a passing dispatch row here fails that
+# guard, not just this row count.
 expectedCaseCount: 42
 cases:
   - name: dispatches-quit

@@ -16,6 +16,7 @@ const (
 	expectedConfigSearchCaseCount  = 4
 	expectedConfigSearchHintCount  = 4
 	expectedConfigSearchModalCount = 2
+	expectedConfigSearchTailCount  = 1
 )
 
 //go:embed testdata/config-screen/search.yaml
@@ -29,13 +30,23 @@ type configSearchCase struct {
 	ForbiddenHint string `yaml:"forbiddenHint"`
 }
 
+type configSearchTailCase struct {
+	Name        string `yaml:"name"`
+	Input       string `yaml:"input"`
+	Width       int    `yaml:"width"`
+	Height      int    `yaml:"height"`
+	WantEditing string `yaml:"wantEditing"`
+}
+
 type configSearchDocument struct {
-	ExpectedCaseCount           int                `yaml:"expectedCaseCount"`
-	ExpectedRequiredHintCount   int                `yaml:"expectedRequiredHintCount"`
-	ExpectedForbiddenModalCount int                `yaml:"expectedForbiddenModalCount"`
-	RequiredHints               []string           `yaml:"requiredHints"`
-	ForbiddenModals             []string           `yaml:"forbiddenModals"`
-	Cases                       []configSearchCase `yaml:"cases"`
+	ExpectedCaseCount           int                    `yaml:"expectedCaseCount"`
+	ExpectedRequiredHintCount   int                    `yaml:"expectedRequiredHintCount"`
+	ExpectedForbiddenModalCount int                    `yaml:"expectedForbiddenModalCount"`
+	ExpectedTailCaseCount       int                    `yaml:"expectedTailCaseCount"`
+	RequiredHints               []string               `yaml:"requiredHints"`
+	ForbiddenModals             []string               `yaml:"forbiddenModals"`
+	Cases                       []configSearchCase     `yaml:"cases"`
+	TailCases                   []configSearchTailCase `yaml:"tailCases"`
 }
 
 func decodeConfigSearchFixture(data []byte) (configSearchDocument, error) {
@@ -59,6 +70,10 @@ func decodeConfigSearchFixture(data []byte) (configSearchDocument, error) {
 			document.ExpectedCaseCount, len(document.Cases), document.ExpectedRequiredHintCount, len(document.RequiredHints),
 			document.ExpectedForbiddenModalCount, len(document.ForbiddenModals))
 	}
+	if document.ExpectedTailCaseCount != expectedConfigSearchTailCount || len(document.TailCases) != expectedConfigSearchTailCount {
+		return document, fmt.Errorf("config search tail cases are not pinned: declared=%d actual=%d required=%d",
+			document.ExpectedTailCaseCount, len(document.TailCases), expectedConfigSearchTailCount)
+	}
 	seenNames := map[string]bool{}
 	seenInputs := map[string]bool{}
 	for _, row := range document.Cases {
@@ -75,6 +90,13 @@ func decodeConfigSearchFixture(data []byte) (configSearchDocument, error) {
 				return document, fmt.Errorf("config search fixture contains an empty required assertion")
 			}
 		}
+	}
+	tailNames := map[string]bool{}
+	for _, row := range document.TailCases {
+		if strings.TrimSpace(row.Name) == "" || tailNames[row.Name] || row.Input == "" || row.Width <= 0 || row.Height <= 0 || row.WantEditing == "" {
+			return document, fmt.Errorf("config search tail fixture contains an invalid or duplicate row: %#v", row)
+		}
+		tailNames[row.Name] = true
 	}
 	return document, nil
 }
@@ -156,6 +178,38 @@ func TestConfigCommandMountedScreenSearchParity(t *testing.T) {
 			}
 			if got := mustReadConfigScreenFile(t, world.claudePath); !bytes.Equal(got, world.initialClaude) {
 				t.Fatal("mounted config search changed persisted Claude settings bytes")
+			}
+		})
+	}
+}
+
+func TestConfigCommandMountedSearchKeepsLatestGraphemesAndCaret(t *testing.T) {
+	t.Parallel()
+
+	document, err := decodeConfigSearchFixture(configSearchFixtureData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range document.TailCases {
+		row := row
+		t.Run(row.Name, func(t *testing.T) {
+			world := newConfigScreenWorld(t, 90)
+			deps := world.dependencies(t)
+			deps.run = func(model tea.Model) (tea.Model, error) {
+				model = configScreenDrain(model, model.Init())
+				model = configScreenUpdate(model, tea.WindowSizeMsg{Width: row.Width, Height: row.Height})
+				model = configScreenUpdate(model, tea.KeyPressMsg{Code: tea.KeyEnter})
+				model = configScreenUpdate(model, tea.KeyPressMsg{Code: '/', Text: "/"})
+				input := []rune(row.Input)[0]
+				model = configScreenUpdate(model, tea.KeyPressMsg{Code: input, Text: row.Input})
+				view := plainConfigScreen(model)
+				if !strings.Contains(view, row.WantEditing) {
+					t.Errorf("mounted config search does not retain its latest graphemes and caret %q:\n%s", row.WantEditing, view)
+				}
+				return model, nil
+			}
+			if _, err := executeConfigScreenCommand(t, buildConfigCommand(deps), world, "config"); err != nil {
+				t.Fatalf("execute mounted config tail search: %v", err)
 			}
 		})
 	}

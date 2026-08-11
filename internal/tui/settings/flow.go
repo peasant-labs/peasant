@@ -755,11 +755,20 @@ func (f Flow) guideErrorLines(styles theme.Styles, width int, err error) []strin
 	lines := make([]string, 0, len(values))
 	for _, value := range values {
 		if value != "" {
-			value = strings.ReplaceAll(ansi.Strip(value), "\r", "")
+			value = sanitizeTerminalLine(value)
 			lines = append(lines, kit.FitLine(style, value, width))
 		}
 	}
 	return lines
+}
+
+func sanitizeTerminalLine(value string) string {
+	return strings.Map(func(char rune) rune {
+		if unicode.IsControl(char) {
+			return -1
+		}
+		return char
+	}, ansi.Strip(value))
 }
 
 // interactive reports whether a field takes input (everything but Info).

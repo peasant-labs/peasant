@@ -62,11 +62,11 @@ cases:
         wantContains: ["[ ]"]
         wantMissing: [tracked]
 renderCases:
-  - {name: config-dark-narrow, surface: config, theme: dark, layout: narrow, width: 80, height: 20}
-  - {name: config-dark-wide, surface: config, theme: dark, layout: wide, width: 120, height: 24}
-  - {name: config-light-narrow, surface: config, theme: light, layout: narrow, width: 80, height: 20}
-  - {name: config-light-wide, surface: config, theme: light, layout: wide, width: 120, height: 24}
-  - {name: kickstart-dark-narrow, surface: kickstart, theme: dark, layout: narrow, width: 80, height: 20}
-  - {name: kickstart-dark-wide, surface: kickstart, theme: dark, layout: wide, width: 120, height: 24}
-  - {name: kickstart-light-narrow, surface: kickstart, theme: light, layout: narrow, width: 80, height: 20}
-  - {name: kickstart-light-wide, surface: kickstart, theme: light, layout: wide, width: 120, height: 24}
+  - {name: config-dark-narrow, surface: config, theme: dark, layout: narrow, width: 80, height: 24}
+  - {name: config-dark-wide, surface: config, theme: dark, layout: wide, width: 120, height: 40}
+  - {name: config-light-narrow, surface: config, theme: light, layout: narrow, width: 80, height: 24}
+  - {name: config-light-wide, surface: config, theme: light, layout: wide, width: 120, height: 40}
+  - {name: kickstart-dark-narrow, surface: kickstart, theme: dark, layout: narrow, width: 80, height: 24}
+  - {name: kickstart-dark-wide, surface: kickstart, theme: dark, layout: wide, width: 120, height: 40}
+  - {name: kickstart-light-narrow, surface: kickstart, theme: light, layout: narrow, width: 80, height: 24}
+  - {name: kickstart-light-wide, surface: kickstart, theme: light, layout: wide, width: 120, height: 40}

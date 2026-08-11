@@ -173,7 +173,7 @@ func (f Frame) View() string {
 
 	if f.footer != "" {
 		b.WriteString(border.Render("│"))
-		b.WriteString(fitLine(styles.Muted.Background(canvas), f.footer, inner))
+		b.WriteString(fitRenderedLine(styles.Muted.Background(canvas), f.footer, inner))
 		b.WriteString(border.Render("│"))
 		b.WriteString("\n")
 	}

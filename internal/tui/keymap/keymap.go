@@ -96,10 +96,12 @@ const (
 	ActionPrevField
 	// ActionToggle toggles/selects the focused item.
 	ActionToggle
-	// ActionSelectAll selects every selectable item in the current scope.
+	// ActionSelectAll toggles every selectable item represented by the current
+	// visible projection.
 	ActionSelectAll
-	// ActionSelectUnderProject selects every session under the project the
-	// cursor sits in. It is an operation, not navigation.
+	// ActionSelectUnderProject selects every selectable node represented under
+	// the current projected project containing the cursor. It is an operation,
+	// not navigation.
 	ActionSelectUnderProject
 
 	// ActionExpand expands a collapsed tree node. Deliberately shares
@@ -112,22 +114,25 @@ const (
 	// ActionCollapse collapses an expanded tree node. See ActionExpand's
 	// doc for why it shares physical keys with ActionLeft.
 	ActionCollapse
-	// ActionExpandLevel expands every branch of the project the cursor sits
-	// in - the whole branch level at once, not just the hovered node.
+	// ActionExpandLevel expands every controllable branch in the current
+	// projected project, not just the hovered node.
 	ActionExpandLevel
-	// ActionCollapseLevel collapses every branch of the project the cursor
-	// sits in.
+	// ActionCollapseLevel collapses every controllable branch in the current
+	// projected project.
 	ActionCollapseLevel
-	// ActionExpandAll expands every node in the whole forest.
+	// ActionExpandAll expands every controllable node represented by the current
+	// visible projection.
 	ActionExpandAll
-	// ActionCollapseAll collapses every node in the whole forest.
+	// ActionCollapseAll collapses every controllable node represented by the
+	// current visible projection.
 	ActionCollapseAll
 
 	// ActionSave persists the current state (e.g. a settings Flow page).
 	ActionSave
 	// ActionHelp opens/closes the full keybinding help overlay.
 	ActionHelp
-	// ActionFilter enters filter/search-text mode.
+	// ActionFilter cycles the harness facet. Hierarchy-wide text search belongs
+	// to ActionSearch.
 	ActionFilter
 	// ActionDeleteFilter removes the previous character while filter text is
 	// being edited.

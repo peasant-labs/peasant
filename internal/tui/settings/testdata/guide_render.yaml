@@ -1,6 +1,7 @@
 expectedRenderCaseCount: 4
 expectedExampleLineCount: 5
 expectedValidationCaseCount: 6
+expectedErrorCaseCount: 1
 heading: privacy preview
 intro: inspect the real transformation before choosing a policy.
 hint: color is never the only before and after distinction.
@@ -25,3 +26,7 @@ validationCases:
   - {name: embedded-newline, kind: label, text: "first\nsecond", wantFragment: embedded line break}
   - {name: pre-rendered-ansi, kind: before, text: "\u001b[31mred\u001b[0m", wantFragment: pre-rendered terminal styling}
   - {name: embedded-tab, kind: after, text: "left\tright", wantFragment: terminal control character}
+errorCases:
+  - name: provider-error-terminal-controls
+    error: "unsafe \u001b[31mcolored\u001b[0m\tbell\u0007back\bspace\u009b"
+    wantVisible: unsafe coloredbellbackspace

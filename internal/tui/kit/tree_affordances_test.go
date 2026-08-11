@@ -19,7 +19,10 @@ import (
 //go:embed testdata/tree_affordances.yaml
 var treeAffordanceData []byte
 
-const expectedTreeAffordanceCaseCount = 19
+const (
+	expectedTreeAffordanceCaseCount = 24
+	expectedRejectedTreeKeyCount    = 4
+)
 
 type treeAffordanceStart string
 
@@ -33,22 +36,47 @@ func (s treeAffordanceStart) valid() bool {
 	return s == treeAffordanceLoaded || s == treeAffordancePreLoad || s == treeAffordanceEmpty
 }
 
+type treeExpansionActionState string
+
+const (
+	treeExpansionActionUnspecified treeExpansionActionState = ""
+	treeExpansionActionNone        treeExpansionActionState = "none"
+	treeExpansionActionExpand      treeExpansionActionState = "expand"
+	treeExpansionActionCollapse    treeExpansionActionState = "collapse"
+)
+
+func (s treeExpansionActionState) valid() bool {
+	switch s {
+	case treeExpansionActionUnspecified, treeExpansionActionNone, treeExpansionActionExpand, treeExpansionActionCollapse:
+		return true
+	default:
+		return false
+	}
+}
+
 type treeAffordanceCase struct {
-	Name                 string              `yaml:"name"`
-	Start                treeAffordanceStart `yaml:"start"`
-	Keys                 []string            `yaml:"keys"`
-	ExpectMode           string              `yaml:"expectMode"`
-	ExpectQuery          string              `yaml:"expectQuery"`
-	ExpectCursorID       string              `yaml:"expectCursorID"`
-	ExpectVisibleIDs     []string            `yaml:"expectVisibleIDs"`
-	ExpectOriginalIDs    []string            `yaml:"expectOriginalIDs"`
-	ExpectProjectedIDs   []string            `yaml:"expectProjectedIDs"`
-	ExpectOverflowTop    bool                `yaml:"expectOverflowTop"`
-	ExpectOverflowBottom bool                `yaml:"expectOverflowBottom"`
-	WantAvailable        []string            `yaml:"wantAvailable"`
-	WantUnavailable      []string            `yaml:"wantUnavailable"`
-	WantViewContains     []string            `yaml:"wantViewContains"`
-	WantViewMissing      []string            `yaml:"wantViewMissing"`
+	Name                    string                   `yaml:"name"`
+	Start                   treeAffordanceStart      `yaml:"start"`
+	Keys                    []string                 `yaml:"keys"`
+	ExpectMode              string                   `yaml:"expectMode"`
+	ExpectQuery             string                   `yaml:"expectQuery"`
+	ExpectCursorID          string                   `yaml:"expectCursorID"`
+	ExpectVisibleIDs        []string                 `yaml:"expectVisibleIDs"`
+	ExpectOriginalIDs       []string                 `yaml:"expectOriginalIDs"`
+	ExpectProjectedIDs      []string                 `yaml:"expectProjectedIDs"`
+	ExpectOverflowTop       bool                     `yaml:"expectOverflowTop"`
+	ExpectOverflowBottom    bool                     `yaml:"expectOverflowBottom"`
+	ExpectCursorExpandGlyph string                   `yaml:"expectCursorExpandGlyph"`
+	ExpectExpansionAction   treeExpansionActionState `yaml:"expectExpansionAction"`
+	WantAvailable           []string                 `yaml:"wantAvailable"`
+	WantUnavailable         []string                 `yaml:"wantUnavailable"`
+	WantViewContains        []string                 `yaml:"wantViewContains"`
+	WantViewMissing         []string                 `yaml:"wantViewMissing"`
+}
+
+type rejectedTreeKey struct {
+	Name  string `yaml:"name"`
+	Token string `yaml:"token"`
 }
 
 type boundedTreeSearchFixture struct {
@@ -59,12 +87,14 @@ type boundedTreeSearchFixture struct {
 }
 
 type treeAffordanceDocument struct {
-	ExpectedCaseCount int                      `yaml:"expectedCaseCount"`
-	Width             int                      `yaml:"width"`
-	Height            int                      `yaml:"height"`
-	Forest            []fixtureTreeNode        `yaml:"forest"`
-	Cases             []treeAffordanceCase     `yaml:"cases"`
-	BoundedSearch     boundedTreeSearchFixture `yaml:"boundedSearch"`
+	ExpectedCaseCount        int                      `yaml:"expectedCaseCount"`
+	ExpectedRejectedKeyCount int                      `yaml:"expectedRejectedKeyCount"`
+	Width                    int                      `yaml:"width"`
+	Height                   int                      `yaml:"height"`
+	Forest                   []fixtureTreeNode        `yaml:"forest"`
+	RejectedKeys             []rejectedTreeKey        `yaml:"rejectedKeys"`
+	Cases                    []treeAffordanceCase     `yaml:"cases"`
+	BoundedSearch            boundedTreeSearchFixture `yaml:"boundedSearch"`
 }
 
 func treeFixtureValuesPresent(values ...[]string) bool {
@@ -96,6 +126,10 @@ func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
 		return doc, fmt.Errorf("tree_affordances.yaml cases: declared=%d actual=%d required=%d",
 			doc.ExpectedCaseCount, len(doc.Cases), expectedTreeAffordanceCaseCount)
 	}
+	if doc.ExpectedRejectedKeyCount != expectedRejectedTreeKeyCount || len(doc.RejectedKeys) != expectedRejectedTreeKeyCount {
+		return doc, fmt.Errorf("tree_affordances.yaml rejected keys: declared=%d actual=%d required=%d",
+			doc.ExpectedRejectedKeyCount, len(doc.RejectedKeys), expectedRejectedTreeKeyCount)
+	}
 	if doc.Width <= 0 || doc.Height <= 0 || len(doc.Forest) == 0 {
 		return doc, fmt.Errorf("tree_affordances.yaml must declare a positive region and non-empty forest")
 	}
@@ -103,6 +137,16 @@ func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
 		len(doc.BoundedSearch.ExpectedVisibleIDs) != 3 || doc.BoundedSearch.MaximumDurationMillis <= 0 ||
 		!treeFixtureValuesPresent(doc.BoundedSearch.ExpectedVisibleIDs) {
 		return doc, fmt.Errorf("tree_affordances.yaml must pin the complete 4000-session bounded-search path")
+	}
+	seenRejectedKeys := map[string]bool{}
+	seenRejectedTokens := map[string]bool{}
+	for _, rejected := range doc.RejectedKeys {
+		if strings.TrimSpace(rejected.Name) == "" || strings.TrimSpace(rejected.Token) == "" ||
+			seenRejectedKeys[rejected.Name] || seenRejectedTokens[rejected.Token] {
+			return doc, fmt.Errorf("tree_affordances.yaml rejected key %q is empty or duplicated", rejected.Name)
+		}
+		seenRejectedKeys[rejected.Name] = true
+		seenRejectedTokens[rejected.Token] = true
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
@@ -114,6 +158,15 @@ func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
 		seen[c.Name] = true
 		if c.ExpectMode == "" {
 			return doc, fmt.Errorf("tree_affordances.yaml case %q must name its search lifecycle mode", c.Name)
+		}
+		if c.ExpectCursorExpandGlyph != "" && c.ExpectCursorExpandGlyph != "▾" && c.ExpectCursorExpandGlyph != "▸" {
+			return doc, fmt.Errorf("tree_affordances.yaml case %q has invalid cursor expand glyph %q", c.Name, c.ExpectCursorExpandGlyph)
+		}
+		if !c.ExpectExpansionAction.valid() {
+			return doc, fmt.Errorf("tree_affordances.yaml case %q has invalid expansion action state %q", c.Name, c.ExpectExpansionAction)
+		}
+		if (c.ExpectCursorExpandGlyph != "" || c.ExpectExpansionAction != treeExpansionActionUnspecified) && c.ExpectCursorID == "" {
+			return doc, fmt.Errorf("tree_affordances.yaml case %q asserts cursor expansion state without a cursor ID", c.Name)
 		}
 		if len(c.ExpectVisibleIDs)+len(c.WantAvailable)+len(c.WantUnavailable)+len(c.WantViewContains)+len(c.WantViewMissing) == 0 && c.ExpectCursorID == "" {
 			return doc, fmt.Errorf("tree_affordances.yaml case %q has no observable assertion", c.Name)
@@ -189,6 +242,16 @@ func TestTree_GlobalSearchAndOverflowAffordances(t *testing.T) {
 			}
 
 			available := actionSetByName(t, tr.AvailableActions())
+			if c.ExpectExpansionAction != treeExpansionActionUnspecified {
+				wantExpand := c.ExpectExpansionAction == treeExpansionActionExpand
+				wantCollapse := c.ExpectExpansionAction == treeExpansionActionCollapse
+				if got := available[keymap.ActionExpand.String()]; got != wantExpand {
+					t.Errorf("expand action available = %t, want %t for state %q", got, wantExpand, c.ExpectExpansionAction)
+				}
+				if got := available[keymap.ActionCollapse.String()]; got != wantCollapse {
+					t.Errorf("collapse action available = %t, want %t for state %q", got, wantCollapse, c.ExpectExpansionAction)
+				}
+			}
 			for _, want := range c.WantAvailable {
 				if !available[want] {
 					t.Errorf("action %q is not available; got %v", want, available)
@@ -201,6 +264,11 @@ func TestTree_GlobalSearchAndOverflowAffordances(t *testing.T) {
 			}
 
 			view := stripANSI(tr.View())
+			if c.ExpectCursorExpandGlyph != "" {
+				if got := renderedCursorExpandGlyph(t, tr, view); got != c.ExpectCursorExpandGlyph {
+					t.Errorf("cursor expand glyph = %q, want %q:\n%s", got, c.ExpectCursorExpandGlyph, view)
+				}
+			}
 			for _, want := range c.WantViewContains {
 				if !strings.Contains(view, want) {
 					t.Errorf("view must contain %q:\n%s", want, view)
@@ -213,6 +281,25 @@ func TestTree_GlobalSearchAndOverflowAffordances(t *testing.T) {
 			}
 		})
 	}
+}
+
+func renderedCursorExpandGlyph(t *testing.T, tr kit.Tree, view string) string {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	viewportRow := tr.Cursor() - tr.ViewportOffset()
+	if viewportRow < 0 || viewportRow >= len(lines) {
+		t.Fatalf("cursor viewport row %d is outside %d rendered rows", viewportRow, len(lines))
+	}
+	boxAt := strings.Index(lines[viewportRow], "[")
+	if boxAt < 0 {
+		t.Fatalf("cursor row has no checkbox: %q", lines[viewportRow])
+	}
+	prefix := strings.TrimRight(lines[viewportRow][:boxAt], " ")
+	runes := []rune(prefix)
+	if len(runes) == 0 {
+		t.Fatalf("cursor row has no expansion glyph before its checkbox: %q", lines[viewportRow])
+	}
+	return string(runes[len(runes)-1])
 }
 
 func treeNodesByID(t *testing.T, roots []*kit.TreeNode) map[string]*kit.TreeNode {
@@ -303,6 +390,18 @@ func TestTreeAffordanceFixtureRejectsTrailingDocuments(t *testing.T) {
 	mutated := append(append([]byte(nil), treeAffordanceData...), []byte("\n---\n{}\n")...)
 	if _, err := decodeTreeAffordances(mutated); err == nil {
 		t.Fatal("tree affordance fixture accepted a trailing YAML document")
+	}
+}
+
+func TestTreeAffordanceFixtureRejectsUnknownAndMultiGraphemeKeys(t *testing.T) {
+	doc := loadTreeAffordances(t)
+	for _, rejected := range doc.RejectedKeys {
+		rejected := rejected
+		t.Run(rejected.Name, func(t *testing.T) {
+			if _, ok := parseFixtureKeyPress(rejected.Token); ok {
+				t.Errorf("fixture key parser accepted rejected token %q", rejected.Token)
+			}
+		})
 	}
 }
 

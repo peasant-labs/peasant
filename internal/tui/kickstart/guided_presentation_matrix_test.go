@@ -282,3 +282,23 @@ func TestGuidedPresentationFixtureRejectsMissingCanonicalSection(t *testing.T) {
 		t.Fatal("guided presentation fixture accepted removal of a canonical guided section")
 	}
 }
+
+func TestGuidedPresentationFixtureRejectsUnknownFields(t *testing.T) {
+	mutated := append(append([]byte(nil), guidedPresentationFixtureData...), []byte("\nunknownField: true\n")...)
+	if bytes.Equal(mutated, guidedPresentationFixtureData) {
+		t.Fatal("guided-presentation unknown-field mutation did not alter the fixture")
+	}
+	if _, err := decodeGuidedPresentationDocument(mutated); err == nil {
+		t.Fatal("guided presentation fixture accepted an unknown field")
+	}
+}
+
+func TestGuidedPresentationFixtureRejectsTrailingDocuments(t *testing.T) {
+	mutated := append(append([]byte(nil), guidedPresentationFixtureData...), []byte("\n---\n{}\n")...)
+	if bytes.Equal(mutated, guidedPresentationFixtureData) {
+		t.Fatal("guided-presentation trailing-document mutation did not alter the fixture")
+	}
+	if _, err := decodeGuidedPresentationDocument(mutated); err == nil {
+		t.Fatal("guided presentation fixture accepted a trailing document")
+	}
+}

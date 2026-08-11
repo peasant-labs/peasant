@@ -18,6 +18,11 @@ import (
 //go:embed testdata/footer_render.yaml
 var footerRenderFixtureData []byte
 
+const (
+	requiredFooterRenderCaseCount  = 4
+	requiredFooterGlobalSearchName = "tree-global-search"
+)
+
 type footerRenderDocument struct {
 	ExpectedCaseCount int                `yaml:"expectedCaseCount"`
 	Cases             []footerRenderCase `yaml:"cases"`
@@ -43,10 +48,10 @@ func loadFooterRenderFixture(data []byte) (footerRenderDocument, error) {
 		}
 		return doc, fmt.Errorf("testdata/footer_render.yaml must hold exactly one YAML document: %w", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
+	if doc.ExpectedCaseCount != requiredFooterRenderCaseCount || len(doc.Cases) != requiredFooterRenderCaseCount {
 		return doc, fmt.Errorf(
-			"testdata/footer_render.yaml: expectedCaseCount=%d but found %d cases (and must be non-zero)",
-			doc.ExpectedCaseCount, len(doc.Cases))
+			"testdata/footer_render.yaml: expectedCaseCount=%d, found=%d, required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), requiredFooterRenderCaseCount)
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
@@ -55,7 +60,20 @@ func loadFooterRenderFixture(data []byte) (footerRenderDocument, error) {
 		}
 		seen[c.Name] = true
 	}
+	if !seen[requiredFooterGlobalSearchName] {
+		return doc, fmt.Errorf("testdata/footer_render.yaml: required case %q is missing", requiredFooterGlobalSearchName)
+	}
 	return doc, nil
+}
+
+func TestFooterRenderFixtureRejectsCoordinatedGlobalSearchRemoval(t *testing.T) {
+	mutated := mutateFixtureFragment(t, "testdata/footer_render.yaml", footerRenderFixtureData,
+		[]byte("expectedCaseCount: 4"), []byte("expectedCaseCount: 3"))
+	mutated = mutateFixtureFragment(t, "testdata/footer_render.yaml", mutated,
+		[]byte("  - name: tree-global-search\n    available: [search, clear-filter]\n    wantPlainText: \"/: search  esc: clear filter\"\n"), nil)
+	if _, err := loadFooterRenderFixture(mutated); err == nil {
+		t.Fatal("footer fixture accepted removal of the global-search regression row coordinated with its declared count")
+	}
 }
 
 // TestFooterView_RendersBothThemes drives keymap.FooterView in BOTH

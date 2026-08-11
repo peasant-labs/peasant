@@ -607,8 +607,9 @@ func (t Tree) AvailableActions() []keymap.ActionID {
 		actions = append(actions, keymap.ActionNextProject)
 	}
 	if node, ok := t.CurrentNode(); ok {
-		if !node.isLeaf() {
-			if t.nodeExpanded(node) {
+		expansion := t.visibleExpansion(node)
+		if expansion.controllable {
+			if expansion.expanded {
 				actions = append(actions, keymap.ActionCollapse)
 			} else {
 				actions = append(actions, keymap.ActionExpand)
@@ -645,6 +646,26 @@ func (t Tree) nodeExpanded(node *TreeNode) bool {
 	}
 	expanded, recorded := t.expanded[t.canonicalNode(node)]
 	return !recorded || expanded
+}
+
+type treeVisibleExpansion struct {
+	expanded     bool
+	controllable bool
+}
+
+// visibleExpansion is the single interpretation of expansion in the rendered
+// projection. Shallow ancestors retained as search context are force-open so
+// their matching descendants stay visible, but they are not controllable: an
+// expand/collapse command would only mutate hidden canonical state without
+// changing the projected view.
+func (t Tree) visibleExpansion(node *TreeNode) treeVisibleExpansion {
+	if node == nil || node.isLeaf() {
+		return treeVisibleExpansion{}
+	}
+	if t.projected && node.projectionOrigin != nil {
+		return treeVisibleExpansion{expanded: true}
+	}
+	return treeVisibleExpansion{expanded: t.nodeExpanded(node), controllable: true}
 }
 
 func (t Tree) projectDirections() (previous, next bool) {
@@ -696,7 +717,8 @@ func (t Tree) projectHasUnselected(node *TreeNode) bool {
 func (t Tree) levelCanExpand(node *TreeNode) bool {
 	root := t.rootAncestor(node)
 	for _, child := range root.Children {
-		if !child.isLeaf() && !t.nodeExpanded(child) {
+		expansion := t.visibleExpansion(child)
+		if expansion.controllable && !expansion.expanded {
 			return true
 		}
 	}
@@ -706,7 +728,8 @@ func (t Tree) levelCanExpand(node *TreeNode) bool {
 func (t Tree) levelCanCollapse(node *TreeNode) bool {
 	root := t.rootAncestor(node)
 	for _, child := range root.Children {
-		if !child.isLeaf() && t.nodeExpanded(child) {
+		expansion := t.visibleExpansion(child)
+		if expansion.controllable && expansion.expanded {
 			return true
 		}
 	}
@@ -717,7 +740,8 @@ func (t Tree) anyInteriorCanExpand() bool {
 	canExpand := false
 	for _, root := range t.renderRoots() {
 		walk(root, func(node *TreeNode) {
-			if !node.isLeaf() && !t.nodeExpanded(node) {
+			expansion := t.visibleExpansion(node)
+			if expansion.controllable && !expansion.expanded {
 				canExpand = true
 			}
 		})
@@ -729,7 +753,8 @@ func (t Tree) anyInteriorCanCollapse() bool {
 	canCollapse := false
 	for _, root := range t.renderRoots() {
 		walk(root, func(node *TreeNode) {
-			if !node.isLeaf() && t.nodeExpanded(node) {
+			expansion := t.visibleExpansion(node)
+			if expansion.controllable && expansion.expanded {
 				canCollapse = true
 			}
 		})
@@ -862,9 +887,8 @@ func (t Tree) handleFilterKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 	if action, ok := keymap.Match(t.keymap, msg, t.filter); ok {
 		switch action {
 		case keymap.ActionDeleteFilter:
-			runes := []rune(t.filter.Query)
-			if len(runes) > 0 {
-				t.filter.Query = string(runes[:len(runes)-1])
+			if t.filter.Query != "" {
+				t.filter.Query = trimLastGraphemeCluster(t.filter.Query)
 				t.applyTextProjection(true)
 			}
 		case keymap.ActionKeepFilter:
@@ -939,8 +963,9 @@ func (t *Tree) toggle(node *TreeNode) {
 	t.recompute()
 }
 
-// toggleAll selects the whole forest, or clears it when everything selectable
-// is already Checked (a root-level select-all / clear-all toggle).
+// toggleAll selects every selectable node represented by the current visible
+// projection, or clears that projection when everything selectable in it is
+// already Checked.
 func (t *Tree) toggleAll() {
 	target := Checked
 	if t.allChecked() {
@@ -952,9 +977,9 @@ func (t *Tree) toggleAll() {
 	t.recompute()
 }
 
-// allChecked reports whether every non-Conflict node in the forest is Checked.
-// A forest containing a Conflict is never "all checked", so select-all keeps
-// selecting rather than flipping to clear.
+// allChecked reports whether every non-Conflict node represented by the current
+// visible projection is Checked. A projection containing a Conflict is never
+// "all checked", so select-all keeps selecting rather than flipping to clear.
 func (t Tree) allChecked() bool {
 	all := true
 	roots := t.renderRoots()
@@ -968,12 +993,13 @@ func (t Tree) allChecked() bool {
 	return all && len(roots) > 0
 }
 
-// setAllExpanded expands (or collapses) every interior node in the whole
-// forest at once, then re-clamps the scroll window so the cursor stays visible.
+// setAllExpanded expands (or collapses) every controllable interior node
+// represented by the current visible projection, then re-clamps the scroll
+// window so the cursor stays visible.
 func (t *Tree) setAllExpanded(expand bool) {
 	for _, r := range t.renderRoots() {
 		walk(r, func(n *TreeNode) {
-			if !n.isLeaf() {
+			if t.visibleExpansion(n).controllable {
 				t.expanded[t.canonicalNode(n)] = expand
 			}
 		})
@@ -981,10 +1007,10 @@ func (t *Tree) setAllExpanded(expand bool) {
 	t.clampWindow()
 }
 
-// setLevelExpanded expands (or collapses) every branch of the project the
-// cursor sits in - the interior children of the cursor node's top-level
-// (project) ancestor. Whether the cursor is on the project itself or on one of
-// its branches, the whole branch level moves together.
+// setLevelExpanded expands (or collapses) every controllable branch in the
+// current projected project containing the cursor. Whether the cursor is on
+// the project itself or one of its branches, its controllable branch level
+// moves together.
 func (t *Tree) setLevelExpanded(expand bool) {
 	node, ok := t.CurrentNode()
 	if !ok {
@@ -992,16 +1018,16 @@ func (t *Tree) setLevelExpanded(expand bool) {
 	}
 	root := t.rootAncestor(node)
 	for _, c := range root.Children {
-		if !c.isLeaf() {
+		if t.visibleExpansion(c).controllable {
 			t.expanded[t.canonicalNode(c)] = expand
 		}
 	}
 	t.clampWindow()
 }
 
-// selectUnderProject checks every selectable session under the project the
-// cursor sits in (the cursor node's top-level ancestor), then rolls interior
-// state back up. It always selects; it is not a clear toggle.
+// selectUnderProject checks every selectable node represented under the current
+// projected project containing the cursor, then rolls interior state back up.
+// It always selects; it is not a clear toggle.
 func (t *Tree) selectUnderProject() {
 	node, ok := t.CurrentNode()
 	if !ok {
@@ -1272,6 +1298,9 @@ type treeRow struct {
 // visibleRows flattens the forest into the ordered rows currently visible,
 // descending into a node's children only when it is expanded. A node is
 // expanded by default (absent from the expanded map); collapse records false.
+// Shallow ancestors retained only to explain a text-search match open
+// transiently even when their canonical node is collapsed, without changing
+// that canonical expansion entry.
 func (t Tree) visibleRows() []treeRow {
 	var rows []treeRow
 	var visit func(n *TreeNode, depth int)
@@ -1280,8 +1309,7 @@ func (t Tree) visibleRows() []treeRow {
 		if n.isLeaf() {
 			return
 		}
-		key := t.canonicalNode(n)
-		if collapsed, ok := t.expanded[key]; ok && !collapsed {
+		if !t.visibleExpansion(n).expanded {
 			return
 		}
 		for _, c := range n.Children {
@@ -1425,7 +1453,7 @@ func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool, edge stri
 	label := flattenLine(node.Label)
 	cur := treeRowLead(styles, active, edge)
 	indent := spaces(row.depth * 2)
-	expand := expandGlyph(t.canonicalNode(node), t.expanded)
+	expand := expandGlyph(node, t.visibleExpansion(node))
 	box := stateBox(styles, node.State)
 	annotation := rowAnnotation(node)
 
@@ -1553,14 +1581,14 @@ func treeRowLeadPlain(active bool, edge string) string {
 // expandGlyph returns the plain expand/collapse indicator for a node: a
 // down-pointing triangle when expanded, a right-pointing one when collapsed,
 // and a space for a leaf. Each is one cell wide.
-func expandGlyph(node *TreeNode, expanded map[*TreeNode]bool) string {
+func expandGlyph(node *TreeNode, expansion treeVisibleExpansion) string {
 	if node.isLeaf() {
 		return " "
 	}
-	if collapsed, ok := expanded[node]; ok && !collapsed {
-		return treeCollapsedGlyph
+	if expansion.expanded {
+		return treeExpandedGlyph
 	}
-	return treeExpandedGlyph
+	return treeCollapsedGlyph
 }
 
 // stateBox returns the tri-state checkbox for a node, styled distinctly per

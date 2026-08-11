@@ -2,7 +2,8 @@
 # and viewport markers for kit.Tree. Every case drives the real component from
 # a freshly loaded project -> branch -> session forest. The exact count and
 # strict loader make behavior changes explicit fixture edits.
-expectedCaseCount: 19
+expectedCaseCount: 24
+expectedRejectedKeyCount: 4
 width: 52
 height: 4
 forest:
@@ -32,6 +33,11 @@ forest:
         label: main
         children:
           - {id: beta-deploy, label: deployment notes}
+rejectedKeys:
+  - {name: misspelled-enter, token: enterr}
+  - {name: misspelled-modified-key, token: ctrl+shfit+h}
+  - {name: multiple-ascii-graphemes, token: ab}
+  - {name: multiple-unicode-graphemes, token: "é👩‍💻"}
 cases:
   - name: pre-load-advertises-no-row-actions
     start: pre-load
@@ -124,6 +130,33 @@ cases:
     expectOriginalIDs: [beta-audit]
     expectProjectedIDs: [project-beta, beta-develop]
 
+  - name: descendant-search-transiently-opens-collapsed-context
+    keys: [J, left, "/", a, u, d, i, t, enter]
+    expectMode: kept
+    expectQuery: audit
+    expectCursorID: project-beta
+    expectCursorExpandGlyph: "▾"
+    expectExpansionAction: none
+    expectVisibleIDs: [project-beta, beta-develop, beta-audit]
+    expectOriginalIDs: [beta-audit]
+    expectProjectedIDs: [project-beta, beta-develop]
+    wantAvailable: [search, clear-filter, toggle]
+    wantUnavailable: [expand, collapse, expand-level, collapse-level, expand-all, collapse-all]
+
+  - name: clearing-search-restores-canonical-collapsed-context
+    keys: [J, left, "/", a, u, d, i, t, enter, esc]
+    expectMode: inactive
+    expectQuery: ""
+    expectCursorID: project-beta
+    expectCursorExpandGlyph: "▸"
+    expectExpansionAction: expand
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
+       project-beta]
+    expectOverflowTop: true
+    wantAvailable: [expand, search]
+    wantUnavailable: [collapse, clear-filter]
+
   - name: mixed-depth-matches-retain-full-project-and-matching-branch
     keys: ["/", a, l, p, h, a, enter]
     expectMode: kept
@@ -185,6 +218,27 @@ cases:
     expectQuery: sh
     wantAvailable: [delete-filter, keep-filter, clear-filter]
     wantUnavailable: [up, down, toggle, search]
+
+  - name: delete-removes-one-combining-grapheme
+    keys: ["/", "é", backspace]
+    expectMode: editing
+    expectQuery: ""
+    expectCursorID: project-alpha
+    expectOverflowBottom: true
+
+  - name: delete-removes-one-zwj-emoji-grapheme
+    keys: ["/", "👩‍💻", backspace]
+    expectMode: editing
+    expectQuery: ""
+    expectCursorID: project-alpha
+    expectOverflowBottom: true
+
+  - name: delete-removes-one-flag-grapheme
+    keys: ["/", "🇺🇸", backspace]
+    expectMode: editing
+    expectQuery: ""
+    expectCursorID: project-alpha
+    expectOverflowBottom: true
 
   - name: no-match-message-is-hierarchy-neutral
     keys: ["/", z, z, enter]

@@ -1,4 +1,5 @@
 expectedCaseCount: 6
+expectedTailCount: 4
 expectedThemeCount: 2
 themes: [dark, light]
 cases:
@@ -26,3 +27,20 @@ cases:
     text: ignored
     width: 0
     fitted: ''
+tailCases:
+  - name: keeps-latest-ascii-and-caret
+    text: 'search: latest query▏'
+    width: 12
+    fitted: '…test query▏'
+  - name: keeps-complete-combining-and-emoji-graphemes
+    text: 'search: old-prefix-é👩‍💻🇺🇸▏'
+    width: 16
+    fitted: '…d-prefix-é👩‍💻🇺🇸▏'
+  - name: one-cell-region-keeps-caret
+    text: 'search: query▏'
+    width: 1
+    fitted: '▏'
+  - name: keeps-wide-suffix-when-ellipsis-underfills
+    text: 'search: x界▏'
+    width: 3
+    fitted: '界▏'

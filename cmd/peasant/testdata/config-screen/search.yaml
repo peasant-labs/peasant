@@ -1,6 +1,7 @@
 expectedCaseCount: 4
 expectedRequiredHintCount: 4
 expectedForbiddenModalCount: 2
+expectedTailCaseCount: 1
 requiredHints:
   - 'backspace: delete'
   - 'enter: keep filter'
@@ -30,3 +31,9 @@ cases:
     wantEditing: 'search: f▏'
     wantKept: 'search: f'
     forbiddenHint: 'f: filter'
+tailCases:
+  - name: config-search-keeps-latest-graphemes-and-caret
+    input: 'old-prefix-keep-é👩‍💻🇺🇸'
+    width: 40
+    height: 24
+    wantEditing: '…d-prefix-keep-é👩‍💻🇺🇸▏'
