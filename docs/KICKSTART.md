@@ -25,9 +25,11 @@ Discovery runs before the interactive screen. The guided flow then presents:
 3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
    projects should be imported automatically. This section is hidden when all sessions are selected.
 4. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
-   explicit publication. Local imports remain original unless you explicitly run `peasant redact`.
-   If kickstart cannot validate an example, it withholds that unverified output and displays an
-   actionable error; the settings flow remains available.
+   explicit publication. Each canonical category leads a tokenized diff: `- before:` marks removed
+   input and `+ after:` marks replacement output, so color is never the only distinction. Local
+   imports remain original unless you explicitly run `peasant redact`. If kickstart cannot validate
+   an example, it withholds that unverified output and displays an actionable error; the settings flow
+   remains available.
 5. **Content license:** choose the default license for a later explicit share. No license is the
    default, and saving any default does not publish anything.
 6. **Sharing visibility:** when connected to a Village, choose the default visibility for later
@@ -39,9 +41,10 @@ Discovery runs before the interactive screen. The guided flow then presents:
 8. **Review and save:** review every visible buffered value and the promised local effects, then
    confirm one config commit. The consent summary states that kickstart publishes nothing.
 
-Each visible section begins with a short guide band before its normal setting fields. Conditional
-sections and their guidance disappear together. The fields, validation, and persisted values are the
-same canonical definitions used by the dense config editor.
+Where a section includes narrative guidance, it shows its setting heading first, then its short guide
+band and field description, then the control. Background-bearing guide and diff rows fill the complete
+available line in both themes. Conditional sections and their guidance disappear together. The fields,
+validation, and persisted values are the same canonical definitions used by the dense config editor.
 
 On the transcript-selection step, the left pane is the project tree and the right pane previews the
 highlighted session. An imported session is read through the same local-store path used by the

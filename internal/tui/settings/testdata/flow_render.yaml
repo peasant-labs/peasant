@@ -4,7 +4,7 @@
 # safely when constrained) in both palettes. The declarations are checked
 # against independent Go constants, so coordinated edits cannot silently drop
 # a state, theme, size, or one side of an 80x24 viewport theme pair.
-expectedCaseCount: 20
+expectedCaseCount: 28
 expectedViewportStateCount: 3
 expectedViewportThemeCount: 2
 expectedViewportCaseCount: 6
@@ -31,3 +31,11 @@ cases:
   - {name: viewport-step-bottom-light-80x24, state: viewport-step-bottom, theme: light, width: 80, height: 24}
   - {name: viewport-receipt-error-bottom-dark-80x24, state: viewport-receipt-error-bottom, theme: dark, width: 80, height: 24}
   - {name: viewport-receipt-error-bottom-light-80x24, state: viewport-receipt-error-bottom, theme: light, width: 80, height: 24}
+  - {name: evidence-receipt-dark-80x24, state: evidence-receipt, theme: dark, width: 80, height: 24}
+  - {name: evidence-receipt-light-80x24, state: evidence-receipt, theme: light, width: 80, height: 24}
+  - {name: evidence-receipt-dark-120x40, state: evidence-receipt, theme: dark, width: 120, height: 40}
+  - {name: evidence-receipt-light-120x40, state: evidence-receipt, theme: light, width: 120, height: 40}
+  - {name: evidence-receipt-error-dark-80x24, state: evidence-receipt-error, theme: dark, width: 80, height: 24}
+  - {name: evidence-receipt-error-light-80x24, state: evidence-receipt-error, theme: light, width: 80, height: 24}
+  - {name: evidence-receipt-error-dark-120x40, state: evidence-receipt-error, theme: dark, width: 120, height: 40}
+  - {name: evidence-receipt-error-light-120x40, state: evidence-receipt-error, theme: light, width: 120, height: 40}

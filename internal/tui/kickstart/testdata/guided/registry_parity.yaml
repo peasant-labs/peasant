@@ -16,6 +16,7 @@ sections:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     hasGuide: true
+    fieldTextBeforeGuide: true
     guideIntro: decide how future branches enter your saved local selection.
     conditional: true
   - key: privacy
@@ -24,6 +25,7 @@ sections:
     fieldKind: radio
     fieldText: redaction level
     hasGuide: true
+    fieldTextBeforeGuide: true
     guideIntro: preview standard redaction before a later explicit publication.
     hasExample: true
     conditional: false
@@ -33,6 +35,7 @@ sections:
     fieldKind: radio
     fieldText: default license attached to pushed transcripts
     hasGuide: true
+    fieldTextBeforeGuide: true
     guideIntro: choose the default license for a later explicit publish.
     conditional: false
   - key: destination
@@ -41,6 +44,7 @@ sections:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     hasGuide: true
+    fieldTextBeforeGuide: true
     guideIntro: choose who may see transcripts after a later explicit publish.
     conditional: true
   - key: retention
@@ -49,6 +53,7 @@ sections:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     hasGuide: true
+    fieldTextBeforeGuide: true
     guideIntro: choose how long claude code keeps its source transcript files.
     conditional: true
 forbiddenRegistryOptions:

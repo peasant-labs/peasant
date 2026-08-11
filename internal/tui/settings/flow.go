@@ -3,9 +3,11 @@ package settings
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -478,8 +480,12 @@ func (f Flow) renderBody(width, height int) string {
 		return joinLines([]string{tabs, "", f.renderReceipt(styles, width)})
 	}
 	lines := []string{tabs, ""}
-	if guide := f.guideLines(styles, width); len(guide) > 0 {
+	guide := f.guideLines(styles, width)
+	guidePending := len(guide) > 0
+	visibleFields := f.steps[f.cur].visibleFields(f.draft)
+	if len(visibleFields) == 0 && guidePending {
 		lines = append(lines, guide...)
+		guidePending = false
 	}
 	// The tab strip and its blank separator already consume rows; a scrolling
 	// field (the tree) must be sized to the height that REMAINS, minus the
@@ -487,43 +493,37 @@ func (f Flow) renderBody(width, height int) string {
 	// full height renders more rows than fit and the frame clips its bottom -
 	// so the cursor is invisible when it reaches the last row.
 	used := len(lines)
-	for _, fld := range f.steps[f.cur].Fields {
-		if !fld.When(f.draft) {
-			continue
+	for _, fld := range visibleFields {
+		var chrome []string
+		if lbl := fld.Label(); lbl != "" && fld.Kind() != KindInfo {
+			headerStyle := styles.Header.Background(f.th.Color(f.th.Palette.Canvas))
+			chrome = append(chrome, kit.FitLine(headerStyle, lbl, width))
 		}
-		// A toggle draws its own label alongside its [on]/[off] state, so drawing
-		// the label a second time as a section header would double it; the header
-		// is drawn only for fields whose control does not render the label itself.
-		var header, desc string
-		if lbl := fld.Label(); lbl != "" && fld.Kind() != KindInfo && fld.Kind() != KindToggle {
-			header = styles.Header.Render(clip(lbl, width))
+		if guidePending {
+			chrome = append(chrome, guide...)
+			guidePending = false
 		}
 		if d := fld.Description(); d != "" && fld.Kind() != KindInfo {
-			desc = styles.Muted.Render(clip(d, width))
+			chrome = append(chrome, styles.Muted.Render(clip(d, width)))
 		}
-		chrome := 0
-		if header != "" {
-			chrome++
-		}
-		if desc != "" {
-			chrome++
-		}
-		avail := height - used - chrome
+		avail := height - used - len(chrome)
 		if avail < 1 {
 			avail = 1
 		}
 		fld.setSize(width, avail)
-		if header != "" {
-			lines = append(lines, header)
-		}
-		if desc != "" {
-			lines = append(lines, desc)
-		}
-		rendered := fld.render(f.draft, styles, width)
+		lines = append(lines, chrome...)
+		rendered := f.renderFlowControl(fld, styles, width)
 		lines = append(lines, rendered)
-		used += chrome + strings.Count(rendered, "\n") + 1
+		used += len(chrome) + strings.Count(rendered, "\n") + 1
 	}
 	return joinLines(lines)
+}
+
+func (f Flow) renderFlowControl(fld Field, styles theme.Styles, width int) string {
+	if toggle, ok := fld.(*toggleField); ok {
+		return toggle.renderFlowControl(f.draft, width)
+	}
+	return fld.render(f.draft, styles, width)
 }
 
 type flowViewportState struct {
@@ -625,10 +625,12 @@ func (f Flow) viewportActions(state *flowViewportState) []keymap.ActionID {
 	return actions
 }
 
-// guideLines renders the current section's optional onboarding metadata before
-// its fields. Dense presentations intentionally do not call this helper. Empty
-// guide values consume no space, and a derived example receives the same theme
-// and Draft the fields use without gaining any control over field behavior.
+// guideLines renders the current section's optional onboarding metadata. The
+// caller places it once before the first field's description/control and after
+// its heading when it has one. Dense presentations intentionally do not call
+// this helper. Empty guide values consume no space, and a derived example
+// receives the same Draft the fields use without gaining control over field
+// behavior or terminal styling.
 func (f Flow) guideLines(styles theme.Styles, width int) []string {
 	if f.OnReceipt() || f.cur < 0 || f.cur >= len(f.steps) {
 		return nil
@@ -638,28 +640,123 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 		return nil
 	}
 	var lines []string
-	appendLine := func(value string, prefix string, style lipgloss.Style) {
+	appendLine := func(value string, prefix string, style lipgloss.Style, full bool) {
 		value = strings.Join(strings.Fields(value), " ")
 		if value == "" {
 			return
 		}
-		lines = append(lines, style.Render(clip(prefix+value, width)))
+		value = prefix + value
+		if full {
+			lines = append(lines, kit.FitLine(style, value, width))
+			return
+		}
+		lines = append(lines, style.Render(clip(value, width)))
 	}
-	appendLine(guide.Intro, "", styles.Surface)
+	appendLine(guide.Intro, "", styles.Surface, true)
 	for _, hint := range guide.Hints {
-		appendLine(hint, "• ", styles.Muted)
+		appendLine(hint, "• ", styles.Muted, false)
 	}
 	if guide.Example != nil {
-		example, err := guide.Example(f.th, f.draft)
-		style := styles.Surface
+		example, err := guide.Example(f.draft)
 		if err != nil {
-			example = "example unavailable; unverified output withheld\n" + err.Error()
-			style = styles.Danger
+			lines = append(lines, f.guideErrorLines(styles, width, err)...)
+		} else if rendered, renderErr := f.renderGuideExampleLines(styles, width, example); renderErr != nil {
+			lines = append(lines, f.guideErrorLines(styles, width, renderErr)...)
+		} else {
+			lines = append(lines, rendered...)
 		}
-		for _, line := range splitLines(strings.TrimSpace(example)) {
-			if line != "" {
-				lines = append(lines, style.Render(clip(line, width)))
-			}
+	}
+	return lines
+}
+
+func (f Flow) renderGuideExampleLines(styles theme.Styles, width int, example []GuideExampleLine) ([]string, error) {
+	surface := f.th.Color(f.th.Palette.Surface)
+	var lines []string
+	for index, line := range example {
+		if err := validateGuideExampleLine(index, line); err != nil {
+			return nil, err
+		}
+		switch line.Kind {
+		case GuideExampleLineText:
+			lines = append(lines, kit.FitLine(styles.Surface, line.Text, width))
+		case GuideExampleLineLabel:
+			lines = append(lines, kit.FitLine(styles.Header.Background(surface), line.Text, width))
+		case GuideExampleLineBefore:
+			lines = append(lines, kit.FitLine(styles.DiffDel.Background(surface), "- before: "+line.Text, width))
+		case GuideExampleLineAfter:
+			lines = append(lines, kit.FitLine(styles.DiffAdd.Background(surface), "+ after: "+line.Text, width))
+		case GuideExampleLineSpacer:
+			lines = append(lines, kit.FitLine(styles.Surface, "", width))
+		}
+	}
+	return lines, nil
+}
+
+func validateGuideExampleLine(index int, line GuideExampleLine) error {
+	if !line.Kind.IsValid() {
+		return guideExampleContractError(
+			fmt.Sprintf("example line %d has unknown semantic kind %d", index, line.Kind),
+			"the provider returned a line the Flow cannot style or prefix safely",
+			"return Text, Label, Before, After, or Spacer from the guide example provider")
+	}
+	if line.Kind == GuideExampleLineSpacer {
+		if line.Text != "" {
+			return guideExampleContractError(
+				fmt.Sprintf("example spacer line %d carries text", index),
+				"a spacer cannot both separate groups and present content",
+				"move the text into a separately typed example line")
+		}
+		return nil
+	}
+	if strings.TrimSpace(line.Text) == "" {
+		return guideExampleContractError(
+			fmt.Sprintf("example line %d has no visible text", index),
+			"a semantic content line cannot demonstrate an empty value",
+			"return non-empty plain text or an explicit Spacer line")
+	}
+	if strings.ContainsAny(line.Text, "\r\n") {
+		return guideExampleContractError(
+			fmt.Sprintf("example line %d contains an embedded line break", index),
+			"one typed line must map to exactly one terminal row",
+			"split multiline content into separately typed lines")
+	}
+	if ansi.Strip(line.Text) != line.Text {
+		return guideExampleContractError(
+			fmt.Sprintf("example line %d contains pre-rendered terminal styling", index),
+			"guide providers return semantic plain text and Flow applies the canonical theme exactly once",
+			"remove ANSI escapes and select the matching GuideExampleLineKind")
+	}
+	for _, value := range line.Text {
+		if unicode.IsControl(value) {
+			return guideExampleContractError(
+				fmt.Sprintf("example line %d contains terminal control character U+%04X", index, value),
+				"control bytes can change terminal state instead of presenting literal example text",
+				"remove control bytes and return one printable plain-text terminal line")
+		}
+	}
+	return nil
+}
+
+func guideExampleContractError(what, why, fix string) error {
+	return fmt.Errorf(
+		"guide example unavailable.\n"+
+			"what: %s.\n"+
+			"why: %s.\n"+
+			"where: settings Flow guide-example boundary.\n"+
+			"when: before rendering a derived example under its field heading.\n"+
+			"means: unverified example output is withheld while the canonical field remains available.\n"+
+			"fix: %s.",
+		what, why, fix)
+}
+
+func (f Flow) guideErrorLines(styles theme.Styles, width int, err error) []string {
+	style := styles.Danger.Background(f.th.Color(f.th.Palette.Surface))
+	values := append([]string{"example unavailable; unverified output withheld"}, splitLines(err.Error())...)
+	lines := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			value = strings.ReplaceAll(ansi.Strip(value), "\r", "")
+			lines = append(lines, kit.FitLine(style, value, width))
 		}
 	}
 	return lines

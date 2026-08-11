@@ -79,6 +79,8 @@ type guidedFramingRow struct {
 	FieldKind             string               `yaml:"fieldKind"`
 	FieldText             string               `yaml:"fieldText"`
 	HasGuide              bool                 `yaml:"hasGuide"`
+	HeadingText           string               `yaml:"headingText"`
+	ControlText           string               `yaml:"controlText"`
 	ExampleText           string               `yaml:"exampleText"`
 	Guide                 guideFixture         `yaml:"guide"`
 	WantContains          []string             `yaml:"wantContains"`
@@ -174,6 +176,10 @@ func loadGuidedFramingDoc(t *testing.T) guidedFramingDoc {
 			if row.Surface == guidedSurfaceRegistrySection &&
 				row.SelectionMode != config.SelectionModeAll && row.SelectionMode != config.SelectionModeSelected {
 				t.Fatalf("guided framing row %q has unknown selection mode %q", row.Name, row.SelectionMode)
+			}
+			if row.Surface == guidedSurfaceRegistrySection && row.SectionKey != kickstart.SectionSelection &&
+				(strings.TrimSpace(row.HeadingText) == "" || strings.TrimSpace(row.ControlText) == "") {
+				t.Fatalf("guided framing row %q does not pin its heading/control order", row.Name)
 			}
 		}
 	}
@@ -285,12 +291,25 @@ func allVisibleFlowViews(t *testing.T, flow settings.Flow, sectionCount int) str
 	return strings.Join(views, "\n")
 }
 
-func assertFramingBeforeField(t *testing.T, row guidedFramingRow, view string) {
+func assertFramingAroundField(t *testing.T, row guidedFramingRow, view string) {
 	t.Helper()
 	plain := stripRender(view)
-	fieldAt := strings.Index(plain, row.FieldText)
-	if fieldAt < 0 {
+	controlAt := strings.Index(plain, row.FieldText)
+	if row.ControlText != "" {
+		controlAt = strings.Index(plain, row.ControlText)
+	}
+	if controlAt < 0 {
 		t.Fatalf("section %q does not render unchanged field text %q:\n%s", row.SectionKey, row.FieldText, plain)
+	}
+	headingAt := -1
+	if row.HeadingText != "" {
+		headingAt = strings.Index(plain, row.HeadingText)
+		if headingAt < 0 {
+			t.Fatalf("section %q does not render heading %q:\n%s", row.SectionKey, row.HeadingText, plain)
+		}
+		if headingAt >= controlAt {
+			t.Errorf("section %q heading %q does not precede control %q", row.SectionKey, row.HeadingText, row.ControlText)
+		}
 	}
 	wantBefore := []string{}
 	if row.HasGuide {
@@ -306,8 +325,14 @@ func assertFramingBeforeField(t *testing.T, row guidedFramingRow, view string) {
 			t.Errorf("section %q does not render guide text %q:\n%s", row.SectionKey, want, plain)
 			continue
 		}
-		if at >= fieldAt {
-			t.Errorf("section %q renders guide text %q after its field, want guide before unchanged fields", row.SectionKey, want)
+		if headingAt >= 0 && at <= headingAt {
+			t.Errorf("section %q renders guide text %q before its heading", row.SectionKey, want)
+		}
+		if at >= controlAt {
+			t.Errorf("section %q renders guide text %q after its control", row.SectionKey, want)
+		}
+		if count := strings.Count(plain, want); count != 1 {
+			t.Errorf("section %q renders guide text %q %d times, want exactly once", row.SectionKey, want, count)
 		}
 	}
 	for _, want := range row.WantContains {
@@ -372,7 +397,7 @@ func TestGuidedFramingFixture(t *testing.T) {
 				flow.SetSize(120, 40)
 				if row.WantVisible {
 					flow = advanceFlowToSection(t, flow, row.SectionKey, len(reg.Sections))
-					assertFramingBeforeField(t, row, flow.View())
+					assertFramingAroundField(t, row, flow.View())
 					return
 				}
 				visibleViews := allVisibleFlowViews(t, flow, len(reg.Sections))
@@ -387,12 +412,12 @@ func TestGuidedFramingFixture(t *testing.T) {
 					Guide: &settings.Guide{
 						Intro: row.Guide.Intro,
 						Hints: row.Guide.Hints,
-						Example: func(gotTheme theme.Theme, gotDraft *settings.Draft) (string, error) {
+						Example: func(gotDraft *settings.Draft) ([]settings.GuideExampleLine, error) {
 							called = true
-							if gotTheme.Mode != th.Mode || gotDraft != draft {
-								t.Errorf("guide example received theme/draft %v/%p, want %v/%p", gotTheme.Mode, gotDraft, th.Mode, draft)
+							if gotDraft != draft {
+								t.Errorf("guide example received draft %p, want %p", gotDraft, draft)
 							}
-							return row.ExampleText, nil
+							return []settings.GuideExampleLine{{Kind: settings.GuideExampleLineText, Text: row.ExampleText}}, nil
 						},
 					},
 					Fields: []settings.Field{settings.Info(row.FieldKey, func(*settings.Draft) string {
@@ -401,7 +426,7 @@ func TestGuidedFramingFixture(t *testing.T) {
 				}}}
 				flow := settings.NewFlow(th, reg, draft)
 				flow.SetSize(120, 40)
-				assertFramingBeforeField(t, row, flow.View())
+				assertFramingAroundField(t, row, flow.View())
 				if !called {
 					t.Fatal("guided Flow did not invoke the section's optional Example")
 				}

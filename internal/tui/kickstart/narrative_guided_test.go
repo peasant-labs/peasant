@@ -282,15 +282,23 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 		t.Fatal("canonical privacy section has no live redactor example provider")
 	}
 
-	view, err := section.Guide.Example(theme.New(theme.ModeDark), draft)
+	lines, err := section.Guide.Example(draft)
 	if err != nil {
 		t.Fatalf("render real privacy guide example: %v", err)
 	}
+	if got, want := len(lines), len(document.PrivacySamples)*3; got != want {
+		t.Fatalf("typed privacy example lines=%d, want %d (label/before/after for every fixture sample)", got, want)
+	}
+	var viewLines []string
+	for _, line := range lines {
+		viewLines = append(viewLines, line.Text)
+	}
+	view := strings.Join(viewLines, "\n")
 	redactor, err := redact.NewRedactor(redact.Standard, nil, redact.XDGPaths{})
 	if err != nil {
 		t.Fatalf("construct independent Standard redactor oracle: %v", err)
 	}
-	for _, row := range document.PrivacySamples {
+	for sampleIndex, row := range document.PrivacySamples {
 		matches := redactor.Detect(row.Before)
 		claimed := false
 		for _, match := range matches {
@@ -306,10 +314,21 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 		if after == row.Before {
 			t.Fatalf("real Standard redactor left synthetic %s sample unchanged", row.Category)
 		}
-		for _, want := range []string{row.CategoryLabel.String(), "before: " + row.Before, "after: " + after} {
+		for _, want := range []string{row.CategoryLabel.String(), row.Before, after} {
 			if !strings.Contains(view, want) {
 				t.Errorf("privacy example does not contain runtime-derived %q:\n%s", want, view)
 			}
+		}
+		base := sampleIndex * 3
+		labelLine, beforeLine, afterLine := lines[base], lines[base+1], lines[base+2]
+		if labelLine.Kind != settings.GuideExampleLineLabel || labelLine.Text != row.CategoryLabel.String() {
+			t.Errorf("privacy sample %q label line=%#v, want canonical typed label %q", row.Name, labelLine, row.CategoryLabel)
+		}
+		if beforeLine.Kind != settings.GuideExampleLineBefore || beforeLine.Text != row.Before {
+			t.Errorf("privacy sample %q before line=%#v, want typed unredacted input", row.Name, beforeLine)
+		}
+		if afterLine.Kind != settings.GuideExampleLineAfter || afterLine.Text != after {
+			t.Errorf("privacy sample %q after line=%#v, want typed production redaction %q", row.Name, afterLine, after)
 		}
 		for _, line := range strings.Split(view, "\n") {
 			if line == string(row.Category) {

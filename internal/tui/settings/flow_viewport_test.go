@@ -220,8 +220,12 @@ func flowViewportStepRegistry(document flowViewportFixtureDocument) Registry {
 		Guide: &Guide{
 			Intro: "inspect the complete derived example before choosing a level.",
 			Hints: []string{"the current choice remains buffered", "paging moves prose, not the choice cursor"},
-			Example: func(theme.Theme, *Draft) (string, error) {
-				return strings.Join(document.ExampleLines, "\n"), nil
+			Example: func(*Draft) ([]GuideExampleLine, error) {
+				lines := make([]GuideExampleLine, 0, len(document.ExampleLines))
+				for _, text := range document.ExampleLines {
+					lines = append(lines, GuideExampleLine{Kind: GuideExampleLineText, Text: text})
+				}
+				return lines, nil
 			},
 		},
 		Fields: []Field{WithDescription(

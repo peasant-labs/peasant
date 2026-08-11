@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/tui/settings"
-	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/redact"
 )
 
@@ -42,14 +41,14 @@ func realPrivacyRedactor(level redact.RedactionLevel) (privacyTextRedactor, erro
 // before/after behavior. The draft is deliberately not used to weaken the
 // level: Standard is the privacy policy offered by this guided flow.
 func privacyGuideExample(samples []privacyExampleSample, factory privacyRedactorFactory) settings.GuideExampleFunc {
-	return func(_ theme.Theme, _ *settings.Draft) (string, error) {
+	return func(_ *settings.Draft) ([]settings.GuideExampleLine, error) {
 		return renderPrivacyExamples(redact.Standard, samples, factory)
 	}
 }
 
-func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExampleSample, factory privacyRedactorFactory) (string, error) {
+func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExampleSample, factory privacyRedactorFactory) ([]settings.GuideExampleLine, error) {
 	if factory == nil {
-		return "", privacyExampleError(
+		return nil, privacyExampleError(
 			"the Standard privacy example redactor cannot be constructed",
 			"the redactor factory boundary is nil",
 			"wire the real github.com/peasant-labs/redact constructor and retry kickstart")
@@ -59,13 +58,13 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 	seen := make(map[redact.Category]int, len(claimed))
 	for index, sample := range samples {
 		if err := sample.Category.Validate(); err != nil {
-			return "", privacyExampleError(
+			return nil, privacyExampleError(
 				fmt.Sprintf("synthetic privacy sample %d declares unknown category %q", index, sample.Category),
 				err.Error(),
 				"assign the sample to secrets, pii, paths, or project before rendering the guide")
 		}
 		if strings.TrimSpace(sample.Before) == "" {
-			return "", privacyExampleError(
+			return nil, privacyExampleError(
 				fmt.Sprintf("synthetic privacy sample for %s has no input", sample.Category),
 				"an empty sample cannot prove that a redaction rule fires",
 				"add safe synthetic input that exercises the declared category")
@@ -74,7 +73,7 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 	}
 	for _, category := range claimed {
 		if seen[category] != 1 {
-			return "", privacyExampleError(
+			return nil, privacyExampleError(
 				fmt.Sprintf("Standard privacy guidance has %d samples for claimed category %s", seen[category], category),
 				"every claimed category must have exactly one independent demonstration",
 				"restore one safe synthetic sample for each category returned by redact.AllCategories")
@@ -83,29 +82,29 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 
 	redactor, err := factory(level)
 	if err != nil {
-		return "", privacyExampleError(
+		return nil, privacyExampleError(
 			fmt.Sprintf("the %s privacy example redactor could not be constructed", level),
 			err.Error(),
 			"repair the redactor configuration or constructor before showing privacy claims")
 	}
 	if redactor == nil {
-		return "", privacyExampleError(
+		return nil, privacyExampleError(
 			fmt.Sprintf("the %s privacy example redactor is nil", level),
 			"the constructor returned no usable redactor without reporting an error",
 			"return a working redactor or a concrete constructor error")
 	}
 
-	var blocks []string
+	lines := make([]settings.GuideExampleLine, 0, len(samples)*3)
 	for _, sample := range samples {
 		categoryLabel, err := canonicalPrivacyCategoryLabel(sample.Category)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		matches := redactor.Detect(sample.Before)
 		categoryFound := false
 		for _, match := range matches {
 			if err := match.Category.Validate(); err != nil {
-				return "", privacyExampleError(
+				return nil, privacyExampleError(
 					fmt.Sprintf("the %s redactor returned unknown category %q", level, match.Category),
 					err.Error(),
 					"repair the redaction rule category before rendering privacy guidance")
@@ -113,21 +112,25 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 			categoryFound = categoryFound || match.Category == sample.Category
 		}
 		if !categoryFound {
-			return "", privacyExampleError(
+			return nil, privacyExampleError(
 				fmt.Sprintf("the synthetic %s sample did not trigger its claimed category", sample.Category),
 				"the real redactor detection result contains no matching category",
 				"update the safe sample if its rule shape changed, or repair the missing redaction rule")
 		}
 		after := redactor.RedactText(sample.Before)
 		if after == sample.Before {
-			return "", privacyExampleError(
+			return nil, privacyExampleError(
 				fmt.Sprintf("the synthetic %s sample remained unchanged at the %s level", sample.Category, level),
 				"detection claimed the category but the real redaction output did not change",
 				"repair the redactor replacement behavior instead of hard-coding example output")
 		}
-		blocks = append(blocks, fmt.Sprintf("%s\nbefore: %s\nafter: %s", categoryLabel, sample.Before, after))
+		lines = append(lines,
+			settings.GuideExampleLine{Kind: settings.GuideExampleLineLabel, Text: categoryLabel.String()},
+			settings.GuideExampleLine{Kind: settings.GuideExampleLineBefore, Text: sample.Before},
+			settings.GuideExampleLine{Kind: settings.GuideExampleLineAfter, Text: after},
+		)
 	}
-	return strings.Join(blocks, "\n\n"), nil
+	return lines, nil
 }
 
 func canonicalPrivacyCategoryLabel(category redact.Category) (redact.CategoryString, error) {

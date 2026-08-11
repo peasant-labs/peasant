@@ -44,15 +44,18 @@ func (o parityOperation) valid() bool {
 }
 
 type paritySectionFixture struct {
-	Key         string `yaml:"key"`
-	Title       string `yaml:"title"`
-	FieldKey    string `yaml:"fieldKey"`
-	FieldKind   string `yaml:"fieldKind"`
-	FieldText   string `yaml:"fieldText"`
-	HasGuide    bool   `yaml:"hasGuide"`
-	GuideIntro  string `yaml:"guideIntro"`
-	HasExample  bool   `yaml:"hasExample"`
-	Conditional bool   `yaml:"conditional"`
+	Key        string `yaml:"key"`
+	Title      string `yaml:"title"`
+	FieldKey   string `yaml:"fieldKey"`
+	FieldKind  string `yaml:"fieldKind"`
+	FieldText  string `yaml:"fieldText"`
+	HasGuide   bool   `yaml:"hasGuide"`
+	GuideIntro string `yaml:"guideIntro"`
+	// FieldTextBeforeGuide distinguishes a field heading (true) from control
+	// output used only as a mounted-presence assertion (false).
+	FieldTextBeforeGuide bool `yaml:"fieldTextBeforeGuide"`
+	HasExample           bool `yaml:"hasExample"`
+	Conditional          bool `yaml:"conditional"`
 }
 
 type forbiddenRegistryOptionsFixture struct {
@@ -241,8 +244,14 @@ func collectFlowEvidence(t *testing.T, flow settings.Flow, expected []string, fi
 		}
 		guideAt := strings.Index(view, fixture.GuideIntro)
 		fieldAt := strings.Index(view, fixture.FieldText)
-		if guideAt < 0 || fieldAt < 0 || guideAt >= fieldAt {
-			t.Errorf("Flow section %q did not render guide before canonical field %q: guide=%d field=%d\n%s",
+		if guideAt < 0 || fieldAt < 0 {
+			t.Errorf("Flow section %q omitted guide or canonical field %q: guide=%d field=%d\n%s",
+				key, fixture.FieldText, guideAt, fieldAt, view)
+		} else if fixture.FieldTextBeforeGuide && fieldAt >= guideAt {
+			t.Errorf("Flow section %q did not render field heading %q before its guide: guide=%d field=%d\n%s",
+				key, fixture.FieldText, guideAt, fieldAt, view)
+		} else if !fixture.FieldTextBeforeGuide && guideAt >= fieldAt {
+			t.Errorf("Flow section %q did not render its guide before mounted field output %q: guide=%d field=%d\n%s",
 				key, fixture.FieldText, guideAt, fieldAt, view)
 		}
 		flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyTab})

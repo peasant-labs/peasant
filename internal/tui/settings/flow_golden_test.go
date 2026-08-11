@@ -20,12 +20,14 @@ import (
 var flowRenderData []byte
 
 const (
-	requiredFlowRenderCaseCount    = 20
+	requiredFlowRenderCaseCount    = 28
 	requiredFlowViewportStateCount = 3
 	requiredFlowViewportThemeCount = 2
 	requiredFlowViewportCaseCount  = 6
 	requiredFlowViewportWidth      = 80
 	requiredFlowViewportHeight     = 24
+	requiredFlowEvidenceStateCount = 2
+	requiredFlowEvidenceCaseCount  = 8
 )
 
 type flowRenderState string
@@ -38,12 +40,15 @@ const (
 	flowRenderViewportStepTop            flowRenderState = "viewport-step-top"
 	flowRenderViewportStepBottom         flowRenderState = "viewport-step-bottom"
 	flowRenderViewportReceiptErrorBottom flowRenderState = "viewport-receipt-error-bottom"
+	flowRenderEvidenceReceipt            flowRenderState = "evidence-receipt"
+	flowRenderEvidenceReceiptError       flowRenderState = "evidence-receipt-error"
 )
 
 func (s flowRenderState) valid() bool {
 	switch s {
 	case flowRenderStep, flowRenderReceipt, flowRenderConfirm, flowRenderHelp,
-		flowRenderViewportStepTop, flowRenderViewportStepBottom, flowRenderViewportReceiptErrorBottom:
+		flowRenderViewportStepTop, flowRenderViewportStepBottom, flowRenderViewportReceiptErrorBottom,
+		flowRenderEvidenceReceipt, flowRenderEvidenceReceiptError:
 		return true
 	default:
 		return false
@@ -53,6 +58,10 @@ func (s flowRenderState) valid() bool {
 func (s flowRenderState) viewportState() bool {
 	return s == flowRenderViewportStepTop || s == flowRenderViewportStepBottom ||
 		s == flowRenderViewportReceiptErrorBottom
+}
+
+func (s flowRenderState) evidenceState() bool {
+	return s == flowRenderEvidenceReceipt || s == flowRenderEvidenceReceiptError
 }
 
 type flowRenderTheme string
@@ -116,7 +125,10 @@ func decodeFlowRenderDoc(data []byte) (flowRenderDoc, error) {
 
 	names := map[string]bool{}
 	pairs := map[flowRenderState]map[flowRenderTheme]int{}
+	evidencePairs := map[string]int{}
+	evidenceStates := map[flowRenderState]bool{}
 	viewportCases := 0
+	evidenceCases := 0
 	for _, row := range doc.Cases {
 		if strings.TrimSpace(row.Name) == "" || names[row.Name] {
 			return doc, fmt.Errorf("flow render row has an empty or duplicate name %q", row.Name)
@@ -127,6 +139,15 @@ func decodeFlowRenderDoc(data []byte) (flowRenderDoc, error) {
 		}
 		if row.Width <= 0 || row.Height <= 0 {
 			return doc, fmt.Errorf("flow render row %q has non-positive size %dx%d", row.Name, row.Width, row.Height)
+		}
+		if row.State.evidenceState() {
+			evidenceCases++
+			evidenceStates[row.State] = true
+			size := fmt.Sprintf("%dx%d", row.Width, row.Height)
+			if size != "80x24" && size != "120x40" {
+				return doc, fmt.Errorf("flow evidence row %q has unsupported size %s", row.Name, size)
+			}
+			evidencePairs[string(row.State)+"/"+string(row.Theme)+"/"+size]++
 		}
 		if !row.State.viewportState() {
 			continue
@@ -153,6 +174,20 @@ func decodeFlowRenderDoc(data []byte) (flowRenderDoc, error) {
 	}
 	if err := validateFlowViewportPair(pairs, flowRenderViewportReceiptErrorBottom); err != nil {
 		return doc, err
+	}
+	if evidenceCases != requiredFlowEvidenceCaseCount || len(evidenceStates) != requiredFlowEvidenceStateCount {
+		return doc, fmt.Errorf("flow receipt evidence rows/states=%d/%d, require %d/%d",
+			evidenceCases, len(evidenceStates), requiredFlowEvidenceCaseCount, requiredFlowEvidenceStateCount)
+	}
+	for _, state := range []flowRenderState{flowRenderEvidenceReceipt, flowRenderEvidenceReceiptError} {
+		for _, renderTheme := range []flowRenderTheme{flowRenderThemeDark, flowRenderThemeLight} {
+			for _, size := range []string{"80x24", "120x40"} {
+				key := string(state) + "/" + string(renderTheme) + "/" + size
+				if evidencePairs[key] != 1 {
+					return doc, fmt.Errorf("flow receipt evidence pair %q has %d rows, want exactly one", key, evidencePairs[key])
+				}
+			}
+		}
 	}
 	return doc, nil
 }
@@ -207,6 +242,13 @@ func buildFlowForRender(t *testing.T, th theme.Theme, state flowRenderState, w, 
 			return ConsentSummary{Values: document.ReceiptValues, Effects: document.ReceiptEffects}, nil
 		}))
 	}
+	if state.evidenceState() {
+		document := loadFlowViewportFixture(t)
+		registry = flowViewportReceiptRegistry(document)
+		options = append(options, WithConsentSummary(func(ConsentContext) (ConsentSummary, error) {
+			return ConsentSummary{Values: document.ReceiptValues[:2], Effects: document.ReceiptEffects[:2]}, nil
+		}))
+	}
 	f := NewFlow(th, registry, d, options...)
 	f.SetSize(w, h)
 	switch state {
@@ -226,6 +268,10 @@ func buildFlowForRender(t *testing.T, th theme.Theme, state flowRenderState, w, 
 		f = send(f, "shift+g")
 	case flowRenderViewportReceiptErrorBottom:
 		f = send(f, "tab", "enter", "shift+g")
+	case flowRenderEvidenceReceipt:
+		f = send(f, "tab")
+	case flowRenderEvidenceReceiptError:
+		f = send(f, "tab", "enter")
 	default:
 		t.Fatalf("unknown state %q", state)
 	}
@@ -262,7 +308,7 @@ func TestFlowRenderFixtureRejectsTrailingDocuments(t *testing.T) {
 
 func TestFlowRenderFixtureRejectsCoordinatedExactCountMutation(t *testing.T) {
 	mutated := mutateFlowRenderFixture(t,
-		"expectedCaseCount: 20", "expectedCaseCount: 19")
+		"expectedCaseCount: 28", "expectedCaseCount: 27")
 	mutated = mutateFlowRenderBytes(t, mutated,
 		"  - {name: step-light-40x8, state: step, theme: light, width: 40, height: 8}\n", "")
 	if _, err := decodeFlowRenderDoc(mutated); err == nil {
@@ -272,7 +318,7 @@ func TestFlowRenderFixtureRejectsCoordinatedExactCountMutation(t *testing.T) {
 
 func TestFlowRenderFixtureRejectsMissingViewportThemePair(t *testing.T) {
 	mutated := mutateFlowRenderFixture(t,
-		"expectedCaseCount: 20", "expectedCaseCount: 19")
+		"expectedCaseCount: 28", "expectedCaseCount: 27")
 	mutated = mutateFlowRenderBytes(t, mutated, "expectedViewportCaseCount: 6", "expectedViewportCaseCount: 5")
 	mutated = mutateFlowRenderBytes(t, mutated,
 		"  - {name: viewport-step-top-light-80x24, state: viewport-step-top, theme: light, width: 80, height: 24}\n", "")
@@ -326,6 +372,16 @@ func TestFlowRenderFixtureRejectsWrongViewportDimensions(t *testing.T) {
 		"name: viewport-step-top-dark-80x23, state: viewport-step-top, theme: dark, width: 80, height: 23")
 	if _, err := decodeFlowRenderDoc(mutated); err == nil {
 		t.Fatal("flow render fixture accepted a viewport row outside the required 80x24 dimensions")
+	}
+}
+
+func TestFlowRenderFixtureRejectsMissingReceiptEvidencePair(t *testing.T) {
+	mutated := mutateFlowRenderFixture(t,
+		"expectedCaseCount: 28", "expectedCaseCount: 27")
+	mutated = mutateFlowRenderBytes(t, mutated,
+		"  - {name: evidence-receipt-error-light-120x40, state: evidence-receipt-error, theme: light, width: 120, height: 40}\n", "")
+	if _, err := decodeFlowRenderDoc(mutated); err == nil {
+		t.Fatal("flow render fixture accepted a missing wide light error-receipt evidence row")
 	}
 }
 

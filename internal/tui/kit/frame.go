@@ -220,7 +220,7 @@ func (f Frame) bodyLines(styles theme.Styles, inner int) []string {
 		if i < len(src) {
 			raw = src[i]
 		}
-		lines = append(lines, fitLine(styles.Base, raw, inner))
+		lines = append(lines, fitRenderedLine(styles.Base, raw, inner))
 	}
 	return lines
 }

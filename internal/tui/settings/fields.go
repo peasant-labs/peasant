@@ -88,7 +88,11 @@ func (f *toggleField) Dirty(d *Draft) bool {
 }
 
 func (f *toggleField) build(d *Draft) kit.Toggle {
-	t := kit.NewToggle(f.th, f.label, f.acc.Get(d.Working()))
+	return f.buildWithLabel(d, f.label)
+}
+
+func (f *toggleField) buildWithLabel(d *Draft, label string) kit.Toggle {
+	t := kit.NewToggle(f.th, label, f.acc.Get(d.Working()))
 	t.SetSize(f.width, 1)
 	if f.focused {
 		t.Focus()
@@ -106,6 +110,15 @@ func (f *toggleField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 func (f *toggleField) render(d *Draft, _ theme.Styles, width int) string {
 	f.width = width
 	return f.build(d).View()
+}
+
+// renderFlowControl keeps the toggle indicator's established right-edge
+// geometry while Flow moves the label into a real heading above the section's
+// guidance. Dense Screen rendering continues to use render, which retains the
+// inline label.
+func (f *toggleField) renderFlowControl(d *Draft, width int) string {
+	f.width = width
+	return f.buildWithLabel(d, "").View()
 }
 
 // --- Text -----------------------------------------------------------------

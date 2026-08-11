@@ -1,0 +1,27 @@
+expectedRenderCaseCount: 4
+expectedExampleLineCount: 5
+expectedValidationCaseCount: 6
+heading: privacy preview
+intro: inspect the real transformation before choosing a policy.
+hint: color is never the only before and after distinction.
+description: choose the policy applied by a later explicit action.
+secondHeading: secondary policy
+secondControl: '(•) keep'
+exampleLines:
+  - {kind: label, text: CREDENTIAL}
+  - {kind: before, text: sk-example}
+  - {kind: after, text: '<CREDENTIAL>'}
+  - {kind: spacer, text: ''}
+  - {kind: text, text: derived by the production boundary}
+renderCases:
+  - {name: dark-narrow, theme: dark, width: 40}
+  - {name: light-narrow, theme: light, width: 40}
+  - {name: dark-wide, theme: dark, width: 72}
+  - {name: light-wide, theme: light, width: 72}
+validationCases:
+  - {name: unknown-kind, kind: unknown, text: value, wantFragment: unknown semantic kind}
+  - {name: spacer-with-text, kind: spacer, text: value, wantFragment: spacer line}
+  - {name: empty-content, kind: text, text: ' ', wantFragment: no visible text}
+  - {name: embedded-newline, kind: label, text: "first\nsecond", wantFragment: embedded line break}
+  - {name: pre-rendered-ansi, kind: before, text: "\u001b[31mred\u001b[0m", wantFragment: pre-rendered terminal styling}
+  - {name: embedded-tab, kind: after, text: "left\tright", wantFragment: terminal control character}

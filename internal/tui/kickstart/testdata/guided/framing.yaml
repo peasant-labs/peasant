@@ -42,6 +42,8 @@ rows:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     hasGuide: true
+    headingText: auto-ingest new branches in fully-selected projects
+    controlText: '[on]'
     guide:
       intro: decide how future branches enter your saved local selection.
       hints:
@@ -58,6 +60,8 @@ rows:
     fieldKind: radio
     fieldText: redaction level
     hasGuide: true
+    headingText: redaction level
+    controlText: '(•) standard'
     guide:
       intro: preview standard redaction before a later explicit publication.
       hints:
@@ -82,6 +86,8 @@ rows:
     fieldKind: radio
     fieldText: default license attached to pushed transcripts
     hasGuide: true
+    headingText: default license attached to pushed transcripts
+    controlText: '(•) none (do not attach a license)'
     guide:
       intro: choose the default license for a later explicit publish.
       hints:
@@ -99,6 +105,8 @@ rows:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     hasGuide: true
+    headingText: default visibility for pushed transcripts
+    controlText: '(•) private'
     guide:
       intro: choose who may see transcripts after a later explicit publish.
       hints:
@@ -116,6 +124,8 @@ rows:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     hasGuide: true
+    headingText: how long claude code keeps its transcripts
+    controlText: '( ) 30 days'
     guide:
       intro: choose how long claude code keeps its source transcript files.
       hints:
@@ -139,6 +149,8 @@ rows:
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
     hasGuide: true
+    headingText: auto-ingest new branches in fully-selected projects
+    controlText: '[on]'
     guide:
       intro: decide how future branches enter your saved local selection.
       hints:
@@ -156,6 +168,8 @@ rows:
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
     hasGuide: true
+    headingText: default visibility for pushed transcripts
+    controlText: '(•) private'
     guide:
       intro: choose who may see transcripts after a later explicit publish.
       hints:
@@ -173,6 +187,8 @@ rows:
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
     hasGuide: true
+    headingText: how long claude code keeps its transcripts
+    controlText: '( ) 30 days'
     guide:
       intro: choose how long claude code keeps its source transcript files.
       hints:

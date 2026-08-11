@@ -1,0 +1,28 @@
+expectedCaseCount: 6
+expectedThemeCount: 2
+themes: [dark, light]
+cases:
+  - name: pads-ascii-through-final-cell
+    text: guide
+    width: 9
+    fitted: 'guide    '
+  - name: truncates-ascii-with-ellipsis
+    text: descriptive text
+    width: 8
+    fitted: 'descrip…'
+  - name: pads-wide-grapheme-by-cells
+    text: '界a'
+    width: 5
+    fitted: '界a  '
+  - name: truncates-wide-graphemes-with-ellipsis
+    text: '界界界'
+    width: 4
+    fitted: '界… '
+  - name: preserves-combining-grapheme
+    text: "éx"
+    width: 4
+    fitted: "éx  "
+  - name: non-positive-width-is-empty
+    text: ignored
+    width: 0
+    fitted: ''

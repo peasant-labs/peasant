@@ -1,7 +1,10 @@
 package kit
 
 import (
+	"strings"
+
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
@@ -59,16 +62,67 @@ func padLine(s string, width int) string {
 	return s + spaces(width-w)
 }
 
-// fitLine truncates then pads a plain line to exactly width cells, applying
-// style to the whole cell run so the padding carries the component's
-// background. This is the single primitive kit components use to emit one
-// content row of a fixed width.
-func fitLine(style lipgloss.Style, s string, width int) string {
+// FitLine truncates then pads one PLAIN-TEXT line to exactly width terminal
+// cells and applies style exactly once, after fitting. Applying the style last
+// makes background-bearing rows paint through their final cell instead of
+// stopping at the final glyph. Measurement and truncation are ANSI-aware and
+// grapheme-aware, but callers must not pass an already-rendered ANSI string:
+// composed output needs fitRenderedLine so nested style resets can restore the
+// parent's background correctly.
+func FitLine(style lipgloss.Style, s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	clipped := truncateLine(s, width)
+	clipped := s
+	if ansi.StringWidth(clipped) > width {
+		clipped = ansi.Truncate(clipped, width, "…")
+	}
 	return style.Render(padLine(clipped, width))
+}
+
+// fitLine preserves the private helper used throughout the component
+// implementations while exposing FitLine to presentation packages that need
+// the same fixed-row contract.
+func fitLine(style lipgloss.Style, s string, width int) string {
+	return FitLine(style, s, width)
+}
+
+// fitRenderedLine fits a line that already contains ANSI styling inside a
+// parent style. Unlike FitLine, this function never applies a style around
+// already-rendered bytes: ANSI reset sequences are not nestable and would
+// otherwise cancel the parent's background before trailing padding. It starts
+// in the parent style, restores that style after each reset, and pads before
+// the final reset so every otherwise-transparent cell inherits the parent.
+func fitRenderedLine(style lipgloss.Style, rendered string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	clipped := rendered
+	if ansi.StringWidth(clipped) > width {
+		clipped = ansi.Truncate(clipped, width, "…")
+	}
+	padding := spaces(width - ansi.StringWidth(clipped))
+	if clipped == "" {
+		return FitLine(style, "", width)
+	}
+
+	styledProbe := style.Render("x")
+	prefixAt := strings.Index(styledProbe, "x")
+	if prefixAt < 0 {
+		return clipped + padding
+	}
+	prefix := styledProbe[:prefixAt]
+	suffix := styledProbe[prefixAt+1:]
+	if prefix == "" || suffix == "" {
+		return clipped + padding
+	}
+	for strings.HasSuffix(clipped, suffix) {
+		clipped = strings.TrimSuffix(clipped, suffix)
+	}
+	restore := suffix + prefix
+	clipped = strings.ReplaceAll(clipped, "\x1b[m", restore)
+	clipped = strings.ReplaceAll(clipped, "\x1b[0m", restore)
+	return prefix + clipped + padding + suffix
 }
 
 // spaces returns n space characters (n<=0 yields "").
