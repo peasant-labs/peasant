@@ -1,113 +1,23 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
-	"errors"
-	"fmt"
-	"io"
-	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/api"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
-const injectedCommandTurnFixtureCaseCount = 18
-
-//go:embed testdata/injected_command_turns.yaml
-var injectedCommandTurnFixtureYAML []byte
-
-type injectedCommandTurnFixture struct {
-	ExpectedCaseCount int                       `yaml:"expectedCaseCount"`
-	Cases             []injectedCommandTurnCase `yaml:"cases"`
-}
-
-type injectedCommandTurnCase struct {
-	Name              string         `yaml:"name"`
-	Harness           schema.Harness `yaml:"harness"`
-	SourceRole        schema.Role    `yaml:"sourceRole"`
-	Content           string         `yaml:"content"`
-	PadToPreviewLimit bool           `yaml:"padToPreviewLimit,omitempty"`
-	ExpectedRole      schema.Role    `yaml:"expectedRole"`
-}
-
-func decodeInjectedCommandTurnFixture(source []byte) (injectedCommandTurnFixture, error) {
-	var fixture injectedCommandTurnFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(source))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
-		return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: %w", err)
-	}
-
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return injectedCommandTurnFixture{}, errors.New("decode injected command turn fixture: expected exactly one YAML document; remove the trailing document")
-		}
-		return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture trailing content: %w", err)
-	}
-
-	if fixture.ExpectedCaseCount != injectedCommandTurnFixtureCaseCount || len(fixture.Cases) != injectedCommandTurnFixtureCaseCount {
-		return injectedCommandTurnFixture{}, fmt.Errorf(
-			"decode injected command turn fixture: case count mismatch: declared=%d rows=%d want=%d; update the fixture rows and exact count together",
-			fixture.ExpectedCaseCount,
-			len(fixture.Cases),
-			injectedCommandTurnFixtureCaseCount,
-		)
-	}
-
-	seenNames := make(map[string]struct{}, len(fixture.Cases))
-	for index, testCase := range fixture.Cases {
-		if strings.TrimSpace(testCase.Name) == "" {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: cases[%d] has a blank name; give every row a stable unique name", index)
-		}
-		if _, duplicate := seenNames[testCase.Name]; duplicate {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: case name %q is duplicated; give every row a unique name", testCase.Name)
-		}
-		seenNames[testCase.Name] = struct{}{}
-		if !testCase.Harness.IsKnown() {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: case %q has unknown harness %q; use a schema harness value", testCase.Name, testCase.Harness)
-		}
-		if !testCase.SourceRole.IsValid() {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: case %q has unknown source role %q; use a schema role value", testCase.Name, testCase.SourceRole)
-		}
-		if !testCase.ExpectedRole.IsValid() {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: case %q has unknown expected role %q; use a schema role value", testCase.Name, testCase.ExpectedRole)
-		}
-		if testCase.Content == "" {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: case %q has empty content; provide the stored content under test", testCase.Name)
-		}
-		if testCase.PadToPreviewLimit && len(testCase.Content) >= defaults.ContentPreviewLimit {
-			return injectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture: case %q cannot pad content length %d to preview limit %d; shorten the fixture content", testCase.Name, len(testCase.Content), defaults.ContentPreviewLimit)
-		}
-	}
-
-	return fixture, nil
-}
-
-func loadInjectedCommandTurnFixture(t *testing.T) injectedCommandTurnFixture {
+func loadInjectedCommandTurnFixture(t *testing.T) testutil.InjectedCommandTurnFixture {
 	t.Helper()
-	fixture, err := decodeInjectedCommandTurnFixture(injectedCommandTurnFixtureYAML)
+	fixture, err := testutil.LoadInjectedCommandTurnFixture()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return fixture
-}
-
-func (fixture injectedCommandTurnFixture) caseByName(t *testing.T, name string) injectedCommandTurnCase {
-	t.Helper()
-	for _, testCase := range fixture.Cases {
-		if testCase.Name == name {
-			return testCase
-		}
-	}
-	t.Fatalf("injected command turn fixture has no case named %q", name)
-	return injectedCommandTurnCase{}
 }
 
 func TestEntriesToTurns_InjectedCommandRolesReachDetailPayload(t *testing.T) {
@@ -119,10 +29,7 @@ func TestEntriesToTurns_InjectedCommandRolesReachDetailPayload(t *testing.T) {
 		index, testCase := index, testCase
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
-			content := testCase.Content
-			if testCase.PadToPreviewLimit {
-				content = strings.Repeat(" ", defaults.ContentPreviewLimit-len(content)) + content
-			}
+			content := testCase.StoredContent()
 			entries := []schema.SessionEntry{{
 				SessionID:      sessionID,
 				EntryIndex:     index,
@@ -162,8 +69,6 @@ func TestEntriesToTurns_InjectedCommandRolesReachDetailPayload(t *testing.T) {
 func TestStoreDataProvider_InjectedCommandRolesReachDetailPayload(t *testing.T) {
 	t.Parallel()
 	fixture := loadInjectedCommandTurnFixture(t)
-	wrapperOnly := fixture.caseByName(t, "command_name_only")
-	mixedProse := fixture.caseByName(t, "trailing_user_prose")
 
 	const sessionID = "45454545-4545-4545-4545-454545454546"
 	db := openTestStore(t)
@@ -172,36 +77,28 @@ func TestStoreDataProvider_InjectedCommandRolesReachDetailPayload(t *testing.T) 
 		sessionID,
 		hash1,
 		"github.com-test",
-		wrapperOnly.Harness,
+		fixture.Cases[0].Harness,
 		day1Ms,
 		100,
 		50,
 		"project-injected-command",
-		2,
+		len(fixture.Cases),
 		0,
 		1000,
 	)
 	provider := seedStore(t, db, []ingest.StoreEntry{storeEntry})
 	sid := schema.SessionID(sessionID)
-	wrapperContent := wrapperOnly.Content
-	mixedContent := mixedProse.Content
-	entries := []schema.SessionEntry{
-		{
+	entries := make([]schema.SessionEntry, len(fixture.Cases))
+	for index, testCase := range fixture.Cases {
+		content := testCase.StoredContent()
+		entries[index] = schema.SessionEntry{
 			SessionID:      sid,
-			EntryIndex:     0,
-			Harness:        wrapperOnly.Harness,
+			EntryIndex:     index,
+			Harness:        testCase.Harness,
 			EntryType:      schema.EntryTypeText,
-			Role:           wrapperOnly.SourceRole,
-			ContentPreview: &wrapperContent,
-		},
-		{
-			SessionID:      sid,
-			EntryIndex:     1,
-			Harness:        mixedProse.Harness,
-			EntryType:      schema.EntryTypeText,
-			Role:           mixedProse.SourceRole,
-			ContentPreview: &mixedContent,
-		},
+			Role:           testCase.SourceRole,
+			ContentPreview: &content,
+		}
 	}
 	if err := db.IndexSessionEntries(context.Background(), sid, entries); err != nil {
 		t.Fatalf("IndexSessionEntries: %v", err)
@@ -211,48 +108,20 @@ func TestStoreDataProvider_InjectedCommandRolesReachDetailPayload(t *testing.T) 
 	if err != nil {
 		t.Fatalf("SessionByID: %v", err)
 	}
-	payload := api.SessionToDetail(session)
-	if len(payload.Turns) != 2 {
-		t.Fatalf("stored entry detail has %d turns, want 2", len(payload.Turns))
+	payload := transcript.SessionToDetail(session)
+	if len(payload.Turns) != len(fixture.Cases) {
+		t.Fatalf("stored entry detail has %d turns, want %d fixture rows", len(payload.Turns), len(fixture.Cases))
 	}
-	if payload.Turns[0].Role != wrapperOnly.ExpectedRole {
-		t.Errorf("wrapper-only stored entry role = %q, want %q", payload.Turns[0].Role, wrapperOnly.ExpectedRole)
-	}
-	if payload.Turns[1].Role != mixedProse.ExpectedRole {
-		t.Errorf("mixed-prose stored entry role = %q, want %q", payload.Turns[1].Role, mixedProse.ExpectedRole)
-	}
-}
-
-func TestInjectedCommandTurnFixtureRejectsUnknownField(t *testing.T) {
-	t.Parallel()
-	mutated := bytes.Replace(
-		injectedCommandTurnFixtureYAML,
-		[]byte("expectedCaseCount:"),
-		[]byte("unknownFixtureField: true\nexpectedCaseCount:"),
-		1,
-	)
-	if _, err := decodeInjectedCommandTurnFixture(mutated); err == nil {
-		t.Fatal("fixture decoder accepted an unknown field")
-	}
-}
-
-func TestInjectedCommandTurnFixtureRejectsTrailingDocument(t *testing.T) {
-	t.Parallel()
-	mutated := append(append([]byte{}, injectedCommandTurnFixtureYAML...), []byte("\n---\nextra: true\n")...)
-	if _, err := decodeInjectedCommandTurnFixture(mutated); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
-		t.Fatalf("trailing-document error = %v, want exact single-document rejection", err)
-	}
-}
-
-func TestInjectedCommandTurnFixtureGuardsExactRowCount(t *testing.T) {
-	t.Parallel()
-	mutated := bytes.Replace(
-		injectedCommandTurnFixtureYAML,
-		[]byte("expectedCaseCount: 18"),
-		[]byte("expectedCaseCount: 17"),
-		1,
-	)
-	if _, err := decodeInjectedCommandTurnFixture(mutated); err == nil || !strings.Contains(err.Error(), "case count mismatch") {
-		t.Fatalf("row-count error = %v, want exact-count rejection", err)
+	for index, testCase := range fixture.Cases {
+		turn := payload.Turns[index]
+		if turn.Index != index {
+			t.Errorf("case %q stored detail turn index = %d, want %d", testCase.Name, turn.Index, index)
+		}
+		if turn.Role != testCase.ExpectedRole {
+			t.Errorf("case %q stored detail role = %q, want %q", testCase.Name, turn.Role, testCase.ExpectedRole)
+		}
+		if turn.Content != testCase.StoredContent() {
+			t.Errorf("case %q stored detail content changed", testCase.Name)
+		}
 	}
 }

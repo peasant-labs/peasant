@@ -35,11 +35,15 @@ const (
 	commandWrapperArguments
 )
 
-// injectedCommandRole keeps harness-generated command markup from claiming the
-// user's authorship. It is deliberately conservative: only a complete sequence
-// of known wrappers with one valid slash-command name qualifies. Any prose,
-// unknown or malformed markup, duplicate wrapper, or possibly truncated preview
-// leaves the stored role unchanged.
+// injectedCommandRole keeps historical harness-generated command markup from
+// claiming the user's authorship. It is deliberately conservative: only a
+// complete sequence of known wrappers with one valid slash-command name
+// qualifies. Any prose, unknown or malformed markup, duplicate wrapper, or
+// possibly truncated preview leaves the stored role unchanged.
+//
+// This projection repairs stored rows that carry no authoritative injection
+// signal. It is not complete injected-turn detection: provider metadata such as
+// Claude's isMeta belongs at ingest, where the original event is still present.
 func injectedCommandRole(entry schema.SessionEntry, content string) schema.Role {
 	if entry.Role != schema.RoleUser || !isInjectedCommandWrapperOnly(content) {
 		return entry.Role
