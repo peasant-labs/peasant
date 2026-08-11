@@ -256,6 +256,7 @@ type PruneSessionRow struct {
 	ProjectName string
 	GitRemote   string // git remote URL from host_slugs table (may be empty)
 	ProjectPath string // raw session worktree, falling back to the project's canonical cwd
+	GitBranch   string // branch recorded when the session was ingested (may be empty)
 	StartMs     int64
 	TurnCount   int
 	OutputPath  string // host_slug used to construct filesystem path
@@ -295,15 +296,16 @@ func (p PrunePlan) SessionIDs() []SessionID {
 //   - the session's project name matches a project's name, OR
 //   - the session ID is explicitly listed.
 //
-// Branch filtering is not applied here because the DB does not store the branch
-// that was active at ingest time. This means --unselected prune is conservative:
-// it will NOT prune a session whose project matches but whose branch was excluded.
+// Branch filtering is not applied by this legacy helper. Clone-aware prune code
+// must use ProjectPath and GitBranch to construct a DiscoveryCandidate and call
+// MatchBranchCandidate.
 func (r PruneSessionRow) IsSelectedBy(sel SelectionMatcher) bool {
 	return sel.Matches(r.Harness, r.GitRemote, r.ProjectName, r.SessionID)
 }
 
-// SelectionMatcher checks whether a session matches the selection config.
-// Built once from config.SelectionConfig, used for each DB session row.
+// SelectionMatcher checks whether a session matches positive selection followed
+// by exact branch and session denials. It is built once from
+// config.SelectionConfig and reused for each candidate.
 type SelectionMatcher struct {
 	// harnesses maps harness name → harnessMatcher.
 	// Empty map means nothing is selected (mode=selected with no harnesses).
@@ -341,8 +343,10 @@ type DiscoveryCandidate struct {
 }
 
 type harnessMatcher struct {
-	projects []projectMatcher
-	sessions map[string]bool // explicit session IDs
+	projects          []projectMatcher
+	sessions          map[string]bool // explicit session IDs
+	branchExclusions  map[ClonePath]map[string]bool
+	sessionExclusions map[string]bool
 }
 
 type projectMatcher struct {
@@ -400,10 +404,9 @@ func (e SelectionEntry) String() string {
 	return fmt.Sprintf("%s branches %v", identity, e.Branches)
 }
 
-// DiscoveryDecision is a discovery match together with the configured entries
-// that produced it. A caller that must explain a withheld session reads the
-// entries from here instead of re-deriving them from the configuration, so the
-// explanation cannot name a different set than the decision used.
+// DiscoveryDecision is a discovery match together with configured positive
+// entries when they are needed to explain a withheld result. An exact denial
+// returns BranchMatchNo with no conflict entries.
 type DiscoveryDecision struct {
 	Match BranchMatch
 	// Admitting and Rejecting are the entries that identify this session and
@@ -490,8 +493,10 @@ func (p projectMatcher) admitsBranch(gitBranch string) bool {
 // harnessSelectionInput is the internal DTO for building a harnessMatcher.
 // Mirrors config.SelectionHarnessConfig without importing internal/config.
 type harnessSelectionInput struct {
-	Projects []projectSelectionInput
-	Sessions []string
+	Projects          []projectSelectionInput
+	Sessions          []string
+	BranchExclusions  []branchExclusionInput
+	SessionExclusions []string
 }
 
 // projectSelectionInput identifies a project by git remote or name for selection matching.
@@ -501,6 +506,11 @@ type projectSelectionInput struct {
 	Name       string
 	ClonePaths []string
 	Branches   []string
+}
+
+type branchExclusionInput struct {
+	ClonePath string
+	Branches  []string
 }
 
 // toBranchSet builds a lookup set from a branch-name slice. Returns nil for
@@ -539,10 +549,34 @@ func newSelectionMatcher(harnesses map[string]harnessSelectionInput) SelectionMa
 	m := SelectionMatcher{harnesses: make(map[string]harnessMatcher, len(harnesses))}
 	for harnessName, input := range harnesses {
 		pm := harnessMatcher{
-			sessions: make(map[string]bool, len(input.Sessions)),
+			sessions:          make(map[string]bool, len(input.Sessions)),
+			branchExclusions:  make(map[ClonePath]map[string]bool, len(input.BranchExclusions)),
+			sessionExclusions: make(map[string]bool, len(input.SessionExclusions)),
 		}
 		for _, sid := range input.Sessions {
 			pm.sessions[sid] = true
+		}
+		for _, sid := range input.SessionExclusions {
+			if sid != "" {
+				pm.sessionExclusions[sid] = true
+			}
+		}
+		for _, exclusion := range input.BranchExclusions {
+			clonePath, exact := exactClonePath(exclusion.ClonePath)
+			if !exact {
+				continue
+			}
+			branches := pm.branchExclusions[clonePath]
+			if branches == nil {
+				branches = make(map[string]bool, len(exclusion.Branches))
+				pm.branchExclusions[clonePath] = branches
+			}
+			for _, branch := range exclusion.Branches {
+				normalized := normalizeBranchForMatch(branch)
+				if normalized != "" {
+					branches[normalized] = true
+				}
+			}
 		}
 		for _, proj := range input.Projects {
 			clonePaths := toClonePathSet(proj.ClonePaths)
@@ -580,6 +614,17 @@ func clonePathSlice(paths []string) []ClonePath {
 		result[index] = ClonePath(path)
 	}
 	return result
+}
+
+func exactClonePath(path string) (ClonePath, bool) {
+	if path == "" || strings.TrimSpace(path) != path || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return "", false
+	}
+	return ClonePath(path), true
+}
+
+func normalizeBranchForMatch(branch string) string {
+	return strings.TrimSpace(branch)
 }
 
 // SelectionMatcherBuilder constructs a SelectionMatcher incrementally.
@@ -633,6 +678,27 @@ func (b *SelectionMatcherBuilder) AddSession(harness, sessionID string) *Selecti
 	return b
 }
 
+// AddBranchExclusion denies branches for one exact physical clone path in the
+// given harness. Callers loading persisted configuration must validate the path
+// and branch names before adding them.
+func (b *SelectionMatcherBuilder) AddBranchExclusion(harness, clonePath string, branches ...string) *SelectionMatcherBuilder {
+	p := b.harnesses[harness]
+	p.BranchExclusions = append(p.BranchExclusions, branchExclusionInput{
+		ClonePath: clonePath,
+		Branches:  append([]string(nil), branches...),
+	})
+	b.harnesses[harness] = p
+	return b
+}
+
+// AddSessionExclusion denies one exact session ID in the given harness.
+func (b *SelectionMatcherBuilder) AddSessionExclusion(harness, sessionID string) *SelectionMatcherBuilder {
+	p := b.harnesses[harness]
+	p.SessionExclusions = append(p.SessionExclusions, sessionID)
+	b.harnesses[harness] = p
+	return b
+}
+
 // Build returns the immutable SelectionMatcher.
 func (b *SelectionMatcherBuilder) Build() SelectionMatcher {
 	return newSelectionMatcher(b.harnesses)
@@ -657,16 +723,48 @@ func (m SelectionMatcher) MatchesCandidate(candidate DiscoveryCandidate) bool {
 	return m.decideCandidate(candidate, branchPolicy{admitUnknownBranch: true}).Match == BranchMatchYes
 }
 
+// ExcludesCandidate reports whether exact deny evidence matches candidate. It
+// does not perform positive admission. Consumers that prepare candidate cohorts
+// can use this method without recreating exact harness, path, or branch rules.
+func (m SelectionMatcher) ExcludesCandidate(candidate DiscoveryCandidate) bool {
+	selected, ok := m.harnesses[candidate.Harness.String()]
+	if !ok {
+		return false
+	}
+	return selected.excludesCandidate(candidate)
+}
+
+func (m harnessMatcher) excludesCandidate(candidate DiscoveryCandidate) bool {
+	if candidate.SessionID != "" && m.sessionExclusions[string(candidate.SessionID)] {
+		return true
+	}
+	clonePath, exact := exactClonePath(candidate.ClonePath.String())
+	if !exact {
+		return false
+	}
+	branch := normalizeBranchForMatch(candidate.Branch)
+	if branch == "" {
+		return false
+	}
+	return m.branchExclusions[clonePath][branch]
+}
+
 // DiscoveryNeedsGit reports whether resolving repository attributes can change
-// discovery matching for this harness and session. Only project entries consult
-// a git remote or branch, so the answer is no when the harness is absent, when
-// it carries no project entries at all (unrestricted, or restricted to explicit
-// session IDs), or when this session is already on the explicit allowlist.
-// Callers that skip resolution must still take the decision from MatchDiscovery;
-// this only avoids work that cannot change it.
+// discovery matching for this harness and session. Project entries and exact
+// branch exclusions consult repository identity. The answer is no when the
+// harness is absent, when an exact session exclusion already decides No, or
+// when neither project entries nor branch exclusions can affect the answer.
+// Callers that skip resolution must still take the decision from a canonical
+// Match method; this only avoids work that cannot change it.
 func (m SelectionMatcher) DiscoveryNeedsGit(harness Harness, sessionID SessionID) bool {
 	selected, ok := m.harnesses[harness.String()]
-	if !ok || len(selected.projects) == 0 {
+	if !ok || selected.sessionExclusions[string(sessionID)] {
+		return false
+	}
+	if len(selected.branchExclusions) > 0 {
+		return true
+	}
+	if len(selected.projects) == 0 {
 		return false
 	}
 	return !selected.sessions[string(sessionID)]
@@ -676,7 +774,8 @@ func (m SelectionMatcher) DiscoveryNeedsGit(harness Harness, sessionID SessionID
 type BranchMatch int
 
 const (
-	// BranchMatchNo means no project/session rule selects the session.
+	// BranchMatchNo means no positive rule selects the session or an exact
+	// denial overrides the positive result.
 	BranchMatchNo BranchMatch = iota
 	// BranchMatchYes means the session is selected.
 	BranchMatchYes
@@ -688,15 +787,16 @@ const (
 	BranchMatchWithheldConflict
 )
 
-// MatchBranch is the branch-aware counterpart to Matches, consulted ONLY by the
-// push path (via PushSessionRow.IsSelectedByBranch). Ingest and prune keep using
-// the project-level Matches, so their behavior is unchanged by this method.
+// MatchBranch is the positional branch-aware counterpart to Matches. It cannot
+// apply exact branch exclusions because a positional call has no physical clone
+// path. Clone-aware consumers must call MatchBranchCandidate.
 //
 // A project "admits" a session when its branch set is empty (all branches), the
 // session's branch is unknown (""), or the branch is in the set. With multiple
 // matching projects the results combine AND-strict: unanimous-admit → Yes;
 // unanimous-reject → No; disagreement → WithheldConflict. The explicit
-// session-ID allowlist and the no-restriction-harness case select unconditionally.
+// session-ID allowlist and the no-restriction-harness case establish positive
+// admission before exact denials are applied.
 func (m SelectionMatcher) MatchBranch(harness Harness, gitRemote, projectName, gitBranch string, sessionID SessionID) BranchMatch {
 	return m.MatchBranchCandidate(DiscoveryCandidate{
 		Harness:            harness,
@@ -734,7 +834,7 @@ func (m SelectionMatcher) MatchDiscovery(harness Harness, gitRemote, projectName
 
 // MatchDiscoveryCandidate is the authoritative discovery matcher. It uses
 // explicit session ID, exact physical clone path, unique remote, then unique
-// project name evidence, in that order.
+// project name evidence, in that order, and applies exact denials last.
 func (m SelectionMatcher) MatchDiscoveryCandidate(candidate DiscoveryCandidate, autoNewBranches bool) BranchMatch {
 	return m.MatchDiscoveryCandidateDecision(candidate, autoNewBranches).Match
 }
@@ -753,8 +853,9 @@ func (m SelectionMatcher) MatchDiscoveryDecision(harness Harness, gitRemote, pro
 	}, autoNewBranches)
 }
 
-// MatchDiscoveryCandidateDecision returns the authoritative candidate result
-// together with the configured entries that caused it.
+// MatchDiscoveryCandidateDecision returns the authoritative candidate result.
+// Positive project decisions include the configured entries that caused them;
+// an exact denial returns BranchMatchNo without a conflicting-entry diagnosis.
 func (m SelectionMatcher) MatchDiscoveryCandidateDecision(candidate DiscoveryCandidate, autoNewBranches bool) DiscoveryDecision {
 	return m.decideCandidate(candidate, branchPolicy{autoAdmitNewBranches: autoNewBranches})
 }
@@ -778,45 +879,42 @@ func (m SelectionMatcher) decideCandidate(candidate DiscoveryCandidate, policy b
 		return DiscoveryDecision{Match: BranchMatchNo} // harness not in selection
 	}
 
+	decision := DiscoveryDecision{}
 	// Harness present with no restrictions → select all for this harness.
 	if len(pm.projects) == 0 && len(pm.sessions) == 0 {
-		return DiscoveryDecision{Match: BranchMatchYes}
+		decision.Match = BranchMatchYes
+	} else if pm.sessions[string(candidate.SessionID)] {
+		// Explicit session ID allowlist → selected before exact denials.
+		decision.Match = BranchMatchYes
+	} else {
+		projects := matchingProjects(pm.projects, candidate)
+		for _, proj := range projects {
+			admitted := proj.admitsBranch(candidate.Branch)
+			if len(proj.branches) > 0 && candidate.Branch == "" && !policy.admitUnknownBranch {
+				admitted = false
+			}
+			if len(proj.branches) > 0 && candidate.Branch != "" && policy.autoAdmitNewBranches {
+				admitted = true
+			}
+			if admitted {
+				decision.Admitting = append(decision.Admitting, proj.entry)
+			} else {
+				decision.Rejecting = append(decision.Rejecting, proj.entry)
+			}
+		}
+		switch {
+		case len(decision.Admitting) == 0 && len(decision.Rejecting) == 0:
+			decision.Match = BranchMatchNo // no entry identifies the session
+		case len(decision.Rejecting) == 0:
+			decision.Match = BranchMatchYes // all matching projects admit
+		case len(decision.Admitting) == 0:
+			decision.Match = BranchMatchNo // all matching projects reject
+		default:
+			decision.Match = BranchMatchWithheldConflict // matching projects disagree
+		}
 	}
-
-	// Explicit session ID allowlist → selected, branch-independent.
-	if pm.sessions[string(candidate.SessionID)] {
-		return DiscoveryDecision{Match: BranchMatchYes}
-	}
-
-	projects := matchingProjects(pm.projects, candidate)
-	if len(projects) == 0 {
+	if pm.excludesCandidate(candidate) {
 		return DiscoveryDecision{Match: BranchMatchNo}
-	}
-
-	decision := DiscoveryDecision{}
-	for _, proj := range projects {
-		admitted := proj.admitsBranch(candidate.Branch)
-		if len(proj.branches) > 0 && candidate.Branch == "" && !policy.admitUnknownBranch {
-			admitted = false
-		}
-		if len(proj.branches) > 0 && candidate.Branch != "" && policy.autoAdmitNewBranches {
-			admitted = true
-		}
-		if admitted {
-			decision.Admitting = append(decision.Admitting, proj.entry)
-		} else {
-			decision.Rejecting = append(decision.Rejecting, proj.entry)
-		}
-	}
-	switch {
-	case len(decision.Admitting) == 0 && len(decision.Rejecting) == 0:
-		decision.Match = BranchMatchNo // no entry identifies the session
-	case len(decision.Rejecting) == 0:
-		decision.Match = BranchMatchYes // all matching projects admit
-	case len(decision.Admitting) == 0:
-		decision.Match = BranchMatchNo // all matching projects reject
-	default:
-		decision.Match = BranchMatchWithheldConflict // matching projects disagree
 	}
 	return decision
 }

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -104,6 +105,14 @@ func CompileSelectionMatcher(selection SelectionConfig) ingest.SelectionMatcher 
 		}
 		for _, sessionID := range selected.Sessions {
 			b.AddSession(harness, sessionID)
+		}
+		if selection.Mode == SelectionModeSelected {
+			for _, excluded := range selected.Exclusions.Branches {
+				b.AddBranchExclusion(harness, excluded.ClonePath, excluded.Branches...)
+			}
+			for _, sessionID := range selected.Exclusions.Sessions {
+				b.AddSessionExclusion(harness, sessionID)
+			}
 		}
 	}
 	return b.Build()
@@ -396,16 +405,35 @@ type ProjectSelection struct {
 	Branches []string `yaml:"branches,omitempty"`
 }
 
-// SelectionHarnessConfig holds the selection allowlist for one harness.
+// BranchExclusion identifies branches denied for one exact physical clone.
+type BranchExclusion struct {
+	// ClonePath is the resolved absolute physical path for the local clone.
+	ClonePath string `yaml:"clonePath"`
+	// Branches lists exact branch names denied for this clone.
+	Branches []string `yaml:"branches"`
+}
+
+// SelectionExclusions holds exact denials for one harness.
+type SelectionExclusions struct {
+	// Branches denies branches only for their exact physical clone path.
+	Branches []BranchExclusion `yaml:"branches,omitempty"`
+	// Sessions denies exact session IDs for this harness.
+	Sessions []string `yaml:"sessions,omitempty"`
+}
+
+// SelectionHarnessConfig holds positive selection and exact exclusions for one harness.
 type SelectionHarnessConfig struct {
 	// Projects lists the allowed projects (by git remote or name).
 	Projects []ProjectSelection `yaml:"projects,omitempty"`
 	// Sessions lists explicitly allowed session IDs (for session-level picks
 	// that don't fit into project grouping).
 	Sessions []string `yaml:"sessions,omitempty"`
+	// Exclusions lists exact branch and session denials applied after positive
+	// selection. Exclusions are valid only in selected mode.
+	Exclusions SelectionExclusions `yaml:"exclusions,omitempty"`
 }
 
-// SelectionConfig controls which projects/branches/sessions are ingested.
+// SelectionConfig controls which projects, branches, and sessions are ingested.
 // Persisted from kickstart wizard selections and used by peasant ingest to filter.
 type SelectionConfig struct {
 	// Mode controls whether the selection filter is active.
@@ -854,10 +882,247 @@ func validate(cfg *Config) error {
 				"        claude-code:\n" +
 				"          projects: [...]")
 	}
+	if err := validateSelectionExclusions(cfg.Selection); err != nil {
+		return err
+	}
 
 	// Validate display config.
 	if cfg.Display.Theme != "" && !cfg.Display.Theme.IsValid() {
 		return fmt.Errorf("config: unknown display.theme %q (valid: dark, light)", cfg.Display.Theme)
 	}
 	return nil
+}
+
+func validateSelectionExclusions(selection SelectionConfig) error {
+	harnessNames := make([]string, 0, len(selection.Harnesses))
+	for harness := range selection.Harnesses {
+		harnessNames = append(harnessNames, harness)
+	}
+	sort.Strings(harnessNames)
+
+	for _, harness := range harnessNames {
+		exclusions := selection.Harnesses[harness].Exclusions
+		if len(exclusions.Branches) == 0 && len(exclusions.Sessions) == 0 {
+			continue
+		}
+		harnessPath := fmt.Sprintf("selection.harnesses[%q]", harness)
+		if selection.Mode != SelectionModeSelected {
+			return newSelectionExclusionValidationError(
+				harnessPath+".exclusions",
+				"exact exclusions cannot be used",
+				fmt.Sprintf("selection.mode is %q instead of %q", selection.Mode, SelectionModeSelected),
+				"set selection.mode to selected or remove the exclusions",
+				nil,
+			)
+		}
+		if strings.TrimSpace(harness) == "" {
+			return newSelectionExclusionValidationError(
+				harnessPath,
+				"the harness name is empty",
+				"an exact exclusion needs a harness identity",
+				"move the exclusions under a supported non-empty harness key",
+				nil,
+			)
+		}
+		if !ingest.Harness(harness).IsKnown() {
+			return newSelectionExclusionValidationError(
+				harnessPath,
+				fmt.Sprintf("harness %q is not supported", harness),
+				"an exact exclusion can only match a known ingestion harness",
+				"use a supported harness key or remove the exclusions",
+				nil,
+			)
+		}
+
+		seenSessions := make(map[string]int, len(exclusions.Sessions))
+		for index, rawSessionID := range exclusions.Sessions {
+			fieldPath := fmt.Sprintf("%s.exclusions.sessions[%d]", harnessPath, index)
+			if rawSessionID == "" {
+				return newSelectionExclusionValidationError(
+					fieldPath,
+					"the session ID is empty",
+					"empty text cannot identify one stored session",
+					"set a valid session UUID or remove this entry",
+					nil,
+				)
+			}
+			if strings.TrimSpace(rawSessionID) != rawSessionID {
+				return newSelectionExclusionValidationError(
+					fieldPath,
+					fmt.Sprintf("session ID %q is not normalized", rawSessionID),
+					"leading or trailing whitespace prevents an exact session match",
+					"remove the surrounding whitespace and retry",
+					nil,
+				)
+			}
+			if _, err := ingest.NewSessionID(rawSessionID); err != nil {
+				return newSelectionExclusionValidationError(
+					fieldPath,
+					fmt.Sprintf("session ID %q is malformed", rawSessionID),
+					"the value is not a valid session identifier",
+					"copy the exact session UUID from Peasant or remove this entry",
+					err,
+				)
+			}
+			if firstIndex, duplicate := seenSessions[rawSessionID]; duplicate {
+				return newSelectionExclusionValidationError(
+					fieldPath,
+					fmt.Sprintf("the session ID duplicates sessions[%d]", firstIndex),
+					"one exact session denial must appear only once per harness",
+					"remove the duplicate session entry",
+					nil,
+				)
+			}
+			seenSessions[rawSessionID] = index
+		}
+
+		seenClonePaths := make(map[string]int, len(exclusions.Branches))
+		for exclusionIndex, exclusion := range exclusions.Branches {
+			rowPath := fmt.Sprintf("%s.exclusions.branches[%d]", harnessPath, exclusionIndex)
+			clonePathField := rowPath + ".clonePath"
+			switch {
+			case exclusion.ClonePath == "":
+				return newSelectionExclusionValidationError(
+					clonePathField,
+					"the clone path is empty",
+					"a branch denial needs one exact physical clone identity",
+					"set the resolved absolute clone path or remove this entry",
+					nil,
+				)
+			case strings.TrimSpace(exclusion.ClonePath) != exclusion.ClonePath:
+				return newSelectionExclusionValidationError(
+					clonePathField,
+					fmt.Sprintf("clone path %q is not normalized", exclusion.ClonePath),
+					"leading or trailing whitespace prevents an exact physical path match",
+					"remove the surrounding whitespace and use the resolved absolute path",
+					nil,
+				)
+			case !filepath.IsAbs(exclusion.ClonePath):
+				return newSelectionExclusionValidationError(
+					clonePathField,
+					fmt.Sprintf("clone path %q is not absolute", exclusion.ClonePath),
+					"a relative path does not provide stable physical clone identity",
+					"replace it with the resolved absolute clone path",
+					nil,
+				)
+			case filepath.Clean(exclusion.ClonePath) != exclusion.ClonePath:
+				return newSelectionExclusionValidationError(
+					clonePathField,
+					fmt.Sprintf("clone path %q is not clean", exclusion.ClonePath),
+					"dot segments or redundant separators do not provide canonical physical identity",
+					fmt.Sprintf("replace it with %q", filepath.Clean(exclusion.ClonePath)),
+					nil,
+				)
+			}
+			if firstIndex, duplicate := seenClonePaths[exclusion.ClonePath]; duplicate {
+				return newSelectionExclusionValidationError(
+					clonePathField,
+					fmt.Sprintf("the clone path duplicates branches[%d].clonePath", firstIndex),
+					"one exact clone must have one branch exclusion row per harness",
+					"merge the branch names into the first row and remove this duplicate",
+					nil,
+				)
+			}
+			seenClonePaths[exclusion.ClonePath] = exclusionIndex
+			if len(exclusion.Branches) == 0 {
+				return newSelectionExclusionValidationError(
+					rowPath+".branches",
+					"the branch list is empty",
+					"the row does not identify any exact branch to deny",
+					"add at least one branch name or remove this row",
+					nil,
+				)
+			}
+			seenBranches := make(map[string]int, len(exclusion.Branches))
+			for branchIndex, branch := range exclusion.Branches {
+				fieldPath := fmt.Sprintf("%s.branches[%d]", rowPath, branchIndex)
+				normalized := strings.TrimSpace(branch)
+				switch {
+				case branch == "":
+					return newSelectionExclusionValidationError(
+						fieldPath,
+						"the branch name is empty",
+						"empty text cannot identify one Git branch",
+						"set the exact case-sensitive branch name or remove this entry",
+						nil,
+					)
+				case normalized != branch:
+					return newSelectionExclusionValidationError(
+						fieldPath,
+						fmt.Sprintf("branch name %q is not normalized", branch),
+						"leading or trailing whitespace prevents an exact branch match",
+						fmt.Sprintf("replace it with %q", normalized),
+						nil,
+					)
+				}
+				if reason := invalidGitBranchReason(branch); reason != "" {
+					return newSelectionExclusionValidationError(
+						fieldPath,
+						fmt.Sprintf("branch name %q is not a valid Git branch name", branch),
+						reason,
+						"use the exact branch name reported by Git or remove this entry",
+						nil,
+					)
+				}
+				if firstIndex, duplicate := seenBranches[branch]; duplicate {
+					return newSelectionExclusionValidationError(
+						fieldPath,
+						fmt.Sprintf("the branch name duplicates branches[%d]", firstIndex),
+						"one exact branch denial must appear only once per clone",
+						"remove the duplicate branch name",
+						nil,
+					)
+				}
+				seenBranches[branch] = branchIndex
+			}
+		}
+	}
+	return nil
+}
+
+func invalidGitBranchReason(branch string) string {
+	switch {
+	case branch == "@":
+		return "Git reserves the single at-sign ref name"
+	case strings.HasPrefix(branch, "-"):
+		return "Git branch shorthand cannot start with a hyphen"
+	case strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/"):
+		return "Git branch names cannot start or end with a slash"
+	case strings.Contains(branch, "//"):
+		return "Git branch names cannot contain consecutive slashes"
+	case strings.Contains(branch, ".."):
+		return "Git branch names cannot contain two consecutive dots"
+	case strings.Contains(branch, "@{"):
+		return "Git branch names cannot contain the reflog sequence @{"
+	case strings.HasSuffix(branch, "."):
+		return "Git branch names cannot end with a dot"
+	}
+	for _, component := range strings.Split(branch, "/") {
+		if strings.HasPrefix(component, ".") {
+			return "Git branch path components cannot start with a dot"
+		}
+		if strings.HasSuffix(strings.ToLower(component), ".lock") {
+			return "Git branch path components cannot end with .lock"
+		}
+	}
+	for _, character := range branch {
+		if character <= ' ' || character == 0x7f || strings.ContainsRune("~^:?*[\\", character) {
+			return fmt.Sprintf("Git branch names cannot contain character %q", character)
+		}
+	}
+	return ""
+}
+
+func newSelectionExclusionValidationError(fieldPath, what, why, fix string, cause error) error {
+	message := fmt.Sprintf(
+		"config: %s: what: %s; why: %s; where: selection validation in internal/config/config.go; when: while loading exact selection exclusions; meaning: Peasant did not load the selection because this denial cannot be applied exactly; fix: %s",
+		fieldPath,
+		what,
+		why,
+		fix,
+	)
+	if cause == nil {
+		return errors.New(message)
+	}
+	return fmt.Errorf("%s: %w", message, cause)
 }
