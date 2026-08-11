@@ -1,20 +1,21 @@
-package main
+package peasant
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"runtime"
+	"path"
 	"strings"
 	"testing"
 	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed README.md docs/KICKSTART.md docs/install/arch.md docs/install/macos.md docs/install/nix.md docs/install/ubuntu.md docs/install/wsl.md
+var installGuidanceProductionFiles embed.FS
 
 //go:embed testdata/install_guidance.yaml
 var installGuidanceFixtureYAML []byte
@@ -137,24 +138,22 @@ func TestInstallGuidanceProductionFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := installGuidanceRepoRoot(t)
 	for _, row := range fixture.Guides {
 		row := row
 		t.Run(row.Name, func(t *testing.T) {
 			t.Parallel()
-			guidePath := filepath.Join(root, filepath.FromSlash(row.Path))
-			contentBytes, err := os.ReadFile(guidePath)
+			contentBytes, err := installGuidanceProductionFiles.ReadFile(row.Path)
 			if err != nil {
 				t.Fatalf("read handwritten install guide %q: %v", row.Path, err)
 			}
 			content := string(contentBytes)
 			assertVersionLeadsToKickstart(t, content, row)
 			assertReinstallGuidance(t, content, row)
-			assertKickstartLink(t, root, guidePath, content, row)
+			assertKickstartLink(t, content, row)
 		})
 	}
 
-	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	readme, err := installGuidanceProductionFiles.ReadFile("README.md")
 	if err != nil {
 		t.Fatalf("read README: %v", err)
 	}
@@ -165,15 +164,6 @@ func TestInstallGuidanceProductionFiles(t *testing.T) {
 	if !strings.Contains(readmeText, "docs/kickstart.md") {
 		t.Fatal("README no longer links the kickstart guide")
 	}
-}
-
-func installGuidanceRepoRoot(t *testing.T) string {
-	t.Helper()
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate install guidance test source")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
 }
 
 func assertVersionLeadsToKickstart(t *testing.T, content string, row installGuidanceFixtureRow) {
@@ -276,7 +266,7 @@ func findInstallGuidanceSection(content string, markers ...string) string {
 	return strings.Join(lines[start:end], "\n")
 }
 
-func assertKickstartLink(t *testing.T, root, guidePath, content string, row installGuidanceFixtureRow) {
+func assertKickstartLink(t *testing.T, content string, row installGuidanceFixtureRow) {
 	t.Helper()
 	if !strings.Contains(content, "]("+row.KickstartLink+")") {
 		t.Fatalf("guide does not link the kickstart rerun/reset boundary %q", row.KickstartLink)
@@ -286,12 +276,11 @@ func assertKickstartLink(t *testing.T, root, guidePath, content string, row inst
 	if targetPath == "" || fragment == "" {
 		t.Fatalf("fixture link %q must include a relative target and a fragment", row.KickstartLink)
 	}
-	resolved := filepath.Clean(filepath.Join(filepath.Dir(guidePath), filepath.FromSlash(targetPath)))
-	relativeToDocs, err := filepath.Rel(filepath.Join(root, "docs"), resolved)
-	if err != nil || relativeToDocs == ".." || strings.HasPrefix(relativeToDocs, ".."+string(filepath.Separator)) {
+	resolved := path.Clean(path.Join(path.Dir(row.Path), targetPath))
+	if resolved == "docs" || !strings.HasPrefix(resolved, "docs/") {
 		t.Fatalf("fixture link %q escapes the docs tree", row.KickstartLink)
 	}
-	targetBytes, err := os.ReadFile(resolved)
+	targetBytes, err := installGuidanceProductionFiles.ReadFile(resolved)
 	if err != nil {
 		t.Fatalf("resolve kickstart link %q from %q: %v", row.KickstartLink, row.Path, err)
 	}
