@@ -1,16 +1,16 @@
 expectedCaseCount: 9
 expectedCaseNames:
-  - overlap-groups-stored-clones-and-preserves-exclusions
-  - same-remote-different-policies-stay-separate
+  - overlap-unions-stored-clones-and-preserves-exclusions
+  - unrestricted-rule-dominates-and-groups-stored-clones
   - non-git-same-name-clones-remain-separate
-  - disjoint-rules-remove-pathless-harness-with-only-exclusions
+  - disjoint-rules-retain-stored-clone-with-union
   - remote-precedence-and-asymmetric-missing-remote-fallback
   - exact-cohort-splits-residual-and-preserves-outside-shape
   - unresolved-rows-add-only-canonical-yes-after-exclusions
   - failed-worktree-does-not-use-canonical-fallback
   - exact-selected-input-is-field-equivalent-without-resolution
 cases:
-  - name: overlap-groups-stored-clones-and-preserves-exclusions
+  - name: overlap-unions-stored-clones-and-preserves-exclusions
     expectedStoredCount: 3
     expectedResolverCallCount: 3
     current:
@@ -40,14 +40,14 @@ cases:
           projects:
             - gitRemote: github.com/acme/tool
               clonePaths: [/fixtures/team-a/tool, /fixtures/team-b/tool]
-              branches: [main]
+              branches: [dev, main, release]
           sessions: [10000000-0000-4000-8000-000000000001]
           exclusions:
             branches:
               - {clonePath: /fixtures/team-a/tool, branches: [blocked]}
             sessions: [10000000-0000-4000-8000-000000000009]
 
-  - name: same-remote-different-policies-stay-separate
+  - name: unrestricted-rule-dominates-and-groups-stored-clones
     expectedStoredCount: 2
     expectedResolverCallCount: 2
     current:
@@ -69,8 +69,7 @@ cases:
       harnesses:
         claude-code:
           projects:
-            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/alpha], branches: [main]}
-            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/beta], branches: [release]}
+            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/alpha, /fixtures/beta]}
 
   - name: non-git-same-name-clones-remain-separate
     expectedStoredCount: 2
@@ -95,7 +94,7 @@ cases:
             - {name: app, clonePaths: [/fixtures/team-a/app]}
             - {name: app, clonePaths: [/fixtures/team-b/app]}
 
-  - name: disjoint-rules-remove-pathless-harness-with-only-exclusions
+  - name: disjoint-rules-retain-stored-clone-with-union
     expectedStoredCount: 1
     expectedResolverCallCount: 1
     current:
@@ -114,6 +113,12 @@ cases:
     expected:
       mode: selected
       autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/disjoint/tool], branches: [main, release]}
+          exclusions:
+            sessions: [50000000-0000-4000-8000-000000000009]
 
   - name: remote-precedence-and-asymmetric-missing-remote-fallback
     expectedStoredCount: 3
@@ -182,7 +187,7 @@ cases:
               name: raw-name
               clonePaths: [/fixtures/residual/b]
               branches: [dev, main]
-            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/cohort/a], branches: [main]}
+            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/cohort/a], branches: [dev, main, release]}
             - name: untouched
               clonePaths: [/fixtures/outside/c]
               branches: []

@@ -94,7 +94,9 @@ func ConvertLegacyAll(
 // The transform is in-memory only. The caller installs the result in a Draft,
 // and Draft.Commit remains the only persistence boundary. A selected config that
 // has no pathless project rules is returned as a defensive field-equivalent copy
-// without consulting the resolver.
+// without consulting the resolver. Matching saved branch lists are unioned for
+// each migrated stored clone; one matching unrestricted rule makes that clone
+// unrestricted.
 func ConvertLegacySelected(
 	current config.SelectionConfig,
 	stored []store.IngestedSessionRow,
@@ -168,7 +170,6 @@ type legacySelectedCohort struct {
 	rows     []store.IngestedSessionRow
 	rules    []config.ProjectSelection
 	branches []string
-	admitted bool
 }
 
 func buildLegacySelectedCohorts(
@@ -206,7 +207,7 @@ func buildLegacySelectedCohorts(
 				cohort.rules = append(cohort.rules, cloneLegacyProjectSelection(project))
 			}
 		}
-		cohort.branches, cohort.admitted = intersectLegacySelectedBranches(cohort.rules)
+		cohort.branches = unionLegacySelectedBranches(cohort.rules)
 	}
 	return cohorts
 }
@@ -240,40 +241,15 @@ func legacyProjectContainsPath(project config.ProjectSelection, clonePath string
 	return false
 }
 
-func intersectLegacySelectedBranches(rules []config.ProjectSelection) ([]string, bool) {
-	var intersection map[string]struct{}
-	restricted := false
+func unionLegacySelectedBranches(rules []config.ProjectSelection) []string {
+	var branches []string
 	for _, rule := range rules {
 		if len(rule.Branches) == 0 {
-			continue
+			return nil
 		}
-		branches := make(map[string]struct{}, len(rule.Branches))
-		for _, branch := range rule.Branches {
-			branches[branch] = struct{}{}
-		}
-		if !restricted {
-			intersection = branches
-			restricted = true
-			continue
-		}
-		for branch := range intersection {
-			if _, present := branches[branch]; !present {
-				delete(intersection, branch)
-			}
-		}
+		branches = append(branches, rule.Branches...)
 	}
-	if !restricted {
-		return nil, true
-	}
-	if len(intersection) == 0 {
-		return nil, false
-	}
-	branches := make([]string, 0, len(intersection))
-	for branch := range intersection {
-		branches = append(branches, branch)
-	}
-	sort.Strings(branches)
-	return branches, true
+	return canonicalLegacySelectedBranches(branches)
 }
 
 type legacySelectedCanonicalKey struct {
@@ -298,10 +274,6 @@ func buildLegacySelectedCanonicalProjects(
 			cohortPaths[harness] = map[string]struct{}{}
 		}
 		cohortPaths[harness][cohort.identity.ClonePath.String()] = struct{}{}
-		if !cohort.admitted {
-			continue
-		}
-
 		key, selection := legacySelectedCanonicalIdentity(cohort)
 		key.policy = legacySelectedPolicyKey(cohort.branches)
 		if grouped[harness] == nil {

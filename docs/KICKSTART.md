@@ -77,11 +77,16 @@ An old `selection.mode: selected` entry can identify a project by name or Git re
 store. It migrates every matching stored physical clone to exact paths. A matching clone found only
 by the current scanner starts clear.
 
-When several pathless rules match one stored clone, Peasant intersects their finite branch lists.
-An unrestricted rule does not widen a finite rule. If no branch satisfies all matching rules,
-Peasant omits that clone. Same-remote Git clones share one entry only when their effective branch
-policy is equal. Unresolved stored sessions remain exact session choices only when the combined
-branch policy admits them.
+When several saved rules apply to one matching stored clone, Peasant unions their branch lists,
+removes duplicates, and sorts the result. For example, `[dev, main]` plus `[main, release]` becomes
+`[dev, main, release]`. Disjoint lists such as `[main]` and `[release]` retain the clone with both
+branches. If any matching rule has no branch list, the migrated clone remains unrestricted. An
+already path-bound rule for that stored clone also contributes its saved branches while kickstart
+canonicalizes the cohort.
+
+Same-remote Git clones share one entry only when their resulting branch unions are equal. Unresolved
+stored sessions remain exact session choices only when the canonical positive matcher admits them
+after exact exclusions.
 
 This migration runs in memory before the project editor opens. Peasant writes the exact paths only
 after you confirm the final save. No, Back, quit, or cancel leaves the old file unchanged.
