@@ -117,11 +117,11 @@ func runKickstartFlow(
 	return deps.runFlow(model)
 }
 
-// prepareKickstartFlowConfig replaces a legacy mode-all policy only in the
-// in-memory draft baseline. It receives the same complete stored-session
-// snapshot the save gate uses, builds exact physical project choices through
-// kickstart.ConvertLegacyAll, and carries unresolved stored session IDs into the
-// selected-mode baseline. The config file is not changed here.
+// prepareKickstartFlowConfig replaces legacy mode-all and pathless selected-mode
+// policies only in the in-memory draft baseline. It receives the same complete
+// stored-session snapshot the save gate uses. Mode all also consults the scanner
+// cohort; selected migration deliberately does not, so scanner-only sibling
+// clones stay clear. The config file is not changed here.
 // settings.Draft.Commit remains the only write, after the user reviews and saves
 // the flow.
 func prepareKickstartFlowConfig(
@@ -130,6 +130,15 @@ func prepareKickstartFlowConfig(
 	stored []store.IngestedSessionRow,
 	resolver ingest.PathIdentityResolver,
 ) (*config.Config, error) {
+	if loaded.Selection.Mode == config.SelectionModeSelected && hasPathlessSelectedProject(loaded.Selection) {
+		selection, err := kickstart.ConvertLegacySelected(loaded.Selection, stored, resolver)
+		if err != nil {
+			return nil, err
+		}
+		converted := *loaded
+		converted.Selection = selection
+		return &converted, nil
+	}
 	if loaded.Selection.Mode != config.SelectionModeAll {
 		return loaded, nil
 	}
@@ -152,6 +161,20 @@ func prepareKickstartFlowConfig(
 	converted := *loaded
 	converted.Selection = selection
 	return &converted, nil
+}
+
+func hasPathlessSelectedProject(selection config.SelectionConfig) bool {
+	if selection.Mode != config.SelectionModeSelected {
+		return false
+	}
+	for _, configured := range selection.Harnesses {
+		for _, project := range configured.Projects {
+			if len(project.ClonePaths) == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func readKickstartStoredSessions(ctx context.Context, db *store.Store) ([]store.IngestedSessionRow, error) {
