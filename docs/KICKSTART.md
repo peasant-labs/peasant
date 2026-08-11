@@ -1,109 +1,138 @@
-# Kickstart wizard
+# Kickstart
 
-`peasant kickstart` mounts Peasant's project-first local-to-Village onboarding flow. It discovers
-transcripts from the configured harness paths, lets you choose work by project, saves the reviewed
-configuration, ingests the exact selected sessions, and can publish them to Village.
+`peasant kickstart` opens Peasant's guided local setup flow. It discovers recorded agent sessions,
+walks through the canonical settings one section at a time, saves once after review, and then imports
+the selected sessions into the local Peasant store.
+
+Kickstart never publishes a transcript. Sharing remains a separate, explicit action.
 
 ```bash
 peasant kickstart
 peasant kickstart --reset
 ```
 
+`peasant ftue` is an alias for the same command. Kickstart currently starts only when invoked; the
+bare `peasant` command does not automatically open it.
+
+## Guided flow
+
+Discovery runs before the interactive screen. The guided flow then presents:
+
+1. **Village connection:** connect now or continue locally. A machine with valid credentials skips
+   this prompt. Connecting only authenticates the machine; publishing stays explicit and opt-in.
+2. **Transcript selection:** choose all recorded sessions or narrow the project-first tree by project,
+   branch, or session. The harness facet filters the same tree without redefining the selection.
+3. **New branches:** for a narrowed selection, choose whether future branches in fully selected
+   projects should be imported automatically. This section is hidden when all sessions are selected.
+4. **Privacy:** review synthetic examples processed by the real Standard redactor used before a later
+   explicit publication. Each canonical category leads a tokenized diff: `- before:` marks removed
+   input and `+ after:` marks replacement output, so color is never the only distinction. Local
+   imports remain original unless you explicitly run `peasant redact`. If kickstart cannot validate
+   an example, it withholds that unverified output and displays an actionable error; the settings flow
+   remains available.
+5. **Content license:** choose the default license for a later explicit share. No license is the
+   default, and saving any default does not publish anything.
+6. **Sharing visibility:** when connected to a Village, choose the default visibility for later
+   explicit pushes. A disconnected flow offers an optional login at this boundary before continuing
+   locally without the visibility section. Login keeps the buffered selection, filters, tree position,
+   and preview focus in place, and publishes nothing.
+7. **Claude retention:** when Claude Code sessions were discovered, choose how long Claude Code keeps
+   its local transcript files.
+8. **Review and save:** review every visible buffered value and the promised local effects, then
+   confirm one config commit. The consent summary states that kickstart publishes nothing.
+
+Where a section includes narrative guidance, it shows its setting heading first, then its short guide
+band and field description, then the control. Background-bearing guide and diff rows fill the complete
+available line in both themes. Conditional sections and their guidance disappear together. The fields,
+validation, and persisted values are the same canonical definitions used by the dense config editor.
+
+On the transcript-selection step, the left pane is the project tree and the right pane previews the
+highlighted session. An imported session is read through the same local-store path used by the
+transcript viewer. A session that has not been imported yet is identified as such rather than shown
+as an empty recording.
+
+Changing selection controls future discovery and import lists. It does not delete sessions already in
+the local store and does not remove copies shared previously.
+
+## Save, retention, and local import
+
+Kickstart buffers edits in a draft. Moving between sections writes nothing. The final confirmation:
+
+1. drops edits from settings that became hidden;
+2. validates every visible field;
+3. atomically commits the resolved configuration file, rejecting concurrent changes;
+4. applies the selected Claude retention value when that section was offered; and
+5. runs the existing local ingest path over the committed selection.
+
+The order is config first, Claude retention second, local import third. There is no push client,
+publisher, publication receipt, or background sharing step in this path.
+
+Local import preserves the original recorded transcript content. The configured privacy level protects
+a later explicit publication; use `peasant redact` when you intentionally want to rewrite local data.
+
+While local import runs, kickstart names the real import stages and shows elapsed time. It only offers
+a qualified estimate when completed bounded work supports one. The completion screen remains visible
+until you explicitly leave it. If import fails, the committed configuration and any applied retention
+setting remain in force; retry reruns only local import and does not recommit or reapply either setting.
+
+After a successful import, the completion screen reports that kickstart published nothing and introduces
+the command list with: "these useful next steps let you modify config, open the local dashboard,
+connect to a village, or explicitly publish later; kickstart runs none of them."
+
+```text
+peasant config
+peasant web start
+peasant village login
+peasant village push
+```
+
+`peasant config` opens the interactive settings editor without importing or publishing. `peasant web
+start` reports the real local address when it starts, so kickstart does not invent a localhost URL.
+Village login and push remain separate, explicit actions.
+
+Pressing `esc` or `q` opens a leave-without-saving confirmation. Confirming that exit leaves the config
+and Claude settings bytes unchanged and does not run local ingest.
+
+## Dense config editor
+
+Use `peasant config` when setup guidance is not needed. `peasant settings` is an alias for the same
+dense section-navigation screen. It mounts the same registry and fields as kickstart but intentionally
+does not render the guide bands.
+
+The config editor saves with `ctrl+s`, confirms discard on exit, and never imports or shares sessions.
+If its Claude retention value changed, it commits config first and writes retention once afterward.
+See [TUI keyboard shortcuts](TUI.md#config-screen) for its controls.
+
+## Keyboard controls
+
+| Action | Keys |
+|--------|------|
+| Move within a field | `arrow keys` or `j` / `k` where offered |
+| Toggle or select | `space` |
+| Next guided section | `tab` |
+| Previous guided section | `shift+tab` |
+| Confirm final review | `enter` |
+| Leave without saving | `esc` or `q`, then confirm |
+| Show or close help | `?` |
+
+In the selection tree, use left/right or `h`/`l` to collapse and expand, `f` to cycle the harness view,
+and `/` to start filtering. Type a query and press `enter` to keep the filter or `esc` to clear it.
+The page and jump keys are shown in the footer. `ctrl+l` moves focus to the preview pane and `ctrl+h`
+returns focus to the tree.
+
+## Reset and standalone boundaries
+
 `--reset` removes Peasant configuration, credentials, database, ingested data, and state before
-starting again. Without `--reset`, kickstart loads the resolved `--config` or `--config-dir` file and
-mutates that configuration. Unrelated settings, custom source paths, and other loaded values are
-preserved; kickstart does not rebuild the file from defaults or silently write a different path.
+starting kickstart again. Without `--reset`, kickstart loads the resolved `--config` or `--config-dir`
+file and preserves unrelated settings and custom paths.
 
-## Mounted flow
+Other lifecycle actions remain separate:
 
-Discovery diagnostics run before the interactive pages. Each operational harness reports its
-discovered count. A failed or unavailable harness reports the real problem and cannot be selected;
-it is not presented as an honest zero-session result.
-
-The mounted journey is:
-
-1. Choose Village authentication or stay local.
-2. Select projects in the two-pane project picker. Untracked projects are on the left, tracked
-   projects are on the right, and one search field remains above both panes. Sessions from different
-   harnesses share one project row when they have the same canonical project identity. Kickstart
-   focuses the project containing the invocation directory when it can identify one.
-3. Narrow scope in one two-column page. The left column is **Project -> Branch -> Session** and the
-   right column is the single global **Harnesses** filter. Harness filtering intersects the selected
-   project scope; it does not erase or widen branch/session choices.
-4. Choose whether newly discovered branches in fully selected projects should be included later.
-5. Review the Standard redaction explanation and choose the schema-owned content license.
-6. Optionally update Claude Code transcript retention.
-7. Choose local-only, private Village publication, or public Village publication. Private is the
-   default. Public requires acknowledgement that downloaded copies cannot be recalled and Creative
-   Commons grants remain irrevocable.
-8. Review the complete selection and give final consent.
-9. Run the ordered journey and review its completion receipt or exact retry targets.
-
-Changing project selection controls future discovery. It does not delete already stored transcripts
-and does not delete or unpublish Village copies.
-
-## Redaction policy
-
-Standard is the only onboarding redaction policy. Kickstart never offers Minimal or Maximum.
-
-- A loaded legacy Minimal setting is raised to Standard with disclosure.
-- A direct request to run onboarding with Minimal is refused.
-- Maximum is unsupported and is refused with an actionable instruction to set
-  `redaction.level: standard` before ingest, publication, or hook installation.
-
-Standard matching is best effort. Publication applies the production Standard boundary to the
-outgoing metadata and transcript content while preserving the local indexed recording. Village's
-server-side secret scan is an additional rejection boundary, not a claim that all identifying data
-can be detected.
-
-## Ordered execution and progress
-
-Final consent starts one cancellable production journey in this order:
-
-1. atomically save the reviewed loaded configuration, rejecting concurrent edits;
-2. ingest, index, and store the exact selected sessions;
-3. publish those sessions when Village was selected;
-4. read complete authoritative receipts from local storage; and
-5. process explicitly supplied hook work last. The mounted wizard currently supplies none, so this
-   stage skips; hook lifecycle remains the standalone CLI described below.
-
-The ingest stage streams the existing detailed production progress in the same execution view:
-Discover, Diff, Filter, Extract, DB Insert, Index, Compute, Annotate, Cleanup, and Report. This is a
-view of the ordered runner's single ingest execution, not a second ingest page or a replay.
-
-Cancellation stops work that has not started and waits for the active operation to return its honest
-persisted effects. A later failure never claims to roll back an earlier durable effect. Retry resumes
-only the failed stage and exact session IDs, or the exact repository/event target, without replaying
-completed publication. Completion displays authoritative Village URLs and applied visibility from
-the stored receipt rather than echoing requested values.
-
-## Current standalone boundaries
-
-Kickstart does not currently mount either of these lifecycle UIs:
-
-- Repository upload-hook installation, status, and removal use the explicit
-  `peasant village hooks install|status|uninstall` CLI. Peasant does not overwrite unowned hooks or
-  change `core.hooksPath`.
-- Exact-preview local transcript deletion uses the standalone `peasant prune` CLI. Stopping future
-  tracking in kickstart is configuration only and never prunes data.
-
-Other confirmed deferred work is SQL-backed desired Village state plus an interactive
-`peasant village config` editor, the broader schema-owned scriptable lifecycle API (including
-organization access), selectable all-configured-project hook scope, and persistent cross-process
-wizard resume.
-
-## Keyboard and related commands
-
-Use arrow keys or `j`/`k` to move, space to toggle, enter to confirm, and tab to move between the
-scope columns. `b` goes back, `r` restarts before execution, and `q` or Ctrl+C quits/cancels. The
-scope tree also supports left/right (or `h`/`l`) to collapse/expand and `f` to search.
-
-On the transcript-selection step, `Ctrl+l` moves input to the preview pane beside the tree
-and `Ctrl+h` moves it back; the divider marks which side is active. While the preview holds
-input, the movement keys scroll it instead of moving the tree cursor. The preview renders
-the session's first recorded message as markdown, with fenced code syntax-highlighted.
+- Publish with the explicit share or Village push flow.
+- Install or remove repository upload hooks with `peasant village hooks` commands.
+- Remove local transcript data with `peasant prune`.
 
 See also:
 
 - [Kickstart CLI reference](cli/peasant_kickstart.md)
-- [TUI keyboard reference](TUI.md)
+- [TUI keyboard shortcuts](TUI.md)

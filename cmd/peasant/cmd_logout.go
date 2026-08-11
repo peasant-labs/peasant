@@ -12,7 +12,7 @@ func BuildLogoutCommand() *cobra.Command {
 		Use:   "logout",
 		Short: "Log out from the Peasant village",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := auth.Logout(cmd.Context()); err != nil {
+			if err := auth.LogoutFrom(cmd.Context(), configDirOverride(cmd)); err != nil {
 				return err
 			}
 			fmt.Println("Logged out successfully")

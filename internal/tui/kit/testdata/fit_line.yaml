@@ -1,0 +1,46 @@
+expectedCaseCount: 6
+expectedTailCount: 4
+expectedThemeCount: 2
+themes: [dark, light]
+cases:
+  - name: pads-ascii-through-final-cell
+    text: guide
+    width: 9
+    fitted: 'guide    '
+  - name: truncates-ascii-with-ellipsis
+    text: descriptive text
+    width: 8
+    fitted: 'descrip…'
+  - name: pads-wide-grapheme-by-cells
+    text: '界a'
+    width: 5
+    fitted: '界a  '
+  - name: truncates-wide-graphemes-with-ellipsis
+    text: '界界界'
+    width: 4
+    fitted: '界… '
+  - name: preserves-combining-grapheme
+    text: "éx"
+    width: 4
+    fitted: "éx  "
+  - name: non-positive-width-is-empty
+    text: ignored
+    width: 0
+    fitted: ''
+tailCases:
+  - name: keeps-latest-ascii-and-caret
+    text: 'search: latest query▏'
+    width: 12
+    fitted: '…test query▏'
+  - name: keeps-complete-combining-and-emoji-graphemes
+    text: 'search: old-prefix-é👩‍💻🇺🇸▏'
+    width: 16
+    fitted: '…d-prefix-é👩‍💻🇺🇸▏'
+  - name: one-cell-region-keeps-caret
+    text: 'search: query▏'
+    width: 1
+    fitted: '▏'
+  - name: keeps-wide-suffix-when-ellipsis-underfills
+    text: 'search: x界▏'
+    width: 3
+    fitted: '界▏'

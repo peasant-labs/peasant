@@ -18,6 +18,8 @@ import (
 //go:embed testdata/kickstart_consent.yaml
 var kickstartConsentYAML []byte
 
+const requiredKickstartConsentRowCount = 5
+
 type kickstartConsentDocument struct {
 	DeclaredRows int                       `yaml:"declaredRows"`
 	RequiredArms []string                  `yaml:"requiredArms"`
@@ -32,7 +34,7 @@ type kickstartConsentFixture struct {
 	WarningContains []string `yaml:"warningContains"`
 	ConsentContains []string `yaml:"consentContains"`
 	ConsentExcludes []string `yaml:"consentExcludes"`
-	Scope           string   `yaml:"scope"`
+	SelectionTarget string   `yaml:"selectionTarget"`
 }
 
 func loadKickstartConsentFixtures(raw []byte) ([]kickstartConsentFixture, error) {
@@ -46,8 +48,9 @@ func loadKickstartConsentFixtures(raw []byte) ([]kickstartConsentFixture, error)
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return nil, fmt.Errorf("kickstart consent fixture must contain exactly one YAML document")
 	}
-	if document.DeclaredRows != len(document.Cases) || document.DeclaredRows < 3 {
-		return nil, fmt.Errorf("kickstart consent fixture row count is not guarded")
+	if document.DeclaredRows != requiredKickstartConsentRowCount || len(document.Cases) != requiredKickstartConsentRowCount {
+		return nil, fmt.Errorf("kickstart consent fixture rows: declared=%d actual=%d required=%d",
+			document.DeclaredRows, len(document.Cases), requiredKickstartConsentRowCount)
 	}
 	ids, arms := map[string]bool{}, map[string]bool{}
 	for _, row := range document.Cases {
@@ -62,6 +65,14 @@ func loadKickstartConsentFixtures(raw []byte) ([]kickstartConsentFixture, error)
 		}
 	}
 	return document.Cases, nil
+}
+
+func mutateKickstartConsentFixture(t *testing.T, data, old, replacement []byte) []byte {
+	t.Helper()
+	if count := bytes.Count(data, old); count != 1 {
+		t.Fatalf("kickstart consent mutation source %q occurs %d times, want exactly one", old, count)
+	}
+	return bytes.Replace(data, old, replacement, 1)
 }
 
 func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
@@ -93,7 +104,7 @@ func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
 					}
 					updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 					model = updated.(ftue.WizardModel)
-					switch fixture.Scope {
+					switch fixture.SelectionTarget {
 					case "branch":
 						for _, key := range []rune{tea.KeyDown, tea.KeySpace, tea.KeySpace} {
 							updated, _ = model.Update(tea.KeyPressMsg{Code: key})
@@ -154,5 +165,20 @@ func TestKickstartConsentFixtureStrictnessAndMutation(t *testing.T) {
 	}
 	if _, err := loadKickstartConsentFixtures(bytes.Replace(kickstartConsentYAML, []byte("arm: authenticated-public"), []byte("arm: authenticated-private"), 1)); err == nil {
 		t.Fatal("loader accepted missing public arm")
+	}
+}
+
+func TestKickstartConsentFixtureRejectsCoordinatedSessionSelectionRemoval(t *testing.T) {
+	t.Parallel()
+
+	mutated := mutateKickstartConsentFixture(t, kickstartConsentYAML,
+		[]byte("declaredRows: 5"), []byte("declaredRows: 4"))
+	mutated = mutateKickstartConsentFixture(t, mutated,
+		[]byte("requiredArms: [logged-out-local, authenticated-private, authenticated-public, branch-selection, session-selection]"),
+		[]byte("requiredArms: [logged-out-local, authenticated-private, authenticated-public, branch-selection]"))
+	mutated = mutateKickstartConsentFixture(t, mutated,
+		[]byte("  - id: session selection consent\n    arm: session-selection\n    existingUser: \"\"\n    destination: local\n    selectionTarget: session\n    consentContains: [\"Claude Code/remote:github.com/acme/tool/main: consent session [session-consent]\"]\n"), nil)
+	if _, err := loadKickstartConsentFixtures(mutated); err == nil {
+		t.Fatal("kickstart consent fixture accepted removal of the session-selection regression row coordinated with its declarations")
 	}
 }

@@ -1,0 +1,39 @@
+expectedCaseCount: 4
+expectedRequiredHintCount: 4
+expectedForbiddenModalCount: 2
+expectedTailCaseCount: 1
+requiredHints:
+  - 'backspace: delete'
+  - 'enter: keep filter'
+  - 'esc: clear filter'
+  - 'tab: next field'
+forbiddenModals:
+  - 'discard changes and leave config?'
+  - 'keyboard shortcuts'
+cases:
+  - name: config-search-accepts-quit-letter
+    input: q
+    wantEditing: 'search: q▏'
+    wantKept: 'search: q'
+    forbiddenHint: 'q: quit'
+  - name: config-search-accepts-back-letter
+    input: b
+    wantEditing: 'search: b▏'
+    wantKept: 'search: b'
+    forbiddenHint: 'esc: back'
+  - name: config-search-accepts-help-punctuation
+    input: '?'
+    wantEditing: 'search: ?▏'
+    wantKept: 'search: ?'
+    forbiddenHint: '?: help'
+  - name: config-search-accepts-facet-letter
+    input: f
+    wantEditing: 'search: f▏'
+    wantKept: 'search: f'
+    forbiddenHint: 'f: filter'
+tailCases:
+  - name: config-search-keeps-latest-graphemes-and-caret
+    input: 'old-prefix-keep-é👩‍💻🇺🇸'
+    width: 40
+    height: 24
+    wantEditing: '…d-prefix-keep-é👩‍💻🇺🇸▏'

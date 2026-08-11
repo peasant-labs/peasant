@@ -1,0 +1,259 @@
+# Full-forest selection behavior through the real Flow -> treeField ->
+# PreviewSplit -> Tree path. The saved allowlist, imported rows, current checks,
+# text query, and harness view are intentionally independent axes.
+fixture: faceted
+expectedSessionCount: 4
+expectedCaseCount: 14
+expectedAnchorMutationProbeCount: 1
+expectedDuplicateAnchorProbeCount: 1
+width: 128
+height: 28
+savedSelection:
+  mode: selected
+  autoIngestNewBranches: false
+  harnesses:
+    opencode:
+      sessions: [oc-1]
+importedSessionIDs: [cc-1]
+sessions:
+  - id: cc-1
+    label: ingest pipeline refactor
+    harness: claude-code
+    remote: "git@github.com:peasant-labs/peasant.git"
+    project: ""
+    branch: develop
+  - id: oc-1
+    label: commit detector fix
+    harness: opencode
+    remote: "git@github.com:peasant-labs/peasant.git"
+    project: ""
+    branch: develop
+  - id: cc-2
+    label: share bridge scan
+    harness: claude-code
+    remote: "git@github.com:peasant-labs/peasant.git"
+    project: ""
+    branch: feature-x
+  - id: oc-2
+    label: governance audit trigger
+    harness: opencode
+    remote: "git@github.com:peasant-labs/village.git"
+    project: ""
+    branch: develop
+cases:
+  - name: saved-imported-and-current-state-render-independently
+    keys: []
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 0
+    wantVisibleRows:
+      [ingest pipeline refactor, commit detector fix, share bridge scan,
+       governance audit trigger]
+    wantViewContains: ["search:"]
+    wantViewMissing:
+      ["tracked =", "imported =", "selected sessions:", "hidden by filters:", "scope:", "view only:"]
+    rowAssertions:
+      - label: commit detector fix
+        wantContains: ["[✓]", tracked]
+        wantMissing: [already imported]
+      - label: ingest pipeline refactor
+        wantContains: ["[ ]", already imported]
+        wantMissing: [tracked]
+
+  - name: harness-projection-keeps-mixed-project-and-hidden-selection
+    keys: [f]
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 1
+    wantVisibleRows: [ingest pipeline refactor, share bridge scan]
+    wantMissingRows: [commit detector fix, governance audit trigger]
+
+  - name: harness-projection-preserves-a-visible-canonical-cursor-and-offset
+    keys: [down, down, f]
+    anchorMutationProbe: true
+    height: 10
+    expectPane: left
+    expectCursorID: cc-1
+    expectPreviewID: cc-1
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkOverflow: true
+    expectOverflowTop: true
+    expectOverflowBottom: false
+    wantVisibleRows: [ingest pipeline refactor, share bridge scan]
+    wantMissingRows: [commit detector fix, governance audit trigger]
+    rowAssertions:
+      - label: ingest pipeline refactor
+        wantContains: ["▸", already imported]
+
+  - name: clearing-harness-projection-restores-its-canonical-anchor
+    keys: [down, down, f, f, f]
+    expectPane: left
+    expectCursorID: cc-1
+    expectPreviewID: cc-1
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    wantVisibleRows:
+      [ingest pipeline refactor, commit detector fix, share bridge scan,
+       governance audit trigger]
+    rowAssertions:
+      - label: ingest pipeline refactor
+        wantContains: ["▸", already imported]
+
+  - name: duplicate-branch-projection-restores-the-hidden-canonical-anchor
+    keys: [down, down, down, down, down, down, down, left, f, f, f]
+    setupKeys: [down, down, down, down, down, down, down, left]
+    facetProjectionKeys: [f]
+    facetClearKeys: [f, f]
+    projectionKeys: ["/", l, a, b, s, "/", p, e, a, s, a, n, t, enter]
+    clearKeys: [esc]
+    duplicateAnchorProbe: true
+    anchorProjectID: github.com/peasant-labs/village
+    survivingProjectID: github.com/peasant-labs/peasant
+    duplicateBranchID: develop
+    expectProjectedCursorID: github.com/peasant-labs/peasant
+    expectMinimumOffset: 1
+    height: 12
+    expectPane: left
+    expectCursorID: develop
+    expectPreviewID: develop
+    expectMode: inactive
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    wantVisibleRows: [share bridge scan]
+    wantMissingRows: [governance audit trigger]
+
+  - name: text-filter-and-toggle-mutate-the-canonical-forest-once
+    keys: ["/", s, h, a, r, e, enter, down, down, space]
+    expectMode: kept
+    expectQuery: share
+    expectSelected: [oc-1, cc-2]
+    expectUnselected: [cc-1, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 1
+    wantVisibleRows: [share bridge scan]
+    wantMissingRows: [commit detector fix, ingest pipeline refactor]
+    rowAssertions:
+      - label: share bridge scan
+        wantContains: ["[✓]"]
+        wantMissing: [tracked, already imported]
+
+  - name: clear-restores-the-forest-with-both-current-selections
+    keys: ["/", s, h, a, r, e, enter, down, down, space, esc]
+    expectMode: inactive
+    expectSelected: [oc-1, cc-2]
+    expectUnselected: [cc-1, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 0
+    wantVisibleRows:
+      [ingest pipeline refactor, commit detector fix, share bridge scan,
+       governance audit trigger]
+    rowAssertions:
+      - label: commit detector fix
+        wantContains: ["[✓]", tracked]
+      - label: share bridge scan
+        wantContains: ["[✓]"]
+
+  - name: harness-and-text-projections-compose-with-shared-identity
+    keys: [f, "/", i, n, g, e, s, t, enter, down, down, space]
+    expectMode: kept
+    expectQuery: ingest
+    expectSelected: [oc-1, cc-1]
+    expectUnselected: [cc-2, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 1
+    wantVisibleRows: [ingest pipeline refactor]
+    wantMissingRows: [commit detector fix, share bridge scan, governance audit trigger]
+    rowAssertions:
+      - label: ingest pipeline refactor
+        wantContains: ["[✓]", already imported]
+        wantMissing: [tracked]
+
+  - name: preview-focus-does-not-steal-or-advertise-tree-search
+    keys: [ctrl+l, "/"]
+    expectPane: right
+    expectMode: inactive
+    expectSelected: [oc-1]
+    checkHiddenSelected: true
+    expectHiddenSelected: 0
+    wantViewContains: ["search:"]
+    wantViewMissing: ["/: search"]
+
+  - name: preview-focus-keeps-active-filter-and-clear-return-path-visible
+    keys: ["/", i, n, g, e, s, t, enter, ctrl+l]
+    expectPane: right
+    expectMode: kept
+    expectQuery: ingest
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 1
+    wantVisibleRows: [ingest pipeline refactor]
+    wantMissingRows: [commit detector fix, share bridge scan, governance audit trigger]
+    wantViewContains: ["search: ingest"]
+    wantViewMissing: ["/: search", "esc: clear filter", "preview focused", "returns to tree"]
+
+  - name: returning-to-tree-restores-current-scope-search-dispatch
+    keys: [ctrl+l, ctrl+h, "/"]
+    expectPane: left
+    expectMode: editing
+    expectSelected: [oc-1]
+    checkHiddenSelected: true
+    expectHiddenSelected: 0
+    wantViewContains: ["search: ▏", "backspace: delete", "enter: keep filter", "esc: clear filter"]
+
+  - name: ctrl-h-terminal-backspace-deletes-while-tree-search-has-focus
+    keys: ["/", s, h, a, ctrl+h, enter]
+    expectPane: left
+    expectMode: kept
+    expectQuery: sh
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 1
+    wantVisibleRows: [share bridge scan]
+    wantMissingRows: [ingest pipeline refactor, commit detector fix, governance audit trigger]
+    wantViewContains: ["search: sh"]
+
+  - name: search-text-keeps-global-shortcut-letters-as-query-content
+    keys: ["/", b, q, "?", f, enter]
+    expectMode: kept
+    expectQuery: "bq?f"
+    expectSelected: [oc-1]
+    expectUnselected: [cc-1, cc-2, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 1
+    wantMissingRows:
+      [ingest pipeline refactor, commit detector fix, share bridge scan,
+       governance audit trigger]
+    wantViewContains: ["search: bq?f"]
+
+  - name: registry-rebuild-keeps-saved-tracked-and-buffered-current-state-independent
+    keys: []
+    workingSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [cc-2]
+    expectMode: inactive
+    expectSelected: [cc-2]
+    expectUnselected: [cc-1, oc-1, oc-2]
+    checkHiddenSelected: true
+    expectHiddenSelected: 0
+    wantVisibleRows:
+      [ingest pipeline refactor, commit detector fix, share bridge scan,
+       governance audit trigger]
+    rowAssertions:
+      - label: commit detector fix
+        wantContains: ["[ ]", tracked]
+        wantMissing: [already imported]
+      - label: share bridge scan
+        wantContains: ["[✓]"]
+        wantMissing: [tracked, already imported]

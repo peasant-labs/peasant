@@ -173,7 +173,7 @@ func (f Frame) View() string {
 
 	if f.footer != "" {
 		b.WriteString(border.Render("│"))
-		b.WriteString(fitLine(styles.Muted.Background(canvas), f.footer, inner))
+		b.WriteString(fitRenderedLine(styles.Muted.Background(canvas), f.footer, inner))
 		b.WriteString(border.Render("│"))
 		b.WriteString("\n")
 	}
@@ -220,7 +220,7 @@ func (f Frame) bodyLines(styles theme.Styles, inner int) []string {
 		if i < len(src) {
 			raw = src[i]
 		}
-		lines = append(lines, fitLine(styles.Base, raw, inner))
+		lines = append(lines, fitRenderedLine(styles.Base, raw, inner))
 	}
 	return lines
 }

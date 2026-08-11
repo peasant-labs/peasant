@@ -12,14 +12,17 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 )
@@ -37,7 +40,124 @@ const (
 	mountTruncatedSessionID = "8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68"
 	mountFreshSessionID     = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
 	mountProjectRowID       = "git@github.com:acme/tool.git"
+	expectedMountSeedRows   = 1
 )
+
+type mountRetentionSeedFixture struct {
+	Name           string `yaml:"name"`
+	CleanupDays    int    `yaml:"cleanupDays"`
+	SelectedOption string `yaml:"selectedOption"`
+	CleanReceipt   string `yaml:"cleanReceipt"`
+}
+
+type mountContractDocument struct {
+	ExpectedRetentionSeedRows int                         `yaml:"expectedRetentionSeedRows"`
+	RetentionSeeds            []mountRetentionSeedFixture `yaml:"retentionSeeds"`
+}
+
+//go:embed testdata/kickstart_mount.yaml
+var kickstartMountData []byte
+
+func loadMountContractDocument(t *testing.T) mountContractDocument {
+	t.Helper()
+	var document mountContractDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(kickstartMountData))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode testdata/kickstart_mount.yaml: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("found a second YAML document")
+		}
+		t.Fatalf("kickstart_mount.yaml must hold exactly one document: %v", err)
+	}
+	if document.ExpectedRetentionSeedRows != expectedMountSeedRows || len(document.RetentionSeeds) != expectedMountSeedRows {
+		t.Fatalf("retention seed rows: declared=%d actual=%d required=%d",
+			document.ExpectedRetentionSeedRows, len(document.RetentionSeeds), expectedMountSeedRows)
+	}
+	for _, row := range document.RetentionSeeds {
+		if strings.TrimSpace(row.Name) == "" || row.CleanupDays <= 0 ||
+			strings.TrimSpace(row.SelectedOption) == "" || strings.TrimSpace(row.CleanReceipt) == "" {
+			t.Fatalf("invalid retention seed fixture: %#v", row)
+		}
+	}
+	return document
+}
+
+// TestRunKickstartFlowPairsRetentionBeforeMount drives the real production
+// mount rather than calling its seed helper below the invocation. The selected
+// radio option proves the mounted Working value equals the fixture; the clean
+// receipt proves the same accessor sees an equal Baseline before any edit.
+func TestRunKickstartFlowPairsRetentionBeforeMount(t *testing.T) {
+	for _, row := range loadMountContractDocument(t).RetentionSeeds {
+		row := row
+		t.Run(row.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+			if err := config.SaveAtomic(path, config.BaseConfig()); err != nil {
+				t.Fatalf("seed config: %v", err)
+			}
+			deps := defaultKickstartCommandDeps()
+			deps.readRetention = func() (int, bool) { return row.CleanupDays, true }
+			runnerCalls := 0
+			deps.runModel = func(model tea.Model) error {
+				runnerCalls++
+				mounted, ok := model.(kickstart.Model)
+				if !ok {
+					t.Fatalf("runKickstartFlow mounted %T, want kickstart.Model", model)
+				}
+				program := mounted.Program()
+				program.SetSize(120, 40)
+				if program.Phase() == kickstart.PhaseOAuth {
+					program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				}
+				if program.Phase() != kickstart.PhaseFlow {
+					t.Fatalf("mounted Program phase=%v, want guided Flow", program.Phase())
+				}
+
+				selected := false
+				for step := 0; step < 12; step++ {
+					if program.Phase() == kickstart.PhaseVisibility {
+						// Continue locally. The visibility prompt is a guided-only
+						// authentication offer and must not hide the later retention
+						// field this mounted contract is proving.
+						program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+						continue
+					}
+					view := ansiPattern.ReplaceAllString(program.View(), "")
+					if strings.Contains(view, row.SelectedOption) {
+						selected = true
+						break
+					}
+					program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+				}
+				if !selected {
+					t.Fatalf("real mounted Flow did not select seeded retention option %q", row.SelectedOption)
+				}
+
+				program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+				receipt := ansiPattern.ReplaceAllString(program.View(), "")
+				if !strings.Contains(receipt, row.CleanReceipt) {
+					t.Fatalf("real mounted Flow did not start with equal retention baseline/working; want %q in receipt:\n%s",
+						row.CleanReceipt, receipt)
+				}
+				return nil
+			}
+
+			inventory := ftue.ProviderInventory{
+				defaults.HarnessClaudeCode: {SessionCount: 1},
+			}
+			if err := runKickstartFlow(mountTestCmd(t, dir), deps, path, inventory, nil); err != nil {
+				t.Fatalf("run production kickstart Flow: %v", err)
+			}
+			if runnerCalls != 1 {
+				t.Fatalf("runKickstartFlow terminal runner calls=%d want=1", runnerCalls)
+			}
+		})
+	}
+}
 
 // mountPreviewSessions is the discovery listing the mounted preview names rows
 // from - the same shape the selection tree is folded from.

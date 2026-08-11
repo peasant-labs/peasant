@@ -88,7 +88,11 @@ func (f *toggleField) Dirty(d *Draft) bool {
 }
 
 func (f *toggleField) build(d *Draft) kit.Toggle {
-	t := kit.NewToggle(f.th, f.label, f.acc.Get(d.Working()))
+	return f.buildWithLabel(d, f.label)
+}
+
+func (f *toggleField) buildWithLabel(d *Draft, label string) kit.Toggle {
+	t := kit.NewToggle(f.th, label, f.acc.Get(d.Working()))
 	t.SetSize(f.width, 1)
 	if f.focused {
 		t.Focus()
@@ -108,6 +112,15 @@ func (f *toggleField) render(d *Draft, _ theme.Styles, width int) string {
 	return f.build(d).View()
 }
 
+// renderFlowControl keeps the toggle indicator's established right-edge
+// geometry while Flow moves the label into a real heading above the section's
+// guidance. Dense Screen rendering continues to use render, which retains the
+// inline label.
+func (f *toggleField) renderFlowControl(d *Draft, width int) string {
+	f.width = width
+	return f.buildWithLabel(d, "").View()
+}
+
 // --- Text -----------------------------------------------------------------
 
 type textField struct {
@@ -124,11 +137,12 @@ func Text(key, label string, acc Accessor[string]) Field {
 	return &textField{baseField: baseField{key: key, label: label}, acc: acc, width: kit.TextFieldMinSize.Width}
 }
 
-func (f *textField) Kind() FieldKind       { return KindText }
-func (f *textField) Validate(*Draft) error { return nil }
-func (f *textField) initCmd() tea.Cmd      { return nil }
-func (f *textField) blur()                 { f.focused = false; f.inner.Blur() }
-func (f *textField) reset(d *Draft)        { f.acc.Set(d.Working(), f.acc.Get(d.Baseline())) }
+func (f *textField) Kind() FieldKind              { return KindText }
+func (f *textField) Validate(*Draft) error        { return nil }
+func (f *textField) initCmd() tea.Cmd             { return nil }
+func (f *textField) blur()                        { f.focused = false; f.inner.Blur() }
+func (f *textField) reset(d *Draft)               { f.acc.Set(d.Working(), f.acc.Get(d.Baseline())) }
+func (f *textField) capturesPrintableInput() bool { return f.focused }
 func (f *textField) availableActions() []keymap.ActionID {
 	return []keymap.ActionID{keymap.ActionConfirm}
 }

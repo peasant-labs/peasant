@@ -15,6 +15,11 @@ import (
 //go:embed testdata/help_dispatchable.yaml
 var helpDispatchableFixtureData []byte
 
+const (
+	requiredHelpDispatchableScenarioCount = 4
+	requiredHelpGlobalSearchName          = "tree-page-scope"
+)
+
 type helpDispatchableDocument struct {
 	ExpectedScenarioCount int                    `yaml:"expectedScenarioCount"`
 	Scenarios             []helpDispatchableCase `yaml:"scenarios"`
@@ -39,10 +44,10 @@ func loadHelpDispatchableFixture(data []byte) (helpDispatchableDocument, error) 
 		}
 		return doc, fmt.Errorf("testdata/help_dispatchable.yaml must hold exactly one YAML document: %w", err)
 	}
-	if doc.ExpectedScenarioCount != len(doc.Scenarios) || len(doc.Scenarios) == 0 {
+	if doc.ExpectedScenarioCount != requiredHelpDispatchableScenarioCount || len(doc.Scenarios) != requiredHelpDispatchableScenarioCount {
 		return doc, fmt.Errorf(
-			"testdata/help_dispatchable.yaml: expectedScenarioCount=%d but found %d scenarios (and must be non-zero)",
-			doc.ExpectedScenarioCount, len(doc.Scenarios))
+			"testdata/help_dispatchable.yaml: expectedScenarioCount=%d, found=%d, required=%d",
+			doc.ExpectedScenarioCount, len(doc.Scenarios), requiredHelpDispatchableScenarioCount)
 	}
 	seen := map[string]bool{}
 	for _, s := range doc.Scenarios {
@@ -51,7 +56,20 @@ func loadHelpDispatchableFixture(data []byte) (helpDispatchableDocument, error) 
 		}
 		seen[s.Name] = true
 	}
+	if !seen[requiredHelpGlobalSearchName] {
+		return doc, fmt.Errorf("testdata/help_dispatchable.yaml: required scenario %q is missing", requiredHelpGlobalSearchName)
+	}
 	return doc, nil
+}
+
+func TestHelpDispatchableFixtureRejectsCoordinatedGlobalSearchRemoval(t *testing.T) {
+	mutated := mutateFixtureFragment(t, "testdata/help_dispatchable.yaml", helpDispatchableFixtureData,
+		[]byte("expectedScenarioCount: 4"), []byte("expectedScenarioCount: 3"))
+	mutated = mutateFixtureFragment(t, "testdata/help_dispatchable.yaml", mutated,
+		[]byte("  - name: tree-page-scope\n    available:\n      [up, down, expand, collapse, search,\n       select-all, toggle, confirm, back, help, filter]\n"), nil)
+	if _, err := loadHelpDispatchableFixture(mutated); err == nil {
+		t.Fatal("help fixture accepted removal of the global-search regression scenario coordinated with its declared count")
+	}
 }
 
 // TestHelpEntries_EqualsDispatchableSet is the fixture-driven proof that

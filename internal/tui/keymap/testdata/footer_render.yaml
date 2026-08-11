@@ -6,7 +6,7 @@
 # separately asserts lipgloss.Width on the raw (still-escaped) rendering
 # equals lipgloss.Width on the stripped text, proving width is measured
 # ansi-aware rather than by raw byte/rune length.
-expectedCaseCount: 3
+expectedCaseCount: 4
 cases:
   - name: list-page-scope
     available: [up, down, confirm, back, help]
@@ -14,6 +14,9 @@ cases:
   - name: form-page-scope
     available: [next-field, prev-field, save, quit]
     wantPlainText: "tab: next field  shift+tab: prev field  ctrl+s: save  q: quit"
+  - name: tree-global-search
+    available: [search, clear-filter]
+    wantPlainText: "/: search  esc: clear filter"
   - name: empty-availability-renders-empty
     available: []
     wantPlainText: ""

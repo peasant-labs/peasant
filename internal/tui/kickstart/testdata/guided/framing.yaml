@@ -1,0 +1,211 @@
+# Guided framing cases cover the production connect step, every canonical
+# registry section when visible, each conditional section when hidden, and the
+# optional derived-example contract. The exact count prevents silent case loss.
+expectedRowCount: 12
+rows:
+  - name: connect-before-settings
+    surface: connect
+    wantBeforeChoice:
+      - local mode keeps all data on this machine
+      - connecting sends nothing until a later explicit publish
+    wantContains:
+      - connect to a village
+      - local mode keeps all data on this machine
+      - connecting sends nothing until a later explicit publish
+      - publishing is separate, explicit, and opt-in.
+      - peasant village login
+
+  - name: simplified-selection
+    surface: registry-section
+    sectionKey: selection
+    sectionTitle: choose sessions to import
+    selectionMode: all
+    wantVisible: true
+    fieldKey: transcripts
+    fieldKind: tree
+    fieldText: "search:"
+    hasGuide: false
+    wantMissing:
+      - transcripts
+      - choose which recorded sessions become part of your local peasant history.
+      - tracked means included by the selection saved during an earlier kickstart run.
+      - imported means transcript data already exists in your local store.
+      - filters change only this view; hidden selections stay selected.
+
+  - name: auto-ingest-guide
+    surface: registry-section
+    sectionKey: auto-ingest
+    sectionTitle: auto-ingest new branches
+    selectionMode: selected
+    wantVisible: true
+    fieldKey: auto-ingest-new-branches
+    fieldKind: toggle
+    fieldText: auto-ingest new branches in fully-selected projects
+    hasGuide: true
+    headingText: auto-ingest new branches in fully-selected projects
+    controlText: '[on]'
+    guide:
+      intro: decide how future branches enter your saved local selection.
+      hints:
+        - this applies only to new branches in projects selected in full.
+        - it never broadens an explicit branch or session selection.
+
+  - name: privacy-guide
+    surface: registry-section
+    sectionKey: privacy
+    sectionTitle: privacy
+    selectionMode: all
+    wantVisible: true
+    fieldKey: redaction-level
+    fieldKind: radio
+    fieldText: redaction level
+    hasGuide: true
+    headingText: redaction level
+    controlText: '(•) standard'
+    guide:
+      intro: preview standard redaction before a later explicit publication.
+      hints:
+        - local imports remain original unless you explicitly run `peasant redact`.
+        - examples below use synthetic text and the same redactor as explicit publication.
+        - standard keeps git remote urls and branch output; maximum removes them.
+    wantContains:
+      - later explicit publication
+      - local imports remain original
+      - peasant redact
+    wantMissing:
+      - before transcripts enter peasant's local store
+      - same redactor as local import
+
+  - name: license-guide
+    surface: registry-section
+    sectionKey: license
+    sectionTitle: content license
+    selectionMode: all
+    wantVisible: true
+    fieldKey: content-license
+    fieldKind: radio
+    fieldText: default license attached to pushed transcripts
+    hasGuide: true
+    headingText: default license attached to pushed transcripts
+    controlText: '(•) none (do not attach a license)'
+    guide:
+      intro: choose the default license for a later explicit publish.
+      hints:
+        - no license is the default unless your loaded config already chose one.
+        - no license keeps all rights; anyone who wants to reuse the transcript must ask.
+
+  - name: destination-guide
+    surface: registry-section
+    sectionKey: destination
+    sectionTitle: sharing
+    selectionMode: all
+    villageConnected: true
+    wantVisible: true
+    fieldKey: default-visibility
+    fieldKind: radio
+    fieldText: default visibility for pushed transcripts
+    hasGuide: true
+    headingText: default visibility for pushed transcripts
+    controlText: '(•) private'
+    guide:
+      intro: choose who may see transcripts after a later explicit publish.
+      hints:
+        - private means only you; group means group members; public means anyone.
+        - saving this default does not publish anything.
+
+  - name: retention-guide
+    surface: registry-section
+    sectionKey: retention
+    sectionTitle: claude retention
+    selectionMode: all
+    claudeSessionsPresent: true
+    wantVisible: true
+    fieldKey: claude-retention-days
+    fieldKind: radio
+    fieldText: how long claude code keeps its transcripts
+    hasGuide: true
+    headingText: how long claude code keeps its transcripts
+    controlText: '( ) 30 days'
+    guide:
+      intro: choose how long claude code keeps its source transcript files.
+      hints:
+        - the selected value is applied after config saves and before local import.
+        - changing claude retention does not delete transcripts already imported into peasant.
+
+  - name: guided-review-summary
+    surface: guided-summary
+    wantContains:
+      - review your changes
+      - content license
+      - 'changed: default license attached to pushed transcripts'
+
+  - name: hidden-auto-ingest-guide
+    surface: registry-section
+    sectionKey: auto-ingest
+    sectionTitle: auto-ingest new branches
+    selectionMode: all
+    wantVisible: false
+    fieldKey: auto-ingest-new-branches
+    fieldKind: toggle
+    fieldText: auto-ingest new branches in fully-selected projects
+    hasGuide: true
+    headingText: auto-ingest new branches in fully-selected projects
+    controlText: '[on]'
+    guide:
+      intro: decide how future branches enter your saved local selection.
+      hints:
+        - this applies only to new branches in projects selected in full.
+        - it never broadens an explicit branch or session selection.
+
+  - name: hidden-destination-guide
+    surface: registry-section
+    sectionKey: destination
+    sectionTitle: sharing
+    selectionMode: all
+    villageConnected: false
+    wantVisible: false
+    fieldKey: default-visibility
+    fieldKind: radio
+    fieldText: default visibility for pushed transcripts
+    hasGuide: true
+    headingText: default visibility for pushed transcripts
+    controlText: '(•) private'
+    guide:
+      intro: choose who may see transcripts after a later explicit publish.
+      hints:
+        - private means only you; group means group members; public means anyone.
+        - saving this default does not publish anything.
+
+  - name: hidden-retention-guide
+    surface: registry-section
+    sectionKey: retention
+    sectionTitle: claude retention
+    selectionMode: all
+    claudeSessionsPresent: false
+    wantVisible: false
+    fieldKey: claude-retention-days
+    fieldKind: radio
+    fieldText: how long claude code keeps its transcripts
+    hasGuide: true
+    headingText: how long claude code keeps its transcripts
+    controlText: '( ) 30 days'
+    guide:
+      intro: choose how long claude code keeps its source transcript files.
+      hints:
+        - the selected value is applied after config saves and before local import.
+        - changing claude retention does not delete transcripts already imported into peasant.
+
+  - name: derived-example
+    surface: derived-example
+    sectionKey: example
+    sectionTitle: example
+    wantVisible: true
+    fieldKey: unchanged-field
+    fieldKind: info
+    fieldText: field output remains unchanged
+    exampleText: 'current village: https://village.example'
+    hasGuide: true
+    guide:
+      intro: see how the current draft affects this step.
+      hints:
+        - this example is derived without changing the draft.

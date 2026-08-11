@@ -102,12 +102,19 @@ type Field interface {
 	blur()
 	setSize(width, height int)
 	availableActions() []keymap.ActionID
+	// capturesPrintableInput reports whether the currently-focused component is
+	// editing free text. Flow consults it only for key messages whose Text is
+	// non-empty, before resolving global printable actions such as q, b, and ?.
+	// Lifecycle keys (escape, enter, tab, arrows) remain typed keymap actions.
+	capturesPrintableInput() bool
 	// sync pulls d's current value into the field's live component (used on
 	// (re-)entry to a step so the component reflects the draft, including after
 	// an edit was dropped).
 	sync(d *Draft)
-	// handle dispatches one message to the field's live component and writes
-	// any resulting value change back into d.
+	// handle dispatches one synchronous key message to the field's live
+	// component and writes any resulting value change back into d. Flow and
+	// Screen route every non-key message exclusively through the private
+	// asyncField capability instead of this general field hook.
 	handle(d *Draft, msg tea.Msg) tea.Cmd
 	// render draws the field's control at the given inner width.
 	render(d *Draft, styles theme.Styles, width int) string
@@ -125,9 +132,10 @@ type baseField struct {
 	when  func(d *Draft) bool
 }
 
-func (b baseField) Key() string         { return b.key }
-func (b baseField) Label() string       { return b.label }
-func (b baseField) Description() string { return b.desc }
+func (b baseField) Key() string                  { return b.key }
+func (b baseField) Label() string                { return b.label }
+func (b baseField) Description() string          { return b.desc }
+func (b baseField) capturesPrintableInput() bool { return false }
 
 func (b baseField) When(d *Draft) bool {
 	if b.when == nil {

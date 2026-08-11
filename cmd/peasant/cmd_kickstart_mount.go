@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -24,7 +25,7 @@ import (
 // (the single atomic config commit point) sequenced after an optional village
 // OAuth step and before ingest, all rendered on the kit. It reuses the SAME
 // business logic the legacy wizard drove - discovery (already run into inventory
-// + sessions), the login runner (internal/auth.Login), the ingest pipeline, and
+// + sessions), the path-aware login runner (internal/auth.LoginFrom), the ingest pipeline, and
 // the Claude retention writer - wiring each as an injected seam of
 // kickstart.Program. The legacy FTUE wizard construction remains present in
 // cmd_kickstart.go as a deprecation candidate; this is the entry point the
@@ -51,7 +52,9 @@ func runKickstartFlow(
 	// cleanup setting so its cursor lands on the value already in force (or the
 	// recommended keep-forever when none is set). The value is transient (never
 	// written to config.yaml); the flow carries it to the retention writer.
-	seedRetentionChoice(draft)
+	if err := seedRetentionChoice(draft, deps.readRetention); err != nil {
+		return err
+	}
 
 	th := theme.New(themeModeFor(loaded))
 
@@ -59,6 +62,22 @@ func runKickstartFlow(
 	// pane's body reads for the whole flow; it is closed when the flow returns.
 	db, closeStore := openKickstartStore(cmd)
 	defer closeStore()
+	if deps.localIngest == nil {
+		return fmt.Errorf(
+			"mount guided kickstart for %q: local ingest boundary is nil.\n"+
+				"what: the guided Program cannot start the post-consent local import.\n"+
+				"why: kickstartCommandDeps.localIngest was assembled without the shared runner and progress source.\n"+
+				"where: runKickstartFlow before constructing kickstart.Program.\n"+
+				"when: after opening the buffered draft and before any interactive choice is shown.\n"+
+				"means: no configuration, retention setting, or transcript was changed.\n"+
+				"fix: construct kickstart through BuildKickstartCommand or supply the local ingest boundary.",
+			configPath)
+	}
+	ingestRun, progress := deps.localIngest(cmd, configPath, sessions)
+	alreadyConnected := false
+	if deps.alreadyConnected != nil {
+		alreadyConnected = deps.alreadyConnected(configDirOverride(cmd))
+	}
 
 	programDeps := kickstart.ProgramDeps{
 		Theme:                 th,
@@ -67,8 +86,9 @@ func runKickstartFlow(
 		Preview:               kickstartPreview(cmd, db, th, sessions),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
-		Ingest:                kickstartIngestFunc(cmd, configPath, sessions),
-		AlreadyConnected:      villageAlreadyConnected(),
+		Ingest:                ingestRun,
+		Progress:              progress,
+		AlreadyConnected:      alreadyConnected,
 		Retention:             kickstart.DefaultRetentionWriter(),
 		// The retention value now comes from the flow's retention field, carried
 		// through the committed draft. This fallback stays 0 so a run that never
@@ -78,7 +98,18 @@ func runKickstartFlow(
 	}
 
 	model := kickstart.NewModel(kickstart.NewProgram(programDeps))
-	return deps.runFlow(model)
+	if deps.runModel == nil {
+		return fmt.Errorf(
+			"mount guided kickstart for %q: terminal runner is nil.\n"+
+				"what: the guided Program cannot be started.\n"+
+				"why: kickstartCommandDeps.runModel was assembled without its Bubble Tea boundary.\n"+
+				"where: runKickstartFlow after the Program and Flow were constructed.\n"+
+				"when: immediately before entering the interactive terminal session.\n"+
+				"means: the draft was not committed and local ingest did not run.\n"+
+				"fix: construct kickstart through BuildKickstartCommand or supply the terminal runner.",
+			configPath)
+	}
+	return deps.runModel(model)
 }
 
 // openKickstartStore opens the local store for the duration of the flow, plus
@@ -172,17 +203,27 @@ func themeModeFor(cfg *config.Config) theme.Mode {
 	return mode
 }
 
-// seedRetentionChoice sets the draft's transient Claude retention value from the
-// cleanup period already written in ~/.claude/settings.json, so the retention
-// field opens on the value in force. When no value is set, it defaults to the
-// recommended keep-forever so a first-time user's cursor lands on the safe
+// seedRetentionChoice initializes both copies of the draft's transient Claude
+// retention value from the cleanup period already written in
+// ~/.claude/settings.json, so the retention field opens clean on the value in
+// force. When no value is set, it defaults to the recommended keep-forever
 // choice. The value is never persisted to config.yaml (yaml:"-").
-func seedRetentionChoice(draft *settings.Draft) {
-	if days, ok := ftue.ReadClaudeCleanupDays(); ok && days > 0 {
-		draft.Working().ClaudeRetentionDays = days
-		return
+func seedRetentionChoice(draft *settings.Draft, read func() (int, bool)) error {
+	if read == nil {
+		return fmt.Errorf(
+			"seed guided retention: Claude settings reader is nil.\n" +
+				"what: the retention field cannot be initialized from the value currently in force.\n" +
+				"why: kickstartCommandDeps.readRetention was assembled without its read boundary.\n" +
+				"where: seedRetentionChoice before settings.Flow mounts.\n" +
+				"when: after opening the Draft and before any interactive field is shown.\n" +
+				"means: the flow was not mounted and no configuration or Claude setting was written.\n" +
+				"fix: construct kickstart through BuildKickstartCommand or supply the Claude retention reader.")
 	}
-	draft.Working().ClaudeRetentionDays = kickstart.RecommendedRetentionDays
+	days := kickstart.RecommendedRetentionDays
+	if current, ok := read(); ok && current > 0 {
+		days = current
+	}
+	return kickstart.SeedRetentionInitial(draft, days)
 }
 
 // claudeSessionsPresent reports whether the discovery inventory found any Claude
@@ -195,14 +236,16 @@ func claudeSessionsPresent(inventory ftue.ProviderInventory) bool {
 // villageAlreadyConnected reports whether this machine already holds valid
 // village credentials, so the connect-now step can be skipped (the UAT flagged
 // that it was shown even when already connected).
-func villageAlreadyConnected() bool {
-	creds, err := auth.LoadCredentials()
+func villageAlreadyConnected(configDir string) bool {
+	creds, err := auth.LoadCredentialsFrom(configDir)
 	return err == nil && creds != nil && creds.IsValid()
 }
 
 // kickstartLoginFunc adapts the existing auth.Login runner to the program's
-// LoginFunc seam, resolving the village URL exactly as `peasant login` does.
+// LoginFunc seam, resolving the village URL and credential store exactly as
+// `peasant login` does.
 func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFunc {
+	configDir := configDirOverride(cmd)
 	return func(ctx context.Context) (string, error) {
 		villageURL := os.Getenv("PEASANT_VILLAGE_URL")
 		if villageURL == "" {
@@ -213,7 +256,7 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 		if villageURL == "" {
 			villageURL = defaults.DefaultVillageURL.String()
 		}
-		creds, err := auth.Login(ctx, villageURL, false)
+		creds, err := auth.LoginFrom(ctx, villageURL, false, configDir)
 		if err != nil {
 			return "", err
 		}
@@ -221,16 +264,17 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 	}
 }
 
-// kickstartIngestFunc builds the post-commit ingest step. It reuses the existing
-// ftue ingest runner (buildFTUEIngestRunner) and the canonical selection matcher:
+// kickstartLocalIngest builds the post-commit ingest step and returns the exact
+// concurrent progress state populated by that runner. It reuses the existing
+// ftue ingest runner core and the canonical selection matcher:
 // after the flow saves config.Selection, this reloads the config, derives which
 // discovered sessions the saved selection admits via ingest.SelectionMatcher (the
 // same matcher ingest, push, discovery, and prune use), and hands them to the
 // existing runner. Mode:all imports everything; mode:selected imports exactly the
 // admitted sessions.
-func kickstartIngestFunc(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) kickstart.IngestFunc {
-	runner, _ := buildFTUEIngestRunner(cmd, configPath)
-	return func(ctx context.Context) (*ftue.IngestResult, error) {
+func kickstartLocalIngest(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource) {
+	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
+	local := func(ctx context.Context) (*ftue.IngestResult, error) {
 		cfg, err := loadConfig(configPath)
 		if err != nil {
 			return nil, err
@@ -238,6 +282,7 @@ func kickstartIngestFunc(cmd *cobra.Command, configPath string, sessions []ftue.
 		answers := deriveKickstartAnswers(cfg, sessions)
 		return runner(ctx, answers)
 	}
+	return local, progress
 }
 
 // deriveKickstartAnswers translates the committed config.Selection into the
@@ -254,7 +299,7 @@ func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) 
 		for h := range harnesses {
 			provs = append(provs, ftue.ProviderSelection{Harness: h, ImportAll: true})
 		}
-		return ftue.WizardAnswers{ProviderSelections: provs}
+		return ftue.WizardAnswers{SelectionMode: cfg.Selection.Mode, ProviderSelections: provs}
 	}
 
 	matcher := config.CompileSelectionMatcher(cfg.Selection)
@@ -274,6 +319,7 @@ func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) 
 		provs = append(provs, ftue.ProviderSelection{Harness: h, ImportAll: false})
 	}
 	return ftue.WizardAnswers{
+		SelectionMode:      cfg.Selection.Mode,
 		ProviderSelections: provs,
 		SelectedSessions:   selected,
 	}

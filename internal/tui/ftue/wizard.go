@@ -114,6 +114,11 @@ const (
 // WizardAnswers accumulates user choices across pages.
 type WizardAnswers struct {
 	VillageConnected bool
+	// SelectionMode preserves the committed discovery policy while guided
+	// kickstart crosses the legacy wizard adapter. An empty value identifies
+	// legacy wizard callers whose provider/session choices retain their existing
+	// interpretation.
+	SelectionMode config.SelectionMode
 	// DaemonMode is reserved for the future daemon feature ("opt-in" or "opt-out").
 	// The wizard page is not yet shown; defaults to "opt-in".
 	DaemonMode            string

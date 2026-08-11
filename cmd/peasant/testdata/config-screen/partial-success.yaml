@@ -1,0 +1,6 @@
+expectedRows: 1
+cases:
+  - name: retention writer failure reports committed config and unchanged claude settings
+    initialRetention: 30
+    selectedRetention: 365
+    writerError: injected retention refusal

@@ -1,0 +1,12 @@
+expectedRowCount: 2
+rows:
+  - name: unrelated-default-profile-does-not-block
+    seededStore: default-only
+    username: default-profile-user
+    wantErrorContains: [login cancelled]
+    wantErrorMissing: [already logged in, default-profile-user]
+  - name: selected-profile-identity-blocks
+    seededStore: override-only
+    username: selected-profile-user
+    wantErrorContains: [already logged in as selected-profile-user]
+    wantErrorMissing: [login cancelled]

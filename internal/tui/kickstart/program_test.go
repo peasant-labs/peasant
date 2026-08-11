@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -61,11 +63,12 @@ func press(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
 // skips login and enters the flow. It returns the program in PhaseFlow.
 func declineOAuth(t *testing.T, p kickstart.Program) kickstart.Program {
 	t.Helper()
-	p, _ = p.Update(press(tea.KeyEnter)) // default focus is "no" -> skip
+	var command tea.Cmd
+	p, command = p.Update(press(tea.KeyEnter)) // default focus is "no" -> skip
 	if p.Phase() != kickstart.PhaseFlow {
 		t.Fatalf("after declining OAuth, phase = %s, want flow", p.Phase())
 	}
-	return p
+	return drainProgram(p, command)
 }
 
 // advanceToCommit tabs through the flow steps to the receipt and confirms,
@@ -147,7 +150,7 @@ func TestProgram_IngestRunsOnlyAfterCommit(t *testing.T) {
 	// The non-default selection the flow will persist.
 	wantSel := config.SelectionConfig{
 		Mode:      config.SelectionModeSelected,
-		Harnesses: map[string]config.SelectionHarnessConfig{"claude-code": {Sessions: []string{"sentinel-session"}}},
+		Harnesses: map[string]config.SelectionHarnessConfig{string(defaults.LegacyHarnessClaude): {Sessions: []string{"sess-p1"}}},
 	}
 	draft.Working().Selection = wantSel
 
@@ -165,7 +168,7 @@ func TestProgram_IngestRunsOnlyAfterCommit(t *testing.T) {
 			data, _ := os.ReadFile(configPath)
 			cfg, _ := config.Parse(data)
 			modeAtIngest = cfg.Selection.Mode
-			if hc, ok := cfg.Selection.Harnesses["claude-code"]; ok {
+			if hc, ok := cfg.Selection.Harnesses[string(defaults.LegacyHarnessClaude)]; ok {
 				sessionsAtIngest = hc.Sessions
 			}
 			committedAtIngest = cfg.Selection.Mode == config.SelectionModeSelected
@@ -194,8 +197,8 @@ func TestProgram_IngestRunsOnlyAfterCommit(t *testing.T) {
 	if !committedAtIngest {
 		t.Fatalf("ingest saw on-disk mode %q, want the committed non-default %q (ordering violated)", modeAtIngest, config.SelectionModeSelected)
 	}
-	if len(sessionsAtIngest) != 1 || sessionsAtIngest[0] != "sentinel-session" {
-		t.Fatalf("ingest saw on-disk sessions %v, want the committed [sentinel-session]", sessionsAtIngest)
+	if len(sessionsAtIngest) != 1 || sessionsAtIngest[0] != "sess-p1" {
+		t.Fatalf("ingest saw on-disk sessions %v, want the committed [sess-p1]", sessionsAtIngest)
 	}
 	if p.IngestResult() == nil || p.IngestResult().New != 1 {
 		t.Fatalf("ingest result not recorded: %+v", p.IngestResult())
@@ -317,14 +320,20 @@ func TestProgram_OAuthLoginFeedsConnected(t *testing.T) {
 	// The accept transition returns a batch (login runner + spinner tick); run
 	// the batch's child commands and feed each result back so the login result
 	// lands without spinning on ticks.
+	var flowInit tea.Cmd
 	for _, child := range unwrapBatch(cmd) {
 		if child == nil {
 			continue
 		}
 		if m := child(); m != nil {
-			p, _ = p.Update(m)
+			var next tea.Cmd
+			p, next = p.Update(m)
+			if p.Phase() == kickstart.PhaseFlow && next != nil {
+				flowInit = next
+			}
 		}
 	}
+	p = runFlowInitOnce(t, p, flowInit)
 	if loginCalls != 1 {
 		t.Fatalf("login runner called %d times, want 1", loginCalls)
 	}
@@ -333,6 +342,9 @@ func TestProgram_OAuthLoginFeedsConnected(t *testing.T) {
 	}
 	if p.Phase() != kickstart.PhaseFlow {
 		t.Fatalf("phase after login = %s, want flow", p.Phase())
+	}
+	if !strings.Contains(stripRender(p.View()), "sharing") {
+		t.Fatal("connected flow did not reveal sharing before its first navigation input")
 	}
 }
 
@@ -382,6 +394,7 @@ func TestProgram_DestinationVisibilityCommits(t *testing.T) {
 	})
 	f := settings.NewFlow(theme.New(theme.ModeDark), reg, draft)
 	f.SetSize(80, 24)
+	f = drainSettingsFlowInit(f, f.Init())
 
 	tab := tea.KeyPressMsg{Code: tea.KeyTab}
 	down := tea.KeyPressMsg{Code: tea.KeyDown}
@@ -426,6 +439,13 @@ func TestProgram_DestinationVisibilityCommits(t *testing.T) {
 	if got.Push.Visibility != config.VisibilityPublic {
 		t.Fatalf("committed visibility = %q, want public (the driven radio choice)", got.Push.Visibility)
 	}
+}
+
+func drainSettingsFlowInit(flow settings.Flow, command tea.Cmd) settings.Flow {
+	for _, message := range collectMsgs(command) {
+		flow, _ = flow.Update(message)
+	}
+	return flow
 }
 
 // unwrapBatch runs cmd and, if it produced a tea.BatchMsg, returns its child

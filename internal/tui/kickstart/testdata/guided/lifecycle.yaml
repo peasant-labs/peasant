@@ -1,0 +1,41 @@
+# These rows drive the real Program, Flow, Registry, fields, and Draft. Only the
+# retention and local-ingest boundaries are recorded. The authority guard names
+# effects the Program dependency contract must never expose.
+expectedRowCount: 3
+authorityGuard:
+  expectedNameCount: 5
+  names: [publish, publication, publisher, push, receipt]
+rows:
+  - name: confirmed-exit
+    operation: exit
+    editLicense: CC0-1.0
+    retentionDays: 90
+    claudeSessionsPresent: true
+    wantCommitted: false
+    wantExited: true
+    wantConfigChanged: false
+    wantEffects: []
+    wantIngestResult: false
+
+  - name: successful-local-import
+    operation: complete
+    editLicense: CC0-1.0
+    retentionDays: 90
+    claudeSessionsPresent: true
+    wantCommitted: true
+    wantExited: false
+    wantConfigChanged: true
+    wantEffects: [retention, ingest]
+    wantIngestResult: true
+    wantRetentionSawCommit: true
+
+  - name: hidden retention does not write external settings
+    operation: complete
+    editLicense: CC0-1.0
+    retentionDays: 90
+    claudeSessionsPresent: false
+    wantCommitted: true
+    wantExited: false
+    wantConfigChanged: true
+    wantEffects: [ingest]
+    wantIngestResult: true
