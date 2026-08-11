@@ -77,14 +77,9 @@ const (
 	ActionNextProject
 	// ActionPrevProject moves the cursor to the previous top-level project.
 	ActionPrevProject
-	// ActionPrevScope moves the tree's active scope one level toward Project.
-	// It does not collapse a node or move split-pane focus.
-	ActionPrevScope
-	// ActionNextScope moves the tree's active scope one level toward Session.
-	// It does not expand a node or move split-pane focus.
-	ActionNextScope
-	// ActionSearchScope starts text search at the tree's current typed scope.
-	ActionSearchScope
+	// ActionSearch starts one hierarchy-wide text search. Components that expose
+	// it search every label they own rather than requiring a separate scope.
+	ActionSearch
 
 	// ActionFocusPaneLeft moves focus to the LEFT pane of a split surface.
 	// It is pane navigation, not field navigation: a split is one field, and
@@ -165,9 +160,7 @@ func AllActions() []ActionID {
 		ActionBottom,
 		ActionNextProject,
 		ActionPrevProject,
-		ActionPrevScope,
-		ActionNextScope,
-		ActionSearchScope,
+		ActionSearch,
 		ActionFocusPaneLeft,
 		ActionFocusPaneRight,
 		ActionNextField,
@@ -196,7 +189,7 @@ func (a ActionID) IsValid() bool {
 	case ActionQuit, ActionConfirm, ActionBack,
 		ActionUp, ActionDown, ActionLeft, ActionRight, ActionPageUp, ActionPageDown,
 		ActionTop, ActionBottom, ActionNextProject, ActionPrevProject,
-		ActionPrevScope, ActionNextScope, ActionSearchScope,
+		ActionSearch,
 		ActionFocusPaneLeft, ActionFocusPaneRight,
 		ActionNextField, ActionPrevField, ActionToggle, ActionSelectAll, ActionSelectUnderProject,
 		ActionExpand, ActionCollapse, ActionExpandLevel, ActionCollapseLevel, ActionExpandAll, ActionCollapseAll,
@@ -218,7 +211,6 @@ func (a ActionID) IsNavigation() bool {
 	case ActionUp, ActionDown, ActionLeft, ActionRight,
 		ActionPageUp, ActionPageDown, ActionTop, ActionBottom,
 		ActionNextProject, ActionPrevProject,
-		ActionPrevScope, ActionNextScope,
 		ActionExpand, ActionCollapse,
 		ActionExpandLevel, ActionCollapseLevel, ActionExpandAll, ActionCollapseAll,
 		ActionFocusPaneLeft, ActionFocusPaneRight,
@@ -260,12 +252,8 @@ func (a ActionID) String() string {
 		return "next-project"
 	case ActionPrevProject:
 		return "prev-project"
-	case ActionPrevScope:
-		return "prev-scope"
-	case ActionNextScope:
-		return "next-scope"
-	case ActionSearchScope:
-		return "search-scope"
+	case ActionSearch:
+		return "search"
 	case ActionFocusPaneLeft:
 		return "focus-pane-left"
 	case ActionFocusPaneRight:
@@ -396,17 +384,9 @@ func Default() Keymap {
 			key.WithKeys("shift+k", "K"),
 			key.WithHelp("shift+k", "prev project"),
 		),
-		ActionPrevScope: key.NewBinding(
-			key.WithKeys("["),
-			key.WithHelp("[", "previous scope"),
-		),
-		ActionNextScope: key.NewBinding(
-			key.WithKeys("]"),
-			key.WithHelp("]", "next scope"),
-		),
-		ActionSearchScope: key.NewBinding(
+		ActionSearch: key.NewBinding(
 			key.WithKeys("/"),
-			key.WithHelp("/", "search scope"),
+			key.WithHelp("/", "search"),
 		),
 		// Vim window-navigation keys for the two panes of a split surface.
 		//

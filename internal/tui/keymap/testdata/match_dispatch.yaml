@@ -130,21 +130,21 @@ cases:
     pressedKey: K
     wantOK: true
     wantAction: prev-project
-  - name: dispatches-prev-scope
-    available: [prev-scope]
+  - name: removed-prev-scope-key-does-not-dispatch
+    available: [search]
     pressedKey: "["
-    wantOK: true
-    wantAction: prev-scope
-  - name: dispatches-next-scope
-    available: [next-scope]
+    wantOK: false
+    wantAction: ""
+  - name: removed-next-scope-key-does-not-dispatch
+    available: [search]
     pressedKey: "]"
-    wantOK: true
-    wantAction: next-scope
-  - name: dispatches-search-scope
-    available: [search-scope]
+    wantOK: false
+    wantAction: ""
+  - name: dispatches-search
+    available: [search]
     pressedKey: "/"
     wantOK: true
-    wantAction: search-scope
+    wantAction: search
   - name: dispatches-focus-pane-left
     available: [focus-pane-left]
     pressedKey: ctrl+h
@@ -223,7 +223,7 @@ cases:
     available:
       [
         quit, confirm, back, up, down, left, right, page-up, page-down,
-        prev-scope, next-scope, search-scope,
+        search,
         focus-pane-left, focus-pane-right,
         next-field, prev-field, toggle, select-all, expand, collapse,
         save, help, filter, top, bottom, next-project, prev-project,

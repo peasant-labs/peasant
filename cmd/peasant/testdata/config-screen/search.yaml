@@ -12,21 +12,21 @@ forbiddenModals:
 cases:
   - name: config-search-accepts-quit-letter
     input: q
-    wantEditing: 'search project: q'
-    wantKept: 'filter project: q'
+    wantEditing: 'search: q▏'
+    wantKept: 'search: q'
     forbiddenHint: 'q: quit'
   - name: config-search-accepts-back-letter
     input: b
-    wantEditing: 'search project: b'
-    wantKept: 'filter project: b'
+    wantEditing: 'search: b▏'
+    wantKept: 'search: b'
     forbiddenHint: 'esc: back'
   - name: config-search-accepts-help-punctuation
     input: '?'
-    wantEditing: 'search project: ?'
-    wantKept: 'filter project: ?'
+    wantEditing: 'search: ?▏'
+    wantKept: 'search: ?'
     forbiddenHint: '?: help'
   - name: config-search-accepts-facet-letter
     input: f
-    wantEditing: 'search project: f'
-    wantKept: 'filter project: f'
+    wantEditing: 'search: f▏'
+    wantKept: 'search: f'
     forbiddenHint: 'f: filter'

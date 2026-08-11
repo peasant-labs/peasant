@@ -74,94 +74,7 @@ func (s TriState) String() string {
 	}
 }
 
-// TreeScope is the closed set of levels a project-first selection tree can
-// navigate and search. Scope is independent from expand/collapse and pane
-// focus: changing it names which column a search targets without repurposing
-// either interaction.
-type TreeScope uint8
-
-const (
-	// TreeScopeUnknown is the invalid zero value.
-	TreeScopeUnknown TreeScope = iota
-	// TreeScopeProject targets top-level project rows.
-	TreeScopeProject
-	// TreeScopeBranch targets branch rows beneath projects.
-	TreeScopeBranch
-	// TreeScopeSession targets session rows beneath branches.
-	TreeScopeSession
-)
-
-// AllTreeScopes returns every valid scope in previous/next navigation order.
-func AllTreeScopes() []TreeScope {
-	return []TreeScope{TreeScopeProject, TreeScopeBranch, TreeScopeSession}
-}
-
-// IsValid reports whether s names a project-first tree scope.
-func (s TreeScope) IsValid() bool {
-	switch s {
-	case TreeScopeProject, TreeScopeBranch, TreeScopeSession:
-		return true
-	default:
-		return false
-	}
-}
-
-// String returns the lower-case user-facing scope name, or "unknown".
-func (s TreeScope) String() string {
-	switch s {
-	case TreeScopeProject:
-		return "project"
-	case TreeScopeBranch:
-		return "branch"
-	case TreeScopeSession:
-		return "session"
-	default:
-		return "unknown"
-	}
-}
-
-// depth returns the project-first row depth represented by s.
-func (s TreeScope) depth() int {
-	switch s {
-	case TreeScopeProject:
-		return 0
-	case TreeScopeBranch:
-		return 1
-	case TreeScopeSession:
-		return 2
-	default:
-		return -1
-	}
-}
-
-// Previous returns the adjacent scope toward Project, clamped at Project. An
-// unknown scope stays unknown so invalid state fails closed instead of silently
-// selecting a real column.
-func (s TreeScope) Previous() TreeScope {
-	switch s {
-	case TreeScopeSession:
-		return TreeScopeBranch
-	case TreeScopeBranch, TreeScopeProject:
-		return TreeScopeProject
-	default:
-		return TreeScopeUnknown
-	}
-}
-
-// Next returns the adjacent scope toward Session, clamped at Session. An
-// unknown scope stays unknown.
-func (s TreeScope) Next() TreeScope {
-	switch s {
-	case TreeScopeProject:
-		return TreeScopeBranch
-	case TreeScopeBranch, TreeScopeSession:
-		return TreeScopeSession
-	default:
-		return TreeScopeUnknown
-	}
-}
-
-// TreeFilterMode is the closed lifecycle of current-scope text search.
+// TreeFilterMode is the closed lifecycle of hierarchy-wide text search.
 type TreeFilterMode uint8
 
 const (
@@ -199,11 +112,10 @@ func (m TreeFilterMode) String() string {
 	}
 }
 
-// TreeFilterState is the typed, inspectable text-search state. Query narrows
-// only rows at Scope; ancestor rows remain as context. It never owns or copies
-// checkbox state: projections retain shared TreeNode identity.
+// TreeFilterState is the typed, inspectable text-search state. Query matches
+// labels at every hierarchy depth; ancestor rows remain as context. It never
+// owns or copies checkbox state: projections retain shared TreeNode identity.
 type TreeFilterState struct {
-	Scope TreeScope
 	Mode  TreeFilterMode
 	Query string
 }
@@ -226,9 +138,9 @@ func (s TreeFilterState) AvailableActions() []keymap.ActionID {
 			keymap.ActionClearFilter,
 		}
 	case TreeFilterKept:
-		return []keymap.ActionID{keymap.ActionSearchScope, keymap.ActionClearFilter}
+		return []keymap.ActionID{keymap.ActionSearch, keymap.ActionClearFilter}
 	case TreeFilterInactive:
-		return []keymap.ActionID{keymap.ActionSearchScope}
+		return []keymap.ActionID{keymap.ActionSearch}
 	default:
 		return nil
 	}
@@ -404,18 +316,15 @@ type Tree struct {
 // the spinner) to begin a scan.
 func NewTree(t theme.Theme, src TreeSource) Tree {
 	return Tree{
-		theme:    t,
-		keymap:   keymap.Default(),
-		src:      src,
-		spinner:  NewSpinner(t, "scanning projects"),
-		owner:    nextAsyncOwnerID(),
-		expanded: map[*TreeNode]bool{},
-		width:    TreeMinSize.Width,
-		height:   TreeMinSize.Height,
-		filter: TreeFilterState{
-			Scope: TreeScopeProject,
-			Mode:  TreeFilterInactive,
-		},
+		theme:            t,
+		keymap:           keymap.Default(),
+		src:              src,
+		spinner:          NewSpinner(t, "scanning projects"),
+		owner:            nextAsyncOwnerID(),
+		expanded:         map[*TreeNode]bool{},
+		width:            TreeMinSize.Width,
+		height:           TreeMinSize.Height,
+		filter:           TreeFilterState{Mode: TreeFilterInactive},
 		filterFallback:   cursorAnchor{depth: -1},
 		projectionAnchor: cursorAnchor{depth: -1},
 	}
@@ -607,7 +516,7 @@ func (t Tree) Err() error { return t.err }
 // projection.
 func (t Tree) Roots() []*TreeNode { return t.roots }
 
-// VisibleRoots returns the current-scope text projection. It shares selectable
+// VisibleRoots returns the hierarchy-wide text projection. It shares selectable
 // node identity with Roots and contains shallow ancestor copies only where
 // needed to retain context. With no active query it is exactly Roots.
 func (t Tree) VisibleRoots() []*TreeNode { return t.renderRoots() }
@@ -620,10 +529,7 @@ func (t Tree) Cursor() int { return t.cursor }
 // across view-only projections.
 func (t Tree) ViewportOffset() int { return t.offset }
 
-// Scope reports the typed Project, Branch, or Session level text search targets.
-func (t Tree) Scope() TreeScope { return t.filter.Scope }
-
-// FilterState reports a copy of the current-scope text-search state.
+// FilterState reports a copy of the hierarchy-wide text-search state.
 func (t Tree) FilterState() TreeFilterState { return t.filter }
 
 // Overflow reports whether the current visible viewport has rows above or
@@ -687,13 +593,7 @@ func (t Tree) AvailableActions() []keymap.ActionID {
 		actions = append(actions, keymap.ActionDown, keymap.ActionPageDown, keymap.ActionBottom)
 	}
 	if len(t.roots) > 0 {
-		if t.filter.Scope != TreeScopeProject {
-			actions = append(actions, keymap.ActionPrevScope)
-		}
-		if t.filter.Scope != TreeScopeSession {
-			actions = append(actions, keymap.ActionNextScope)
-		}
-		actions = append(actions, keymap.ActionSearchScope)
+		actions = append(actions, keymap.ActionSearch)
 	}
 	if t.filter.Active() {
 		actions = append(actions, keymap.ActionClearFilter)
@@ -918,11 +818,7 @@ func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 		t.moveToProject(1)
 	case keymap.ActionPrevProject:
 		t.moveToProject(-1)
-	case keymap.ActionPrevScope:
-		t.moveScope(t.filter.Scope.Previous())
-	case keymap.ActionNextScope:
-		t.moveScope(t.filter.Scope.Next())
-	case keymap.ActionSearchScope:
+	case keymap.ActionSearch:
 		if !t.filter.Active() || t.filterFallback.depth < 0 {
 			t.filterFallback = t.currentAnchor()
 		}
@@ -995,8 +891,8 @@ func (t Tree) handleFilterKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 	return t, nil
 }
 
-// clearFilter returns to the current unfiltered roots without changing scope,
-// expansion, or any node's checkbox state.
+// clearFilter returns to the current unfiltered roots without changing
+// expansion or any node's checkbox state.
 func (t *Tree) clearFilter() {
 	anchor := t.filterFallback
 	if anchor.depth < 0 {
@@ -1219,7 +1115,7 @@ func (t Tree) currentAnchor() cursorAnchor {
 	return cursorAnchor{node: t.canonicalNode(row.node), depth: row.depth, offset: t.offset}
 }
 
-// applyTextProjection rebuilds the current-scope text view from the installed
+// applyTextProjection rebuilds the hierarchy-wide text view from the installed
 // roots. Matching subtrees retain original pointers; only ancestor context is
 // shallow-copied and recorded in origins.
 func (t *Tree) applyTextProjection(preserveCursor bool) {
@@ -1240,7 +1136,7 @@ func (t *Tree) applyTextProjectionAt(anchor cursorAnchor) {
 		t.visible = nil
 		t.projected = false
 	} else {
-		t.visible = projectTree(t.roots, t.filter.Scope, query)
+		t.visible = projectTree(t.roots, query)
 		t.projected = true
 	}
 	t.recompute()
@@ -1259,32 +1155,24 @@ func (t *Tree) applyTextProjectionAt(anchor cursorAnchor) {
 	t.clampWindow()
 }
 
-// projectTree narrows roots to nodes whose label or id contains query at scope,
-// retaining ancestors for context. A matched scope node is the original pointer
-// with its whole subtree; retained ancestors are shallow copies whose children
-// are only the matching branches. The origins map links those copies back to the
-// canonical forest for expansion state.
-func projectTree(roots []*TreeNode, scope TreeScope, query string) []*TreeNode {
-	targetDepth := scope.depth()
-	if targetDepth < 0 {
-		return nil
-	}
+// projectTree narrows roots to nodes whose label contains query at any depth,
+// retaining ancestors for context. A matched node is the original pointer with
+// its whole subtree; retained ancestors are shallow copies whose children are
+// only matching branches. Query normalization happens once before the linear
+// walk, and no ID or metadata participates in user-visible label search.
+func projectTree(roots []*TreeNode, query string) []*TreeNode {
 	needle := strings.ToLower(strings.TrimSpace(query))
-	var project func(*TreeNode, int) *TreeNode
-	project = func(node *TreeNode, depth int) *TreeNode {
-		if depth == targetDepth {
-			haystack := strings.ToLower(flattenLine(node.Label) + " " + node.ID)
-			if strings.Contains(haystack, needle) {
-				return node
-			}
-			return nil
-		}
-		if depth > targetDepth {
-			return nil
+	if needle == "" {
+		return roots
+	}
+	var project func(*TreeNode) *TreeNode
+	project = func(node *TreeNode) *TreeNode {
+		if strings.Contains(strings.ToLower(flattenLine(node.Label)), needle) {
+			return node
 		}
 		children := make([]*TreeNode, 0, len(node.Children))
 		for _, child := range node.Children {
-			if kept := project(child, depth+1); kept != nil {
+			if kept := project(child); kept != nil {
 				children = append(children, kept)
 			}
 		}
@@ -1295,64 +1183,11 @@ func projectTree(roots []*TreeNode, scope TreeScope, query string) []*TreeNode {
 	}
 	visible := make([]*TreeNode, 0, len(roots))
 	for _, root := range roots {
-		if kept := project(root, 0); kept != nil {
+		if kept := project(root); kept != nil {
 			visible = append(visible, kept)
 		}
 	}
 	return visible
-}
-
-// moveScope changes the typed active scope and moves the cursor to the nearest
-// row at that level in the current context. It does not touch expand/collapse or
-// split-pane focus state.
-func (t *Tree) moveScope(scope TreeScope) {
-	if !scope.IsValid() || scope == t.filter.Scope {
-		return
-	}
-	t.filter.Scope = scope
-	t.applyTextProjection(true)
-	t.moveCursorToScope(scope)
-}
-
-func (t *Tree) moveCursorToScope(scope TreeScope) {
-	rows := t.visibleRows()
-	if len(rows) == 0 || t.cursor < 0 || t.cursor >= len(rows) {
-		return
-	}
-	targetDepth := scope.depth()
-	current := rows[t.cursor]
-	if current.depth == targetDepth {
-		return
-	}
-	if targetDepth < current.depth {
-		parent := t.parentIndex()
-		node := current.node
-		for depth := current.depth; depth > targetDepth; depth-- {
-			next, ok := parent[node]
-			if !ok {
-				return
-			}
-			node = next
-		}
-		for i, row := range rows {
-			if row.node == node {
-				t.cursor = i
-				t.clampWindow()
-				return
-			}
-		}
-		return
-	}
-	for i := t.cursor + 1; i < len(rows); i++ {
-		if rows[i].depth <= current.depth {
-			break
-		}
-		if rows[i].depth == targetDepth {
-			t.cursor = i
-			t.clampWindow()
-			return
-		}
-	}
 }
 
 // recompute rolls every interior node's state up from its children across the
@@ -1532,7 +1367,7 @@ func (t Tree) View() string {
 	if len(rows) == 0 {
 		empty := "no projects"
 		if t.filter.Active() {
-			empty = noMatchesLabel(t.filter.Scope)
+			empty = "no matching rows"
 		}
 		return fitLine(styles.Muted, empty, t.width)
 	}
@@ -1560,19 +1395,6 @@ func (t Tree) View() string {
 		out = append(out, fitLine(styles.Base, "", t.width))
 	}
 	return joinLines(out)
-}
-
-func noMatchesLabel(scope TreeScope) string {
-	switch scope {
-	case TreeScopeProject:
-		return "no matching projects"
-	case TreeScopeBranch:
-		return "no matching branches"
-	case TreeScopeSession:
-		return "no matching sessions"
-	default:
-		return "no matching rows"
-	}
 }
 
 // minFallback renders one truncation-safe line when the region is below the

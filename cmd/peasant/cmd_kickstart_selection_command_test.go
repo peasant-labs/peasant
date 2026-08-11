@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/golden"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -27,6 +29,7 @@ const (
 	expectedSelectionCommandCaseCount          = 1
 	expectedSelectionCommandSessionCount       = 2
 	expectedSelectionCommandMutationProbeCount = 1
+	expectedSelectionCommandRenderCaseCount    = 8
 )
 
 //go:embed testdata/kickstart_selection_command.yaml
@@ -35,7 +38,6 @@ var selectionCommandData []byte
 type selectionCommandAction string
 
 const (
-	selectionCommandNextScope  selectionCommandAction = "next-scope"
 	selectionCommandSearch     selectionCommandAction = "search"
 	selectionCommandKeepFilter selectionCommandAction = "keep-filter"
 	selectionCommandClear      selectionCommandAction = "clear-filter"
@@ -45,7 +47,7 @@ const (
 
 func (a selectionCommandAction) valid() bool {
 	switch a {
-	case selectionCommandNextScope, selectionCommandSearch, selectionCommandKeepFilter,
+	case selectionCommandSearch, selectionCommandKeepFilter,
 		selectionCommandClear, selectionCommandDown, selectionCommandToggle:
 		return true
 	default:
@@ -76,11 +78,67 @@ type selectionCommandCase struct {
 	ParityRowAssertions   []selectionCommandRowAssertion `yaml:"parityRowAssertions"`
 }
 
+type selectionCommandSurface string
+
+const (
+	selectionCommandSurfaceConfig    selectionCommandSurface = "config"
+	selectionCommandSurfaceKickstart selectionCommandSurface = "kickstart"
+)
+
+func (s selectionCommandSurface) valid() bool {
+	return s == selectionCommandSurfaceConfig || s == selectionCommandSurfaceKickstart
+}
+
+func allSelectionCommandSurfaces() []selectionCommandSurface {
+	return []selectionCommandSurface{selectionCommandSurfaceConfig, selectionCommandSurfaceKickstart}
+}
+
+type selectionCommandLayout string
+
+const (
+	selectionCommandLayoutNarrow selectionCommandLayout = "narrow"
+	selectionCommandLayoutWide   selectionCommandLayout = "wide"
+)
+
+func (l selectionCommandLayout) valid() bool {
+	return l == selectionCommandLayoutNarrow || l == selectionCommandLayoutWide
+}
+
+func (l selectionCommandLayout) dimensions() (int, int) {
+	switch l {
+	case selectionCommandLayoutNarrow:
+		return 80, 20
+	case selectionCommandLayoutWide:
+		return 120, 24
+	default:
+		return 0, 0
+	}
+}
+
+func allSelectionCommandLayouts() []selectionCommandLayout {
+	return []selectionCommandLayout{selectionCommandLayoutNarrow, selectionCommandLayoutWide}
+}
+
+func allSelectionCommandThemes() []config.Theme {
+	return []config.Theme{config.ThemeDark, config.ThemeLight}
+}
+
+type selectionCommandRenderCase struct {
+	Name    string                  `yaml:"name"`
+	Surface selectionCommandSurface `yaml:"surface"`
+	Theme   config.Theme            `yaml:"theme"`
+	Layout  selectionCommandLayout  `yaml:"layout"`
+	Width   int                     `yaml:"width"`
+	Height  int                     `yaml:"height"`
+}
+
 type selectionCommandDocument struct {
-	ExpectedCaseCount          int                    `yaml:"expectedCaseCount"`
-	ExpectedSessionCount       int                    `yaml:"expectedSessionCount"`
-	ExpectedMutationProbeCount int                    `yaml:"expectedMutationProbeCount"`
-	Cases                      []selectionCommandCase `yaml:"cases"`
+	ExpectedCaseCount          int                          `yaml:"expectedCaseCount"`
+	ExpectedSessionCount       int                          `yaml:"expectedSessionCount"`
+	ExpectedMutationProbeCount int                          `yaml:"expectedMutationProbeCount"`
+	ExpectedRenderCaseCount    int                          `yaml:"expectedRenderCaseCount"`
+	Cases                      []selectionCommandCase       `yaml:"cases"`
+	RenderCases                []selectionCommandRenderCase `yaml:"renderCases"`
 }
 
 func selectionCommandValuesPresent(values ...[]string) bool {
@@ -111,6 +169,10 @@ func decodeSelectionCommand(data []byte) (selectionCommandDocument, error) {
 	if doc.ExpectedCaseCount != expectedSelectionCommandCaseCount || len(doc.Cases) != expectedSelectionCommandCaseCount {
 		return doc, fmt.Errorf("kickstart selection command cases: declared=%d actual=%d required=%d",
 			doc.ExpectedCaseCount, len(doc.Cases), expectedSelectionCommandCaseCount)
+	}
+	if doc.ExpectedRenderCaseCount != expectedSelectionCommandRenderCaseCount || len(doc.RenderCases) != expectedSelectionCommandRenderCaseCount {
+		return doc, fmt.Errorf("selection command render cases: declared=%d actual=%d required=%d",
+			doc.ExpectedRenderCaseCount, len(doc.RenderCases), expectedSelectionCommandRenderCaseCount)
 	}
 	seenCases := map[string]bool{}
 	seenSessions := map[string]bool{}
@@ -165,6 +227,29 @@ func decodeSelectionCommand(data []byte) (selectionCommandDocument, error) {
 		return doc, fmt.Errorf("kickstart selection command mutation probes: declared=%d actual=%d required=%d",
 			doc.ExpectedMutationProbeCount, mutationProbes, expectedSelectionCommandMutationProbeCount)
 	}
+	renderNames := map[string]bool{}
+	renderCombinations := map[string]int{}
+	for _, renderCase := range doc.RenderCases {
+		expectedWidth, expectedHeight := renderCase.Layout.dimensions()
+		if strings.TrimSpace(renderCase.Name) == "" || renderNames[renderCase.Name] || !renderCase.Surface.valid() ||
+			!renderCase.Theme.IsValid() || !renderCase.Layout.valid() || renderCase.Width != expectedWidth || renderCase.Height != expectedHeight {
+			return doc, fmt.Errorf("kickstart selection command fixture contains an invalid or duplicate render case %#v", renderCase)
+		}
+		renderNames[renderCase.Name] = true
+		combination := fmt.Sprintf("%s/%s/%s", renderCase.Surface, renderCase.Theme, renderCase.Layout)
+		renderCombinations[combination]++
+	}
+	for _, surface := range allSelectionCommandSurfaces() {
+		for _, commandTheme := range allSelectionCommandThemes() {
+			for _, layout := range allSelectionCommandLayouts() {
+				combination := fmt.Sprintf("%s/%s/%s", surface, commandTheme, layout)
+				if renderCombinations[combination] != 1 {
+					return doc, fmt.Errorf("kickstart selection command fixture has %d render cases for %s, want exactly one",
+						renderCombinations[combination], combination)
+				}
+			}
+		}
+	}
 	return doc, nil
 }
 
@@ -184,8 +269,6 @@ func selectionCommandMessage(t *testing.T, input selectionCommandInput) tea.KeyP
 		return tea.KeyPressMsg{Code: r, Text: input.Text}
 	}
 	switch input.Action {
-	case selectionCommandNextScope:
-		return tea.KeyPressMsg{Code: ']'}
 	case selectionCommandSearch:
 		return tea.KeyPressMsg{Code: '/'}
 	case selectionCommandKeepFilter:
@@ -277,6 +360,7 @@ func assertSelectionParityView(t *testing.T, surface, view string, rows []select
 	if view == "" {
 		t.Fatalf("%s selection parity mount produced no view", surface)
 	}
+	assertMountedSelectionSearch(t, view)
 	assertSelectionCommandRows(t, view, rows)
 }
 
@@ -310,6 +394,27 @@ func seedSelectionCommandConfig(t *testing.T, dir string, selection config.Selec
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read kickstart selection config: %v", err)
+	}
+	return path, data
+}
+
+func seedSelectionCommandRenderConfig(
+	t *testing.T,
+	dir string,
+	selection config.SelectionConfig,
+	commandTheme config.Theme,
+) (string, []byte) {
+	t.Helper()
+	path := defaults.ResolveConfigFilePathWith(dir).String()
+	cfg := config.BaseConfig()
+	cfg.Selection = selection
+	cfg.Display.Theme = commandTheme
+	if err := config.SaveAtomic(path, cfg); err != nil {
+		t.Fatalf("seed %s selection command render config: %v", commandTheme, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s selection command render config: %v", commandTheme, err)
 	}
 	return path, data
 }
@@ -362,6 +467,7 @@ func TestKickstartCommandMountsNonEmptySelectionInteraction(t *testing.T) {
 					t.Fatalf("selection command phase = %s after declining connection, want flow", mounted.Phase())
 				}
 				initialView := selectionCommandView(model)
+				assertMountedSelectionSearch(t, initialView)
 				for _, listing := range c.Listings {
 					if !strings.Contains(initialView, listing.Title) {
 						t.Fatalf("non-empty command mount omitted discovered session %q:\n%s", listing.Title, initialView)
@@ -369,7 +475,9 @@ func TestKickstartCommandMountsNonEmptySelectionInteraction(t *testing.T) {
 				}
 
 				model = driveSelectionCommandInputs(t, model, c.SelectionInputs)
-				assertSelectionCommandRows(t, selectionCommandView(model), c.RowAssertions)
+				selectionView := selectionCommandView(model)
+				assertMountedSelectionSearch(t, selectionView)
+				assertSelectionCommandRows(t, selectionView, c.RowAssertions)
 				if after, err := os.ReadFile(configPath); err != nil || !bytes.Equal(after, before) {
 					t.Fatalf("buffered selection changed config before consent: readErr=%v", err)
 				}
@@ -466,6 +574,100 @@ func TestConfigAndKickstartShareCanonicalSelectionInitialization(t *testing.T) {
 	}
 }
 
+func assertSelectionCommandRender(t *testing.T, renderCase selectionCommandRenderCase, view string) {
+	t.Helper()
+	plain := ansiPattern.ReplaceAllString(view, "")
+	assertMountedSelectionSearch(t, plain)
+	for _, want := range []string{"choose sessions to import", "keep sess", "toggle target"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("%s mounted selection render omits %q:\n%s", renderCase.Surface, want, plain)
+		}
+	}
+	lines := strings.Split(view, "\n")
+	if len(lines) != renderCase.Height {
+		t.Errorf("%s mounted selection render height = %d, want %d", renderCase.Surface, len(lines), renderCase.Height)
+	}
+	maximumWidth := 0
+	for _, line := range lines {
+		width := lipgloss.Width(line)
+		if width > renderCase.Width {
+			t.Errorf("%s mounted selection line width = %d, exceeds %d: %q", renderCase.Surface, width, renderCase.Width, line)
+		}
+		if width > maximumWidth {
+			maximumWidth = width
+		}
+	}
+	if maximumWidth != renderCase.Width {
+		t.Errorf("%s mounted selection maximum width = %d, want %d", renderCase.Surface, maximumWidth, renderCase.Width)
+	}
+}
+
+func TestSelectionCommands_RenderGolden(t *testing.T) {
+	doc := loadSelectionCommand(t)
+	selectionCase := doc.Cases[0]
+	for _, renderCase := range doc.RenderCases {
+		renderCase := renderCase
+		t.Run(renderCase.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			_, before := seedSelectionCommandRenderConfig(t, dir, selectionCase.ExpectedSelection, renderCase.Theme)
+			var rendered string
+			terminalCalls := 0
+
+			switch renderCase.Surface {
+			case selectionCommandSurfaceConfig:
+				deps := defaultConfigCommandDeps()
+				deps.discover = func(context.Context, string, string) configDiscovery {
+					return configDiscovery{
+						inventory: ftue.ProviderInventory{
+							defaults.HarnessClaudeCode: {SessionCount: len(selectionCase.Listings), Enabled: true},
+						},
+						source: kickstart.NewScannerTreeSource(selectionCase.Listings),
+					}
+				}
+				deps.openRetention = func() (configRetentionFile, error) {
+					return selectionCommandRetentionFile{path: filepath.Join(dir, "claude-settings.json")}, nil
+				}
+				deps.run = func(model tea.Model) (tea.Model, error) {
+					terminalCalls++
+					model = drainSelectionCommandModel(t, model, model.Init())
+					model = updateSelectionCommandModel(t, model, tea.WindowSizeMsg{Width: renderCase.Width, Height: renderCase.Height})
+					model = updateSelectionCommandModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+					rendered = model.View().Content
+					return model, nil
+				}
+				if _, err := executeWithDataDir(t, buildConfigCommand(deps), dir, nil); err != nil {
+					t.Fatalf("run mounted config selection render: %v", err)
+				}
+
+			case selectionCommandSurfaceKickstart:
+				deps := selectionKickstartDeps(t, selectionCase, func(model tea.Model) error {
+					terminalCalls++
+					model = updateSelectionCommandModel(t, model, tea.WindowSizeMsg{Width: renderCase.Width, Height: renderCase.Height})
+					model = updateSelectionCommandModel(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+					rendered = model.View().Content
+					return nil
+				})
+				if _, err := executeWithDataDir(t, buildKickstartCommand(deps), dir, nil); err != nil {
+					t.Fatalf("run mounted kickstart selection render: %v", err)
+				}
+
+			default:
+				t.Fatalf("unsupported selection command render surface %q", renderCase.Surface)
+			}
+
+			if terminalCalls != 1 {
+				t.Fatalf("%s selection render terminal calls = %d, want 1", renderCase.Surface, terminalCalls)
+			}
+			assertSelectionCommandRender(t, renderCase, rendered)
+			golden.RequireEqual(t, []byte(rendered))
+			after, err := os.ReadFile(defaults.ResolveConfigFilePathWith(dir).String())
+			if err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("%s selection render changed config bytes: readErr=%v", renderCase.Surface, err)
+			}
+		})
+	}
+}
+
 func TestSelectionCommandFixtureMutationProbeRequiresToggle(t *testing.T) {
 	probes := 0
 	for _, c := range loadSelectionCommand(t).Cases {
@@ -531,5 +733,22 @@ func TestSelectionCommandFixturePinsMutationProbeCount(t *testing.T) {
 	mutated := mutateSelectionCommandCount(t, "expectedMutationProbeCount", expectedSelectionCommandMutationProbeCount)
 	if _, err := decodeSelectionCommand(mutated); err == nil {
 		t.Fatal("selection command fixture accepted a changed mutation-probe count")
+	}
+}
+
+func TestSelectionCommandFixturePinsRenderCaseCount(t *testing.T) {
+	mutated := mutateSelectionCommandCount(t, "expectedRenderCaseCount", expectedSelectionCommandRenderCaseCount)
+	if _, err := decodeSelectionCommand(mutated); err == nil {
+		t.Fatal("selection command fixture accepted a changed render-case count")
+	}
+}
+
+func TestSelectionCommandFixturePinsRenderMatrix(t *testing.T) {
+	mutated := bytes.Replace(selectionCommandData, []byte("surface: kickstart"), []byte("surface: config"), 1)
+	if bytes.Equal(mutated, selectionCommandData) {
+		t.Fatal("selection command render-matrix mutation did not alter the fixture")
+	}
+	if _, err := decodeSelectionCommand(mutated); err == nil {
+		t.Fatal("selection command fixture accepted a duplicate config row and missing kickstart row")
 	}
 }

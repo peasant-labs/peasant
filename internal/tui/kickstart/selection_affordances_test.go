@@ -23,6 +23,17 @@ var selectionAffordanceData []byte
 
 const expectedSelectionAffordanceCaseCount = 7
 
+type selectionAffordanceSurface string
+
+const (
+	selectionAffordanceSurfaceField selectionAffordanceSurface = "selection"
+	selectionAffordanceSurfaceHelp  selectionAffordanceSurface = "help"
+)
+
+func (s selectionAffordanceSurface) valid() bool {
+	return s == selectionAffordanceSurfaceField || s == selectionAffordanceSurfaceHelp
+}
+
 type selectionAffordanceRow struct {
 	Label        string   `yaml:"label"`
 	WantContains []string `yaml:"wantContains"`
@@ -30,15 +41,17 @@ type selectionAffordanceRow struct {
 }
 
 type selectionAffordanceCase struct {
-	Name                    string                   `yaml:"name"`
-	Keys                    []string                 `yaml:"keys"`
-	BeforeLoad              bool                     `yaml:"beforeLoad"`
-	DrainAfterKeys          bool                     `yaml:"drainAfterKeys"`
-	WantBeforeDrainContains []string                 `yaml:"wantBeforeDrainContains"`
-	WantBeforeDrainMissing  []string                 `yaml:"wantBeforeDrainMissing"`
-	WantContains            []string                 `yaml:"wantContains"`
-	WantMissing             []string                 `yaml:"wantMissing"`
-	RowAssertions           []selectionAffordanceRow `yaml:"rowAssertions"`
+	Name                    string                     `yaml:"name"`
+	Surface                 selectionAffordanceSurface `yaml:"surface"`
+	ExpectedSearchCursors   *int                       `yaml:"expectedSearchCursors"`
+	Keys                    []string                   `yaml:"keys"`
+	BeforeLoad              bool                       `yaml:"beforeLoad"`
+	DrainAfterKeys          bool                       `yaml:"drainAfterKeys"`
+	WantBeforeDrainContains []string                   `yaml:"wantBeforeDrainContains"`
+	WantBeforeDrainMissing  []string                   `yaml:"wantBeforeDrainMissing"`
+	WantContains            []string                   `yaml:"wantContains"`
+	WantMissing             []string                   `yaml:"wantMissing"`
+	RowAssertions           []selectionAffordanceRow   `yaml:"rowAssertions"`
 }
 
 type selectionAffordanceDocument struct {
@@ -70,7 +83,9 @@ func decodeSelectionAffordances(data []byte) (selectionAffordanceDocument, error
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
-		if c.Name == "" || seen[c.Name] || len(c.WantBeforeDrainContains)+len(c.WantBeforeDrainMissing)+len(c.WantContains)+len(c.WantMissing)+len(c.RowAssertions) == 0 ||
+		if c.Name == "" || seen[c.Name] || !c.Surface.valid() || c.ExpectedSearchCursors == nil ||
+			*c.ExpectedSearchCursors < 0 || *c.ExpectedSearchCursors > 1 ||
+			len(c.WantBeforeDrainContains)+len(c.WantBeforeDrainMissing)+len(c.WantContains)+len(c.WantMissing)+len(c.RowAssertions) == 0 ||
 			!selectionRenderValuesPresent(c.WantBeforeDrainContains, c.WantBeforeDrainMissing, c.WantContains, c.WantMissing) {
 			return doc, fmt.Errorf("selection_affordances.yaml contains an invalid, duplicate, or assertion-free case: %#v", c)
 		}
@@ -167,6 +182,13 @@ func selectionAffordanceLine(view, label string) string {
 	return ""
 }
 
+func assertSingleSelectionSearchBar(t *testing.T, view string) {
+	t.Helper()
+	if got := strings.Count(view, "search:"); got != 1 {
+		t.Errorf("mounted selection step renders %d search bars, want exactly one:\n%s", got, view)
+	}
+}
+
 func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
 	doc := loadSelectionAffordances(t)
 	for _, c := range doc.Cases {
@@ -175,6 +197,7 @@ func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
 			program := driveSelectionAffordanceProgram(t, selectionAffordanceProgram(t, doc.SavedSelection, !c.BeforeLoad), c.Keys)
 			if c.BeforeLoad {
 				view := stripRender(program.View())
+				assertSingleSelectionSearchBar(t, view)
 				for _, want := range c.WantBeforeDrainContains {
 					if !strings.Contains(view, want) {
 						t.Errorf("pre-load selection step must contain %q:\n%s", want, view)
@@ -190,6 +213,15 @@ func TestSelectionStep_AffordancesUseMountedProductionPath(t *testing.T) {
 				program = drainProgram(program, program.Init())
 			}
 			view := stripRender(program.View())
+			if c.Surface == selectionAffordanceSurfaceField {
+				assertSingleSelectionSearchBar(t, view)
+			} else if strings.Contains(view, "search:") {
+				t.Errorf("help modal leaked the underlying selection search bar:\n%s", view)
+			}
+			if got := strings.Count(view, "▏"); got != *c.ExpectedSearchCursors {
+				t.Errorf("mounted %s surface renders %d search cursors, want %d:\n%s",
+					c.Surface, got, *c.ExpectedSearchCursors, view)
+			}
 			for _, want := range c.WantContains {
 				if !strings.Contains(view, want) {
 					t.Errorf("mounted selection step must contain %q:\n%s", want, view)

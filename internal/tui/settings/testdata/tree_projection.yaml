@@ -43,7 +43,6 @@ sessions:
 cases:
   - name: saved-imported-and-current-state-render-independently
     keys: []
-    expectScope: project
     expectMode: inactive
     expectSelected: [oc-1]
     expectUnselected: [cc-1, cc-2, oc-2]
@@ -52,10 +51,9 @@ cases:
     wantVisibleRows:
       [ingest pipeline refactor, commit detector fix, share bridge scan,
        governance audit trigger]
-    wantViewContains:
-      - "tracked = included by previous saved selection"
-      - "imported = already in local store"
-      - "/: search this scope"
+    wantViewContains: ["search:"]
+    wantViewMissing:
+      ["tracked =", "imported =", "selected sessions:", "hidden by filters:", "scope:", "view only:"]
     rowAssertions:
       - label: commit detector fix
         wantContains: ["[✓]", tracked]
@@ -66,7 +64,6 @@ cases:
 
   - name: harness-projection-keeps-mixed-project-and-hidden-selection
     keys: [f]
-    expectScope: project
     expectMode: inactive
     expectSelected: [oc-1]
     expectUnselected: [cc-1, cc-2, oc-2]
@@ -78,11 +75,10 @@ cases:
   - name: harness-projection-preserves-a-visible-canonical-cursor-and-offset
     keys: [down, down, f]
     anchorMutationProbe: true
-    height: 12
+    height: 10
     expectPane: left
     expectCursorID: cc-1
     expectPreviewID: cc-1
-    expectScope: project
     expectMode: inactive
     expectSelected: [oc-1]
     expectUnselected: [cc-1, cc-2, oc-2]
@@ -100,7 +96,6 @@ cases:
     expectPane: left
     expectCursorID: cc-1
     expectPreviewID: cc-1
-    expectScope: project
     expectMode: inactive
     expectSelected: [oc-1]
     expectUnselected: [cc-1, cc-2, oc-2]
@@ -128,7 +123,6 @@ cases:
     expectPane: left
     expectCursorID: develop
     expectPreviewID: develop
-    expectScope: project
     expectMode: inactive
     expectSelected: [oc-1]
     expectUnselected: [cc-1, cc-2, oc-2]
@@ -136,8 +130,7 @@ cases:
     wantMissingRows: [governance audit trigger]
 
   - name: text-filter-and-toggle-mutate-the-canonical-forest-once
-    keys: ["]", "]", "/", s, h, a, r, e, enter, down, down, space]
-    expectScope: session
+    keys: ["/", s, h, a, r, e, enter, down, down, space]
     expectMode: kept
     expectQuery: share
     expectSelected: [oc-1, cc-2]
@@ -152,8 +145,7 @@ cases:
         wantMissing: [tracked, already imported]
 
   - name: clear-restores-the-forest-with-both-current-selections
-    keys: ["]", "]", "/", s, h, a, r, e, enter, down, down, space, esc]
-    expectScope: session
+    keys: ["/", s, h, a, r, e, enter, down, down, space, esc]
     expectMode: inactive
     expectSelected: [oc-1, cc-2]
     expectUnselected: [cc-1, oc-2]
@@ -169,8 +161,7 @@ cases:
         wantContains: ["[✓]"]
 
   - name: harness-and-text-projections-compose-with-shared-identity
-    keys: [f, "]", "]", "/", i, n, g, e, s, t, enter, down, down, space]
-    expectScope: session
+    keys: [f, "/", i, n, g, e, s, t, enter, down, down, space]
     expectMode: kept
     expectQuery: ingest
     expectSelected: [oc-1, cc-1]
@@ -187,17 +178,16 @@ cases:
   - name: preview-focus-does-not-steal-or-advertise-tree-search
     keys: [ctrl+l, "/"]
     expectPane: right
-    expectScope: project
     expectMode: inactive
     expectSelected: [oc-1]
     checkHiddenSelected: true
     expectHiddenSelected: 0
-    wantViewMissing: ["/: search this scope"]
+    wantViewContains: ["search:"]
+    wantViewMissing: ["/: search"]
 
   - name: preview-focus-keeps-active-filter-and-clear-return-path-visible
-    keys: ["]", "]", "/", i, n, g, e, s, t, enter, ctrl+l]
+    keys: ["/", i, n, g, e, s, t, enter, ctrl+l]
     expectPane: right
-    expectScope: session
     expectMode: kept
     expectQuery: ingest
     expectSelected: [oc-1]
@@ -206,30 +196,21 @@ cases:
     expectHiddenSelected: 1
     wantVisibleRows: [ingest pipeline refactor]
     wantMissingRows: [commit detector fix, share bridge scan, governance audit trigger]
-    wantViewContains:
-      - "preview focused; filter session: ingest"
-      - "ctrl+h returns to tree"
-      - "esc: clear filter"
-    wantViewMissing: ["/: search this scope"]
+    wantViewContains: ["search: ingest"]
+    wantViewMissing: ["/: search", "esc: clear filter", "preview focused", "returns to tree"]
 
   - name: returning-to-tree-restores-current-scope-search-dispatch
     keys: [ctrl+l, ctrl+h, "/"]
     expectPane: left
-    expectScope: project
     expectMode: editing
     expectSelected: [oc-1]
     checkHiddenSelected: true
     expectHiddenSelected: 0
-    wantViewContains:
-      - "type to filter"
-      - "backspace: delete"
-      - "enter: keep filter"
-      - "esc: clear filter"
+    wantViewContains: ["search: ▏", "backspace: delete", "enter: keep filter", "esc: clear filter"]
 
   - name: ctrl-h-terminal-backspace-deletes-while-tree-search-has-focus
-    keys: ["]", "]", "/", s, h, a, ctrl+h, enter]
+    keys: ["/", s, h, a, ctrl+h, enter]
     expectPane: left
-    expectScope: session
     expectMode: kept
     expectQuery: sh
     expectSelected: [oc-1]
@@ -238,15 +219,12 @@ cases:
     expectHiddenSelected: 1
     wantVisibleRows: [share bridge scan]
     wantMissingRows: [ingest pipeline refactor, commit detector fix, governance audit trigger]
-    wantViewContains:
-      - "filter session: sh"
-      - "hidden by filters: 1"
+    wantViewContains: ["search: sh"]
 
   - name: search-text-keeps-global-shortcut-letters-as-query-content
-    keys: ["]", "]", "/", b, q, "?", enter]
-    expectScope: session
+    keys: ["/", b, q, "?", f, enter]
     expectMode: kept
-    expectQuery: "bq?"
+    expectQuery: "bq?f"
     expectSelected: [oc-1]
     expectUnselected: [cc-1, cc-2, oc-2]
     checkHiddenSelected: true
@@ -254,9 +232,7 @@ cases:
     wantMissingRows:
       [ingest pipeline refactor, commit detector fix, share bridge scan,
        governance audit trigger]
-    wantViewContains:
-      - "filter session: bq?"
-      - "hidden by filters: 1"
+    wantViewContains: ["search: bq?f"]
 
   - name: registry-rebuild-keeps-saved-tracked-and-buffered-current-state-independent
     keys: []
@@ -266,7 +242,6 @@ cases:
       harnesses:
         claude-code:
           sessions: [cc-2]
-    expectScope: project
     expectMode: inactive
     expectSelected: [cc-2]
     expectUnselected: [cc-1, oc-1, oc-2]

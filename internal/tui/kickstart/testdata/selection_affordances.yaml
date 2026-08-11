@@ -1,6 +1,6 @@
 # Assertions over the canonical kickstart Program/Flow/Registry selection step.
 # Discovery and preview data come from the strict selection_render fixture; this
-# document owns the saved-selection state and interaction expectations.
+# document owns saved-selection state and interaction expectations.
 expectedCaseCount: 7
 savedSelection:
   mode: selected
@@ -9,17 +9,14 @@ savedSelection:
     claude-code:
       sessions: [cc-parent]
 cases:
-  - name: default-distinguishes-saved-imported-and-current
+  - name: default-shows-one-search-bar-and-row-local-state
+    surface: selection
+    expectedSearchCursors: 0
     keys: []
-    wantContains:
-      - "tracked = included by previous saved selection"
-      - "imported = already in local store"
-      - "scope: [project]  branch  session"
-      - "/: search this scope"
-      - "view only"
-      - "mixed projects remain"
-      - "hidden selections stay selected"
-      - "hidden by filters: 0"
+    wantContains: ["search:"]
+    wantMissing:
+      ["transcripts", "scope:", "previous scope", "next scope", "search scope",
+       "tracked =", "imported =", "selected sessions:", "hidden by filters:", "view only:"]
     rowAssertions:
       - label: parent session
         wantContains: ["[✓]", tracked]
@@ -28,55 +25,51 @@ cases:
         wantContains: ["[ ]", already imported]
         wantMissing: [tracked]
 
-  - name: typed-scope-actions-reach-session-without-changing-expand-bindings
-    keys: ["]", "]"]
-    wantContains:
-      - "scope: project  branch  [session]"
-      - "ctrl+l: focus right pane"
-    wantMissing: ["→/l: expand", "←/h: collapse"]
+  - name: removed-scope-keys-do-not-change-the-selection-surface
+    surface: selection
+    expectedSearchCursors: 0
+    keys: ["[", "]"]
+    wantContains: ["search:", parent session, cursor session]
+    wantMissing: ["scope:", "previous scope", "next scope", "search scope"]
 
-  - name: search-editing-shows-type-delete-keep-and-clear
+  - name: search-editing-shows-one-focused-cursor-and-typed-lifecycle
+    surface: selection
+    expectedSearchCursors: 1
     keys: ["/"]
     wantContains:
-      - "search project:"
-      - "type to filter"
-      - "backspace: delete"
-      - "enter: keep filter"
-      - "esc: clear filter"
+      ["search: ▏", "backspace: delete", "enter: keep filter", "esc: clear filter"]
+    wantMissing: ["type to filter", "search scope"]
 
-  - name: help-is-derived-from-current-tree-availability
+  - name: help-is-derived-from-global-tree-availability
+    surface: help
+    expectedSearchCursors: 0
     keys: ["?"]
     wantContains:
-      - "keyboard shortcuts"
-      - "]            next scope"
-      - "/            search scope"
-      - "←/h          collapse"
-      - "ctrl+l       focus right pane"
-    wantMissing: ["[            previous scope", "→/l          expand"]
+      ["keyboard shortcuts", "/            search", "←/h          collapse", "ctrl+l       focus right pane"]
+    wantMissing:
+      ["[            previous scope", "]            next scope", "/            search scope", "→/l          expand"]
 
   - name: leaf-help-omits-no-op-expand-and-collapse-actions
-    keys: ["]", "]", "?"]
-    wantContains:
-      - "keyboard shortcuts"
-      - "space        select"
-      - "/            search scope"
+    surface: help
+    expectedSearchCursors: 0
+    keys: [j, j, "?"]
+    wantContains: ["keyboard shortcuts", "space        select", "/            search"]
     wantMissing:
-      - "→/l          expand"
-      - "←/h          collapse"
+      ["→/l          expand", "←/h          collapse", "previous scope", "next scope", "search scope"]
 
   - name: pre-load-facet-key-is-unavailable-and-does-not-narrow-after-load
+    surface: selection
+    expectedSearchCursors: 0
     beforeLoad: true
     drainAfterKeys: true
     keys: [f]
-    wantBeforeDrainContains: [scanning projects]
-    wantBeforeDrainMissing: ["f: filter"]
-    wantContains: [cursor session, "> all 3"]
+    wantBeforeDrainContains: [scanning projects, "search:"]
+    wantBeforeDrainMissing: ["f: filter", "scope:"]
+    wantContains: [cursor session, "> all 3", "search:"]
 
-  - name: preview-focus-removes-tree-only-search-from-availability
-    keys: [ctrl+l]
-    wantContains:
-      - ">"
-      - "PgDn: page down"
-    wantMissing:
-      - "/: search this scope"
-      - "space: select"
+  - name: preview-focus-suppresses-tree-search-dispatch
+    surface: selection
+    expectedSearchCursors: 0
+    keys: [ctrl+l, "/"]
+    wantContains: [">", "PgDn: page down", "search:"]
+    wantMissing: ["/: search", "space: select", "search scope", "▏"]

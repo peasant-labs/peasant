@@ -20,7 +20,7 @@ cases:
         opencode:
           sessions: [oc-1]
     beforeLoginKeys:
-      [f, down, left, down, down, "]", "]", "/", c, c, enter, space,
+      [f, down, left, down, down, "/", s, h, a, r, e, enter, space,
        ctrl+l, down]
     expectedSelection:
       mode: selected
@@ -35,21 +35,20 @@ cases:
     expectedSourceLoads: 1
     expectedPreviewID: cc-2
     stateLineLabels:
-      - 'preview focused; filter session: cc'
-      - 'selected 2; hidden by filters: 1'
+      - 'search: share'
       - 'claude code 2'
-      - 'develop'
+      - 'feature-x'
       - 'share bridge scan'
       - 'retained preview cc-2 line 3'
     wantViewContains:
-      - 'preview focused; filter session: cc'
-      - 'hidden by filters: 1'
+      - 'search: share'
       - 'claude code 2'
-      - '↑  ▸ [ ] develop'
+      - 'feature-x'
       - 'share bridge scan'
       - 'retained preview cc-2 line 3'
     wantViewMissing:
       - 'ingest pipeline refactor'
+      - 'develop'
 
   - name: pending-tree-result-reaches-selection-while-sharing-is-current
     scenario: pending-tree-result

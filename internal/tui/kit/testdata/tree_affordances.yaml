@@ -1,8 +1,8 @@
-# Scoped search, lifecycle actions, and viewport markers for kit.Tree. Every
-# case drives the real component from a freshly loaded project -> branch ->
-# session forest. The row-count guard and strict loader make adding or removing
-# a behavior an explicit fixture edit.
-expectedCaseCount: 17
+# Global hierarchy search, lifecycle actions, pointer-preserving projections,
+# and viewport markers for kit.Tree. Every case drives the real component from
+# a freshly loaded project -> branch -> session forest. The exact count and
+# strict loader make behavior changes explicit fixture edits.
+expectedCaseCount: 19
 width: 52
 height: 4
 forest:
@@ -24,58 +24,64 @@ forest:
         label: develop
         children:
           - {id: beta-audit, label: governance audit}
+      - id: beta-release
+        label: alpha release
+        children:
+          - {id: beta-release-notes, label: release notes}
+      - id: beta-main
+        label: main
+        children:
+          - {id: beta-deploy, label: deployment notes}
 cases:
   - name: pre-load-advertises-no-row-actions
     start: pre-load
     keys: []
-    expectScope: project
     expectMode: inactive
     wantAvailable: [help, back]
-    wantUnavailable: [down, next-scope, search-scope, toggle, expand, collapse, select-all]
+    wantUnavailable: [down, search, toggle, expand, collapse, select-all]
 
   - name: successful-empty-load-advertises-no-row-actions
     start: empty
     keys: []
-    expectScope: project
     expectMode: inactive
     wantAvailable: [help, back]
-    wantUnavailable: [down, next-scope, search-scope, toggle, expand, collapse, select-all]
+    wantUnavailable: [down, search, toggle, expand, collapse, select-all]
     wantViewContains: [no projects]
 
   - name: expanded-interior-advertises-collapse-not-expand
     keys: []
-    expectScope: project
     expectMode: inactive
     expectCursorID: project-alpha
     expectOverflowBottom: true
-    wantAvailable: [collapse, toggle]
+    wantAvailable: [collapse, toggle, search]
     wantUnavailable: [expand, up, page-up, top, prev-project]
 
   - name: collapsed-interior-advertises-expand-not-collapse
     keys: [left]
-    expectScope: project
     expectMode: inactive
     expectCursorID: project-alpha
-    expectVisibleIDs: [project-alpha, project-beta, beta-develop, beta-audit]
-    wantAvailable: [expand, toggle]
+    expectVisibleIDs:
+      [project-alpha, project-beta, beta-develop, beta-audit, beta-release,
+       beta-release-notes, beta-main, beta-deploy]
+    expectOverflowBottom: true
+    wantAvailable: [expand, toggle, search]
     wantUnavailable: [collapse, up, page-up, top, prev-project]
 
-  - name: project-scope-starts-with-bottom-overflow-and-search
+  - name: full-forest-starts-with-bottom-overflow-and-neutral-search
     keys: []
-    expectScope: project
     expectMode: inactive
     expectVisibleIDs:
       [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
-       project-beta, beta-develop, beta-audit]
+       project-beta, beta-develop, beta-audit, beta-release, beta-release-notes,
+       beta-main, beta-deploy]
     expectOverflowBottom: true
-    wantAvailable: [next-scope, search-scope]
-    wantUnavailable: [prev-scope, clear-filter]
+    wantAvailable: [search]
+    wantUnavailable: [clear-filter]
     wantViewContains: ["↓"]
     wantViewMissing: ["↑"]
 
   - name: page-down-shows-both-overflow-directions
     keys: [pgdown]
-    expectScope: project
     expectMode: inactive
     expectOverflowTop: true
     expectOverflowBottom: true
@@ -83,102 +89,134 @@ cases:
 
   - name: bottom-removes-only-the-bottom-overflow-marker
     keys: [shift+g]
-    expectScope: project
     expectMode: inactive
     expectOverflowTop: true
     expectOverflowBottom: false
     wantViewContains: ["↑"]
     wantViewMissing: ["↓"]
 
-  - name: next-scope-navigates-to-branch-without-expanding
-    keys: ["]"]
-    expectScope: branch
-    expectMode: inactive
-    expectCursorID: alpha-main
-    expectOverflowBottom: true
-    wantAvailable: [prev-scope, next-scope, search-scope, collapse]
-    wantUnavailable: [expand]
-
-  - name: next-scope-navigates-to-session-without-moving-pane-focus
-    keys: ["]", "]"]
-    expectScope: session
-    expectMode: inactive
-    expectCursorID: alpha-ingest
-    expectOverflowTop: true
-    expectOverflowBottom: true
-    wantAvailable: [prev-scope, search-scope, toggle]
-    wantUnavailable: [next-scope, focus-pane-left, focus-pane-right, expand, collapse]
-
-  - name: previous-scope-returns-from-session-to-branch
-    keys: ["]", "]", "["]
-    expectScope: branch
-    expectMode: inactive
-    expectCursorID: alpha-main
-    expectOverflowBottom: true
-
-  - name: project-search-keeps-the-matching-project-subtree
-    keys: ["/", a, l, p, h, a, enter]
-    expectScope: project
+  - name: matching-project-keeps-its-complete-original-subtree
+    keys: ["/", a, l, p, h, a, space, p, r, o, j, e, c, t, enter]
     expectMode: kept
-    expectQuery: alpha
-    expectVisibleIDs:
-      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share]
+    expectQuery: alpha project
+    expectCursorID: project-alpha
+    expectVisibleIDs: [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share]
+    expectOriginalIDs: [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share]
     expectOverflowBottom: true
-    wantAvailable: [search-scope, clear-filter, toggle]
+    wantAvailable: [search, clear-filter, toggle]
     wantUnavailable: [keep-filter, delete-filter]
 
-  - name: branch-search-preserves-project-context
-    keys: ["]", "/", f, e, a, t, u, r, e, enter]
-    expectScope: branch
+  - name: matching-branch-keeps-its-subtree-and-shallow-project-context
+    keys: ["/", f, e, a, t, u, r, e, enter]
     expectMode: kept
     expectQuery: feature
+    expectCursorID: project-alpha
     expectVisibleIDs: [project-alpha, alpha-feature, alpha-share]
+    expectOriginalIDs: [alpha-feature, alpha-share]
+    expectProjectedIDs: [project-alpha]
 
-  - name: session-search-preserves-project-and-branch-context
-    keys: ["]", "]", "/", a, u, d, i, t, enter]
-    expectScope: session
+  - name: matching-session-keeps-shallow-project-and-branch-context
+    keys: ["/", a, u, d, i, t, enter]
     expectMode: kept
     expectQuery: audit
+    expectCursorID: project-beta
     expectVisibleIDs: [project-beta, beta-develop, beta-audit]
+    expectOriginalIDs: [beta-audit]
+    expectProjectedIDs: [project-beta, beta-develop]
+
+  - name: mixed-depth-matches-retain-full-project-and-matching-branch
+    keys: ["/", a, l, p, h, a, enter]
+    expectMode: kept
+    expectQuery: alpha
+    expectCursorID: project-alpha
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
+       project-beta, beta-release, beta-release-notes]
+    expectOriginalIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
+       beta-release, beta-release-notes]
+    expectProjectedIDs: [project-beta]
+    expectOverflowBottom: true
+
+  - name: global-label-search-is-case-insensitive
+    keys: ["/", G, o, V, e, R, n, A, n, C, e, enter]
+    expectMode: kept
+    expectQuery: GoVeRnAnCe
+    expectCursorID: project-beta
+    expectVisibleIDs: [project-beta, beta-develop, beta-audit]
+    expectOriginalIDs: [beta-audit]
+    expectProjectedIDs: [project-beta, beta-develop]
+
+  - name: global-search-does-not-match-internal-identifiers
+    keys: ["/", p, r, o, j, e, c, t, "-", a, l, p, h, a, enter]
+    expectMode: kept
+    expectQuery: project-alpha
+    wantAvailable: [search, clear-filter]
+    wantViewContains: ["no matching rows"]
+    wantViewMissing: ["alpha project"]
+
+  - name: duplicate-branch-labels-retain-both-canonical-branches
+    keys: ["/", m, a, i, n, enter]
+    expectMode: kept
+    expectQuery: main
+    expectCursorID: project-alpha
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, project-beta, beta-main, beta-deploy]
+    expectOriginalIDs: [alpha-main, alpha-ingest, beta-main, beta-deploy]
+    expectProjectedIDs: [project-alpha, project-beta]
+    expectOverflowBottom: true
+
+  - name: whitespace-query-restores-the-full-forest
+    keys: ["/", space, space, enter]
+    expectMode: inactive
+    expectQuery: ""
+    expectCursorID: project-alpha
+    expectVisibleIDs:
+      [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
+       project-beta, beta-develop, beta-audit, beta-release, beta-release-notes,
+       beta-main, beta-deploy]
+    expectOverflowBottom: true
+    wantAvailable: [search]
+    wantUnavailable: [clear-filter, keep-filter, delete-filter]
 
   - name: editing-advertises-delete-keep-clear-and-delete-mutates-query
-    keys: ["]", "]", "/", s, h, a, backspace]
-    expectScope: session
+    keys: ["/", s, h, a, backspace]
     expectMode: editing
     expectQuery: sh
     wantAvailable: [delete-filter, keep-filter, clear-filter]
-    wantUnavailable: [up, down, toggle, search-scope]
+    wantUnavailable: [up, down, toggle, search]
 
-  - name: no-match-message-names-the-active-session-scope
-    keys: ["]", "]", "/", z, z, enter]
-    expectScope: session
+  - name: no-match-message-is-hierarchy-neutral
+    keys: ["/", z, z, enter]
     expectMode: kept
     expectQuery: zz
-    wantAvailable: [prev-scope, search-scope, clear-filter]
-    wantViewContains: ["no matching sessions"]
-    wantViewMissing: ["no projects"]
+    wantAvailable: [search, clear-filter]
+    wantViewContains: ["no matching rows"]
+    wantViewMissing: ["no projects", "no matching projects", "no matching branches", "no matching sessions"]
 
-  - name: clear-restores-the-complete-forest-and-selection-navigation
-    keys: ["]", "]", "/", a, u, d, i, t, enter, esc]
-    expectScope: session
+  - name: clear-restores-the-prefilter-canonical-cursor
+    keys: [down, down, "/", a, u, d, i, t, enter, esc]
     expectMode: inactive
     expectQuery: ""
     expectCursorID: alpha-ingest
+    expectOverflowTop: true
     expectVisibleIDs:
       [project-alpha, alpha-main, alpha-ingest, alpha-feature, alpha-share,
-       project-beta, beta-develop, beta-audit]
-    expectOverflowTop: true
+       project-beta, beta-develop, beta-audit, beta-release, beta-release-notes,
+       beta-main, beta-deploy]
     expectOverflowBottom: true
-    wantAvailable: [prev-scope, search-scope, toggle]
+    wantAvailable: [search, toggle]
     wantUnavailable: [clear-filter, keep-filter, delete-filter]
 
-  - name: clear-after-no-match-restores-the-prefilter-cursor
-    keys: ["]", "]", "/", z, z, enter, esc]
-    expectScope: session
-    expectMode: inactive
-    expectQuery: ""
-    expectCursorID: alpha-ingest
-    expectOverflowTop: true
-    expectOverflowBottom: true
-    wantAvailable: [prev-scope, search-scope, toggle]
-    wantUnavailable: [clear-filter, keep-filter, delete-filter]
+  - name: printable-global-shortcuts-remain-query-text
+    keys: ["/", b, q, "?", f, enter]
+    expectMode: kept
+    expectQuery: "bq?f"
+    wantAvailable: [search, clear-filter]
+    wantViewContains: ["no matching rows"]
+
+boundedSearch:
+  generatedSessionCount: 4000
+  query: needle session 3999
+  expectedVisibleIDs: [large-project, large-branch, session-3999]
+  maximumDurationMillis: 5000

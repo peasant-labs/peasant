@@ -55,7 +55,6 @@ type projectionCase struct {
 	ExpectPane              string                   `yaml:"expectPane"`
 	ExpectCursorID          string                   `yaml:"expectCursorID"`
 	ExpectPreviewID         string                   `yaml:"expectPreviewID"`
-	ExpectScope             string                   `yaml:"expectScope"`
 	ExpectMode              string                   `yaml:"expectMode"`
 	ExpectQuery             string                   `yaml:"expectQuery"`
 	ExpectSelected          []string                 `yaml:"expectSelected"`
@@ -145,7 +144,7 @@ func decodeTreeProjection(data []byte) (projectionDocument, error) {
 	anchorMutationProbes := 0
 	duplicateAnchorProbes := 0
 	for _, c := range doc.Cases {
-		if c.Name == "" || c.ExpectScope == "" || c.ExpectMode == "" || seenCases[c.Name] ||
+		if c.Name == "" || c.ExpectMode == "" || seenCases[c.Name] ||
 			!projectionValuesPresent(c.Keys, c.ExpectSelected, c.ExpectUnselected, c.WantVisibleRows, c.WantMissingRows, c.WantViewContains, c.WantViewMissing) {
 			return doc, fmt.Errorf("tree_projection.yaml contains an invalid or duplicate case: %#v", c)
 		}
@@ -259,10 +258,10 @@ func mountedProjectionFlow(t *testing.T, doc projectionDocument, c projectionCas
 	for _, id := range doc.ImportedSessionIDs {
 		imported[id] = true
 	}
-	field := Tree("selection", "transcripts", selectionAccessor(), projectionSource{fixture: doc.Fixture, imported: imported},
+	field := Tree("selection", "", selectionAccessor(), projectionSource{fixture: doc.Fixture, imported: imported},
 		WithFacet(MetaHarness, "harness"), WithPreviewBodySource(projectionPreviewSource{}),
 		WithPreviewRatio(0.5), WithDraftSelectionState())
-	reg := Registry{Sections: []Section{{Key: "transcripts", Title: "select transcripts", Fields: []Field{field}}}}
+	reg := Registry{Sections: []Section{{Key: "selection", Title: "select sessions", Fields: []Field{field}}}}
 	flow := NewFlow(theme.New(theme.ModeDark), reg, draft)
 	height := doc.Height
 	if c.Height > 0 {
@@ -329,6 +328,41 @@ func projectionSelects(sel config.SelectionConfig, session projectionSession) bo
 	return match == ingest.BranchMatchYes
 }
 
+func projectionHiddenSelectedCount(full, visible []*kit.TreeNode) int {
+	visibleLeaves := map[*kit.TreeNode]bool{}
+	for _, root := range visible {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if len(node.Children) == 0 {
+				visibleLeaves[node] = true
+			}
+		})
+	}
+	hidden := 0
+	for _, root := range full {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if len(node.Children) == 0 && node.State == kit.Checked && !visibleLeaves[node] {
+				hidden++
+			}
+		})
+	}
+	return hidden
+}
+
+func assertSimplifiedSelectionChrome(t *testing.T, view string) {
+	t.Helper()
+	if got := strings.Count(view, "search:"); got != 1 {
+		t.Errorf("selection field renders %d search bars, want exactly one:\n%s", got, view)
+	}
+	for _, forbidden := range []string{
+		"transcripts", "scope:", "previous scope", "next scope", "search scope",
+		"tracked =", "imported =", "selected sessions:", "hidden by filters:", "view only:",
+	} {
+		if strings.Contains(view, forbidden) {
+			t.Errorf("simplified selection field renders removed text %q:\n%s", forbidden, view)
+		}
+	}
+}
+
 func projectionSessionByID(t *testing.T, sessions []projectionSession, id string) projectionSession {
 	t.Helper()
 	for _, session := range sessions {
@@ -348,10 +382,8 @@ func TestFlow_TreeProjectionPreservesCanonicalSelection(t *testing.T) {
 			flow, draft, field := mountedProjectionFlow(t, doc, c)
 			flow = driveProjectionFlow(t, flow, c.Keys)
 			view := stripANSIForSettings(flow.View())
+			assertSimplifiedSelectionChrome(t, view)
 
-			if got := field.tree.Scope().String(); got != c.ExpectScope {
-				t.Errorf("scope = %q, want %q", got, c.ExpectScope)
-			}
 			state := field.tree.FilterState()
 			if got := state.Mode.String(); got != c.ExpectMode || state.Query != c.ExpectQuery {
 				t.Errorf("filter = %s/%q, want %s/%q", got, state.Query, c.ExpectMode, c.ExpectQuery)
@@ -394,9 +426,8 @@ func TestFlow_TreeProjectionPreservesCanonicalSelection(t *testing.T) {
 				}
 			}
 			if c.CheckHiddenSelected {
-				want := fmt.Sprintf("hidden by filters: %d", c.ExpectHiddenSelected)
-				if !strings.Contains(view, want) {
-					t.Errorf("view does not report %q:\n%s", want, view)
+				if got := projectionHiddenSelectedCount(field.full, field.tree.VisibleRoots()); got != c.ExpectHiddenSelected {
+					t.Errorf("hidden selected leaves = %d, want %d", got, c.ExpectHiddenSelected)
 				}
 			}
 

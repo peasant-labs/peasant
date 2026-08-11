@@ -4,17 +4,18 @@
 expectedSectionCount: 6
 sections:
   - key: selection
-    title: choose transcripts to import
+    title: choose sessions to import
     fieldKey: transcripts
     fieldKind: tree
-    fieldText: no projects
-    guideIntro: choose which recorded sessions become part of your local peasant history.
+    fieldText: "search:"
+    hasGuide: false
     conditional: false
   - key: auto-ingest
     title: auto-ingest new branches
     fieldKey: auto-ingest-new-branches
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
+    hasGuide: true
     guideIntro: decide how future branches enter your saved local selection.
     conditional: true
   - key: privacy
@@ -22,6 +23,7 @@ sections:
     fieldKey: redaction-level
     fieldKind: radio
     fieldText: redaction level
+    hasGuide: true
     guideIntro: preview standard redaction before a later explicit publication.
     hasExample: true
     conditional: false
@@ -30,6 +32,7 @@ sections:
     fieldKey: content-license
     fieldKind: radio
     fieldText: default license attached to pushed transcripts
+    hasGuide: true
     guideIntro: choose the default license for a later explicit publish.
     conditional: false
   - key: destination
@@ -37,6 +40,7 @@ sections:
     fieldKey: default-visibility
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
+    hasGuide: true
     guideIntro: choose who may see transcripts after a later explicit publish.
     conditional: true
   - key: retention
@@ -44,6 +48,7 @@ sections:
     fieldKey: claude-retention-days
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
+    hasGuide: true
     guideIntro: choose how long claude code keeps its source transcript files.
     conditional: true
 forbiddenRegistryOptions:

@@ -4,7 +4,7 @@
 # against BOTH len(AllActions()) and len(actions) here - so adding a new
 # ActionID to the enum without adding its row here fails this test, rather
 # than shipping an action with no fixture coverage at all.
-expectedActionCount: 35
+expectedActionCount: 33
 actions:
   - name: quit
   - name: confirm
@@ -19,9 +19,7 @@ actions:
   - name: bottom
   - name: next-project
   - name: prev-project
-  - name: prev-scope
-  - name: next-scope
-  - name: search-scope
+  - name: search
   - name: focus-pane-left
   - name: focus-pane-right
   - name: next-field

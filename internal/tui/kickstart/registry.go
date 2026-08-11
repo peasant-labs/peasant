@@ -87,18 +87,10 @@ func BuildRegistry(opts Options) settings.Registry {
 	sections := []settings.Section{
 		{
 			Key:   SectionSelection,
-			Title: "choose transcripts to import",
-			Guide: sectionGuide(
-				"choose which recorded sessions become part of your local peasant history.",
-				"tracked means included by the selection saved during an earlier kickstart run.",
-				"imported means transcript data already exists in your local store.",
-				"filters change only this view; hidden selections stay selected.",
-			),
+			Title: "choose sessions to import",
 			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Tree(FieldSelection, "transcripts", selectionAccessor(), opts.Source,
-						selectionTreeOptions(opts)...),
-					"view only: harness-only rows hide; mixed projects remain through included data; hidden selections stay selected and counted."),
+				settings.Tree(FieldSelection, "", selectionAccessor(), opts.Source,
+					selectionTreeOptions(opts)...),
 			},
 		},
 		{

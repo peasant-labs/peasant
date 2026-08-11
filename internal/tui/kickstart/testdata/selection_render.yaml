@@ -1,4 +1,4 @@
-# The rendered "choose transcripts to import" step, captured as golden
+# The rendered "choose sessions to import" step, captured as golden
 # snapshots. The listing is built to exercise every answer this step gives at
 # once: two harnesses (so the facet gutter has values to group and narrow by), a
 # parent session with a subagent chain (so a row carries a child count), and an
@@ -15,10 +15,10 @@
 #   session-cursor   - cursor moved onto the already-imported session row
 #   preview-focused  - the same row, with input moved to the preview pane
 #   preview-scrolled - the preview focused and scrolled down
-#   search-editing   - a project-scope query is being typed
-#   kept-filter      - a session-scope query remains active after enter
-#   branch-scope     - the branch column is active
-#   session-scope    - the session column is active
+#   search-editing      - one hierarchy-wide query is being typed
+#   kept-filter         - a global session-label query remains after enter
+#   global-branch-match - a branch-label match retains its subtree and context
+#   global-session-match - a session-label match retains shallow ancestors
 #   overflow-middle  - usable rows exist above and below the viewport
 #   overflow-bottom  - the cursor is at the final usable row
 #
@@ -37,7 +37,7 @@ expectedSessionCount: 5
 expectedHarnessCount: 2
 expectedBothThemeStateCount: 6
 bothThemeStates:
-  [search-editing, kept-filter, branch-scope, session-scope,
+  [search-editing, kept-filter, global-branch-match, global-session-match,
    overflow-middle, overflow-bottom]
 renderAssertions:
   expectedRowCount: 11
@@ -60,15 +60,17 @@ renderAssertions:
       wantContains: ["harness: claude code", please refactor the ingest]
       wantMissing: [child sessions, already imported]
     - case: search-editing-dark
-      wantContains:
-        ["search project: a", type to filter, "backspace: delete", "enter: keep filter", "esc: clear filter"]
+      wantContains: ["search: a▏", "backspace: delete", "enter: keep filter", "esc: clear filter"]
+      wantMissing: [type to filter, "scope:"]
     - case: kept-filter-dark
-      wantContains: ["filter session: cursor", "hidden by filters: 2", cursor session]
+      wantContains: ["search: cursor", cursor session]
       wantMissing: [parent session, imported session]
-    - case: branch-scope-dark
-      wantContains: ["scope: project  [branch]  session"]
-    - case: session-scope-dark
-      wantContains: ["scope: project  branch  [session]"]
+    - case: global-branch-match-dark
+      wantContains: ["search: main", "parent ses", already imported, cursor session]
+      wantMissing: ["scope:"]
+    - case: global-session-match-dark
+      wantContains: ["search: cursor", cursor session]
+      wantMissing: [parent session, imported session, "scope:"]
     - case: overflow-middle-dark
       wantContains: ["↑  ▾", "↓      [✓]"]
     - case: overflow-bottom-dark
@@ -222,23 +224,23 @@ cases:
     theme: light
     width: 120
     height: 24
-  - name: branch-scope-dark
-    state: branch-scope
+  - name: global-branch-match-dark
+    state: global-branch-match
     theme: dark
     width: 120
     height: 24
-  - name: branch-scope-light
-    state: branch-scope
+  - name: global-branch-match-light
+    state: global-branch-match
     theme: light
     width: 120
     height: 24
-  - name: session-scope-dark
-    state: session-scope
+  - name: global-session-match-dark
+    state: global-session-match
     theme: dark
     width: 120
     height: 24
-  - name: session-scope-light
-    state: session-scope
+  - name: global-session-match-light
+    state: global-session-match
     theme: light
     width: 120
     height: 24
@@ -246,19 +248,19 @@ cases:
     state: overflow-middle
     theme: dark
     width: 120
-    height: 16
+    height: 9
   - name: overflow-middle-light
     state: overflow-middle
     theme: light
     width: 120
-    height: 16
+    height: 9
   - name: overflow-bottom-dark
     state: overflow-bottom
     theme: dark
     width: 120
-    height: 16
+    height: 9
   - name: overflow-bottom-light
     state: overflow-bottom
     theme: light
     width: 120
-    height: 16
+    height: 9

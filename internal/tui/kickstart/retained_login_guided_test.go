@@ -325,7 +325,7 @@ func returnToRetainedSelection(t *testing.T, program kickstart.Program) kickstar
 	t.Helper()
 	for step := 0; step < 16; step++ {
 		view := stripRender(program.View())
-		if strings.Contains(view, "choose which recorded sessions become part of your local peasant history") {
+		if strings.Contains(view, "search:") {
 			return program
 		}
 		program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
@@ -357,6 +357,7 @@ func retainedStateLines(t *testing.T, view string, labels []string) []string {
 func assertRetainedView(t *testing.T, row retainedLoginCase, view string) {
 	t.Helper()
 	plain := stripRender(view)
+	assertSimplifiedSelectionRender(t, plain)
 	for _, want := range row.WantViewContains {
 		if !strings.Contains(plain, want) {
 			t.Errorf("retained selection view does not contain %q:\n%s", want, plain)

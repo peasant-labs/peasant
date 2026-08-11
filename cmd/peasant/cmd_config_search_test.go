@@ -104,6 +104,7 @@ func TestConfigCommandMountedScreenSearchParity(t *testing.T) {
 				model = configScreenUpdate(model, tea.KeyPressMsg{Code: r, Text: row.Input})
 
 				editing := plainConfigScreen(model)
+				assertMountedSelectionSearch(t, editing)
 				if !strings.Contains(editing, row.WantEditing) {
 					t.Errorf("mounted config search does not contain %q:\n%s", row.WantEditing, editing)
 				}
@@ -123,20 +124,22 @@ func TestConfigCommandMountedScreenSearchParity(t *testing.T) {
 
 				model = configScreenUpdate(model, tea.KeyPressMsg{Code: tea.KeyBackspace})
 				deleted := plainConfigScreen(model)
-				if strings.Contains(deleted, row.WantEditing) || !strings.Contains(deleted, "search project:") {
+				assertMountedSelectionSearch(t, deleted)
+				if strings.Contains(deleted, row.WantEditing) || !strings.Contains(deleted, "search: ▏") {
 					t.Errorf("mounted config delete did not remove query %q:\n%s", row.Input, deleted)
 				}
 				model = configScreenUpdate(model, tea.KeyPressMsg{Code: r, Text: row.Input})
 				model = configScreenUpdate(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 				kept := plainConfigScreen(model)
+				assertMountedSelectionSearch(t, kept)
 				if !strings.Contains(kept, row.WantKept) {
 					t.Errorf("mounted config keep does not contain %q:\n%s", row.WantKept, kept)
 				}
 				model = configScreenUpdate(model, tea.KeyPressMsg{Code: '/', Text: "/"})
 				model = configScreenUpdate(model, tea.KeyPressMsg{Code: tea.KeyEscape})
 				cleared := plainConfigScreen(model)
-				if strings.Contains(cleared, row.WantEditing) || strings.Contains(cleared, row.WantKept) ||
-					strings.Contains(cleared, "search project:") || strings.Contains(cleared, "filter project:") {
+				assertMountedSelectionSearch(t, cleared)
+				if strings.Contains(cleared, row.WantEditing) || strings.Contains(cleared, row.WantKept) {
 					t.Errorf("mounted config clear retained search state for %q:\n%s", row.Input, cleared)
 				}
 				return model, nil
@@ -155,6 +158,21 @@ func TestConfigCommandMountedScreenSearchParity(t *testing.T) {
 				t.Fatal("mounted config search changed persisted Claude settings bytes")
 			}
 		})
+	}
+}
+
+func assertMountedSelectionSearch(t *testing.T, view string) {
+	t.Helper()
+	if got := strings.Count(view, "search:"); got != 1 {
+		t.Errorf("mounted selection contains %d search bars, want exactly one:\n%s", got, view)
+	}
+	for _, forbidden := range []string{
+		"transcripts", "scope:", "previous scope", "next scope", "search scope",
+		"tracked =", "imported =", "selected sessions:", "hidden by filters:", "view only:",
+	} {
+		if strings.Contains(view, forbidden) {
+			t.Errorf("mounted selection contains removed text %q:\n%s", forbidden, view)
+		}
 	}
 }
 

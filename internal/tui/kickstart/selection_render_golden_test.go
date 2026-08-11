@@ -52,8 +52,8 @@ const (
 	selectionRenderPreviewScrolled selectionRenderState = "preview-scrolled"
 	selectionRenderSearchEditing   selectionRenderState = "search-editing"
 	selectionRenderKeptFilter      selectionRenderState = "kept-filter"
-	selectionRenderBranchScope     selectionRenderState = "branch-scope"
-	selectionRenderSessionScope    selectionRenderState = "session-scope"
+	selectionRenderBranchMatch     selectionRenderState = "global-branch-match"
+	selectionRenderSessionMatch    selectionRenderState = "global-session-match"
 	selectionRenderOverflowMiddle  selectionRenderState = "overflow-middle"
 	selectionRenderOverflowBottom  selectionRenderState = "overflow-bottom"
 )
@@ -62,8 +62,8 @@ func (s selectionRenderState) valid() bool {
 	switch s {
 	case selectionRenderDefault, selectionRenderNarrowed, selectionRenderGutterHidden,
 		selectionRenderSessionCursor, selectionRenderPreviewFocused, selectionRenderPreviewScrolled,
-		selectionRenderSearchEditing, selectionRenderKeptFilter, selectionRenderBranchScope,
-		selectionRenderSessionScope, selectionRenderOverflowMiddle, selectionRenderOverflowBottom:
+		selectionRenderSearchEditing, selectionRenderKeptFilter, selectionRenderBranchMatch,
+		selectionRenderSessionMatch, selectionRenderOverflowMiddle, selectionRenderOverflowBottom:
 		return true
 	default:
 		return false
@@ -72,8 +72,8 @@ func (s selectionRenderState) valid() bool {
 
 func (s selectionRenderState) requiresBothThemes() bool {
 	switch s {
-	case selectionRenderSearchEditing, selectionRenderKeptFilter, selectionRenderBranchScope,
-		selectionRenderSessionScope, selectionRenderOverflowMiddle, selectionRenderOverflowBottom:
+	case selectionRenderSearchEditing, selectionRenderKeptFilter, selectionRenderBranchMatch,
+		selectionRenderSessionMatch, selectionRenderOverflowMiddle, selectionRenderOverflowBottom:
 		return true
 	default:
 		return false
@@ -353,18 +353,25 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 		p = pressAndDrain(p, '/')
 		p = typeAndDrain(p, 'a')
 	case selectionRenderKeptFilter:
-		p = moveToSessionScope(p)
 		p = pressAndDrain(p, '/')
 		for _, r := range "cursor" {
 			p = typeAndDrain(p, r)
 		}
 		p = pressAndDrain(p, tea.KeyEnter)
-	case selectionRenderBranchScope:
-		p = pressAndDrain(p, ']')
-	case selectionRenderSessionScope:
-		p = moveToSessionScope(p)
+	case selectionRenderBranchMatch:
+		p = pressAndDrain(p, '/')
+		for _, r := range "main" {
+			p = typeAndDrain(p, r)
+		}
+		p = pressAndDrain(p, tea.KeyEnter)
+	case selectionRenderSessionMatch:
+		p = pressAndDrain(p, '/')
+		for _, r := range "cursor" {
+			p = typeAndDrain(p, r)
+		}
+		p = pressAndDrain(p, tea.KeyEnter)
 	case selectionRenderOverflowMiddle:
-		p = drainProgram(p.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}))
+		p = pressAndDrain(p, 'j')
 		p = pressAndDrain(p, 'j')
 	case selectionRenderOverflowBottom:
 		p = drainProgram(p.Update(tea.KeyPressMsg{Code: 'G', Text: "G"}))
@@ -418,10 +425,6 @@ func typeAndDrain(p kickstart.Program, value rune) kickstart.Program {
 	return drainProgram(next, cmd)
 }
 
-func moveToSessionScope(p kickstart.Program) kickstart.Program {
-	return pressAndDrain(pressAndDrain(p, ']'), ']')
-}
-
 // TestSelectionStep_RenderGolden captures the whole rendered step for every
 // state, so the child-session counts, the imported/not-yet split, the facet
 // gutter, and the preview pane are all visible in the test artifact.
@@ -430,8 +433,24 @@ func TestSelectionStep_RenderGolden(t *testing.T) {
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			p := buildSelectionStep(t, doc, c)
+			assertSimplifiedSelectionRender(t, stripRender(p.View()))
 			golden.RequireEqual(t, []byte(p.View()))
 		})
+	}
+}
+
+func assertSimplifiedSelectionRender(t *testing.T, view string) {
+	t.Helper()
+	if got := strings.Count(view, "search:"); got != 1 {
+		t.Errorf("selection render contains %d search bars, want exactly one:\n%s", got, view)
+	}
+	for _, forbidden := range []string{
+		"transcripts", "scope:", "previous scope", "next scope", "search scope",
+		"tracked =", "imported =", "selected sessions:", "hidden by filters:", "view only:",
+	} {
+		if strings.Contains(view, forbidden) {
+			t.Errorf("selection render contains removed text %q:\n%s", forbidden, view)
+		}
 	}
 }
 

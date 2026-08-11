@@ -49,6 +49,7 @@ type paritySectionFixture struct {
 	FieldKey    string `yaml:"fieldKey"`
 	FieldKind   string `yaml:"fieldKind"`
 	FieldText   string `yaml:"fieldText"`
+	HasGuide    bool   `yaml:"hasGuide"`
 	GuideIntro  string `yaml:"guideIntro"`
 	HasExample  bool   `yaml:"hasExample"`
 	Conditional bool   `yaml:"conditional"`
@@ -103,7 +104,8 @@ func loadParityDocument(t *testing.T) parityDocument {
 	sectionKeys := map[string]bool{}
 	for _, section := range document.Sections {
 		if section.Key == "" || sectionKeys[section.Key] || section.Title == "" || section.FieldKey == "" ||
-			section.FieldKind == "" || section.FieldText == "" || section.GuideIntro == "" {
+			section.FieldKind == "" || section.FieldText == "" || (section.HasGuide && section.GuideIntro == "") ||
+			(!section.HasGuide && section.GuideIntro != "") {
 			t.Fatalf("invalid or duplicate parity section fixture: %#v", section)
 		}
 		sectionKeys[section.Key] = true
@@ -188,8 +190,12 @@ func assertRegistryContract(t *testing.T, registry settings.Registry, fixtures [
 			t.Errorf("section %q field = %q/%s, want %q/%s",
 				section.Key, field.Key(), field.Kind(), fixture.FieldKey, fixture.FieldKind)
 		}
-		if section.Guide == nil || section.Guide.Intro != fixture.GuideIntro ||
-			(section.Guide.Example != nil) != fixture.HasExample {
+		if (section.Guide != nil) != fixture.HasGuide {
+			t.Errorf("section %q guide presence = %t, want %t", section.Key, section.Guide != nil, fixture.HasGuide)
+			continue
+		}
+		if fixture.HasGuide && (section.Guide.Intro != fixture.GuideIntro ||
+			(section.Guide.Example != nil) != fixture.HasExample) {
 			t.Errorf("section %q guide = %#v, want intro %q with example=%t",
 				section.Key, section.Guide, fixture.GuideIntro, fixture.HasExample)
 		}
@@ -225,6 +231,14 @@ func collectFlowEvidence(t *testing.T, flow settings.Flow, expected []string, fi
 		keys = append(keys, key)
 		view := stripRender(flow.View())
 		fixture := fixtureSectionByKey(t, fixtures, key)
+		if key == kickstart.SectionSelection {
+			assertSimplifiedSelectionRender(t, view)
+			if !strings.Contains(view, fixture.FieldText) {
+				t.Errorf("Flow selection section does not render its field-local search %q:\n%s", fixture.FieldText, view)
+			}
+			flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+			continue
+		}
 		guideAt := strings.Index(view, fixture.GuideIntro)
 		fieldAt := strings.Index(view, fixture.FieldText)
 		if guideAt < 0 || fieldAt < 0 || guideAt >= fieldAt {
@@ -246,8 +260,11 @@ func collectScreenEvidence(t *testing.T, screen settings.Screen, expected []stri
 		if !strings.Contains(view, fixture.FieldText) {
 			t.Errorf("Screen selected section %q does not render canonical field text %q:\n%s", key, fixture.FieldText, view)
 		}
+		if key == kickstart.SectionSelection {
+			assertSimplifiedSelectionRender(t, view)
+		}
 		for _, section := range fixtures {
-			if strings.Contains(view, section.GuideIntro) {
+			if section.GuideIntro != "" && strings.Contains(view, section.GuideIntro) {
 				t.Errorf("dense Screen rendered Guide intro %q while section %q was selected", section.GuideIntro, key)
 			}
 		}

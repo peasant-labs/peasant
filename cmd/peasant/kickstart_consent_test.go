@@ -32,7 +32,7 @@ type kickstartConsentFixture struct {
 	WarningContains []string `yaml:"warningContains"`
 	ConsentContains []string `yaml:"consentContains"`
 	ConsentExcludes []string `yaml:"consentExcludes"`
-	Scope           string   `yaml:"scope"`
+	SelectionTarget string   `yaml:"selectionTarget"`
 }
 
 func loadKickstartConsentFixtures(raw []byte) ([]kickstartConsentFixture, error) {
@@ -93,7 +93,7 @@ func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
 					}
 					updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 					model = updated.(ftue.WizardModel)
-					switch fixture.Scope {
+					switch fixture.SelectionTarget {
 					case "branch":
 						for _, key := range []rune{tea.KeyDown, tea.KeySpace, tea.KeySpace} {
 							updated, _ = model.Update(tea.KeyPressMsg{Code: key})

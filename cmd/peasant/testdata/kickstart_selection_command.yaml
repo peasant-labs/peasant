@@ -1,11 +1,12 @@
-# Non-empty transcript selection through the real kickstart command mount. The
+# Non-empty session selection through the real kickstart command mount. The
 # same raw discovery listing also mounts the config editor so both presentations
 # must derive saved tracking and current checkbox state in the canonical field.
 expectedCaseCount: 1
 expectedSessionCount: 2
 expectedMutationProbeCount: 1
+expectedRenderCaseCount: 8
 cases:
-  - name: command-mount-buffers-a-scoped-toggle-before-consent
+  - name: command-mount-buffers-a-global-search-toggle-before-consent
     mutationProbe: true
     listings:
       - harness: claude-code
@@ -32,8 +33,6 @@ cases:
         claude-code:
           sessions: ["3f1c9a52-1c45-4ca6-8e2a-3ef4db896a44"]
     selectionInputs:
-      - action: next-scope
-      - action: next-scope
       - action: search
       - text: t
       - text: o
@@ -62,3 +61,12 @@ cases:
       - label: toggle target
         wantContains: ["[ ]"]
         wantMissing: [tracked]
+renderCases:
+  - {name: config-dark-narrow, surface: config, theme: dark, layout: narrow, width: 80, height: 20}
+  - {name: config-dark-wide, surface: config, theme: dark, layout: wide, width: 120, height: 24}
+  - {name: config-light-narrow, surface: config, theme: light, layout: narrow, width: 80, height: 20}
+  - {name: config-light-wide, surface: config, theme: light, layout: wide, width: 120, height: 24}
+  - {name: kickstart-dark-narrow, surface: kickstart, theme: dark, layout: narrow, width: 80, height: 20}
+  - {name: kickstart-dark-wide, surface: kickstart, theme: dark, layout: wide, width: 120, height: 24}
+  - {name: kickstart-light-narrow, surface: kickstart, theme: light, layout: narrow, width: 80, height: 20}
+  - {name: kickstart-light-wide, surface: kickstart, theme: light, layout: wide, width: 120, height: 24}

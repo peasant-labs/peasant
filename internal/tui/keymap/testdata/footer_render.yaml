@@ -14,9 +14,9 @@ cases:
   - name: form-page-scope
     available: [next-field, prev-field, save, quit]
     wantPlainText: "tab: next field  shift+tab: prev field  ctrl+s: save  q: quit"
-  - name: tree-scope-search
-    available: [prev-scope, next-scope, search-scope, clear-filter]
-    wantPlainText: "[: previous scope  ]: next scope  /: search scope  esc: clear filter"
+  - name: tree-global-search
+    available: [search, clear-filter]
+    wantPlainText: "/: search  esc: clear filter"
   - name: empty-availability-renders-empty
     available: []
     wantPlainText: ""

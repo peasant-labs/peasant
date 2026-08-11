@@ -15,5 +15,5 @@ scenarios:
     available: [delete-filter, keep-filter, clear-filter]
   - name: tree-page-scope
     available:
-      [up, down, expand, collapse, prev-scope, next-scope, search-scope,
+      [up, down, expand, collapse, search,
        select-all, toggle, confirm, back, help, filter]

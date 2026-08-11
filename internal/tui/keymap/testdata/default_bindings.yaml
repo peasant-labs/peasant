@@ -10,7 +10,7 @@
 # added to the enum without a Default() binding AND without a row here fails
 # in two independent places (this fixture's count guard, and
 # TestDefault_Bindings' per-action lookup).
-expectedBindingCount: 35
+expectedBindingCount: 33
 bindings:
   - action: quit
     keys: ["q", "ctrl+c"]
@@ -64,18 +64,10 @@ bindings:
     keys: ["shift+k", "K"]
     helpKey: "shift+k"
     helpDesc: "prev project"
-  - action: prev-scope
-    keys: ["["]
-    helpKey: "["
-    helpDesc: "previous scope"
-  - action: next-scope
-    keys: ["]"]
-    helpKey: "]"
-    helpDesc: "next scope"
-  - action: search-scope
+  - action: search
     keys: ["/"]
     helpKey: "/"
-    helpDesc: "search scope"
+    helpDesc: "search"
   - action: focus-pane-left
     keys: ["ctrl+h"]
     helpKey: "ctrl+h"

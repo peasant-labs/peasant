@@ -15,21 +15,22 @@ rows:
       - publishing is separate, explicit, and opt-in.
       - peasant village login
 
-  - name: selection-guide
+  - name: simplified-selection
     surface: registry-section
     sectionKey: selection
-    sectionTitle: choose transcripts to import
+    sectionTitle: choose sessions to import
     selectionMode: all
     wantVisible: true
     fieldKey: transcripts
     fieldKind: tree
-    fieldText: no projects
-    guide:
-      intro: choose which recorded sessions become part of your local peasant history.
-      hints:
-        - tracked means included by the selection saved during an earlier kickstart run.
-        - imported means transcript data already exists in your local store.
-        - filters change only this view; hidden selections stay selected.
+    fieldText: "search:"
+    hasGuide: false
+    wantMissing:
+      - transcripts
+      - choose which recorded sessions become part of your local peasant history.
+      - tracked means included by the selection saved during an earlier kickstart run.
+      - imported means transcript data already exists in your local store.
+      - filters change only this view; hidden selections stay selected.
 
   - name: auto-ingest-guide
     surface: registry-section
@@ -40,6 +41,7 @@ rows:
     fieldKey: auto-ingest-new-branches
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
+    hasGuide: true
     guide:
       intro: decide how future branches enter your saved local selection.
       hints:
@@ -55,6 +57,7 @@ rows:
     fieldKey: redaction-level
     fieldKind: radio
     fieldText: redaction level
+    hasGuide: true
     guide:
       intro: preview standard redaction before a later explicit publication.
       hints:
@@ -78,6 +81,7 @@ rows:
     fieldKey: content-license
     fieldKind: radio
     fieldText: default license attached to pushed transcripts
+    hasGuide: true
     guide:
       intro: choose the default license for a later explicit publish.
       hints:
@@ -94,6 +98,7 @@ rows:
     fieldKey: default-visibility
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
+    hasGuide: true
     guide:
       intro: choose who may see transcripts after a later explicit publish.
       hints:
@@ -110,6 +115,7 @@ rows:
     fieldKey: claude-retention-days
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
+    hasGuide: true
     guide:
       intro: choose how long claude code keeps its source transcript files.
       hints:
@@ -132,6 +138,7 @@ rows:
     fieldKey: auto-ingest-new-branches
     fieldKind: toggle
     fieldText: auto-ingest new branches in fully-selected projects
+    hasGuide: true
     guide:
       intro: decide how future branches enter your saved local selection.
       hints:
@@ -148,6 +155,7 @@ rows:
     fieldKey: default-visibility
     fieldKind: radio
     fieldText: default visibility for pushed transcripts
+    hasGuide: true
     guide:
       intro: choose who may see transcripts after a later explicit publish.
       hints:
@@ -164,6 +172,7 @@ rows:
     fieldKey: claude-retention-days
     fieldKind: radio
     fieldText: how long claude code keeps its transcripts
+    hasGuide: true
     guide:
       intro: choose how long claude code keeps its source transcript files.
       hints:
@@ -179,6 +188,7 @@ rows:
     fieldKind: info
     fieldText: field output remains unchanged
     exampleText: 'current village: https://village.example'
+    hasGuide: true
     guide:
       intro: see how the current draft affects this step.
       hints:

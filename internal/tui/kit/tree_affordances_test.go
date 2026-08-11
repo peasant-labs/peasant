@@ -7,7 +7,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
@@ -17,7 +19,7 @@ import (
 //go:embed testdata/tree_affordances.yaml
 var treeAffordanceData []byte
 
-const expectedTreeAffordanceCaseCount = 17
+const expectedTreeAffordanceCaseCount = 19
 
 type treeAffordanceStart string
 
@@ -35,11 +37,12 @@ type treeAffordanceCase struct {
 	Name                 string              `yaml:"name"`
 	Start                treeAffordanceStart `yaml:"start"`
 	Keys                 []string            `yaml:"keys"`
-	ExpectScope          string              `yaml:"expectScope"`
 	ExpectMode           string              `yaml:"expectMode"`
 	ExpectQuery          string              `yaml:"expectQuery"`
 	ExpectCursorID       string              `yaml:"expectCursorID"`
 	ExpectVisibleIDs     []string            `yaml:"expectVisibleIDs"`
+	ExpectOriginalIDs    []string            `yaml:"expectOriginalIDs"`
+	ExpectProjectedIDs   []string            `yaml:"expectProjectedIDs"`
 	ExpectOverflowTop    bool                `yaml:"expectOverflowTop"`
 	ExpectOverflowBottom bool                `yaml:"expectOverflowBottom"`
 	WantAvailable        []string            `yaml:"wantAvailable"`
@@ -48,12 +51,20 @@ type treeAffordanceCase struct {
 	WantViewMissing      []string            `yaml:"wantViewMissing"`
 }
 
+type boundedTreeSearchFixture struct {
+	GeneratedSessionCount int      `yaml:"generatedSessionCount"`
+	Query                 string   `yaml:"query"`
+	ExpectedVisibleIDs    []string `yaml:"expectedVisibleIDs"`
+	MaximumDurationMillis int      `yaml:"maximumDurationMillis"`
+}
+
 type treeAffordanceDocument struct {
-	ExpectedCaseCount int                  `yaml:"expectedCaseCount"`
-	Width             int                  `yaml:"width"`
-	Height            int                  `yaml:"height"`
-	Forest            []fixtureTreeNode    `yaml:"forest"`
-	Cases             []treeAffordanceCase `yaml:"cases"`
+	ExpectedCaseCount int                      `yaml:"expectedCaseCount"`
+	Width             int                      `yaml:"width"`
+	Height            int                      `yaml:"height"`
+	Forest            []fixtureTreeNode        `yaml:"forest"`
+	Cases             []treeAffordanceCase     `yaml:"cases"`
+	BoundedSearch     boundedTreeSearchFixture `yaml:"boundedSearch"`
 }
 
 func treeFixtureValuesPresent(values ...[]string) bool {
@@ -88,15 +99,21 @@ func decodeTreeAffordances(data []byte) (treeAffordanceDocument, error) {
 	if doc.Width <= 0 || doc.Height <= 0 || len(doc.Forest) == 0 {
 		return doc, fmt.Errorf("tree_affordances.yaml must declare a positive region and non-empty forest")
 	}
+	if doc.BoundedSearch.GeneratedSessionCount != 4000 || strings.TrimSpace(doc.BoundedSearch.Query) == "" ||
+		len(doc.BoundedSearch.ExpectedVisibleIDs) != 3 || doc.BoundedSearch.MaximumDurationMillis <= 0 ||
+		!treeFixtureValuesPresent(doc.BoundedSearch.ExpectedVisibleIDs) {
+		return doc, fmt.Errorf("tree_affordances.yaml must pin the complete 4000-session bounded-search path")
+	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
 		if c.Name == "" || seen[c.Name] || !c.Start.valid() ||
-			!treeFixtureValuesPresent(c.Keys, c.ExpectVisibleIDs, c.WantAvailable, c.WantUnavailable, c.WantViewContains, c.WantViewMissing) {
+			!treeFixtureValuesPresent(c.Keys, c.ExpectVisibleIDs, c.ExpectOriginalIDs, c.ExpectProjectedIDs,
+				c.WantAvailable, c.WantUnavailable, c.WantViewContains, c.WantViewMissing) {
 			return doc, fmt.Errorf("tree_affordances.yaml case %q is empty, duplicated, has an invalid start, or contains a blank fixture value", c.Name)
 		}
 		seen[c.Name] = true
-		if c.ExpectScope == "" || c.ExpectMode == "" {
-			return doc, fmt.Errorf("tree_affordances.yaml case %q must name scope and mode", c.Name)
+		if c.ExpectMode == "" {
+			return doc, fmt.Errorf("tree_affordances.yaml case %q must name its search lifecycle mode", c.Name)
 		}
 		if len(c.ExpectVisibleIDs)+len(c.WantAvailable)+len(c.WantUnavailable)+len(c.WantViewContains)+len(c.WantViewMissing) == 0 && c.ExpectCursorID == "" {
 			return doc, fmt.Errorf("tree_affordances.yaml case %q has no observable assertion", c.Name)
@@ -123,7 +140,7 @@ func actionSetByName(t *testing.T, actions []keymap.ActionID) map[string]bool {
 	return out
 }
 
-func TestTree_ScopedSearchAndOverflowAffordances(t *testing.T) {
+func TestTree_GlobalSearchAndOverflowAffordances(t *testing.T) {
 	t.Parallel()
 	doc := loadTreeAffordances(t)
 	for _, c := range doc.Cases {
@@ -147,9 +164,6 @@ func TestTree_ScopedSearchAndOverflowAffordances(t *testing.T) {
 				tr, _ = tr.Update(keyPress(t, pressed))
 			}
 
-			if got := tr.Scope().String(); got != c.ExpectScope {
-				t.Errorf("scope = %q, want %q", got, c.ExpectScope)
-			}
 			state := tr.FilterState()
 			if got := state.Mode.String(); got != c.ExpectMode {
 				t.Errorf("filter mode = %q, want %q", got, c.ExpectMode)
@@ -168,6 +182,7 @@ func TestTree_ScopedSearchAndOverflowAffordances(t *testing.T) {
 					t.Errorf("visible rows = %v, want %v", got, c.ExpectVisibleIDs)
 				}
 			}
+			assertTreeProjectionIdentity(t, roots, tr.VisibleRoots(), c.ExpectOriginalIDs, c.ExpectProjectedIDs)
 			overflow := tr.Overflow()
 			if overflow.Top != c.ExpectOverflowTop || overflow.Bottom != c.ExpectOverflowBottom {
 				t.Errorf("overflow = %+v, want top=%t bottom=%t", overflow, c.ExpectOverflowTop, c.ExpectOverflowBottom)
@@ -197,6 +212,76 @@ func TestTree_ScopedSearchAndOverflowAffordances(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func treeNodesByID(t *testing.T, roots []*kit.TreeNode) map[string]*kit.TreeNode {
+	t.Helper()
+	out := map[string]*kit.TreeNode{}
+	var visit func(*kit.TreeNode)
+	visit = func(node *kit.TreeNode) {
+		if _, exists := out[node.ID]; exists {
+			t.Fatalf("pointer-identity fixture requires unique IDs; duplicate %q", node.ID)
+		}
+		out[node.ID] = node
+		for _, child := range node.Children {
+			visit(child)
+		}
+	}
+	for _, root := range roots {
+		visit(root)
+	}
+	return out
+}
+
+func assertTreeProjectionIdentity(t *testing.T, canonical, visible []*kit.TreeNode, originalIDs, projectedIDs []string) {
+	t.Helper()
+	canonicalByID := treeNodesByID(t, canonical)
+	visibleByID := treeNodesByID(t, visible)
+	for _, id := range originalIDs {
+		if canonicalByID[id] == nil || visibleByID[id] == nil || canonicalByID[id] != visibleByID[id] {
+			t.Errorf("visible node %q does not retain its canonical pointer", id)
+		}
+	}
+	for _, id := range projectedIDs {
+		if canonicalByID[id] == nil || visibleByID[id] == nil || canonicalByID[id] == visibleByID[id] {
+			t.Errorf("context node %q is not a shallow projection", id)
+		}
+	}
+}
+
+func TestTree_GlobalSearchHandlesFourThousandSessionsWithinBound(t *testing.T) {
+	doc := loadTreeAffordances(t)
+	fixture := doc.BoundedSearch
+	sessions := make([]*kit.TreeNode, 0, fixture.GeneratedSessionCount)
+	for index := 0; index < fixture.GeneratedSessionCount; index++ {
+		label := fmt.Sprintf("recorded session %04d", index)
+		if index == fixture.GeneratedSessionCount-1 {
+			label = fixture.Query
+		}
+		sessions = append(sessions, &kit.TreeNode{ID: fmt.Sprintf("session-%04d", index), Label: label})
+	}
+	branch := &kit.TreeNode{ID: "large-branch", Label: "main", Children: sessions}
+	project := &kit.TreeNode{ID: "large-project", Label: "large project", Children: []*kit.TreeNode{branch}}
+	tr := loadedTreeWithHeight(t, []*kit.TreeNode{project}, 8)
+	tr.SetSize(80, 8)
+
+	started := time.Now()
+	tr, _ = tr.Update(keyPress(t, "/"))
+	for _, value := range fixture.Query {
+		tr, _ = tr.Update(tea.KeyPressMsg{Code: value, Text: string(value)})
+	}
+	tr, _ = tr.Update(keyPress(t, "enter"))
+	elapsed := time.Since(started)
+	if elapsed > time.Duration(fixture.MaximumDurationMillis)*time.Millisecond {
+		t.Fatalf("4000-session global search took %s, fixture bound is %dms", elapsed, fixture.MaximumDurationMillis)
+	}
+	if got := orderedVisibleIDs(t, tr); !equalOrdered(got, fixture.ExpectedVisibleIDs) {
+		t.Fatalf("4000-session visible rows = %v, want %v", got, fixture.ExpectedVisibleIDs)
+	}
+	if tr.Roots()[0] != project || tr.VisibleRoots()[0] == project ||
+		tr.VisibleRoots()[0].Children[0] == branch || tr.VisibleRoots()[0].Children[0].Children[0] != sessions[len(sessions)-1] {
+		t.Fatal("4000-session projection did not preserve full roots, shallow ancestors, and canonical matching session")
 	}
 }
 

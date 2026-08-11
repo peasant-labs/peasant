@@ -33,10 +33,11 @@ type treeField struct {
 	focused bool
 	width   int
 	height  int
-	// affordanceRows is the number of status rows reserved by the last render.
-	// It is cached so sizing never has to walk the full forest for counts.
-	affordanceRows int
-	mounted        bool
+	// searchRows reserves the field-local search bar above the tree. Normal
+	// regions always render one; a one-row emergency region gives that sole row
+	// to the tree so the field still exposes a selectable surface.
+	searchRows int
+	mounted    bool
 	// forestReady is true only after the mounted Tree accepts a successful load
 	// result. Loading, stale, foreign, and failed messages must never turn the
 	// current forest into a persisted selection.
@@ -179,7 +180,7 @@ func (f *treeField) blur()          { f.focused = false; f.tree.Blur() }
 
 func (f *treeField) setSize(w, h int) {
 	f.width, f.height = w, h
-	f.affordanceRows = clampAffordanceRows(treeAffordanceRows, h)
+	f.searchRows = treeSearchRows(h)
 	f.applySize()
 }
 
@@ -198,28 +199,15 @@ func (f *treeField) applySize() {
 	f.tree.SetSize(inner, height)
 }
 
-// treeAffordanceRows are the maximum field-local status rows above the tree:
-// current scope/search controls, tracked/imported definitions, and canonical
-// selected/hidden counts. Very short regions retain at least one tree row and
-// show as many status rows as fit. Wide regions combine the definitions and
-// count so the adjacent preview keeps another useful row.
-const treeAffordanceRows = 3
-
-func clampAffordanceRows(rows, height int) int {
-	if maximum := height - 1; rows > maximum {
-		rows = maximum
+func treeSearchRows(height int) int {
+	if height > 1 {
+		return 1
 	}
-	if rows < 0 {
-		return 0
-	}
-	if rows > treeAffordanceRows {
-		return treeAffordanceRows
-	}
-	return rows
+	return 0
 }
 
 func (f *treeField) contentHeight() int {
-	height := f.height - f.affordanceRows
+	height := f.height - f.searchRows
 	if height < 1 {
 		return 1
 	}
@@ -259,7 +247,7 @@ func (f *treeField) facetAvailable() bool {
 }
 
 // capturesPrintableInput is the Flow field-input contract: while the tree pane
-// is editing a scoped query, printable q, b, ?, and similar characters are text
+// is editing its global query, printable q, b, ?, and similar characters are text
 // before they are global shortcuts. Preview focus remains non-textual.
 func (f *treeField) capturesPrintableInput() bool {
 	if !f.focused || !f.tree.FilterState().Editing() {
@@ -475,143 +463,42 @@ func (f *treeField) render(_ *Draft, _ theme.Styles, width int) string {
 	if width != f.width {
 		f.width = width
 	}
-	selected := checkedLeafCount(f.full)
-	hidden := f.hiddenSelectedCount()
-	status := f.affordanceLines(width, selected, hidden)
-	f.affordanceRows = clampAffordanceRows(len(status), f.height)
+	f.searchRows = treeSearchRows(f.height)
 	f.applySize()
-	status = status[:f.affordanceRows]
+	var chrome []string
+	if f.searchRows == 1 {
+		chrome = []string{f.searchBar(width)}
+	}
 	body := f.treeView()
 	gutter := f.gutterLines(f.contentHeight())
 	if len(gutter) == 0 {
-		return joinLines(append(status, strings.Split(body, "\n")...))
+		return joinLines(append(chrome, strings.Split(body, "\n")...))
 	}
-	return joinLines(append(status, strings.Split(joinColumns(gutter, body), "\n")...))
+	return joinLines(append(chrome, strings.Split(joinColumns(gutter, body), "\n")...))
 }
 
-// affordanceLines renders field-local state that must remain visible even when
-// the shared footer is too narrow to carry every Tree action.
-func (f *treeField) affordanceLines(width, selected, hidden int) []string {
+// searchBar is the selection field's only explanatory chrome. Its text remains
+// stable across lifecycle states; the current query is always visible, and an
+// editing tree pane gets the existing selected style plus a cursor glyph. Kept
+// queries use the header style, while preview focus removes the editing cursor
+// and mutes the line so there is one unambiguous input owner.
+func (f *treeField) searchBar(width int) string {
 	styles := f.th.Styles()
 	state := f.tree.FilterState()
-	km := keymap.Default()
-	interaction := ""
-	switch {
-	case f.hasPreview() && f.split.ActivePane() == kit.PaneRight:
-		focusLeft := actionKey(km, keymap.ActionFocusPaneLeft)
-		clearFilter := actionHint(km, keymap.ActionClearFilter)
-		if state.Editing() {
-			interaction = fmt.Sprintf("preview focused; search %s: %s; %s returns to tree to keep or %s", state.Scope, state.Query, focusLeft, clearFilter)
-		} else if state.Active() {
-			interaction = fmt.Sprintf("preview focused; filter %s: %s; %s returns to tree, then %s", state.Scope, state.Query, focusLeft, clearFilter)
-		} else {
-			interaction = fmt.Sprintf("preview focused; %s returns to tree", focusLeft)
-		}
-	case state.Editing():
-		interaction = fmt.Sprintf("search %s: %s    type to filter  %s  %s  %s", state.Scope, state.Query,
-			actionHint(km, keymap.ActionDeleteFilter), actionHint(km, keymap.ActionKeepFilter), actionHint(km, keymap.ActionClearFilter))
-	case state.Active():
-		interaction = fmt.Sprintf("filter %s: %s    %s  %s", state.Scope, state.Query,
-			actionHint(km, keymap.ActionSearchScope), actionHint(km, keymap.ActionClearFilter))
-	default:
-		interaction = f.scopeHint(state.Scope, km)
+	line := "search: " + state.Query
+	style := styles.Muted
+	if state.Active() {
+		style = styles.Header
 	}
-	definitions := "tracked = included by previous saved selection; imported = already in local store"
-	summary := fmt.Sprintf("selected sessions: %d; hidden by filters: %d", selected, hidden)
-	compactSummary := fmt.Sprintf("selected %d; hidden by filters: %d", selected, hidden)
-	if lipgloss.Width(definitions)+4+lipgloss.Width(compactSummary) <= width {
-		return []string{
-			styles.Muted.Render(clip(interaction, width)),
-			styles.Muted.Render(clip(definitions+"    "+compactSummary, width)),
-		}
+	if state.Editing() && f.searchHasFocus() {
+		line += "▏"
+		style = styles.Selected
 	}
-	return []string{
-		styles.Muted.Render(clip(interaction, width)),
-		styles.Muted.Render(clip(definitions, width)),
-		styles.Muted.Render(clip(summary, width)),
-	}
+	return fitCell(style, line, width)
 }
 
-func (f *treeField) scopeHint(active kit.TreeScope, km keymap.Keymap) string {
-	labels := make([]string, 0, len(kit.AllTreeScopes()))
-	for _, scope := range kit.AllTreeScopes() {
-		label := scope.String()
-		if scope == active {
-			label = "[" + label + "]"
-		}
-		labels = append(labels, label)
-	}
-	actions := actionSet(f.availableActions())
-	hint := "scope: " + strings.Join(labels, "  ")
-	if actions[keymap.ActionSearchScope] {
-		hint += "    " + actionKey(km, keymap.ActionSearchScope) + ": search this scope"
-	}
-	if actions[keymap.ActionCollapse] {
-		hint += "    " + actionHint(km, keymap.ActionCollapse)
-	}
-	if actions[keymap.ActionExpand] {
-		hint += "  " + actionHint(km, keymap.ActionExpand)
-	}
-	if actions[keymap.ActionFocusPaneRight] {
-		hint += "  " + actionHint(km, keymap.ActionFocusPaneRight)
-	}
-	return hint
-}
-
-func actionHint(km keymap.Keymap, action keymap.ActionID) string {
-	entries := keymap.HelpEntries(km, availList{action})
-	if len(entries) != 1 {
-		return ""
-	}
-	return entries[0].Key + ": " + entries[0].Desc
-}
-
-func actionKey(km keymap.Keymap, action keymap.ActionID) string {
-	entries := keymap.HelpEntries(km, availList{action})
-	if len(entries) != 1 {
-		return ""
-	}
-	return entries[0].Key
-}
-
-func actionSet(actions []keymap.ActionID) map[keymap.ActionID]bool {
-	out := make(map[keymap.ActionID]bool, len(actions))
-	for _, action := range actions {
-		out[action] = true
-	}
-	return out
-}
-
-func checkedLeafCount(roots []*kit.TreeNode) int {
-	count := 0
-	for _, root := range roots {
-		walkNodes(root, func(node *kit.TreeNode) {
-			if len(node.Children) == 0 && node.State == kit.Checked {
-				count++
-			}
-		})
-	}
-	return count
-}
-
-func (f *treeField) hiddenSelectedCount() int {
-	visible := map[*kit.TreeNode]bool{}
-	for _, root := range f.tree.VisibleRoots() {
-		walkNodes(root, func(node *kit.TreeNode) {
-			if len(node.Children) == 0 {
-				visible[node] = true
-			}
-		})
-	}
-	hidden := 0
-	for _, root := range f.full {
-		walkNodes(root, func(node *kit.TreeNode) {
-			if len(node.Children) == 0 && node.State == kit.Checked && !visible[node] {
-				hidden++
-			}
-		})
-	}
-	return hidden
+func (f *treeField) searchHasFocus() bool {
+	return f.focused && (!f.hasPreview() || f.split.ActivePane() == kit.PaneLeft)
 }
 
 // treeView renders the tree, beside its preview body when one is mounted.

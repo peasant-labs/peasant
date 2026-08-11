@@ -54,26 +54,26 @@ from the shared `internal/tui/keymap` action catalog. The older page-specific
 reference below remains for legacy wizard pages that have not yet moved to the
 kit.
 
-## Kickstart transcript selection
+## Kickstart session selection
 
-The guided kickstart selection step uses a project → branch → session tree. Its
-status rows distinguish three independent facts:
+The guided kickstart selection step uses a project → branch → session tree with
+one search bar above it. Search checks project, branch, and session labels at the
+same time. A matching project keeps its full subtree, a matching branch keeps
+that branch, and a matching session keeps the shallow project and branch context
+needed to identify it.
 
-- `tracked` means the row was included by the previous saved selection;
-- `already imported` means transcript data is already in the local store; and
-- the checkbox is the current buffered choice for this run.
-
+Rows keep the durable state close to the item it describes: `tracked` marks a
+row included by the previous saved selection, `already imported` marks data in
+the local store, and the checkbox is the current buffered choice for this run.
 Long trees show `↑`, `↓`, or `↕` in the row margin when more rows exist above,
-below, or in both directions. The selected-session summary also reports how many
-selected sessions are hidden by the current text or harness view.
+below, or in both directions.
 
 | Action | Keys | Description |
 |--------|------|-------------|
 | Move | `↑` `k` `↓` `j` | Move through visible rows |
 | Page | `PgUp` `Ctrl+u` `PgDn` `Ctrl+d` | Move one visible page |
 | First / last row | `g` `Shift+g` | Jump to the start or end |
-| Previous / next scope | `[` `]` | Move among project, branch, and session scope |
-| Search current scope | `/` | Start a text filter at the named scope |
+| Search | `/` | Start one case-insensitive hierarchy search |
 | Type filter | any printable key | Append text while search is editing |
 | Delete search text | `backspace` | Remove the previous character |
 | Keep filter | `enter` | Leave search editing while keeping the filter |
@@ -82,23 +82,22 @@ selected sessions are hidden by the current text or harness view.
 | Select row | `space` | Toggle the visible row and its visible descendants |
 | Select visible tree | `a` | Select or clear the current projected tree |
 | Select current project | `Shift+a` | Select visible sessions under the current project |
-| Collapse / expand | `←` `h` / `→` `l` | Change tree expansion without changing scope |
+| Collapse / expand | `←` `h` / `→` `l` | Change tree expansion |
 | Focus tree / preview | `Ctrl+h` / `Ctrl+l` | Move input across the preview divider |
 | Help | `?` | Show actions available for the current focus |
 
-Search keeps ancestor rows for context and shares session nodes with the full
-forest, so selecting a filtered row changes the real buffered choice exactly
-once. Clearing restores the complete forest, expansion state, and the current
-row when it still exists. While a filter remains active, the status line keeps
-the clear path visible, including when preview focus requires returning to the
-tree first. Footer and help entries describe only actions that can run in the
-current state: a leaf does not advertise expand or collapse, edge navigation is
-omitted when it cannot move, and the harness key appears only after its values
-load while the tree pane has focus.
+Search keeps ancestor rows for context and shares selectable descendants with
+the full forest, so selecting a filtered row changes the real buffered choice
+exactly once. Clearing restores the complete forest, expansion state, and the
+same canonical cursor row when it still exists. Footer and help entries describe
+only actions that can run in the current state: a leaf does not advertise expand
+or collapse, edge navigation is omitted when it cannot move, search is absent
+from footer/help while the preview owns input, and the harness key appears only
+after its values load while the tree pane has focus.
 
 The harness control is view-only: rows found only under an excluded harness are
 hidden, mixed-harness projects remain through included data, and hidden
-selections remain selected and counted. Changing the harness view does not
+selections remain selected. Changing the harness view does not
 rewrite saved selection intent. A highlighted canonical row keeps its viewport
 anchor when it remains in the projected view; returning to the complete view
 restores that anchor even if an intermediate harness view hid it.
@@ -169,7 +168,7 @@ Includes all `PageKeyMap` bindings plus:
 | Search | `f` | Enter search/filter mode |
 | Confirm selection | `tab` | Open confirm overlay (requires at least one session selected) |
 
-### Split preview pane (rebuilt "choose transcripts to import" step)
+### Split preview pane (rebuilt session-selection step)
 
 The rebuilt selection step shows the session tree on the left and a preview of the
 highlighted session on the right. The divider between them carries a focus marker

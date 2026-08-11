@@ -78,6 +78,7 @@ type guidedFramingRow struct {
 	FieldKey              string               `yaml:"fieldKey"`
 	FieldKind             string               `yaml:"fieldKind"`
 	FieldText             string               `yaml:"fieldText"`
+	HasGuide              bool                 `yaml:"hasGuide"`
 	ExampleText           string               `yaml:"exampleText"`
 	Guide                 guideFixture         `yaml:"guide"`
 	WantContains          []string             `yaml:"wantContains"`
@@ -162,8 +163,13 @@ func loadGuidedFramingDoc(t *testing.T) guidedFramingDoc {
 			}
 		case guidedSurfaceRegistrySection, guidedSurfaceDerivedExample:
 			if row.SectionKey == "" || row.SectionTitle == "" || row.FieldKey == "" ||
-				row.FieldKind == "" || row.FieldText == "" || row.Guide.Intro == "" || len(row.Guide.Hints) == 0 {
+				row.FieldKind == "" || row.FieldText == "" ||
+				(row.HasGuide && (row.Guide.Intro == "" || len(row.Guide.Hints) == 0)) ||
+				(!row.HasGuide && (row.Guide.Intro != "" || len(row.Guide.Hints) != 0)) {
 				t.Fatalf("guided framing row %q leaves its section, field, or guide contract unspecified", row.Name)
+			}
+			if row.Surface == guidedSurfaceDerivedExample && !row.HasGuide {
+				t.Fatalf("guided framing row %q cannot derive an example without a guide", row.Name)
 			}
 			if row.Surface == guidedSurfaceRegistrySection &&
 				row.SelectionMode != config.SelectionModeAll && row.SelectionMode != config.SelectionModeSelected {
@@ -248,10 +254,10 @@ func assertGuideMetadata(t *testing.T, row guidedFramingRow, section settings.Se
 		t.Errorf("section %q field identity = %q/%s, want %q/%s",
 			row.SectionKey, field.Key(), field.Kind(), row.FieldKey, row.FieldKind)
 	}
-	if section.Guide == nil {
-		t.Fatalf("section %q has no guided framing", row.SectionKey)
+	if (section.Guide != nil) != row.HasGuide {
+		t.Fatalf("section %q guide presence = %t, want %t", row.SectionKey, section.Guide != nil, row.HasGuide)
 	}
-	if section.Guide.Intro != row.Guide.Intro || !reflect.DeepEqual(section.Guide.Hints, row.Guide.Hints) {
+	if row.HasGuide && (section.Guide.Intro != row.Guide.Intro || !reflect.DeepEqual(section.Guide.Hints, row.Guide.Hints)) {
 		t.Errorf("section %q guide = %#v, want intro %q and hints %v",
 			row.SectionKey, section.Guide, row.Guide.Intro, row.Guide.Hints)
 	}
@@ -286,7 +292,11 @@ func assertFramingBeforeField(t *testing.T, row guidedFramingRow, view string) {
 	if fieldAt < 0 {
 		t.Fatalf("section %q does not render unchanged field text %q:\n%s", row.SectionKey, row.FieldText, plain)
 	}
-	wantBefore := append([]string{row.Guide.Intro}, row.Guide.Hints...)
+	wantBefore := []string{}
+	if row.HasGuide {
+		wantBefore = append(wantBefore, row.Guide.Intro)
+		wantBefore = append(wantBefore, row.Guide.Hints...)
+	}
 	if row.ExampleText != "" {
 		wantBefore = append(wantBefore, row.ExampleText)
 	}
@@ -309,6 +319,9 @@ func assertFramingBeforeField(t *testing.T, row guidedFramingRow, view string) {
 		if strings.Contains(plain, forbidden) {
 			t.Errorf("section %q renders forbidden guidance %q:\n%s", row.SectionKey, forbidden, plain)
 		}
+	}
+	if row.SectionKey == kickstart.SectionSelection {
+		assertSimplifiedSelectionRender(t, plain)
 	}
 }
 
@@ -363,7 +376,7 @@ func TestGuidedFramingFixture(t *testing.T) {
 					return
 				}
 				visibleViews := allVisibleFlowViews(t, flow, len(reg.Sections))
-				if strings.Contains(visibleViews, row.Guide.Intro) {
+				if row.Guide.Intro != "" && strings.Contains(visibleViews, row.Guide.Intro) {
 					t.Errorf("hidden section %q leaked its guide into the visible flow:\n%s", row.SectionKey, visibleViews)
 				}
 			case guidedSurfaceDerivedExample:

@@ -112,10 +112,10 @@ func newPrintableAvailabilityFlow(t *testing.T) Flow {
 	if err != nil {
 		t.Fatalf("open printable availability draft: %v", err)
 	}
-	field := Tree("selection", "transcripts", selectionAccessor(), scannerfix.NewFixtureTreeSource("standard"),
+	field := Tree("selection", "", selectionAccessor(), scannerfix.NewFixtureTreeSource("standard"),
 		WithFacet(MetaHarness, "harness"))
 	flow := NewFlow(theme.New(theme.ModeDark), Registry{Sections: []Section{{
-		Key: "transcripts", Title: "select transcripts", Fields: []Field{field},
+		Key: "selection", Title: "choose sessions to import", Fields: []Field{field},
 	}}}, draft)
 	flow.SetSize(120, 24)
 	return drainInit(flow)
@@ -132,6 +132,7 @@ func TestFlowPrintableInputUsesOneEffectiveAvailability(t *testing.T) {
 			flow, _ = flow.Update(tea.KeyPressMsg{Code: r, Text: row.Input})
 
 			plain := stripANSIForSettings(flow.View())
+			assertSimplifiedSelectionChrome(t, plain)
 			if !strings.Contains(plain, row.WantQuery) {
 				t.Errorf("mounted search status does not contain %q:\n%s", row.WantQuery, plain)
 			}

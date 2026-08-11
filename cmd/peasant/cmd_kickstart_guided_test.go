@@ -70,9 +70,10 @@ func TestKickstartCommandMountsGuidedProgram(t *testing.T) {
 		}
 		program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		flowView := ansiPattern.ReplaceAllString(program.View(), "")
-		if !strings.Contains(flowView, "choose which recorded sessions become part of your local peasant history.") {
-			t.Fatalf("production command did not mount guided registry framing:\n%s", flowView)
+		if !strings.Contains(flowView, "choose sessions to import") {
+			t.Fatalf("production command did not mount selection section:\n%s", flowView)
 		}
+		assertMountedSelectionSearch(t, flowView)
 		return nil
 	}
 
