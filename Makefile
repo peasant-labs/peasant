@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash
+.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test
 
 VERSION ?= dev
 
@@ -130,6 +130,14 @@ e2e-schema-parity:
 # retraction drops one) with verbose output. See docs/e2e.md.
 demo:
 	go test -race -tags=e2e -count=1 -v -run TestSkipGateDemo ./internal/e2e/...
+
+# Manual visual evidence for the mounted guided TUI. The build tag keeps the
+# harness and its tests out of default Go builds and tests.
+guided-screenshots:
+	go run -tags=guided_screenshots ./cmd/peasant-guided-screenshots
+
+guided-screenshots-test:
+	go test -race -tags=guided_screenshots ./cmd/peasant-guided-screenshots
 
 build: web
 	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$(VERSION)" -o bin/peasant ./cmd/peasant
