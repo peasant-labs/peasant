@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 )
@@ -24,6 +25,95 @@ type toolResultData struct {
 	Output    string
 	IsError   bool
 	Timestamp int64
+}
+
+type commandWrapperKind uint8
+
+const (
+	commandWrapperName commandWrapperKind = 1 << iota
+	commandWrapperMessage
+	commandWrapperArguments
+)
+
+// injectedCommandRole keeps harness-generated command markup from claiming the
+// user's authorship. It is deliberately conservative: only a complete sequence
+// of known wrappers with one valid slash-command name qualifies. Any prose,
+// unknown or malformed markup, duplicate wrapper, or possibly truncated preview
+// leaves the stored role unchanged.
+func injectedCommandRole(entry schema.SessionEntry, content string) schema.Role {
+	if entry.Role != schema.RoleUser || !isInjectedCommandWrapperOnly(content) {
+		return entry.Role
+	}
+	return schema.RoleSystem
+}
+
+func isInjectedCommandWrapperOnly(content string) bool {
+	// ContentPreview is the classification input. At the preview limit, a
+	// syntactically complete wrapper could still have user prose beyond the stored
+	// bytes. Match the existing overlay gate and fail safe to user authorship.
+	if content == "" || len(content) >= defaults.ContentPreviewLimit {
+		return false
+	}
+
+	rest := strings.TrimSpace(content)
+	seen := commandWrapperKind(0)
+	for rest != "" {
+		kind, openTag, closeTag, ok := commandWrapperAtStart(rest)
+		if !ok || seen&kind != 0 {
+			return false
+		}
+
+		bodyAndRest := rest[len(openTag):]
+		closeIndex := strings.Index(bodyAndRest, closeTag)
+		if closeIndex < 0 {
+			return false
+		}
+		body := bodyAndRest[:closeIndex]
+		if strings.ContainsAny(body, "<>") || !validCommandWrapperBody(kind, body) {
+			return false
+		}
+
+		seen |= kind
+		rest = strings.TrimSpace(bodyAndRest[closeIndex+len(closeTag):])
+	}
+
+	return seen&commandWrapperName != 0
+}
+
+func commandWrapperAtStart(content string) (commandWrapperKind, string, string, bool) {
+	const (
+		nameOpen     = "<command-name>"
+		nameClose    = "</command-name>"
+		messageOpen  = "<command-message>"
+		messageClose = "</command-message>"
+		argsOpen     = "<command-args>"
+		argsClose    = "</command-args>"
+	)
+
+	switch {
+	case strings.HasPrefix(content, nameOpen):
+		return commandWrapperName, nameOpen, nameClose, true
+	case strings.HasPrefix(content, messageOpen):
+		return commandWrapperMessage, messageOpen, messageClose, true
+	case strings.HasPrefix(content, argsOpen):
+		return commandWrapperArguments, argsOpen, argsClose, true
+	default:
+		return 0, "", "", false
+	}
+}
+
+func validCommandWrapperBody(kind commandWrapperKind, body string) bool {
+	trimmed := strings.TrimSpace(body)
+	switch kind {
+	case commandWrapperName:
+		return len(trimmed) > 1 && strings.HasPrefix(trimmed, "/") && !strings.ContainsAny(trimmed, " \t\r\n")
+	case commandWrapperMessage:
+		return trimmed != ""
+	case commandWrapperArguments:
+		return true
+	default:
+		return false
+	}
 }
 
 // entriesToTurns converts flat session_entries into the Turn model expected by
@@ -197,7 +287,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 
 		t := ingest.Turn{
 			Index:       e.EntryIndex,
-			Role:        e.Role,
+			Role:        injectedCommandRole(e, content),
 			Content:     content,
 			Timestamp:   ts,
 			Depth:       e.Depth,
