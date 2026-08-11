@@ -9,8 +9,8 @@ import {
 } from '@/test/strictYaml';
 
 const REQUIRED_PICKER_CASE_NAMES = [
-  'mounted home picker explains coverage and search',
-  'mounted map picker explains coverage and search',
+  'shared Home picker explains coverage and search',
+  'shared Map picker explains coverage and search',
 ] as const;
 
 const REQUIRED_OUTCOME_CASE_NAMES = [
@@ -49,7 +49,6 @@ const OUTCOME_FIELDS = [
   'name',
   'outcome',
   'sessionId',
-  'transcriptLabel',
   'mapLabel',
   'taskTitle',
   'entryIndex',
@@ -75,7 +74,6 @@ export type ClarityOutcomeCase = {
   name: string;
   outcome: 'resolved' | 'partial' | 'failed';
   sessionId: string;
-  transcriptLabel: string;
   mapLabel: string;
   taskTitle: string;
   entryIndex: number;

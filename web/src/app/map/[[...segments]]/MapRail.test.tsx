@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { NodeRail, ProjectRail } from './MapRail';
-import { makeCommitRef, makeSession, NODE_DETAIL, PROJECT_HASH } from '../lib/test-fixtures';
+import { makeCommitRef, makeSession, makeTask, NODE_DETAIL, PROJECT_HASH } from '../lib/test-fixtures';
 import {
   parseTranscriptRoute,
   parseTranscriptRouteQuery,
@@ -15,6 +15,7 @@ import type { Harness } from '@peasant-labs/schema';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
 import { strikeMountedWebFixture } from '@/test/fixtures/strikeMountedWeb';
 import { assertCommitRowLink, loadCommitRowManifest, proveCommitRowMutation } from './commitRowFixtures';
+import { localReviewClarityFixture } from '@/test/fixtures/localReviewClarity';
 
 /**
  * The "Conversations that built this" commit-row section (`MapRail.tsx`
@@ -220,6 +221,50 @@ describe('NodeRail commit-row session list', () => {
     expect(parseTranscriptRouteQuery(destination.searchParams)).toMatchObject({
       origin: RouteOrigin.Map,
     });
+  });
+
+  it('exposes complete ingest-time outcome help beside the production task list', () => {
+    const tasks = localReviewClarityFixture.outcomeCases.map((testCase) => makeTask({
+      sessionId: testCase.sessionId,
+      entryIndex: testCase.entryIndex,
+      title: testCase.taskTitle,
+      outcome: testCase.outcome,
+      retryLoop: false,
+      labels: [],
+    }));
+    render(
+      <ProjectRail
+        projectHash={PROJECT_HASH}
+        projectName="alpha-project"
+        sessions={localReviewClarityFixture.outcomeCases.map((testCase) => makeSession({
+          id: testCase.sessionId,
+          preview: testCase.taskTitle,
+        }))}
+        coverage={null}
+        recentTasks={tasks}
+        recentTasksError={null}
+        nowMs={NODE_DETAIL.lastTouchMs ?? Date.now()}
+      />,
+    );
+
+    for (const testCase of localReviewClarityFixture.outcomeCases) {
+      const row = screen.getByRole('link', {
+        name: `Open task at turn ${testCase.entryIndex} of session ${testCase.sessionId}`,
+      });
+      expect(row).toHaveTextContent(testCase.mapLabel);
+    }
+
+    const help = screen.getByRole('button', {
+      name: localReviewClarityFixture.copy.outcomeHelpName,
+    });
+    fireEvent.focus(help);
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent(localReviewClarityFixture.copy.outcomeSource);
+    for (const testCase of localReviewClarityFixture.outcomeCases) {
+      expect(tooltip).toHaveTextContent(testCase.definition);
+    }
+    expect(tooltip).toHaveTextContent(localReviewClarityFixture.copy.outcomeLimit);
+    expect(help).toHaveAttribute('aria-describedby', tooltip.id);
   });
 
   it('renders canonical Strike identity and navigation in a mounted Map commit row', () => {

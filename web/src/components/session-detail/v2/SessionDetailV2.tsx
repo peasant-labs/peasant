@@ -43,7 +43,6 @@ import {
 import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
 import { adaptQualitySessions } from '@/lib/quality/types';
-import { OutcomeHeuristicHelp } from '@/components/OutcomeHeuristicHelp';
 
 interface SessionDetailV2Props {
   sessionId: string;
@@ -296,18 +295,15 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // (via the composite's `headerActions` slot) rather than the removed
   // prelude's toggle bar. Still copies exactly what's shown (scope respected).
   const headerActions = (
-    <>
-      {detail.outcome && <OutcomeHeuristicHelp />}
-      <button
-        type="button"
-        onClick={copyMarkdown}
-        title="copy the conversation shown above (respecting the active scope) as markdown text"
-        className="btn btn-secondary btn-sm"
-      >
-        <Copy size={14} aria-hidden />
-        {copied ? 'copied' : 'copy as markdown'}
-      </button>
-    </>
+    <button
+      type="button"
+      onClick={copyMarkdown}
+      title="copy the conversation shown above (respecting the active scope) as markdown text"
+      className="btn btn-secondary btn-sm"
+    >
+      <Copy size={14} aria-hidden />
+      {copied ? 'copied' : 'copy as markdown'}
+    </button>
   );
 
   return (

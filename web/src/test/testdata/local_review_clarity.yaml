@@ -8,7 +8,7 @@ copy:
   outcomeSource: computed at ingest time from recorded error patterns, not a verified result.
   outcomeLimit: the current data includes the label, not a reason for an individual result.
 pickerCases:
-  - name: mounted home picker explains coverage and search
+  - name: shared Home picker explains coverage and search
     surface: home
     destination: changes
     projectCount: 9
@@ -20,7 +20,7 @@ pickerCases:
     expectedCoverageLabel: 34 recorded files out of 37 total files
     expectedLinkName: Open the changes of alpha-project
     expectedHref: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  - name: mounted map picker explains coverage and search
+  - name: shared Map picker explains coverage and search
     surface: map
     destination: map
     projectCount: 9
@@ -36,7 +36,6 @@ outcomeCases:
   - name: mounted resolved outcome exposes heuristic help
     outcome: resolved
     sessionId: clarity-resolved
-    transcriptLabel: resolved
     mapLabel: resolved
     taskTitle: resolved fixture task
     entryIndex: 1
@@ -44,7 +43,6 @@ outcomeCases:
   - name: mounted partial outcome exposes heuristic help
     outcome: partial
     sessionId: clarity-partial
-    transcriptLabel: partial
     mapLabel: partial
     taskTitle: partial fixture task
     entryIndex: 2
@@ -52,7 +50,6 @@ outcomeCases:
   - name: mounted failed outcome exposes heuristic help
     outcome: failed
     sessionId: clarity-failed
-    transcriptLabel: failed
     mapLabel: not resolved
     taskTitle: failed fixture task
     entryIndex: 3
