@@ -42,14 +42,14 @@ const (
 type kickstartStoredGateBehavior string
 
 const (
-	kickstartStoredGateExplicit     kickstartStoredGateBehavior = "stored-explicit"
-	kickstartStoredGateUnresolved   kickstartStoredGateBehavior = "stored-unresolved-explicit"
-	kickstartStoredGateClone        kickstartStoredGateBehavior = "stored-canonical-clone"
-	kickstartStoredGateUniqueName   kickstartStoredGateBehavior = "stored-unique-name"
-	kickstartStoredGateNameConflict kickstartStoredGateBehavior = "stored-ambiguous-name"
-	kickstartStoredGateEmpty        kickstartStoredGateBehavior = "empty-control"
-	kickstartStoredGateReadFailure  kickstartStoredGateBehavior = "store-read-failure"
-	kickstartStoredGateInvalidHash  kickstartStoredGateBehavior = "store-invalid-project-hash"
+	kickstartStoredGateExplicit      kickstartStoredGateBehavior = "stored-explicit"
+	kickstartStoredGateUnresolved    kickstartStoredGateBehavior = "stored-unresolved-explicit"
+	kickstartStoredGateClone         kickstartStoredGateBehavior = "stored-canonical-clone"
+	kickstartStoredGateUniqueName    kickstartStoredGateBehavior = "stored-unique-name"
+	kickstartStoredGateNameMigration kickstartStoredGateBehavior = "stored-name-migration"
+	kickstartStoredGateEmpty         kickstartStoredGateBehavior = "empty-control"
+	kickstartStoredGateReadFailure   kickstartStoredGateBehavior = "store-read-failure"
+	kickstartStoredGateInvalidHash   kickstartStoredGateBehavior = "store-invalid-project-hash"
 )
 
 type kickstartStoredGateStoreState string
@@ -187,7 +187,7 @@ func validateKickstartStoredGateDocument(t *testing.T, document kickstartStoredG
 		kickstartStoredGateUnresolved,
 		kickstartStoredGateClone,
 		kickstartStoredGateUniqueName,
-		kickstartStoredGateNameConflict,
+		kickstartStoredGateNameMigration,
 		kickstartStoredGateEmpty,
 		kickstartStoredGateReadFailure,
 		kickstartStoredGateInvalidHash,
@@ -328,16 +328,19 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 			len(testCase.ExpectedPushSessionIDs) != 1 || testCase.ExpectedPushSessionIDs[0] != testCase.StoredRows[0].SessionID {
 			t.Fatalf("stored gate fixture unique-name case %q does not align DB-only non-Git behavior", testCase.Name)
 		}
-	case kickstartStoredGateNameConflict:
-		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateConfirm ||
+	case kickstartStoredGateNameMigration:
+		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateNone ||
 			testCase.Selection.Kind != kickstartStoredGateSelectName || len(testCase.StoredRows) != 2 || len(testCase.ScannerRows) != 0 ||
 			testCase.StoredRows[0].ProjectHash == testCase.StoredRows[1].ProjectHash ||
 			testCase.StoredRows[0].CanonicalPathKey == testCase.StoredRows[1].CanonicalPathKey ||
 			filepath.Base(testCase.StoredRows[0].CanonicalPathKey) != testCase.Selection.ProjectName ||
 			filepath.Base(testCase.StoredRows[1].CanonicalPathKey) != testCase.Selection.ProjectName ||
 			testCase.ExpectedCandidateCount != 2 || testCase.ExpectedDescendantCount != 2 ||
-			testCase.ExpectedViewerProjects != 0 || testCase.ExpectedViewerSessions != 0 || len(testCase.ExpectedPushSessionIDs) != 0 {
-			t.Fatalf("stored gate fixture same-name case %q does not encode fail-closed physical ambiguity", testCase.Name)
+			testCase.ExpectedViewerProjects != 2 || testCase.ExpectedViewerSessions != 2 ||
+			len(testCase.ExpectedPushSessionIDs) != 2 ||
+			testCase.ExpectedPushSessionIDs[0] != testCase.StoredRows[0].SessionID ||
+			testCase.ExpectedPushSessionIDs[1] != testCase.StoredRows[1].SessionID {
+			t.Fatalf("stored gate fixture name-migration case %q does not select every matching stored clone", testCase.Name)
 		}
 	case kickstartStoredGateEmpty:
 		if testCase.StoreState != kickstartStoredGateReadable || testCase.ExpectedGate != kickstartStoredGateConfirm ||
@@ -379,7 +382,7 @@ func validateKickstartStoredGateCaseSemantics(t *testing.T, testCase kickstartSt
 func (b kickstartStoredGateBehavior) valid() bool {
 	return b == kickstartStoredGateExplicit || b == kickstartStoredGateUnresolved ||
 		b == kickstartStoredGateClone || b == kickstartStoredGateUniqueName ||
-		b == kickstartStoredGateNameConflict || b == kickstartStoredGateEmpty ||
+		b == kickstartStoredGateNameMigration || b == kickstartStoredGateEmpty ||
 		b == kickstartStoredGateReadFailure || b == kickstartStoredGateInvalidHash
 }
 

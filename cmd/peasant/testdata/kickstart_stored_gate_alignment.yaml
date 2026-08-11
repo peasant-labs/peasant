@@ -133,8 +133,8 @@ cases:
     expectedPushSessionIds:
       - 76000000-0000-4000-8000-000000000001
 
-  - name: same-name db-only projects fail closed
-    behavior: stored-ambiguous-name
+  - name: pathless name migrates all matching db-only projects
+    behavior: stored-name-migration
     storeState: readable
     selection:
       kind: project-name
@@ -162,12 +162,14 @@ cases:
         canonicalPathKey: ambiguous-two/atlas
         worktreePathKey: ""
     scannerRows: []
-    expectedGate: confirm-no-projects
+    expectedGate: none
     expectedCandidateCount: 2
     expectedDescendantCount: 2
-    expectedViewerProjects: 0
-    expectedViewerSessions: 0
-    expectedPushSessionIds: []
+    expectedViewerProjects: 2
+    expectedViewerSessions: 2
+    expectedPushSessionIds:
+      - 77000000-0000-4000-8000-000000000001
+      - 77000000-0000-4000-8000-000000000002
 
   - name: no effective stored or scanner descendant confirms
     behavior: empty-control
