@@ -39,6 +39,10 @@ peasant version    # should include ${VERSION}
 version comparison upgrades in place. Release-candidate packages (`0.1.0~rc1`) sort
 *older* than their final (`0.1.0`), so an rc upgrades cleanly to the final.
 
+Reinstalling uses the same `apt install` command and does not require removing the old
+package first. Package replacement does not remove Peasant's XDG configuration, database,
+ingested data, or state.
+
 **Removing:** `sudo apt remove peasant`.
 
 > **No `apt upgrade` channel.** There is no hosted apt repository yet, so Peasant
@@ -64,6 +68,24 @@ sudo install -m755 peasant /usr/local/bin/peasant
 
 peasant version
 ```
+
+## Reinstalling or upgrading
+
+For the `.deb` channel, download the desired package and use `sudo apt install ./…` for both
+reinstalls and upgrades. For the raw tarball channel, download the newer archive, verify it,
+extract it, and repeat `sudo install -m755 peasant /usr/local/bin/peasant`. Both channels replace
+the binary without removing Peasant's configuration, database, ingested data, or state.
+
+## Verify and start guided setup
+
+After `peasant version` reports the expected build, run the guided setup wizard:
+
+```bash
+peasant version
+peasant kickstart
+```
+
+For a later setup run, read [kickstart rerun and reset behavior](../KICKSTART.md#reset-and-standalone-boundaries).
 
 ## Notes
 

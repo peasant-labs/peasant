@@ -59,6 +59,25 @@ has coarser modification-time semantics, so keep data WSL-side when you can.
 file. Before starting again on the same port, run `peasant web stop` (it cleans up the
 stale PID file), then `peasant web start`.
 
+## Reinstalling or upgrading
+
+WSL has no separate Peasant install channel. Reinstall or upgrade through the underlying distro
+guide you followed: a Debian package uses `apt install` for in-place replacement, a raw tarball
+uses the guide's `sudo install` step, an RPM uses `dnf`, and an AUR package uses `pacman` or its
+AUR helper. These package or binary replacements do not remove Peasant's configuration, database,
+ingested data, or state.
+
+## Verify and start guided setup
+
+After the underlying install guide's `peasant version` check succeeds, run the guided setup wizard:
+
+```bash
+peasant version
+peasant kickstart
+```
+
+For a later setup run, read [kickstart rerun and reset behavior](../KICKSTART.md#reset-and-standalone-boundaries).
+
 ## Notes
 
 - All state stays inside the WSL distro (`~/.config|.local/share|.local/state/peasant`),
