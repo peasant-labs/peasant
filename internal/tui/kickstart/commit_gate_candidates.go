@@ -12,7 +12,10 @@ import (
 
 // CommitGateCandidates builds the complete available project cohort that the
 // kickstart save gate evaluates. Scanner descendants keep the editor's exact
-// ProjectIdentity while their parent cohort uses transient RepositoryIdentity.
+// ProjectIdentity while their visible parent cohort uses transient
+// RepositoryIdentity. Commit-gate candidates remain partitioned by harness
+// because SelectionConfig and EffectiveProjects are harness-keyed even when the
+// editor renders one cross-harness repository root.
 // Stored rows keep the same distinct parent-project and descendant-worktree
 // carriers used by the viewer: ProjectHash identifies the parent, CanonicalCwd
 // is the project path and name carrier, and GitWorktree is the descendant path.
@@ -66,13 +69,13 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 		if _, err := ingest.NewSessionID(row.Listing.SessionID); err != nil {
 			continue
 		}
-		key := row.RepositoryIdentity.String()
+		key := row.ProjectIdentity.Harness.String() + "\x00" + row.RepositoryIdentity.String()
 		project := projects[key]
 		if project == nil {
 			project = &commitGateProjectCohort{
 				identity: row.RepositoryIdentity,
 				parentID: selectionprojection.ParentProjectID(key),
-				harness:  row.RepositoryIdentity.Harness,
+				harness:  row.ProjectIdentity.Harness,
 			}
 			projects[key] = project
 			projectOrder = append(projectOrder, key)

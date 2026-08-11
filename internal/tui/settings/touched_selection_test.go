@@ -80,21 +80,23 @@ const (
 )
 
 type touchedFieldCase struct {
-	Name                 string                 `yaml:"name"`
-	Current              config.SelectionConfig `yaml:"current"`
-	ProjectIdentity      string                 `yaml:"projectIdentity"`
-	Harness              string                 `yaml:"harness"`
-	ClonePath            string                 `yaml:"clonePath"`
-	LinkedClonePath      string                 `yaml:"linkedClonePath"`
-	GitRemote            string                 `yaml:"gitRemote"`
-	Branch               string                 `yaml:"branch"`
-	SessionID            string                 `yaml:"sessionId"`
-	LinkedSessionID      string                 `yaml:"linkedSessionId"`
-	Keys                 []touchedFieldKey      `yaml:"keys"`
-	ExpectedSessionState string                 `yaml:"expectedSessionState"`
-	ExpectedSetCount     int                    `yaml:"expectedSetCount"`
-	ExpectReconcileError bool                   `yaml:"expectReconcileError"`
-	WithPreview          bool                   `yaml:"withPreview"`
+	Name                 string                  `yaml:"name"`
+	Current              config.SelectionConfig  `yaml:"current"`
+	ProjectIdentity      string                  `yaml:"projectIdentity"`
+	Harness              string                  `yaml:"harness"`
+	LinkedHarness        string                  `yaml:"linkedHarness"`
+	ClonePath            string                  `yaml:"clonePath"`
+	LinkedClonePath      string                  `yaml:"linkedClonePath"`
+	GitRemote            string                  `yaml:"gitRemote"`
+	Branch               string                  `yaml:"branch"`
+	SessionID            string                  `yaml:"sessionId"`
+	LinkedSessionID      string                  `yaml:"linkedSessionId"`
+	Keys                 []touchedFieldKey       `yaml:"keys"`
+	ExpectedSessionState string                  `yaml:"expectedSessionState"`
+	ExpectedSetCount     int                     `yaml:"expectedSetCount"`
+	ExpectReconcileError bool                    `yaml:"expectReconcileError"`
+	WithPreview          bool                    `yaml:"withPreview"`
+	Expected             *config.SelectionConfig `yaml:"expected"`
 }
 
 func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
@@ -158,6 +160,9 @@ func loadTouchedSelectionDocument(t *testing.T) touchedSelectionDocument {
 		}
 		if (testCase.LinkedClonePath == "") != (testCase.LinkedSessionID == "") {
 			t.Fatalf("field case %q must set linkedClonePath and linkedSessionId together", testCase.Name)
+		}
+		if testCase.LinkedHarness != "" && testCase.LinkedClonePath == "" {
+			t.Fatalf("field case %q sets linkedHarness without a linked session", testCase.Name)
 		}
 	}
 	return document
@@ -344,11 +349,17 @@ func TestTreeFieldTouchedSelectionFixture(t *testing.T) {
 				t.Fatalf("accessor Set count=%d, want %d", setCount, testCase.ExpectedSetCount)
 			}
 			after := TreeSelection{Mode: draft.Working().Selection.Mode, Harnesses: draft.Working().Selection.Harnesses}
-			if !reflect.DeepEqual(after, before) {
-				t.Fatalf("no-op/rollback changed Draft.Working\n got: %#v\nwant: %#v", after, before)
+			want := before
+			if testCase.Expected != nil {
+				want = TreeSelection{Mode: testCase.Expected.Mode, Harnesses: testCase.Expected.Harnesses}
 			}
-			if afterMarkers := touchedMarkerSnapshot(field.selectionRoots()); !reflect.DeepEqual(afterMarkers, beforeMarkers) {
-				t.Fatalf("no-op/rollback changed private markers\n got: %#v\nwant: %#v", afterMarkers, beforeMarkers)
+			if !reflect.DeepEqual(after, want) {
+				t.Fatalf("tree field selection mismatch\n got: %#v\nwant: %#v", after, want)
+			}
+			if testCase.Expected == nil {
+				if afterMarkers := touchedMarkerSnapshot(field.selectionRoots()); !reflect.DeepEqual(afterMarkers, beforeMarkers) {
+					t.Fatalf("no-op/rollback changed private markers\n got: %#v\nwant: %#v", afterMarkers, beforeMarkers)
+				}
 			}
 			if (field.reconcileErr != nil) != testCase.ExpectReconcileError {
 				t.Fatalf("reconcileErr=%v, expected present=%v", field.reconcileErr, testCase.ExpectReconcileError)
@@ -374,7 +385,6 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 		ID: testCase.ProjectIdentity,
 		Meta: map[string]string{
 			MetaProjectIdentity: testCase.ProjectIdentity,
-			MetaProjectHarness:  testCase.Harness,
 			MetaClonePath:       testCase.ClonePath,
 			MetaRemote:          testCase.GitRemote,
 		},
@@ -391,12 +401,19 @@ func touchedFieldRoot(testCase touchedFieldCase) *kit.TreeNode {
 			}},
 		}},
 	}
+	if testCase.LinkedHarness == "" || testCase.LinkedHarness == testCase.Harness {
+		root.Meta[MetaProjectHarness] = testCase.Harness
+	}
 	if testCase.LinkedClonePath != "" {
 		delete(root.Meta, MetaClonePath)
+		linkedHarness := testCase.LinkedHarness
+		if linkedHarness == "" {
+			linkedHarness = testCase.Harness
+		}
 		root.Children[0].Children = append(root.Children[0].Children, &kit.TreeNode{
 			ID: testCase.LinkedSessionID,
 			Meta: map[string]string{
-				MetaHarness:         testCase.Harness,
+				MetaHarness:         linkedHarness,
 				MetaProjectIdentity: testCase.ProjectIdentity,
 				MetaClonePath:       testCase.LinkedClonePath,
 				MetaRemote:          testCase.GitRemote,

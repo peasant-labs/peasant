@@ -500,10 +500,9 @@ func assertKickstartGateCandidates(
 	}
 	for _, want := range expected {
 		physicalPath := ingest.ClonePath(paths[want.PathKey])
-		wantParentID := selectionprojection.ParentProjectID((kickstart.ProjectIdentity{
-			Harness:   ingest.Harness(want.Harness),
-			ClonePath: physicalPath,
-		}).String())
+		wantParentID := selectionprojection.ParentProjectID(
+			ingest.Harness(want.Harness).String() + "\x00" + physicalPath.String(),
+		)
 		candidate, ok := byParentID[wantParentID]
 		if !ok {
 			t.Fatalf("missing candidate for stable ParentProjectID %q", wantParentID)

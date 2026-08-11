@@ -51,12 +51,13 @@ const (
 	MetaRemote = "remote"
 	MetaBranch = "branch"
 	// MetaProjectIdentity carries the scanner's stable root identity. For Git
-	// scanner roots it is harness + transient repository common-directory path;
-	// exact worktree identity remains in MetaClonePath on descendants. It is
-	// never a display label or persisted config field.
+	// scanner roots it is the transient repository common-directory path shared
+	// across harnesses; exact harness/worktree identity remains on session
+	// descendants. It is never a display label or persisted config field.
 	MetaProjectIdentity = "projectIdentity"
-	// MetaProjectHarness carries the harness component of a project identity on
-	// the project root. Session leaves continue to use MetaHarness.
+	// MetaProjectHarness is the compatibility key used by older single-harness
+	// exact trees. Current scanner roots can span harnesses and recover each
+	// harness from session leaves through MetaHarness.
 	MetaProjectHarness = "projectHarness"
 	// MetaProjectName keeps the discovery name separate from a rendered label.
 	// A non-Git label may add short path context and must never be persisted as
@@ -327,7 +328,6 @@ func isExactProjectFirstForest(roots []*kit.TreeNode) bool {
 	}
 	for _, root := range roots {
 		if metaOf(root, MetaProjectIdentity) == "" ||
-			metaOf(root, MetaProjectHarness) == "" ||
 			!rootCarriesExactSessionPath(root) {
 			return false
 		}
@@ -887,15 +887,31 @@ func appendAvailableSessionsByPath(
 	key := harness.String() + "\x00" + clonePath.String()
 	project := (*byPath)[key]
 	if project == nil {
+		gitRemote := gitRemoteOf(node)
+		if gitRemote == "" {
+			gitRemote = gitRemoteOf(projectNode)
+		}
+		projectName := metaOf(node, MetaProjectName)
+		if projectName == "" {
+			projectName = projectNameOf(projectNode)
+		}
+		remoteMultiplicity := multiplicityOf(node, MetaRemoteMultiplicity)
+		if remoteMultiplicity == ingest.DiscoveryIdentityUnproven {
+			remoteMultiplicity = multiplicityOf(projectNode, MetaRemoteMultiplicity)
+		}
+		nameMultiplicity := multiplicityOf(node, MetaNameMultiplicity)
+		if nameMultiplicity == ingest.DiscoveryIdentityUnproven {
+			nameMultiplicity = multiplicityOf(projectNode, MetaNameMultiplicity)
+		}
 		project = &availableProject{
 			node:               projectNode,
 			harness:            harness,
 			identity:           projectIdentityOf(projectNode),
-			gitRemote:          gitRemoteOf(projectNode),
-			projectName:        projectNameOf(projectNode),
+			gitRemote:          gitRemote,
+			projectName:        projectName,
 			clonePath:          clonePath,
-			remoteMultiplicity: multiplicityOf(projectNode, MetaRemoteMultiplicity),
-			nameMultiplicity:   multiplicityOf(projectNode, MetaNameMultiplicity),
+			remoteMultiplicity: remoteMultiplicity,
+			nameMultiplicity:   nameMultiplicity,
 			branches:           map[string]struct{}{},
 		}
 		(*byPath)[key] = project

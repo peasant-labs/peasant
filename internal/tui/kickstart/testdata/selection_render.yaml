@@ -44,7 +44,8 @@ renderAssertions:
   rows:
     - case: default-dark
       wantContains:
-        [+ 2 child sessions, already imported, harness, claude code, cursor]
+        [+ 2 child sessions, already imported, harness, claude code, cursor,
+         "project: github:acme/tool", "git directory: /fixtures/claude/acme-tool"]
       wantMissing: [child subagent, grandchild subagent]
     - case: narrowed-dark
       wantContains: [+ 2 child sessions, claude code]

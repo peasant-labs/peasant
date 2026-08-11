@@ -27,6 +27,11 @@ import (
 type kickstartCommandDeps struct {
 	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
 	getwd    func() (string, error)
+	// pathResolver and repositoryResolver keep exact worktree identity separate
+	// from transient Git repository grouping at the command boundary. Production
+	// uses physical/Git resolvers; mounted tests can supply deterministic paths.
+	pathResolver       ingest.PathIdentityResolver
+	repositoryResolver ingest.RepositoryPathResolver
 	// run is the retained legacy terminal boundary. Production selects runFlow;
 	// tests for still-shipping legacy behavior deliberately omit runFlow.
 	run func(ftue.WizardModel) error
@@ -50,8 +55,10 @@ type kickstartCommandDeps struct {
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
 	return kickstartCommandDeps{
-		discover: ftueDiscover,
-		getwd:    os.Getwd,
+		discover:           ftueDiscover,
+		getwd:              os.Getwd,
+		pathResolver:       ingest.NewPhysicalPathResolver(),
+		repositoryResolver: ingest.NewGitRepositoryPathResolver(),
 		run: func(model ftue.WizardModel) error {
 			_, err := tea.NewProgram(model).Run()
 			return err

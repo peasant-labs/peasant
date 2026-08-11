@@ -542,7 +542,7 @@ func (f *treeField) snapshotSelectableState(intent treeSelectionIntent) (selecta
 }
 
 func snapshotProjectState(state selectableState, root *kit.TreeNode) (selectableState, error) {
-	if _, _, err := exactProjectRootIdentity(root); err != nil {
+	if _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
 	if len(root.Children) == 0 {
@@ -557,7 +557,7 @@ func snapshotProjectState(state selectableState, root *kit.TreeNode) (selectable
 }
 
 func snapshotBranchState(state selectableState, root, branch *kit.TreeNode) (selectableState, error) {
-	if _, _, err := exactProjectRootIdentity(root); err != nil {
+	if _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
 	branchName, err := exactBranchName(branch)
@@ -576,7 +576,7 @@ func snapshotBranchState(state selectableState, root, branch *kit.TreeNode) (sel
 }
 
 func snapshotSessionState(state selectableState, root, branch, session *kit.TreeNode) (selectableState, error) {
-	if _, _, err := exactProjectRootIdentity(root); err != nil {
+	if _, err := exactProjectRootIdentity(root); err != nil {
 		return nil, err
 	}
 	branchName, err := exactBranchName(branch)
@@ -658,27 +658,25 @@ func markerValue(node *kit.TreeNode, key string) (string, bool) {
 	return value, present
 }
 
-func exactProjectRootIdentity(root *kit.TreeNode) (string, string, error) {
+func exactProjectRootIdentity(root *kit.TreeNode) (string, error) {
 	identity := metaOf(root, MetaProjectIdentity)
-	harness := metaOf(root, MetaProjectHarness)
 	switch {
 	case identity == "":
-		return "", "", fmt.Errorf("project node %q has no stable project identity", root.ID)
+		return "", fmt.Errorf("project node %q has no stable project identity", root.ID)
 	case root.ID != identity:
-		return "", "", fmt.Errorf("project node ID %q does not match identity %q", root.ID, identity)
-	case harness == "" || !ingest.Harness(harness).IsKnown():
-		return "", "", fmt.Errorf("project %q carries unknown harness %q", identity, harness)
+		return "", fmt.Errorf("project node ID %q does not match identity %q", root.ID, identity)
 	}
-	return identity, harness, nil
+	return identity, nil
 }
 
 func exactSessionNodeIdentity(root, session *kit.TreeNode) (string, string, string, error) {
-	identity, harness, err := exactProjectRootIdentity(root)
+	identity, err := exactProjectRootIdentity(root)
 	if err != nil {
 		return "", "", "", err
 	}
-	if sessionHarness := harnessOf(session); sessionHarness == "" || sessionHarness != harness {
-		return "", "", "", fmt.Errorf("session %q carries harness %q, want project harness %q", session.ID, sessionHarness, harness)
+	harness := harnessOf(session)
+	if harness == "" || !ingest.Harness(harness).IsKnown() {
+		return "", "", "", fmt.Errorf("session %q under project %q carries unknown harness %q", session.ID, identity, harness)
 	}
 	if sessionIdentity := metaOf(session, MetaProjectIdentity); sessionIdentity != "" && sessionIdentity != identity {
 		return "", "", "", fmt.Errorf("session %q carries project identity %q, want %q", session.ID, sessionIdentity, identity)

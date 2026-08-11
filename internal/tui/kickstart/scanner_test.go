@@ -202,7 +202,7 @@ func TestScannerTreeSource_UsesPhysicalCloneIdentityAndCompleteMultiplicity(t *t
 	for _, project := range roots {
 		clonePath := project.Meta[settings.MetaClonePath]
 		byPath[clonePath] = project
-		wantID := (kickstart.ProjectIdentity{Harness: ingest.Harness("claude-code"), ClonePath: ingest.ClonePath(clonePath)}).String()
+		wantID := (kickstart.RepositoryIdentity{RepositoryPath: ingest.RepositoryPath(clonePath)}).String()
 		if project.ID != wantID || project.Meta[settings.MetaProjectIdentity] != wantID {
 			t.Fatalf("project identity = id %q meta %q, want %q", project.ID, project.Meta[settings.MetaProjectIdentity], wantID)
 		}
@@ -307,10 +307,13 @@ func TestScannerTreeSource_NonGitLabelsExtendSuffixToStayDistinct(t *testing.T) 
 	}
 }
 
-func TestScannerTreeSource_ProjectIdentityIncludesHarness(t *testing.T) {
+func TestScannerTreeSource_RepositoryRootAndBranchSpanHarnesses(t *testing.T) {
 	t.Parallel()
 	if got := (kickstart.ProjectIdentity{ClonePath: ingest.ClonePath("/fixtures/tool")}).String(); got != "" {
 		t.Fatalf("project identity without a harness = %q, want unavailable", got)
+	}
+	if got := (kickstart.RepositoryIdentity{RepositoryPath: ingest.RepositoryPath("/fixtures/tool")}).String(); got != "/fixtures/tool" {
+		t.Fatalf("repository identity = %q, want harness-independent path", got)
 	}
 	clone := filepath.Join(t.TempDir(), "tool")
 	if err := os.MkdirAll(clone, 0o755); err != nil {
@@ -319,22 +322,36 @@ func TestScannerTreeSource_ProjectIdentityIncludesHarness(t *testing.T) {
 	remote := "git@github.com:acme/tool.git"
 	listings := []ftue.SessionListing{
 		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "tool", GitRemote: remote, Branch: "main", SessionID: "session-claude-code", WorkingDir: clone},
-		{Harness: string(defaults.HarnessOpenCode), ProjectName: "tool", GitRemote: remote, Branch: "main", SessionID: "session-open-code", WorkingDir: clone},
+		{Harness: string(defaults.HarnessCodex), ProjectName: "tool", GitRemote: remote, Branch: "main", SessionID: "session-codex", WorkingDir: clone},
 	}
 	roots, err := kickstart.NewScannerTreeSource(listings).Load(context.Background())
 	if err != nil {
 		t.Fatalf("scanner load: %v", err)
 	}
-	if len(roots) != 2 || roots[0].ID == roots[1].ID {
-		t.Fatalf("same physical path across two harnesses produced identities %q and %q", roots[0].ID, roots[1].ID)
+	if len(roots) != 1 {
+		t.Fatalf("same repository across two harnesses produced %d roots, want 1", len(roots))
 	}
-	for _, project := range roots {
-		for _, branch := range project.Children {
-			for _, session := range branch.Children {
-				if session.Meta[settings.MetaRemoteMultiplicity] != settings.MetaMultiplicityUnique {
-					t.Errorf("session %q remote multiplicity = %q, want unique within its harness", session.ID, session.Meta[settings.MetaRemoteMultiplicity])
-				}
-			}
+	project := roots[0]
+	if project.Meta[settings.MetaProjectHarness] != "" {
+		t.Fatalf("cross-harness project root carries one misleading harness %q", project.Meta[settings.MetaProjectHarness])
+	}
+	if len(project.Children) != 1 || project.Children[0].Meta[settings.MetaBranch] != "main" {
+		t.Fatalf("same branch across harnesses was not coalesced: %#v", project.Children)
+	}
+	sessions := project.Children[0].Children
+	if len(sessions) != 2 {
+		t.Fatalf("coalesced main branch sessions = %d, want 2", len(sessions))
+	}
+	seenHarnesses := map[string]bool{}
+	for _, session := range sessions {
+		seenHarnesses[session.Meta[settings.MetaHarness]] = true
+		if session.Meta[settings.MetaRemoteMultiplicity] != settings.MetaMultiplicityUnique {
+			t.Errorf("session %q remote multiplicity = %q, want unique within its harness", session.ID, session.Meta[settings.MetaRemoteMultiplicity])
+		}
+	}
+	for _, harness := range []string{string(defaults.HarnessClaudeCode), string(defaults.HarnessCodex)} {
+		if !seenHarnesses[harness] {
+			t.Errorf("coalesced branch is missing %q session provenance", harness)
 		}
 	}
 }

@@ -17,31 +17,45 @@
 # user message and that message is the first thing the transcript below renders.
 # expectedCaseCount is the row-count guard.
 expectedCaseCount: 6
+repositories:
+  - {clonePath: /fixtures/acme-tool, repositoryPath: /fixtures/repos/acme-tool.git}
+  - {clonePath: /fixtures/acme-tool-linked, repositoryPath: /fixtures/repos/acme-tool.git}
 listings:
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
     branch: main
     title: please refactor the ingest pipeline
     sessionId: stored-1
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
     branch: main
     title: fresh session
     sessionId: fresh-1
   - harness: cursor
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
     branch: ""
     title: branchless session
     sessionId: fresh-2
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
     branch: main
     title: a talk with no code in it
     sessionId: stored-plain
+  - harness: codex
+    projectName: acme/tool
+    gitRemote: "https://github.com/acme/tool.git"
+    workingDir: /fixtures/acme-tool-linked
+    branch: main
+    title: codex worktree session
+    sessionId: fresh-3
 stored:
   stored-1:
     - role: user
@@ -132,18 +146,39 @@ cases:
       - "branch:"
       - branchless session
 
-  - name: a-project-row-explains-what-to-highlight
-    highlight: "git@github.com:acme/tool.git"
+  - name: a-project-row-shows-combined-repository-context
+    highlightKind: project
+    highlight: "github:acme/tool"
     width: 60
     wantContains:
-      - select a session to preview it
+      - "project: github:acme/tool"
+      - "harnesses: claude code, codex, cursor"
+      - "remote: github.com/acme/tool"
+      - "git directory: /fixtures/repos/acme-tool.git"
+      - "worktrees: 2"
+      - /fixtures/acme-tool
+      - /fixtures/acme-tool-linked
+      - "branches: 2"
+      - (unknown branch)
+      - main
+      - "sessions: 5"
     wantMissing:
-      - "harness:"
+      - select a session to preview it
 
-  - name: a-branch-row-explains-what-to-highlight
+  - name: a-branch-row-shows-combined-branch-context
+    highlightKind: branch
     highlight: main
     width: 60
     wantContains:
-      - select a session to preview it
+      - "project: github:acme/tool"
+      - "branch: main"
+      - "harnesses: claude code, codex"
+      - "remote: github.com/acme/tool"
+      - "git directory: /fixtures/repos/acme-tool.git"
+      - "worktrees: 2"
+      - /fixtures/acme-tool
+      - /fixtures/acme-tool-linked
+      - "sessions: 4"
     wantMissing:
-      - "harness:"
+      - select a session to preview it
+      - "branches:"

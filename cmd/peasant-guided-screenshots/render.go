@@ -125,14 +125,20 @@ func renderSelectionCapture(
 		return "", err
 	}
 	th := captureThemeValue(capture.Theme)
+	source := kickstart.NewScannerTreeSource(
+		selection.Listings,
+		kickstart.WithIngestedSessionIDs(selection.Ingested),
+	)
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
-		Theme: th,
-		Draft: draft,
-		Source: kickstart.NewScannerTreeSource(
+		Theme:  th,
+		Draft:  draft,
+		Source: source,
+		Preview: kickstart.NewListingPreview(
+			th,
 			selection.Listings,
-			kickstart.WithIngestedSessionIDs(selection.Ingested),
+			nil,
+			kickstart.WithListingPreviewContextSource(source),
 		),
-		Preview: kickstart.NewListingPreview(th, selection.Listings, nil),
 	})
 	program.SetSize(capture.Width, capture.Height)
 	program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

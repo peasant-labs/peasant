@@ -1,5 +1,5 @@
 expectedCaseCount: 11
-expectedFieldCaseCount: 7
+expectedFieldCaseCount: 9
 expectedNames:
   - unrelated-action-preserves-distinct-policies-and-exclusions
   - scanner-absent-policy-survives-branch-deny
@@ -20,6 +20,8 @@ expectedFieldNames:
   - invalid-session-id-rolls-back
   - load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
   - grouped-satisfied-select-under-is-a-true-no-op
+  - project-toggle-spans-harnesses
+  - branch-toggle-spans-harnesses
 fieldCases:
   - name: conflict-toggle-is-a-true-no-op
     current:
@@ -151,6 +153,58 @@ fieldCases:
     expectedSessionState: checked
     expectedSetCount: 0
     expectReconcileError: false
+
+  - name: project-toggle-spans-harnesses
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: /fixtures/repos/tool.git
+    harness: claude-code
+    linkedHarness: codex
+    clonePath: /fixtures/tool-main
+    linkedClonePath: /fixtures/tool-linked
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    linkedSessionId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    keys: [toggle]
+    expectedSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main]}
+        codex:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked]}
+
+  - name: branch-toggle-spans-harnesses
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: /fixtures/repos/tool.git
+    harness: claude-code
+    linkedHarness: codex
+    clonePath: /fixtures/tool-main
+    linkedClonePath: /fixtures/tool-linked
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    linkedSessionId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    keys: [down, toggle]
+    expectedSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main], branches: [main]}
+        codex:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked], branches: [main]}
 cases:
   - name: unrelated-action-preserves-distinct-policies-and-exclusions
     operation: project-on

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -50,6 +51,7 @@ type repositoryGroupingCase struct {
 	ExpectedSelection    config.SelectionConfig      `yaml:"expectedSelection"`
 	ExpectedChecked      []string                    `yaml:"expectedChecked"`
 	ExpectedUnchecked    []string                    `yaml:"expectedUnchecked"`
+	Facet                *repositoryFacetExpectation `yaml:"facet"`
 }
 
 type repositoryPathFixture struct {
@@ -59,10 +61,20 @@ type repositoryPathFixture struct {
 }
 
 type repositoryRootExpectation struct {
-	RepositoryPath     string              `yaml:"repositoryPath"`
-	ClonePaths         []string            `yaml:"clonePaths"`
-	Branches           map[string][]string `yaml:"branches"`
-	RemoteMultiplicity string              `yaml:"remoteMultiplicity"`
+	RepositoryPath      string              `yaml:"repositoryPath"`
+	ClonePaths          []string            `yaml:"clonePaths"`
+	Remotes             []string            `yaml:"remotes"`
+	CandidateClonePaths map[string][]string `yaml:"candidateClonePaths"`
+	Branches            map[string][]string `yaml:"branches"`
+	RemoteMultiplicity  string              `yaml:"remoteMultiplicity"`
+}
+
+type repositoryFacetExpectation struct {
+	Harness             string   `yaml:"harness"`
+	Project             string   `yaml:"project"`
+	Branch              string   `yaml:"branch"`
+	WantSessions        []string `yaml:"wantSessions"`
+	WantMissingSessions []string `yaml:"wantMissingSessions"`
 }
 
 func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
@@ -91,6 +103,11 @@ func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
 		if len(testCase.Repositories) == 0 || len(testCase.Listings) == 0 || len(testCase.ExpectedRoots) == 0 {
 			t.Fatalf("repository grouping case %q requires repositories, listings, and roots", testCase.Name)
 		}
+		for _, root := range testCase.ExpectedRoots {
+			if root.RepositoryPath == "" || len(root.ClonePaths) == 0 || len(root.CandidateClonePaths) == 0 {
+				t.Fatalf("repository grouping case %q root %q requires repository, root paths, and harness candidate paths", testCase.Name, root.RepositoryPath)
+			}
+		}
 		if testCase.Action != repositoryGroupingNone && testCase.Action != repositoryGroupingProject && testCase.Action != repositoryGroupingBranch {
 			t.Fatalf("repository grouping case %q has unknown action %q", testCase.Name, testCase.Action)
 		}
@@ -99,6 +116,16 @@ func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
 		}
 		if testCase.Action == repositoryGroupingBranch && testCase.ActionBranch == "" {
 			t.Fatalf("repository grouping case %q has no action branch", testCase.Name)
+		}
+		if testCase.Facet != nil {
+			testutil.RequireFixtureFields(t, "repository grouping facet", testCase.Name, []testutil.FixtureField{
+				{Key: "facet.harness", Value: testCase.Facet.Harness},
+				{Key: "facet.project", Value: testCase.Facet.Project},
+				{Key: "facet.branch", Value: testCase.Facet.Branch},
+			})
+			if len(testCase.Facet.WantSessions) == 0 || len(testCase.Facet.WantMissingSessions) == 0 {
+				t.Fatalf("repository grouping facet case %q needs visible and hidden session rows", testCase.Name)
+			}
 		}
 	}
 	return document
@@ -132,6 +159,7 @@ func TestScannerRepositoryGroupingAndExactRoundTrip(t *testing.T) {
 			source := repositoryGroupingSource(testCase.Listings, resolver)
 			roots := loadRepositoryGroupingRoots(t, source)
 			assertRepositoryGroupingRoots(t, roots, testCase.ExpectedRoots)
+			assertRepositoryGroupingPreviewContexts(t, source, roots, testCase.ExpectedRoots)
 			candidates, err := source.CommitGateCandidates(nil)
 			if err != nil {
 				t.Fatalf("build repository grouping commit-gate candidates: %v", err)
@@ -170,6 +198,50 @@ func TestScannerRepositoryGroupingAndExactRoundTrip(t *testing.T) {
 				t.Fatalf("reopened checked sessions=%v, want %v", checked, sortedCopy(testCase.ExpectedChecked))
 			}
 			assertUncheckedSessionIDs(t, reopened, testCase.ExpectedUnchecked)
+		})
+	}
+}
+
+func TestScannerRepositoryGroupingFacetKeepsSharedAncestors(t *testing.T) {
+	t.Parallel()
+	document := loadRepositoryGroupingDocument(t)
+	for _, testCase := range document.Cases {
+		if testCase.Facet == nil {
+			continue
+		}
+		testCase := testCase
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			source := repositoryGroupingSource(testCase.Listings, fixtureRepositoryResolver(testCase.Repositories))
+			program, _ := newTestProgram(t, kickstart.ProgramDeps{Source: source})
+			program.SetSize(120, 30)
+			program = declineOAuth(t, program)
+
+			harnesses := repositoryListingHarnesses(testCase.Listings)
+			facetIndex := -1
+			for index, harness := range harnesses {
+				if harness == testCase.Facet.Harness {
+					facetIndex = index
+					break
+				}
+			}
+			if facetIndex < 0 {
+				t.Fatalf("facet harness %q is not present in %v", testCase.Facet.Harness, harnesses)
+			}
+			for index := 0; index <= facetIndex; index++ {
+				program, _ = program.Update(press('f'))
+			}
+			view := stripRender(program.View())
+			for _, want := range append([]string{testCase.Facet.Project, testCase.Facet.Branch}, testCase.Facet.WantSessions...) {
+				if !strings.Contains(view, want) {
+					t.Fatalf("facet %q must retain %q; view:\n%s", testCase.Facet.Harness, want, view)
+				}
+			}
+			for _, unwanted := range testCase.Facet.WantMissingSessions {
+				if strings.Contains(view, unwanted) {
+					t.Fatalf("facet %q retained hidden session %q; view:\n%s", testCase.Facet.Harness, unwanted, view)
+				}
+			}
 		})
 	}
 }
@@ -319,42 +391,49 @@ func assertRepositoryGroupingCandidates(
 	expected []repositoryRootExpectation,
 ) {
 	t.Helper()
-	if len(candidates) != len(expected) {
-		t.Fatalf("repository commit-gate candidates=%d, want %d", len(candidates), len(expected))
+	expectedCandidateCount := 0
+	for _, root := range expected {
+		expectedCandidateCount += len(root.CandidateClonePaths)
 	}
-	byRepository := make(map[string]selectionprojection.ProjectCandidate, len(candidates))
+	if len(candidates) != expectedCandidateCount {
+		t.Fatalf("repository commit-gate candidates=%d, want %d", len(candidates), expectedCandidateCount)
+	}
+	byRepositoryHarness := make(map[string]selectionprojection.ProjectCandidate, len(candidates))
 	for _, candidate := range candidates {
-		path := candidate.RepositoryPath.String()
-		if _, duplicate := byRepository[path]; duplicate {
-			t.Fatalf("repository path %q appears in more than one commit-gate candidate", path)
+		key := candidate.RepositoryPath.String() + "\x00" + candidate.Harness.String()
+		if _, duplicate := byRepositoryHarness[key]; duplicate {
+			t.Fatalf("repository/harness %q/%q appears in more than one commit-gate candidate", candidate.RepositoryPath, candidate.Harness)
 		}
-		byRepository[path] = candidate
+		byRepositoryHarness[key] = candidate
 	}
 	for _, want := range expected {
-		candidate, ok := byRepository[want.RepositoryPath]
-		if !ok {
-			t.Fatalf("missing commit-gate candidate for repository %q", want.RepositoryPath)
-		}
-		pathSet := map[string]struct{}{}
-		for _, descendant := range candidate.Descendants {
-			pathSet[descendant.ClonePath.String()] = struct{}{}
-			if descendant.RepositoryPath != candidate.RepositoryPath {
-				t.Fatalf("repository %q descendant %q carries repository path %q", want.RepositoryPath, descendant.SessionID, descendant.RepositoryPath)
+		for harness, wantPaths := range want.CandidateClonePaths {
+			candidate, ok := byRepositoryHarness[want.RepositoryPath+"\x00"+harness]
+			if !ok {
+				t.Fatalf("missing commit-gate candidate for repository %q harness %q", want.RepositoryPath, harness)
 			}
-		}
-		paths := make([]string, 0, len(pathSet))
-		for path := range pathSet {
-			paths = append(paths, path)
-		}
-		sort.Strings(paths)
-		if !reflect.DeepEqual(paths, sortedCopy(want.ClonePaths)) {
-			t.Fatalf("repository %q commit-gate descendant paths=%v, want %v", want.RepositoryPath, paths, sortedCopy(want.ClonePaths))
-		}
-		if len(want.ClonePaths) == 1 && candidate.ClonePath.String() != want.ClonePaths[0] {
-			t.Fatalf("single-worktree repository %q candidate path=%q, want %q", want.RepositoryPath, candidate.ClonePath, want.ClonePaths[0])
-		}
-		if len(want.ClonePaths) > 1 && candidate.ClonePath != "" {
-			t.Fatalf("multi-worktree repository %q retained misleading candidate path %q", want.RepositoryPath, candidate.ClonePath)
+			pathSet := map[string]struct{}{}
+			for _, descendant := range candidate.Descendants {
+				pathSet[descendant.ClonePath.String()] = struct{}{}
+				if descendant.RepositoryPath != candidate.RepositoryPath {
+					t.Fatalf("repository %q descendant %q carries repository path %q", want.RepositoryPath, descendant.SessionID, descendant.RepositoryPath)
+				}
+			}
+			paths := make([]string, 0, len(pathSet))
+			for path := range pathSet {
+				paths = append(paths, path)
+			}
+			sort.Strings(paths)
+			wantPaths = sortedCopy(wantPaths)
+			if !reflect.DeepEqual(paths, wantPaths) {
+				t.Fatalf("repository %q harness %q commit-gate descendant paths=%v, want %v", want.RepositoryPath, harness, paths, wantPaths)
+			}
+			if len(wantPaths) == 1 && candidate.ClonePath.String() != wantPaths[0] {
+				t.Fatalf("single-worktree repository %q harness %q candidate path=%q, want %q", want.RepositoryPath, harness, candidate.ClonePath, wantPaths[0])
+			}
+			if len(wantPaths) > 1 && candidate.ClonePath != "" {
+				t.Fatalf("multi-worktree repository %q harness %q retained misleading candidate path %q", want.RepositoryPath, harness, candidate.ClonePath)
+			}
 		}
 	}
 }
@@ -365,24 +444,29 @@ func assertRepositoryGroupingRoots(t *testing.T, roots []*kit.TreeNode, expected
 		t.Fatalf("repository roots=%d, want %d", len(roots), len(expected))
 	}
 	byRepository := make(map[string]*kit.TreeNode, len(roots))
+	rowIDs := make(map[string]string)
 	for _, root := range roots {
 		path := root.Meta[settings.MetaRepositoryPath]
 		if _, duplicate := byRepository[path]; duplicate {
 			t.Fatalf("repository path %q appears in more than one root", path)
 		}
 		byRepository[path] = root
+		assertUniqueRepositoryRowID(t, rowIDs, root.ID, "project "+path)
+		for _, branch := range root.Children {
+			assertUniqueRepositoryRowID(t, rowIDs, branch.ID, "branch "+path+"/"+branch.Meta[settings.MetaBranch])
+		}
 	}
 	for _, want := range expected {
 		root := byRepository[want.RepositoryPath]
 		if root == nil {
 			t.Fatalf("missing repository root %q; got %v", want.RepositoryPath, repositoryRootPaths(roots))
 		}
-		wantIdentity := (kickstart.RepositoryIdentity{
-			Harness:        ingest.Harness(root.Meta[settings.MetaProjectHarness]),
-			RepositoryPath: ingest.RepositoryPath(want.RepositoryPath),
-		}).String()
+		wantIdentity := (kickstart.RepositoryIdentity{RepositoryPath: ingest.RepositoryPath(want.RepositoryPath)}).String()
 		if root.ID != wantIdentity || root.Meta[settings.MetaProjectIdentity] != wantIdentity {
 			t.Fatalf("root identity id=%q meta=%q, want %q", root.ID, root.Meta[settings.MetaProjectIdentity], wantIdentity)
+		}
+		if root.Meta[settings.MetaProjectHarness] != "" {
+			t.Fatalf("repository root %q carries one misleading harness %q", want.RepositoryPath, root.Meta[settings.MetaProjectHarness])
 		}
 		clonePaths, branches, sessionCount := repositoryRootEvidence(root)
 		if !reflect.DeepEqual(clonePaths, sortedCopy(want.ClonePaths)) {
@@ -404,6 +488,86 @@ func assertRepositoryGroupingRoots(t *testing.T, roots []*kit.TreeNode, expected
 			t.Fatalf("multi-worktree root retained misleading clone path %q", root.Meta[settings.MetaClonePath])
 		}
 	}
+}
+
+func assertRepositoryGroupingPreviewContexts(
+	t *testing.T,
+	source *kickstart.ScannerTreeSource,
+	roots []*kit.TreeNode,
+	expected []repositoryRootExpectation,
+) {
+	t.Helper()
+	for _, want := range expected {
+		root := repositoryRootByPath(t, roots, want.RepositoryPath)
+		context, ok := source.ListingPreviewContext(root.ID)
+		if !ok {
+			t.Fatalf("repository %q has no project preview context", want.RepositoryPath)
+		}
+		clonePaths, branches, sessionCount := repositoryRootEvidence(root)
+		if context.Kind != kickstart.ListingPreviewProject || context.Project != root.Label || context.RepositoryPath != want.RepositoryPath {
+			t.Fatalf("repository %q project preview identity=%#v", want.RepositoryPath, context)
+		}
+		if !reflect.DeepEqual(context.Harnesses, sortedMapKeys(want.CandidateClonePaths)) ||
+			!reflect.DeepEqual(sortedCopy(context.Remotes), sortedCopy(want.Remotes)) ||
+			!reflect.DeepEqual(context.ClonePaths, clonePaths) ||
+			!reflect.DeepEqual(context.Branches, sortedMapKeys(branches)) || context.SessionCount != sessionCount {
+			t.Fatalf("repository %q project preview evidence=%#v", want.RepositoryPath, context)
+		}
+
+		for _, branch := range root.Children {
+			branchName := branch.Meta[settings.MetaBranch]
+			branchContext, found := source.ListingPreviewContext(branch.ID)
+			if !found {
+				t.Fatalf("repository %q branch %q has no preview context", want.RepositoryPath, branchName)
+			}
+			wantHarnesses := repositoryBranchHarnesses(branch)
+			wantPaths := sortedCopy(branches[branchName])
+			if branchContext.Kind != kickstart.ListingPreviewBranch || branchContext.Project != root.Label ||
+				branchContext.Branch != branchName || branchContext.RepositoryPath != want.RepositoryPath ||
+				!reflect.DeepEqual(branchContext.Harnesses, wantHarnesses) ||
+				!reflect.DeepEqual(sortedCopy(branchContext.Remotes), sortedCopy(want.Remotes)) ||
+				!reflect.DeepEqual(branchContext.ClonePaths, wantPaths) || branchContext.SessionCount != len(branch.Children) {
+				t.Fatalf("repository %q branch %q preview evidence=%#v", want.RepositoryPath, branchName, branchContext)
+			}
+		}
+	}
+}
+
+func assertUniqueRepositoryRowID(t *testing.T, seen map[string]string, id, description string) {
+	t.Helper()
+	if prior, duplicate := seen[id]; duplicate {
+		t.Fatalf("tree row ID %q identifies both %s and %s", id, prior, description)
+	}
+	seen[id] = description
+}
+
+func repositoryBranchHarnesses(branch *kit.TreeNode) []string {
+	set := make(map[string]struct{})
+	for _, session := range branch.Children {
+		if harness := session.Meta[settings.MetaHarness]; harness != "" {
+			set[harness] = struct{}{}
+		}
+	}
+	return sortedMapKeys(set)
+}
+
+func sortedMapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func repositoryListingHarnesses(listings []ftue.SessionListing) []string {
+	set := make(map[string]struct{})
+	for _, listing := range listings {
+		if listing.Harness != "" {
+			set[listing.Harness] = struct{}{}
+		}
+	}
+	return sortedMapKeys(set)
 }
 
 func repositoryRootEvidence(root *kit.TreeNode) ([]string, map[string][]string, int) {

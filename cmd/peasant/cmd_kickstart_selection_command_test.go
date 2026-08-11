@@ -32,6 +32,8 @@ const (
 	expectedSelectionCommandMutationProbeCount = 1
 	expectedSelectionCommandRenderCaseCount    = 8
 	selectionCommandClonePathPlaceholder       = "__MATERIALIZED_CLONE_PATH__"
+	selectionCommandRenderClonePath            = "/fixtures/worktrees/example-tool"
+	selectionCommandRenderRepositoryPath       = "/fixtures/repositories/example-tool.git"
 )
 
 //go:embed testdata/kickstart_selection_command.yaml
@@ -424,6 +426,21 @@ func materializeSelectionCommandExpectedSelection(t *testing.T, selection config
 	return materialized
 }
 
+type selectionCommandRenderPathResolver struct{}
+
+func (selectionCommandRenderPathResolver) Resolve(string) (ingest.ClonePath, error) {
+	return ingest.ClonePath(selectionCommandRenderClonePath), nil
+}
+
+type selectionCommandRenderRepositoryResolver struct{}
+
+func (selectionCommandRenderRepositoryResolver) ResolveRepositoryPath(context.Context, ingest.ClonePath) (ingest.RepositoryPath, error) {
+	return ingest.RepositoryPath(selectionCommandRenderRepositoryPath), nil
+}
+
+var _ ingest.PathIdentityResolver = selectionCommandRenderPathResolver{}
+var _ ingest.RepositoryPathResolver = selectionCommandRenderRepositoryResolver{}
+
 func seedSelectionCommandStoredEvidence(t *testing.T, dataHome string, listings []ftue.SessionListing) {
 	t.Helper()
 	dbPath := defaults.ResolveDBFilePathWith(dataHome).String()
@@ -738,6 +755,13 @@ func TestSelectionCommands_RenderGolden(t *testing.T) {
 		t.Run(renderCase.Name, func(t *testing.T) {
 			selectionCase := selectionCase
 			materializeSelectionCommandCase(t, &selectionCase)
+			if renderCase.Surface == selectionCommandSurfaceKickstart {
+				selectionCase.ExpectedSelection = materializeSelectionCommandExpectedSelection(
+					t,
+					doc.Cases[0].ExpectedSelection,
+					selectionCommandRenderClonePath,
+				)
+			}
 			dir := t.TempDir()
 			_, before := seedSelectionCommandRenderConfig(t, dir, selectionCase.ExpectedSelection, renderCase.Theme)
 			var rendered string
@@ -777,6 +801,8 @@ func TestSelectionCommands_RenderGolden(t *testing.T) {
 					rendered = model.View().Content
 					return nil
 				})
+				deps.pathResolver = selectionCommandRenderPathResolver{}
+				deps.repositoryResolver = selectionCommandRenderRepositoryResolver{}
 				if _, err := executeWithDataDir(t, buildKickstartCommand(deps), dir, nil); err != nil {
 					t.Fatalf("run mounted kickstart selection render: %v", err)
 				}

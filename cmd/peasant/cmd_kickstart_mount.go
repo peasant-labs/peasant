@@ -59,7 +59,14 @@ func runKickstartFlow(
 	if err != nil {
 		return kickstartStoreReadError(loaded.Selection.Mode, err)
 	}
-	identityResolver := ingest.NewPhysicalPathResolver()
+	identityResolver := deps.pathResolver
+	if identityResolver == nil {
+		identityResolver = ingest.NewPhysicalPathResolver()
+	}
+	repositoryResolver := deps.repositoryResolver
+	if repositoryResolver == nil {
+		repositoryResolver = ingest.NewGitRepositoryPathResolver()
+	}
 	flowConfig, err := prepareKickstartFlowConfig(loaded, sessions, storedSessions, identityResolver)
 	if err != nil {
 		return err
@@ -86,6 +93,7 @@ func runKickstartFlow(
 	source := kickstart.NewScannerTreeSource(
 		sessions,
 		kickstart.WithPathIdentityResolver(identityResolver),
+		kickstart.WithRepositoryPathResolver(repositoryResolver),
 		kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
 	)
 	commitGateCandidates, err := source.CommitGateCandidates(storedSessions)
@@ -124,7 +132,7 @@ func runKickstartFlow(
 		Draft:                 draft,
 		Source:                source,
 		CommitGate:            settings.NewCommitGateEvaluator(commitGateCandidates),
-		Preview:               kickstartPreview(cmd, db, th, sessions),
+		Preview:               kickstartPreview(cmd, db, th, sessions, source),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
 		Ingest:                ingestRun,
@@ -324,7 +332,13 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // not committed yet would hide the very rows they are deciding about. This
 // matches the ratified model in which a selection scopes discovery lists rather
 // than access to stored data.
-func kickstartPreview(cmd *cobra.Command, db *store.Store, th theme.Theme, sessions []ftue.SessionListing) kit.BodySource {
+func kickstartPreview(
+	cmd *cobra.Command,
+	db *store.Store,
+	th theme.Theme,
+	sessions []ftue.SessionListing,
+	contexts ...kickstart.ListingPreviewContextSource,
+) kit.BodySource {
 	var turns kickstart.SessionTurnsFunc
 	if db != nil {
 		ctx := cmd.Context()
@@ -350,7 +364,11 @@ func kickstartPreview(cmd *cobra.Command, db *store.Store, th theme.Theme, sessi
 			return session.Turns, nil
 		}
 	}
-	return kickstart.NewListingPreview(th, sessions, turns)
+	var opts []kickstart.ListingPreviewOption
+	if len(contexts) > 0 && contexts[0] != nil {
+		opts = append(opts, kickstart.WithListingPreviewContextSource(contexts[0]))
+	}
+	return kickstart.NewListingPreview(th, sessions, turns, opts...)
 }
 
 // themeModeFor picks the palette mode from config, defaulting to dark when the

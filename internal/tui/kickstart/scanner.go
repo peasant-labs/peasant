@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
@@ -15,10 +16,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 )
 
-// ProjectIdentity is the stable identity of one available scanner project.
-// Display labels, remotes, and project names are deliberately excluded: two
-// harnesses or two physical clones are different editor projects even when
-// their labels are identical.
+// ProjectIdentity is the stable exact-selection identity of one discovered
+// harness/worktree pair. Display labels, remotes, and project names are
+// deliberately excluded: two harnesses or two physical worktrees remain
+// distinct persisted scopes even when one repository row presents them together.
 type ProjectIdentity struct {
 	Harness   ingest.Harness
 	ClonePath ingest.ClonePath
@@ -40,25 +41,23 @@ func (i ProjectIdentity) available() bool {
 }
 
 // RepositoryIdentity is the transient scanner-root identity shared by linked
-// worktrees. ProjectIdentity remains the exact worktree identity used by saved
-// selection and exclusions.
+// worktrees and every harness that discovered them. ProjectIdentity remains the
+// exact harness/worktree identity used by saved selection and exclusions.
 type RepositoryIdentity struct {
-	Harness        ingest.Harness
 	RepositoryPath ingest.RepositoryPath
 }
 
-// String returns an unambiguous repository-root key. It is never persisted or
-// rendered as row text.
+// String returns the repository-root key. It is never persisted or rendered as
+// row text.
 func (i RepositoryIdentity) String() string {
 	if !i.available() {
 		return ""
 	}
-	harness := i.Harness.String()
-	return strconv.Itoa(len(harness)) + ":" + harness + i.RepositoryPath.String()
+	return i.RepositoryPath.String()
 }
 
 func (i RepositoryIdentity) available() bool {
-	return i.Harness != "" && i.RepositoryPath != ""
+	return i.RepositoryPath != ""
 }
 
 // ScannerTreeSource is the REAL kit.TreeSource the mounted kickstart tree loads
@@ -72,15 +71,17 @@ func (i RepositoryIdentity) available() bool {
 // uses scannerfix.FixtureTreeSource instead; both satisfy the same seam.
 //
 // The node Meta keys it writes (settings.MetaRemote on a project node,
-// settings.MetaBranch on a branch node, settings.MetaHarness on each session
-// leaf) are exactly the ones settings.FromTreeNodes reads back when deriving the
-// persisted (harness-keyed) SelectionConfig, so a selection made over this
-// project-first forest round-trips without a parallel model.
+// settings.MetaBranch on a branch node, settings.MetaHarness and exact path
+// metadata on each session leaf) are exactly the ones settings.FromTreeNodes
+// reads back when deriving the persisted (harness-keyed) SelectionConfig, so a
+// cross-harness selection round-trips without a parallel model.
 type ScannerTreeSource struct {
 	sessions           []ftue.SessionListing
 	ingested           map[string]bool
 	resolver           ingest.PathIdentityResolver
 	repositoryResolver ingest.RepositoryPathResolver
+	previewMu          sync.RWMutex
+	previewContexts    map[string]ListingPreviewContext
 }
 
 // ScannerOption configures a ScannerTreeSource at construction.
@@ -144,6 +145,7 @@ func NewScannerTreeSource(sessions []ftue.SessionListing, opts ...ScannerOption)
 }
 
 var _ kit.TreeSource = (*ScannerTreeSource)(nil)
+var _ ListingPreviewContextSource = (*ScannerTreeSource)(nil)
 
 // Load resolves the complete discovery cohort before it builds any tree nodes.
 // A listing whose working directory is empty, missing, or otherwise unresolved
@@ -154,7 +156,28 @@ var _ kit.TreeSource = (*ScannerTreeSource)(nil)
 // forest still loads, and saved unavailable choices remain in the editor's
 // unmatched baseline.
 func (s *ScannerTreeSource) Load(ctx context.Context) ([]*kit.TreeNode, error) {
-	return buildForest(prepareSessionListings(ctx, s.sessions, s.resolver, s.repositoryResolver), s.ingested), nil
+	roots := buildForest(prepareSessionListings(ctx, s.sessions, s.resolver, s.repositoryResolver), s.ingested)
+	contexts := scannerPreviewContexts(roots)
+	s.previewMu.Lock()
+	s.previewContexts = contexts
+	s.previewMu.Unlock()
+	return roots, nil
+}
+
+// ListingPreviewContext returns metadata for a project or branch row from the
+// exact forest produced by the latest successful Load. Preview rendering never
+// reruns Git or tries to reconstruct repository identity from display labels.
+func (s *ScannerTreeSource) ListingPreviewContext(id string) (ListingPreviewContext, bool) {
+	if s == nil {
+		return ListingPreviewContext{}, false
+	}
+	s.previewMu.RLock()
+	context, ok := s.previewContexts[id]
+	s.previewMu.RUnlock()
+	if !ok {
+		return ListingPreviewContext{}, false
+	}
+	return cloneListingPreviewContext(context), true
 }
 
 // PreparedSessionListing carries one discovered session together with the
@@ -238,7 +261,7 @@ func prepareSessionListings(
 					}
 					repositoryPaths[clonePath] = repositoryPath
 				}
-				row.RepositoryIdentity = RepositoryIdentity{Harness: harness, RepositoryPath: repositoryPath}
+				row.RepositoryIdentity = RepositoryIdentity{RepositoryPath: repositoryPath}
 			}
 		}
 		cohort[index] = row
@@ -295,11 +318,12 @@ func cohortMultiplicity(cohorts map[multiplicityKey]*identityCohort, key multipl
 // harness is a property of an individual session, carried on the node, not a
 // top-level bucket). Grouping keys:
 //
-//   - project node: keyed only by RepositoryIdentity (harness + transient Git
+//   - project node: keyed only by RepositoryIdentity (transient Git
 //     common-directory path, with exact ClonePath as the fail-safe non-Git
-//     fallback). Remote/name/multiplicity metadata is carried separately for
-//     the canonical matcher and config round-trip. A remote label never becomes
-//     an identity key.
+//     fallback). Sessions from every harness therefore share one repository
+//     root. Remote/name/multiplicity metadata is carried separately for the
+//     canonical matcher and config round-trip. A remote label never becomes an
+//     identity key.
 //   - branch node: keyed by branch (or "(unknown branch)" when discovery could
 //     not resolve one) with the branch carried in Meta.
 //   - session node: keyed by the raw session ID, carrying its harness in Meta so
@@ -377,7 +401,7 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 		b, ok := p.branches[bKey]
 		if !ok {
 			node := &kit.TreeNode{
-				ID:    bKey,
+				ID:    scannerBranchID(pKey, bKey),
 				Label: branchLabel,
 				Meta:  map[string]string{settings.MetaBranch: bKey},
 			}
@@ -414,6 +438,13 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 	return roots
 }
 
+// scannerBranchID keeps identical branch names under independent repositories
+// distinct for preview loading while MetaBranch remains the persisted branch
+// identity.
+func scannerBranchID(repositoryID, branch string) string {
+	return "branch:" + strconv.Itoa(len(repositoryID)) + ":" + repositoryID + branch
+}
+
 func projectRepresentative(rows []PreparedSessionListing) PreparedSessionListing {
 	if len(rows) == 0 {
 		return PreparedSessionListing{}
@@ -441,7 +472,6 @@ func projectRepresentative(rows []PreparedSessionListing) PreparedSessionListing
 func scannerProjectMeta(row PreparedSessionListing, identity RepositoryIdentity, rows []PreparedSessionListing) map[string]string {
 	meta := map[string]string{
 		settings.MetaProjectIdentity:    identity.String(),
-		settings.MetaProjectHarness:     identity.Harness.String(),
 		settings.MetaRepositoryPath:     identity.RepositoryPath.String(),
 		settings.MetaRemoteMultiplicity: multiplicityText(row.Candidate.RemoteMultiplicity),
 		settings.MetaNameMultiplicity:   multiplicityText(row.Candidate.NameMultiplicity),
@@ -463,13 +493,90 @@ func annotateScannerScopeMeta(node *kit.TreeNode, identity RepositoryIdentity, r
 		node.Meta = map[string]string{}
 	}
 	node.Meta[settings.MetaProjectIdentity] = identity.String()
-	node.Meta[settings.MetaProjectHarness] = identity.Harness.String()
 	node.Meta[settings.MetaRepositoryPath] = identity.RepositoryPath.String()
 	if clonePath, unique := uniqueScannerClonePath(rows); unique {
 		node.Meta[settings.MetaClonePath] = clonePath.String()
 	} else {
 		delete(node.Meta, settings.MetaClonePath)
 	}
+}
+
+func scannerPreviewContexts(roots []*kit.TreeNode) map[string]ListingPreviewContext {
+	contexts := make(map[string]ListingPreviewContext)
+	for _, root := range roots {
+		contexts[root.ID] = scannerPreviewContext(root, nil)
+		for _, branch := range root.Children {
+			contexts[branch.ID] = scannerPreviewContext(root, branch)
+		}
+	}
+	return contexts
+}
+
+func scannerPreviewContext(root, selectedBranch *kit.TreeNode) ListingPreviewContext {
+	kind := ListingPreviewProject
+	branches := root.Children
+	branchName := ""
+	if selectedBranch != nil {
+		kind = ListingPreviewBranch
+		branches = []*kit.TreeNode{selectedBranch}
+		branchName = selectedBranch.Meta[settings.MetaBranch]
+	}
+
+	harnessSet := map[string]struct{}{}
+	remoteSet := map[string]struct{}{}
+	clonePathSet := map[string]struct{}{}
+	branchSet := map[string]struct{}{}
+	sessionCount := 0
+	for _, branch := range branches {
+		if name := branch.Meta[settings.MetaBranch]; name != "" {
+			branchSet[name] = struct{}{}
+		}
+		for _, session := range branch.Children {
+			sessionCount++
+			if harness := session.Meta[settings.MetaHarness]; harness != "" {
+				harnessSet[harness] = struct{}{}
+			}
+			if remote := scannerPreviewRemote(session.Meta[settings.MetaRemote]); remote != "" {
+				remoteSet[remote] = struct{}{}
+			}
+			if clonePath := session.Meta[settings.MetaClonePath]; clonePath != "" {
+				clonePathSet[clonePath] = struct{}{}
+			}
+		}
+	}
+	if len(remoteSet) == 0 {
+		if remote := scannerPreviewRemote(root.Meta[settings.MetaRemote]); remote != "" {
+			remoteSet[remote] = struct{}{}
+		}
+	}
+
+	return ListingPreviewContext{
+		Kind:           kind,
+		Project:        root.Label,
+		Harnesses:      sortedScannerPreviewValues(harnessSet),
+		Remotes:        sortedScannerPreviewValues(remoteSet),
+		RepositoryPath: root.Meta[settings.MetaRepositoryPath],
+		ClonePaths:     sortedScannerPreviewValues(clonePathSet),
+		Branches:       sortedScannerPreviewValues(branchSet),
+		Branch:         branchName,
+		SessionCount:   sessionCount,
+	}
+}
+
+func scannerPreviewRemote(remote string) string {
+	if normalized := ingest.NormalizeRemoteForMatch(remote); normalized != "" {
+		return normalized
+	}
+	return remote
+}
+
+func sortedScannerPreviewValues(set map[string]struct{}) []string {
+	values := make([]string, 0, len(set))
+	for value := range set {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
 }
 
 func uniqueScannerClonePath(rows []PreparedSessionListing) (ingest.ClonePath, bool) {

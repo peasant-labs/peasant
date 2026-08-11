@@ -305,7 +305,13 @@ func renderThemeFor(t *testing.T, name selectionRenderTheme) theme.Mode {
 func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderCase) kickstart.Program {
 	t.Helper()
 	th := theme.New(renderThemeFor(t, c.Theme))
-	preview := kickstart.NewListingPreview(th, doc.Listings, turnsFromPrompts(doc.Stored))
+	source := kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested))
+	preview := kickstart.NewListingPreview(
+		th,
+		doc.Listings,
+		turnsFromPrompts(doc.Stored),
+		kickstart.WithListingPreviewContextSource(source),
+	)
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.SaveAtomic(path, config.BaseConfig()); err != nil {
@@ -322,7 +328,7 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 	p := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:   th,
 		Draft:   draft,
-		Source:  kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested)),
+		Source:  source,
 		Preview: preview,
 	})
 	p.SetSize(c.Width, c.Height)
