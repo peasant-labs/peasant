@@ -89,6 +89,12 @@ const (
 	MetaIngested = kit.MetaIngested
 	// MetaIngestedValue is the value MetaIngested carries when set.
 	MetaIngestedValue = kit.MetaIngestedValue
+	// MetaTracked marks a row included by the previously saved selection. It is
+	// display-only and must never be inferred from MetaIngested or current
+	// checkbox state.
+	MetaTracked = kit.MetaTracked
+	// MetaTrackedValue is the value MetaTracked carries when set.
+	MetaTrackedValue = kit.MetaTrackedValue
 	// MetaChildCount carries how many child (subagent) sessions a parent session
 	// groups. A parent session is a LEAF row that summarises its subagents, so
 	// the count is display-only context and never affects the derived
@@ -304,6 +310,24 @@ func isProjectFirstForest(roots []*kit.TreeNode) bool {
 		}
 	}
 	return false
+}
+
+// isExactProjectFirstForest reports whether a project-first forest carries the
+// complete physical identity contract emitted by kickstart.ScannerTreeSource.
+// Presentation fixtures may use the same hierarchy without exact paths; those
+// continue through the generic draft-selection path.
+func isExactProjectFirstForest(roots []*kit.TreeNode) bool {
+	if len(roots) == 0 || !isProjectFirstForest(roots) {
+		return false
+	}
+	for _, root := range roots {
+		if metaOf(root, MetaProjectIdentity) == "" ||
+			metaOf(root, MetaProjectHarness) == "" ||
+			metaOf(root, MetaClonePath) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // harnessesUnder returns the distinct harnesses of every session node in n's
@@ -688,9 +712,27 @@ func (p availableProject) candidate() ingest.DiscoveryCandidate {
 }
 
 // ApplyExistingSelection remains the compatibility entry point for callers that
-// only need tree state. The implementation is exactly PrepopulateSelection; no
-// positional or second matcher path exists.
+// only need tree state. Mode all is handled directly; selected mode delegates to
+// the one canonical candidate-matcher path in PrepopulateSelection.
 func ApplyExistingSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
+	if sel.Mode == config.SelectionModeAll {
+		for _, root := range roots {
+			setSubtreeChecked(root)
+		}
+		return
+	}
+	if isProjectFirstForest(roots) {
+		applyExistingProjectFirstSelection(roots, sel)
+		return
+	}
+	_ = PrepopulateSelection(roots, sel)
+}
+
+// applyExistingProjectFirstSelection applies sel to the project -> branch ->
+// session forest produced by kickstart.ScannerTreeSource. It delegates to the
+// same candidate-aware matcher as every other selected-mode forest so clone
+// paths, identity multiplicity, and exact exclusions cannot drift by shape.
+func applyExistingProjectFirstSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
 	_ = PrepopulateSelection(roots, sel)
 }
 
@@ -1396,6 +1438,44 @@ func branchPolicyKey(branches []string) string {
 		return "all"
 	}
 	return strings.Join(branches, "\x00")
+}
+
+// ApplyTrackedSelection annotates the rows included by a previously saved
+// selection without changing their current checkbox state. It deliberately
+// reuses ApplyExistingSelection as the canonical matcher boundary, snapshots
+// every TriState first, and restores those states afterward. Local-store
+// presence is never consulted, so imported and tracked remain independent.
+func ApplyTrackedSelection(roots []*kit.TreeNode, sel config.SelectionConfig) {
+	states := map[*kit.TreeNode]kit.TriState{}
+	for _, root := range roots {
+		walkNodes(root, func(node *kit.TreeNode) {
+			states[node] = node.State
+			if node.Meta != nil {
+				delete(node.Meta, MetaTracked)
+			}
+		})
+	}
+
+	ApplyExistingSelection(roots, sel)
+	for _, root := range roots {
+		walkNodes(root, func(node *kit.TreeNode) {
+			if node.State == kit.Checked || node.State == kit.Conflict {
+				if node.Meta == nil {
+					node.Meta = map[string]string{}
+				}
+				node.Meta[MetaTracked] = MetaTrackedValue
+			}
+			node.State = states[node]
+		})
+	}
+}
+
+// setSubtreeChecked sets n and every descendant to Checked.
+func setSubtreeChecked(n *kit.TreeNode) {
+	n.State = kit.Checked
+	for _, c := range n.Children {
+		setSubtreeChecked(c)
+	}
 }
 
 func reconcileSelectionScope(next *TreeSelection, scope selectionScope, autoIngestNewBranches bool) error {

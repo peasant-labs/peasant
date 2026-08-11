@@ -301,12 +301,14 @@ func TestRunKickstartFlowLegacyAllRejectsUnreadableStoredEvidence(t *testing.T) 
 	}
 	before := mountedLegacyReadFile(t, configPath)
 	runnerCalled := false
+	deps := defaultKickstartCommandDeps()
+	deps.runModel = func(tea.Model) error {
+		runnerCalled = true
+		return nil
+	}
 	err := runKickstartFlow(
 		mountTestCmd(t, dataHome),
-		kickstartCommandDeps{runFlow: func(tea.Model) error {
-			runnerCalled = true
-			return nil
-		}},
+		deps,
 		configPath,
 		nil,
 		nil,
@@ -353,37 +355,42 @@ func TestRunKickstartFlowConvertsLegacyAllFromStoredEvidence(t *testing.T) {
 			listings := mountedLegacyListings(testCase.Scan, paths)
 			cmd := mountTestCmd(t, dataHome)
 			committed := false
-			deps := kickstartCommandDeps{
-				runFlow: func(model tea.Model) error {
-					mounted, ok := model.(kickstart.Model)
-					if !ok {
-						return fmt.Errorf("runKickstartFlow mounted %T, want kickstart.Model", model)
+			deps := defaultKickstartCommandDeps()
+			deps.runModel = func(model tea.Model) error {
+				mounted, ok := model.(kickstart.Model)
+				if !ok {
+					return fmt.Errorf("runKickstartFlow mounted %T, want kickstart.Model", model)
+				}
+				program := mounted.Program()
+				program.SetSize(120, 30)
+				var load tea.Cmd
+				if program.Phase() == kickstart.PhaseOAuth {
+					program, load = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				} else {
+					load = program.Init()
+				}
+				program = drainMountedLegacyProgram(t, program, load)
+				if program.Phase() != kickstart.PhaseFlow {
+					return fmt.Errorf("mounted kickstart phase after scanner load = %s, want flow", program.Phase())
+				}
+				if current := mountedLegacyReadFile(t, configPath); !bytes.Equal(current, before) {
+					return fmt.Errorf("legacy config changed before the user commit\n before: %s\ncurrent: %s", before, current)
+				}
+				for step := 0; step < 24 && !program.OnReceipt(); step++ {
+					key := tea.KeyPressMsg{Code: tea.KeyTab}
+					if program.Phase() == kickstart.PhaseVisibility {
+						key = tea.KeyPressMsg{Code: tea.KeyEnter}
 					}
-					program := mounted.Program()
-					program.SetSize(120, 30)
-					var load tea.Cmd
-					if program.Phase() == kickstart.PhaseOAuth {
-						program, load = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-					} else {
-						load = program.Init()
-					}
-					program = drainMountedLegacyProgram(t, program, load)
-					if program.Phase() != kickstart.PhaseFlow {
-						return fmt.Errorf("mounted kickstart phase after scanner load = %s, want flow", program.Phase())
-					}
-					if current := mountedLegacyReadFile(t, configPath); !bytes.Equal(current, before) {
-						return fmt.Errorf("legacy config changed before the user commit\n before: %s\ncurrent: %s", before, current)
-					}
-					for range 8 {
-						program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-					}
-					program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-					if !program.Committed() {
-						return fmt.Errorf("mounted kickstart did not commit the converted selection; phase=%s", program.Phase())
-					}
-					committed = true
-					return nil
-				},
+					var next tea.Cmd
+					program, next = program.Update(key)
+					program = drainMountedLegacyProgram(t, program, next)
+				}
+				program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				if !program.Committed() {
+					return fmt.Errorf("mounted kickstart did not commit the converted selection; phase=%s", program.Phase())
+				}
+				committed = true
+				return nil
 			}
 
 			if err := runKickstartFlow(cmd, deps, configPath, nil, listings); err != nil {

@@ -1,7 +1,6 @@
 package kickstart
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -23,8 +22,14 @@ type Options struct {
 	// dev loop and tests it is scannerfix.FixtureTreeSource.
 	Source kit.TreeSource
 	// VillageConnected gates the destination/visibility fields, which only make
-	// sense once a village login has succeeded.
+	// sense once a village login has succeeded. It remains the static fallback
+	// for callers such as config Screen that do not need live authentication.
 	VillageConnected bool
+	// VillageConnectedFunc reports live connection state for the guided Program.
+	// When present it takes precedence over VillageConnected, allowing one
+	// mounted Registry and Flow to reveal sharing after login without replacing
+	// any field instance or presentation state.
+	VillageConnectedFunc func() bool
 	// ClaudeSessionsPresent gates the Claude transcript-retention field, which is
 	// only offered when Claude sessions were discovered (legacy shouldSkip parity).
 	ClaudeSessionsPresent bool
@@ -42,7 +47,6 @@ const (
 	SectionLicense     = "license"
 	SectionDestination = "destination"
 	SectionRetention   = "retention"
-	SectionReceipt     = "receipt"
 )
 
 // Field keys are stable within their section.
@@ -53,7 +57,6 @@ const (
 	FieldLicense    = "content-license"
 	FieldVisibility = "default-visibility"
 	FieldRetention  = "claude-retention-days"
-	FieldReceipt    = "summary"
 )
 
 // neverExpireDays is the cleanupPeriodDays value that keeps Claude Code
@@ -71,10 +74,10 @@ const licenseNone = "none (do not attach a license)"
 
 // BuildRegistry composes the kickstart onboarding as a settings.Registry: the
 // selection tree, the conditional auto-ingest-new-branches toggle, the privacy
-// (redaction) choice, the content-license choice, and the read-only receipt that
-// is the single atomic commit point. The village destination/visibility and
-// Claude retention fields are gated by opts and, when present, appear between
-// license and receipt.
+// (redaction) choice, and the content-license choice. The village
+// destination/visibility and Claude retention fields are gated by opts. Final
+// review and save guidance belongs to each presentation rather than appearing
+// here as a false setting.
 //
 // Every field edits the draft through an Accessor whose target IS the real
 // config.Config layout, so a committed draft is field-for-field the same shape
@@ -84,15 +87,20 @@ func BuildRegistry(opts Options) settings.Registry {
 	sections := []settings.Section{
 		{
 			Key:   SectionSelection,
-			Title: "choose transcripts to import",
+			Title: "choose sessions to import",
 			Fields: []settings.Field{
-				settings.Tree(FieldSelection, "transcripts", selectionAccessor(), opts.Source,
+				settings.Tree(FieldSelection, "", selectionAccessor(), opts.Source,
 					selectionTreeOptions(opts)...),
 			},
 		},
 		{
 			Key:   SectionAutoIngest,
 			Title: "auto-ingest new branches",
+			Guide: sectionGuide(
+				"decide how future branches enter your saved local selection.",
+				"this applies only to new branches in projects selected in full.",
+				"it never broadens an explicit branch or session selection.",
+			),
 			// Only offered for a narrowed selection: with mode:all every future
 			// branch is already ingested, so the question is meaningless.
 			When: func(d *settings.Draft) bool {
@@ -107,15 +115,27 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionPrivacy,
 			Title: "privacy",
+			Guide: sectionGuideWithExample(
+				"preview standard redaction before a later explicit publication.",
+				privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
+				"local imports remain original unless you explicitly run `peasant redact`.",
+				"examples below use synthetic text and the same redactor as explicit publication.",
+				"standard keeps git remote urls and branch output; maximum removes them.",
+			),
 			Fields: []settings.Field{
 				settings.WithDescription(
 					settings.Radio(FieldPrivacy, "redaction level", privacyAccessor(), privacyOptions()...),
-					"choose how much sensitive data peasant removes before it stores a transcript."),
+					"choose how much sensitive data peasant removes before a later explicit publication; this does not rewrite local imports."),
 			},
 		},
 		{
 			Key:   SectionLicense,
 			Title: "content license",
+			Guide: sectionGuide(
+				"choose the default license for a later explicit publish.",
+				"no license is the default unless your loaded config already chose one.",
+				"no license keeps all rights; anyone who wants to reuse the transcript must ask.",
+			),
 			Fields: []settings.Field{
 				settings.WithDescription(
 					settings.Radio(FieldLicense, "default license attached to pushed transcripts", licenseAccessor(), licenseOptions()...),
@@ -125,12 +145,17 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionDestination,
 			Title: "sharing",
+			Guide: sectionGuide(
+				"choose who may see transcripts after a later explicit publish.",
+				"private means only you; group means group members; public means anyone.",
+				"saving this default does not publish anything.",
+			),
 			// Only meaningful once a village connection exists: the default
 			// visibility governs transcripts PUSHED to that village. With no
 			// village connected there is nowhere to push, so the question is
 			// hidden (its edits are dropped before the receipt).
 			When: func(_ *settings.Draft) bool {
-				return opts.VillageConnected
+				return opts.villageConnected()
 			},
 			Fields: []settings.Field{
 				settings.WithDescription(
@@ -141,6 +166,11 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionRetention,
 			Title: "claude retention",
+			Guide: sectionGuide(
+				"choose how long claude code keeps its source transcript files.",
+				"the selected value is applied after config saves and before local import.",
+				"changing claude retention does not delete transcripts already imported into peasant.",
+			),
 			// Only offered when Claude Code sessions were discovered: the field
 			// edits Claude Code's own cleanup setting, which is meaningless when no
 			// Claude sessions exist (legacy shouldSkip parity).
@@ -153,15 +183,25 @@ func BuildRegistry(opts Options) settings.Registry {
 					"choose when claude code deletes its own transcript files."),
 			},
 		},
-		{
-			Key:   SectionReceipt,
-			Title: "review and save",
-			Fields: []settings.Field{
-				settings.Info(FieldReceipt, receiptContent),
-			},
-		},
 	}
 	return settings.Registry{Sections: sections}
+}
+
+func (o Options) villageConnected() bool {
+	if o.VillageConnectedFunc != nil {
+		return o.VillageConnectedFunc()
+	}
+	return o.VillageConnected
+}
+
+// sectionGuide keeps the canonical registry's optional framing concise and
+// static. It describes a section without changing its fields or visibility.
+func sectionGuide(intro string, hints ...string) *settings.Guide {
+	return &settings.Guide{Intro: intro, Hints: hints}
+}
+
+func sectionGuideWithExample(intro string, example settings.GuideExampleFunc, hints ...string) *settings.Guide {
+	return &settings.Guide{Intro: intro, Hints: hints, Example: example}
 }
 
 // selectionTreeOptions composes the selection tree's options: the harness facet
@@ -171,11 +211,14 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 	out := []settings.TreeOption{
 		settings.WithFacet(settings.MetaHarness, "harness"),
 		settings.WithFacetDisplay(harnessFacetLabel),
-		settings.WithSelectionRestoration(),
 		settings.WithSelectAllHelp("select all projects"),
+		settings.WithDraftSelectionState(),
 	}
 	if opts.Preview != nil {
-		out = append(out, settings.WithPreviewBodySource(opts.Preview))
+		out = append(out,
+			settings.WithPreviewBodySource(opts.Preview),
+			settings.WithPreviewRatio(0.5),
+		)
 	}
 	return out
 }
@@ -354,33 +397,4 @@ func retentionOptions() []settings.Option[int] {
 		{Label: "1 year", Value: 365, Description: "removes claude transcripts after 365 days."},
 		{Label: "never expire", Value: neverExpireDays, Description: "keeps claude transcripts forever. recommended for peasant users."},
 	}
-}
-
-// receiptContent renders the read-only commit summary from the working draft. It
-// reports exactly what a confirm will persist: the selection mode, the number of
-// selected harnesses, the auto-ingest answer, the redaction level, and the
-// license.
-func receiptContent(d *settings.Draft) string {
-	cfg := d.Working()
-	var b strings.Builder
-	fmt.Fprintf(&b, "transcripts: %s\n", cfg.Selection.Mode)
-	if cfg.Selection.Mode == config.SelectionModeSelected {
-		fmt.Fprintf(&b, "selected harnesses: %d\n", len(cfg.Selection.Harnesses))
-		fmt.Fprintf(&b, "auto-ingest new branches: %t\n", cfg.Selection.AutoIngestNewBranches)
-	} else {
-		b.WriteString("auto-ingest new branches: yes (standing policy)\n")
-	}
-	fmt.Fprintf(&b, "redaction level: %s\n", cfg.Redaction.Level)
-	if cfg.Push.License == "" {
-		b.WriteString("license: none\n")
-	} else {
-		fmt.Fprintf(&b, "license: %s\n", cfg.Push.License)
-	}
-	if cfg.ClaudeRetentionDays >= neverExpireDays {
-		b.WriteString("claude retention: never expire\n")
-	} else if cfg.ClaudeRetentionDays > 0 {
-		fmt.Fprintf(&b, "claude retention: %d days\n", cfg.ClaudeRetentionDays)
-	}
-	b.WriteString("\npress enter to save.")
-	return b.String()
 }

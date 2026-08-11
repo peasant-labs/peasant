@@ -1,0 +1,144 @@
+# Asynchronous TreeField load ordering over a real Draft and Tree. The initial
+# selections deliberately differ from an empty-forest derivation so every
+# preservation row catches a premature Draft write.
+expectedCaseCount: 7
+expectedNodeCount: 4
+expectedMutationProbeCount: 4
+width: 96
+height: 22
+sourceError: synthetic scan refusal
+forest:
+  - id: project-a
+    label: example/project
+    state: partial
+    meta:
+      remote: git@github.com:example/project.git
+    children:
+      - id: main
+        label: main
+        state: partial
+        meta:
+          branch: main
+        children:
+          - id: session-a
+            label: selected session
+            state: checked
+            meta:
+              harness: claude-code
+          - id: session-b
+            label: unselected session
+            state: unchecked
+            meta:
+              harness: claude-code
+cases:
+  - name: spinner-before-result-preserves-draft-until-success
+    configExists: true
+    sourceResult: forest
+    delivery: spinner-before-result
+    initialSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedValidation: ready
+    mutationProbe: true
+
+  - name: foreign-message-before-result-preserves-draft-until-success
+    configExists: true
+    sourceResult: forest
+    delivery: foreign-before-result
+    initialSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedValidation: ready
+    mutationProbe: true
+
+  - name: result-before-spinner-keeps-derived-selection-after-late-tick
+    configExists: true
+    sourceResult: forest
+    delivery: result-before-spinner
+    initialSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedValidation: ready
+
+  - name: load-failure-preserves-prior-selection-and-blocks-commit
+    configExists: true
+    sourceResult: error
+    delivery: result-only
+    initialSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [session-a]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [session-a]
+    expectedValidation: failed
+    attemptCommit: true
+    mutationProbe: true
+    wantErrorContains:
+      ["what:", "why:", "where:", "when:", "means:", "fix:", synthetic scan refusal]
+
+  - name: successful-empty-scan-is-ready-and-preserves-prior-selection
+    configExists: true
+    sourceResult: empty
+    delivery: result-only
+    initialSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [session-a]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [session-a]
+    expectedValidation: ready
+    mutationProbe: true
+
+  - name: successful-nonempty-first-scan-applies-default-draft-selection
+    configExists: false
+    sourceResult: forest
+    delivery: result-only
+    initialSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedValidation: ready
+
+  - name: commit-before-result-preserves-selection-and-blocks
+    configExists: true
+    sourceResult: forest
+    delivery: hold-result
+    initialSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [session-a]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [session-a]
+    expectedValidation: loading
+    attemptCommit: true
+    wantErrorContains:
+      ["what:", "why:", "where:", "when:", "means:", "fix:", not ready]

@@ -46,10 +46,6 @@ func NewCommitGateEvaluator(candidates []selectionprojection.ProjectCandidate) C
 	}
 }
 
-// FlowOption configures an optional Flow behavior without changing existing
-// settings flows that do not need a save gate.
-type FlowOption func(*Flow)
-
 // WithCommitGate mounts evaluator at the receipt's save action.
 func WithCommitGate(evaluator CommitGateEvaluator) FlowOption {
 	return func(flow *Flow) {

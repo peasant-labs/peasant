@@ -124,7 +124,6 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 			})
 			program.SetSize(120, 28)
 			program = declineOAuth(t, program)
-			program = drainProgram(program, program.Init())
 
 			for _, action := range testCase.Actions {
 				program = pressAndDrain(program, mountedTouchedRune(action))

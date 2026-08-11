@@ -16,7 +16,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -33,14 +32,84 @@ func stripRender(s string) string { return ansiPattern.ReplaceAllString(s, "") }
 //go:embed testdata/selection_render.yaml
 var selectionRenderData []byte
 
+const (
+	expectedSelectionRenderCaseCount             = 23
+	expectedSelectionRenderSessionCount          = 5
+	expectedSelectionRenderHarnessCount          = 2
+	expectedSelectionRenderPreviewAssertionCount = 3
+	expectedSelectionRenderTextAssertionCount    = 11
+	expectedSelectionRenderBothThemeStateCount   = 6
+)
+
+type selectionRenderState string
+
+const (
+	selectionRenderDefault         selectionRenderState = "default"
+	selectionRenderNarrowed        selectionRenderState = "narrowed"
+	selectionRenderGutterHidden    selectionRenderState = "gutter-hidden"
+	selectionRenderSessionCursor   selectionRenderState = "session-cursor"
+	selectionRenderPreviewFocused  selectionRenderState = "preview-focused"
+	selectionRenderPreviewScrolled selectionRenderState = "preview-scrolled"
+	selectionRenderSearchEditing   selectionRenderState = "search-editing"
+	selectionRenderKeptFilter      selectionRenderState = "kept-filter"
+	selectionRenderBranchMatch     selectionRenderState = "global-branch-match"
+	selectionRenderSessionMatch    selectionRenderState = "global-session-match"
+	selectionRenderOverflowMiddle  selectionRenderState = "overflow-middle"
+	selectionRenderOverflowBottom  selectionRenderState = "overflow-bottom"
+)
+
+func (s selectionRenderState) valid() bool {
+	switch s {
+	case selectionRenderDefault, selectionRenderNarrowed, selectionRenderGutterHidden,
+		selectionRenderSessionCursor, selectionRenderPreviewFocused, selectionRenderPreviewScrolled,
+		selectionRenderSearchEditing, selectionRenderKeptFilter, selectionRenderBranchMatch,
+		selectionRenderSessionMatch, selectionRenderOverflowMiddle, selectionRenderOverflowBottom:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s selectionRenderState) requiresBothThemes() bool {
+	switch s {
+	case selectionRenderSearchEditing, selectionRenderKeptFilter, selectionRenderBranchMatch,
+		selectionRenderSessionMatch, selectionRenderOverflowMiddle, selectionRenderOverflowBottom:
+		return true
+	default:
+		return false
+	}
+}
+
+type selectionRenderTheme string
+
+const (
+	selectionRenderDark  selectionRenderTheme = "dark"
+	selectionRenderLight selectionRenderTheme = "light"
+)
+
+func (t selectionRenderTheme) valid() bool {
+	return t == selectionRenderDark || t == selectionRenderLight
+}
+
 // selectionRenderCase is one captured screen: the state the step is driven
 // into, the palette, and the region it renders at.
 type selectionRenderCase struct {
-	Name   string `yaml:"name"`
-	State  string `yaml:"state"`
-	Theme  string `yaml:"theme"`
-	Width  int    `yaml:"width"`
-	Height int    `yaml:"height"`
+	Name   string               `yaml:"name"`
+	State  selectionRenderState `yaml:"state"`
+	Theme  selectionRenderTheme `yaml:"theme"`
+	Width  int                  `yaml:"width"`
+	Height int                  `yaml:"height"`
+}
+
+type selectionRenderAssertionRow struct {
+	Case         string   `yaml:"case"`
+	WantContains []string `yaml:"wantContains"`
+	WantMissing  []string `yaml:"wantMissing"`
+}
+
+type selectionRenderAssertions struct {
+	ExpectedRowCount int                           `yaml:"expectedRowCount"`
+	Rows             []selectionRenderAssertionRow `yaml:"rows"`
 }
 
 // previewColoredRun is one span of the preview body that must carry a NAMED
@@ -70,71 +139,159 @@ type previewAssertions struct {
 // selectionRenderDoc is the whole fixture: the discovery listing the step folds,
 // which sessions the store holds, and the cases - plus the row-count guards.
 type selectionRenderDoc struct {
-	ExpectedCaseCount    int                   `yaml:"expectedCaseCount"`
-	ExpectedHarnessCount int                   `yaml:"expectedHarnessCount"`
-	PreviewAssertions    previewAssertions     `yaml:"previewAssertions"`
-	Stored               map[string]string     `yaml:"stored"`
-	Listings             []ftue.SessionListing `yaml:"listings"`
-	Ingested             []string              `yaml:"ingested"`
-	Cases                []selectionRenderCase `yaml:"cases"`
+	ExpectedCaseCount           int                       `yaml:"expectedCaseCount"`
+	ExpectedSessionCount        int                       `yaml:"expectedSessionCount"`
+	ExpectedHarnessCount        int                       `yaml:"expectedHarnessCount"`
+	ExpectedBothThemeStateCount int                       `yaml:"expectedBothThemeStateCount"`
+	BothThemeStates             []selectionRenderState    `yaml:"bothThemeStates"`
+	RenderAssertions            selectionRenderAssertions `yaml:"renderAssertions"`
+	PreviewAssertions           previewAssertions         `yaml:"previewAssertions"`
+	Stored                      map[string]string         `yaml:"stored"`
+	Listings                    []ftue.SessionListing     `yaml:"listings"`
+	Ingested                    []string                  `yaml:"ingested"`
+	Cases                       []selectionRenderCase     `yaml:"cases"`
 }
 
-func loadSelectionRenderDoc(t *testing.T) selectionRenderDoc {
-	t.Helper()
+func selectionRenderValuesPresent(values ...[]string) bool {
+	for _, group := range values {
+		for _, value := range group {
+			if strings.TrimSpace(value) == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func decodeSelectionRender(data []byte) (selectionRenderDoc, error) {
 	var doc selectionRenderDoc
-	dec := yaml.NewDecoder(bytes.NewReader(selectionRenderData))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil {
-		t.Fatalf("decode testdata/selection_render.yaml: %v", err)
+		return doc, fmt.Errorf("decode testdata/selection_render.yaml: %w", err)
 	}
 	var trailing any
 	if err := dec.Decode(&trailing); err != io.EOF {
 		if err == nil {
 			err = fmt.Errorf("found a second YAML document")
 		}
-		t.Fatalf("selection_render.yaml must hold exactly one document: %v", err)
+		return doc, fmt.Errorf("selection_render.yaml must hold exactly one document: %w", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))
+	if doc.ExpectedCaseCount != expectedSelectionRenderCaseCount || len(doc.Cases) != expectedSelectionRenderCaseCount {
+		return doc, fmt.Errorf("selection render cases: declared=%d actual=%d required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), expectedSelectionRenderCaseCount)
+	}
+	if doc.ExpectedSessionCount != expectedSelectionRenderSessionCount || len(doc.Listings) != expectedSelectionRenderSessionCount {
+		return doc, fmt.Errorf("selection render sessions: declared=%d actual=%d required=%d",
+			doc.ExpectedSessionCount, len(doc.Listings), expectedSelectionRenderSessionCount)
 	}
 	harnesses := map[string]bool{}
+	sessionIDs := map[string]bool{}
 	for _, sess := range doc.Listings {
+		if sess.SessionID == "" || sess.Harness == "" || sessionIDs[sess.SessionID] {
+			return doc, fmt.Errorf("selection render fixture contains an invalid or duplicate session %q", sess.SessionID)
+		}
+		sessionIDs[sess.SessionID] = true
 		harnesses[sess.Harness] = true
 	}
 	pa := doc.PreviewAssertions
-	if pa.ExpectedRowCount != len(pa.Rows) || len(pa.Rows) == 0 {
-		t.Fatalf("previewAssertions.expectedRowCount=%d but %d rows present", pa.ExpectedRowCount, len(pa.Rows))
+	if pa.ExpectedRowCount != expectedSelectionRenderPreviewAssertionCount || len(pa.Rows) != expectedSelectionRenderPreviewAssertionCount {
+		return doc, fmt.Errorf("selection render preview assertions: declared=%d actual=%d required=%d",
+			pa.ExpectedRowCount, len(pa.Rows), expectedSelectionRenderPreviewAssertionCount)
 	}
-	for _, row := range pa.Rows {
-		if len(row.WantVisible)+len(row.WantMissing)+len(row.WantColored) == 0 {
-			t.Fatalf("preview assertion row %q declares no expected values; an empty want list is a guaranteed pass", row.Case)
-		}
-		testutil.RequireFixtureFields(t, "preview assertion", row.Case, []testutil.FixtureField{
-			{Key: "wantFocusMarker", Value: row.WantFocusMarker},
-		})
+	ra := doc.RenderAssertions
+	if ra.ExpectedRowCount != expectedSelectionRenderTextAssertionCount || len(ra.Rows) != expectedSelectionRenderTextAssertionCount {
+		return doc, fmt.Errorf("selection render text assertions: declared=%d actual=%d required=%d",
+			ra.ExpectedRowCount, len(ra.Rows), expectedSelectionRenderTextAssertionCount)
 	}
-	if len(harnesses) != doc.ExpectedHarnessCount {
-		t.Fatalf("expectedHarnessCount=%d but the listing carries %d", doc.ExpectedHarnessCount, len(harnesses))
+	if doc.ExpectedHarnessCount != expectedSelectionRenderHarnessCount || len(harnesses) != expectedSelectionRenderHarnessCount {
+		return doc, fmt.Errorf("selection render harnesses: declared=%d actual=%d required=%d",
+			doc.ExpectedHarnessCount, len(harnesses), expectedSelectionRenderHarnessCount)
 	}
+	caseNames := map[string]bool{}
+	casesByState := map[selectionRenderState]map[selectionRenderTheme][]selectionRenderCase{}
 	for _, c := range doc.Cases {
-		testutil.RequireFixtureFields(t, "selection render", c.Name, []testutil.FixtureField{
-			{Key: "state", Value: c.State},
-			{Key: "theme", Value: c.Theme},
-		})
+		if c.Name == "" || caseNames[c.Name] || !c.State.valid() || !c.Theme.valid() {
+			return doc, fmt.Errorf("selection render fixture case %q is empty, duplicated, or has an invalid state/theme", c.Name)
+		}
+		caseNames[c.Name] = true
+		if casesByState[c.State] == nil {
+			casesByState[c.State] = map[selectionRenderTheme][]selectionRenderCase{}
+		}
+		casesByState[c.State][c.Theme] = append(casesByState[c.State][c.Theme], c)
 		if c.Width <= 0 || c.Height <= 0 {
-			t.Fatalf("selection render fixture case %q declares a %dx%d region; a non-positive size captures nothing",
+			return doc, fmt.Errorf("selection render fixture case %q declares a %dx%d region; a non-positive size captures nothing",
 				c.Name, c.Width, c.Height)
 		}
+	}
+	if doc.ExpectedBothThemeStateCount != expectedSelectionRenderBothThemeStateCount || len(doc.BothThemeStates) != expectedSelectionRenderBothThemeStateCount {
+		return doc, fmt.Errorf("selection render both-theme states: declared=%d actual=%d required=%d",
+			doc.ExpectedBothThemeStateCount, len(doc.BothThemeStates), expectedSelectionRenderBothThemeStateCount)
+	}
+	pairedStates := map[selectionRenderState]bool{}
+	for _, state := range doc.BothThemeStates {
+		if !state.requiresBothThemes() || pairedStates[state] {
+			return doc, fmt.Errorf("selection render both-theme state %q is not required or is duplicated", state)
+		}
+		pairedStates[state] = true
+		dark := casesByState[state][selectionRenderDark]
+		light := casesByState[state][selectionRenderLight]
+		if len(dark) != 1 || len(light) != 1 || dark[0].Width != light[0].Width || dark[0].Height != light[0].Height {
+			return doc, fmt.Errorf("selection render state %q must have one dark and one light case at the same size", state)
+		}
+	}
+	for id := range doc.Stored {
+		if !sessionIDs[id] {
+			return doc, fmt.Errorf("selection render fixture stores preview text for unknown session %q", id)
+		}
+	}
+	ingestedIDs := map[string]bool{}
+	for _, id := range doc.Ingested {
+		if !sessionIDs[id] || ingestedIDs[id] {
+			return doc, fmt.Errorf("selection render fixture ingested session %q is unknown or duplicated", id)
+		}
+		ingestedIDs[id] = true
+	}
+	assertionNames := map[string]bool{}
+	for _, row := range ra.Rows {
+		if row.Case == "" || assertionNames[row.Case] || !caseNames[row.Case] || len(row.WantContains)+len(row.WantMissing) == 0 ||
+			!selectionRenderValuesPresent(row.WantContains, row.WantMissing) {
+			return doc, fmt.Errorf("selection render text assertion %q is empty, duplicated, assertion-free, or references no case", row.Case)
+		}
+		assertionNames[row.Case] = true
+	}
+	previewNames := map[string]bool{}
+	for _, row := range pa.Rows {
+		if row.Case == "" || strings.TrimSpace(row.WantFocusMarker) == "" || previewNames[row.Case] || !caseNames[row.Case] ||
+			len(row.WantVisible)+len(row.WantMissing)+len(row.WantColored) == 0 ||
+			!selectionRenderValuesPresent(row.WantVisible, row.WantMissing) {
+			return doc, fmt.Errorf("preview assertion row %q is empty, duplicated, assertion-free, or references no case", row.Case)
+		}
+		previewNames[row.Case] = true
+		for _, colored := range row.WantColored {
+			if strings.TrimSpace(colored.Text) == "" || strings.TrimSpace(colored.Token) == "" {
+				return doc, fmt.Errorf("preview assertion row %q has an empty colored-run field", row.Case)
+			}
+		}
+	}
+	return doc, nil
+}
+
+func loadSelectionRenderDoc(t *testing.T) selectionRenderDoc {
+	t.Helper()
+	doc, err := decodeSelectionRender(selectionRenderData)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return doc
 }
 
-func renderThemeFor(t *testing.T, name string) theme.Mode {
+func renderThemeFor(t *testing.T, name selectionRenderTheme) theme.Mode {
 	t.Helper()
 	switch name {
-	case "dark":
+	case selectionRenderDark:
 		return theme.ModeDark
-	case "light":
+	case selectionRenderLight:
 		return theme.ModeLight
 	default:
 		t.Fatalf("unknown theme %q", name)
@@ -170,22 +327,21 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 	})
 	p.SetSize(c.Width, c.Height)
 	p = declineOAuth(t, p)
-	p = drainProgram(p, p.Init())
 
 	switch c.State {
-	case "default":
-	case "narrowed":
+	case selectionRenderDefault:
+	case selectionRenderNarrowed:
 		p = pressAndDrain(p, 'f')
-	case "gutter-hidden":
+	case selectionRenderGutterHidden:
 		// The cycle is every-value, then one state per harness, then hidden.
 		for i := 0; i < doc.ExpectedHarnessCount+1; i++ {
 			p = pressAndDrain(p, 'f')
 		}
-	case "session-cursor":
+	case selectionRenderSessionCursor:
 		p = cursorOntoImportedSession(p)
-	case "preview-focused":
+	case selectionRenderPreviewFocused:
 		p = drainProgram(cursorOntoImportedSession(p).Update(focusPreviewKey()))
-	case "preview-scrolled":
+	case selectionRenderPreviewScrolled:
 		p = drainProgram(cursorOntoImportedSession(p).Update(focusPreviewKey()))
 		// Far enough to carry the pane past the identity lines AND past the
 		// prose, so the capture proves the viewport moved rather than that a
@@ -193,6 +349,32 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 		for i := 0; i < previewScrollRows; i++ {
 			p = pressAndDrain(p, 'j')
 		}
+	case selectionRenderSearchEditing:
+		p = pressAndDrain(p, '/')
+		p = typeAndDrain(p, 'a')
+	case selectionRenderKeptFilter:
+		p = pressAndDrain(p, '/')
+		for _, r := range "cursor" {
+			p = typeAndDrain(p, r)
+		}
+		p = pressAndDrain(p, tea.KeyEnter)
+	case selectionRenderBranchMatch:
+		p = pressAndDrain(p, '/')
+		for _, r := range "main" {
+			p = typeAndDrain(p, r)
+		}
+		p = pressAndDrain(p, tea.KeyEnter)
+	case selectionRenderSessionMatch:
+		p = pressAndDrain(p, '/')
+		for _, r := range "cursor" {
+			p = typeAndDrain(p, r)
+		}
+		p = pressAndDrain(p, tea.KeyEnter)
+	case selectionRenderOverflowMiddle:
+		p = pressAndDrain(p, 'j')
+		p = pressAndDrain(p, 'j')
+	case selectionRenderOverflowBottom:
+		p = drainProgram(p.Update(tea.KeyPressMsg{Code: 'G', Text: "G"}))
 	default:
 		t.Fatalf("unknown state %q", c.State)
 	}
@@ -239,6 +421,11 @@ func pressAndDrain(p kickstart.Program, code rune) kickstart.Program {
 	return drainProgram(next, cmd)
 }
 
+func typeAndDrain(p kickstart.Program, value rune) kickstart.Program {
+	next, cmd := p.Update(tea.KeyPressMsg{Code: value, Text: string(value)})
+	return drainProgram(next, cmd)
+}
+
 // TestSelectionStep_RenderGolden captures the whole rendered step for every
 // state, so the child-session counts, the imported/not-yet split, the facet
 // gutter, and the preview pane are all visible in the test artifact.
@@ -247,8 +434,24 @@ func TestSelectionStep_RenderGolden(t *testing.T) {
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			p := buildSelectionStep(t, doc, c)
+			assertSimplifiedSelectionRender(t, stripRender(p.View()))
 			golden.RequireEqual(t, []byte(p.View()))
 		})
+	}
+}
+
+func assertSimplifiedSelectionRender(t *testing.T, view string) {
+	t.Helper()
+	if got := strings.Count(view, "search:"); got != 1 {
+		t.Errorf("selection render contains %d search bars, want exactly one:\n%s", got, view)
+	}
+	for _, forbidden := range []string{
+		"transcripts", "scope:", "previous scope", "next scope", "search scope",
+		"tracked =", "imported =", "selected sessions:", "hidden by filters:", "view only:",
+	} {
+		if strings.Contains(view, forbidden) {
+			t.Errorf("selection render contains removed text %q:\n%s", forbidden, view)
+		}
 	}
 }
 
@@ -280,14 +483,14 @@ func TestSelectionStep_RenderSizeInvariant(t *testing.T) {
 // when they render the same state at the same size - a second palette re-colours
 // the same screen, but a second SIZE can drop or add content (a narrower tree
 // pane drops its row annotations), so each size is its own shape.
-func requireEveryContentShapeAsserted(t *testing.T, doc selectionRenderDoc, want map[string]struct{ contains, missing []string }) {
+func requireEveryContentShapeAsserted(t *testing.T, doc selectionRenderDoc) {
 	t.Helper()
 	// A shape counts as asserted from EITHER source: this test's per-state text
 	// expectations, or the fixture's previewAssertions rows, which name what the
 	// preview pane must show for the states that exist to capture it.
 	named := map[string]bool{}
-	for name := range want {
-		named[name] = true
+	for _, row := range doc.RenderAssertions.Rows {
+		named[row.Case] = true
 	}
 	for _, row := range doc.PreviewAssertions.Rows {
 		named[row.Case] = true
@@ -318,68 +521,93 @@ func TestSelectionStep_RenderCarriesEachAnswer(t *testing.T) {
 	for _, c := range doc.Cases {
 		byName[c.Name] = c
 	}
-	want := map[string]struct{ contains, missing []string }{
-		"default-dark": {
-			contains: []string{
-				"+ 2 child sessions", // the parent summarises its subagent chain
-				"already imported",   // the stored session is marked
-				"harness",            // the facet gutter is shown by default
-				"claude code",
-				"cursor",
-			},
-			missing: []string{"child subagent", "grandchild subagent"},
-		},
-		"narrowed-dark": {
-			contains: []string{"+ 2 child sessions", "claude code"},
-			missing:  []string{"cursor session"}, // narrowed away
-		},
-		"gutter-hidden-dark": {
-			contains: []string{"+ 2 child sessions", "cursor session"},
-			missing:  []string{"claude code 3"}, // the gutter rows are gone
-		},
-		// The preview shows the highlighted session's whole recorded
-		// conversation, tagged by voice. It deliberately does NOT repeat the
-		// session title: a title is derived from the first user message, and
-		// that message is the first thing the transcript below renders.
-		"session-cursor-dark": {
-			contains: []string{
-				"harness: claude code",                // the pane's own header chrome
-				"you",                                 // the person's turn is tagged
-				"assistant",                           // and so is the agent's
-				"please refactor the ingest pipeline", // the first turn
-				recordedExchange,                      // and the reply after it
-			},
-			missing: []string{"imported session"},
-		},
-		// A narrower region is NOT a colour variant of session-cursor-dark: the
-		// tree pane no longer has the budget to carry a row annotation, so both
-		// are dropped while the preview keeps describing the highlighted row.
-		"session-cursor-narrow": {
-			contains: []string{
-				"harness: claude code",                // the preview names the row
-				"please refactor the ingest pipeline", // and the recorded transcript
-			},
-			missing: []string{"child sessions", "already imported", "imported session"},
-		},
-	}
-	requireEveryContentShapeAsserted(t, doc, want)
-	for name, expect := range want {
-		c, ok := byName[name]
+	requireEveryContentShapeAsserted(t, doc)
+	for _, expect := range doc.RenderAssertions.Rows {
+		c, ok := byName[expect.Case]
 		if !ok {
-			t.Fatalf("fixture has no case %q", name)
+			t.Fatalf("fixture has no case %q", expect.Case)
 		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(expect.Case, func(t *testing.T) {
 			view := stripRender(buildSelectionStep(t, doc, c).View())
-			for _, s := range expect.contains {
+			for _, s := range expect.WantContains {
 				if !strings.Contains(view, s) {
 					t.Errorf("state %q must show %q; view:\n%s", c.State, s, view)
 				}
 			}
-			for _, s := range expect.missing {
+			for _, s := range expect.WantMissing {
 				if strings.Contains(view, s) {
 					t.Errorf("state %q must not show %q; view:\n%s", c.State, s, view)
 				}
 			}
 		})
+	}
+}
+
+func mutateSelectionRenderCount(t *testing.T, field string, expected int) []byte {
+	t.Helper()
+	declared := []byte(fmt.Sprintf("%s: %d", field, expected))
+	changed := []byte(fmt.Sprintf("%s: %d", field, expected+1))
+	mutated := bytes.Replace(selectionRenderData, declared, changed, 1)
+	if bytes.Equal(mutated, selectionRenderData) {
+		t.Fatalf("selection render %s mutation did not alter the fixture", field)
+	}
+	return mutated
+}
+
+func TestSelectionRenderFixtureRejectsUnknownFields(t *testing.T) {
+	mutated := append(append([]byte(nil), selectionRenderData...), []byte("\nunknownField: true\n")...)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted an unknown field")
+	}
+}
+
+func TestSelectionRenderFixtureRejectsTrailingDocuments(t *testing.T) {
+	mutated := append(append([]byte(nil), selectionRenderData...), []byte("\n---\n{}\n")...)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a trailing document")
+	}
+}
+
+func TestSelectionRenderFixturePinsCaseCount(t *testing.T) {
+	mutated := mutateSelectionRenderCount(t, "expectedCaseCount", expectedSelectionRenderCaseCount)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a changed case-count declaration")
+	}
+}
+
+func TestSelectionRenderFixturePinsSessionCount(t *testing.T) {
+	mutated := mutateSelectionRenderCount(t, "expectedSessionCount", expectedSelectionRenderSessionCount)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a changed session-count declaration")
+	}
+}
+
+func TestSelectionRenderFixturePinsHarnessCount(t *testing.T) {
+	mutated := mutateSelectionRenderCount(t, "expectedHarnessCount", expectedSelectionRenderHarnessCount)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a changed harness-count declaration")
+	}
+}
+
+func TestSelectionRenderFixturePinsPreviewAssertionCount(t *testing.T) {
+	mutated := mutateSelectionRenderCount(t, "expectedRowCount", expectedSelectionRenderPreviewAssertionCount)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a changed preview-assertion count")
+	}
+}
+
+func TestSelectionRenderFixturePinsTextAssertionCount(t *testing.T) {
+	// The first expectedRowCount belongs to renderAssertions; mutate it without
+	// changing the independent preview assertion declaration.
+	mutated := mutateSelectionRenderCount(t, "expectedRowCount", expectedSelectionRenderTextAssertionCount)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a changed text-assertion count")
+	}
+}
+
+func TestSelectionRenderFixturePinsBothThemeStateCount(t *testing.T) {
+	mutated := mutateSelectionRenderCount(t, "expectedBothThemeStateCount", expectedSelectionRenderBothThemeStateCount)
+	if _, err := decodeSelectionRender(mutated); err == nil {
+		t.Fatal("selection render fixture accepted a changed both-theme state count")
 	}
 }

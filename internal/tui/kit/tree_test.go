@@ -21,6 +21,7 @@ var treePropagationData []byte
 // on load, so their fixture State (if any) is ignored.
 type fixtureTreeNode struct {
 	ID       string            `yaml:"id"`
+	Label    string            `yaml:"label"`
 	State    string            `yaml:"state"`
 	Children []fixtureTreeNode `yaml:"children"`
 }
@@ -84,7 +85,11 @@ func buildForest(t *testing.T, nodes []fixtureTreeNode) []*kit.TreeNode {
 	t.Helper()
 	var out []*kit.TreeNode
 	for _, n := range nodes {
-		node := &kit.TreeNode{ID: n.ID, State: parseFixtureState(t, n.State), Label: n.ID}
+		label := n.Label
+		if label == "" {
+			label = n.ID
+		}
+		node := &kit.TreeNode{ID: n.ID, State: parseFixtureState(t, n.State), Label: label}
 		node.Children = buildForest(t, n.Children)
 		out = append(out, node)
 	}

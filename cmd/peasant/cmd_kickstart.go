@@ -25,12 +25,27 @@ import (
 )
 
 type kickstartCommandDeps struct {
-	discover     func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
-	getwd        func() (string, error)
-	run          func(ftue.WizardModel) error
-	runFlow      func(tea.Model) error
-	flowIngest   kickstart.IngestFunc
-	existingUser func(string) string
+	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
+	getwd    func() (string, error)
+	// run is the retained legacy terminal boundary. Production selects runFlow;
+	// tests for still-shipping legacy behavior deliberately omit runFlow.
+	run func(ftue.WizardModel) error
+	// runFlow is the guided orchestration selected by the production builder.
+	// runModel is only its terminal execution boundary, so tests can inspect the
+	// real mounted Program without replacing the production path decision.
+	runFlow  func(*cobra.Command, kickstartCommandDeps, string, ftue.ProviderInventory, []ftue.SessionListing) error
+	runModel func(tea.Model) error
+	// readRetention is the external Claude settings read used before Flow mounts.
+	readRetention func() (int, bool)
+	existingUser  func(string) string
+	// alreadyConnected reads the same isolated credential directory the command
+	// was configured with; localIngest returns one runner and its exact
+	// concurrent progress source so Program never observes a different attempt.
+	alreadyConnected func(configDir string) bool
+	localIngest      func(*cobra.Command, string, []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource)
+	// flowIngest is a focused test seam for the post-save callback. Production
+	// uses localIngest so the runner and progress source always share one attempt.
+	flowIngest kickstart.IngestFunc
 }
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
@@ -41,10 +56,16 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 			_, err := tea.NewProgram(model).Run()
 			return err
 		},
-		runFlow: func(model tea.Model) error {
+		runFlow: runKickstartFlow,
+		runModel: func(model tea.Model) error {
 			_, err := tea.NewProgram(model).Run()
 			return err
 		},
+		readRetention: ftue.ReadClaudeCleanupDays,
+		alreadyConnected: func(configDir string) bool {
+			return villageAlreadyConnected(configDir)
+		},
+		localIngest: kickstartLocalIngest,
 		existingUser: func(configDir string) string {
 			if creds, err := auth.LoadCredentialsFrom(configDir); err == nil && creds != nil && creds.IsValid() {
 				return creds.Username
@@ -110,14 +131,15 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			spinner.Stop()
 
 			// Mount the rebuilt onboarding: the declarative settings.Flow rendered
-			// on the kit, sequenced OAuth -> Flow -> Ingest. This is the default
+			// on the kit, sequenced through optional login/visibility guidance,
+			// local ingest, and persistent completion. This is the default
 			// production entry point (deps.runFlow is wired). The legacy page-based
 			// FTUE wizard is retained as a deprecation candidate and is reached only
 			// when no flow runner is injected (its direct coverage drives
 			// runLegacyFTUEWizard); its view layer is retired in a separate,
 			// user-confirmed step.
 			if deps.runFlow != nil {
-				if err := runKickstartFlow(cmd, deps, configPath, inventory, sessions); err != nil {
+				if err := deps.runFlow(cmd, deps, configPath, inventory, sessions); err != nil {
 					return fmt.Errorf("setup flow failed: %w", err)
 				}
 				return nil
@@ -182,7 +204,7 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 	}
 
 	// 2. Credentials.
-	if err := auth.ClearCredentials(); err != nil {
+	if err := auth.ClearCredentialsFrom(configDirOverride(cmd)); err != nil {
 		return fmt.Errorf("reset credentials: %w", err)
 	}
 
@@ -498,8 +520,17 @@ func (a *progressAdapter) Snapshot() map[string]ftue.StageProgress {
 // after the user confirms import. The config is re-loaded at call time so it picks
 // up the file the wizard just saved.
 func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRunnerFunc, ftue.ProgressSnapshot) {
+	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
+	return runner, &progressAdapter{state: progress}
+}
+
+// buildFTUEIngestRunnerWithProgress constructs the retained runner together with
+// the exact ProgressState it writes. Guided kickstart consumes the native state
+// through its narrow ProgressSource boundary; the legacy wizard receives the
+// compatibility adapter above. Both presentations therefore observe the same
+// pipeline run rather than parallel counters.
+func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (ftue.IngestRunnerFunc, *ingest.ProgressState) {
 	progState := ingest.NewProgressState()
-	adapter := &progressAdapter{state: progState}
 	return func(ctx context.Context, answers ftue.WizardAnswers) (*ftue.IngestResult, error) {
 		// Suppress log output so it doesn't corrupt the TUI alt-screen.
 		origLogger := slog.Default()
@@ -537,13 +568,7 @@ func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRu
 
 		// Map selected sessions to AllowedSessionIDs filter, expanding
 		// parent sessions to include their subagent children.
-		allowedIDs := expandAllowedSessionIDs(answers.EffectiveSelectedSessions())
-		if allowedIDs == nil && hasRestrictedProviderSelection(answers.ProviderSelections) {
-			// An explicitly empty individual selection means import nothing. A nil
-			// map means allow all to Pipeline, so preserve the empty selection as a
-			// non-nil map.
-			allowedIDs = map[ingest.SessionID]bool{}
-		}
+		allowedIDs := kickstartAllowedSessionIDs(answers)
 
 		pipelineCfg := ingest.PipelineConfig{
 			Sources:            sources,
@@ -597,7 +622,20 @@ func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRu
 			Duration:       result.Duration,
 			ProviderCounts: providerCounts,
 		}, nil
-	}, adapter
+	}, progState
+}
+
+// kickstartAllowedSessionIDs preserves the difference between unrestricted
+// legacy wizard input and a committed selected-mode policy that currently
+// matches no discovered sessions. Pipeline uses nil to mean allow all, so the
+// latter must cross this adapter as an allocated empty set.
+func kickstartAllowedSessionIDs(answers ftue.WizardAnswers) map[ingest.SessionID]bool {
+	allowed := expandAllowedSessionIDs(answers.EffectiveSelectedSessions())
+	if allowed == nil && (answers.SelectionMode == config.SelectionModeSelected ||
+		hasRestrictedProviderSelection(answers.ProviderSelections)) {
+		return map[ingest.SessionID]bool{}
+	}
+	return allowed
 }
 
 func hasRestrictedProviderSelection(selections []ftue.ProviderSelection) bool {

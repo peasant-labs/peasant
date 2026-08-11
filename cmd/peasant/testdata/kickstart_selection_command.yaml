@@ -1,0 +1,82 @@
+# Non-empty session selection through the real kickstart command mount. The
+# same raw discovery listing also mounts the config editor so both presentations
+# must derive saved tracking and current checkbox state in the canonical field.
+expectedCaseCount: 1
+expectedSessionCount: 2
+expectedMutationProbeCount: 1
+expectedRenderCaseCount: 8
+cases:
+  - name: command-mount-buffers-a-global-search-toggle-before-consent
+    mutationProbe: true
+    listings:
+      - harness: claude-code
+        projectName: example/tool
+        gitRemote: "git@github.com:example/tool.git"
+        branch: main
+        title: keep session
+        sessionId: "3f1c9a52-1c45-4ca6-8e2a-3ef4db896a44"
+        turnCount: 2
+      - harness: claude-code
+        projectName: example/tool
+        gitRemote: "git@github.com:example/tool.git"
+        branch: main
+        title: toggle target
+        sessionId: "8d2e4b71-9ec4-4c35-8208-f31b80179f68"
+        turnCount: 3
+    initialSelection:
+      mode: all
+      autoIngestNewBranches: true
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:example/tool.git"
+              clonePaths: ["__MATERIALIZED_CLONE_PATH__"]
+          exclusions:
+            sessions: ["8d2e4b71-9ec4-4c35-8208-f31b80179f68"]
+    configExpectedSelection:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          sessions: ["3f1c9a52-1c45-4ca6-8e2a-3ef4db896a44"]
+    selectionInputs:
+      - action: search
+      - text: t
+      - text: o
+      - text: g
+      - text: g
+      - text: l
+      - text: e
+      - action: keep-filter
+      - action: down
+      - action: down
+      - action: toggle
+      - action: clear-filter
+    beforeConsentContains:
+      - review your changes
+      - "selection: only the buffered projects, branches, and sessions"
+      - "changed: transcripts"
+      - publish nothing
+    rowAssertions:
+      - label: keep session
+        wantContains: ["[✓]", tracked]
+      - label: toggle target
+        wantContains: ["[ ]", tracked]
+    parityRowAssertions:
+      - label: keep session
+        wantContains: ["[✓]", tracked]
+      - label: toggle target
+        wantContains: ["[ ]"]
+        wantMissing: [tracked]
+renderCases:
+  - {name: config-dark-narrow, surface: config, theme: dark, layout: narrow, width: 80, height: 24}
+  - {name: config-dark-wide, surface: config, theme: dark, layout: wide, width: 120, height: 40}
+  - {name: config-light-narrow, surface: config, theme: light, layout: narrow, width: 80, height: 24}
+  - {name: config-light-wide, surface: config, theme: light, layout: wide, width: 120, height: 40}
+  - {name: kickstart-dark-narrow, surface: kickstart, theme: dark, layout: narrow, width: 80, height: 24}
+  - {name: kickstart-dark-wide, surface: kickstart, theme: dark, layout: wide, width: 120, height: 40}
+  - {name: kickstart-light-narrow, surface: kickstart, theme: light, layout: narrow, width: 80, height: 24}
+  - {name: kickstart-light-wide, surface: kickstart, theme: light, layout: wide, width: 120, height: 40}

@@ -614,9 +614,7 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 				for _, key := range testCase.EditKeys {
 					mounted = updateKickstartGateModel(t, mounted, key)
 				}
-				for index := 0; index < 12 && !mounted.Program().OnReceipt(); index++ {
-					mounted = updateKickstartGateModel(t, mounted, commitGateKey("tab"))
-				}
+				mounted = advanceKickstartGateModelToReceipt(t, mounted)
 				if !mounted.Program().OnReceipt() {
 					return fmt.Errorf("kickstart flow did not reach review and save")
 				}
@@ -646,7 +644,7 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 
 			deps := defaultKickstartCommandDeps()
 			deps.flowIngest = flowIngest
-			deps.runFlow = driveFlow
+			deps.runModel = driveFlow
 			cmd := mountTestCmd(t, t.TempDir())
 			if err := runKickstartFlow(cmd, deps, configPath, ftue.ProviderInventory{}, listings); err != nil {
 				t.Fatalf("run %s mounted kickstart flow: %v", testCase.RunState, err)
@@ -778,6 +776,18 @@ func startKickstartGateModel(t *testing.T, model kickstart.Model) kickstart.Mode
 	}
 	if model.Program().Phase() != kickstart.PhaseFlow {
 		t.Fatalf("mounted kickstart phase=%s, want flow", model.Program().Phase())
+	}
+	return model
+}
+
+func advanceKickstartGateModelToReceipt(t *testing.T, model kickstart.Model) kickstart.Model {
+	t.Helper()
+	for step := 0; step < 24 && !model.Program().OnReceipt(); step++ {
+		key := commitGateKey("tab")
+		if model.Program().Phase() == kickstart.PhaseVisibility {
+			key = commitGateKeyEnter
+		}
+		model = updateKickstartGateModel(t, model, key)
 	}
 	return model
 }

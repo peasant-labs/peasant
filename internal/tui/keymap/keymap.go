@@ -22,6 +22,8 @@
 package keymap
 
 import (
+	"unicode"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
@@ -75,6 +77,9 @@ const (
 	ActionNextProject
 	// ActionPrevProject moves the cursor to the previous top-level project.
 	ActionPrevProject
+	// ActionSearch starts one hierarchy-wide text search. Components that expose
+	// it search every label they own rather than requiring a separate scope.
+	ActionSearch
 
 	// ActionFocusPaneLeft moves focus to the LEFT pane of a split surface.
 	// It is pane navigation, not field navigation: a split is one field, and
@@ -91,10 +96,12 @@ const (
 	ActionPrevField
 	// ActionToggle toggles/selects the focused item.
 	ActionToggle
-	// ActionSelectAll selects every selectable item in the current scope.
+	// ActionSelectAll toggles every selectable item represented by the current
+	// visible projection.
 	ActionSelectAll
-	// ActionSelectUnderProject selects every session under the project the
-	// cursor sits in. It is an operation, not navigation.
+	// ActionSelectUnderProject selects every selectable node represented under
+	// the current projected project containing the cursor. It is an operation,
+	// not navigation.
 	ActionSelectUnderProject
 
 	// ActionExpand expands a collapsed tree node. Deliberately shares
@@ -107,23 +114,35 @@ const (
 	// ActionCollapse collapses an expanded tree node. See ActionExpand's
 	// doc for why it shares physical keys with ActionLeft.
 	ActionCollapse
-	// ActionExpandLevel expands every branch of the project the cursor sits
-	// in - the whole branch level at once, not just the hovered node.
+	// ActionExpandLevel expands every controllable branch in the current
+	// projected project, not just the hovered node.
 	ActionExpandLevel
-	// ActionCollapseLevel collapses every branch of the project the cursor
-	// sits in.
+	// ActionCollapseLevel collapses every controllable branch in the current
+	// projected project.
 	ActionCollapseLevel
-	// ActionExpandAll expands every node in the whole forest.
+	// ActionExpandAll expands every controllable node represented by the current
+	// visible projection.
 	ActionExpandAll
-	// ActionCollapseAll collapses every node in the whole forest.
+	// ActionCollapseAll collapses every controllable node represented by the
+	// current visible projection.
 	ActionCollapseAll
 
 	// ActionSave persists the current state (e.g. a settings Flow page).
 	ActionSave
 	// ActionHelp opens/closes the full keybinding help overlay.
 	ActionHelp
-	// ActionFilter enters filter/search-text mode.
+	// ActionFilter cycles the harness facet. Hierarchy-wide text search belongs
+	// to ActionSearch.
 	ActionFilter
+	// ActionDeleteFilter removes the previous character while filter text is
+	// being edited.
+	ActionDeleteFilter
+	// ActionKeepFilter exits filter editing while retaining the current query.
+	ActionKeepFilter
+	// ActionClearFilter exits filter editing and clears the current query. It
+	// remains available while a kept query is active, so users always have a
+	// visible way back to the unfiltered forest.
+	ActionClearFilter
 )
 
 // AllActions returns the full closed set of real (non-ActionUnknown)
@@ -146,6 +165,7 @@ func AllActions() []ActionID {
 		ActionBottom,
 		ActionNextProject,
 		ActionPrevProject,
+		ActionSearch,
 		ActionFocusPaneLeft,
 		ActionFocusPaneRight,
 		ActionNextField,
@@ -162,6 +182,9 @@ func AllActions() []ActionID {
 		ActionSave,
 		ActionHelp,
 		ActionFilter,
+		ActionDeleteFilter,
+		ActionKeepFilter,
+		ActionClearFilter,
 	}
 }
 
@@ -171,10 +194,12 @@ func (a ActionID) IsValid() bool {
 	case ActionQuit, ActionConfirm, ActionBack,
 		ActionUp, ActionDown, ActionLeft, ActionRight, ActionPageUp, ActionPageDown,
 		ActionTop, ActionBottom, ActionNextProject, ActionPrevProject,
+		ActionSearch,
 		ActionFocusPaneLeft, ActionFocusPaneRight,
 		ActionNextField, ActionPrevField, ActionToggle, ActionSelectAll, ActionSelectUnderProject,
 		ActionExpand, ActionCollapse, ActionExpandLevel, ActionCollapseLevel, ActionExpandAll, ActionCollapseAll,
-		ActionSave, ActionHelp, ActionFilter:
+		ActionSave, ActionHelp, ActionFilter,
+		ActionDeleteFilter, ActionKeepFilter, ActionClearFilter:
 		return true
 	default:
 		return false
@@ -232,6 +257,8 @@ func (a ActionID) String() string {
 		return "next-project"
 	case ActionPrevProject:
 		return "prev-project"
+	case ActionSearch:
+		return "search"
 	case ActionFocusPaneLeft:
 		return "focus-pane-left"
 	case ActionFocusPaneRight:
@@ -264,6 +291,12 @@ func (a ActionID) String() string {
 		return "help"
 	case ActionFilter:
 		return "filter"
+	case ActionDeleteFilter:
+		return "delete-filter"
+	case ActionKeepFilter:
+		return "keep-filter"
+	case ActionClearFilter:
+		return "clear-filter"
 	default:
 		return "unknown"
 	}
@@ -356,6 +389,10 @@ func Default() Keymap {
 			key.WithKeys("shift+k", "K"),
 			key.WithHelp("shift+k", "prev project"),
 		),
+		ActionSearch: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search"),
+		),
 		// Vim window-navigation keys for the two panes of a split surface.
 		//
 		// ctrl+h is worth a note, because it is famously ambiguous: the keystroke
@@ -365,8 +402,9 @@ func Default() Keymap {
 		// case, and what kitty's and xterm's extended protocols encode
 		// unambiguously - the two are distinct here and this binding is live. On
 		// a terminal configured to send 0x08 for backspace they are one keystroke
-		// no software can separate; there, backspace focuses the left pane, which
-		// is harmless because no split surface takes text input.
+		// no software can separate. PreviewSplit therefore treats 0x08 as filter
+		// deletion only while its already-focused tree is editing search text; from
+		// the preview it retains the focus-left meaning.
 		ActionFocusPaneLeft: key.NewBinding(
 			key.WithKeys("ctrl+h"),
 			key.WithHelp("ctrl+h", "focus left pane"),
@@ -431,6 +469,18 @@ func Default() Keymap {
 			key.WithKeys("f"),
 			key.WithHelp("f", "filter"),
 		),
+		ActionDeleteFilter: key.NewBinding(
+			key.WithKeys("backspace", "ctrl+h"),
+			key.WithHelp("backspace", "delete"),
+		),
+		ActionKeepFilter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "keep filter"),
+		),
+		ActionClearFilter: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "clear filter"),
+		),
 	}
 }
 
@@ -452,6 +502,28 @@ func Match(km Keymap, msg tea.KeyPressMsg, avail Availability) (ActionID, bool) 
 		}
 	}
 	return ActionUnknown, false
+}
+
+// HasPrintableBinding reports whether action has a key that a focused text
+// editor receives as printable input. It lets a presentation remove shadowed
+// actions from its effective Availability while editing, so dispatch, footer,
+// and help all describe the same keys. "space" is the one printable key whose
+// binding name is not itself a single rune.
+func HasPrintableBinding(km Keymap, action ActionID) bool {
+	binding, ok := km[action]
+	if !ok {
+		return false
+	}
+	for _, name := range binding.Keys() {
+		if name == "space" {
+			return true
+		}
+		runes := []rune(name)
+		if len(runes) == 1 && unicode.IsPrint(runes[0]) {
+			return true
+		}
+	}
+	return false
 }
 
 // mustBinding returns km's binding for action and whether one exists. It

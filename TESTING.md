@@ -350,6 +350,75 @@ Environment overrides:
 Full flow, sandbox/guards, env overrides, and fixture provenance:
 [`docs/e2e.md`](docs/e2e.md) and [`docs/e2e-fixture.md`](docs/e2e-fixture.md).
 
+## Guided TUI screenshot harness (manual prototype)
+
+The repository contains an opt-in, manually invoked harness for visual review of the mounted
+guided setup UI. It exercises the real production paths without replacing them with screenshot-only
+test doubles: `settings.Flow` renders the guided settings sections, and `kickstart.Program` mounts
+the selection states. The harness is a prototype, not an exhaustive terminal-page harness yet.
+
+The capture source is the strict synthetic fixture at
+`cmd/peasant-guided-screenshots/testdata/captures.yaml`. It supplies only scrubbed project and
+session-shaped values, and the harness creates isolated temporary config files before mounting the
+models. The loader rejects unknown fields, trailing YAML documents, duplicate or missing matrix
+entries, and changed count declarations before any PNG is published. No local config, transcript,
+repository, credential, or other user data is read into the evidence.
+
+This harness is outside the default tests and builds. All command and test files are guarded by the
+opt-in `guided_screenshots` build tag, so `go test ./...`, `make check`, normal `go build`/`make
+build`, and the production Peasant binary do not compile or run it.
+
+### Running the harness
+
+Run the fixture and mounted-render tests explicitly:
+
+```bash
+make guided-screenshots-test
+```
+
+To generate PNG evidence, enter the Nix development shell first. It provides the `freeze` executable
+through the `charm-freeze` package:
+
+```bash
+nix develop
+make guided-screenshots
+```
+
+The normal capture requires a clean Peasant worktree so its directory name identifies the committed
+source revision. During harness development, an intentionally disposable capture may be generated
+from uncommitted changes with:
+
+```bash
+go run -tags=guided_screenshots ./cmd/peasant-guided-screenshots --allow-dirty
+```
+
+Dirty captures use a `-dirty` suffix in their directory name and must not be treated as commit
+evidence. The command prints each output path and fails closed if the fixture, mounted render,
+Freeze invocation, or PNG dimension check fails.
+
+### Contact sheets and evidence review
+
+The harness publishes three contact sheets under the commit-derived directory
+`out/test/screenshots/peasant-guided-final-<commit>/`:
+
+| File | PNG dimensions | Contents |
+|------|----------------|----------|
+| `guided-dark.png` | `1800x3300` | The five guided sections in the dark theme: auto-ingest, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
+| `guided-light.png` | `1800x3300` | The same five guided sections and terminal sizes in the light theme. |
+| `selection.png` | `1800x1400` | The mounted selection view in the dark theme, showing the default and global-search states at `80x24` and `120x40`. |
+
+The selection fixture contains five synthetic sessions across two harnesses, with one session marked
+as already ingested. The default and search states therefore exercise the mounted hierarchy and
+global search without depending on a developer's session history. The guided matrix contains 20
+captures: five sections x two themes x two terminal sizes.
+
+The generated directory is local evidence and is ignored by git at `/out/test/screenshots/`; do not
+commit the PNGs. Manually inspect all three sheets after generation. Review both themes, both
+terminal sizes, every guided section, and both selection states for clipped or overlapping content,
+full-line styling, heading-first guidance, readable privacy before/after rows, usable selection
+search, and blank or stale-looking panels. A passing command proves fixture coverage and image
+dimensions; it does not replace this visual review.
+
 ## TypeScript unit tests (verified)
 
 TypeScript tests use Vitest and import from the same annotation fixture file (`web/src/test/fixtures/annotations.ts`):

@@ -1,0 +1,19 @@
+expectedCaseCount: 2
+expectedModalCaseCount: 1
+expectedTextPreservationCount: 1
+expectedCommitCount: 1
+cases:
+  - name: tree-result-arrives-before-discard-modal-cancel
+    scenario: discard-modal
+    initialText: "https://village.example/modal?q=preserve"
+    sessionID: async-modal-session
+    expectLoadCount: 1
+    expectReady: true
+    expectCommit: true
+  - name: non-current-prepopulated-text-survives-tree-result
+    scenario: non-current-text
+    initialText: "https://village.example/non-current?q=preserve"
+    sessionID: async-text-session
+    expectLoadCount: 1
+    expectReady: true
+    expectCommit: false

@@ -193,6 +193,13 @@ func TestDefault_Bindings(t *testing.T) {
 //go:embed testdata/match_dispatch.yaml
 var matchDispatchFixtureData []byte
 
+const (
+	requiredMatchDispatchCaseCount       = 42
+	requiredRemovedPrevScopeCaseName     = "removed-prev-scope-key-does-not-dispatch"
+	requiredRemovedNextScopeCaseName     = "removed-next-scope-key-does-not-dispatch"
+	requiredGlobalSearchDispatchCaseName = "dispatches-search"
+)
+
 type matchDispatchDocument struct {
 	ExpectedCaseCount int                 `yaml:"expectedCaseCount"`
 	Cases             []matchDispatchCase `yaml:"cases"`
@@ -220,10 +227,10 @@ func loadMatchDispatchFixture(data []byte) (matchDispatchDocument, error) {
 		}
 		return doc, fmt.Errorf("testdata/match_dispatch.yaml must hold exactly one YAML document: %w", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
+	if doc.ExpectedCaseCount != requiredMatchDispatchCaseCount || len(doc.Cases) != requiredMatchDispatchCaseCount {
 		return doc, fmt.Errorf(
-			"testdata/match_dispatch.yaml: expectedCaseCount=%d but found %d cases (and must be non-zero)",
-			doc.ExpectedCaseCount, len(doc.Cases))
+			"testdata/match_dispatch.yaml: expectedCaseCount=%d, found=%d, required=%d",
+			doc.ExpectedCaseCount, len(doc.Cases), requiredMatchDispatchCaseCount)
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Cases {
@@ -232,7 +239,26 @@ func loadMatchDispatchFixture(data []byte) (matchDispatchDocument, error) {
 		}
 		seen[c.Name] = true
 	}
+	if !seen[requiredRemovedPrevScopeCaseName] {
+		return doc, fmt.Errorf("testdata/match_dispatch.yaml: required case %q is missing", requiredRemovedPrevScopeCaseName)
+	}
+	if !seen[requiredRemovedNextScopeCaseName] {
+		return doc, fmt.Errorf("testdata/match_dispatch.yaml: required case %q is missing", requiredRemovedNextScopeCaseName)
+	}
+	if !seen[requiredGlobalSearchDispatchCaseName] {
+		return doc, fmt.Errorf("testdata/match_dispatch.yaml: required case %q is missing", requiredGlobalSearchDispatchCaseName)
+	}
 	return doc, nil
+}
+
+func TestMatchDispatchFixtureRejectsCoordinatedRemovedScopeRowRemoval(t *testing.T) {
+	mutated := mutateFixtureFragment(t, "testdata/match_dispatch.yaml", matchDispatchFixtureData,
+		[]byte("expectedCaseCount: 42"), []byte("expectedCaseCount: 41"))
+	mutated = mutateFixtureFragment(t, "testdata/match_dispatch.yaml", mutated,
+		[]byte("  - name: removed-prev-scope-key-does-not-dispatch\n    available: [search]\n    pressedKey: \"[\"\n    wantOK: false\n    wantAction: \"\"\n"), nil)
+	if _, err := loadMatchDispatchFixture(mutated); err == nil {
+		t.Fatal("match-dispatch fixture accepted removal of a retired-scope regression row coordinated with its declared count")
+	}
 }
 
 // TestMatch_DispatchTable drives keymap.Match against every fixture case,

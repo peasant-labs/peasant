@@ -1,12 +1,21 @@
 package keymap_test
 
 import (
+	"bytes"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 )
+
+func mutateFixtureFragment(t *testing.T, fixture string, data, old, replacement []byte) []byte {
+	t.Helper()
+	if count := bytes.Count(data, old); count != 1 {
+		t.Fatalf("%s mutation source %q occurs %d times, want exactly one", fixture, old, count)
+	}
+	return bytes.Replace(data, old, replacement, 1)
+}
 
 // actionsByName maps every keymap.ActionID's String() name back to its
 // ActionID, built fresh from keymap.AllActions() so it can never drift from

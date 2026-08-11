@@ -2,9 +2,10 @@
 # row under one project root at the given width and asserts what the row does
 # and does not say. The annotations are display-only Meta a TreeSource attached:
 # childCount summarises the subagent sessions a parent groups (the parent stays
-# a leaf row), and ingested marks a session the local store already holds.
+# a leaf row), ingested marks a session the local store already holds, tracked
+# records the previous saved selection, and state is the current checkbox.
 # expectedCaseCount is the row-count guard.
-expectedCaseCount: 9
+expectedCaseCount: 13
 cases:
   - name: two-subagents-read-as-a-plural-count
     label: parent session
@@ -93,3 +94,35 @@ cases:
       - "session title"
     wantMissing:
       - "child session"
+
+  - name: saved-tracked-and-currently-selected-are-separate-signals
+    label: saved selected row
+    tracked: true
+    state: checked
+    width: 72
+    wantContains: ["[✓]", tracked, saved selected row]
+    wantMissing: [already imported]
+
+  - name: a-saved-row-remains-tracked-after-current-checkbox-clear
+    label: saved cleared row
+    tracked: true
+    state: unchecked
+    width: 72
+    wantContains: ["[ ]", tracked, saved cleared row]
+    wantMissing: [already imported]
+
+  - name: imported-does-not-imply-saved-tracked
+    label: local current row
+    ingested: true
+    state: checked
+    width: 72
+    wantContains: ["[✓]", already imported]
+    wantMissing: [tracked]
+
+  - name: saved-and-imported-survive-a-current-checkbox-clear
+    label: combined cleared row
+    ingested: true
+    tracked: true
+    state: unchecked
+    width: 86
+    wantContains: ["[ ]", tracked, already imported]

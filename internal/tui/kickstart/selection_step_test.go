@@ -27,16 +27,6 @@ func selectionStepView(t *testing.T, width, height int) string {
 	})
 	p.SetSize(width, height)
 	p = declineOAuth(t, p)
-
-	// Run the flow's startup commands (the tree scan and the first preview load)
-	// and feed every message back, exactly as the runtime would.
-	for _, msg := range collectMsgs(p.Init()) {
-		var cmd tea.Cmd
-		p, cmd = p.Update(msg)
-		for _, follow := range collectMsgs(cmd) {
-			p, _ = p.Update(follow)
-		}
-	}
 	if p.Phase() != kickstart.PhaseFlow {
 		t.Fatalf("phase = %s, want flow", p.Phase())
 	}
@@ -90,9 +80,6 @@ func TestSelectionStep_PreviewFollowsTheCursor(t *testing.T) {
 	})
 	p.SetSize(120, 30)
 	p = declineOAuth(t, p)
-	for _, msg := range collectMsgs(p.Init()) {
-		p, _ = p.Update(msg)
-	}
 
 	// Rows are project, branch, then the two parent sessions: step onto the
 	// already-imported one and drain the preview load it triggers.

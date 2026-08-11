@@ -29,11 +29,15 @@ func selectionAccessor() Accessor[TreeSelection] {
 }
 
 func treeRegistry(src kit.TreeSource) Registry {
+	return treeRegistryWithLabel(src, "transcripts")
+}
+
+func treeRegistryWithLabel(src kit.TreeSource, label string) Registry {
 	return Registry{Sections: []Section{
 		{
 			Key:    "transcripts",
 			Title:  "select transcripts",
-			Fields: []Field{Tree("selection", "transcripts", selectionAccessor(), src, WithSelectionRestoration())},
+			Fields: []Field{Tree("selection", label, selectionAccessor(), src, WithSelectionRestoration())},
 		},
 	}}
 }
@@ -269,7 +273,7 @@ func TestFlow_ConflictBlocksReceiptWithActionableError(t *testing.T) {
 		t.Fatalf("NewDraft: %v", err)
 	}
 	src := scannerfix.NewFixtureTreeSource("conflict")
-	f := NewFlow(theme.New(theme.ModeDark), treeRegistry(src), d)
+	f := NewFlow(theme.New(theme.ModeDark), treeRegistryWithLabel(src, ""), d)
 	f.SetSize(80, 20)
 	f = drainInit(f)
 
@@ -282,10 +286,16 @@ func TestFlow_ConflictBlocksReceiptWithActionableError(t *testing.T) {
 	if f.Err() == nil {
 		t.Fatalf("no error surfaced for the conflict")
 	}
-	for _, part := range []string{"what:", "why:", "fix:", "conflict"} {
-		if !strings.Contains(f.Err().Error(), part) {
-			t.Fatalf("error not actionable (missing %q): %v", part, f.Err())
-		}
+	errorText := f.Err().Error()
+	if !strings.Contains(errorText, "the transcript selection still contains") || strings.Contains(errorText, `selection ""`) {
+		t.Fatalf("blank presentation label leaked into conflict wording: %v", f.Err())
+	}
+	assertActionableScreenError(t, f.Err())
+	if !strings.Contains(errorText, "conflict") {
+		t.Fatalf("conflict error omitted its cause: %v", f.Err())
+	}
+	if !strings.Contains(errorText, "when: validating the final review before the atomic config commit.") {
+		t.Fatalf("conflict error omitted the commit-stage timing: %v", f.Err())
 	}
 	// Fail closed: nothing written.
 	if string(before) != string(mustRead(t, path)) {

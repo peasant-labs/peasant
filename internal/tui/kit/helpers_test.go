@@ -2,9 +2,11 @@ package kit_test
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -50,53 +52,65 @@ func themeForName(t *testing.T, name string) theme.Theme {
 // actually press.
 func keyPress(t *testing.T, s string) tea.KeyPressMsg {
 	t.Helper()
+	msg, ok := parseFixtureKeyPress(s)
+	if !ok {
+		t.Fatalf("keyPress: no mapping for %q", s)
+	}
+	return msg
+}
+
+func parseFixtureKeyPress(s string) (tea.KeyPressMsg, bool) {
 	switch s {
 	case "enter":
-		return tea.KeyPressMsg{Code: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}, true
 	case "esc":
-		return tea.KeyPressMsg{Code: tea.KeyEscape}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}, true
 	case "space":
-		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}, true
 	case "up":
-		return tea.KeyPressMsg{Code: tea.KeyUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp}, true
 	case "down":
-		return tea.KeyPressMsg{Code: tea.KeyDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown}, true
 	case "left":
-		return tea.KeyPressMsg{Code: tea.KeyLeft}
+		return tea.KeyPressMsg{Code: tea.KeyLeft}, true
 	case "right":
-		return tea.KeyPressMsg{Code: tea.KeyRight}
+		return tea.KeyPressMsg{Code: tea.KeyRight}, true
 	case "a":
-		return tea.KeyPressMsg{Code: 'a', Text: "a"}
+		return tea.KeyPressMsg{Code: 'a', Text: "a"}, true
 	case "tab":
-		return tea.KeyPressMsg{Code: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}, true
 	case "shift+tab":
-		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, true
 	case "pgup":
-		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}, true
 	case "pgdown":
-		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}, true
 	case "ctrl+h":
-		return tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}
+		return tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}, true
 	case "ctrl+l":
-		return tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
+		return tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, true
 	case "ctrl+p":
-		return tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}
+		return tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, true
 	case "ctrl+o":
-		return tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
+		return tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, true
 	case "backspace":
-		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}, true
 	case "shift+g":
-		return tea.KeyPressMsg{Code: 'G', Text: "G"}
+		return tea.KeyPressMsg{Code: 'G', Text: "G"}, true
 	case "ctrl+shift+l":
-		return tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift}
+		return tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl | tea.ModShift}, true
 	case "ctrl+shift+h":
-		return tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl | tea.ModShift}
+		return tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl | tea.ModShift}, true
 	default:
-		if len(s) == 1 {
-			return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
+		if s == "" || !utf8.ValidString(s) {
+			return tea.KeyPressMsg{}, false
 		}
-		t.Fatalf("keyPress: no mapping for %q", s)
-		return tea.KeyPressMsg{}
+		cluster, _ := ansi.FirstGraphemeCluster(s, ansi.GraphemeWidth)
+		if cluster != s {
+			return tea.KeyPressMsg{}, false
+		}
+		value, _ := utf8.DecodeRuneInString(cluster)
+		return tea.KeyPressMsg{Code: value, Text: cluster}, true
 	}
 }
 

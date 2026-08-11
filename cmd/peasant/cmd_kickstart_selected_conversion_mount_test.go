@@ -376,7 +376,7 @@ func runMountedLegacySelectedJourney(
 		ingestCalls++
 		return &ftue.IngestResult{}, nil
 	}
-	deps.runFlow = func(model tea.Model) error {
+	deps.runModel = func(model tea.Model) error {
 		var ok bool
 		mounted, ok = model.(kickstart.Model)
 		if !ok {
@@ -386,9 +386,7 @@ func runMountedLegacySelectedJourney(
 		if current := mountedLegacyReadFile(t, configPath); !bytes.Equal(current, before) {
 			return fmt.Errorf("selected legacy config changed before consent\n before: %s\ncurrent: %s", before, current)
 		}
-		for index := 0; index < 12 && !mounted.Program().OnReceipt(); index++ {
-			mounted = updateKickstartGateModel(t, mounted, commitGateKey("tab"))
-		}
+		mounted = advanceKickstartGateModelToReceipt(t, mounted)
 		if !mounted.Program().OnReceipt() {
 			return fmt.Errorf("selected legacy flow did not reach review and save")
 		}

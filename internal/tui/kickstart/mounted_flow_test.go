@@ -325,7 +325,6 @@ func TestMountedKickstartFlowUsesPhysicalSelectionEvidence(t *testing.T) {
 			})
 			program.SetSize(120, 28)
 			program = declineOAuth(t, program)
-			program = drainProgram(program, program.Init())
 
 			if source.loadCount() != 1 {
 				t.Fatalf("initial mounted flow completed %d scanner loads, want 1", source.loadCount())

@@ -1,0 +1,120 @@
+expectedExampleLineCount: 16
+expectedReceiptValueCount: 14
+expectedReceiptEffectCount: 4
+expectedErrorLineCount: 6
+expectedCaseCount: 8
+expectedLegacyMutationCount: 2
+exampleLines:
+  - example row 01
+  - example row 02
+  - example row 03
+  - example row 04
+  - example row 05
+  - example row 06
+  - example row 07
+  - example row 08
+  - example row 09
+  - example row 10
+  - example row 11
+  - example row 12
+  - example row 13
+  - example row 14
+  - example row 15
+  - example row 16
+receiptValues:
+  - buffered choice 01
+  - buffered choice 02
+  - buffered choice 03
+  - buffered choice 04
+  - buffered choice 05
+  - buffered choice 06
+  - buffered choice 07
+  - buffered choice 08
+  - buffered choice 09
+  - buffered choice 10
+  - buffered choice 11
+  - buffered choice 12
+  - buffered choice 13
+  - buffered choice 14
+receiptEffects:
+  - durable effect 01
+  - durable effect 02
+  - durable effect 03
+  - durable effect 04
+errorLines:
+  - 'what: fixture save was blocked'
+  - 'why: fixture validation found a conflict'
+  - 'where: fixture receipt validation boundary'
+  - 'when: before the atomic settings commit'
+  - 'means: no buffered setting was written'
+  - 'fix: resolve the fixture conflict and confirm again'
+cases:
+  - name: overflowing-step-starts-at-top
+    state: step
+    wantContains: [example row 01]
+    wantMissing: ['(•) standard']
+    wantActions: [page-down, bottom]
+    wantMissingActions: [page-up, top]
+  - name: page-down-reveals-current-choice
+    state: step
+    keys: [page-down]
+    wantContains: ['(•) standard', '( ) maximum', removes standard material]
+    wantMissing: [example row 01]
+    wantActions: [page-up, top]
+    wantMissingActions: [page-down, bottom]
+    wantScrolled: true
+    legacyMutationProbe: true
+    mutationReveal: '(•) standard'
+  - name: page-up-returns-to-step-top
+    state: step
+    keys: [page-down, page-up]
+    wantContains: [example row 01]
+    wantMissing: ['(•) standard']
+    wantActions: [page-down, bottom]
+    wantMissingActions: [page-up, top]
+  - name: bottom-jumps-to-current-choice
+    state: step
+    keys: [bottom]
+    wantContains: ['(•) standard', '( ) maximum']
+    wantMissing: [example row 01]
+    wantActions: [page-up, top]
+    wantMissingActions: [page-down, bottom]
+    wantScrolled: true
+  - name: top-returns-after-bottom
+    state: step
+    keys: [bottom, top]
+    wantContains: [example row 01]
+    wantMissing: ['(•) standard']
+    wantActions: [page-down, bottom]
+    wantMissingActions: [page-up, top]
+  - name: down-remains-radio-owned-before-paging
+    state: step
+    keys: [down, page-down]
+    assertDownFieldOwned: true
+    wantContains: ['▸ ( ) maximum', removes standard material]
+    wantMissing: [example row 01]
+    wantActions: [page-up, top]
+    wantMissingActions: [page-down, bottom]
+    wantScrolled: true
+  - name: failing-receipt-starts-with-error-clipped
+    state: receipt-error
+    wantContains: [review your changes, buffered choice 01]
+    wantMissing: ['fix: resolve the fixture conflict and confirm again']
+    wantActions: [page-down, bottom]
+    wantMissingActions: [page-up, top]
+  - name: failing-receipt-page-down-reveals-complete-repair
+    state: receipt-error
+    keys: [page-down]
+    wantContains:
+      - 'what: fixture save was blocked'
+      - 'why: fixture validation found a conflict'
+      - 'where: fixture receipt validation boundary'
+      - 'when: before the atomic settings commit'
+      - 'means: no buffered setting was written'
+      - 'fix: resolve the fixture conflict and confirm again'
+    wantMissing: [buffered choice 01]
+    wantActions: [page-up, top]
+    wantMissingActions: [page-down, bottom]
+    wantScrolled: true
+    legacyMutationProbe: true
+    mutationReveal: 'fix: resolve the fixture conflict and confirm again'

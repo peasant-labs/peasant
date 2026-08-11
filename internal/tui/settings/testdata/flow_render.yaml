@@ -1,9 +1,15 @@
 # Flow chrome golden matrix: each flow state is rendered in both themes at both
 # a roomy and a constrained terminal size, proving the frame, footer, fields,
 # receipt, and exit-confirm overlay draw within their region (and fall back
-# safely when constrained) in both palettes. expectedCaseCount guards the
-# matrix cannot silently drop a state, theme, or size.
-expectedCaseCount: 14
+# safely when constrained) in both palettes. The declarations are checked
+# against independent Go constants, so coordinated edits cannot silently drop
+# a state, theme, size, or one side of an 80x24 viewport theme pair.
+expectedCaseCount: 28
+expectedViewportStateCount: 3
+expectedViewportThemeCount: 2
+expectedViewportCaseCount: 6
+viewportWidth: 80
+viewportHeight: 24
 cases:
   - {name: step-dark-80x10, state: step, theme: dark, width: 80, height: 10}
   - {name: step-light-80x10, state: step, theme: light, width: 80, height: 10}
@@ -19,3 +25,17 @@ cases:
   - {name: confirm-light-40x8, state: confirm, theme: light, width: 40, height: 8}
   - {name: help-dark-80x10, state: help, theme: dark, width: 80, height: 10}
   - {name: help-light-80x10, state: help, theme: light, width: 80, height: 10}
+  - {name: viewport-step-top-dark-80x24, state: viewport-step-top, theme: dark, width: 80, height: 24}
+  - {name: viewport-step-top-light-80x24, state: viewport-step-top, theme: light, width: 80, height: 24}
+  - {name: viewport-step-bottom-dark-80x24, state: viewport-step-bottom, theme: dark, width: 80, height: 24}
+  - {name: viewport-step-bottom-light-80x24, state: viewport-step-bottom, theme: light, width: 80, height: 24}
+  - {name: viewport-receipt-error-bottom-dark-80x24, state: viewport-receipt-error-bottom, theme: dark, width: 80, height: 24}
+  - {name: viewport-receipt-error-bottom-light-80x24, state: viewport-receipt-error-bottom, theme: light, width: 80, height: 24}
+  - {name: evidence-receipt-dark-80x24, state: evidence-receipt, theme: dark, width: 80, height: 24}
+  - {name: evidence-receipt-light-80x24, state: evidence-receipt, theme: light, width: 80, height: 24}
+  - {name: evidence-receipt-dark-120x40, state: evidence-receipt, theme: dark, width: 120, height: 40}
+  - {name: evidence-receipt-light-120x40, state: evidence-receipt, theme: light, width: 120, height: 40}
+  - {name: evidence-receipt-error-dark-80x24, state: evidence-receipt-error, theme: dark, width: 80, height: 24}
+  - {name: evidence-receipt-error-light-80x24, state: evidence-receipt-error, theme: light, width: 80, height: 24}
+  - {name: evidence-receipt-error-dark-120x40, state: evidence-receipt-error, theme: dark, width: 120, height: 40}
+  - {name: evidence-receipt-error-light-120x40, state: evidence-receipt-error, theme: light, width: 120, height: 40}

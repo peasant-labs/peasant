@@ -1,0 +1,8 @@
+expectedRows: 1
+cases:
+  - name: save completion wins over reordered mutation and discard input
+    initialRetention: 30
+    selectedRetention: 365
+    expectWriterCalls: 1
+    reorderedInput: [up, space, esc, left, enter]
+    saveInstruction: "ctrl+s saves visible settings"

@@ -4,11 +4,11 @@
 # in AvailableActions order), a pressed key label (resolved via
 # msgForKeyString in helpers_test.go), and the expected (action, ok) result.
 #
-# The first 18 rows (one per ActionID) are the full-enum-coverage guard: the
-# test asserts the union of every wantAction across wantOK=true rows equals
-# keymap.AllActions() exactly, so an ActionID added to the enum without a
-# passing dispatch row here fails that guard, not just this row count.
-expectedCaseCount: 35
+# The successful rows collectively cover the full ActionID enum. The test
+# asserts that their wantAction union equals keymap.AllActions() exactly, so an
+# ActionID added to the enum without a passing dispatch row here fails that
+# guard, not just this row count.
+expectedCaseCount: 42
 cases:
   - name: dispatches-quit
     available: [quit]
@@ -130,6 +130,21 @@ cases:
     pressedKey: K
     wantOK: true
     wantAction: prev-project
+  - name: removed-prev-scope-key-does-not-dispatch
+    available: [search]
+    pressedKey: "["
+    wantOK: false
+    wantAction: ""
+  - name: removed-next-scope-key-does-not-dispatch
+    available: [search]
+    pressedKey: "]"
+    wantOK: false
+    wantAction: ""
+  - name: dispatches-search
+    available: [search]
+    pressedKey: "/"
+    wantOK: true
+    wantAction: search
   - name: dispatches-focus-pane-left
     available: [focus-pane-left]
     pressedKey: ctrl+h
@@ -162,6 +177,26 @@ cases:
     pressedKey: f
     wantOK: true
     wantAction: filter
+  - name: dispatches-delete-filter
+    available: [delete-filter]
+    pressedKey: backspace
+    wantOK: true
+    wantAction: delete-filter
+  - name: dispatches-delete-filter-from-ctrl-h-terminal-backspace
+    available: [delete-filter]
+    pressedKey: ctrl+h
+    wantOK: true
+    wantAction: delete-filter
+  - name: dispatches-keep-filter
+    available: [keep-filter]
+    pressedKey: enter
+    wantOK: true
+    wantAction: keep-filter
+  - name: dispatches-clear-filter
+    available: [clear-filter]
+    pressedKey: esc
+    wantOK: true
+    wantAction: clear-filter
   # Extra cases beyond one-per-action: unavailable keys, alias keys, and
   # avail-order priority when two available actions share a physical key.
   - name: no-match-when-action-unavailable
@@ -188,11 +223,12 @@ cases:
     available:
       [
         quit, confirm, back, up, down, left, right, page-up, page-down,
+        search,
         focus-pane-left, focus-pane-right,
         next-field, prev-field, toggle, select-all, expand, collapse,
         save, help, filter, top, bottom, next-project, prev-project,
         select-under-project, expand-level, collapse-level,
-        expand-all, collapse-all,
+        expand-all, collapse-all, delete-filter, keep-filter, clear-filter,
       ]
     pressedKey: z
     wantOK: false

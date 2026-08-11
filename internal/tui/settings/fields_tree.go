@@ -36,7 +36,15 @@ type treeField struct {
 	focused bool
 	width   int
 	height  int
-	mounted bool
+	// searchRows reserves the field-local search bar above the tree. Normal
+	// regions always render one; a one-row emergency region gives that sole row
+	// to the tree so the field still exposes a selectable surface.
+	searchRows int
+	mounted    bool
+	// forestReady is true only after the mounted Tree accepts a successful load
+	// result. Loading, stale, foreign, and failed messages must never turn the
+	// current forest into a persisted selection.
+	forestReady bool
 
 	// facetKey is the Meta key the side gutter groups by (empty: no facet).
 	facetKey string
@@ -57,12 +65,17 @@ type treeField struct {
 	// previewBody builds the layout function the pane renders that body with. It
 	// is a factory over the theme rather than a ready-made renderer because a
 	// field only learns its theme at mount.
-	previewBody func(theme.Theme) kit.BodyRenderer
-	split       kit.PreviewSplit
+	previewBody  func(theme.Theme) kit.BodyRenderer
+	split        kit.PreviewSplit
+	previewRatio float64
+
 	// restoreSelection enables the kickstart selection editor's one-time saved
 	// baseline application. Other generic Tree users keep the source-provided
 	// states they already own.
 	restoreSelection bool
+	// initializeSelection marks the saved baseline as tracked and applies the
+	// working draft whenever a fresh forest loads.
+	initializeSelection bool
 	// selectAllHelp narrows the generic select-all action's user-facing scope.
 	// The key and action ID remain canonical.
 	selectAllHelp string
@@ -73,13 +86,19 @@ type treeField struct {
 	view []*kit.TreeNode
 
 	// baselineApplied records the first successful selected-mode source load when
-	// restoreSelection is enabled. That load alone restores Draft.Baseline; a
-	// later load restores Draft.Working instead, so a refresh cannot overwrite
-	// edits already made on screen. Legacy mode all waits for its conversion
-	// boundary and does not set this flag.
+	// selection initialization is enabled. Draft initialization uses Working as
+	// the current checkbox state; restoration-only callers use Baseline on the
+	// first load and Working thereafter, so refresh cannot overwrite edits already
+	// made on screen. Legacy mode all waits for its conversion boundary and does
+	// not set this flag.
 	baselineApplied bool
-	unmatched       UnmatchedBaseline
-	reconcileErr    error
+	// selectionActioned distinguishes a user selection mutation from the
+	// conversion value prepared in Draft.Working before this field mounted. The
+	// prepared value remains commit-ready without making load-only convergence
+	// look like a transcript edit.
+	selectionActioned bool
+	unmatched         UnmatchedBaseline
+	reconcileErr      error
 }
 
 // TreeOption configures a tree field at construction.
@@ -128,9 +147,10 @@ func WithPreviewBody(build func(theme.Theme) kit.BodyRenderer) TreeOption {
 }
 
 // WithSelectionRestoration applies the saved selected-mode configuration after
-// the first successful source load and before deriving the working value. It is
-// opt-in because generic Tree sources may own meaningful initial node states;
-// kickstart uses it for its selection editor.
+// the first successful source load and before deriving the working value. For a
+// field without WithDraftSelectionState, the first load uses Draft.Baseline and
+// later loads use Draft.Working. It is opt-in because generic Tree sources may
+// own meaningful initial node states; kickstart uses it for its selection editor.
 func WithSelectionRestoration() TreeOption {
 	return func(f *treeField) { f.restoreSelection = true }
 }
@@ -140,6 +160,19 @@ func WithSelectionRestoration() TreeOption {
 // trees on the generic "select all" wording.
 func WithSelectAllHelp(description string) TreeOption {
 	return func(f *treeField) { f.selectAllHelp = description }
+}
+
+// WithPreviewRatio sets the fraction of the tree/preview region assigned to the
+// tree pane. PreviewSplit clamps the value to its safe range.
+func WithPreviewRatio(ratio float64) TreeOption {
+	return func(f *treeField) { f.previewRatio = ratio }
+}
+
+// WithDraftSelectionState makes the Draft baseline the saved tracked source and
+// the Draft working value the current checkbox source on every fresh load. It is
+// opt-in so a generic Tree can still load authoritative source states.
+func WithDraftSelectionState() TreeOption {
+	return func(f *treeField) { f.initializeSelection = true }
 }
 
 // Tree builds the selection-tree field bound to acc, loading its forest from
@@ -161,6 +194,9 @@ func (f *treeField) mount(t theme.Theme) {
 	// the preview never work on diverging copies of the forest.
 	if f.previewSource != nil {
 		f.split = kit.NewPreviewSplitWithBodies(t, kit.NewTreeLeftPane(&f.tree), f.previewSource)
+		if f.previewRatio > 0 {
+			f.split = f.split.WithRatio(f.previewRatio)
+		}
 	}
 	f.mounted = true
 }
@@ -173,6 +209,7 @@ func (f *treeField) initCmd() tea.Cmd {
 	if !f.mounted {
 		return nil
 	}
+	f.forestReady = false
 	var loadCmd tea.Cmd
 	f.tree, loadCmd = f.tree.Load()
 	return tea.Batch(loadCmd, f.tree.Init())
@@ -183,6 +220,7 @@ func (f *treeField) blur()          { f.focused = false; f.tree.Blur() }
 
 func (f *treeField) setSize(w, h int) {
 	f.width, f.height = w, h
+	f.searchRows = treeSearchRows(h)
 	f.applySize()
 }
 
@@ -191,13 +229,29 @@ func (f *treeField) setSize(w, h int) {
 // which arrives after the first size.
 func (f *treeField) applySize() {
 	inner := f.width - f.gutterWidth()
+	height := f.contentHeight()
 	if f.hasPreview() {
 		// The split owns the divide between the tree and the preview body, and
 		// sizes the tree itself.
-		f.split.SetSize(inner, f.height)
+		f.split.SetSize(inner, height)
 		return
 	}
-	f.tree.SetSize(inner, f.height)
+	f.tree.SetSize(inner, height)
+}
+
+func treeSearchRows(height int) int {
+	if height > 1 {
+		return 1
+	}
+	return 0
+}
+
+func (f *treeField) contentHeight() int {
+	height := f.height - f.searchRows
+	if height < 1 {
+		return 1
+	}
+	return height
 }
 
 // availableActions reports what the field dispatches right now, plus the filter
@@ -216,7 +270,7 @@ func (f *treeField) availableActions() []keymap.ActionID {
 	} else {
 		actions = f.tree.AvailableActions()
 	}
-	if f.facetKey != "" {
+	if f.facetAvailable() {
 		actions = append(actions, keymap.ActionFilter)
 	}
 	return actions
@@ -237,18 +291,64 @@ func (f *treeField) actionKeymap() keymap.Keymap {
 	return km
 }
 
+// facetAvailable keeps facet dispatch and its advertised key in lockstep. A
+// facet has no effect before a successful non-empty load, while search text is
+// being edited, or while the preview pane owns input.
+func (f *treeField) facetAvailable() bool {
+	if f.facetKey == "" || !f.forestReady || len(f.facetValues()) == 0 || f.tree.FilterState().Editing() {
+		return false
+	}
+	return !f.hasPreview() || f.split.ActivePane() == kit.PaneLeft
+}
+
+// capturesPrintableInput is the Flow field-input contract: while the tree pane
+// is editing its global query, printable q, b, ?, and similar characters are text
+// before they are global shortcuts. Preview focus remains non-textual.
+func (f *treeField) capturesPrintableInput() bool {
+	if !f.focused || !f.tree.FilterState().Editing() {
+		return false
+	}
+	return !f.hasPreview() || f.split.ActivePane() == kit.PaneLeft
+}
+
 func (f *treeField) sync(d *Draft) {}
 
-// handle forwards a message to the live tree, then re-derives the selection
-// from the current forest and writes it back into the draft. The filter key is
-// answered first: it re-points the tree at a narrowed VIEW of the loaded forest
-// rather than reaching the tree as navigation.
+// handle accepts focused key input and delegates non-key messages through the
+// same owner-checking async capability. Presentations can route non-key work
+// directly through asyncField; callers using the general Field seam remain
+// isolated because foreign work is rejected before component update.
 func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
+	if _, ok := msg.(tea.KeyPressMsg); ok {
+		return f.handleMessage(d, msg, true)
+	}
+	return f.handleAsync(d, msg)
+}
+
+// handleAsync accepts only result/tick messages owned by this field's Tree or
+// PreviewSplit. A foreign owner is rejected before either component sees it,
+// and Draft changes are derived only when this Tree accepts its own load result.
+func (f *treeField) handleAsync(d *Draft, msg tea.Msg) tea.Cmd {
+	owned := f.tree.OwnsAsync(msg)
+	if f.hasPreview() {
+		owned = f.split.OwnsAsync(msg)
+	}
+	if !owned {
+		return nil
+	}
+	return f.handleMessage(d, msg, false)
+}
+
+var _ asyncField = (*treeField)(nil)
+
+// handleMessage advances the owned component. When allowFacet is true it also
+// handles the synchronous harness-view key before ordinary Tree dispatch.
+func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cmd {
 	var cmd tea.Cmd
 	wasLoading := f.tree.Loading()
+	treeOwned := f.tree.OwnsAsync(msg)
 	intent := f.captureSelectionIntent(msg)
 	var before selectableState
-	exactAction := f.restoreSelection && f.baselineApplied && intent.action != keymap.ActionUnknown && isProjectFirstForest(f.tree.Roots())
+	exactAction := (f.restoreSelection || f.initializeSelection) && f.baselineApplied && intent.action != keymap.ActionUnknown && isExactProjectFirstForest(f.tree.Roots())
 	if exactAction {
 		var err error
 		before, err = f.snapshotSelectableState(intent)
@@ -257,7 +357,8 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 	}
-	if !f.handleFacetKey(msg) {
+	facetHandled := allowFacet && f.handleFacetKey(msg)
+	if !facetHandled {
 		if f.hasPreview() {
 			// The split routes the message to the tree it holds by pointer, then
 			// loads the body of whatever row the cursor ends on.
@@ -265,8 +366,19 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		} else {
 			f.tree, cmd = f.tree.Update(msg)
 		}
-		loadSucceeded := wasLoading && !f.tree.Loading() && f.tree.Err() == nil
-		f.captureForest(loadSucceeded)
+	} else if f.hasPreview() {
+		// A facet can move the cursor onto a different row without routing through
+		// PreviewSplit.Update, so explicitly refresh the body it now names.
+		cmd = f.split.Load()
+	}
+	acceptedTreeLoad := treeOwned && wasLoading && !f.tree.Loading()
+	if acceptedTreeLoad {
+		if f.tree.Err() == nil {
+			f.captureForest(d)
+			f.forestReady = true
+		} else {
+			f.forestReady = false
+		}
 	}
 
 	// A spinner tick, an in-flight load, or a failed load must not replace the
@@ -276,11 +388,12 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		return cmd
 	}
 
-	loadSucceeded := wasLoading && !f.tree.Loading()
-	if f.restoreSelection && loadSucceeded {
+	restoreState := f.restoreSelection || (f.initializeSelection && isExactProjectFirstForest(f.selectionRoots()))
+	loadSucceeded := acceptedTreeLoad && f.tree.Err() == nil
+	if restoreState && loadSucceeded {
 		selection := d.Working().Selection
 		firstSuccessfulLoad := !f.baselineApplied
-		if firstSuccessfulLoad {
+		if f.restoreSelection && !f.initializeSelection && firstSuccessfulLoad {
 			selection = d.Baseline().Selection
 		}
 		if selection.Mode != config.SelectionModeSelected {
@@ -297,10 +410,21 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 		}
 		return cmd
 	}
-	if f.restoreSelection && !f.baselineApplied {
+	if restoreState && !f.baselineApplied {
+		if d.Working().Selection.Mode == config.SelectionModeAll && intent.action != keymap.ActionUnknown {
+			// The config screen can still open a legacy all-mode draft directly.
+			// Its first real tree action converts the currently available physical
+			// forest to an exact selected baseline before later touched-scope edits.
+			f.applySelectionIntent(intent)
+			derived := FromTreeNodes(f.selectionRoots())
+			f.setWorkingSelection(d, derived, true)
+			f.unmatched = PrepopulateSelection(f.selectionRoots(), derived.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
+			f.baselineApplied = true
+			f.reconcileErr = nil
+		}
 		return cmd
 	}
-	if f.restoreSelection && isProjectFirstForest(f.selectionRoots()) && intent.action == keymap.ActionUnknown {
+	if restoreState && isExactProjectFirstForest(f.selectionRoots()) && intent.action == keymap.ActionUnknown {
 		// Draft.Working is authoritative for the kickstart selection editor.
 		// Navigation, preview, facet, spinner, and expansion messages change only
 		// the view and must never round-trip the complete forest into the draft.
@@ -330,7 +454,7 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 			return cmd
 		}
 		if changed {
-			f.acc.Set(d.Working(), next)
+			f.setWorkingSelection(d, next, true)
 		}
 		// Reapply the canonical matcher after the reducer succeeds. This updates
 		// the private branch/session provenance markers from the value that would
@@ -343,8 +467,12 @@ func (f *treeField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	// The selection is re-derived after a facet change too, so what a commit
 	// would persist is always read from the whole forest - never left behind at
 	// whatever the last narrowed view happened to hold.
-	derived := FromTreeNodes(f.selectionRoots())
-	f.acc.Set(d.Working(), MergeSelection(derived, f.unmatched))
+	if restoreState {
+		derived := FromTreeNodes(f.selectionRoots())
+		f.setWorkingSelection(d, MergeSelection(derived, f.unmatched), intent.action != keymap.ActionUnknown)
+	} else if f.forestReady && len(f.full) > 0 && (allowFacet || acceptedTreeLoad) && !(acceptedTreeLoad && f.initializeSelection) {
+		f.setWorkingSelection(d, FromTreeNodes(f.selectionRoots()), intent.action != keymap.ActionUnknown)
+	}
 	return cmd
 }
 
@@ -840,7 +968,7 @@ func nodeContains(root, target *kit.TreeNode) bool {
 // handleFacetKey answers the filter key when a facet is configured, reporting
 // whether it consumed the message.
 func (f *treeField) handleFacetKey(msg tea.Msg) bool {
-	if f.facetKey == "" {
+	if !f.facetAvailable() {
 		return false
 	}
 	keyMsg, ok := msg.(tea.KeyPressMsg)
@@ -856,22 +984,27 @@ func (f *treeField) handleFacetKey(msg tea.Msg) bool {
 	return true
 }
 
-// captureForest records a freshly-loaded forest as the full one and re-applies
-// the current facet to it. A load result is recognised by the tree's roots no
-// longer being the view the field last installed.
-func (f *treeField) captureForest(force bool) {
+// captureForest records a successfully-loaded forest as the full one and
+// re-applies the current facet to it. Its caller has already observed the live
+// Tree transition out of loading with no error, so nil roots mean a successful
+// empty scan rather than an absent result.
+func (f *treeField) captureForest(d *Draft) {
 	roots := f.tree.Roots()
-	if force {
-		f.full = roots
-		f.view = roots
-		f.applyFacet()
-		return
+	// A config that existed when the Draft opened has a real saved selection to
+	// annotate as tracked. WithDraftSelectionState always makes this field the
+	// sole owner of applying the current working selection, including a first-run
+	// Draft whose default is mode:all and a registry rebuilt after user edits.
+	baseline := f.acc.Get(d.Baseline())
+	working := f.acc.Get(d.Working())
+	if f.initializeSelection && d.expectedExists {
+		ApplyTrackedSelection(roots, baseline.ToSelectionConfig(d.Baseline().Selection.AutoIngestNewBranches))
 	}
-	if len(roots) == 0 || sameNodes(roots, f.view) {
-		return
+	if f.initializeSelection {
+		ApplyExistingSelection(roots, working.ToSelectionConfig(d.Working().Selection.AutoIngestNewBranches))
 	}
 	f.full = roots
 	f.view = roots
+	f.tree = f.tree.WithRoots(roots)
 	f.applyFacet()
 }
 
@@ -894,7 +1027,8 @@ func (f *treeField) selectionRoots() []*kit.TreeNode {
 // leaving the cursor alone when the view did not change.
 func (f *treeField) applyFacet() {
 	next := f.full
-	if value, ok := f.activeFacetValue(); ok {
+	value, projected := f.activeFacetValue()
+	if projected {
 		next = pruneForest(f.full, f.facetKey, value)
 	}
 	if sameNodes(next, f.tree.Roots()) {
@@ -902,7 +1036,11 @@ func (f *treeField) applyFacet() {
 		return
 	}
 	f.view = next
-	f.tree = f.tree.WithRoots(next)
+	if projected {
+		f.tree = f.tree.WithProjectedRoots(next)
+	} else {
+		f.tree = f.tree.WithUnprojectedRoots(next)
+	}
 	f.applySize()
 }
 
@@ -962,17 +1100,46 @@ func (f *treeField) facetCount(value string) int {
 	return n
 }
 
-func (f *treeField) render(d *Draft, _ theme.Styles, width int) string {
+func (f *treeField) render(_ *Draft, _ theme.Styles, width int) string {
 	if width != f.width {
 		f.width = width
 	}
+	f.searchRows = treeSearchRows(f.height)
 	f.applySize()
-	body := f.treeView()
-	gutter := f.gutterLines()
-	if len(gutter) == 0 {
-		return body
+	var chrome []string
+	if f.searchRows == 1 {
+		chrome = []string{f.searchBar(width)}
 	}
-	return joinColumns(gutter, body)
+	body := f.treeView()
+	gutter := f.gutterLines(f.contentHeight())
+	if len(gutter) == 0 {
+		return joinLines(append(chrome, strings.Split(body, "\n")...))
+	}
+	return joinLines(append(chrome, strings.Split(joinColumns(gutter, body), "\n")...))
+}
+
+// searchBar is the selection field's only explanatory chrome. Its text remains
+// stable across lifecycle states; the current query is always visible, and an
+// editing tree pane gets the existing selected style plus a cursor glyph. Kept
+// queries use the header style. Preview focus removes the editing cursor, while
+// a non-empty active query remains header-styled so its filter stays visible.
+func (f *treeField) searchBar(width int) string {
+	styles := f.th.Styles()
+	state := f.tree.FilterState()
+	line := "search: " + state.Query
+	style := styles.Muted
+	if state.Active() {
+		style = styles.Header
+	}
+	if state.Editing() && f.searchHasFocus() {
+		line += "▏"
+		style = styles.Selected
+	}
+	return kit.FitLineTail(style, line, width)
+}
+
+func (f *treeField) searchHasFocus() bool {
+	return f.focused && (!f.hasPreview() || f.split.ActivePane() == kit.PaneLeft)
 }
 
 // treeView renders the tree, beside its preview body when one is mounted.
@@ -1048,14 +1215,14 @@ func (f *treeField) displayValue(value string) string {
 // gutterLines renders the facet gutter as exactly f.height lines of exactly
 // gutterWidth cells: the label, then the "all" row and one row per value, with
 // the active row marked. It returns nil when no gutter is drawn.
-func (f *treeField) gutterLines() []string {
+func (f *treeField) gutterLines(height int) []string {
 	gw := f.gutterWidth()
 	if gw == 0 {
 		return nil
 	}
 	styles := f.th.Styles()
 	values := f.facetValues()
-	lines := []string{fitCell(styles.Header, f.facetLabel, gw)}
+	lines := []string{kit.FitLine(styles.Header, f.facetLabel, gw)}
 	for i, text := range f.gutterRowTexts(values) {
 		style := styles.Muted
 		marker := "  "
@@ -1063,42 +1230,83 @@ func (f *treeField) gutterLines() []string {
 			style = styles.Selected
 			marker = "> "
 		}
-		lines = append(lines, fitCell(style, marker+text, gw))
+		lines = append(lines, kit.FitLine(style, marker+text, gw))
 	}
-	for len(lines) < f.height {
-		lines = append(lines, fitCell(styles.Base, "", gw))
+	for len(lines) < height {
+		lines = append(lines, kit.FitLine(styles.Base, "", gw))
 	}
-	return lines[:f.height]
+	return lines[:height]
 }
 
 // reset restores the draft's baseline selection value. The live tree forest is
 // left as-is (its display is rebuilt from the source on the next scan); what a
 // commit persists is the accessor value, which reset returns to baseline.
-func (f *treeField) reset(d *Draft) { f.acc.Set(d.Working(), f.acc.Get(d.Baseline())) }
+func (f *treeField) reset(d *Draft) {
+	f.acc.Set(d.Working(), f.acc.Get(d.Baseline()))
+	f.selectionActioned = false
+}
+
+func (f *treeField) setWorkingSelection(d *Draft, selection TreeSelection, userAction bool) bool {
+	current := f.acc.Get(d.Working())
+	if selectionsEqual(current, selection) {
+		return false
+	}
+	f.acc.Set(d.Working(), selection)
+	if f.initializeSelection && userAction {
+		f.selectionActioned = true
+	}
+	return true
+}
 
 func (f *treeField) Dirty(d *Draft) bool {
+	if f.initializeSelection && !f.selectionActioned {
+		return false
+	}
 	w := f.acc.Get(d.Working())
 	b := f.acc.Get(d.Baseline())
 	return !selectionsEqual(w, b)
 }
 
-// Validate blocks the commit when the forest still contains a display-only
-// Conflict node, and otherwise checks the derived selection is internally
-// consistent. It inspects the WHOLE forest, so a conflict hidden by the current
-// facet still blocks.
+// Validate blocks commit until a successful scan has reached this mounted
+// field, then blocks when the forest contains a display-only Conflict node and
+// otherwise checks the derived selection. It inspects the WHOLE forest, so a
+// conflict hidden by the current facet still blocks.
 func (f *treeField) Validate(d *Draft) error {
 	if f.reconcileErr != nil {
 		return f.reconcileErr
 	}
+	if !f.forestReady {
+		if err := f.tree.Err(); err != nil {
+			return fmt.Errorf(
+				"transcript selection scan failed.\n"+
+					"what: the selection tree could not load the current transcript forest.\n"+
+					"why: the configured selection source returned: %v.\n"+
+					"where: settings.treeField.Validate (field %q).\n"+
+					"when: validating the final review before the atomic config commit.\n"+
+					"means: the existing buffered selection is preserved and no configuration is written.\n"+
+					"fix: resolve the reported scan problem, then restart this settings flow and wait for a successful scan.",
+				err, f.key)
+		}
+		return fmt.Errorf(
+			"transcript selection is not ready.\n"+
+				"what: the selection tree has not received a successful transcript scan result.\n"+
+				"why: the scan is still loading or its result has not reached the mounted field.\n"+
+				"where: settings.treeField.Validate (field %q).\n"+
+				"when: validating the final review before the atomic config commit.\n"+
+				"means: the existing buffered selection is preserved and no configuration is written.\n"+
+				"fix: wait for scanning to finish; if it does not, leave without saving and retry.",
+			f.key)
+	}
 	if HasConflict(f.selectionRoots()) {
 		return fmt.Errorf(
 			"unresolved transcript selection conflict.\n"+
-				"what: the selection %q still contains an entry whose backing project or worktree no longer exists.\n"+
+				"what: the transcript selection still contains an entry whose backing project or worktree no longer exists.\n"+
 				"why: a saved selection points at something the current scan cannot reconcile, so its true state is ambiguous.\n"+
 				"where: settings.treeField.Validate (field %q).\n"+
+				"when: validating the final review before the atomic config commit.\n"+
 				"means: the settings flow will not persist an ambiguous selection.\n"+
 				"fix: resolve the highlighted conflicting entry (re-check or clear it) and confirm again.",
-			f.label, f.key)
+			f.key)
 	}
 	return f.acc.Get(d.Working()).Validate()
 }
@@ -1134,9 +1342,7 @@ func pruneNode(n *kit.TreeNode, key, value string) *kit.TreeNode {
 	if len(kept) == 0 {
 		return nil
 	}
-	cp := *n
-	cp.Children = kept
-	return &cp
+	return kit.ProjectTreeNode(n, kept)
 }
 
 // metaOf returns the value n carries for key, or "".
@@ -1167,31 +1373,6 @@ func sameNodes(a, b []*kit.TreeNode) bool {
 		}
 	}
 	return true
-}
-
-// fitCell truncates then pads a plain string to exactly width cells and styles
-// the whole run, so a column's background is unbroken.
-func fitCell(style lipgloss.Style, s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	clipped := clip(s, width)
-	if pad := width - lipgloss.Width(clipped); pad > 0 {
-		clipped += spaceRun(pad)
-	}
-	return style.Render(clipped)
-}
-
-// spaceRun returns n spaces (n<=0 yields "").
-func spaceRun(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	out := make([]byte, n)
-	for i := range out {
-		out[i] = ' '
-	}
-	return string(out)
 }
 
 // joinColumns lays a fixed-width left column beside a body, line for line. Each

@@ -1,0 +1,20 @@
+# The visibility login detour must yield to either Flow-owned keyboard overlay.
+# Each row mounts the real Program and canonical Registry at the disconnected
+# license step, proves Tab is swallowed by the active overlay, closes it, and
+# then proves one later Tab opens the visibility prompt without invoking login.
+expectedCaseCount: 2
+expectedConfirmCount: 1
+expectedHelpCount: 1
+cases:
+  - name: exit-confirmation-keeps-tab
+    overlay: confirm
+    width: 120
+    height: 30
+    wantSection: choose the default license for a later explicit publish.
+    wantOverlay: leave settings
+  - name: help-keeps-tab
+    overlay: help
+    width: 120
+    height: 30
+    wantSection: choose the default license for a later explicit publish.
+    wantOverlay: keyboard shortcuts

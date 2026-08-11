@@ -711,6 +711,14 @@ Some features are shelved in the default build and gated behind a flag: the
 
 ## Development
 
+### Optional screenshot harness dependency
+
+`freeze` is an optional development dependency used only by the guided TUI screenshot harness. The
+Nix development shell supplies it as `charm-freeze`. Normal Peasant builds, runtime execution, and
+default tests do not require it. The two opt-in entry points are `make guided-screenshots-test` and
+`make guided-screenshots`; see [TESTING.md](TESTING.md#guided-tui-screenshot-harness-manual-prototype)
+for the operational guide and visual-review expectations.
+
 ```bash
 # Enter dev shell
 nix develop

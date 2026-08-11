@@ -599,7 +599,7 @@ func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
 				ingestCalls++
 				return &ftue.IngestResult{}, nil
 			}
-			deps.runFlow = func(model tea.Model) error {
+			deps.runModel = func(model tea.Model) error {
 				flowMounted = true
 				var ok bool
 				mounted, ok = model.(kickstart.Model)
@@ -607,9 +607,7 @@ func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
 					return fmt.Errorf("stored gate mounted model has type %T, want kickstart.Model", model)
 				}
 				mounted = startKickstartGateModel(t, mounted)
-				for index := 0; index < 12 && !mounted.Program().OnReceipt(); index++ {
-					mounted = updateKickstartGateModel(t, mounted, commitGateKey("tab"))
-				}
+				mounted = advanceKickstartGateModelToReceipt(t, mounted)
 				if !mounted.Program().OnReceipt() {
 					return fmt.Errorf("stored gate flow did not reach review and save")
 				}

@@ -181,7 +181,6 @@ func TestMountedProgramRestoresSavedSelectionThroughProductionRegistry(t *testin
 	})
 	program.SetSize(100, 24)
 	program = declineOAuth(t, program)
-	program = drainProgram(program, program.Init())
 
 	got := normalizedSelection(draft.Working().Selection)
 	want := normalizedSelection(saved)
@@ -209,7 +208,6 @@ func TestMountedKickstartNoEditSaveKeepsExplicitSessionsScoped(t *testing.T) {
 	})
 	program.SetSize(100, 24)
 	program = declineOAuth(t, program)
-	program = drainProgram(program, program.Init())
 	program, _ = advanceToCommit(program)
 	if !program.Committed() {
 		t.Fatalf("explicit-session no-edit save did not commit: phase=%s", program.Phase())
@@ -253,7 +251,6 @@ func TestMountedKickstartSelectAllNamesProjectScopeAndCommitsCurrentClones(t *te
 	})
 	program.SetSize(120, 28)
 	program = declineOAuth(t, program)
-	program = drainProgram(program, program.Init())
 
 	program = pressAndDrain(program, '?')
 	if view := program.View(); !strings.Contains(view, "select all projects") {

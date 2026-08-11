@@ -1,0 +1,10 @@
+expectedCaseCount: 1
+expectedModalCaseCount: 1
+expectedCommitCount: 1
+cases:
+  - name: tree-result-arrives-during-exit-confirmation
+    initialText: "https://village.example/flow-modal?q=preserve"
+    sessionID: flow-modal-session
+    expectLoadCount: 1
+    expectReady: true
+    expectCommit: true

@@ -16,13 +16,14 @@ func BuildLoginCommand() *cobra.Command {
 		Short: "Log in to the Peasant village via GitHub",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath := resolveConfigPath(cmd)
+			configDir := configDirOverride(cmd)
 
 			var villageURL string
 			if local {
 				villageURL = defaults.LocalVillageURL.String()
 				// Auto-switch: clear any existing session so the user doesn't
 				// have to manually logout before switching to local.
-				_ = auth.Logout(cmd.Context())
+				_ = auth.LogoutFrom(cmd.Context(), configDir)
 			} else {
 				// Env var takes precedence over config file so that
 				// PEASANT_VILLAGE_URL=https://localhost:8443 peasant login works as expected.
@@ -38,7 +39,7 @@ func BuildLoginCommand() *cobra.Command {
 				}
 			}
 
-			creds, err := auth.Login(cmd.Context(), villageURL, false)
+			creds, err := auth.LoginFrom(cmd.Context(), villageURL, false, configDir)
 			if err != nil {
 				return err
 			}

@@ -57,7 +57,7 @@ cases:
         sessions:
           - {harness: claude-code, ids: [unavailable-session]}
 
-  - name: mode-all-bypasses-selected-restoration
+  - name: mode-all-applies-draft-selection
     operation: load-only
     paths:
       - {key: all-project, state: directory}
@@ -70,8 +70,8 @@ cases:
       roots:
         - {pathKey: all-project, remoteMultiplicity: unique, nameMultiplicity: unique}
       editorSessions: [all-session]
-      initiallyCheckedSessions: []
-      initiallyUncheckedSessions: [all-session]
+      initiallyCheckedSessions: [all-session]
+      initiallyUncheckedSessions: []
       loadCount: 1
       saved:
         mode: all

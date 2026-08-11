@@ -74,12 +74,97 @@ func (s TriState) String() string {
 	}
 }
 
-// TreeNode is one node in the selection hierarchy the kit tree renders:
-// provider -> remote -> worktree -> session. A node owns its selection State,
-// its ordered Children, and a display-only Meta bag. The tree mutates State in
-// place through the Children pointers as the user toggles and as interior
-// nodes roll up, so a [TreeSource] hands back the *TreeNode graph it wants the
-// tree to own.
+// TreeFilterMode is the closed lifecycle of hierarchy-wide text search.
+type TreeFilterMode uint8
+
+const (
+	// TreeFilterModeUnknown is the invalid zero value.
+	TreeFilterModeUnknown TreeFilterMode = iota
+	// TreeFilterInactive means no text query is being edited or kept.
+	TreeFilterInactive
+	// TreeFilterEditing means printable input and delete edit the query.
+	TreeFilterEditing
+	// TreeFilterKept means editing ended while the query remains active.
+	TreeFilterKept
+)
+
+// IsValid reports whether m is a known filter lifecycle state.
+func (m TreeFilterMode) IsValid() bool {
+	switch m {
+	case TreeFilterInactive, TreeFilterEditing, TreeFilterKept:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns a stable lower-case name for m, or "unknown".
+func (m TreeFilterMode) String() string {
+	switch m {
+	case TreeFilterInactive:
+		return "inactive"
+	case TreeFilterEditing:
+		return "editing"
+	case TreeFilterKept:
+		return "kept"
+	default:
+		return "unknown"
+	}
+}
+
+// TreeFilterState is the typed, inspectable text-search state. Query matches
+// labels at every hierarchy depth; ancestor rows remain as context. It never
+// owns or copies checkbox state: projections retain shared TreeNode identity.
+type TreeFilterState struct {
+	Mode  TreeFilterMode
+	Query string
+}
+
+// Active reports whether a non-empty query currently narrows the visible tree.
+func (s TreeFilterState) Active() bool { return strings.TrimSpace(s.Query) != "" }
+
+// Editing reports whether text input currently edits the query.
+func (s TreeFilterState) Editing() bool { return s.Mode == TreeFilterEditing }
+
+// AvailableActions reports the filter lifecycle actions dispatchable in this
+// state. It is itself a keymap.Availability, so search-mode dispatch, footer,
+// and help can consume exactly the same typed set.
+func (s TreeFilterState) AvailableActions() []keymap.ActionID {
+	switch s.Mode {
+	case TreeFilterEditing:
+		return []keymap.ActionID{
+			keymap.ActionDeleteFilter,
+			keymap.ActionKeepFilter,
+			keymap.ActionClearFilter,
+		}
+	case TreeFilterKept:
+		return []keymap.ActionID{keymap.ActionSearch, keymap.ActionClearFilter}
+	case TreeFilterInactive:
+		return []keymap.ActionID{keymap.ActionSearch}
+	default:
+		return nil
+	}
+}
+
+var _ keymap.Availability = TreeFilterState{}
+
+// TreeOverflow reports whether usable rows exist above or below the current
+// viewport. The view renders markers from this state rather than guessing from
+// cursor position.
+type TreeOverflow struct {
+	Top    bool
+	Bottom bool
+}
+
+// Any reports whether either viewport edge has hidden rows.
+func (o TreeOverflow) Any() bool { return o.Top || o.Bottom }
+
+// TreeNode is one node in the ordered hierarchy the kit tree renders. The
+// kickstart selection source uses project -> branch -> session. A node owns its
+// selection State, ordered Children, and a display-only Meta bag. The tree
+// mutates State in place through the Children pointers as the user toggles and
+// as interior nodes roll up, so a [TreeSource] hands back the *TreeNode graph it
+// wants the tree to own.
 type TreeNode struct {
 	// ID is a stable identifier for the node (a provider slug, a remote URL, a
 	// worktree path, a session id). It is display/lookup data, not rendered
@@ -99,6 +184,31 @@ type TreeNode struct {
 	// dispatch - it exists so a source can attach context a future row
 	// renderer or the settings detail pane can surface.
 	Meta map[string]string
+	// projectionOrigin points from a shallow ancestor copy in a filtered view to
+	// the canonical node whose expansion/cursor identity it represents. Sources
+	// cannot set it; [ProjectTreeNode] is the one projection constructor.
+	projectionOrigin *TreeNode
+}
+
+// ProjectTreeNode returns a shallow, view-only copy of node with children as
+// its visible descendants. The copy retains node's canonical identity for
+// cursor and expansion state, while selectable descendants remain the caller's
+// shared pointers. A nil node returns nil.
+func ProjectTreeNode(node *TreeNode, children []*TreeNode) *TreeNode {
+	if node == nil {
+		return nil
+	}
+	cp := *node
+	cp.Children = children
+	cp.projectionOrigin = canonicalProjectionOrigin(node)
+	return &cp
+}
+
+func canonicalProjectionOrigin(node *TreeNode) *TreeNode {
+	for node != nil && node.projectionOrigin != nil {
+		node = node.projectionOrigin
+	}
+	return node
 }
 
 // Meta keys the tree ROW RENDERER understands. A [TreeSource] attaches them to
@@ -117,6 +227,12 @@ const (
 	MetaIngested = "ingested"
 	// MetaIngestedValue is the value MetaIngested carries when set.
 	MetaIngestedValue = "true"
+	// MetaTracked marks a row included by the selection saved before the current
+	// editing run. It is intentionally independent from MetaIngested (local
+	// store presence) and the node's mutable checkbox State.
+	MetaTracked = "tracked"
+	// MetaTrackedValue is the value MetaTracked carries when set.
+	MetaTrackedValue = "true"
 )
 
 // isLeaf reports whether n has no children.
@@ -130,8 +246,8 @@ func (n *TreeNode) meta(key string) string {
 	return n.Meta[key]
 }
 
-// TreeSource loads the tree's node forest, potentially slowly (a real scan of
-// providers/remotes/worktrees/sessions). It is the ONLY asynchronous
+// TreeSource loads the tree's node forest, potentially slowly (for example, a
+// real scan of projects/branches/sessions). It is the ONLY asynchronous
 // field-data source in this component vocabulary: the kit tree renders a
 // spinner while Load is in flight and drops a late result whose generation no
 // longer matches (the stale guard). Load must honor ctx cancellation so a
@@ -143,18 +259,17 @@ type TreeSource interface {
 }
 
 // treeLoadedMsg is the internal message a Tree's load command emits when a
-// [TreeSource.Load] returns. gen carries the load generation the command was
-// issued under so [Tree.Update] can drop a stale result (a load whose tree was
-// re-sourced or replaced before it returned) - the same generation-guard
-// pattern the preview slice uses.
+// [TreeSource.Load] returns. owner isolates concrete Tree instances; gen lets
+// that owner drop a stale load after it was re-sourced or replaced.
 type treeLoadedMsg struct {
+	owner asyncOwnerID
 	gen   uint64
 	nodes []*TreeNode
 	err   error
 }
 
-// Tree is the tri-state selection tree: it renders a provider -> remote ->
-// worktree -> session hierarchy with tri-state checkboxes, propagates a parent
+// Tree is the tri-state selection tree: it renders an ordered hierarchy with
+// tri-state checkboxes, propagates a parent
 // toggle down to its descendants, rolls child state back up to Checked/Partial,
 // and renders a Conflict node distinctly. While its [TreeSource] is loading it
 // shows the kit [Spinner] AND keeps processing input (navigation across known
@@ -167,9 +282,12 @@ type Tree struct {
 	keymap  keymap.Keymap
 	src     TreeSource
 	spinner Spinner
+	owner   asyncOwnerID
 
-	roots    []*TreeNode
-	expanded map[*TreeNode]bool
+	roots     []*TreeNode
+	visible   []*TreeNode
+	projected bool
+	expanded  map[*TreeNode]bool
 
 	loading bool
 	gen     uint64
@@ -181,6 +299,16 @@ type Tree struct {
 	width   int
 	height  int
 	focused bool
+	filter  TreeFilterState
+	// filterFallback remembers the row and viewport under the cursor when search
+	// starts, so clearing returns to that exact canonical context even when the
+	// projection temporarily showed a same-named row from another project.
+	filterFallback cursorAnchor
+	// projectionAnchor retains the canonical row and its viewport position for
+	// the lifetime of an external roots projection (for example, a harness
+	// facet), including an intermediate view that hides that row.
+	projectionAnchor      cursorAnchor
+	projectionViewportRow int
 }
 
 // NewTree builds a Tree over theme t that loads its forest from src. It starts
@@ -188,13 +316,17 @@ type Tree struct {
 // the spinner) to begin a scan.
 func NewTree(t theme.Theme, src TreeSource) Tree {
 	return Tree{
-		theme:    t,
-		keymap:   keymap.Default(),
-		src:      src,
-		spinner:  NewSpinner(t, "scanning projects"),
-		expanded: map[*TreeNode]bool{},
-		width:    TreeMinSize.Width,
-		height:   TreeMinSize.Height,
+		theme:            t,
+		keymap:           keymap.Default(),
+		src:              src,
+		spinner:          NewSpinner(t, "scanning projects"),
+		owner:            nextAsyncOwnerID(),
+		expanded:         map[*TreeNode]bool{},
+		width:            TreeMinSize.Width,
+		height:           TreeMinSize.Height,
+		filter:           TreeFilterState{Mode: TreeFilterInactive},
+		filterFallback:   cursorAnchor{depth: -1},
+		projectionAnchor: cursorAnchor{depth: -1},
 	}
 }
 
@@ -216,12 +348,26 @@ func (t Tree) Init() tea.Cmd {
 	return nil
 }
 
+// OwnsAsync reports whether msg is an asynchronous result or active spinner
+// tick this exact Tree may consume. Result ownership is instance-specific;
+// value copies keep the same immutable owner identity.
+func (t Tree) OwnsAsync(msg tea.Msg) bool {
+	switch m := msg.(type) {
+	case treeLoadedMsg:
+		return t.owner.valid() && m.owner.valid() && m.owner == t.owner
+	case spinner.TickMsg:
+		return t.loading && t.spinner.ownsTick(m)
+	default:
+		return false
+	}
+}
+
 // Load begins (or restarts) a scan: it cancels any in-flight load, opens a
 // fresh cancellable context, bumps the load generation, marks the tree
 // loading, and returns the command that runs [TreeSource.Load] and emits its
-// result tagged with this generation. A result whose generation no longer
-// matches when it arrives is dropped by [Tree.Update] (the stale guard). Batch
-// the returned command with [Tree.Init] to also start the spinner.
+// result tagged with immutable owner identity and this generation. A foreign
+// owner or stale generation is dropped by [Tree.Update]. Batch the returned
+// command with [Tree.Init] to also start the spinner.
 func (t Tree) Load() (Tree, tea.Cmd) {
 	if t.cancel != nil {
 		t.cancel()
@@ -230,12 +376,15 @@ func (t Tree) Load() (Tree, tea.Cmd) {
 	t.cancel = cancel
 	t.gen++
 	gen := t.gen
+	owner := t.owner
 	t.loading = true
 	t.err = nil
+	t.projectionAnchor = cursorAnchor{depth: -1}
+	t.projectionViewportRow = 0
 	src := t.src
 	cmd := func() tea.Msg {
 		nodes, err := src.Load(ctx)
-		return treeLoadedMsg{gen: gen, nodes: nodes, err: err}
+		return treeLoadedMsg{owner: owner, gen: gen, nodes: nodes, err: err}
 	}
 	return t, cmd
 }
@@ -248,12 +397,83 @@ func (t Tree) Load() (Tree, tea.Cmd) {
 // keeps the full forest for deriving what to persist. It does not re-run a
 // scan; use [Tree.Load] for that.
 func (t Tree) WithRoots(roots []*TreeNode) Tree {
+	t.projectionAnchor = cursorAnchor{depth: -1}
+	t.projectionViewportRow = 0
+	return t.replaceRoots(roots)
+}
+
+func (t Tree) replaceRoots(roots []*TreeNode) Tree {
 	t.roots = roots
 	t.cursor = 0
 	t.offset = 0
-	t.recompute()
-	t.clampWindow()
+	t.applyTextProjection(false)
 	return t
+}
+
+// WithProjectedRoots replaces the installed view while retaining the current
+// canonical row and its viewport position when that row remains present. It is
+// for view-only projections such as a harness facet; source loads continue to
+// reset to the first row through the normal load path. When the anchored row is
+// absent, the new projection falls back to its first row predictably.
+func (t Tree) WithProjectedRoots(roots []*TreeNode) Tree {
+	t = t.captureProjectionAnchor()
+	return t.replaceRootsAt(roots, t.projectionAnchor, t.projectionViewportRow)
+}
+
+// WithUnprojectedRoots restores the row captured when external projection
+// began, when it exists in roots, then ends that projection lifecycle. An
+// intermediate projection may hide the row without losing the eventual return
+// target.
+func (t Tree) WithUnprojectedRoots(roots []*TreeNode) Tree {
+	t = t.captureProjectionAnchor()
+	anchor := t.projectionAnchor
+	viewportRow := t.projectionViewportRow
+	t = t.replaceRootsAt(roots, anchor, viewportRow)
+	t.projectionAnchor = cursorAnchor{depth: -1}
+	t.projectionViewportRow = 0
+	return t
+}
+
+func (t Tree) captureProjectionAnchor() Tree {
+	current := t.currentAnchor()
+	if current.depth < 0 {
+		return t
+	}
+	if t.projectionAnchor.depth < 0 || t.containsAnchor(t.projectionAnchor) {
+		t.projectionAnchor = current
+		t.projectionViewportRow = t.cursor - t.offset
+	}
+	return t
+}
+
+func (t Tree) replaceRootsAt(roots []*TreeNode, anchor cursorAnchor, viewportRow int) Tree {
+	t = t.replaceRoots(roots)
+	if anchor.depth < 0 {
+		return t
+	}
+	for i, row := range t.visibleRows() {
+		if !t.rowMatchesAnchor(row, anchor) {
+			continue
+		}
+		t.cursor = i
+		t.offset = i - viewportRow
+		t.clampWindow()
+		return t
+	}
+	return t
+}
+
+func (t Tree) containsAnchor(anchor cursorAnchor) bool {
+	for _, row := range t.visibleRows() {
+		if t.rowMatchesAnchor(row, anchor) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) rowMatchesAnchor(row treeRow, anchor cursorAnchor) bool {
+	return anchor.node != nil && t.canonicalNode(row.node) == anchor.node
 }
 
 // Focus gives the Tree keyboard focus.
@@ -291,11 +511,42 @@ func (t Tree) Loading() bool { return t.loading }
 func (t Tree) Err() error { return t.err }
 
 // Roots returns the tree's current root nodes (nil while loading or before the
-// first load completes).
+// first load completes). These are the unfiltered roots most recently loaded or
+// installed with [Tree.WithRoots]; [Tree.VisibleRoots] reports the current text
+// projection.
 func (t Tree) Roots() []*TreeNode { return t.roots }
+
+// VisibleRoots returns the hierarchy-wide text projection. It shares selectable
+// node identity with Roots and contains shallow ancestor copies only where
+// needed to retain context. With no active query it is exactly Roots.
+func (t Tree) VisibleRoots() []*TreeNode { return t.renderRoots() }
 
 // Cursor reports the current cursor index into the visible (expanded) rows.
 func (t Tree) Cursor() int { return t.cursor }
+
+// ViewportOffset reports the first visible row index in the current projection.
+// It is observable scroll state used by hosts that preserve a canonical cursor
+// across view-only projections.
+func (t Tree) ViewportOffset() int { return t.offset }
+
+// FilterState reports a copy of the hierarchy-wide text-search state.
+func (t Tree) FilterState() TreeFilterState { return t.filter }
+
+// Overflow reports whether the current visible viewport has rows above or
+// below it. Loading and empty trees report no overflow.
+func (t Tree) Overflow() TreeOverflow {
+	if t.loading || t.height < 1 {
+		return TreeOverflow{}
+	}
+	count := len(t.visibleRows())
+	if count == 0 {
+		return TreeOverflow{}
+	}
+	return TreeOverflow{
+		Top:    t.offset > 0,
+		Bottom: t.offset+t.height < count,
+	}
+}
 
 // CurrentNode returns the node under the cursor and true, or nil and false
 // when there are no visible rows.
@@ -322,35 +573,193 @@ func (t Tree) HasConflict() bool {
 	return any
 }
 
-// AvailableActions reports the actions the Tree dispatches in its current
-// state. While loading only Help/Back are live (navigation over an
-// as-yet-empty forest is a no-op but never blocks); once loaded the full
-// navigate/expand/collapse/toggle set is available.
+// AvailableActions reports only actions that can change the Tree in its current
+// state. Loading/failed/empty forests expose no row operations; navigation is
+// edge-aware; and expand, collapse, and selection follow the current row and
+// projected forest shape. Dispatch, footer, and help consume this same set.
 func (t Tree) AvailableActions() []keymap.ActionID {
-	if t.loading {
+	if t.loading || t.err != nil {
 		return []keymap.ActionID{keymap.ActionHelp, keymap.ActionBack}
 	}
-	return []keymap.ActionID{
-		keymap.ActionUp,
-		keymap.ActionDown,
-		keymap.ActionPageUp,
-		keymap.ActionPageDown,
-		keymap.ActionTop,
-		keymap.ActionBottom,
-		keymap.ActionNextProject,
-		keymap.ActionPrevProject,
-		keymap.ActionCollapse,
-		keymap.ActionExpand,
-		keymap.ActionCollapseLevel,
-		keymap.ActionExpandLevel,
-		keymap.ActionCollapseAll,
-		keymap.ActionExpandAll,
-		keymap.ActionToggle,
-		keymap.ActionSelectAll,
-		keymap.ActionSelectUnderProject,
-		keymap.ActionHelp,
-		keymap.ActionBack,
+	if t.filter.Editing() {
+		return t.filter.AvailableActions()
 	}
+	actions := make([]keymap.ActionID, 0, 18)
+	rows := t.visibleRows()
+	if t.cursor > 0 && len(rows) > 0 {
+		actions = append(actions, keymap.ActionUp, keymap.ActionPageUp, keymap.ActionTop)
+	}
+	if t.cursor >= 0 && t.cursor+1 < len(rows) {
+		actions = append(actions, keymap.ActionDown, keymap.ActionPageDown, keymap.ActionBottom)
+	}
+	if len(t.roots) > 0 {
+		actions = append(actions, keymap.ActionSearch)
+	}
+	if t.filter.Active() {
+		actions = append(actions, keymap.ActionClearFilter)
+	}
+	if previous, next := t.projectDirections(); previous {
+		actions = append(actions, keymap.ActionPrevProject)
+		if next {
+			actions = append(actions, keymap.ActionNextProject)
+		}
+	} else if next {
+		actions = append(actions, keymap.ActionNextProject)
+	}
+	if node, ok := t.CurrentNode(); ok {
+		expansion := t.visibleExpansion(node)
+		if expansion.controllable {
+			if expansion.expanded {
+				actions = append(actions, keymap.ActionCollapse)
+			} else {
+				actions = append(actions, keymap.ActionExpand)
+			}
+		}
+		if t.subtreeHasSelectable(node) {
+			actions = append(actions, keymap.ActionToggle)
+		}
+		if t.levelCanExpand(node) {
+			actions = append(actions, keymap.ActionExpandLevel)
+		}
+		if t.levelCanCollapse(node) {
+			actions = append(actions, keymap.ActionCollapseLevel)
+		}
+		if t.projectHasUnselected(node) {
+			actions = append(actions, keymap.ActionSelectUnderProject)
+		}
+	}
+	if t.anyInteriorCanExpand() {
+		actions = append(actions, keymap.ActionExpandAll)
+	}
+	if t.anyInteriorCanCollapse() {
+		actions = append(actions, keymap.ActionCollapseAll)
+	}
+	if t.hasSelectableNode() {
+		actions = append(actions, keymap.ActionSelectAll)
+	}
+	return append(actions, keymap.ActionHelp, keymap.ActionBack)
+}
+
+func (t Tree) nodeExpanded(node *TreeNode) bool {
+	if node == nil || node.isLeaf() {
+		return false
+	}
+	expanded, recorded := t.expanded[t.canonicalNode(node)]
+	return !recorded || expanded
+}
+
+type treeVisibleExpansion struct {
+	expanded     bool
+	controllable bool
+}
+
+// visibleExpansion is the single interpretation of expansion in the rendered
+// projection. Shallow ancestors retained as search context are force-open so
+// their matching descendants stay visible, but they are not controllable: an
+// expand/collapse command would only mutate hidden canonical state without
+// changing the projected view.
+func (t Tree) visibleExpansion(node *TreeNode) treeVisibleExpansion {
+	if node == nil || node.isLeaf() {
+		return treeVisibleExpansion{}
+	}
+	if t.projected && node.projectionOrigin != nil {
+		return treeVisibleExpansion{expanded: true}
+	}
+	return treeVisibleExpansion{expanded: t.nodeExpanded(node), controllable: true}
+}
+
+func (t Tree) projectDirections() (previous, next bool) {
+	node, ok := t.CurrentNode()
+	if !ok {
+		return false, false
+	}
+	root := t.rootAncestor(node)
+	roots := t.renderRoots()
+	for i, candidate := range roots {
+		if candidate != root {
+			continue
+		}
+		return i > 0, i+1 < len(roots)
+	}
+	return false, false
+}
+
+func (t Tree) subtreeHasSelectable(node *TreeNode) bool {
+	selectable := false
+	walk(node, func(candidate *TreeNode) {
+		if candidate.isLeaf() && candidate.State != Conflict {
+			selectable = true
+		}
+	})
+	return selectable
+}
+
+func (t Tree) hasSelectableNode() bool {
+	for _, root := range t.renderRoots() {
+		if t.subtreeHasSelectable(root) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) projectHasUnselected(node *TreeNode) bool {
+	root := t.rootAncestor(node)
+	unselected := false
+	walk(root, func(candidate *TreeNode) {
+		if candidate.isLeaf() && candidate.State != Conflict && candidate.State != Checked {
+			unselected = true
+		}
+	})
+	return unselected
+}
+
+func (t Tree) levelCanExpand(node *TreeNode) bool {
+	root := t.rootAncestor(node)
+	for _, child := range root.Children {
+		expansion := t.visibleExpansion(child)
+		if expansion.controllable && !expansion.expanded {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) levelCanCollapse(node *TreeNode) bool {
+	root := t.rootAncestor(node)
+	for _, child := range root.Children {
+		expansion := t.visibleExpansion(child)
+		if expansion.controllable && expansion.expanded {
+			return true
+		}
+	}
+	return false
+}
+
+func (t Tree) anyInteriorCanExpand() bool {
+	canExpand := false
+	for _, root := range t.renderRoots() {
+		walk(root, func(node *TreeNode) {
+			expansion := t.visibleExpansion(node)
+			if expansion.controllable && !expansion.expanded {
+				canExpand = true
+			}
+		})
+	}
+	return canExpand
+}
+
+func (t Tree) anyInteriorCanCollapse() bool {
+	canCollapse := false
+	for _, root := range t.renderRoots() {
+		walk(root, func(node *TreeNode) {
+			expansion := t.visibleExpansion(node)
+			if expansion.controllable && expansion.expanded {
+				canCollapse = true
+			}
+		})
+	}
+	return canCollapse
 }
 
 var _ keymap.Availability = Tree{}
@@ -360,6 +769,12 @@ var _ keymap.Availability = Tree{}
 func (t Tree) Update(msg tea.Msg) (Tree, tea.Cmd) {
 	switch m := msg.(type) {
 	case treeLoadedMsg:
+		// Instance ownership is checked before generation. Two newly-mounted
+		// trees both begin at generation one, so generation alone cannot
+		// distinguish their first completions.
+		if !t.owner.valid() || !m.owner.valid() || m.owner != t.owner {
+			return t, nil
+		}
 		// Stale guard: a result whose generation no longer matches was
 		// re-sourced or replaced before it returned - drop it.
 		if m.gen != t.gen {
@@ -372,10 +787,9 @@ func (t Tree) Update(msg tea.Msg) (Tree, tea.Cmd) {
 			return t, nil
 		}
 		t.roots = m.nodes
-		t.recompute()
 		t.cursor = 0
 		t.offset = 0
-		t.clampWindow()
+		t.applyTextProjection(false)
 		return t, nil
 	case spinner.TickMsg:
 		if !t.loading {
@@ -395,6 +809,9 @@ func (t Tree) Update(msg tea.Msg) (Tree, tea.Cmd) {
 // navigation while loading, leave the tree unchanged (input stays live but
 // there is nothing yet to move over).
 func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
+	if t.filter.Editing() {
+		return t.handleFilterKey(msg)
+	}
 	action, ok := keymap.Match(t.keymap, msg, t)
 	if !ok {
 		return t, nil
@@ -426,14 +843,21 @@ func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 		t.moveToProject(1)
 	case keymap.ActionPrevProject:
 		t.moveToProject(-1)
+	case keymap.ActionSearch:
+		if !t.filter.Active() || t.filterFallback.depth < 0 {
+			t.filterFallback = t.currentAnchor()
+		}
+		t.filter.Mode = TreeFilterEditing
+	case keymap.ActionClearFilter:
+		t.clearFilter()
 	case keymap.ActionExpand:
 		if node, okc := t.CurrentNode(); okc && !node.isLeaf() {
-			t.expanded[node] = true
+			t.expanded[t.canonicalNode(node)] = true
 			t.clampWindow()
 		}
 	case keymap.ActionCollapse:
 		if node, okc := t.CurrentNode(); okc && !node.isLeaf() {
-			t.expanded[node] = false
+			t.expanded[t.canonicalNode(node)] = false
 			t.clampWindow()
 		}
 	case keymap.ActionExpandLevel:
@@ -454,6 +878,54 @@ func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 		t.selectUnderProject()
 	}
 	return t, nil
+}
+
+// handleFilterKey owns search-text editing. Lifecycle keys dispatch through the
+// typed keymap; printable text is content forwarded by Bubble Tea rather than a
+// second keybinding definition.
+func (t Tree) handleFilterKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
+	if action, ok := keymap.Match(t.keymap, msg, t.filter); ok {
+		switch action {
+		case keymap.ActionDeleteFilter:
+			if t.filter.Query != "" {
+				t.filter.Query = trimLastGraphemeCluster(t.filter.Query)
+				t.applyTextProjection(true)
+			}
+		case keymap.ActionKeepFilter:
+			t.filter.Query = strings.TrimSpace(t.filter.Query)
+			if t.filter.Query == "" {
+				t.filter.Mode = TreeFilterInactive
+			} else {
+				t.filter.Mode = TreeFilterKept
+			}
+			t.applyTextProjection(true)
+			if t.filter.Mode == TreeFilterInactive {
+				t.filterFallback = cursorAnchor{depth: -1}
+			}
+		case keymap.ActionClearFilter:
+			t.clearFilter()
+		}
+		return t, nil
+	}
+	if msg.Text == "" || (msg.Mod != 0 && msg.Mod != tea.ModShift) {
+		return t, nil
+	}
+	t.filter.Query += msg.Text
+	t.applyTextProjection(true)
+	return t, nil
+}
+
+// clearFilter returns to the current unfiltered roots without changing
+// expansion or any node's checkbox state.
+func (t *Tree) clearFilter() {
+	anchor := t.filterFallback
+	if anchor.depth < 0 {
+		anchor = t.currentAnchor()
+	}
+	t.filter.Query = ""
+	t.filter.Mode = TreeFilterInactive
+	t.applyTextProjectionAt(anchor)
+	t.filterFallback = cursorAnchor{depth: -1}
 }
 
 // moveCursor moves the cursor by delta over count rows, clamped, then
@@ -491,51 +963,54 @@ func (t *Tree) toggle(node *TreeNode) {
 	t.recompute()
 }
 
-// toggleAll selects the whole forest, or clears it when everything selectable
-// is already Checked (a root-level select-all / clear-all toggle).
+// toggleAll selects every selectable node represented by the current visible
+// projection, or clears that projection when everything selectable in it is
+// already Checked.
 func (t *Tree) toggleAll() {
 	target := Checked
 	if t.allChecked() {
 		target = Unchecked
 	}
-	for _, r := range t.roots {
+	for _, r := range t.renderRoots() {
 		setSubtree(r, target)
 	}
 	t.recompute()
 }
 
-// allChecked reports whether every non-Conflict node in the forest is Checked.
-// A forest containing a Conflict is never "all checked", so select-all keeps
-// selecting rather than flipping to clear.
+// allChecked reports whether every non-Conflict node represented by the current
+// visible projection is Checked. A projection containing a Conflict is never
+// "all checked", so select-all keeps selecting rather than flipping to clear.
 func (t Tree) allChecked() bool {
 	all := true
-	for _, r := range t.roots {
+	roots := t.renderRoots()
+	for _, r := range roots {
 		walk(r, func(n *TreeNode) {
 			if n.State != Checked {
 				all = false
 			}
 		})
 	}
-	return all && len(t.roots) > 0
+	return all && len(roots) > 0
 }
 
-// setAllExpanded expands (or collapses) every interior node in the whole
-// forest at once, then re-clamps the scroll window so the cursor stays visible.
+// setAllExpanded expands (or collapses) every controllable interior node
+// represented by the current visible projection, then re-clamps the scroll
+// window so the cursor stays visible.
 func (t *Tree) setAllExpanded(expand bool) {
-	for _, r := range t.roots {
+	for _, r := range t.renderRoots() {
 		walk(r, func(n *TreeNode) {
-			if !n.isLeaf() {
-				t.expanded[n] = expand
+			if t.visibleExpansion(n).controllable {
+				t.expanded[t.canonicalNode(n)] = expand
 			}
 		})
 	}
 	t.clampWindow()
 }
 
-// setLevelExpanded expands (or collapses) every branch of the project the
-// cursor sits in - the interior children of the cursor node's top-level
-// (project) ancestor. Whether the cursor is on the project itself or on one of
-// its branches, the whole branch level moves together.
+// setLevelExpanded expands (or collapses) every controllable branch in the
+// current projected project containing the cursor. Whether the cursor is on
+// the project itself or one of its branches, its controllable branch level
+// moves together.
 func (t *Tree) setLevelExpanded(expand bool) {
 	node, ok := t.CurrentNode()
 	if !ok {
@@ -543,16 +1018,16 @@ func (t *Tree) setLevelExpanded(expand bool) {
 	}
 	root := t.rootAncestor(node)
 	for _, c := range root.Children {
-		if !c.isLeaf() {
-			t.expanded[c] = expand
+		if t.visibleExpansion(c).controllable {
+			t.expanded[t.canonicalNode(c)] = expand
 		}
 	}
 	t.clampWindow()
 }
 
-// selectUnderProject checks every selectable session under the project the
-// cursor sits in (the cursor node's top-level ancestor), then rolls interior
-// state back up. It always selects; it is not a clear toggle.
+// selectUnderProject checks every selectable node represented under the current
+// projected project containing the cursor, then rolls interior state back up.
+// It always selects; it is not a clear toggle.
 func (t *Tree) selectUnderProject() {
 	node, ok := t.CurrentNode()
 	if !ok {
@@ -573,7 +1048,8 @@ func (t *Tree) moveToProject(delta int) {
 	}
 	root := t.rootAncestor(node)
 	idx := -1
-	for i, r := range t.roots {
+	roots := t.renderRoots()
+	for i, r := range roots {
 		if r == root {
 			idx = i
 			break
@@ -586,10 +1062,10 @@ func (t *Tree) moveToProject(delta int) {
 	if target < 0 {
 		target = 0
 	}
-	if target >= len(t.roots) {
-		target = len(t.roots) - 1
+	if target >= len(roots) {
+		target = len(roots) - 1
 	}
-	targetRoot := t.roots[target]
+	targetRoot := roots[target]
 	for i, r := range t.visibleRows() {
 		if r.node == targetRoot {
 			t.cursor = i
@@ -624,10 +1100,120 @@ func (t Tree) parentIndex() map[*TreeNode]*TreeNode {
 			visit(c)
 		}
 	}
-	for _, r := range t.roots {
+	for _, r := range t.renderRoots() {
 		visit(r)
 	}
 	return parent
+}
+
+// renderRoots returns the current text projection, or the installed roots when
+// no query is active.
+func (t Tree) renderRoots() []*TreeNode {
+	if t.projected {
+		return t.visible
+	}
+	return t.roots
+}
+
+// canonicalNode resolves a shallow projection ancestor to the corresponding
+// node in the installed roots. Matching nodes and descendants are already the
+// original pointers and pass through unchanged.
+func (t Tree) canonicalNode(node *TreeNode) *TreeNode {
+	return canonicalProjectionOrigin(node)
+}
+
+// cursorAnchor records canonical pointer identity and depth so projection
+// changes can keep the same row. Shallow projection ancestors resolve through
+// projectionOrigin; display IDs are deliberately excluded because common
+// branch names such as main and develop repeat under different projects.
+type cursorAnchor struct {
+	node   *TreeNode
+	depth  int
+	offset int
+}
+
+func (t Tree) currentAnchor() cursorAnchor {
+	rows := t.visibleRows()
+	if t.cursor < 0 || t.cursor >= len(rows) {
+		return cursorAnchor{depth: -1}
+	}
+	row := rows[t.cursor]
+	return cursorAnchor{node: t.canonicalNode(row.node), depth: row.depth, offset: t.offset}
+}
+
+// applyTextProjection rebuilds the hierarchy-wide text view from the installed
+// roots. Matching subtrees retain original pointers; only ancestor context is
+// shallow-copied and recorded in origins.
+func (t *Tree) applyTextProjection(preserveCursor bool) {
+	anchor := cursorAnchor{depth: -1}
+	if preserveCursor {
+		anchor = t.currentAnchor()
+		if anchor.depth < 0 && t.filterFallback.depth >= 0 {
+			anchor = t.filterFallback
+		}
+	}
+	t.applyTextProjectionAt(anchor)
+}
+
+func (t *Tree) applyTextProjectionAt(anchor cursorAnchor) {
+	t.recompute()
+	query := strings.TrimSpace(t.filter.Query)
+	if query == "" {
+		t.visible = nil
+		t.projected = false
+	} else {
+		t.visible = projectTree(t.roots, query)
+		t.projected = true
+	}
+	t.recompute()
+	rows := t.visibleRows()
+	t.cursor = 0
+	t.offset = 0
+	if anchor.depth >= 0 {
+		for i, row := range rows {
+			if t.canonicalNode(row.node) == anchor.node {
+				t.cursor = i
+				t.offset = anchor.offset
+				break
+			}
+		}
+	}
+	t.clampWindow()
+}
+
+// projectTree narrows roots to nodes whose label contains query at any depth,
+// retaining ancestors for context. A matched node is the original pointer with
+// its whole subtree; retained ancestors are shallow copies whose children are
+// only matching branches. Query normalization happens once before the linear
+// walk, and no ID or metadata participates in user-visible label search.
+func projectTree(roots []*TreeNode, query string) []*TreeNode {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return roots
+	}
+	var project func(*TreeNode) *TreeNode
+	project = func(node *TreeNode) *TreeNode {
+		if strings.Contains(strings.ToLower(flattenLine(node.Label)), needle) {
+			return node
+		}
+		children := make([]*TreeNode, 0, len(node.Children))
+		for _, child := range node.Children {
+			if kept := project(child); kept != nil {
+				children = append(children, kept)
+			}
+		}
+		if len(children) == 0 {
+			return nil
+		}
+		return ProjectTreeNode(node, children)
+	}
+	visible := make([]*TreeNode, 0, len(roots))
+	for _, root := range roots {
+		if kept := project(root); kept != nil {
+			visible = append(visible, kept)
+		}
+	}
+	return visible
 }
 
 // recompute rolls every interior node's state up from its children across the
@@ -635,6 +1221,11 @@ func (t Tree) parentIndex() map[*TreeNode]*TreeNode {
 func (t *Tree) recompute() {
 	for _, r := range t.roots {
 		rollup(r)
+	}
+	if len(t.visible) > 0 {
+		for _, r := range t.visible {
+			rollup(r)
+		}
 	}
 }
 
@@ -707,6 +1298,9 @@ type treeRow struct {
 // visibleRows flattens the forest into the ordered rows currently visible,
 // descending into a node's children only when it is expanded. A node is
 // expanded by default (absent from the expanded map); collapse records false.
+// Shallow ancestors retained only to explain a text-search match open
+// transiently even when their canonical node is collapsed, without changing
+// that canonical expansion entry.
 func (t Tree) visibleRows() []treeRow {
 	var rows []treeRow
 	var visit func(n *TreeNode, depth int)
@@ -715,14 +1309,14 @@ func (t Tree) visibleRows() []treeRow {
 		if n.isLeaf() {
 			return
 		}
-		if collapsed, ok := t.expanded[n]; ok && !collapsed {
+		if !t.visibleExpansion(n).expanded {
 			return
 		}
 		for _, c := range n.Children {
 			visit(c, depth+1)
 		}
 	}
-	for _, r := range t.roots {
+	for _, r := range t.renderRoots() {
 		visit(r, 0)
 	}
 	return rows
@@ -799,15 +1393,31 @@ func (t Tree) View() string {
 	}
 	rows := t.visibleRows()
 	if len(rows) == 0 {
-		return fitLine(styles.Muted, "no projects", t.width)
+		empty := "no projects"
+		if t.filter.Active() {
+			empty = "no matching rows"
+		}
+		return fitLine(styles.Muted, empty, t.width)
 	}
 	end := t.offset + t.height
 	if end > len(rows) {
 		end = len(rows)
 	}
+	overflow := t.Overflow()
 	out := make([]string, 0, t.height)
 	for i := t.offset; i < end; i++ {
-		out = append(out, t.renderRow(styles, rows[i], i == t.cursor))
+		edge := ""
+		if i == t.offset && overflow.Top {
+			edge = treeOverflowTopGlyph
+		}
+		if i == end-1 && overflow.Bottom {
+			if edge == "" {
+				edge = treeOverflowBottomGlyph
+			} else {
+				edge = treeOverflowBothGlyph
+			}
+		}
+		out = append(out, t.renderRow(styles, rows[i], i == t.cursor, edge))
 	}
 	for len(out) < t.height {
 		out = append(out, fitLine(styles.Base, "", t.width))
@@ -833,7 +1443,7 @@ func (t Tree) minFallback(styles theme.Styles) string {
 // budget so the row fills the width exactly; when the fixed prefix cannot fit
 // (deep indent in a narrow region) it falls back to a single hard-truncated
 // line so the width invariant always holds.
-func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool) string {
+func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool, edge string) string {
 	node := row.node
 	// A label MUST render as exactly one display line: a newline in the label
 	// (e.g. a multi-line first-turn title) would otherwise split one row across
@@ -841,9 +1451,9 @@ func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool) string {
 	// counts one row per line. The annotations are appended on the SAME line for
 	// the same reason.
 	label := flattenLine(node.Label)
-	cur := styledCursor(styles, active)
+	cur := treeRowLead(styles, active, edge)
 	indent := spaces(row.depth * 2)
-	expand := expandGlyph(node, t.expanded)
+	expand := expandGlyph(node, t.visibleExpansion(node))
 	box := stateBox(styles, node.State)
 	annotation := rowAnnotation(node)
 
@@ -853,7 +1463,7 @@ func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool) string {
 	if labelBudget < 1 {
 		// Narrow region: styled segments would not fit, so hard-truncate the
 		// whole plain row and style it as a unit - never overflow the width.
-		plain := stripCursor(active) + indent + expand + " " + box + " " + label + annotation
+		plain := treeRowLeadPlain(active, edge) + indent + expand + " " + box + " " + label + annotation
 		style := styles.Base
 		if active {
 			style = styles.Selected
@@ -919,6 +1529,9 @@ func rowAnnotation(node *TreeNode) string {
 			fmt.Fprintf(&b, " + %d child sessions", n)
 		}
 	}
+	if node.meta(MetaTracked) == MetaTrackedValue {
+		b.WriteString("  tracked")
+	}
 	if node.meta(MetaIngested) == MetaIngestedValue {
 		b.WriteString("  already imported")
 	}
@@ -940,25 +1553,42 @@ func childCountOf(node *TreeNode) int {
 	return n
 }
 
-// stripCursor returns the plain (unstyled) cursor prefix for the fallback row.
-func stripCursor(active bool) string {
+// treeRowLead renders the fixed two-cell cursor/overflow prefix. Overflow uses
+// the second cell, so it never changes row width or steals the cursor.
+func treeRowLead(styles theme.Styles, active bool, edge string) string {
+	plain := treeRowLeadPlain(active, edge)
 	if active {
-		return cursorGlyph
+		return styles.Selected.Render(plain)
 	}
-	return noCursorGlyph
+	if edge != "" {
+		return styles.Muted.Render(plain)
+	}
+	return styles.Base.Render(plain)
+}
+
+func treeRowLeadPlain(active bool, edge string) string {
+	first := " "
+	if active {
+		first = "▸"
+	}
+	second := " "
+	if edge != "" {
+		second = edge
+	}
+	return first + second
 }
 
 // expandGlyph returns the plain expand/collapse indicator for a node: a
 // down-pointing triangle when expanded, a right-pointing one when collapsed,
 // and a space for a leaf. Each is one cell wide.
-func expandGlyph(node *TreeNode, expanded map[*TreeNode]bool) string {
+func expandGlyph(node *TreeNode, expansion treeVisibleExpansion) string {
 	if node.isLeaf() {
 		return " "
 	}
-	if collapsed, ok := expanded[node]; ok && !collapsed {
-		return treeCollapsedGlyph
+	if expansion.expanded {
+		return treeExpandedGlyph
 	}
-	return treeExpandedGlyph
+	return treeCollapsedGlyph
 }
 
 // stateBox returns the tri-state checkbox for a node, styled distinctly per
@@ -992,8 +1622,11 @@ func joinLines(lines []string) string {
 // Tree row glyph vocabulary. The boxes are all three cells wide so a column of
 // mixed states stays aligned; the expand glyphs are one cell wide.
 const (
-	treeExpandedGlyph  = "▾"
-	treeCollapsedGlyph = "▸"
-	partialBox         = "[~]"
-	conflictBox        = "[!]"
+	treeExpandedGlyph       = "▾"
+	treeCollapsedGlyph      = "▸"
+	treeOverflowTopGlyph    = "↑"
+	treeOverflowBottomGlyph = "↓"
+	treeOverflowBothGlyph   = "↕"
+	partialBox              = "[~]"
+	conflictBox             = "[!]"
 )
