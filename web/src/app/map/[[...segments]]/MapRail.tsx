@@ -9,6 +9,7 @@ import { Skeleton as SkeletonBox } from '@/lib/skeleton';
 import type { DecodedMapNodeDetailPayload, DecodedTaskSummary } from '@/lib/api/map';
 import type { SessionSummary } from '@/types/messages';
 import { displayProject } from '@/lib/quality/utils';
+import { OutcomeHeuristicHelp } from '@/components/OutcomeHeuristicHelp';
 import { RouteOrigin, transcriptHref, type ProjectHash, type ReturnLocation } from '@/lib/navigation/projectRoutes';
 import {
   contributeSessionsHref,
@@ -217,6 +218,9 @@ export function ProjectRail({
           latest recorded conversations; hover one to light up what it
           shaped.
         </p>
+        {recentTasks?.some((task) => task.outcome) && (
+          <OutcomeHeuristicHelp className="mb-2" />
+        )}
         {recentTasksError ? (
           <p className="text-[13px] text-danger">{recentTasksError}</p>
         ) : recentTasksLoading || recentTasks === null ? (
@@ -457,6 +461,7 @@ export function NodeRail({
   returnTo,
 }: NodeRailProps) {
   const shapedRows = detail ? interleaveShapedBy(detail.shapedBy, detail.recentCommits) : [];
+  const hasShapedOutcome = shapedRows.some((row) => row.kind === 'task' && row.task.outcome);
   const contributeIds = detail ? shapedBySessionIds(detail.shapedBy) : [];
   /** sessionId -> SessionSummary, for resolving a commit row's `sessionIds`
    *  into a harness + display name. */
@@ -555,6 +560,7 @@ export function NodeRail({
           </RailSection>
 
           <RailSection title="Conversations that built this">
+            {hasShapedOutcome && <OutcomeHeuristicHelp className="mb-2" />}
             {shapedRows.length === 0 ? (
               <p className="text-[13px] text-ink-4">No recorded conversations or updates.</p>
             ) : (

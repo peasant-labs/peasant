@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
@@ -19,6 +19,10 @@ import {
   requireRecord,
   requireUniqueNames,
 } from '@/test/strictYaml';
+import {
+  localReviewClarityFixture,
+  makeClarityProjectSummaries,
+} from '@/test/fixtures/localReviewClarity';
 
 // ChangeGraph (embedded in the home's single-project change list) now calls
 // useRouter for CommitGraph tip-row navigation; mock it here so tests never
@@ -218,6 +222,48 @@ describe('HomePage — the changes-first picker', () => {
 
     // No map embedded on the home anymore.
     expect(screen.queryByLabelText(/Map of/)).not.toBeInTheDocument();
+  });
+
+  const homeClarityCase = localReviewClarityFixture.pickerCases.find(({ surface }) => surface === 'home');
+  if (!homeClarityCase) throw new Error('local review clarity fixture is missing the mounted Home case');
+
+  it(homeClarityCase.name, async () => {
+    const projects = makeClarityProjectSummaries(homeClarityCase);
+    channelData = {
+      sessions: projects.map((project, index) => makeSession({
+        id: `clarity-home-${index}`,
+        project: project.project,
+        projectHash: project.projectHash,
+      })),
+    };
+    api.fetchProjectSummaries.mockResolvedValue(makeSummaries(projects));
+    render(<HomePage />);
+
+    const search = await screen.findByRole('searchbox', {
+      name: localReviewClarityFixture.copy.searchAccessibleName,
+    });
+    expect(search).toHaveAttribute('placeholder', localReviewClarityFixture.copy.searchPlaceholder);
+    const searchIcon = search.closest('.input-ico')?.querySelector('svg');
+    expect(searchIcon).toBeInTheDocument();
+    expect(searchIcon).toHaveAttribute('aria-hidden', 'true');
+
+    const coverageHelp = screen.getByRole('button', {
+      name: localReviewClarityFixture.copy.coverageHelpName,
+    });
+    expect(coverageHelp).toHaveTextContent(localReviewClarityFixture.copy.coverageVisibleLabel);
+    expect(screen.queryByText('Files with AI')).not.toBeInTheDocument();
+    fireEvent.focus(coverageHelp);
+    const coverageTooltip = screen.getByRole('tooltip');
+    expect(coverageTooltip).toHaveTextContent(localReviewClarityFixture.copy.coverageHelpText);
+    expect(coverageHelp).toHaveAttribute('aria-describedby', coverageTooltip.id);
+
+    const target = screen.getByRole('link', { name: homeClarityCase.expectedLinkName });
+    expect(target).toHaveAttribute('href', homeClarityCase.expectedHref);
+    expect(within(target).getByLabelText(homeClarityCase.expectedCoverageLabel)).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: homeClarityCase.searchQuery } });
+    expect(screen.getAllByRole('link', { name: /Open the changes of/ })).toEqual([target]);
+    expect(target).toHaveAttribute('href', homeClarityCase.expectedHref);
   });
 
   it('E1: shows aggregate summary cards above the multi-project picker', async () => {

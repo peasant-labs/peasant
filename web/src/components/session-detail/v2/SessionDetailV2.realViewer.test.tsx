@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { SessionDetailV2 } from './SessionDetailV2';
 import { parseTranscriptRouteQuery, type ProjectHash } from '@/lib/navigation/projectRoutes';
 import { parseStrictYAML, requireExactRequiredFields, requireRecord, requireUniqueNames } from '@/test/strictYaml';
+import { localReviewClarityFixture } from '@/test/fixtures/localReviewClarity';
 
 const PROJECT_HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ProjectHash;
 const PATHNAME = '/projects/alpha-project/sess-12345678';
@@ -230,6 +231,52 @@ describe('packed Fairtrade viewer mounted through Peasant', () => {
       assertExactMatrix(activeTurnCallbacks, fixture.expectedCallbacks, 'mounted transition callback');
       assertExactMatrix(history, fixture.expectedHistory, 'mounted transition history');
       expect(view.container.querySelector('.txn-app')).toBe(viewer);
+    });
+  }
+
+  for (const outcomeCase of localReviewClarityFixture.outcomeCases) {
+    it(outcomeCase.name, async () => {
+      currentSearchParams = new URLSearchParams('turn=0');
+      channelData = {
+        id: 'sess-12345678',
+        project: 'alpha-project',
+        harness: 'codex',
+        outcome: outcomeCase.outcome,
+        startTime: '2026-07-15T08:00:00Z',
+        endTime: '2026-07-15T08:01:00Z',
+        durationMins: 1,
+        totalTokens: 12,
+        tokensIn: 5,
+        tokensOut: 7,
+        turnCount: 1,
+        toolCallCount: 0,
+        turns: [{
+          index: 0,
+          role: 'user',
+          depth: 0,
+          content: 'fixture turn',
+          timestamp: '2026-07-15T08:00:00Z',
+          toolCalls: [],
+        }],
+      };
+
+      const view = render(<TestDetail />);
+      await waitFor(() => expect(view.container.querySelector('.txn-app')).toBeInTheDocument());
+      expect(
+        view.container.querySelector(`.txn-meta .chip[title="outcome · ${outcomeCase.outcome}"]`),
+      ).toHaveTextContent(outcomeCase.transcriptLabel);
+
+      const help = await screen.findByRole('button', {
+        name: localReviewClarityFixture.copy.outcomeHelpName,
+      });
+      fireEvent.focus(help);
+      const tooltip = await screen.findByRole('tooltip');
+      expect(tooltip).toHaveTextContent(localReviewClarityFixture.copy.outcomeSource);
+      for (const definitionCase of localReviewClarityFixture.outcomeCases) {
+        expect(tooltip).toHaveTextContent(definitionCase.definition);
+      }
+      expect(tooltip).toHaveTextContent(localReviewClarityFixture.copy.outcomeLimit);
+      expect(help).toHaveAttribute('aria-describedby', tooltip.id);
     });
   }
 });

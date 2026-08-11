@@ -93,9 +93,9 @@ export const GLOSSARY = {
       'The slice of the conversation in view — the whole thing, one request, or only what touched a given file or change. Clear it to see everything.',
   },
   coverage: {
-    term: 'AI-built files',
+    term: 'recorded files',
     short:
-      'How much of this code was last edited during a recorded AI conversation. The rest predates recording, or was edited outside this tool.',
+      'Files with at least one edit captured in a saved AI conversation. Total files are every file measured for the project.',
   },
 
   // --- the map / structure layer -------------------------------------------

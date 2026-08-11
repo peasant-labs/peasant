@@ -18,9 +18,11 @@ import {
   SESSIONS,
   SUMMARIES,
   TASKS,
+  makeTask,
   makeSession,
 } from '../lib/test-fixtures';
 import { graphAdapterContractFixture } from '@/test/fixtures/graphAdapterContract';
+import { localReviewClarityFixture } from '@/test/fixtures/localReviewClarity';
 
 // ---------------------------------------------------------------------------
 // Mocks: the sessions WS channel + the shared composition boundary. This file
@@ -418,6 +420,49 @@ describe('MapShell — one map without lenses', () => {
     render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
     await screen.findByTestId('map-canvas');
     expect((await screen.findAllByText('Could not load recent work.'))[0]).toBeInTheDocument();
+  });
+
+  it('mounted Map outcome rows expose the complete ingest-time heuristic help', async () => {
+    ws.data = {
+      sessions: localReviewClarityFixture.outcomeCases.map((testCase) => makeSession({
+        id: testCase.sessionId,
+        preview: testCase.taskTitle,
+      })),
+    };
+    stubFetch({
+      tasks: {
+        projectHash: PROJECT_HASH,
+        tasks: localReviewClarityFixture.outcomeCases.map((testCase) => makeTask({
+          sessionId: testCase.sessionId,
+          entryIndex: testCase.entryIndex,
+          title: testCase.taskTitle,
+          outcome: testCase.outcome,
+          retryLoop: false,
+          labels: [],
+        })),
+      },
+    });
+    render(<MapShell projectHash={PROJECT_HASH} projectName={PROJECT} />);
+    await screen.findByTestId('map-canvas');
+
+    for (const testCase of localReviewClarityFixture.outcomeCases) {
+      const row = (await screen.findAllByRole('link', {
+        name: `Open task at turn ${testCase.entryIndex} of session ${testCase.sessionId}`,
+      }))[0];
+      expect(row).toHaveTextContent(testCase.mapLabel);
+    }
+
+    const help = (await screen.findAllByRole('button', {
+      name: localReviewClarityFixture.copy.outcomeHelpName,
+    }))[0];
+    fireEvent.focus(help);
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent(localReviewClarityFixture.copy.outcomeSource);
+    for (const testCase of localReviewClarityFixture.outcomeCases) {
+      expect(tooltip).toHaveTextContent(testCase.definition);
+    }
+    expect(tooltip).toHaveTextContent(localReviewClarityFixture.copy.outcomeLimit);
+    expect(help).toHaveAttribute('aria-describedby', tooltip.id);
   });
 
   // -- Rail to canvas highlight relay -------------------------------------------
