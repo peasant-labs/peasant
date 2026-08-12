@@ -123,7 +123,10 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		}
 		fullSession.PushedAt = detail.PushedAt
 	}
-	fullSession.Turns = transcript.EntriesToTurns(dbEntries)
+	fullSession.Turns, err = transcript.EntriesToTurnsValidated(dbEntries)
+	if err != nil {
+		return nil, fmt.Errorf("export.ExportSession: validate indexed observed model evidence after storage read and before export: %w", err)
+	}
 
 	// Convert to the standardized detail payload — same as the session viewer.
 	payload, err := transcript.SessionToDetailValidated(fullSession)

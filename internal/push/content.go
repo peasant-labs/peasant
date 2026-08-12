@@ -39,7 +39,11 @@ func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.Sessi
 // boundary and returns attribution failures to outward-facing callers.
 func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) (schema.TranscriptContent, error) {
 	session := metadataToSession(meta, fields)
-	session.Turns = transcript.EntriesToTurns(entries)
+	turns, err := transcript.EntriesToTurnsValidated(entries)
+	if err != nil {
+		return schema.TranscriptContent{}, err
+	}
+	session.Turns = turns
 
 	payload, err := transcript.SessionToDetailValidated(session)
 	if err != nil {
@@ -110,20 +114,6 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 			err)
 	}
 	return redactedEntries, nil
-}
-
-func hasObservedModelEntries(entries []schema.SessionEntry) bool {
-	for _, entry := range entries {
-		if entry.Role == schema.RoleAssistant && entry.Extra != nil {
-			var extra map[string]json.RawMessage
-			if json.Unmarshal([]byte(*entry.Extra), &extra) == nil {
-				if _, present := extra["model_id"]; present {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 // redactJSONDocument redacts a marshalled document and PROVES it did.

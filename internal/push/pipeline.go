@@ -25,6 +25,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
@@ -62,16 +63,15 @@ func persistenceContext(ctx context.Context) (context.Context, context.CancelFun
 // files via the injected FileSystem, and uploads via the injected Publisher.
 // The Pipeline has no os import — all filesystem access is through p.fs.
 type Pipeline struct {
-	store               PipelineStore
-	transport           Transport
-	creds               *auth.Credentials
-	cfg                 *config.Config
-	fs                  ingest.FileSystem
-	runCfg              PipelineConfig
-	redactor            ingest.TextRedactor // safety-net redaction applied before upload
-	stderr              io.Writer           // destination for non-fatal warnings and notices
-	titles              title.Pipeline
-	contentCapabilities []village.ContentCapabilityAdvertisement
+	store     PipelineStore
+	transport Transport
+	creds     *auth.Credentials
+	cfg       *config.Config
+	fs        ingest.FileSystem
+	runCfg    PipelineConfig
+	redactor  ingest.TextRedactor // safety-net redaction applied before upload
+	stderr    io.Writer           // destination for non-fatal warnings and notices
+	titles    title.Pipeline
 }
 
 // Publisher is the authoritative Village publication surface required by the
@@ -186,7 +186,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// contract version; no audit log.
 	if p.runCfg.DryRun {
 		for _, sess := range sessions {
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion)
+			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
@@ -201,7 +201,6 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	if err != nil {
 		return result, err
 	}
-	p.contentCapabilities = capabilities
 
 	// 7. Concurrent uploads via errgroup, smallest first when a budget applies.
 	sessions = orderForBudget(ctx, sessions)
@@ -230,7 +229,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 			}
 			mu.Unlock()
 
-			sr := p.pushSession(gctx, sess, visibility, license, emit)
+			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -750,6 +749,7 @@ func (p *Pipeline) pushSession(
 	visibility schema.Visibility,
 	license schema.License,
 	emit schema.PushContractVersion,
+	contentCapabilities []village.ContentCapabilityAdvertisement,
 ) SessionPushResult {
 	// 1. Read metadata.json via injected FileSystem. The path is resolved by the
 	// shared ingest helper so subagent sessions (which live under
@@ -873,16 +873,9 @@ func (p *Pipeline) pushSession(
 			Error:     entriesErr,
 		}
 	}
-	if hasObservedModelEntries(entries) && !village.SupportsObservedModel(p.contentCapabilities) {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error: fmt.Errorf(
-				"enriched transcript push refused because session %s carries observedModel source evidence but the target Village did not advertise %q version %q in push.Pipeline.pushSession after GET /api/v1/schema/version and before content construction or upload; no transcript bytes or metadata were sent, and silently removing the evidence would misattribute assistant output; use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
-				sess.SessionID, village.ContentCapabilityObservedModel, village.ObservedModelCapabilityVersion,
-			),
-		}
+	hasObservedModel, observationErr := transcript.ValidateObservedModelEntries(entries)
+	if observationErr != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: observationErr}
 	}
 
 	// 4. Load the producer-owned durable associations. Unlike metrics and
@@ -973,6 +966,17 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Title:     title,
 			Status:    status,
+		}
+	}
+	if hasObservedModel && !village.SupportsObservedModel(contentCapabilities) {
+		return SessionPushResult{
+			SessionID: sess.SessionID,
+			HostSlug:  sess.HostSlug,
+			Status:    PushStatusError,
+			Error: fmt.Errorf(
+				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise %q version %q\n  where: push.Pipeline.pushSession\n  when: after GET /api/v1/schema/version and before content construction or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
+				sess.SessionID, village.ContentCapabilityObservedModel, village.ObservedModelCapabilityVersion,
+			),
 		}
 	}
 

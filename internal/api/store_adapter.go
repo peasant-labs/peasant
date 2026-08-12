@@ -228,7 +228,11 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 		// Non-fatal: return session without turns rather than failing entirely.
 		return &s, nil
 	}
-	s.Turns = EntriesToTurns(entries)
+	turns, validationErr := transcript.EntriesToTurnsValidated(entries)
+	if validationErr != nil {
+		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
+	}
+	s.Turns = turns
 
 	// Overlay full turn content from the source transcript, re-indexed with
 	// truncation disabled (see transcript.BuildContentOverlay) — otherwise

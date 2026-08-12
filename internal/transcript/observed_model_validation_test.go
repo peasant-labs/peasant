@@ -72,7 +72,7 @@ func TestValidateObservedModelEvidenceFixture(t *testing.T) {
 				t.Fatalf("accepted=%t, want %t; error=%v", err == nil, fixtureCase.Accepted, err)
 			}
 			if err != nil {
-				for _, fragment := range []string{"failed because", "in transcript.ValidateObservedModelEvidence", "during SessionDetailPayload construction", "no local, exported, or remote payload", "because", "retry"} {
+				for _, fragment := range []string{"observed-model producer validation failed", "  what:", "  why:", "  where: transcript.ValidateObservedModelEvidence", "  when: during SessionDetailPayload construction", "  meaning:", "  fix:", "retry"} {
 					if !strings.Contains(err.Error(), fragment) {
 						t.Errorf("actionable error missing %q: %v", fragment, err)
 					}

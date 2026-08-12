@@ -103,7 +103,7 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			}
 			if fixtureCase.WantError {
 				message := result.Sessions[0].Error.Error()
-				for _, fragment := range []string{"refused because", "did not advertise", "in push.Pipeline.pushSession", "before content construction or upload", "no transcript bytes or metadata were sent", "silently removing", "then retry"} {
+				for _, fragment := range []string{"enriched transcript push refused", "  what:", "  why: the target Village did not advertise", "  where: push.Pipeline.pushSession", "  when:", "  meaning:", "  fix:", "before content construction or upload", "no transcript bytes or metadata were sent", "silently removing", "then retry"} {
 					if !strings.Contains(message, fragment) {
 						t.Errorf("actionable refusal missing %q: %s", fragment, message)
 					}
