@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -69,6 +70,10 @@ type claudeTeammateIdentity struct {
 // contentBlock is a typed block inside an assistant message content array.
 type contentBlock struct {
 	Type string `json:"type"`
+}
+
+type claudeFileOpener interface {
+	Open(path string) (io.ReadCloser, error)
 }
 
 // Discover walks each configured source path looking for *.jsonl files.
@@ -332,12 +337,27 @@ func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTe
 // Discovery fails open for unreadable, empty, malformed, or mixed files so a
 // future transcript format cannot be silently discarded.
 func (a *ClaudeAdapter) isClaudeFileHistorySnapshot(path string) bool {
-	data, err := a.fs.ReadFile(path)
-	if err != nil {
-		return false
+	var reader io.Reader
+	var closeFile func() error
+	if opener, ok := a.fs.(claudeFileOpener); ok {
+		file, err := opener.Open(path)
+		if err != nil {
+			return false
+		}
+		reader = file
+		closeFile = file.Close
+	} else {
+		data, err := a.fs.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		reader = bytes.NewReader(data)
+	}
+	if closeFile != nil {
+		defer closeFile()
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
 	var records int
 	for scanner.Scan() {

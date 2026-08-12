@@ -385,27 +385,27 @@ func kickstartPreview(
 // renderable turns an honest preview. Source records are bounded so a malformed
 // or unusually large transcript cannot monopolize the interactive preview.
 func kickstartImportedEmptySessionBody(ctx context.Context, db *store.Store) kickstart.EmptySessionBodyFunc {
-	return func(sessionID string) (string, bool, error) {
+	return func(sessionID string) (kickstart.EmptySessionPreview, bool, error) {
 		info, err := db.SessionSourceInfo(ctx, sessionID)
 		if err != nil {
-			return "", false, fmt.Errorf("read source information for imported session %q: %w", sessionID, err)
+			return kickstart.EmptySessionPreview{}, false, fmt.Errorf("read source information for imported session %q: %w", sessionID, err)
 		}
 		const noTurns = "imported, but no renderable transcript turns were produced."
 		if info == nil {
-			return "", false, nil
+			return kickstart.EmptySessionPreview{}, false, nil
 		}
 		if info.SourcePath == "" {
-			return noTurns + "\n\nraw source is unavailable.", true, nil
+			return kickstart.EmptySessionPreview{Note: noTurns + "\n\nraw source is unavailable."}, true, nil
 		}
 
 		file, err := os.Open(info.SourcePath)
 		if err != nil {
-			return noTurns + "\n\nraw source is unavailable.", true, nil
+			return kickstart.EmptySessionPreview{Note: noTurns + "\n\nraw source is unavailable."}, true, nil
 		}
 		defer file.Close()
 		data, err := io.ReadAll(io.LimitReader(file, kickstartRawSourcePreviewLimit+1))
 		if err != nil {
-			return "", false, fmt.Errorf("read source for imported session %q: %w", sessionID, err)
+			return kickstart.EmptySessionPreview{}, false, fmt.Errorf("read source for imported session %q: %w", sessionID, err)
 		}
 		truncated := len(data) > kickstartRawSourcePreviewLimit
 		if truncated {
@@ -427,14 +427,14 @@ func kickstartImportedEmptySessionBody(ctx context.Context, db *store.Store) kic
 			}
 		}
 		if len(records) == 0 {
-			return noTurns + "\n\nraw source records are unavailable or malformed.", true, nil
+			return kickstart.EmptySessionPreview{Note: noTurns + "\n\nraw source records are unavailable or malformed."}, true, nil
 		}
 
-		body := noTurns + "\n\nraw source records:\n" + strings.Join(records, "\n")
+		note := noTurns + "\n\nraw source records:"
 		if truncated {
-			body += "\n\nsource preview truncated."
+			note += "\n\nsource preview truncated."
 		}
-		return body, true, nil
+		return kickstart.EmptySessionPreview{Note: note, SourceJSON: strings.Join(records, "\n")}, true, nil
 	}
 }
 

@@ -25,10 +25,17 @@ import (
 // recorded turns directly.
 type SessionTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 
+// EmptySessionPreview is the imported-but-empty session state. SourceJSON is a
+// bounded JSONL excerpt that ListingPreview renders through the JSON highlighter.
+type EmptySessionPreview struct {
+	Note       string
+	SourceJSON string
+}
+
 // EmptySessionBodyFunc distinguishes a session that the store does not hold
 // from one it holds without renderable turns. The mounted preview uses the
 // latter to show source evidence instead of falsely calling it unimported.
-type EmptySessionBodyFunc func(sessionID string) (body string, imported bool, err error)
+type EmptySessionBodyFunc func(sessionID string) (preview EmptySessionPreview, imported bool, err error)
 
 // ListingPreviewKind identifies the non-session row a scanner preview describes.
 type ListingPreviewKind uint8
@@ -157,12 +164,13 @@ func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 	}
 	if len(recorded) == 0 {
 		if p.emptyBody != nil {
-			note, imported, err := p.emptyBody(id)
+			preview, imported, err := p.emptyBody(id)
 			if err != nil {
 				return nil, err
 			}
 			if imported {
-				body.note = note
+				body.note = preview.Note
+				body.rawJSON = preview.SourceJSON
 				return body, nil
 			}
 		}
@@ -284,6 +292,7 @@ type sessionBody struct {
 	header     []string
 	transcript transcriptview.Document
 	note       string
+	rawJSON    string
 }
 
 var _ kit.PreviewBody = sessionBody{}
@@ -316,6 +325,9 @@ func (b sessionBody) Render(width int) string {
 		// pane wrote, so it takes the same body ink the rest of the prose does.
 		parts = append(parts, styles.Base.Render(ansi.Wrap(b.note, width, "")))
 	}
+	if b.rawJSON != "" {
+		parts = append(parts, mdrender.New(b.th).Render("```json\n"+b.rawJSON+"\n```", width))
+	}
 	return strings.Join(parts, headerSeparator)
 }
 
@@ -332,6 +344,9 @@ func (b sessionBody) plain() string {
 		parts = append(parts, body)
 	} else if b.note != "" {
 		parts = append(parts, b.note)
+	}
+	if b.rawJSON != "" {
+		parts = append(parts, b.rawJSON)
 	}
 	return strings.Join(parts, headerSeparator)
 }
