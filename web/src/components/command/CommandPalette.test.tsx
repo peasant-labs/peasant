@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act, waitFor } from '@testing-library/react';
+import { parseStrictYAML, requireExactRequiredFields, requireRecord } from '@/test/strictYaml';
 import {
   CommandPalette,
   filterCommands,
@@ -14,32 +17,30 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 const toggle = vi.fn();
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle }) }));
 
-const fetchProjectSummaries = vi.fn();
-const fetchSearch = vi.fn();
-const fetchDiscovery = vi.fn();
 const parentVisibleFixture = projectViewerStateFixture('explicit session makes parent visible');
 const PROJECT_HASH = parentVisibleFixture.summary.projects[0].projectHash;
-vi.mock('@/lib/api/map', () => ({
-  fetchProjectSummaries: () => fetchProjectSummaries(),
-  fetchSearch: (q: string, limit?: number) => fetchSearch(q, limit),
-}));
-vi.mock('@/lib/api/discovery', () => ({
-  fetchDiscovery: () => fetchDiscovery(),
-  requireDiscoveryItem: (discovery: Map<string, unknown>, sessionId: string) => {
-    const item = discovery.get(sessionId);
-    if (!item) throw new Error('requires exactly one discovery row');
-    return item;
-  },
-}));
+const fixturePath = resolve(process.cwd(), 'src/components/command/testdata/search_discovery.yaml');
+const fixture = requireRecord(parseStrictYAML(readFileSync(fixturePath, 'utf8'), 'search discovery fixture'), 'search discovery fixture');
+requireExactRequiredFields(fixture, ['valid', 'invalid'], 'search discovery fixture');
+const validFixture = requireRecord(fixture.valid, 'search discovery fixture.valid');
+requireExactRequiredFields(validFixture, ['search', 'discovery'], 'search discovery fixture.valid');
+const invalidFixtures = fixture.invalid as Array<Record<string, unknown>>;
+if (invalidFixtures.length !== 4) throw new Error(`search discovery fixture must contain exactly 4 invalid rows, got ${invalidFixtures.length}`);
+
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
 beforeEach(() => {
   push.mockClear();
   toggle.mockClear();
-  fetchSearch.mockReset();
-  fetchDiscovery.mockReset();
-  fetchSearch.mockResolvedValue({ query: '', results: [] });
-  fetchDiscovery.mockResolvedValue(new Map());
-  fetchProjectSummaries.mockResolvedValue(parentVisibleFixture.summary);
+  fetchMock.mockReset();
+  fetchMock.mockImplementation(async (input: string | URL) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
+    if (url.pathname === '/api/v1/search') return Response.json({ query: url.searchParams.get('q'), results: [] });
+    if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
+    throw new Error(`unexpected test request ${url.pathname}`);
+  });
 });
 afterEach(() => cleanup());
 
@@ -99,24 +100,23 @@ describe('CommandPalette', () => {
   });
 
   it('retries failed project discovery on the same surface and repopulates projects', async () => {
-    const callsBefore = fetchProjectSummaries.mock.calls.length;
-    fetchProjectSummaries
-      .mockRejectedValueOnce(new Error('database unavailable'))
-      .mockResolvedValueOnce({
-        projects: [{
-          projectHash: PROJECT_HASH,
-          project: '/work/alpha-project',
-          sessions: 3,
-          recordedFiles: 1,
-          totalFiles: 2,
-          openChanges: 1,
-        }],
-      });
+    let projectCalls = 0;
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/projects/summary') {
+        projectCalls += 1;
+        if (projectCalls === 1) throw new Error('database unavailable');
+        return Response.json({ projects: [{ projectHash: PROJECT_HASH, project: '/work/alpha-project', sessions: 3, recordedFiles: 1, totalFiles: 2, openChanges: 1 }] });
+      }
+      if (url.pathname === '/api/v1/search') return Response.json({ query: url.searchParams.get('q'), results: [] });
+      if (url.pathname === '/api/v1/web/discovery') return Response.json({ items: [] });
+      throw new Error(`unexpected test request ${url.pathname}`);
+    });
     open();
 
     fireEvent.click(await screen.findByRole('button', { name: 'retry project discovery' }));
     expect(await screen.findByText('alpha-project · map')).toBeInTheDocument();
-    expect(fetchProjectSummaries.mock.calls.length - callsBefore).toBe(2);
+    expect(projectCalls).toBe(2);
   });
 
   it('does not search for queries shorter than 2 characters', async () => {
@@ -125,53 +125,51 @@ describe('CommandPalette', () => {
     fireEvent.change(input, { target: { value: 'a' } });
     // Give the debounce window time to (not) fire.
     await new Promise((r) => setTimeout(r, 250));
-    expect(fetchSearch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/search'));
     expect(screen.queryByText('Messages')).not.toBeInTheDocument();
   });
 
   it('searches transcripts and deep-links a Messages hit to its task turn', async () => {
-    fetchSearch.mockResolvedValue({
-      query: 'pipeline',
-      results: [
-        {
-          sessionId: 'sess-9',
-          project: '/work/alpha-project',
-          projectHash: PROJECT_HASH,
-          entryIndex: 6,
-          role: 'user',
-          snippet: 'fix the [pipeline] retry',
-          score: 2,
-        },
-      ],
+    const valid = validFixture.search as Record<string, unknown>;
+    const discovery = validFixture.discovery;
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/search') return Response.json(valid);
+      if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
+      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
+      throw new Error(`unexpected test request ${url.pathname}`);
     });
-    fetchDiscovery.mockResolvedValue(new Map([
-      ['sess-9', { sessionId: 'sess-9', locationLabel: 'alpha', repositoryLocationId: 'rl_alpha', branch: 'main', selectionStatus: 'unselected' }],
-    ]));
     open();
     const input = screen.getByRole('combobox');
     fireEvent.change(input, { target: { value: 'pipeline' } });
 
-    await waitFor(() => expect(fetchSearch).toHaveBeenCalledWith('pipeline', 20));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=pipeline&limit=20')));
     const hit = await screen.findByText('fix the [pipeline] retry');
-    expect(screen.getByText('Messages')).toBeInTheDocument();
-    expect(screen.getByText(/alpha · main · unselected/)).toBeInTheDocument();
+    expect(screen.getAllByText('Messages')).toHaveLength(2);
+    expect(screen.getByText(/alpha-main · main · selected/)).toBeInTheDocument();
 
-    fireEvent.mouseDown(hit);
-    expect(push).toHaveBeenCalledWith(
-      `/projects/${PROJECT_HASH}/sess-9?turn=6`,
-    );
+    expect(screen.getByText(/alpha-feature · main · unselected/)).toBeInTheDocument();
+    expect(screen.getByText("<script>alert('unsafe')</script> pipeline")).toBeInTheDocument();
+    expect(screen.queryByText(/opaque-location/)).not.toBeInTheDocument();
+    const unselectedHit = screen.getByText("<script>alert('unsafe')</script> pipeline");
+    fireEvent.mouseDown(unselectedHit);
+    expect(push).toHaveBeenCalledWith(`/projects/${PROJECT_HASH}/sess-unselected?turn=7`);
   });
 
-  it('fails closed when a search result has no discovery row', async () => {
-    fetchSearch.mockResolvedValue({ query: 'pipeline', results: [{
-      sessionId: 'missing', project: '/work/alpha-project', projectHash: PROJECT_HASH,
-      entryIndex: 1, role: 'user', snippet: 'pipeline', score: 1,
-    }] });
-    fetchDiscovery.mockResolvedValue(new Map());
+  it.each(invalidFixtures.map((row) => [String(row.name), row] as const))('fails closed for %s', async (_name, row) => {
+    const search = row.search as Record<string, unknown>;
+    const discovery = row.discovery;
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/search') return Response.json(search);
+      if (url.pathname === '/api/v1/web/discovery') return Response.json(discovery);
+      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
+      throw new Error(`unexpected test request ${url.pathname}`);
+    });
     open();
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pipeline' } });
     expect(await screen.findByRole('alert')).toHaveTextContent(/discovery/i);
-    expect(screen.queryByText('pipeline')).not.toBeInTheDocument();
+    expect(screen.queryByText(/pipeline/)).not.toBeInTheDocument();
   });
 
   it('runs the theme action and closes on Escape', () => {

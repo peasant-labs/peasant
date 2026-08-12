@@ -1,0 +1,108 @@
+valid:
+  search:
+    query: pipeline
+    results:
+      - sessionId: sess-selected
+        project: /work/alpha-project
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entryIndex: 6
+        role: user
+        snippet: "fix the [pipeline] retry"
+        score: 2
+      - sessionId: sess-unselected
+        project: /work/alpha-project
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entryIndex: 7
+        role: assistant
+        snippet: "<script>alert('unsafe')</script> pipeline"
+        score: 1
+  discovery:
+    items:
+      - sessionId: sess-selected
+        locationLabel: alpha-main
+        repositoryLocationId: opaque-location-a
+        branch: main
+        selectionStatus: selected
+      - sessionId: sess-unselected
+        locationLabel: alpha-feature
+        repositoryLocationId: opaque-location-b
+        branch: main
+        selectionStatus: unselected
+      - sessionId: unrelated
+        locationLabel: ignored-extra
+        repositoryLocationId: opaque-location-extra
+        branch: main
+        selectionStatus: selected
+invalid:
+  - name: missing-row
+    search:
+      query: pipeline
+      results:
+        - sessionId: sess-missing
+          project: /work/alpha-project
+          projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          entryIndex: 1
+          role: user
+          snippet: pipeline
+          score: 1
+    discovery:
+      items: []
+  - name: duplicate-row
+    search:
+      query: pipeline
+      results:
+        - sessionId: sess-selected
+          project: /work/alpha-project
+          projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          entryIndex: 1
+          role: user
+          snippet: pipeline
+          score: 1
+    discovery:
+      items:
+        - sessionId: sess-selected
+          locationLabel: alpha-main
+          repositoryLocationId: opaque-location-a
+          branch: main
+          selectionStatus: selected
+        - sessionId: sess-selected
+          locationLabel: alpha-feature
+          repositoryLocationId: opaque-location-b
+          branch: main
+          selectionStatus: unselected
+  - name: malformed-row
+    search:
+      query: pipeline
+      results:
+        - sessionId: sess-selected
+          project: /work/alpha-project
+          projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          entryIndex: 1
+          role: user
+          snippet: pipeline
+          score: 1
+    discovery:
+      items:
+        - sessionId: sess-selected
+          locationLabel: alpha-main
+          repositoryLocationId: opaque-location-a
+          branch: 42
+          selectionStatus: selected
+  - name: unknown-status
+    search:
+      query: pipeline
+      results:
+        - sessionId: sess-selected
+          project: /work/alpha-project
+          projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          entryIndex: 1
+          role: user
+          snippet: pipeline
+          score: 1
+    discovery:
+      items:
+        - sessionId: sess-selected
+          locationLabel: alpha-main
+          repositoryLocationId: opaque-location-a
+          branch: main
+          selectionStatus: mystery
