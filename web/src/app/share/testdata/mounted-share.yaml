@@ -5,6 +5,8 @@ sessions:
   - { id: sess-held, harness: codex, project: alpha, projectHash: hash-alpha-b, startTime: '2026-08-12T06:00:00Z', durationMins: 1, totalTokens: 400, turnCount: 1, toolCallCount: 0, preview: held, shareStatus: held }
   - { id: sess-error, harness: claude-code, project: beta, projectHash: hash-beta, startTime: '2026-08-12T05:00:00Z', durationMins: 1, totalTokens: 500, turnCount: 1, toolCallCount: 0, preview: error, shareStatus: error }
   - { id: sess-pushing, harness: opencode, project: beta, projectHash: hash-beta, startTime: '2026-08-12T04:00:00Z', durationMins: 1, totalTokens: 600, turnCount: 1, toolCallCount: 0, preview: pushing, shareStatus: pushing }
+  - { id: sess-repo-main, harness: claude-code, project: alpha, projectHash: hash-alpha-a, startTime: '2026-08-12T03:00:00Z', durationMins: 1, totalTokens: 700, turnCount: 1, toolCallCount: 0, preview: repo main, shareStatus: new }
+  - { id: sess-repo-feature, harness: opencode, project: alpha, projectHash: hash-alpha-a, startTime: '2026-08-12T02:00:00Z', durationMins: 1, totalTokens: 800, turnCount: 1, toolCallCount: 0, preview: repo feature, shareStatus: updated }
 items:
   - { sessionId: sess-new, locationLabel: same label, repositoryLocationId: location-a, branch: main, selectionStatus: unselected }
   - { sessionId: sess-updated, locationLabel: same label, repositoryLocationId: location-b, branch: feature, selectionStatus: unselected }
@@ -12,6 +14,8 @@ items:
   - { sessionId: sess-held, locationLabel: same label, repositoryLocationId: location-b, branch: feature, selectionStatus: selected }
   - { sessionId: sess-error, locationLabel: beta location, repositoryLocationId: location-c, branch: main, selectionStatus: selected }
   - { sessionId: sess-pushing, locationLabel: beta location, repositoryLocationId: location-c, branch: main, selectionStatus: selected }
+  - { sessionId: sess-repo-main, locationLabel: same label, repositoryLocationId: location-a, branch: main, selectionStatus: selected }
+  - { sessionId: sess-repo-feature, locationLabel: same label, repositoryLocationId: location-a, branch: feature, selectionStatus: selected }
   - { sessionId: extra-discovery-row, locationLabel: ignored, repositoryLocationId: ignored, branch: ignored, selectionStatus: selected }
 invalidCases:
   - { name: missing, operation: remove, sessionId: sess-new }

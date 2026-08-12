@@ -22,7 +22,7 @@ const CHROME = process.env.CHROME_PATH
 const FIXTURE = join(HERE, 'testdata/search-share.yaml')
 const FEATURE_BYTES = Object.freeze({
   search: ['data-search-annotation', 'repositoryLocationId'],
-  share: ['share-project-check__mixed', 'choose sessions to contribute', 'omitted projectHash'],
+  share: ['share-hierarchy-check__mixed', 'select repository location', 'select branch', 'omitted projectHash'],
   discoveryRoute: '/api/v1/web/discovery',
 })
 const THEMES = ['dark', 'light']
@@ -170,23 +170,25 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
   } else {
     await wait(page, '[aria-label="choose sessions to contribute"]', 'share chooser')
     await page.click('[aria-label="select session sess-visual-share-003"]')
-    await page.focus('[aria-label^="select project "]')
+    await page.focus('[aria-label="select branch feat/retry-observability"]')
     const probe = await page.evaluate(() => {
       const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
       const labels = [...chooser.querySelectorAll('[aria-label^="project "]')].map((e) => e.getAttribute('aria-label'))
       const locations = [...chooser.querySelectorAll('[aria-label^="repository location "]')].map((e) => e.getAttribute('aria-label'))
       const branches = [...chooser.querySelectorAll('[aria-label^="branch "]')].map((e) => e.getAttribute('aria-label'))
       const boxes = [...chooser.querySelectorAll('input[type="checkbox"]')]
-      const projectBox = chooser.querySelector('[aria-label^="select project "]')
+      const hierarchyBoxes = [...chooser.querySelectorAll('[aria-label^="select project "], [aria-label^="select repository location "], [aria-label^="select branch "]')]
+      const focusedBox = chooser.querySelector('[aria-label="select branch feat/retry-observability"]')
       const disabled = boxes.filter((box) => box.disabled).length
       const selected = boxes.filter((box) => box.checked).length
       const toolbar = chooser.querySelector('button')
-      const focusStyle = projectBox ? getComputedStyle(projectBox) : null
-      const glyph = chooser.querySelector('.share-project-check__mixed')
+      const focusStyle = focusedBox ? getComputedStyle(focusedBox) : null
+      const glyphs = [...chooser.querySelectorAll('.share-hierarchy-check__mixed')]
+      const glyph = glyphs[0]
       const glyphStyle = glyph ? getComputedStyle(glyph) : null
-      return { labels, locations, branches, checkboxes: boxes.length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === projectBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, mixed: projectBox?.indeterminate, ariaMixed: projectBox?.getAttribute('aria-checked'), glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor } }
+      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor } }
     })
-    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 5 || probe.selected !== 1 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || !probe.mixed || probe.ariaMixed !== 'mixed' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
+    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)

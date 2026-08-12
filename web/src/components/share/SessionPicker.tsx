@@ -43,7 +43,25 @@ interface SessionPickerProps {
   onNext: () => void;
 }
 
-function ProjectCheckbox({ checked, mixed, disabled, onChange, label }: {
+interface DescendantSelectionState {
+  eligibleIds: string[];
+  checked: boolean;
+  mixed: boolean;
+  disabled: boolean;
+}
+
+function descendantSelectionState(ids: string[], selectableIds: Set<string>, selectedIds: Set<string>): DescendantSelectionState {
+  const eligibleIds = ids.filter((id) => selectableIds.has(id));
+  const selectedCount = eligibleIds.filter((id) => selectedIds.has(id)).length;
+  return {
+    eligibleIds,
+    checked: eligibleIds.length > 0 && selectedCount === eligibleIds.length,
+    mixed: selectedCount > 0 && selectedCount < eligibleIds.length,
+    disabled: eligibleIds.length === 0,
+  };
+}
+
+function TriStateCheckbox({ checked, mixed, disabled, onChange, label }: {
   checked: boolean;
   mixed: boolean;
   disabled: boolean;
@@ -54,7 +72,7 @@ function ProjectCheckbox({ checked, mixed, disabled, onChange, label }: {
   useEffect(() => {
     if (ref.current) ref.current.indeterminate = mixed;
   }, [mixed]);
-  return <label className="check share-project-check"><input ref={ref} type="checkbox" className="check-box" checked={checked} data-indeterminate={mixed || undefined} aria-checked={mixed ? 'mixed' : checked} disabled={disabled} onChange={onChange} aria-label={label} />{mixed && <span className="share-project-check__mixed" aria-hidden="true" />}</label>;
+  return <label className="check share-hierarchy-check"><input ref={ref} type="checkbox" className="check-box" checked={checked} data-indeterminate={mixed || undefined} aria-checked={mixed ? 'mixed' : checked} disabled={disabled} onChange={onChange} aria-label={label} />{mixed && <span className="share-hierarchy-check__mixed" aria-hidden="true" />}</label>;
 }
 
 export function SessionPicker({
@@ -81,11 +99,10 @@ export function SessionPicker({
     [selectableIds, onSelectionChange],
   );
 
-  const toggleGroup = useCallback((ids: string[]) => {
-    const eligible = ids.filter((id) => selectableIds.has(id));
-    const allSelected = eligible.length > 0 && eligible.every((id) => selectedIds.has(id));
+  const toggleDescendants = useCallback((ids: string[]) => {
+    const state = descendantSelectionState(ids, selectableIds, selectedIds);
     const next = new Set(selectedIds);
-    for (const id of eligible) allSelected ? next.delete(id) : next.add(id);
+    for (const id of state.eligibleIds) state.checked ? next.delete(id) : next.add(id);
     handleChange(next);
   }, [handleChange, selectableIds, selectedIds]);
 
@@ -120,17 +137,18 @@ export function SessionPicker({
           const cleanName = displayProject(project.projectName);
           const fullPath = decodeProjectPath(project.projectName);
           const projectIds = project.locations.flatMap((location) => location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)));
-          const eligibleProjectIds = projectIds.filter((id) => selectableIds.has(id));
-          const projectSelectedCount = eligibleProjectIds.filter((id) => selectedIds.has(id)).length;
+           const projectState = descendantSelectionState(projectIds, selectableIds, selectedIds);
           return <section key={project.key} className="border-b border-rule last:border-b-0" aria-label={`project ${cleanName}`}>
             <h2 className="px-4 py-3 font-mono font-semibold flex items-center gap-3" title={fullPath !== cleanName ? fullPath : undefined}>
-              <ProjectCheckbox checked={eligibleProjectIds.length > 0 && projectSelectedCount === eligibleProjectIds.length} mixed={projectSelectedCount > 0 && projectSelectedCount < eligibleProjectIds.length} disabled={eligibleProjectIds.length === 0} onChange={() => toggleGroup(projectIds)} label={`select project ${cleanName}`} />
+               <TriStateCheckbox {...projectState} onChange={() => toggleDescendants(projectIds)} label={`select project ${cleanName}`} />
               {cleanName}
             </h2>
             {project.locations.map((location) => <section key={location.repositoryLocationId} className="ml-4 border-l border-rule" aria-label={`repository location ${location.locationLabel}`}>
-              <h3 className="px-4 py-2 font-mono text-sm text-ink-2">repository location · {location.locationLabel}</h3>
-              {location.branches.map((branch) => <section key={branch.branch} className="ml-4 border-l border-rule" aria-label={`branch ${branch.branch || 'unknown'}`}>
-                <h4 className="px-4 py-2 font-mono text-sm text-ink-3">branch · {branch.branch || 'unknown'}</h4>
+              <h3 className="px-4 py-2 font-mono text-sm text-ink-2 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)), selectableIds, selectedIds)} onChange={() => toggleDescendants(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)))} label={`select repository location ${location.locationLabel}`} />repository location · {location.locationLabel}</h3>
+              {location.branches.map((branch) => {
+                const branchIds = branch.sessions.map((session) => session.id);
+                return <section key={branch.branch} className="ml-4 border-l border-rule" aria-label={`branch ${branch.branch || 'unknown'}`}>
+                <h4 className="px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(branchIds, selectableIds, selectedIds)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
                 <div className="ml-4">
                   {branch.sessions.map((session) => <div key={session.id} className="flex items-center gap-3 px-4 py-3 border-t border-rule">
                     <Checkbox checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} onChange={(checked) => {
@@ -141,7 +159,7 @@ export function SessionPicker({
                     <div className="min-w-0"><div>{summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`}</div><div className="font-mono text-xs text-ink-3">{sessionMeta(session)} · {session.totalTokens.toLocaleString()} tokens</div></div>
                   </div>)}
                 </div>
-              </section>)}
+              </section>;})}
             </section>)}
           </section>;
         })}

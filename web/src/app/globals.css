@@ -675,10 +675,10 @@ textarea::placeholder {
   transform: none;
   opacity: 1;
 }
-.share-project-check {
+.share-hierarchy-check {
   position: relative;
 }
-.share-project-check__mixed {
+.share-hierarchy-check__mixed {
   position: absolute;
   left: 4px;
   top: 8px;
