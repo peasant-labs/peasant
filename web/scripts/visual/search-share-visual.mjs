@@ -109,28 +109,56 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     await wait(page, '[role="dialog"][aria-label="Command palette"]', 'command palette')
     const input = await wait(page, '[role="combobox"]', 'command palette input')
     await input.type(fixture.search.query)
-    await page.waitForFunction(() => document.querySelectorAll('[role="option"]').length >= 2, { timeout: 10000 })
-     const probe = await page.evaluate(() => {
-       const options = [...document.querySelectorAll('[role="option"]')]
-       const annotations = options.map((o) => o.querySelector('[data-search-annotation="true"]'))
-       const annotationGeometry = annotations.map((annotation) => {
-         const box = annotation?.getBoundingClientRect()
-         const style = annotation ? getComputedStyle(annotation) : null
-         return { visible: !!annotation && !!box && box.width > 0 && box.height > 0, overflow: style?.overflow, text: annotation?.textContent || '' }
-       })
-       const active = options.filter((o) => o.getAttribute('aria-selected') === 'true').length
-       const row = document.querySelector('[data-search-annotation="true"]')?.closest('button')
-       row?.focus()
-       const focused = document.activeElement === row
-       const focusStyle = row ? getComputedStyle(row) : null
-       const descriptions = options.map((o) => {
-         const button = o.querySelector('button')
-         const id = button?.getAttribute('aria-describedby')
-         return id ? document.getElementById(id)?.textContent || '' : ''
-       })
-       return { annotationGeometry, active, focused, focusStyle: { outlineStyle: focusStyle?.outlineStyle, outlineWidth: focusStyle?.outlineWidth, outlineColor: focusStyle?.outlineColor }, descriptions, rowOverflow: row ? row.scrollWidth > row.clientWidth : false }
-     })
-     if (!probe.annotationGeometry.every((annotation) => annotation.visible && annotation.overflow !== 'hidden') || !probe.annotationGeometry.some((annotation) => annotation.text.includes('worktrees/engine-main') && annotation.text.includes('selected')) || !probe.annotationGeometry.some((annotation) => annotation.text.includes('worktrees/engine-feature') && annotation.text.includes('unselected')) || !probe.descriptions.some((text) => text.includes('feat/retry-observability') && text.includes('unselected')) || probe.active !== 1 || !probe.focused || probe.focusStyle.outlineStyle === 'none' || probe.focusStyle.outlineWidth === '0px' || probe.rowOverflow) fail(`${theme}/${viewport.id}/search: annotation/focus probe ${JSON.stringify(probe)}`)
+    await page.waitForFunction(() => {
+      const options = [...document.querySelectorAll('[role="option"]')]
+      return options.length >= 2 && options.every((option) => option.querySelector('[data-search-annotation="true"]')?.textContent?.trim())
+    }, { timeout: 10000 })
+    const activeButton = await page.waitForSelector('[role="option"][aria-selected="true"] button', { visible: true, timeout: 10000 })
+    await activeButton.focus()
+    const probe = await page.evaluate(() => {
+      const options = [...document.querySelectorAll('[role="option"]')]
+      const viewport = { width: window.innerWidth, height: window.innerHeight }
+      const annotationGeometry = options.map((option) => {
+        const annotation = option.querySelector('[data-search-annotation="true"]')
+        const box = annotation?.getBoundingClientRect()
+        const style = annotation ? getComputedStyle(annotation) : null
+        const clippingAncestors = []
+        for (let ancestor = annotation?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const ancestorStyle = getComputedStyle(ancestor)
+          if (['hidden', 'clip', 'scroll', 'auto'].includes(ancestorStyle.overflow) || ['hidden', 'clip', 'scroll', 'auto'].includes(ancestorStyle.overflowX) || ['hidden', 'clip', 'scroll', 'auto'].includes(ancestorStyle.overflowY)) {
+            const ancestorBox = ancestor.getBoundingClientRect()
+            clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, within: box && box.left >= ancestorBox.left && box.right <= ancestorBox.right && box.top >= ancestorBox.top && box.bottom <= ancestorBox.bottom, ancestor: { left: ancestorBox.left, right: ancestorBox.right, top: ancestorBox.top, bottom: ancestorBox.bottom }, box: box && { left: box.left, right: box.right, top: box.top, bottom: box.bottom } })
+          }
+        }
+        const onscreen = box && box.left >= 0 && box.top >= 0 && box.right <= viewport.width && box.bottom <= viewport.height
+        return {
+          visible: !!annotation && !!box && box.width > 0 && box.height > 0,
+          unclipped: !!onscreen && clippingAncestors.every((ancestor) => ancestor.within) && style?.overflow !== 'hidden' && style?.overflowX !== 'hidden' && style?.overflowY !== 'hidden',
+          clippingAncestors,
+          text: annotation?.textContent?.trim() || '',
+        }
+      })
+      const active = options.filter((o) => o.getAttribute('aria-selected') === 'true').length
+      const row = document.querySelector('[role="option"][aria-selected="true"] button')
+      const focused = document.activeElement === row
+      const focusStyle = row ? getComputedStyle(row) : null
+      const descriptions = options.map((o) => {
+        const button = o.querySelector('button')
+        const id = button?.getAttribute('aria-describedby')
+        const description = id ? document.getElementById(id) : null
+        const box = description?.getBoundingClientRect()
+        return { text: description?.textContent?.trim() || '', visible: !!box && box.width > 0 && box.height > 0 }
+      })
+      return {
+        annotationGeometry,
+        active,
+        focused,
+        focusStyle: { outlineStyle: focusStyle?.outlineStyle, outlineWidth: focusStyle?.outlineWidth, outlineColor: focusStyle?.outlineColor },
+        descriptions,
+        rowOverflow: row ? row.scrollWidth > row.clientWidth : false,
+      }
+    })
+    if (!probe.annotationGeometry.every((annotation) => annotation.visible && annotation.unclipped && annotation.text) || !probe.annotationGeometry.some((annotation) => annotation.text.includes('worktrees/engine-main') && annotation.text.includes('selected')) || !probe.annotationGeometry.some((annotation) => annotation.text.includes('worktrees/engine-feature') && annotation.text.includes('unselected')) || !probe.descriptions.some((description) => description.visible && description.text.includes('feat/retry-observability') && description.text.includes('unselected')) || probe.active !== 1 || !probe.focused || probe.focusStyle.outlineStyle === 'none' || probe.focusStyle.outlineWidth === '0px' || probe.focusStyle.outlineColor === 'rgba(0, 0, 0, 0)' || probe.rowOverflow) fail(`${theme}/${viewport.id}/search: annotation/focus probe ${JSON.stringify(probe)}`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'search.png'), '[role="dialog"][aria-label="Command palette"]', `${theme}/${viewport.id}/search`)
   } else {
     await wait(page, '[aria-label="choose sessions to contribute"]', 'share chooser')
