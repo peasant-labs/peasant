@@ -39,7 +39,7 @@ type discoveryHTTPFixture struct {
 }
 
 type discoveryHTTPSession struct {
-	ID, Project, ProjectHash, Worktree, Remote, Branch, Cohort, SearchText, Status string
+	ID, Project, ProjectHash, Worktree, Remote, Branch, Cohort, SearchText, Status, Label string
 }
 
 type discoveryHTTPFailure struct {
@@ -125,7 +125,7 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	}
 	for _, expected := range fixture.Sessions {
 		item := byID[expected.ID]
-		if item == nil || stringField(t, item, "branch") != expected.Branch || stringField(t, item, "selectionStatus") != expected.Status {
+		if item == nil || stringField(t, item, "branch") != expected.Branch || stringField(t, item, "selectionStatus") != expected.Status || stringField(t, item, "locationLabel") != expected.Label {
 			t.Fatalf("discovery item %q = %+v, want branch=%q status=%q", expected.ID, item, expected.Branch, expected.Status)
 		}
 	}

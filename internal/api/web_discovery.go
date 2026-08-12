@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 )
@@ -71,7 +72,7 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 	if err != nil {
 		return nil, fmt.Errorf("Web discovery could not prepare the canonical selection matcher in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair the selection, then retry: %w", err)
 	}
-	prepared, remoteMultiplicity, nameMultiplicity, err := prepareWebDiscoveryIdentities(ctx, rows, resolver)
+	prepared, remoteMultiplicity, nameMultiplicity, err := prepareWebDiscoveryIdentities(ctx, rows, cfg.Selection, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +96,7 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 		}
 		selected := mode == config.SelectionModeAll
 		if matcher != nil {
-			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: remote, ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: branch, RemoteMultiplicity: multiplicity(ingest.NormalizeRemoteForMatch(remote), remoteMultiplicity), NameMultiplicity: multiplicity(ingest.NormalizeProjectNameForMatch(row.ProjectName), nameMultiplicity)})
+			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: remote, ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: branch, RemoteMultiplicity: remoteMultiplicity[i], NameMultiplicity: nameMultiplicity[i]})
 			switch match {
 			case ingest.BranchMatchYes:
 				selected = true
@@ -122,12 +123,36 @@ type preparedWebDiscoveryIdentity struct {
 	locationID, label string
 }
 
-func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow, resolver ingest.RepositoryIdentityResolver) ([]preparedWebDiscoveryIdentity, map[string]map[string]struct{}, map[string]map[string]struct{}, error) {
+func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow, selection config.SelectionConfig, resolver ingest.RepositoryIdentityResolver) ([]preparedWebDiscoveryIdentity, []ingest.DiscoveryIdentityMultiplicity, []ingest.DiscoveryIdentityMultiplicity, error) {
 	if resolver == nil {
 		return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity because no topology resolver was configured in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restart Peasant, then retry")
 	}
 	prepared := make([]preparedWebDiscoveryIdentity, len(rows))
-	remote, names := map[string]map[string]struct{}{}, map[string]map[string]struct{}{}
+	remoteEvidence := make([]selectionprojection.CohortEvidence, len(rows))
+	nameEvidence := make([]selectionprojection.CohortEvidence, len(rows))
+	labelEvidence := make([]selectionprojection.LocationLabelEvidence, len(rows))
+	cohortKeys := make([]ingest.RepositoryCohortKey, len(rows))
+	pathResolver := ingest.NewPhysicalPathResolver()
+	selected := make(map[ingest.Harness]map[ingest.RepositoryCohortKey]ingest.ClonePath)
+	for harnessName, harnessSelection := range selection.Harnesses {
+		harness := ingest.Harness(harnessName)
+		for _, project := range harnessSelection.Projects {
+			for _, raw := range project.ClonePaths {
+				clone, resolveErr := pathResolver.Resolve(raw)
+				if resolveErr != nil {
+					continue
+				}
+				identity, identityErr := resolver.ResolveRepositoryIdentity(ctx, clone)
+				if identityErr != nil || identity.CohortKey == "" {
+					continue
+				}
+				if selected[harness] == nil {
+					selected[harness] = make(map[ingest.RepositoryCohortKey]ingest.ClonePath)
+				}
+				selected[harness][identity.CohortKey] = clone
+			}
+		}
+	}
 	byPath := map[string]preparedWebDiscoveryIdentity{}
 	for i := range rows {
 		raw := rows[i].GitWorktree
@@ -136,7 +161,7 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 		}
 		p, ok := byPath[raw]
 		if !ok {
-			clone, err := ingest.NewPhysicalPathResolver().Resolve(raw)
+			clone, err := pathResolver.Resolve(raw)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is unavailable in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restore the repository or re-ingest the session, then retry: %w", rows[i].SessionID, err)
 			}
@@ -146,14 +171,30 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 			}
 			digest := sha256.Sum256([]byte(identity.CohortKey.String()))
 			id := fmt.Sprintf("rl_%x", digest[:16])
-			p = preparedWebDiscoveryIdentity{clonePath: clone, locationID: id, label: fmt.Sprintf("repository location %x", digest[:4])}
+			matchPath := clone
+			if saved := selected[ingest.Harness(rows[i].ModelHarness)][identity.CohortKey]; saved != "" {
+				matchPath = saved
+			}
+			p = preparedWebDiscoveryIdentity{clonePath: matchPath, locationID: id}
 			byPath[raw] = p
+			cohortKeys[i] = identity.CohortKey
 		}
 		prepared[i] = p
-		recordMultiplicity(remote, ingest.NormalizeRemoteForMatch(value(rows[i].CanonicalRemote)), p.locationID)
-		recordMultiplicity(names, ingest.NormalizeProjectNameForMatch(rows[i].ProjectName), p.locationID)
+		if cohortKeys[i] == "" {
+			clone, _ := pathResolver.Resolve(raw)
+			identity, _ := resolver.ResolveRepositoryIdentity(ctx, clone)
+			cohortKeys[i] = identity.CohortKey
+		}
+		harness := ingest.Harness(rows[i].ModelHarness)
+		remoteEvidence[i] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeRemoteForMatch(value(rows[i].CanonicalRemote)), CohortKey: cohortKeys[i]}
+		nameEvidence[i] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeProjectNameForMatch(rows[i].ProjectName), CohortKey: cohortKeys[i]}
+		labelEvidence[i] = selectionprojection.LocationLabelEvidence{ProjectName: rows[i].ProjectName, GitRemote: value(rows[i].CanonicalRemote), CohortKey: cohortKeys[i]}
 	}
-	return prepared, remote, names, nil
+	labels := selectionprojection.DistinctLocationLabels(labelEvidence)
+	for i := range prepared {
+		prepared[i].label = labels[i]
+	}
+	return prepared, selectionprojection.CohortMultiplicities(remoteEvidence), selectionprojection.CohortMultiplicities(nameEvidence), nil
 }
 
 func value(v *string) string {
@@ -161,19 +202,4 @@ func value(v *string) string {
 		return ""
 	}
 	return *v
-}
-func recordMultiplicity(dst map[string]map[string]struct{}, key, identity string) {
-	if key == "" {
-		return
-	}
-	if dst[key] == nil {
-		dst[key] = map[string]struct{}{}
-	}
-	dst[key][identity] = struct{}{}
-}
-func multiplicity(key string, all map[string]map[string]struct{}) ingest.DiscoveryIdentityMultiplicity {
-	if key != "" && len(all[key]) == 1 {
-		return ingest.DiscoveryIdentityUnique
-	}
-	return ingest.DiscoveryIdentityAmbiguous
 }
