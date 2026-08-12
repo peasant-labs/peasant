@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -124,10 +123,13 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		}
 		fullSession.PushedAt = detail.PushedAt
 	}
-	fullSession.Turns = api.EntriesToTurns(dbEntries)
+	fullSession.Turns = transcript.EntriesToTurns(dbEntries)
 
 	// Convert to the standardized detail payload — same as the session viewer.
-	payload := api.SessionToDetail(fullSession)
+	payload, err := transcript.SessionToDetailValidated(fullSession)
+	if err != nil {
+		return nil, fmt.Errorf("export.ExportSession: validate observed model evidence before export: %w", err)
+	}
 	payload.TurnCount = len(payload.Turns)
 
 	// Overlay full content from source re-index where available.

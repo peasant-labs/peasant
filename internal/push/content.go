@@ -31,10 +31,20 @@ import (
 // SessionDetailPayload.SchemaVersion are both stamped from emit in lockstep
 // (envelope wins on any future disagreement; see schema.TranscriptContent).
 func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) schema.TranscriptContent {
+	content, _ := BuildTranscriptContentValidated(meta, entries, emit, fields)
+	return content
+}
+
+// BuildTranscriptContentValidated builds content through the producer trust
+// boundary and returns attribution failures to outward-facing callers.
+func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) (schema.TranscriptContent, error) {
 	session := metadataToSession(meta, fields)
 	session.Turns = transcript.EntriesToTurns(entries)
 
-	payload := transcript.SessionToDetail(session)
+	payload, err := transcript.SessionToDetailValidated(session)
+	if err != nil {
+		return schema.TranscriptContent{}, err
+	}
 	payload.TurnCount = len(payload.Turns)
 	payload.SchemaVersion = emit
 
@@ -42,7 +52,7 @@ func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.Sessi
 		ContractVersion: emit,
 		Kind:            schema.ContentKindSessionDetail,
 		SessionDetail:   payload,
-	}
+	}, nil
 }
 
 // RedactEntries returns the stored entries with every string value redacted at
@@ -100,6 +110,20 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 			err)
 	}
 	return redactedEntries, nil
+}
+
+func hasObservedModelEntries(entries []schema.SessionEntry) bool {
+	for _, entry := range entries {
+		if entry.Role == schema.RoleAssistant && entry.Extra != nil {
+			var extra map[string]json.RawMessage
+			if json.Unmarshal([]byte(*entry.Extra), &extra) == nil {
+				if _, present := extra["model_id"]; present {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // redactJSONDocument redacts a marshalled document and PROVES it did.
@@ -169,7 +193,10 @@ func marshalTranscriptContent(
 	fields config.PushFieldVisibility,
 	redactor redact.JSONRedactor,
 ) ([]byte, error) {
-	content := BuildTranscriptContent(meta, entries, emit, fields)
+	content, err := BuildTranscriptContentValidated(meta, entries, emit, fields)
+	if err != nil {
+		return nil, err
+	}
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)

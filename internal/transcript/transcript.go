@@ -210,6 +210,11 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			TokensOut:   e.TokensOut,
 			PartType:    e.PartType,
 		}
+		observation := modelObservation(e)
+		projectedObservation := projectModelObservation(observation)
+		if projectedObservation != "" {
+			assignProjectedModelObservation(&t, projectedObservation)
+		}
 
 		// Attach folded ToolCalls from depth=1 children.
 		if folded, ok := foldedToolCalls[e.EntryIndex]; ok {
@@ -255,7 +260,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		}
 
 		turns = append(turns, t)
-		if observation := modelObservation(e); observation.present {
+		if observation.present {
 			turnObservations[t.Index] = observation
 		}
 	}
@@ -382,6 +387,15 @@ func SessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	return sessionToDetail(s)
 }
 
+// SessionToDetailValidated is the canonical producer trust boundary. Callers
+// that can surface failures use it so invalid attribution never reaches a wire.
+func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, error) {
+	if err := validateSessionObservedModelEvidence(s); err != nil {
+		return nil, err
+	}
+	return sessionToDetail(s), nil
+}
+
 // sessionToDetail converts a full Session to a SessionDetailPayload.
 func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	turns := make([]schema.TurnDetail, len(s.Turns))
@@ -401,20 +415,23 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 			}
 		}
 		turns[i] = schema.TurnDetail{
-			Index:       t.Index,
-			Role:        t.Role,
-			Content:     t.Content,
-			ToolCalls:   toolCalls,
-			Timestamp:   t.Timestamp,
-			Depth:       t.Depth,
-			ParentIndex: t.ParentIndex,
-			EntryType:   t.EntryType,
-			HasThinking: t.HasThinking,
-			StopReason:  t.StopReason,
-			TokensIn:    t.TokensIn,
-			TokensOut:   t.TokensOut,
+			Index:         t.Index,
+			Role:          t.Role,
+			Content:       t.Content,
+			ToolCalls:     toolCalls,
+			Timestamp:     t.Timestamp,
+			Depth:         t.Depth,
+			ParentIndex:   t.ParentIndex,
+			EntryType:     t.EntryType,
+			HasThinking:   t.HasThinking,
+			StopReason:    t.StopReason,
+			TokensIn:      t.TokensIn,
+			TokensOut:     t.TokensOut,
+			ObservedModel: t.ObservedModel,
 		}
 	}
+
+	model := sessionModelSeed(s)
 
 	// Derive source and status from session fields.
 	source := "imported"
@@ -448,7 +465,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Source:           source,
 		Status:           status,
 		Project:          s.Project,
-		Model:            s.Model,
+		Model:            model,
 		WorkingDirectory: s.ProjectPath,
 		GitBranch:        s.GitBranch,
 		GitRemote:        s.GitRemote,

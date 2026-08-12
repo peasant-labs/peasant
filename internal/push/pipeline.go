@@ -25,6 +25,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -61,15 +62,16 @@ func persistenceContext(ctx context.Context) (context.Context, context.CancelFun
 // files via the injected FileSystem, and uploads via the injected Publisher.
 // The Pipeline has no os import — all filesystem access is through p.fs.
 type Pipeline struct {
-	store     PipelineStore
-	transport Transport
-	creds     *auth.Credentials
-	cfg       *config.Config
-	fs        ingest.FileSystem
-	runCfg    PipelineConfig
-	redactor  ingest.TextRedactor // safety-net redaction applied before upload
-	stderr    io.Writer           // destination for non-fatal warnings and notices
-	titles    title.Pipeline
+	store               PipelineStore
+	transport           Transport
+	creds               *auth.Credentials
+	cfg                 *config.Config
+	fs                  ingest.FileSystem
+	runCfg              PipelineConfig
+	redactor            ingest.TextRedactor // safety-net redaction applied before upload
+	stderr              io.Writer           // destination for non-fatal warnings and notices
+	titles              title.Pipeline
+	contentCapabilities []village.ContentCapabilityAdvertisement
 }
 
 // Publisher is the authoritative Village publication surface required by the
@@ -195,10 +197,11 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// contract window and decide the emit version. Aborts the whole push on an
 	// upgrade-CLI or non-downgradable mismatch; downgrade-emits (with a one-line
 	// warning) when the CLI is ahead. Skipped above for dry-run (no HTTP).
-	emit, err := p.negotiate(ctx)
+	emit, capabilities, err := p.negotiate(ctx)
 	if err != nil {
 		return result, err
 	}
+	p.contentCapabilities = capabilities
 
 	// 7. Concurrent uploads via errgroup, smallest first when a budget applies.
 	sessions = orderForBudget(ctx, sessions)
@@ -868,6 +871,17 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
 			Error:     entriesErr,
+		}
+	}
+	if hasObservedModelEntries(entries) && !village.SupportsObservedModel(p.contentCapabilities) {
+		return SessionPushResult{
+			SessionID: sess.SessionID,
+			HostSlug:  sess.HostSlug,
+			Status:    PushStatusError,
+			Error: fmt.Errorf(
+				"enriched transcript push refused because session %s carries observedModel source evidence but the target Village did not advertise %q version %q in push.Pipeline.pushSession after GET /api/v1/schema/version and before content construction or upload; no transcript bytes or metadata were sent, and silently removing the evidence would misattribute assistant output; use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
+				sess.SessionID, village.ContentCapabilityObservedModel, village.ObservedModelCapabilityVersion,
+			),
 		}
 	}
 

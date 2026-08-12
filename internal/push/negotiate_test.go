@@ -43,7 +43,7 @@ func TestNegotiate_Within_EmitsAtCLIVersion(t *testing.T) {
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
-	emit, err := p.negotiate(context.Background())
+	emit, _, err := p.negotiate(context.Background())
 	if err != nil {
 		t.Fatalf("within-window must not error, got: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestNegotiate_OlderThanMin_AbortsUpgradeCLI(t *testing.T) {
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
-	emit, err := p.negotiate(context.Background())
+	emit, _, err := p.negotiate(context.Background())
 	if err == nil {
 		t.Fatalf("CLI older than Min must abort; got emit=%q nil err", emit)
 	}
@@ -88,7 +88,7 @@ func TestNegotiate_AheadOfCurrent_DowngradeEmitsWithWarning(t *testing.T) {
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
-	emit, err := p.negotiate(context.Background())
+	emit, _, err := p.negotiate(context.Background())
 	if err != nil {
 		t.Fatalf("CLI ahead (downgradable) must not error, got: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNegotiate_Unadvertised_ProceedsAtCLIVersion(t *testing.T) {
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
-	emit, err := p.negotiate(context.Background())
+	emit, _, err := p.negotiate(context.Background())
 	if err != nil {
 		t.Fatalf("unadvertised window must not error, got: %v", err)
 	}
