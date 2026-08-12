@@ -17,6 +17,8 @@ import (
 type knownSession struct {
 	GitRemote     string
 	Branch        string
+	GitWorktree   string
+	CanonicalCwd  string
 	Title         string
 	IngestedMs    int64
 	SchemaVersion int
@@ -26,6 +28,17 @@ type knownSession struct {
 // index means no reusable database was available, and every discovered session
 // is then resolved the full way.
 type knownSessionIndex map[string]knownSession
+
+// workingDirectory returns the most specific project directory the store
+// recorded. A per-session Git worktree wins over the project-level canonical
+// directory. Discovery still wins over both when the current source carries a
+// working directory.
+func (s knownSession) workingDirectory() string {
+	if s.GitWorktree != "" {
+		return s.GitWorktree
+	}
+	return s.CanonicalCwd
+}
 
 // reusable reports whether a discovered session is already recorded AND its
 // source has not changed since that ingest, so the recorded values stand in for
@@ -83,6 +96,8 @@ func loadKnownSessions(ctx context.Context, dbPath string) knownSessionIndex {
 		known[row.SessionID] = knownSession{
 			GitRemote:     row.GitRemote,
 			Branch:        row.Branch,
+			GitWorktree:   row.GitWorktree,
+			CanonicalCwd:  row.CanonicalCwd,
 			Title:         row.Title,
 			IngestedMs:    row.IngestedMs,
 			SchemaVersion: row.SchemaVersion,

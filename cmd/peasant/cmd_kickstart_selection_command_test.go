@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 )
@@ -30,6 +31,9 @@ const (
 	expectedSelectionCommandSessionCount       = 2
 	expectedSelectionCommandMutationProbeCount = 1
 	expectedSelectionCommandRenderCaseCount    = 8
+	selectionCommandClonePathPlaceholder       = "__MATERIALIZED_CLONE_PATH__"
+	selectionCommandRenderClonePath            = "/fixtures/worktrees/example-tool"
+	selectionCommandRenderRepositoryPath       = "/fixtures/repositories/example-tool.git"
 )
 
 //go:embed testdata/kickstart_selection_command.yaml
@@ -67,15 +71,16 @@ type selectionCommandRowAssertion struct {
 }
 
 type selectionCommandCase struct {
-	Name                  string                         `yaml:"name"`
-	MutationProbe         bool                           `yaml:"mutationProbe"`
-	Listings              []ftue.SessionListing          `yaml:"listings"`
-	InitialSelection      config.SelectionConfig         `yaml:"initialSelection"`
-	ExpectedSelection     config.SelectionConfig         `yaml:"expectedSelection"`
-	SelectionInputs       []selectionCommandInput        `yaml:"selectionInputs"`
-	BeforeConsentContains []string                       `yaml:"beforeConsentContains"`
-	RowAssertions         []selectionCommandRowAssertion `yaml:"rowAssertions"`
-	ParityRowAssertions   []selectionCommandRowAssertion `yaml:"parityRowAssertions"`
+	Name                    string                         `yaml:"name"`
+	MutationProbe           bool                           `yaml:"mutationProbe"`
+	Listings                []ftue.SessionListing          `yaml:"listings"`
+	InitialSelection        config.SelectionConfig         `yaml:"initialSelection"`
+	ExpectedSelection       config.SelectionConfig         `yaml:"expectedSelection"`
+	ConfigExpectedSelection config.SelectionConfig         `yaml:"configExpectedSelection"`
+	SelectionInputs         []selectionCommandInput        `yaml:"selectionInputs"`
+	BeforeConsentContains   []string                       `yaml:"beforeConsentContains"`
+	RowAssertions           []selectionCommandRowAssertion `yaml:"rowAssertions"`
+	ParityRowAssertions     []selectionCommandRowAssertion `yaml:"parityRowAssertions"`
 }
 
 type selectionCommandSurface string
@@ -179,7 +184,8 @@ func decodeSelectionCommand(data []byte) (selectionCommandDocument, error) {
 	mutationProbes := 0
 	sessions := 0
 	for _, c := range doc.Cases {
-		if c.Name == "" || seenCases[c.Name] || !c.InitialSelection.Mode.IsValid() || !c.ExpectedSelection.Mode.IsValid() {
+		if c.Name == "" || seenCases[c.Name] || !c.InitialSelection.Mode.IsValid() ||
+			!c.ExpectedSelection.Mode.IsValid() || !c.ConfigExpectedSelection.Mode.IsValid() {
 			return doc, fmt.Errorf("kickstart selection command fixture contains an invalid or duplicate case %q", c.Name)
 		}
 		seenCases[c.Name] = true
@@ -383,6 +389,89 @@ func selectionKickstartDeps(t *testing.T, c selectionCommandCase, runModel func(
 	return deps
 }
 
+func materializeSelectionCommandCase(t *testing.T, c *selectionCommandCase) {
+	t.Helper()
+	clonePath := filepath.Join(t.TempDir(), "example-tool")
+	if err := os.MkdirAll(clonePath, 0o755); err != nil {
+		t.Fatalf("create selection command clone path: %v", err)
+	}
+	materialized := append([]ftue.SessionListing(nil), c.Listings...)
+	for index := range materialized {
+		materialized[index].WorkingDir = clonePath
+	}
+	c.Listings = materialized
+	c.ExpectedSelection = materializeSelectionCommandExpectedSelection(t, c.ExpectedSelection, clonePath)
+}
+
+func materializeSelectionCommandExpectedSelection(t *testing.T, selection config.SelectionConfig, clonePath string) config.SelectionConfig {
+	t.Helper()
+	data, err := yaml.Marshal(selection)
+	if err != nil {
+		t.Fatalf("copy selection command expected selection: %v", err)
+	}
+	var materialized config.SelectionConfig
+	if err := yaml.Unmarshal(data, &materialized); err != nil {
+		t.Fatalf("restore selection command expected selection: %v", err)
+	}
+	for harness, configured := range materialized.Harnesses {
+		for projectIndex := range configured.Projects {
+			for pathIndex, path := range configured.Projects[projectIndex].ClonePaths {
+				if path == selectionCommandClonePathPlaceholder {
+					configured.Projects[projectIndex].ClonePaths[pathIndex] = clonePath
+				}
+			}
+		}
+		materialized.Harnesses[harness] = configured
+	}
+	return materialized
+}
+
+type selectionCommandRenderPathResolver struct{}
+
+func (selectionCommandRenderPathResolver) Resolve(string) (ingest.ClonePath, error) {
+	return ingest.ClonePath(selectionCommandRenderClonePath), nil
+}
+
+type selectionCommandRenderRepositoryResolver struct{}
+
+func (selectionCommandRenderRepositoryResolver) ResolveRepositoryIdentity(context.Context, ingest.ClonePath) (ingest.RepositoryIdentity, error) {
+	return ingest.RepositoryIdentity{
+		CohortKey:    ingest.RepositoryCohortKey("repo:39:" + selectionCommandRenderRepositoryPath),
+		GitDirectory: ingest.RepositoryPath(selectionCommandRenderRepositoryPath),
+	}, nil
+}
+
+var _ ingest.PathIdentityResolver = selectionCommandRenderPathResolver{}
+var _ ingest.RepositoryIdentityResolver = selectionCommandRenderRepositoryResolver{}
+
+func seedSelectionCommandStoredEvidence(t *testing.T, dataHome string, listings []ftue.SessionListing) {
+	t.Helper()
+	dbPath := defaults.ResolveDBFilePathWith(dataHome).String()
+	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("create selection command data directory: %v", err)
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open selection command store: %v", err)
+	}
+	entries := make([]ingest.StoreEntry, 0, len(listings))
+	for index, listing := range listings {
+		entry := storeEntryFor(listing.SessionID, int64(1_700_000_000_000+index))
+		entry.Metadata.Project.Name = listing.ProjectName
+		entry.Metadata.Project.FilePath = listing.WorkingDir
+		remote, branch, worktree := listing.GitRemote, listing.Branch, listing.WorkingDir
+		entry.Metadata.Git = ingest.GitContext{Remote: &remote, Branch: &branch, Worktree: &worktree}
+		entries = append(entries, entry)
+	}
+	if err := db.InsertSessions(t.Context(), entries); err != nil {
+		_ = db.Close()
+		t.Fatalf("insert selection command stored evidence: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close selection command store: %v", err)
+	}
+}
+
 func seedSelectionCommandConfig(t *testing.T, dir string, selection config.SelectionConfig) (string, []byte) {
 	t.Helper()
 	path := defaults.ResolveConfigFilePathWith(dir).String()
@@ -453,7 +542,9 @@ func TestKickstartCommandMountsNonEmptySelectionInteraction(t *testing.T) {
 	for _, c := range doc.Cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			materializeSelectionCommandCase(t, &c)
 			dir := t.TempDir()
+			seedSelectionCommandStoredEvidence(t, dir, c.Listings)
 			configPath, before := seedSelectionCommandConfig(t, dir, c.InitialSelection)
 			terminalCalls := 0
 			deps := selectionKickstartDeps(t, c, func(model tea.Model) error {
@@ -528,6 +619,7 @@ func TestConfigCommandMountsGlobalSearchToggleAndSave(t *testing.T) {
 	for _, c := range doc.Cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			materializeSelectionCommandCase(t, &c)
 			dir := t.TempDir()
 			configPath, before := seedSelectionCommandConfig(t, dir, c.InitialSelection)
 			terminalCalls := 0
@@ -567,8 +659,8 @@ func TestConfigCommandMountsGlobalSearchToggleAndSave(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse saved config selection: %v", err)
 			}
-			if !reflect.DeepEqual(persisted.Selection, c.ExpectedSelection) {
-				t.Fatalf("saved config selection = %#v, want %#v", persisted.Selection, c.ExpectedSelection)
+			if !reflect.DeepEqual(persisted.Selection, c.ConfigExpectedSelection) {
+				t.Fatalf("saved config selection = %#v, want %#v", persisted.Selection, c.ConfigExpectedSelection)
 			}
 		})
 	}
@@ -586,6 +678,7 @@ func TestConfigAndKickstartShareCanonicalSelectionInitialization(t *testing.T) {
 	for _, c := range loadSelectionCommand(t).Cases {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
+			materializeSelectionCommandCase(t, &c)
 			dir := t.TempDir()
 			_, before := seedSelectionCommandConfig(t, dir, c.ExpectedSelection)
 			views := map[string]string{}
@@ -663,6 +756,15 @@ func TestSelectionCommands_RenderGolden(t *testing.T) {
 	for _, renderCase := range doc.RenderCases {
 		renderCase := renderCase
 		t.Run(renderCase.Name, func(t *testing.T) {
+			selectionCase := selectionCase
+			materializeSelectionCommandCase(t, &selectionCase)
+			if renderCase.Surface == selectionCommandSurfaceKickstart {
+				selectionCase.ExpectedSelection = materializeSelectionCommandExpectedSelection(
+					t,
+					doc.Cases[0].ExpectedSelection,
+					selectionCommandRenderClonePath,
+				)
+			}
 			dir := t.TempDir()
 			_, before := seedSelectionCommandRenderConfig(t, dir, selectionCase.ExpectedSelection, renderCase.Theme)
 			var rendered string
@@ -702,6 +804,8 @@ func TestSelectionCommands_RenderGolden(t *testing.T) {
 					rendered = model.View().Content
 					return nil
 				})
+				deps.pathResolver = selectionCommandRenderPathResolver{}
+				deps.repositoryResolver = selectionCommandRenderRepositoryResolver{}
 				if _, err := executeWithDataDir(t, buildKickstartCommand(deps), dir, nil); err != nil {
 					t.Fatalf("run mounted kickstart selection render: %v", err)
 				}

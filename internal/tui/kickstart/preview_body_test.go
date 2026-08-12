@@ -2,6 +2,7 @@ package kickstart_test
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
@@ -24,17 +26,19 @@ var previewBodyData []byte
 // previewBodyCase is one highlighted row and the lines its preview must and
 // must not carry.
 type previewBodyCase struct {
-	Name         string   `yaml:"name"`
-	Highlight    string   `yaml:"highlight"`
-	Width        int      `yaml:"width"`
-	WantContains []string `yaml:"wantContains"`
-	WantMissing  []string `yaml:"wantMissing"`
+	Name          string   `yaml:"name"`
+	HighlightKind string   `yaml:"highlightKind"`
+	Highlight     string   `yaml:"highlight"`
+	Width         int      `yaml:"width"`
+	WantContains  []string `yaml:"wantContains"`
+	WantMissing   []string `yaml:"wantMissing"`
 }
 
 // previewBodyDocument is the whole fixture plus its row-count guard. Stored maps
 // a session id to the RECORDED TURNS the local store holds for it.
 type previewBodyDocument struct {
 	ExpectedCaseCount int                               `yaml:"expectedCaseCount"`
+	Repositories      []repositoryPathFixture           `yaml:"repositories"`
 	Listings          []ftue.SessionListing             `yaml:"listings"`
 	Stored            map[string][]testutil.TurnFixture `yaml:"stored"`
 	Cases             []previewBodyCase                 `yaml:"cases"`
@@ -61,6 +65,9 @@ func loadPreviewBodies(t *testing.T) previewBodyDocument {
 	if len(doc.Listings) == 0 {
 		t.Fatal("fixture declares no listings")
 	}
+	if len(doc.Repositories) == 0 {
+		t.Fatal("fixture declares no resolved repository paths")
+	}
 	if len(doc.Stored) == 0 {
 		t.Fatal("fixture declares no stored sessions; every case would take the not-imported path")
 	}
@@ -84,6 +91,9 @@ func loadPreviewBodies(t *testing.T) previewBodyDocument {
 		testutil.RequireFixtureFields(t, "preview body", c.Name, []testutil.FixtureField{
 			{Key: "highlight", Value: c.Highlight},
 		})
+		if c.HighlightKind != "" && c.HighlightKind != "session" && c.HighlightKind != "project" && c.HighlightKind != "branch" {
+			t.Fatalf("preview fixture case %q declares unknown highlightKind %q", c.Name, c.HighlightKind)
+		}
 		if c.Width <= 0 {
 			t.Fatalf("preview fixture case %q declares width %d", c.Name, c.Width)
 		}
@@ -159,6 +169,15 @@ func needle(s string) string { return strings.Join(strings.Fields(s), " ") }
 func TestListingPreview_BodyPerRowKind(t *testing.T) {
 	t.Parallel()
 	doc := loadPreviewBodies(t)
+	source := kickstart.NewScannerTreeSource(
+		doc.Listings,
+		withFixturePathResolver(),
+		kickstart.WithRepositoryIdentityResolver(fixtureRepositoryResolver(doc.Repositories)),
+	)
+	roots, err := source.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load preview scanner forest: %v", err)
+	}
 
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -167,13 +186,19 @@ func TestListingPreview_BodyPerRowKind(t *testing.T) {
 			// behind it carries an unsynchronised per-turn cache because it is
 			// only ever drawn from the UI goroutine, so sharing one across
 			// parallel cases would be racing on a contract the pane keeps.
-			preview := kickstart.NewListingPreview(previewTheme(), doc.Listings, storedTurns(t, doc))
-			body, err := preview.Body(c.Highlight)
+			preview := kickstart.NewListingPreview(
+				previewTheme(),
+				doc.Listings,
+				storedTurns(t, doc),
+				kickstart.WithListingPreviewContextSource(source),
+			)
+			highlight := previewHighlightID(t, roots, c)
+			body, err := preview.Body(highlight)
 			if err != nil {
-				t.Fatalf("load preview for %q: %v", c.Highlight, err)
+				t.Fatalf("load preview for %q: %v", highlight, err)
 			}
 			if body == nil {
-				t.Fatalf("preview for %q loaded no body at all", c.Highlight)
+				t.Fatalf("preview for %q loaded no body at all", highlight)
 			}
 			got := flattenPane(body.Render(c.Width))
 			for _, want := range c.WantContains {
@@ -188,6 +213,30 @@ func TestListingPreview_BodyPerRowKind(t *testing.T) {
 			}
 		})
 	}
+}
+
+func previewHighlightID(t *testing.T, roots []*kit.TreeNode, c previewBodyCase) string {
+	t.Helper()
+	switch c.HighlightKind {
+	case "", "session":
+		return c.Highlight
+	case "project":
+		for _, root := range roots {
+			if root.Label == c.Highlight {
+				return root.ID
+			}
+		}
+	case "branch":
+		for _, root := range roots {
+			for _, branch := range root.Children {
+				if branch.Label == c.Highlight {
+					return branch.ID
+				}
+			}
+		}
+	}
+	t.Fatalf("preview fixture case %q cannot resolve %s highlight %q", c.Name, c.HighlightKind, c.Highlight)
+	return ""
 }
 
 // TestListingPreview_HighlightsCodeInTheRecordedReply proves the pane reaches

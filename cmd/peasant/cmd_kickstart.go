@@ -27,6 +27,11 @@ import (
 type kickstartCommandDeps struct {
 	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
 	getwd    func() (string, error)
+	// pathResolver and repositoryResolver keep exact worktree identity separate
+	// from transient Git repository topology at the command boundary. Production
+	// uses physical/Git resolvers; mounted tests can supply deterministic values.
+	pathResolver       ingest.PathIdentityResolver
+	repositoryResolver ingest.RepositoryIdentityResolver
 	// run is the retained legacy terminal boundary. Production selects runFlow;
 	// tests for still-shipping legacy behavior deliberately omit runFlow.
 	run func(ftue.WizardModel) error
@@ -43,12 +48,17 @@ type kickstartCommandDeps struct {
 	// concurrent progress source so Program never observes a different attempt.
 	alreadyConnected func(configDir string) bool
 	localIngest      func(*cobra.Command, string, []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource)
+	// flowIngest is a focused test seam for the post-save callback. Production
+	// uses localIngest so the runner and progress source always share one attempt.
+	flowIngest kickstart.IngestFunc
 }
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
 	return kickstartCommandDeps{
-		discover: ftueDiscover,
-		getwd:    os.Getwd,
+		discover:           ftueDiscover,
+		getwd:              os.Getwd,
+		pathResolver:       ingest.NewPhysicalPathResolver(),
+		repositoryResolver: ingest.NewGitRepositoryIdentityResolver(),
 		run: func(model ftue.WizardModel) error {
 			_, err := tea.NewProgram(model).Run()
 			return err
@@ -332,6 +342,7 @@ func ftueDiscoverWith(
 			projectName := d.ProjectName
 			title := d.Title
 			branchName := d.Branch // prefer per-session branch from session data
+			workingDir := d.CWD
 			var gitRemote string
 			// claudeProjectDir is the decoded project directory for a Claude
 			// session, kept so the git resolution below can read its remote.
@@ -363,6 +374,9 @@ func ftueDiscoverWith(
 				if title == "" {
 					title = record.Title
 				}
+				if workingDir == "" {
+					workingDir = record.workingDirectory()
+				}
 			} else {
 				gitRemote, branchName = resolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
 			}
@@ -376,7 +390,7 @@ func ftueDiscoverWith(
 				Date:        date,
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
-				WorkingDir:  d.CWD,
+				WorkingDir:  workingDir,
 			})
 		}
 		discovery.SessionCount = rootCount

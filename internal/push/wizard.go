@@ -86,13 +86,13 @@ type PushWizardSession struct {
 // WizardCandidates partitions sessions into the wizard's display order: kept
 // (unlocked, branch-selected) first, then withheld (Locked=true, branch
 // conflict) so the user sees WHY a session is excluded rather than having it
-// silently dropped. A nil matcher keeps all sessions (none withheld), matching
+// silently dropped. A nil selection keeps all sessions (none withheld), matching
 // the "no selection => push everything otherwise eligible" rule.
 //
 // This is the wizard-side counterpart to the pipeline's ApplySelection: both
-// consume the SAME shared matcher, so the wizard's selectable set equals the
-// pipeline's kept set by construction.
-func WizardCandidates(sessions []ingest.PushSessionRow, sel *ingest.SelectionMatcher) []PushWizardSession {
+// consume the SAME command-prepared decisions, so the wizard's selectable set
+// equals the pipeline's kept set by construction.
+func WizardCandidates(sessions []ingest.PushSessionRow, sel *SessionSelection) []PushWizardSession {
 	kept, withheld := ApplySelection(sessions, sel)
 	out := make([]PushWizardSession, 0, len(kept)+len(withheld))
 	for _, s := range kept {

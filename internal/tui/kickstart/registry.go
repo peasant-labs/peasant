@@ -211,6 +211,7 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 	out := []settings.TreeOption{
 		settings.WithFacet(settings.MetaHarness, "harness"),
 		settings.WithFacetDisplay(harnessFacetLabel),
+		settings.WithSelectAllHelp("select all projects"),
 		settings.WithDraftSelectionState(),
 	}
 	if opts.Preview != nil {
@@ -236,9 +237,9 @@ func harnessFacetLabel(harness string) string { return harnessDisplayName(harnes
 
 // selectionAccessor lenses the config's SelectionConfig into the tree's
 // TreeSelection (mode + per-harness allowlist). The AutoIngestNewBranches flag is
-// owned by its own toggle field, and the ratified root-check policy
-// ([DeriveSelection]) is applied when the tree writes an all-checked forest: an
-// "all" selection forces the flag on.
+// owned by its own toggle field. A project-first all-checked forest now derives
+// an exact selected-mode project list, so this legacy mode-all branch is reached
+// only before the dedicated conversion boundary replaces an old policy.
 func selectionAccessor() settings.Accessor[settings.TreeSelection] {
 	return settings.Accessor[settings.TreeSelection]{
 		Get: func(cfg *config.Config) settings.TreeSelection {
@@ -251,8 +252,7 @@ func selectionAccessor() settings.Accessor[settings.TreeSelection] {
 			cfg.Selection.Mode = v.Mode
 			cfg.Selection.Harnesses = v.Harnesses
 			if v.Mode == config.SelectionModeAll {
-				// Root-check is a standing policy: later-discovered projects are
-				// auto-included without re-running onboarding.
+				// Preserve compatibility for a non-project-first settings forest.
 				cfg.Selection.AutoIngestNewBranches = true
 			}
 		},

@@ -60,6 +60,7 @@ surface rendered non-empty), separate from the demo-parity pixel diff.
 | Script | What it does |
 |---|---|
 | `probe-peasant.mjs` | DOM validator. Reports the `.txn-*` box sizes, the tab + view-toggle labels, the theme control, and the `.txn-stream` scroll metrics (its `overflowY`/scroll vs client height, plus `.txn-stream-prelude`'s computed `position` — must never be `fixed`/`sticky`) and confirms the PAGE itself does not overflow (the composite owns the only scroller). Run it first whenever the harness route or the composite changes. |
+| `selection-recovery-probe.mjs` | Real-build computed-style probe for the shared selection-recovery panel. It verifies build provenance, boots `bin/peasant`, mounts the all-hidden state on Home and Map through the production summary request, and checks both themes for accepted copy, visibility, Atkinson fonts, tabular counts, canonical surface styling, and the copy control focus ring. It writes no screenshots. |
 | `peasant-shoot.mjs` | Captures the 10 transcript surfaces for one theme. Most surfaces are captured at the base viewport (`captureBeyondViewport:true`); the full trace canvas (whose content scrolls inside the bounded `.txn-stream`) is captured in FULL by temporarily growing the viewport to the stream's natural height (`shotTall`, ported from fairtrade's own `shootdemo.mjs`). Every capture passes the non-empty `SurfaceGate`. **Two-tier failures** (below). |
 | `surface-gate.mjs` | The shared non-empty assertion (byte floor, non-background ratio, distinct-colour count, no byte-identical duplicates). Vendored from the demo side so both are held to the same bar. |
 | `boot-peasant.mjs` | Host-integration check (oracle arm 2): boots the **real** `/projects/[name]/[id]` route against a running backend and asserts the composite renders through the real `SessionDetailV2` adapter + WebSocket path (exit 2 if `.txn-app` never mounts). The fixture route is backend-free, so this is the only arm that exercises the real transport. Validates its `PEASANT_PROJECT` coordinate against the live backend first (`validate-mock-coordinates.mjs`) so a stale default fails loud, not as a misleading transport-broken diagnosis. |
@@ -136,6 +137,9 @@ pnpm dev   # terminal 1 — next dev on :3000
 # 0. sanity-check the DOM (optional)
 pnpm probe:peasant
 
+# 0b. probe the production selection-recovery panel on Home + Map in both themes
+pnpm probe:selection-recovery
+
 # 1. app side — both themes
 pnpm shoot:peasant -- dark  "$CAPTURES/peasant/dark"
 pnpm shoot:peasant -- light "$CAPTURES/peasant/light"
@@ -167,6 +171,7 @@ review-capture/                         # runtime output (ephemeral, gitignored)
 | `CHROME_PATH` | — (required) | all |
 | `PUPPETEER_CORE` | bare `puppeteer-core` | all (set only if the bare import won't resolve) |
 | `PEASANT_URL` | `http://localhost:3000/dev/visual-harness` | probe, shoot |
+| `PEASANT_RECOVERY_PORT` | `8707` | selection-recovery probe real-binary server |
 | `REF_DIR` | `demo` | stitch (reference/left; `demo`=the fairtrade demo reference — cross-component, informational; same-component gates are `changes` and the smoke baseline) |
 | `REF_LABEL` | same-component baseline caption | stitch (reference column caption) |
 | `APP_DIR` | `peasant` | stitch (subject/right capture subdir) |

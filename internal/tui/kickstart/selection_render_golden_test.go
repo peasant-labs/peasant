@@ -305,7 +305,13 @@ func renderThemeFor(t *testing.T, name selectionRenderTheme) theme.Mode {
 func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderCase) kickstart.Program {
 	t.Helper()
 	th := theme.New(renderThemeFor(t, c.Theme))
-	preview := kickstart.NewListingPreview(th, doc.Listings, turnsFromPrompts(doc.Stored))
+	source := kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested))
+	preview := kickstart.NewListingPreview(
+		th,
+		doc.Listings,
+		turnsFromPrompts(doc.Stored),
+		kickstart.WithListingPreviewContextSource(source),
+	)
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.SaveAtomic(path, config.BaseConfig()); err != nil {
@@ -322,7 +328,7 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 	p := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:   th,
 		Draft:   draft,
-		Source:  kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested)),
+		Source:  source,
 		Preview: preview,
 	})
 	p.SetSize(c.Width, c.Height)
@@ -382,10 +388,11 @@ func buildSelectionStep(t *testing.T, doc selectionRenderDoc, c selectionRenderC
 }
 
 // cursorOntoImportedSession steps the tree cursor onto the already-imported
-// session row. Rows are project, branch, then the sessions: the third one,
-// which the import-state grouping puts after the not-yet-imported ones.
+// Claude session row. Physical project identity splits the later Cursor clone
+// into its own root, so the first four rows are the Claude project, branch,
+// not-yet-imported parent, and imported session.
 func cursorOntoImportedSession(p kickstart.Program) kickstart.Program {
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		p = pressAndDrain(p, 'j')
 	}
 	return p

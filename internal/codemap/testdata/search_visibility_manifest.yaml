@@ -1,4 +1,4 @@
-expectedCaseCount: 7
+expectedCaseCount: 8
 requiredNames:
   - hidden_best_visible_next_limit_1
   - hidden_prefix_pages_until_visible_limit
@@ -7,3 +7,4 @@ requiredNames:
   - explicit_session_no_sibling
   - conflict_fails_closed
   - selected_empty_returns_empty
+  - exact_branch_exclusion_uses_stored_worktree

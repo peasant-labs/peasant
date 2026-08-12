@@ -7,10 +7,12 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
+	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/schema"
 )
@@ -112,6 +114,7 @@ func (s *Service) projectHasVisibleSession(ctx context.Context, projectHash sche
 			Harness:     defaults.Harness(session.harness),
 			GitRemote:   session.gitRemote,
 			ProjectName: session.projectName,
+			ClonePath:   s.resolveSessionClonePath(session.gitWorktree, session.projectName),
 			GitBranch:   session.gitBranch,
 		})
 		if visibilityErr != nil {
@@ -151,14 +154,85 @@ func (s *Service) ProjectSummaries(ctx context.Context) (*ProjectSummariesResult
 		Projects:  []schema.ProjectSummary{},
 		Selection: SelectionState{Active: s.visibility.Active()},
 	}
-	for _, p := range projects {
-		row, total, visible, err := s.projectSummary(ctx, p)
+	mode, matcher, err := s.visibility.ProjectionInputs()
+	if err != nil {
+		return nil, fmt.Errorf("codemap: prepare project-summary visibility projection: %w", err)
+	}
+
+	// Materialize every stored project/session before the first matcher call.
+	// EffectiveProjects needs the complete operation cohort to prove remote and
+	// name multiplicity instead of letting the query order change visibility.
+	cohorts := make([]projectSummaryCohort, len(projects))
+	totalSessions := 0
+	for projectIndex, project := range projects {
+		sessions, queryErr := s.querySessions(ctx, project.hash)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		cohorts[projectIndex] = projectSummaryCohort{project: project, sessions: sessions}
+		totalSessions += len(sessions)
+	}
+
+	projectionCandidates := make([]selectionprojection.ProjectCandidate, 0, totalSessions)
+	resolvedPaths := make(map[string]ingest.ClonePath)
+	resolvePath := func(raw string) ingest.ClonePath {
+		if raw == "" {
+			return ""
+		}
+		if resolved, ok := resolvedPaths[raw]; ok {
+			return resolved
+		}
+		resolved := s.resolveClonePath(raw)
+		resolvedPaths[raw] = resolved
+		return resolved
+	}
+	for _, cohort := range cohorts {
+		resolvedWorktrees := make([]ingest.ClonePath, len(cohort.sessions))
+		var projectClonePath ingest.ClonePath
+		if mode == config.SelectionModeSelected {
+			for sessionIndex, session := range cohort.sessions {
+				resolvedWorktrees[sessionIndex] = resolvePath(session.gitWorktree)
+			}
+			// A resolved session worktree is the preferred descendant identity. The
+			// project cwd is resolved separately and remains the helper's fallback
+			// only when that descendant identity is unavailable.
+			projectClonePath = resolvePath(cohort.project.cwd)
+		}
+		// Keep one descendant per candidate. EffectiveProjects still receives
+		// the complete operation cohort, and its identity sets deduplicate shared
+		// clone paths so sessions never count as clones. The one-descendant shape
+		// lets this same pass return the exact visible session IDs while
+		// ParentProjectID aggregates them back into one summary row.
+		for sessionIndex, session := range cohort.sessions {
+			candidate, candidateErr := projectSummaryCandidate(cohort.project, session, resolvedWorktrees[sessionIndex], projectClonePath)
+			if candidateErr != nil {
+				return nil, candidateErr
+			}
+			projectionCandidates = append(projectionCandidates, candidate)
+		}
+	}
+
+	effective := selectionprojection.EffectiveProjects(
+		matcher,
+		config.SelectionConfig{Mode: mode},
+		projectionCandidates,
+	)
+	projectVisibility, err := collectProjectSummaryVisibility(effective)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, cohort := range cohorts {
+		projectID := selectionprojection.ParentProjectID(cohort.project.hash.String())
+		visible := visibleProjectSessions(cohort.sessions, projectVisibility.visibleSessions[projectID])
+		_, parentEffective := projectVisibility.effectiveParents[projectID]
+		row, err := s.projectSummary(ctx, cohort.project, visible, parentEffective)
 		if err != nil {
 			return nil, err
 		}
-		result.Selection.HiddenSessions += total - visible
+		result.Selection.HiddenSessions += len(cohort.sessions) - len(visible)
 		if row == nil {
-			if total > 0 {
+			if len(cohort.sessions) > 0 {
 				result.Selection.HiddenProjects++
 			}
 			continue
@@ -175,42 +249,143 @@ func (s *Service) ProjectSummaries(ctx context.Context) (*ProjectSummariesResult
 	return result, nil
 }
 
-// projectSummary measures one project: recorded activity from the store,
-// coverage against the tracked files at HEAD, and the open-branch count.
-// The two int returns are (totalSessions, visibleSessions) BEFORE and AFTER
-// selection filtering — the same pass ProjectSummaries uses to compute
-// SelectionState, so those counts can never drift from what the row (or its
-// absence) already shows.
-func (s *Service) projectSummary(ctx context.Context, p projectRow) (*schema.ProjectSummary, int, int, error) {
-	sessions, err := s.querySessions(ctx, p.hash)
+type projectSummaryCohort struct {
+	project  projectRow
+	sessions []sessionRow
+}
+
+func (s *Service) resolveClonePath(raw string) ingest.ClonePath {
+	if raw == "" || s.pathIdentityResolver == nil {
+		return ""
+	}
+	resolved, err := s.pathIdentityResolver.Resolve(raw)
 	if err != nil {
-		return nil, 0, 0, err
+		// Stored paths can become unavailable after ingest. Missing filesystem
+		// evidence must not fail the entire viewer list or be recast as identity.
+		return ""
 	}
-	totalCount := len(sessions)
-	visibleSessions := make([]sessionRow, 0, len(sessions))
+	return resolved
+}
+
+func (s *Service) resolveSessionClonePath(gitWorktree, projectName string) ingest.ClonePath {
+	if gitWorktree != "" {
+		return s.resolveClonePath(gitWorktree)
+	}
+	return s.resolveClonePath(projectName)
+}
+
+func projectSummaryCandidate(
+	project projectRow,
+	session sessionRow,
+	sessionClonePath ingest.ClonePath,
+	projectClonePath ingest.ClonePath,
+) (selectionprojection.ProjectCandidate, error) {
+	sessionID, err := ingest.NewSessionID(session.id)
+	if err != nil {
+		return selectionprojection.ProjectCandidate{}, fmt.Errorf(
+			"codemap: prepare project-summary candidate for project %s: stored session ID %q is malformed, so the complete viewer cohort cannot be matched safely; run `peasant ingest verify`, repair the store, and retry: %w",
+			project.hash,
+			session.id,
+			err,
+		)
+	}
+	var parentID ingest.SessionID
+	if session.parentID != "" {
+		parentID, err = ingest.NewSessionID(session.parentID)
+		if err != nil {
+			return selectionprojection.ProjectCandidate{}, fmt.Errorf(
+				"codemap: prepare project-summary candidate for session %q in project %s: stored parent session ID %q is malformed, so descendant visibility cannot be determined safely; run `peasant ingest verify`, repair the store, and retry: %w",
+				session.id,
+				project.hash,
+				session.parentID,
+				err,
+			)
+		}
+	}
+
+	return selectionprojection.ProjectCandidate{
+		ParentProjectID: selectionprojection.ParentProjectID(project.hash.String()),
+		Harness:         defaults.Harness(session.harness),
+		GitRemote:       session.gitRemote,
+		ProjectName:     session.projectName,
+		ClonePath:       projectClonePath,
+		Descendants: []selectionprojection.SessionCandidate{{
+			SessionID:       sessionID,
+			Branch:          session.gitBranch,
+			ParentSessionID: parentID,
+			ClonePath:       sessionClonePath,
+		}},
+	}, nil
+}
+
+type projectSummaryVisibility struct {
+	effectiveParents map[selectionprojection.ParentProjectID]struct{}
+	visibleSessions  map[selectionprojection.ParentProjectID]map[string]struct{}
+}
+
+func collectProjectSummaryVisibility(effective []selectionprojection.EffectiveProject) (projectSummaryVisibility, error) {
+	visibility := projectSummaryVisibility{
+		effectiveParents: make(map[selectionprojection.ParentProjectID]struct{}),
+		visibleSessions:  make(map[selectionprojection.ParentProjectID]map[string]struct{}),
+	}
+	for _, project := range effective {
+		if len(project.Candidate.Descendants) != 1 {
+			return projectSummaryVisibility{}, fmt.Errorf(
+				"codemap: collect project-summary visibility for parent %q: EffectiveProjects returned %d descendants for a one-session viewer candidate, so exact hidden-session counts cannot be produced safely; update Peasant and retry",
+				project.Candidate.ParentProjectID,
+				len(project.Candidate.Descendants),
+			)
+		}
+		visibility.effectiveParents[project.Candidate.ParentProjectID] = struct{}{}
+		switch project.SelectedDescendantCount {
+		case 0:
+			// The selected canonical project can remain effective while this
+			// candidate's preferred session worktree belongs to a sibling clone.
+			// Keep the parent row without treating that sibling as selected.
+			continue
+		case 1:
+			// The carrier has exactly one descendant, so a selected count of one
+			// is the only proof that this session itself is visible.
+		default:
+			return projectSummaryVisibility{}, fmt.Errorf(
+				"codemap: collect project-summary visibility for parent %q: EffectiveProjects selected descendant count %d is outside the expected 0..1 range for a one-session viewer candidate; no project list was returned because parent effectiveness cannot safely prove sibling-session visibility; update Peasant and retry",
+				project.Candidate.ParentProjectID,
+				project.SelectedDescendantCount,
+			)
+		}
+		projectSessions := visibility.visibleSessions[project.Candidate.ParentProjectID]
+		if projectSessions == nil {
+			projectSessions = make(map[string]struct{})
+			visibility.visibleSessions[project.Candidate.ParentProjectID] = projectSessions
+		}
+		projectSessions[project.Candidate.Descendants[0].SessionID.String()] = struct{}{}
+	}
+	return visibility, nil
+}
+
+func visibleProjectSessions(sessions []sessionRow, visible map[string]struct{}) []sessionRow {
+	result := make([]sessionRow, 0, len(visible))
 	for _, session := range sessions {
-		visible, visibilityErr := s.visibility.Visible(sessionvisibility.Candidate{
-			SessionID:   ingest.SessionID(session.id),
-			Harness:     defaults.Harness(session.harness),
-			GitRemote:   session.gitRemote,
-			ProjectName: session.projectName,
-			GitBranch:   session.gitBranch,
-		})
-		if visibilityErr != nil {
-			return nil, 0, 0, visibilityErr
-		}
-		if visible {
-			visibleSessions = append(visibleSessions, session)
+		if _, ok := visible[session.id]; ok {
+			result = append(result, session)
 		}
 	}
-	sessions = visibleSessions
-	visibleCount := len(sessions)
-	if len(sessions) == 0 {
-		return nil, totalCount, visibleCount, nil
+	return result
+}
+
+// projectSummary measures one effective project's already-projected visible
+// sessions: recorded activity from the store, coverage against the tracked
+// files at HEAD, and the open-branch count. An effective selected parent can
+// remain a row with zero sessions when every available descendant belongs to
+// an unselected sibling clone. ProjectSummaries supplies both signals from the
+// same EffectiveProjects pass that computes hidden counts.
+func (s *Service) projectSummary(ctx context.Context, p projectRow, sessions []sessionRow, parentEffective bool) (*schema.ProjectSummary, error) {
+	if !parentEffective {
+		return nil, nil
 	}
 	tasks, err := s.loadTasks(ctx, p.cwd, sessions)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, err
 	}
 	stats := computeFileStats(tasks)
 
@@ -246,7 +421,7 @@ func (s *Service) projectSummary(ctx context.Context, p projectRow) (*schema.Pro
 	if repoFound {
 		row.OpenChanges = countOpenChanges(ctx, repo)
 	}
-	return row, totalCount, visibleCount, nil
+	return row, nil
 }
 
 // lastWorkMs is the most recent session activity: max end_ms over the

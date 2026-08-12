@@ -86,7 +86,7 @@ func writeTestCredentials(t *testing.T, dir string) {
 // push integration tests. Mirrors internal/store's makeStoreEntry (not importable
 // from package main) and additionally sets Git.Remote/Branch so the push read
 // path surfaces them for branch-aware selection.
-func makeCmdStoreEntry(t *testing.T, sessionID, hostSlug, remote, branch string, startMs int64) ingest.StoreEntry {
+func makeCmdStoreEntry(t *testing.T, sessionID, hostSlug, remote, branch string, startMs int64, projectPaths ...string) ingest.StoreEntry {
 	t.Helper()
 	sid, err := ingest.NewSessionID(sessionID)
 	if err != nil {
@@ -114,9 +114,13 @@ func makeCmdStoreEntry(t *testing.T, sessionID, hostSlug, remote, branch string,
 	meta.HostSlug = hs
 	meta.Timestamp = ingest.TimestampInfo{Start: startMs, End: startMs + 60000, Ingested: &ingested}
 	meta.Source = ingest.SourceInfo{FilePath: string(srcPath), Format: ingest.SourceFormatJSONL}
-	meta.Project = ingest.ProjectInfo{Hash: ph, Name: "myapp", FilePath: "/home/test/myapp"}
+	projectPath := "/home/test/myapp"
+	if len(projectPaths) > 0 {
+		projectPath = projectPaths[0]
+	}
+	meta.Project = ingest.ProjectInfo{Hash: ph, Name: "myapp", FilePath: projectPath}
 	meta.Stats = ingest.StatsInfo{TurnCount: 5, ToolCallCount: 3, DurationMs: 60000, TokensIn: 100, TokensOut: 50}
-	meta.Git = ingest.GitContext{Remote: &remote, Branch: &branch}
+	meta.Git = ingest.GitContext{Remote: &remote, Branch: &branch, Worktree: &projectPath}
 
 	return ingest.StoreEntry{
 		Metadata: &meta,
@@ -148,10 +152,14 @@ func seedCrossBranchSessions(t *testing.T, dir string) (selectedID, otherID, rem
 		t.Fatalf("store.Open: %v", err)
 	}
 	defer s.Close()
+	projectPath := filepath.Join(dir, "repositories", "repo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project path: %v", err)
+	}
 
 	entries := []ingest.StoreEntry{
-		makeCmdStoreEntry(t, selectedID, "github.com-user-repo", remote, "main", 1700000000000),
-		makeCmdStoreEntry(t, otherID, "github.com-user-repo", remote, "feature", 1700000060000),
+		makeCmdStoreEntry(t, selectedID, "github.com-user-repo", remote, "main", 1700000000000, projectPath),
+		makeCmdStoreEntry(t, otherID, "github.com-user-repo", remote, "feature", 1700000060000, projectPath),
 	}
 	if err := s.InsertSessions(context.Background(), entries); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
@@ -220,11 +228,18 @@ func seedMultiProjectConflict(t *testing.T, dir string) (selectedID, excludedID,
 		t.Fatalf("store.Open: %v", err)
 	}
 	defer s.Close()
+	selectedPath := filepath.Join(dir, "repositories", "repo-one")
+	conflictPath := filepath.Join(dir, "repositories", "repo-two")
+	for _, projectPath := range []string{selectedPath, conflictPath} {
+		if err := os.MkdirAll(projectPath, 0o755); err != nil {
+			t.Fatalf("mkdir project path: %v", err)
+		}
+	}
 
 	entries := []ingest.StoreEntry{
-		makeCmdStoreEntry(t, selectedID, "github.com-user-repo-one", remoteSelected, "main", 1700000000000),
-		makeCmdStoreEntry(t, excludedID, "github.com-user-repo-one", remoteSelected, "feature", 1700000060000),
-		makeCmdStoreEntry(t, conflictID, "github.com-user-repo-two", remoteConflict, "main", 1700000120000),
+		makeCmdStoreEntry(t, selectedID, "github.com-user-repo-one", remoteSelected, "main", 1700000000000, selectedPath),
+		makeCmdStoreEntry(t, excludedID, "github.com-user-repo-one", remoteSelected, "feature", 1700000060000, selectedPath),
+		makeCmdStoreEntry(t, conflictID, "github.com-user-repo-two", remoteConflict, "main", 1700000120000, conflictPath),
 	}
 	if err := s.InsertSessions(context.Background(), entries); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
@@ -312,11 +327,6 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvid
 	}
 	cfg.Output.BasePath = string(resolved)
 
-	var sel *ingest.SelectionMatcher
-	if cfg.Selection.Mode == config.SelectionModeSelected {
-		m := cfg.SelectionMatcher()
-		sel = &m
-	}
 	q := push.PushCandidateQuery{
 		Force:          force,
 		SourceProvider: sourceProvider,
@@ -329,6 +339,14 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvid
 		t.Fatalf("store.Open: %v", err)
 	}
 	defer db.Close()
+	var sel *push.SessionSelection
+	if cfg.Selection.Mode == config.SelectionModeSelected {
+		matcher := cfg.SelectionMatcher()
+		sel, err = preparePushSelection(context.Background(), db, matcher, fixturePathIdentityResolver{})
+		if err != nil {
+			t.Fatalf("preparePushSelection: %v", err)
+		}
+	}
 
 	wiz, err := buildPushWizardSessions(context.Background(), db, &ingest.OSFileSystem{}, cfg.Output.BasePath, q, sel)
 	if err != nil {
@@ -469,9 +487,13 @@ func TestBuildPushWizardSessions_SelectionAware(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	defer db.Close()
+	selection, err := preparePushSelection(context.Background(), db, matcher, fixturePathIdentityResolver{})
+	if err != nil {
+		t.Fatalf("preparePushSelection: %v", err)
+	}
 
 	q := push.PushCandidateQuery{Method: cfg.Push.Method, Sources: cfg.Push.Sources}
-	wiz, err := buildPushWizardSessions(context.Background(), db, &ingest.OSFileSystem{}, cfg.Output.BasePath, q, &matcher)
+	wiz, err := buildPushWizardSessions(context.Background(), db, &ingest.OSFileSystem{}, cfg.Output.BasePath, q, selection)
 	if err != nil {
 		t.Fatalf("buildPushWizardSessions: %v", err)
 	}

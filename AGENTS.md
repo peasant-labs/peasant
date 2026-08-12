@@ -23,6 +23,20 @@ go test -race ./internal/ingest -run TestName -v
 Build the CLI with `make build`. Full-stack tests require Podman and the companion Village service;
 run them with `make e2e`. See [`TESTING.md`](TESTING.md) and [`docs/e2e.md`](docs/e2e.md) for prerequisites.
 
+### TUI visual review
+
+Every user-visible terminal UI change must follow
+[`.claude/skills/tui-visual-review/SKILL.md`](.claude/skills/tui-visual-review/SKILL.md). This includes
+changes to mounted layout, hierarchy, copy, previews, focus, search, facets, row annotations, themes,
+forms, and navigation.
+
+The required workflow runs the opt-in mounted screenshot tests, rasterizes deterministic ANSI states
+with Freeze, and manually inspects the changed states in both themes at `80x24` and `120x40`. If the
+strict capture fixture does not represent the changed state, extend it before capturing. ANSI goldens
+and successful PNG generation are not visual self-review. Dirty captures are disposable development
+evidence; interface-changing PRs require clean-revision screenshots and durable GitHub-hosted review
+evidence. Generated PNGs remain untracked.
+
 ## Tests and fixtures
 
 - Prefer integration tests for behavior involving I/O, state, or multiple components.

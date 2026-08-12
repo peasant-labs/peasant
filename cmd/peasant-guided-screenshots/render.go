@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -125,14 +127,22 @@ func renderSelectionCapture(
 		return "", err
 	}
 	th := captureThemeValue(capture.Theme)
+	source := kickstart.NewScannerTreeSource(
+		selection.Listings,
+		kickstart.WithPathIdentityResolver(capturePathResolver{}),
+		kickstart.WithRepositoryIdentityResolver(newCaptureRepositoryResolver(selection.Repositories)),
+		kickstart.WithIngestedSessionIDs(selection.Ingested),
+	)
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
-		Theme: th,
-		Draft: draft,
-		Source: kickstart.NewScannerTreeSource(
+		Theme:  th,
+		Draft:  draft,
+		Source: source,
+		Preview: kickstart.NewListingPreview(
+			th,
 			selection.Listings,
-			kickstart.WithIngestedSessionIDs(selection.Ingested),
+			selectionTurns(selection.Transcripts),
+			kickstart.WithListingPreviewContextSource(source),
 		),
-		Preview: kickstart.NewListingPreview(th, selection.Listings, nil),
 	})
 	program.SetSize(capture.Width, capture.Height)
 	program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -147,8 +157,64 @@ func renderSelectionCapture(
 		}
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
+	if state.Key == selectionStateBranchPreview {
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
+	if state.Key == selectionStateSessionPreview {
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
 	return program.View(), nil
 }
+
+func selectionTurns(transcripts map[string][]selectionTurnFixture) kickstart.SessionTurnsFunc {
+	return func(sessionID string) ([]ingest.Turn, error) {
+		rows := transcripts[sessionID]
+		turns := make([]ingest.Turn, 0, len(rows))
+		for index, row := range rows {
+			turns = append(turns, ingest.Turn{
+				Index:     index,
+				Role:      row.Role,
+				EntryType: row.EntryType,
+				Content:   row.Content,
+			})
+		}
+		return turns, nil
+	}
+}
+
+type capturePathResolver struct{}
+
+func (capturePathResolver) Resolve(dir string) (ingest.ClonePath, error) {
+	if dir == "" || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return "", fmt.Errorf("capture path %q is not a clean absolute path", dir)
+	}
+	return ingest.ClonePath(dir), nil
+}
+
+type captureRepositoryResolver map[ingest.ClonePath]ingest.RepositoryIdentity
+
+func newCaptureRepositoryResolver(fixtures []selectionRepositoryFixture) captureRepositoryResolver {
+	resolver := make(captureRepositoryResolver, len(fixtures))
+	for _, fixture := range fixtures {
+		resolver[ingest.ClonePath(fixture.ClonePath)] = ingest.RepositoryIdentity{
+			CohortKey:    ingest.RepositoryCohortKey(fixture.CohortKey),
+			GitDirectory: ingest.RepositoryPath(fixture.GitDirectory),
+		}
+	}
+	return resolver
+}
+
+func (r captureRepositoryResolver) ResolveRepositoryIdentity(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryIdentity, error) {
+	identity, ok := r[clonePath]
+	if !ok {
+		return ingest.RepositoryIdentity{}, fmt.Errorf("capture fixture has no repository identity for %q", clonePath)
+	}
+	return identity, nil
+}
+
+var _ ingest.PathIdentityResolver = capturePathResolver{}
+var _ ingest.RepositoryIdentityResolver = captureRepositoryResolver{}
 
 func newCaptureDraft(workingDirectory, name string, selected bool) (*settings.Draft, error) {
 	configPath := filepath.Join(workingDirectory, name, "config.yaml")
@@ -221,15 +287,21 @@ func composeSelectionSheet(
 ) (string, error) {
 	rows := make([]string, 0, len(states))
 	for _, state := range states {
-		left, err := selectionCaptureFor(cases, captures, state.Key, 80, 24)
-		if err != nil {
-			return "", err
+		themes := []captureTheme{captureThemeDark}
+		if state.Key.requiresBothThemes() {
+			themes = append(themes, captureThemeLight)
 		}
-		right, err := selectionCaptureFor(cases, captures, state.Key, 120, 40)
-		if err != nil {
-			return "", err
+		for _, captureTheme := range themes {
+			left, err := selectionCaptureFor(cases, captures, state.Key, captureTheme, 80, 24)
+			if err != nil {
+				return "", err
+			}
+			right, err := selectionCaptureFor(cases, captures, state.Key, captureTheme, 120, 40)
+			if err != nil {
+				return "", err
+			}
+			rows = append(rows, joinCapturePair(left, right))
 		}
-		rows = append(rows, joinCapturePair(left, right))
 	}
 	return renderContactSheet(sheet.Title, rows), nil
 }
@@ -253,14 +325,15 @@ func selectionCaptureFor(
 	cases []selectionCaptureFixture,
 	captures map[string]terminalCapture,
 	state selectionState,
+	captureTheme captureTheme,
 	width, height int,
 ) (terminalCapture, error) {
 	for _, capture := range cases {
-		if capture.State == state && capture.Width == width && capture.Height == height {
+		if capture.State == state && capture.Theme == captureTheme && capture.Width == width && capture.Height == height {
 			return captures[capture.Name], nil
 		}
 	}
-	return terminalCapture{}, fmt.Errorf("compose selection sheet: no capture for %s/%dx%d", state, width, height)
+	return terminalCapture{}, fmt.Errorf("compose selection sheet: no capture for %s/%s/%dx%d", state, captureTheme, width, height)
 }
 
 func joinCapturePair(left, right terminalCapture) string {

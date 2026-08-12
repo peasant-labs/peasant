@@ -2,12 +2,273 @@ package ingest
 
 import (
 	"context"
+	_ "embed"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/repository_identity_failures.yaml
+var repositoryIdentityFailureData []byte
+
+//go:embed testdata/repository_topology_guards.yaml
+var repositoryTopologyGuardData []byte
+
+type repositoryIdentityFailureDocument struct {
+	ExpectedCaseCount int                                `yaml:"expectedCaseCount"`
+	Cases             []repositoryIdentityFailureFixture `yaml:"cases"`
+}
+
+type repositoryIdentityFailureFixture struct {
+	Name                   string `yaml:"name"`
+	FailCommand            string `yaml:"failCommand"`
+	FailPath               string `yaml:"failPath"`
+	WantOperation          string `yaml:"wantOperation"`
+	WantGitDirectory       string `yaml:"wantGitDirectory"`
+	ExpectedCommandMinimum int    `yaml:"expectedCommandMinimum"`
+}
+
+type repositoryTopologyGuardKind string
+
+const (
+	repositoryTopologyGuardContainment repositoryTopologyGuardKind = "containment"
+	repositoryTopologyGuardCycle       repositoryTopologyGuardKind = "cycle"
+	repositoryTopologyGuardDepth       repositoryTopologyGuardKind = "depth"
+)
+
+type repositoryTopologyGuardDocument struct {
+	ExpectedCaseCount int                              `yaml:"expectedCaseCount"`
+	Cases             []repositoryTopologyGuardFixture `yaml:"cases"`
+}
+
+type repositoryTopologyGuardFixture struct {
+	Name             string                      `yaml:"name"`
+	Kind             repositoryTopologyGuardKind `yaml:"kind"`
+	NestedDepth      int                         `yaml:"nestedDepth"`
+	WantErrorText    string                      `yaml:"wantErrorText"`
+	WantGitDirectory string                      `yaml:"wantGitDirectory"`
+}
+
+type repositoryIdentityFixturePathResolver struct {
+	failPath string
+}
+
+func (r repositoryIdentityFixturePathResolver) Resolve(raw string) (ClonePath, error) {
+	if raw == r.failPath {
+		return "", fmt.Errorf("fixture physical path failure for %q", raw)
+	}
+	return ClonePath(filepath.Clean(raw)), nil
+}
+
+func loadRepositoryIdentityFailureFixtures(t *testing.T) repositoryIdentityFailureDocument {
+	t.Helper()
+	var document repositoryIdentityFailureDocument
+	decoder := yaml.NewDecoder(strings.NewReader(string(repositoryIdentityFailureData)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode repository identity failure fixture: %v", err)
+	}
+	if document.ExpectedCaseCount != len(document.Cases) || len(document.Cases) == 0 {
+		t.Fatalf("repository identity failure fixture declared=%d actual=%d", document.ExpectedCaseCount, len(document.Cases))
+	}
+	seen := make(map[string]bool, len(document.Cases))
+	for _, testCase := range document.Cases {
+		if testCase.Name == "" || testCase.WantOperation == "" || testCase.ExpectedCommandMinimum <= 0 || seen[testCase.Name] {
+			t.Fatalf("invalid repository identity failure fixture %#v", testCase)
+		}
+		seen[testCase.Name] = true
+	}
+	return document
+}
+
+func TestExecGitResolver_RepositoryIdentityFailureBoundaries(t *testing.T) {
+	document := loadRepositoryIdentityFailureFixtures(t)
+	for _, testCase := range document.Cases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			commands := 0
+			resolver := &ExecGitResolver{
+				identityPathResolver: repositoryIdentityFixturePathResolver{failPath: testCase.FailPath},
+				identityRunGit: func(_ context.Context, args ...string) (string, error) {
+					commands++
+					command := strings.Join(args, " ")
+					if testCase.FailCommand != "" && strings.Contains(command, testCase.FailCommand) {
+						return "", fmt.Errorf("fixture command failure for %q", command)
+					}
+					switch {
+					case strings.Contains(command, "--git-common-dir"):
+						return "/fixture/git-dir", nil
+					case strings.Contains(command, "--show-superproject-working-tree"):
+						return "/fixture/super", nil
+					case strings.Contains(command, "--show-toplevel") && strings.Contains(command, "/fixture/super/child"):
+						return "/fixture/super/child", nil
+					case strings.Contains(command, "--show-toplevel") && strings.Contains(command, "/fixture/super"):
+						return "/fixture/super", nil
+					case strings.Contains(command, "config --file"):
+						return "submodule.child.path child", nil
+					default:
+						return "", fmt.Errorf("unexpected fixture command %q", command)
+					}
+				},
+			}
+			identity, err := resolver.ResolveRepositoryIdentity(context.Background(), ClonePath("/fixture/super/child"))
+			if err == nil || !strings.Contains(err.Error(), testCase.WantOperation) {
+				t.Fatalf("repository identity failure error=%v, want operation %q", err, testCase.WantOperation)
+			}
+			if identity.GitDirectory.String() != testCase.WantGitDirectory {
+				t.Fatalf("repository identity failure Git directory=%q, want %q", identity.GitDirectory, testCase.WantGitDirectory)
+			}
+			if commands < testCase.ExpectedCommandMinimum {
+				t.Fatalf("repository identity failure commands=%d, want at least %d", commands, testCase.ExpectedCommandMinimum)
+			}
+		})
+	}
+}
+
+func loadRepositoryTopologyGuardFixtures(t *testing.T) repositoryTopologyGuardDocument {
+	t.Helper()
+	var document repositoryTopologyGuardDocument
+	decoder := yaml.NewDecoder(strings.NewReader(string(repositoryTopologyGuardData)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode repository topology guard fixture: %v", err)
+	}
+	if document.ExpectedCaseCount != len(document.Cases) || len(document.Cases) == 0 {
+		t.Fatalf("repository topology guard fixture declared=%d actual=%d", document.ExpectedCaseCount, len(document.Cases))
+	}
+	seen := make(map[string]bool, len(document.Cases))
+	for _, testCase := range document.Cases {
+		validKind := testCase.Kind == repositoryTopologyGuardContainment || testCase.Kind == repositoryTopologyGuardCycle || testCase.Kind == repositoryTopologyGuardDepth
+		if testCase.Name == "" || !validKind || testCase.WantErrorText == "" || testCase.WantGitDirectory == "" || seen[testCase.Name] {
+			t.Fatalf("invalid repository topology guard fixture %#v", testCase)
+		}
+		if testCase.Kind == repositoryTopologyGuardDepth && testCase.NestedDepth <= maximumRepositoryIdentityDepth {
+			t.Fatalf("repository topology depth fixture %q depth=%d, want greater than %d", testCase.Name, testCase.NestedDepth, maximumRepositoryIdentityDepth)
+		}
+		seen[testCase.Name] = true
+	}
+	return document
+}
+
+func TestExecGitResolver_RepositoryIdentityTopologyGuards(t *testing.T) {
+	document := loadRepositoryTopologyGuardFixtures(t)
+	for _, testCase := range document.Cases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			resolver, start := topologyGuardResolver(t, testCase)
+			identity, err := resolver.ResolveRepositoryIdentity(context.Background(), ClonePath(start))
+			if err == nil || !strings.Contains(err.Error(), testCase.WantErrorText) {
+				t.Fatalf("repository topology guard error=%v, want text %q", err, testCase.WantErrorText)
+			}
+			if identity.GitDirectory.String() != testCase.WantGitDirectory {
+				t.Fatalf("repository topology guard Git directory=%q, want %q", identity.GitDirectory, testCase.WantGitDirectory)
+			}
+		})
+	}
+}
+
+func topologyGuardResolver(t *testing.T, testCase repositoryTopologyGuardFixture) (*ExecGitResolver, string) {
+	t.Helper()
+	pathResolver := repositoryIdentityFixturePathResolver{}
+	switch testCase.Kind {
+	case repositoryTopologyGuardContainment:
+		return &ExecGitResolver{
+			identityPathResolver: pathResolver,
+			identityRunGit: func(_ context.Context, args ...string) (string, error) {
+				command := strings.Join(args, " ")
+				switch {
+				case strings.Contains(command, "--git-common-dir"):
+					return testCase.WantGitDirectory, nil
+				case strings.Contains(command, "--show-superproject-working-tree"):
+					return "/fixture/super", nil
+				case strings.Contains(command, "--show-toplevel") && strings.Contains(command, "/fixture/outside/child"):
+					return "/fixture/outside/child", nil
+				case strings.Contains(command, "--show-toplevel") && strings.Contains(command, "/fixture/super"):
+					return "/fixture/super", nil
+				default:
+					return "", fmt.Errorf("unexpected containment fixture command %q", command)
+				}
+			},
+		}, "/fixture/outside/child"
+	case repositoryTopologyGuardCycle:
+		superTopCalls := 0
+		return &ExecGitResolver{
+			identityPathResolver: pathResolver,
+			identityRunGit: func(_ context.Context, args ...string) (string, error) {
+				command := strings.Join(args, " ")
+				directory := repositoryIdentityCommandDirectory(args)
+				switch {
+				case strings.Contains(command, "--git-common-dir"):
+					if directory == "/fixture/super/child" {
+						return testCase.WantGitDirectory, nil
+					}
+					return "/fixture/super.git", nil
+				case strings.Contains(command, "--show-superproject-working-tree") && directory == "/fixture/super/child":
+					return "/fixture/super", nil
+				case strings.Contains(command, "--show-superproject-working-tree"):
+					return "/fixture/grand", nil
+				case strings.Contains(command, "--show-toplevel") && directory == "/fixture/super/child":
+					return "/fixture/super/child", nil
+				case strings.Contains(command, "--show-toplevel") && directory == "/fixture/super":
+					superTopCalls++
+					if superTopCalls == 1 {
+						return "/fixture/super", nil
+					}
+					return "/fixture/super/child", nil
+				case strings.Contains(command, "config --file"):
+					return "submodule.child.path child", nil
+				default:
+					return "", fmt.Errorf("unexpected cycle fixture command %q", command)
+				}
+			},
+		}, "/fixture/super/child"
+	case repositoryTopologyGuardDepth:
+		parts := make([]string, testCase.NestedDepth+2)
+		declarations := make([]string, len(parts))
+		for index := range parts {
+			parts[index] = fmt.Sprintf("level-%02d", index)
+			declarations[index] = fmt.Sprintf("submodule.level-%02d.path level-%02d", index, index)
+		}
+		start := filepath.Join(append([]string{"/fixture"}, parts...)...)
+		return &ExecGitResolver{
+			identityPathResolver: pathResolver,
+			identityRunGit: func(_ context.Context, args ...string) (string, error) {
+				command := strings.Join(args, " ")
+				directory := repositoryIdentityCommandDirectory(args)
+				switch {
+				case strings.Contains(command, "--git-common-dir"):
+					if directory == start {
+						return testCase.WantGitDirectory, nil
+					}
+					return filepath.Join("/fixture/gitdirs", strings.TrimPrefix(directory, "/")), nil
+				case strings.Contains(command, "--show-superproject-working-tree"):
+					return filepath.Dir(directory), nil
+				case strings.Contains(command, "--show-toplevel"):
+					return directory, nil
+				case strings.Contains(command, "config --file"):
+					return strings.Join(declarations, "\n"), nil
+				default:
+					return "", fmt.Errorf("unexpected depth fixture command %q", command)
+				}
+			},
+		}, start
+	default:
+		t.Fatalf("unknown repository topology guard %q", testCase.Kind)
+		return nil, ""
+	}
+}
+
+func repositoryIdentityCommandDirectory(args []string) string {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "-C" {
+			return args[index+1]
+		}
+	}
+	return ""
+}
 
 // initTestRepo creates a temp directory with a git repo configured for testing.
 func initTestRepo(t *testing.T) string {

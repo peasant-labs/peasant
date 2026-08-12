@@ -27,9 +27,7 @@ cases:
       autoIngestNewBranches: false
       harnesses:
         claude-code:
-          projects:
-            - gitRemote: git@github.com:peasant-labs/peasant.git
-              branches: [feature-x]
+          sessions: [cc-2]
         opencode:
           sessions: [oc-1]
     expectedSourceLoads: 1

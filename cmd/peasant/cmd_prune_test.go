@@ -624,6 +624,13 @@ func seedPruneTestSessionsWithGitRemote(t *testing.T, dir string) {
 	ingestedC := startC + 120000
 	ingestedD := startD + 120000
 	selectedRemote := "git@github.com:selected/repo.git"
+	selectedPath := filepath.Join(dir, "projects", "selected")
+	unselectedPath := filepath.Join(dir, "projects", "unselected")
+	for _, projectPath := range []string{selectedPath, unselectedPath} {
+		if err := os.MkdirAll(projectPath, 0o755); err != nil {
+			t.Fatalf("seed: create project path: %v", err)
+		}
+	}
 
 	entries := []ingest.StoreEntry{
 		{
@@ -639,7 +646,7 @@ func seedPruneTestSessionsWithGitRemote(t *testing.T, dir string) {
 				Project: schema.ProjectContext{
 					Hash:     schema.ProjectHash(pruneTestProject),
 					Name:     "selected-project",
-					FilePath: "/test/selected",
+					FilePath: selectedPath,
 				},
 				Timestamp: schema.TimestampInfo{Start: startC, End: startC + 60000, Ingested: &ingestedC},
 				Source:    schema.SourceInfo{FilePath: "/test/c.jsonl", Format: schema.SourceFormatJSONL},
@@ -655,7 +662,7 @@ func seedPruneTestSessionsWithGitRemote(t *testing.T, dir string) {
 				Project: schema.ProjectContext{
 					Hash:     schema.ProjectHash("2222222222222222222222222222222222222222222222222222222222222222"),
 					Name:     "unselected-project",
-					FilePath: "/test/unselected",
+					FilePath: unselectedPath,
 				},
 				Timestamp: schema.TimestampInfo{Start: startD, End: startD + 60000, Ingested: &ingestedD},
 				Source:    schema.SourceInfo{FilePath: "/test/d.jsonl", Format: schema.SourceFormatJSONL},

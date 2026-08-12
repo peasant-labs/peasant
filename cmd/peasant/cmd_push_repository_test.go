@@ -341,7 +341,7 @@ func seedRepositoryScopeWorld(t *testing.T) repositoryScopeWorld {
 
 func scopeEntry(t *testing.T, session scopeSession, hostSlug, branch string, startMs int64, hash ingest.ProjectHash, path string) ingest.StoreEntry {
 	t.Helper()
-	entry := makeCmdStoreEntry(t, scopeSessionIDs[session], hostSlug, "", branch, startMs)
+	entry := makeCmdStoreEntry(t, scopeSessionIDs[session], hostSlug, "", branch, startMs, path)
 	entry.Metadata.Project = ingest.ProjectInfo{Hash: hash, Name: filepath.Base(path), FilePath: path}
 	return entry
 }
@@ -352,7 +352,7 @@ func scopeConfigBody(testCase pushRepositoryScopeCase, world repositoryScopeWorl
 	body := "version: 1\npush:\n  method: all\n  visibility: private\n"
 	switch testCase.Mode {
 	case scopeModeSelected:
-		body += "selection:\n  mode: selected\n  harnesses:\n    claude-code:\n      projects:\n        - name: shared-name\n          branches:\n"
+		body += fmt.Sprintf("selection:\n  mode: selected\n  harnesses:\n    claude-code:\n      projects:\n        - name: shared-name\n          clonePaths:\n            - %q\n          branches:\n", world.repo)
 		for _, branch := range testCase.SelectedBranches {
 			body += "            - " + branch + "\n"
 		}

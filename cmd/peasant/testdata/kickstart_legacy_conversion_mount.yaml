@@ -1,0 +1,136 @@
+expectedCaseCount: 2
+cases:
+  - name: stored-columns-select-exact-clones-and-preserve-unmatched-harness
+    expectedStoredCount: 3
+    expectedScanCount: 5
+    expectedSelectedProjectCount: 2
+    expectedUnmatchedSessionCount: 1
+    autoIngestNewBranches: true
+    paths:
+      - {key: team-a/tool, state: directory}
+      - {key: team-b/tool, state: directory}
+      - {key: canonical/app, state: directory}
+      - {key: missing/old-tool, state: missing}
+      - {key: current/decoy-tool, state: directory}
+      - {key: current/new-project, state: directory}
+    stored:
+      - sessionId: 10000000-0000-0000-0000-000000000001
+        harness: claude-code
+        projectHash: "1111111111111111111111111111111111111111111111111111111111111111"
+        hostSlug: github.com--acme--tool-a
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: old-branch
+        gitWorktreePathKey: team-a/tool
+        canonicalCwdPathKey: team-b/tool
+        title: same-label
+        ingestedMs: 1770000000000
+      - sessionId: 20000000-0000-0000-0000-000000000002
+        harness: opencode
+        projectHash: "2222222222222222222222222222222222222222222222222222222222222222"
+        hostSlug: github.com--acme--canonical-app
+        gitRemote: "https://github.com/acme/canonical-app.git"
+        branch: main
+        canonicalCwdPathKey: canonical/app
+        title: canonical-app
+        ingestedMs: 1770000001000
+      - sessionId: 30000000-0000-0000-0000-000000000003
+        harness: cursor
+        projectHash: "3333333333333333333333333333333333333333333333333333333333333333"
+        hostSlug: github.com--acme--decoy-tool
+        gitRemote: "git@github.com:acme/decoy-tool.git"
+        branch: main
+        gitWorktreePathKey: missing/old-tool
+        canonicalCwdPathKey: current/decoy-tool
+        title: same-label
+        ingestedMs: 1770000000000
+    scan:
+      - sessionId: 10000000-0000-0000-0000-000000000001
+        harness: claude-code
+        projectName: tool
+        gitRemote: "git@github.com:acme/tool.git"
+        pathKey: team-a/tool
+        branch: main
+        title: same-label
+        date: 2026-02-02T02:40:00Z
+      - sessionId: 10000000-0000-0000-0000-000000000099
+        harness: claude-code
+        projectName: tool
+        gitRemote: "git@github.com:acme/tool.git"
+        pathKey: team-b/tool
+        branch: release
+        title: same-label
+        date: 2026-02-02T02:40:00Z
+      - sessionId: 20000000-0000-0000-0000-000000000002
+        harness: opencode
+        projectName: canonical-app
+        gitRemote: "https://github.com/acme/canonical-app.git"
+        pathKey: canonical/app
+        branch: main
+        title: canonical-app
+        date: 2026-02-02T02:40:01Z
+      - sessionId: 30000000-0000-0000-0000-000000000003
+        harness: cursor
+        projectName: decoy-tool
+        gitRemote: "git@github.com:acme/decoy-tool.git"
+        pathKey: current/decoy-tool
+        branch: main
+        title: same-label
+        date: 2026-02-02T02:40:00Z
+      - sessionId: 40000000-0000-0000-0000-000000000004
+        harness: claude-code
+        projectName: new-project
+        gitRemote: "git@github.com:acme/new-project.git"
+        pathKey: current/new-project
+        branch: main
+        title: new-project
+        date: 2026-02-02T02:40:02Z
+    expectedProjects:
+      - harness: claude-code
+        gitRemote: "git@github.com:acme/tool.git"
+        pathKeys: [team-a/tool]
+      - harness: opencode
+        gitRemote: "https://github.com/acme/canonical-app.git"
+        pathKeys: [canonical/app]
+    expectedSessions:
+      - harness: cursor
+        ids: [30000000-0000-0000-0000-000000000003]
+    expectedClearPathKeys: [team-b/tool, current/decoy-tool, current/new-project]
+
+  - name: disabled-auto-ingest-survives-canonical-cwd-conversion
+    expectedStoredCount: 1
+    expectedScanCount: 2
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedSessionCount: 0
+    autoIngestNewBranches: false
+    paths:
+      - {key: saved/non-git-app, state: directory}
+      - {key: current/brand-new-app, state: directory}
+    stored:
+      - sessionId: 50000000-0000-0000-0000-000000000005
+        harness: opencode
+        projectHash: "5555555555555555555555555555555555555555555555555555555555555555"
+        hostSlug: local--saved--non-git-app
+        branch: main
+        canonicalCwdPathKey: saved/non-git-app
+        title: app
+        ingestedMs: 1770000003000
+    scan:
+      - sessionId: 50000000-0000-0000-0000-000000000005
+        harness: opencode
+        projectName: app
+        pathKey: saved/non-git-app
+        branch: main
+        title: app
+        date: 2026-02-02T02:40:03Z
+      - sessionId: 60000000-0000-0000-0000-000000000006
+        harness: opencode
+        projectName: app
+        pathKey: current/brand-new-app
+        branch: main
+        title: app
+        date: 2026-02-02T02:40:03Z
+    expectedProjects:
+      - harness: opencode
+        name: app
+        pathKeys: [saved/non-git-app]
+    expectedClearPathKeys: [current/brand-new-app]

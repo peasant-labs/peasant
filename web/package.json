@@ -16,6 +16,7 @@
     "test:provider-build-provenance": "node scripts/provider-build-provenance-guidance.test.mjs && node scripts/provider-build-provenance.mjs",
     "test:watch": "vitest",
     "probe:peasant": "node scripts/visual/probe-peasant.mjs",
+    "probe:selection-recovery": "node scripts/visual/selection-recovery-probe.mjs",
     "shoot:peasant": "node scripts/visual/peasant-shoot.mjs",
     "shoot:changes": "node scripts/visual/changes-shoot.mjs",
     "boot:peasant": "node scripts/visual/boot-peasant.mjs",

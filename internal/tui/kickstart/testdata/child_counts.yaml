@@ -13,6 +13,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: parent session
         sessionId: p
         subagentIds: [c1]
@@ -20,6 +21,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: child subagent
         sessionId: c1
         subagentIds: [c2]
@@ -27,6 +29,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: grandchild subagent
         sessionId: c2
     expectedRows:
@@ -41,6 +44,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: parent session
         sessionId: p
         subagentIds: [c1]
@@ -48,6 +52,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: child subagent
         sessionId: c1
     expectedRows:
@@ -62,6 +67,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: plain session
         sessionId: p
     expectedRows:
@@ -76,6 +82,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: parent session
         sessionId: p
         subagentIds: [c1, missing-from-discovery]
@@ -83,6 +90,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: child subagent
         sessionId: c1
     expectedRows:
@@ -99,6 +107,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: parent session
         sessionId: p
         subagentIds: [c1, c2]
@@ -106,6 +115,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: child subagent
         sessionId: c1
         subagentIds: [c2, c1]
@@ -113,6 +123,7 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: shared subagent
         sessionId: c2
     expectedRows:
@@ -127,24 +138,28 @@ cases:
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: session a
         sessionId: a
       - harness: claude-code
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: session b
         sessionId: b
       - harness: claude-code
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: session c
         sessionId: c
       - harness: claude-code
         projectName: acme/tool
         gitRemote: "git@github.com:acme/tool.git"
         branch: main
+        workingDir: /fixtures/claude/acme-tool
         title: session d
         sessionId: d
     expectedRows:

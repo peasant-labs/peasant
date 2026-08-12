@@ -1,0 +1,311 @@
+expectedCaseCount: 12
+expectedNames:
+  - unrelated-project-action-preserves-visible-policies
+  - unrelated-project-action-preserves-scanner-absent-policy
+  - auto-branch-deny-survives-refresh
+  - branch-reselect-clears-deny
+  - project-admitted-session-deny-survives-refresh
+  - session-reselect-clears-deny-without-redundant-positive
+  - filtered-select-all-leaves-hidden-harness-clear
+  - exact-project-clear-preserves-sibling-clone
+  - grouped-project-clear-removes-linked-worktrees-only
+  - grouped-branch-clear-denies-descendant-worktree-only
+  - grouped-session-clear-keeps-linked-sibling
+  - grouped-shared-branch-clear-denies-all-descendant-worktrees
+cases:
+  - name: unrelated-project-action-preserves-visible-policies
+    paths:
+      - {key: clone-a, state: directory}
+      - {key: clone-b, state: directory}
+      - {key: clone-c, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: clone a}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", pathKey: clone-b, branch: release, sessionId: 22222222-2222-4222-8222-222222222222, title: clone b}
+      - {harness: claude-code, projectName: other, gitRemote: "git@github.com:acme/other.git", pathKey: clone-c, branch: dev, sessionId: 33333333-3333-4333-8333-333333333333, title: clone c}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+        - {harness: claude-code, gitRemote: "https://github.com/acme/tool.git", pathKeys: [clone-b], branches: [release]}
+      sessionExclusions:
+        - {harness: claude-code, ids: [99999999-9999-4999-8999-999999999999]}
+    actions: [down, down, down, down, down, down, toggle]
+    refresh: true
+    expectedCheckedSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+      - 33333333-3333-4333-8333-333333333333
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+        - {harness: claude-code, gitRemote: "https://github.com/acme/tool.git", pathKeys: [clone-b], branches: [release]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-c]}
+      sessionExclusions:
+        - {harness: claude-code, ids: [99999999-9999-4999-8999-999999999999]}
+
+  - name: unrelated-project-action-preserves-scanner-absent-policy
+    paths:
+      - {key: clone-a, state: directory}
+      - {key: clone-b, state: moved, target: moved-b}
+      - {key: clone-c, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: clone a}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", pathKey: clone-b, branch: release, sessionId: 22222222-2222-4222-8222-222222222222, title: unavailable clone b}
+      - {harness: claude-code, projectName: other, gitRemote: "git@github.com:acme/other.git", pathKey: clone-c, branch: dev, sessionId: 33333333-3333-4333-8333-333333333333, title: clone c}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+        - {harness: claude-code, gitRemote: "https://github.com/acme/tool.git", pathKeys: [clone-b], branches: [release]}
+    actions: [down, down, down, toggle]
+    refresh: true
+    expectedCheckedSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 33333333-3333-4333-8333-333333333333
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+        - {harness: claude-code, gitRemote: "https://github.com/acme/tool.git", pathKeys: [clone-b], branches: [release]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-c]}
+
+  - name: auto-branch-deny-survives-refresh
+    paths:
+      - {key: clone-a, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: topic, sessionId: 44444444-4444-4444-8444-444444444444, title: topic session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: true
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+    actions: [down, toggle]
+    refresh: true
+    expectedUncheckedSessions: [44444444-4444-4444-8444-444444444444]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+      branchExclusions:
+        - {harness: claude-code, pathKey: clone-a, branches: [topic]}
+
+  - name: branch-reselect-clears-deny
+    paths:
+      - {key: clone-a, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: topic, sessionId: 44444444-4444-4444-8444-444444444444, title: topic session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: true
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+      branchExclusions:
+        - {harness: claude-code, pathKey: clone-a, branches: [topic]}
+    actions: [down, toggle]
+    refresh: true
+    expectedCheckedSessions: [44444444-4444-4444-8444-444444444444]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main, topic]}
+
+  - name: project-admitted-session-deny-survives-refresh
+    paths:
+      - {key: clone-a, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 55555555-5555-4555-8555-555555555555, title: main session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+    actions: [down, down, toggle]
+    refresh: true
+    expectedUncheckedSessions: [55555555-5555-4555-8555-555555555555]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+      sessionExclusions:
+        - {harness: claude-code, ids: [55555555-5555-4555-8555-555555555555]}
+
+  - name: session-reselect-clears-deny-without-redundant-positive
+    paths:
+      - {key: clone-a, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 55555555-5555-4555-8555-555555555555, title: main session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+      sessionExclusions:
+        - {harness: claude-code, ids: [55555555-5555-4555-8555-555555555555]}
+    actions: [down, down, toggle]
+    refresh: true
+    expectedCheckedSessions: [55555555-5555-4555-8555-555555555555]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+
+  - name: filtered-select-all-leaves-hidden-harness-clear
+    paths:
+      - {key: claude-project, state: directory}
+      - {key: codex-project, state: directory}
+    listings:
+      - {harness: claude-code, projectName: claude-project, gitRemote: "git@github.com:acme/claude.git", pathKey: claude-project, branch: main, sessionId: 66666666-6666-4666-8666-666666666666, title: claude session}
+      - {harness: codex, projectName: codex-project, gitRemote: "git@github.com:acme/codex.git", pathKey: codex-project, branch: main, sessionId: 77777777-7777-4777-8777-777777777777, title: codex session}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    actions: [filter, select-all]
+    refresh: true
+    expectedCheckedSessions: [66666666-6666-4666-8666-666666666666]
+    expectedUncheckedSessions: [77777777-7777-4777-8777-777777777777]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/claude.git", pathKeys: [claude-project]}
+
+  - name: exact-project-clear-preserves-sibling-clone
+    paths:
+      - {key: clone-a, state: directory}
+      - {key: clone-b, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: clone a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-b, branch: release, sessionId: 22222222-2222-4222-8222-222222222222, title: clone b}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-b], branches: [release]}
+    actions: [toggle]
+    refresh: true
+    expectedUncheckedSessions: [11111111-1111-4111-8111-111111111111]
+    expectedCheckedSessions: [22222222-2222-4222-8222-222222222222]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-b], branches: [release]}
+
+  - name: grouped-project-clear-removes-linked-worktrees-only
+    paths:
+      - {key: repo-a-main, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-a-linked, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-z-independent, state: directory, repositoryKey: repo-z-independent}
+      - {key: missing, state: moved, target: moved-missing}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-a-main, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: main worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", pathKey: repo-a-linked, branch: review, sessionId: 22222222-2222-4222-8222-222222222222, title: linked worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-z-independent, branch: release, sessionId: 33333333-3333-4333-8333-333333333333, title: independent clone}
+      - {harness: claude-code, projectName: missing, gitRemote: "git@github.com:acme/missing.git", pathKey: missing, branch: gone, sessionId: 44444444-4444-4444-8444-444444444444, title: unavailable clone}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked, repo-z-independent]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/missing.git", pathKeys: [missing], branches: [gone]}
+    actions: [toggle]
+    refresh: true
+    expectedUncheckedSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expectedCheckedSessions: [33333333-3333-4333-8333-333333333333]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-z-independent]}
+        - {harness: claude-code, gitRemote: "git@github.com:acme/missing.git", pathKeys: [missing], branches: [gone]}
+
+  - name: grouped-branch-clear-denies-descendant-worktree-only
+    paths:
+      - {key: repo-a-main, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-a-linked, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-z-independent, state: directory, repositoryKey: repo-z-independent}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-a-main, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: main worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", pathKey: repo-a-linked, branch: review, sessionId: 22222222-2222-4222-8222-222222222222, title: linked worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-z-independent, branch: review, sessionId: 33333333-3333-4333-8333-333333333333, title: independent clone}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked, repo-z-independent]}
+    actions: [down, down, down, toggle]
+    refresh: true
+    expectedCheckedSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 33333333-3333-4333-8333-333333333333
+    expectedUncheckedSessions: [22222222-2222-4222-8222-222222222222]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked, repo-z-independent]}
+      branchExclusions:
+        - {harness: claude-code, pathKey: repo-a-linked, branches: [review]}
+
+  - name: grouped-session-clear-keeps-linked-sibling
+    paths:
+      - {key: repo-a-main, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-a-linked, state: directory, repositoryKey: repo-a-main}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-a-main, branch: topic, sessionId: 11111111-1111-4111-8111-111111111111, title: main worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", pathKey: repo-a-linked, branch: topic, sessionId: 22222222-2222-4222-8222-222222222222, title: linked worktree}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked]}
+    actions: [down, down, toggle]
+    refresh: true
+    expectedCheckedSessions: [22222222-2222-4222-8222-222222222222]
+    expectedUncheckedSessions: [11111111-1111-4111-8111-111111111111]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked]}
+      sessionExclusions:
+        - {harness: claude-code, ids: [11111111-1111-4111-8111-111111111111]}
+
+  - name: grouped-shared-branch-clear-denies-all-descendant-worktrees
+    paths:
+      - {key: repo-a-main, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-a-linked, state: directory, repositoryKey: repo-a-main}
+      - {key: repo-z-independent, state: directory, repositoryKey: repo-z-independent}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-a-main, branch: topic, sessionId: 11111111-1111-4111-8111-111111111111, title: main worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", pathKey: repo-a-linked, branch: topic, sessionId: 22222222-2222-4222-8222-222222222222, title: linked worktree}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: repo-z-independent, branch: topic, sessionId: 33333333-3333-4333-8333-333333333333, title: independent clone}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked, repo-z-independent]}
+    actions: [down, toggle]
+    refresh: true
+    expectedCheckedSessions: [33333333-3333-4333-8333-333333333333]
+    expectedUncheckedSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [repo-a-main, repo-a-linked, repo-z-independent]}
+      branchExclusions:
+        - {harness: claude-code, pathKey: repo-a-linked, branches: [topic]}
+        - {harness: claude-code, pathKey: repo-a-main, branches: [topic]}

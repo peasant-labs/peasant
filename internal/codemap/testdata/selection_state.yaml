@@ -4,34 +4,162 @@ cases:
     provenance: {source: requirement, ref: peasant-166-all-mode-inactive}
     mutation: {description: switch selection.mode to selected so Active flips true even though nothing new is hidden}
     input:
-      selection: {mode: all, allowed_project_names: [], allowed_sessions: []}
+      selection: {mode: all}
       projects:
         - cwd: /work/alpha
-          sessions: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+          sessions:
+            - {id: "11111111-1111-4111-8111-111111111111"}
+            - {id: "22222222-2222-4222-8222-222222222222"}
         - cwd: /work/beta
-          sessions: ["33333333-3333-3333-3333-333333333333"]
-    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 2}
+          sessions:
+            - {id: "33333333-3333-4333-8333-333333333333"}
+    expected: {active: false, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 2, visible_session_count: 3}
 
   - name: selected_mode_hides_one_project_entirely
     classification: must-pass
     provenance: {source: bug, ref: peasant-166-project-fully-hidden}
     mutation: {description: add /work/beta to the allowed project names so it is no longer fully hidden}
     input:
-      selection: {mode: selected, allowed_project_names: ["/work/alpha"], allowed_sessions: []}
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {name: alpha}
       projects:
         - cwd: /work/alpha
-          sessions: ["44444444-4444-4444-4444-444444444444", "55555555-5555-5555-5555-555555555555"]
+          sessions:
+            - {id: "44444444-4444-4444-8444-444444444444"}
+            - {id: "55555555-5555-4555-8555-555555555555"}
         - cwd: /work/beta
-          sessions: ["66666666-6666-6666-6666-666666666666", "77777777-7777-7777-7777-777777777777", "88888888-8888-8888-8888-888888888888"]
-    expected: {active: true, hidden_projects: 1, hidden_sessions: 3, visible_project_count: 1}
+          sessions:
+            - {id: "66666666-6666-4666-8666-666666666666"}
+            - {id: "77777777-7777-4777-8777-777777777777"}
+            - {id: "88888888-8888-4888-8888-888888888888"}
+    expected: {active: true, hidden_projects: 1, hidden_sessions: 3, visible_project_count: 1, visible_session_count: 2}
 
   - name: selected_mode_hides_some_sessions_without_hiding_the_project_row
     classification: must-pass
     provenance: {source: requirement, ref: peasant-166-partial-session-hide-still-lists-project}
     mutation: {description: allowlist the whole project by name so no individual session is hidden}
     input:
-      selection: {mode: selected, allowed_project_names: [], allowed_sessions: ["99999999-9999-9999-9999-999999999999"]}
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions: ["99999999-9999-4999-8999-999999999999"]
       projects:
         - cwd: /work/gamma
-          sessions: ["99999999-9999-9999-9999-999999999999", "aaaaaaaa-1111-1111-1111-111111111111", "bbbbbbbb-2222-2222-2222-222222222222"]
-    expected: {active: true, hidden_projects: 0, hidden_sessions: 2, visible_project_count: 1}
+          sessions:
+            - {id: "99999999-9999-4999-8999-999999999999"}
+            - {id: "aaaaaaaa-1111-4111-8111-111111111111"}
+            - {id: "bbbbbbbb-2222-4222-8222-222222222222"}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 2, visible_project_count: 1, visible_session_count: 1}
+
+  - name: selected_mode_hides_every_stored_project
+    classification: must-pass
+    provenance: {source: bug, ref: peasant-80-all-hidden-viewer-list}
+    mutation: {description: select one available session so the all-hidden recovery state disappears}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions: ["dddddddd-4444-4444-8444-444444444444"]
+      projects:
+        - cwd: /work/hidden
+          sessions:
+            - {id: "cccccccc-3333-4333-8333-333333333331"}
+            - {id: "cccccccc-3333-4333-8333-333333333332", git_worktree: /work/hidden-linked}
+    expected: {active: true, hidden_projects: 1, hidden_sessions: 2, visible_project_count: 0, visible_session_count: 0}
+
+  - name: explicitly_selected_parent_admits_nested_child
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-80-selected-descendant-parent-row}
+    mutation: {description: stop carrying sessions.parent_id into the projection so the child becomes hidden}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            sessions: ["eeeeeeee-5555-4555-8555-555555555550"]
+      projects:
+        - cwd: /work/nested
+          sessions:
+            - {id: "eeeeeeee-5555-4555-8555-555555555550"}
+            - {id: "eeeeeeee-5555-4555-8555-555555555551", parent_id: "eeeeeeee-5555-4555-8555-555555555550", git_worktree: /work/nested-linked}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 2}
+
+  - name: session_worktree_overrides_project_cwd
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-80-session-worktree-first}
+    mutation: {description: use the project cwd for every descendant so the selected linked worktree disappears}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {clonePaths: [/work/delta-linked]}
+      projects:
+        - cwd: /work/delta-main
+          sessions:
+            - {id: "ffffffff-6666-4666-8666-666666666661", git_worktree: /work/delta-linked}
+            - {id: "ffffffff-6666-4666-8666-666666666662"}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 1}
+
+  - name: project_cwd_fallback_admits_session_without_worktree
+    classification: must-pass
+    provenance: {source: requirement, ref: peasant-80-project-cwd-fallback}
+    mutation: {description: leave descendants without a fallback clone path so the selected main checkout disappears}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {clonePaths: [/work/epsilon-main]}
+      projects:
+        - cwd: /work/epsilon-main
+          sessions:
+            - {id: "abababab-7777-4777-8777-777777777777"}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 0, visible_project_count: 1, visible_session_count: 1}
+
+  - name: canonical_clone_selection_does_not_widen_sibling_worktree
+    classification: must-pass
+    provenance: {source: bug, ref: sibling-session-visibility-widening}
+    mutation: {description: treat parent-only effectiveness as descendant visibility so the sibling clone session leaks into the summary}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - gitRemote: https://github.com/example/shared.git
+                clonePaths: [/work/shared-clone-a]
+      projects:
+        - cwd: /work/shared-clone-a
+          git_remote: https://github.com/example/shared.git
+          sessions:
+            - {id: "cdcdcdcd-8888-4888-8888-888888888881"}
+            - {id: "cdcdcdcd-8888-4888-8888-888888888882", git_worktree: /work/shared-clone-b}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 1}
+
+  - name: selected_canonical_parent_remains_visible_without_selected_descendants
+    classification: must-pass
+    provenance: {source: requirement, ref: effective-parent-separate-from-descendants}
+    mutation: {description: derive parent visibility only from selected descendant IDs so the selected canonical parent disappears}
+    input:
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - gitRemote: https://github.com/example/parent-only.git
+                clonePaths: [/work/parent-clone-a]
+      projects:
+        - cwd: /work/parent-clone-a
+          git_remote: https://github.com/example/parent-only.git
+          sessions:
+            - {id: "dededede-9999-4999-8999-999999999999", git_worktree: /work/parent-clone-b}
+    expected: {active: true, hidden_projects: 0, hidden_sessions: 1, visible_project_count: 1, visible_session_count: 0}

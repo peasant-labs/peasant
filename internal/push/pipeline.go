@@ -377,19 +377,19 @@ func ApplyRepositoryScope(sessions []ingest.PushSessionRow, scope *RepositorySco
 	return kept
 }
 
-// ApplySelection partitions sessions using the branch-aware selection matcher.
-// A nil matcher applies no filter (all sessions kept). Sessions the matcher
-// withholds due to a multi-project branch conflict (AND-strict) are returned
+// ApplySelection partitions sessions using command-prepared branch-aware
+// decisions. A nil selection applies no filter (all sessions kept). Sessions
+// withheld due to a multi-project branch conflict (AND-strict) are returned
 // separately so callers surface them rather than silently dropping them. This
 // is the single shared selection filter used by BOTH the pipeline and the CLI
 // consent listing, so the dry-run, consent, and real-push sets are identical
 // by construction.
-func ApplySelection(sessions []ingest.PushSessionRow, sel *ingest.SelectionMatcher) (kept, withheld []ingest.PushSessionRow) {
+func ApplySelection(sessions []ingest.PushSessionRow, sel *SessionSelection) (kept, withheld []ingest.PushSessionRow) {
 	if sel == nil {
 		return sessions, nil
 	}
 	for _, s := range sessions {
-		switch s.IsSelectedByBranch(*sel) {
+		switch sel.Decision(ingest.SessionID(s.SessionID)) {
 		case ingest.BranchMatchYes:
 			kept = append(kept, s)
 		case ingest.BranchMatchWithheldConflict:

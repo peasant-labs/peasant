@@ -3,7 +3,11 @@
 
 ralph-plans/
 finesse-plans/
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/tui-visual-review/
+!.claude/skills/tui-visual-review/SKILL.md
 bin/
 # Ignore built web assets, but keep a committed `.gitkeep` placeholder so the
 # `//go:embed all:web/out` directive (embed.go) is satisfied for `go install`

@@ -31,6 +31,16 @@ cases:
       autoIngestNewBranches: true
       harnesses:
         claude-code:
+          projects:
+            - gitRemote: "git@github.com:example/tool.git"
+              clonePaths: ["__MATERIALIZED_CLONE_PATH__"]
+          exclusions:
+            sessions: ["8d2e4b71-9ec4-4c35-8208-f31b80179f68"]
+    configExpectedSelection:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
           sessions: ["3f1c9a52-1c45-4ca6-8e2a-3ef4db896a44"]
     selectionInputs:
       - action: search

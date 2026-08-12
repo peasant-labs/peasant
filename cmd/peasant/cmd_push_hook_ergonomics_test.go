@@ -442,6 +442,10 @@ func TestPushCmd_RepositoryScopeSuppressesAnotherRepositorysWithheldNotice(t *te
 	const conflictRemote = "git@github.com:user/conflict.git"
 	const scopedID = "aaaa1111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	const conflictedID = "bbbb2222-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	conflictPath := filepath.Join(dir, "work", "conflict")
+	if err := os.MkdirAll(conflictPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
@@ -456,15 +460,15 @@ func TestPushCmd_RepositoryScopeSuppressesAnotherRepositorysWithheldNotice(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	conflictHash, _, err := ingest.DeriveProjectIdentifiers(db.InstallationSalt(), conflictRemote, "/elsewhere/conflict")
+	conflictHash, _, err := ingest.DeriveProjectIdentifiers(db.InstallationSalt(), conflictRemote, conflictPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	scopedEntry := makeCmdStoreEntry(t, scopedID, "local-work-alpha", "", "main", 1700000000000)
+	scopedEntry := makeCmdStoreEntry(t, scopedID, "local-work-alpha", "", "main", 1700000000000, scoped)
 	scopedEntry.Metadata.Project = ingest.ProjectInfo{Hash: scopedHash, Name: "alpha", FilePath: scoped}
-	conflicted := makeCmdStoreEntry(t, conflictedID, "github.com-user-conflict", conflictRemote, "main", 1700000060000)
-	conflicted.Metadata.Project = ingest.ProjectInfo{Hash: conflictHash, Name: "conflict", FilePath: "/elsewhere/conflict"}
+	conflicted := makeCmdStoreEntry(t, conflictedID, "github.com-user-conflict", conflictRemote, "main", 1700000060000, conflictPath)
+	conflicted.Metadata.Project = ingest.ProjectInfo{Hash: conflictHash, Name: "conflict", FilePath: conflictPath}
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{scopedEntry, conflicted}); err != nil {
 		t.Fatal(err)
 	}

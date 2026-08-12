@@ -44,9 +44,43 @@ func runKickstartFlow(
 	if err != nil {
 		loaded = config.BaseConfig()
 	}
+	th := theme.New(themeModeFor(loaded))
+
+	// One store handle serves the stored-session snapshot, already-imported marks,
+	// and preview bodies for the whole flow. The snapshot feeds both legacy
+	// conversion and the scanner/store union used by the save gate. It is closed
+	// when the flow returns.
+	db, closeStore, storeOpenErr := openKickstartStoreWithError(cmd)
+	defer closeStore()
+	if storeOpenErr != nil {
+		return kickstartStoreOpenError(loaded.Selection.Mode, storeOpenErr)
+	}
+	storedSessions, err := readKickstartStoredSessions(ctx, db)
+	if err != nil {
+		return kickstartStoreReadError(loaded.Selection.Mode, err)
+	}
+	identityResolver := deps.pathResolver
+	if identityResolver == nil {
+		identityResolver = ingest.NewPhysicalPathResolver()
+	}
+	repositoryResolver := deps.repositoryResolver
+	if repositoryResolver == nil {
+		repositoryResolver = ingest.NewGitRepositoryIdentityResolver()
+	}
+	flowConfig, err := prepareKickstartFlowConfig(loaded, sessions, storedSessions, identityResolver)
+	if err != nil {
+		return err
+	}
+	// Keep the file-backed config as the draft baseline. A legacy conversion is
+	// an in-memory working edit so the user's final confirmation persists it;
+	// treating the conversion as the baseline would make Commit preserve the
+	// legacy bytes as a semantically clean no-op.
 	draft, err := settings.NewDraft(configPath, loaded)
 	if err != nil {
 		return err
+	}
+	if flowConfig != loaded {
+		draft.Working().Selection = flowConfig.Selection
 	}
 	// Seed the retention field's starting value from Claude Code's current
 	// cleanup setting so its cursor lands on the value already in force (or the
@@ -56,12 +90,23 @@ func runKickstartFlow(
 		return err
 	}
 
-	th := theme.New(themeModeFor(loaded))
-
-	// One store handle serves both the already-imported marks and the preview
-	// pane's body reads for the whole flow; it is closed when the flow returns.
-	db, closeStore := openKickstartStore(cmd)
-	defer closeStore()
+	source := kickstart.NewScannerTreeSource(
+		sessions,
+		kickstart.WithPathIdentityResolver(identityResolver),
+		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
+		kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
+	)
+	commitGateCandidates, err := source.CommitGateCandidates(storedSessions)
+	if err != nil {
+		return fmt.Errorf(
+			"prepare project save evidence: %w.\n"+
+				"what: Peasant could not build the complete project and session evidence for the save check.\n"+
+				"why: a locally stored session has identity data that Peasant cannot validate safely.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while joining scanner and stored-session evidence for the no-project confirmation.\n"+
+				"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
+				"fix: run `peasant ingest verify`, repair the reported stored session, then run `peasant kickstart` again.", err)
+	}
 	if deps.localIngest == nil {
 		return fmt.Errorf(
 			"mount guided kickstart for %q: local ingest boundary is nil.\n"+
@@ -78,12 +123,16 @@ func runKickstartFlow(
 	if deps.alreadyConnected != nil {
 		alreadyConnected = deps.alreadyConnected(configDirOverride(cmd))
 	}
+	if deps.flowIngest != nil {
+		ingestRun = deps.flowIngest
+	}
 
 	programDeps := kickstart.ProgramDeps{
 		Theme:                 th,
 		Draft:                 draft,
-		Source:                kickstart.NewScannerTreeSource(sessions, kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db))),
-		Preview:               kickstartPreview(cmd, db, th, sessions),
+		Source:                source,
+		CommitGate:            settings.NewCommitGateEvaluator(commitGateCandidates),
+		Preview:               kickstartPreview(cmd, db, th, sessions, source),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
 		Ingest:                ingestRun,
@@ -112,20 +161,142 @@ func runKickstartFlow(
 	return deps.runModel(model)
 }
 
+// prepareKickstartFlowConfig replaces legacy mode-all and pathless selected-mode
+// policies only in the in-memory draft baseline. It receives the same complete
+// stored-session snapshot the save gate uses. Mode all also consults the scanner
+// cohort; selected migration deliberately does not, so scanner-only sibling
+// clones stay clear. The config file is not changed here.
+// settings.Draft.Commit remains the only write, after the user reviews and saves
+// the flow.
+func prepareKickstartFlowConfig(
+	loaded *config.Config,
+	sessions []ftue.SessionListing,
+	stored []store.IngestedSessionRow,
+	resolver ingest.PathIdentityResolver,
+) (*config.Config, error) {
+	if loaded.Selection.Mode == config.SelectionModeSelected && hasPathlessSelectedProject(loaded.Selection) {
+		selection, err := kickstart.ConvertLegacySelected(loaded.Selection, stored, resolver)
+		if err != nil {
+			return nil, err
+		}
+		converted := *loaded
+		converted.Selection = selection
+		return &converted, nil
+	}
+	if loaded.Selection.Mode != config.SelectionModeAll {
+		return loaded, nil
+	}
+
+	conversion, err := kickstart.ConvertLegacyAll(
+		sessions,
+		stored,
+		resolver,
+		loaded.Selection.AutoIngestNewBranches,
+	)
+	if err != nil {
+		return nil, err
+	}
+	merged := settings.MergeSelection(settings.TreeSelection{
+		Mode:      conversion.Initial.Mode,
+		Harnesses: conversion.Initial.Harnesses,
+	}, conversion.Unmatched)
+	selection := conversion.Initial
+	selection.Harnesses = merged.Harnesses
+	converted := *loaded
+	converted.Selection = selection
+	return &converted, nil
+}
+
+func hasPathlessSelectedProject(selection config.SelectionConfig) bool {
+	if selection.Mode != config.SelectionModeSelected {
+		return false
+	}
+	for _, configured := range selection.Harnesses {
+		for _, project := range configured.Projects {
+			if len(project.ClonePaths) == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func readKickstartStoredSessions(ctx context.Context, db *store.Store) ([]store.IngestedSessionRow, error) {
+	if db == nil {
+		return nil, nil
+	}
+	return db.AllIngestedSessions(ctx)
+}
+
+func kickstartStoreOpenError(mode config.SelectionMode, err error) error {
+	if mode == config.SelectionModeAll {
+		return fmt.Errorf(
+			"prepare legacy project selection: %w.\n"+
+				"what: Peasant could not open the stored sessions needed to build exact project choices.\n"+
+				"why: Peasant could not read the local session store as a Peasant database.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while converting the saved all-projects setting.\n"+
+				"meaning: Peasant did not change the saved setting or start setup.\n"+
+				"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+	}
+	return fmt.Errorf(
+		"prepare saved project availability: %w.\n"+
+			"what: Peasant could not open the stored sessions needed to verify the saved project choice.\n"+
+			"why: Peasant could not read the local session store as a Peasant database.\n"+
+			"where: runKickstartFlow, before the selection screen opened.\n"+
+			"when: while aligning the no-project save check with the web viewer and push chooser.\n"+
+			"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
+			"fix: check the Peasant data directory and database, then run `peasant kickstart` again.", err)
+}
+
+func kickstartStoreReadError(mode config.SelectionMode, err error) error {
+	if mode == config.SelectionModeAll {
+		return fmt.Errorf(
+			"prepare legacy project selection: %w.\n"+
+				"what: Peasant could not read the stored sessions needed to build exact project choices.\n"+
+				"why: the local session store query failed.\n"+
+				"where: runKickstartFlow, before the selection screen opened.\n"+
+				"when: while converting the saved all-projects setting.\n"+
+				"meaning: Peasant did not change the saved setting or start setup.\n"+
+				"fix: check that the Peasant data directory is readable, then run `peasant kickstart` again.", err)
+	}
+	return fmt.Errorf(
+		"prepare saved project availability: %w.\n"+
+			"what: Peasant could not read the stored sessions needed to verify the saved project choice.\n"+
+			"why: the local session store query failed.\n"+
+			"where: runKickstartFlow, before the selection screen opened.\n"+
+			"when: while aligning the no-project save check with the web viewer and push chooser.\n"+
+			"meaning: Peasant did not change the saved setting or start ingest because project availability is unknown.\n"+
+			"fix: run `peasant ingest verify`, repair the local session store, then run `peasant kickstart` again.", err)
+}
+
 // openKickstartStore opens the local store for the duration of the flow, plus
 // the func that closes it. It is best-effort: on a first run the store may not
 // exist yet, and any open problem yields a nil store and a no-op close, so
 // onboarding runs without the marks and preview bodies it would have provided.
 func openKickstartStore(cmd *cobra.Command) (*store.Store, func()) {
+	db, closeStore, _ := openKickstartStoreWithError(cmd)
+	return db, closeStore
+}
+
+// openKickstartStoreWithError is the exact store-open boundary used by legacy
+// conversion and the save gate. The compatibility wrapper above keeps callers
+// that only need preview reads best-effort, while runKickstartFlow rejects an
+// unreadable existing store instead of mistaking unavailable evidence for an
+// empty store.
+func openKickstartStoreWithError(cmd *cobra.Command) (*store.Store, func(), error) {
 	dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, func() {}
+		if os.IsNotExist(err) {
+			return nil, func() {}, nil
+		}
+		return nil, func() {}, err
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
-		return nil, func() {}
+		return nil, func() {}, err
 	}
-	return db, func() { _ = db.Close() }
+	return db, func() { _ = db.Close() }, nil
 }
 
 // ingestedSessionIDs reads the session ids the local store already holds so the
@@ -161,7 +332,13 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // not committed yet would hide the very rows they are deciding about. This
 // matches the ratified model in which a selection scopes discovery lists rather
 // than access to stored data.
-func kickstartPreview(cmd *cobra.Command, db *store.Store, th theme.Theme, sessions []ftue.SessionListing) kit.BodySource {
+func kickstartPreview(
+	cmd *cobra.Command,
+	db *store.Store,
+	th theme.Theme,
+	sessions []ftue.SessionListing,
+	contexts ...kickstart.ListingPreviewContextSource,
+) kit.BodySource {
 	var turns kickstart.SessionTurnsFunc
 	if db != nil {
 		ctx := cmd.Context()
@@ -187,7 +364,11 @@ func kickstartPreview(cmd *cobra.Command, db *store.Store, th theme.Theme, sessi
 			return session.Turns, nil
 		}
 	}
-	return kickstart.NewListingPreview(th, sessions, turns)
+	var opts []kickstart.ListingPreviewOption
+	if len(contexts) > 0 && contexts[0] != nil {
+		opts = append(opts, kickstart.WithListingPreviewContextSource(contexts[0]))
+	}
+	return kickstart.NewListingPreview(th, sessions, turns, opts...)
 }
 
 // themeModeFor picks the palette mode from config, defaulting to dark when the
@@ -272,23 +453,39 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 // same matcher ingest, push, discovery, and prune use), and hands them to the
 // existing runner. Mode:all imports everything; mode:selected imports exactly the
 // admitted sessions.
-func kickstartLocalIngest(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource) {
-	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
-	local := func(ctx context.Context) (*ftue.IngestResult, error) {
+// kickstartIngestFuncWithRunner builds the same post-save callback with its
+// filesystem identity boundary and ingest runner injected. Production supplies
+// the physical resolver and real pipeline runner; focused mounted tests replace
+// only those dependencies and exercise this callback unchanged.
+func kickstartIngestFuncWithRunner(
+	configPath string,
+	sessions []ftue.SessionListing,
+	resolver ingest.PathIdentityResolver,
+	runner ftue.IngestRunnerFunc,
+) kickstart.IngestFunc {
+	return func(ctx context.Context) (*ftue.IngestResult, error) {
 		cfg, err := loadConfig(configPath)
 		if err != nil {
 			return nil, err
 		}
-		answers := deriveKickstartAnswers(cfg, sessions)
+		answers := deriveKickstartAnswers(cfg, sessions, resolver)
 		return runner(ctx, answers)
 	}
-	return local, progress
+}
+
+func kickstartLocalIngest(cmd *cobra.Command, configPath string, sessions []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource) {
+	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
+	return kickstartIngestFuncWithRunner(configPath, sessions, ingest.NewPhysicalPathResolver(), runner), progress
 }
 
 // deriveKickstartAnswers translates the committed config.Selection into the
 // ftue.WizardAnswers the existing ingest runner consumes, reusing the canonical
 // selection matcher so kickstart imports exactly what the saved selection admits.
-func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) ftue.WizardAnswers {
+func deriveKickstartAnswers(
+	cfg *config.Config,
+	sessions []ftue.SessionListing,
+	resolver ingest.PathIdentityResolver,
+) ftue.WizardAnswers {
 	// Mode:all - import every discovered provider's sessions.
 	if cfg.Selection.Mode != config.SelectionModeSelected {
 		harnesses := map[string]bool{}
@@ -305,13 +502,11 @@ func deriveKickstartAnswers(cfg *config.Config, sessions []ftue.SessionListing) 
 	matcher := config.CompileSelectionMatcher(cfg.Selection)
 	selectedHarnesses := map[string]bool{}
 	var selected []ftue.SessionListing
-	for _, s := range sessions {
-		match := matcher.MatchDiscovery(
-			ingest.Harness(s.Harness), s.GitRemote, s.ProjectName, s.Branch,
-			ingest.SessionID(s.SessionID), cfg.Selection.AutoIngestNewBranches)
+	for _, prepared := range kickstart.PrepareSessionListings(sessions, resolver) {
+		match := matcher.MatchDiscoveryCandidate(prepared.Candidate, cfg.Selection.AutoIngestNewBranches)
 		if match == ingest.BranchMatchYes {
-			selected = append(selected, s)
-			selectedHarnesses[s.Harness] = true
+			selected = append(selected, prepared.Listing)
+			selectedHarnesses[prepared.Listing.Harness] = true
 		}
 	}
 	var provs []ftue.ProviderSelection
