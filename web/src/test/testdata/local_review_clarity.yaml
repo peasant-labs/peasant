@@ -1,0 +1,65 @@
+copy:
+  searchPlaceholder: "search projects…"
+  searchAccessibleName: search projects
+  coverageVisibleLabel: recorded files / total files
+  coverageHelpName: recorded files out of total project files
+  coverageHelpText: recorded files have an edit captured in a saved AI conversation. total files are all files measured in this project.
+  outcomeHelpName: how session outcomes are estimated
+  outcomeSource: computed at ingest time from recorded error patterns, not a verified result.
+  outcomeLimit: the current data includes the label, not a reason for an individual result.
+  explainerIntro: Each row is a project this tool found recorded AI conversations for. The columns show recorded files out of total project files, when it was last worked on, and how many lines of work (branches) haven’t been merged back into the main version yet.
+  explainerRecordedFile: A recorded file has an edit captured during a saved AI conversation.
+  explainerDestinationHome: Click a project to see its changes.
+  explainerDestinationMap: Click a project to see its map.
+pickerCases:
+  - name: shared Home picker explains coverage and search
+    surface: home
+    destination: changes
+    projectCount: 9
+    targetProject: /work/alpha-project
+    targetProjectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    recordedFiles: 34
+    totalFiles: 37
+    searchQuery: alpha
+    expectedCoverageLabel: 34 recorded files out of 37 total files
+    expectedLinkName: Open the changes of alpha-project
+    expectedHref: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - name: shared Map picker explains coverage and search
+    surface: map
+    destination: map
+    projectCount: 9
+    targetProject: /work/alpha-project
+    targetProjectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    recordedFiles: 34
+    totalFiles: 37
+    searchQuery: alpha
+    expectedCoverageLabel: 34 recorded files out of 37 total files
+    expectedLinkName: Open the map of alpha-project
+    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+outcomeCases:
+  - name: mounted resolved outcome exposes heuristic help
+    outcome: resolved
+    sessionId: clarity-resolved
+    mapLabel: resolved
+    taskTitle: resolved fixture task
+    entryIndex: 1
+    definition: "resolved: no notable recorded error pattern."
+  - name: mounted partial outcome exposes heuristic help
+    outcome: partial
+    sessionId: clarity-partial
+    mapLabel: partial
+    taskTitle: partial fixture task
+    entryIndex: 2
+    definition: "partial: some errors, an ending error, or a moderate error cluster."
+  - name: mounted failed outcome exposes heuristic help
+    outcome: failed
+    sessionId: clarity-failed
+    mapLabel: not resolved
+    taskTitle: failed fixture task
+    entryIndex: 3
+    definition: "failed: a high or concentrated error pattern."
+noOutcomeCase:
+  name: mounted task list without outcomes omits heuristic help
+  sessionId: clarity-no-outcome
+  taskTitle: task without outcome
+  entryIndex: 4
