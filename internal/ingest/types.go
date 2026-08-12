@@ -30,6 +30,14 @@ func NewModelID(raw string) (ModelID, error) {
 	return schema.NewModelID(raw)
 }
 
+// ObservedModelID is exact source evidence from one assistant-generated turn.
+type ObservedModelID = schema.ObservedModelID
+
+// NewObservedModelID validates exact source-observed model bytes.
+func NewObservedModelID(raw string) (ObservedModelID, error) {
+	return schema.NewObservedModelID(raw)
+}
+
 // --- ProjectHash ---
 
 // ProjectHash is a SHA-256 hex digest of the project's origin URL or local path.

@@ -2,13 +2,13 @@ package ingest
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 // ValidObservedModel reports whether value can be trusted as exact source
 // evidence. Accepted bytes are never normalized.
 func ValidObservedModel(value string) bool {
-	return value != "" && strings.TrimSpace(value) == value
+	_, err := NewObservedModelID(value)
+	return err == nil
 }
 
 func removeModelObservation(extraJSON *string) *string {

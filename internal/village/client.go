@@ -358,7 +358,7 @@ func (c *VillageClient) UploadAnnotations(
 
 // GetSchemaVersion queries the village for the current annotation schema version
 // and returns the response. A non-2xx status code causes an error.
-func (c *VillageClient) GetSchemaVersion(ctx context.Context) (*schema.SchemaVersionResponse, int, error) {
+func (c *VillageClient) GetSchemaVersion(ctx context.Context) (*SchemaVersionResponse, int, error) {
 	endpoint := c.baseURL + schemaVersionEndpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -379,7 +379,7 @@ func (c *VillageClient) GetSchemaVersion(ctx context.Context) (*schema.SchemaVer
 		return nil, statusCode, fmt.Errorf("village returned %d: %s", statusCode, string(respBody))
 	}
 
-	var result schema.SchemaVersionResponse
+	var result SchemaVersionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, statusCode, fmt.Errorf("decode schema version response: %w", err)
 	}

@@ -33,6 +33,9 @@ type Turn struct {
 	Timestamp   time.Time
 	Depth       int  // 0 = main agent, 1+ = subagent nesting levels
 	ParentIndex *int // entry_index of parent turn (nil for depth=0)
+	// ObservedModel is exact source evidence. Omission remains omission; readers
+	// derive sticky state without mutating this raw observation.
+	ObservedModel ObservedModelID
 
 	// Enrichment fields — propagated from session_entries for the detail view.
 	EntryType   schema.EntryType   // text, tool_use, tool_result, thinking, system, error, result

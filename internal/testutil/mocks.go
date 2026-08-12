@@ -18,6 +18,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -1242,7 +1243,7 @@ type StubPublisher struct {
 	// advertised no window. SchemaVersionErr forces a transport error.
 	// SchemaVersionCalls counts invocations so tests can assert the (formerly
 	// dead) preflight is actually called.
-	SchemaVersionResp   *schema.SchemaVersionResponse
+	SchemaVersionResp   *village.SchemaVersionResponse
 	SchemaVersionErr    error
 	SchemaVersionStatus int
 	SchemaVersionCalls  int
@@ -1250,7 +1251,7 @@ type StubPublisher struct {
 
 // GetSchemaVersion is the village schema-version preflight double. Together with
 // PublishAuthoritative it makes StubPublisher satisfy the push transport contract.
-func (s *StubPublisher) GetSchemaVersion(_ context.Context) (*schema.SchemaVersionResponse, int, error) {
+func (s *StubPublisher) GetSchemaVersion(_ context.Context) (*village.SchemaVersionResponse, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.SchemaVersionCalls++
