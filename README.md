@@ -54,7 +54,8 @@ peasant web stop
 ## First-run onboarding
 
 `peasant kickstart` discovers recordings from the configured harnesses and groups
-them by canonical project identity. The project-first wizard lets you choose projects,
+them by [canonical project identity](internal/ingest/README.md#repository-identity-during-discovery).
+The project-first wizard lets you choose projects,
 narrow them by branch or individual session, and apply one global harness filter
 without widening that scope. You can keep the selected work local or authenticate and
 publish it to Village, privately by default, after reviewing Standard redaction and a
