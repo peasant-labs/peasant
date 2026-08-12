@@ -2,10 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"sort"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -25,10 +25,11 @@ const (
 
 // WebDiscoveryItem contains only display-safe metadata needed to join a stored session.
 type WebDiscoveryItem struct {
-	SessionID       string                      `json:"sessionId"`
-	LocationLabel   string                      `json:"locationLabel"`
-	Branch          string                      `json:"branch"`
-	SelectionStatus WebDiscoverySelectionStatus `json:"selectionStatus"`
+	SessionID            string                      `json:"sessionId"`
+	LocationLabel        string                      `json:"locationLabel"`
+	RepositoryLocationID string                      `json:"repositoryLocationId"`
+	Branch               string                      `json:"branch"`
+	SelectionStatus      WebDiscoverySelectionStatus `json:"selectionStatus"`
 }
 
 type webDiscoveryPayload struct {
@@ -45,7 +46,11 @@ func (s *Server) handleWebDiscovery(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "Web discovery could not start because this endpoint accepts no query fields in internal/api.handleWebDiscovery. No session metadata was returned. Remove the query string and retry.", "web_discovery_query_unsupported")
 		return
 	}
-	items, err := buildWebDiscovery(r.Context(), s.cfg.Store, s.cfg.Config)
+	resolver := s.cfg.RepositoryIdentityResolver
+	if resolver == nil {
+		resolver = ingest.NewGitRepositoryIdentityResolver()
+	}
+	items, err := buildWebDiscovery(r.Context(), s.cfg.Store, s.cfg.Config, resolver)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error(), "web_discovery_projection_failed")
 		return
@@ -53,7 +58,7 @@ func (s *Server) handleWebDiscovery(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(webDiscoveryPayload{Items: items})
 }
 
-func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config) ([]WebDiscoveryItem, error) {
+func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config, resolver ingest.RepositoryIdentityResolver) ([]WebDiscoveryItem, error) {
 	policy, err := sessionvisibility.New(cfg.Selection)
 	if err != nil {
 		return nil, fmt.Errorf("Web discovery could not build selection status because the saved kickstart selection is invalid in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair the selection, then retry: %w", err)
@@ -62,7 +67,14 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config)
 	if err != nil {
 		return nil, fmt.Errorf("Web discovery could not read stored sessions in internal/api.buildWebDiscovery. No partial metadata was returned. Retry; if the failure repeats, inspect the Peasant server logs: %w", err)
 	}
-	labels := safeLocationLabels(rows)
+	mode, matcher, err := policy.ProjectionInputs()
+	if err != nil {
+		return nil, fmt.Errorf("Web discovery could not prepare the canonical selection matcher in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair the selection, then retry: %w", err)
+	}
+	prepared, remoteMultiplicity, nameMultiplicity, err := prepareWebDiscoveryIdentities(ctx, rows, resolver)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]WebDiscoveryItem, len(rows))
 	seen := make(map[string]struct{}, len(rows))
 	for i := range rows {
@@ -81,64 +93,87 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config)
 		if row.CanonicalRemote != nil {
 			remote = *row.CanonicalRemote
 		}
-		selected, matchErr := policy.Visible(sessionvisibility.Candidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: remote, ProjectName: row.ProjectName, ClonePath: resolvedClonePath(row), GitBranch: branch})
-		if matchErr != nil {
-			return nil, fmt.Errorf("Web discovery could not compute selection status for session %q through the canonical matcher in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart` to repair conflicting selection rules, then retry: %w", row.SessionID, matchErr)
+		selected := mode == config.SelectionModeAll
+		if matcher != nil {
+			match := matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{SessionID: ingest.SessionID(row.SessionID), Harness: defaults.Harness(row.ModelHarness), GitRemote: remote, ProjectName: row.ProjectName, ClonePath: prepared[i].clonePath, Branch: branch, RemoteMultiplicity: multiplicity(ingest.NormalizeRemoteForMatch(remote), remoteMultiplicity), NameMultiplicity: multiplicity(ingest.NormalizeProjectNameForMatch(row.ProjectName), nameMultiplicity)})
+			switch match {
+			case ingest.BranchMatchYes:
+				selected = true
+			case ingest.BranchMatchNo:
+				selected = false
+			case ingest.BranchMatchWithheldConflict:
+				return nil, fmt.Errorf("Web discovery could not compute selection status for session %q because persisted project rules conflict in internal/api.buildWebDiscovery. No partial metadata was returned. Run `peasant kickstart`, make the repository branch rules consistent, then retry", row.SessionID)
+			default:
+				return nil, fmt.Errorf("Web discovery received an unknown canonical matcher result for session %q in internal/api.buildWebDiscovery. No partial metadata was returned. Update Peasant, then retry", row.SessionID)
+			}
 		}
 		status := WebDiscoveryUnselected
 		if selected {
 			status = WebDiscoverySelected
 		}
-		items[i] = WebDiscoveryItem{SessionID: row.SessionID, LocationLabel: labels[i], Branch: branch, SelectionStatus: status}
+		items[i] = WebDiscoveryItem{SessionID: row.SessionID, LocationLabel: prepared[i].label, RepositoryLocationID: prepared[i].locationID, Branch: branch, SelectionStatus: status}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].SessionID < items[j].SessionID })
 	return items, nil
 }
 
-func resolvedClonePath(row *store.SessionRow) ingest.ClonePath {
-	raw := row.GitWorktree
-	if raw == "" && row.ProjectName != row.ProjectHash {
-		raw = row.ProjectName
-	}
-	if raw == "" {
-		return ""
-	}
-	path, err := ingest.NewPhysicalPathResolver().Resolve(raw)
-	if err != nil {
-		return ""
-	}
-	return path
+type preparedWebDiscoveryIdentity struct {
+	clonePath         ingest.ClonePath
+	locationID, label string
 }
 
-func safeLocationLabels(rows []store.SessionRow) []string {
-	base := make([]string, len(rows))
-	pathSets := make(map[string]map[string]struct{})
+func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow, resolver ingest.RepositoryIdentityResolver) ([]preparedWebDiscoveryIdentity, map[string]map[string]struct{}, map[string]map[string]struct{}, error) {
+	if resolver == nil {
+		return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity because no topology resolver was configured in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restart Peasant, then retry")
+	}
+	prepared := make([]preparedWebDiscoveryIdentity, len(rows))
+	remote, names := map[string]map[string]struct{}{}, map[string]map[string]struct{}{}
+	byPath := map[string]preparedWebDiscoveryIdentity{}
 	for i := range rows {
-		label := "local repository"
-		if rows[i].GitWorktree != "" {
-			label = filepath.Base(filepath.Clean(rows[i].GitWorktree))
+		raw := rows[i].GitWorktree
+		if raw == "" {
+			return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is missing in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Re-ingest the session from an available repository, then retry", rows[i].SessionID)
 		}
-		base[i] = label
-		if pathSets[label] == nil {
-			pathSets[label] = make(map[string]struct{})
+		p, ok := byPath[raw]
+		if !ok {
+			clone, err := ingest.NewPhysicalPathResolver().Resolve(raw)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is unavailable in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restore the repository or re-ingest the session, then retry: %w", rows[i].SessionID, err)
+			}
+			identity, err := resolver.ResolveRepositoryIdentity(ctx, clone)
+			if err != nil || identity.CohortKey == "" {
+				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository topology for session %q in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned because repository identity would be ambiguous. Restore a valid Git repository and retry: %w", rows[i].SessionID, err)
+			}
+			digest := sha256.Sum256([]byte(identity.CohortKey.String()))
+			id := fmt.Sprintf("rl_%x", digest[:16])
+			p = preparedWebDiscoveryIdentity{clonePath: clone, locationID: id, label: fmt.Sprintf("repository location %x", digest[:4])}
+			byPath[raw] = p
 		}
-		pathSets[label][rows[i].GitWorktree] = struct{}{}
+		prepared[i] = p
+		recordMultiplicity(remote, ingest.NormalizeRemoteForMatch(value(rows[i].CanonicalRemote)), p.locationID)
+		recordMultiplicity(names, ingest.NormalizeProjectNameForMatch(rows[i].ProjectName), p.locationID)
 	}
-	paths := make(map[string][]string, len(pathSets))
-	for label, set := range pathSets {
-		for value := range set {
-			paths[label] = append(paths[label], value)
-		}
-		sort.Strings(paths[label])
+	return prepared, remote, names, nil
+}
+
+func value(v *string) string {
+	if v == nil {
+		return ""
 	}
-	labels := make([]string, len(rows))
-	for i := range rows {
-		variants := paths[base[i]]
-		labels[i] = base[i]
-		if len(variants) > 1 {
-			index := sort.SearchStrings(variants, rows[i].GitWorktree)
-			labels[i] = fmt.Sprintf("%s %d", base[i], index+1)
-		}
+	return *v
+}
+func recordMultiplicity(dst map[string]map[string]struct{}, key, identity string) {
+	if key == "" {
+		return
 	}
-	return labels
+	if dst[key] == nil {
+		dst[key] = map[string]struct{}{}
+	}
+	dst[key][identity] = struct{}{}
+}
+func multiplicity(key string, all map[string]map[string]struct{}) ingest.DiscoveryIdentityMultiplicity {
+	if key != "" && len(all[key]) == 1 {
+		return ingest.DiscoveryIdentityUnique
+	}
+	return ingest.DiscoveryIdentityAmbiguous
 }

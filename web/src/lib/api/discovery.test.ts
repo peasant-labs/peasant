@@ -15,7 +15,7 @@ describe('decodeDiscovery', () => {
     const decoded = decodeDiscovery(fixture.valid);
     expect(decoded.size).toBe(2);
     expect(requireDiscoveryItem(decoded, 'session-b', 'search')).toEqual({
-      sessionId: 'session-b', locationLabel: 'app 2', branch: 'feature', selectionStatus: 'unselected',
+      sessionId: 'session-b', locationLabel: 'app 2', repositoryLocationId: 'rl_b', branch: 'feature', selectionStatus: 'unselected',
     });
   });
 

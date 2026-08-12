@@ -145,7 +145,7 @@ describe('CommandPalette', () => {
       ],
     });
     fetchDiscovery.mockResolvedValue(new Map([
-      ['sess-9', { sessionId: 'sess-9', locationLabel: 'alpha', branch: 'main', selectionStatus: 'unselected' }],
+      ['sess-9', { sessionId: 'sess-9', locationLabel: 'alpha', repositoryLocationId: 'rl_alpha', branch: 'main', selectionStatus: 'unselected' }],
     ]));
     open();
     const input = screen.getByRole('combobox');

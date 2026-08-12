@@ -55,6 +55,9 @@ type ServerConfig struct {
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
+	// RepositoryIdentityResolver resolves private discovery rows into logical
+	// repository cohorts. Nil uses the production Git topology resolver.
+	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
 }
 
 // Server is the HTTP server for the web dashboard.

@@ -199,7 +199,7 @@ describe('ShareWizardClient', () => {
     });
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ items: [{ sessionId: 'retry-1', locationLabel: 'workspace', branch: 'main', selectionStatus: 'selected' }] }),
+      json: async () => ({ items: [{ sessionId: 'retry-1', locationLabel: 'workspace', repositoryLocationId: 'rl_workspace', branch: 'main', selectionStatus: 'selected' }] }),
     });
 
     const user = userEvent.setup();

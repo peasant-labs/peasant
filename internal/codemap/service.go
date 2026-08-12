@@ -23,7 +23,6 @@ import (
 	"unicode"
 
 	"github.com/peasant-labs/peasant/internal/codegraph"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
@@ -264,66 +263,22 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 		limit = searchMaxLimit
 	}
 
-	// The caller's limit is semantic: it caps visible results, not raw FTS
-	// rows. Page by the same bounded size, advance strictly by raw rows, and
-	// keep scanning hidden prefixes until the visible limit is filled or the
-	// ranked source is exhausted.
-	pageSize := limit
-	rawOffset := 0
-	for len(payload.Results) < limit {
-		rows, err := s.querySearch(ctx, match, pageSize, rawOffset)
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) == 0 {
-			break
-		}
-
-		for _, r := range rows {
-			visible, visibilityErr := s.visibility.Visible(sessionvisibility.Candidate{
-				SessionID:   ingest.SessionID(r.sessionID),
-				Harness:     defaults.Harness(r.harness),
-				GitRemote:   r.gitRemote,
-				ProjectName: r.projectName,
-				ClonePath:   s.resolveSessionClonePath(r.gitWorktree, r.projectName),
-				GitBranch:   r.gitBranch,
-			})
-			if visibilityErr != nil {
-				return nil, fmt.Errorf(
-					"codemap: search visibility failed for session %q at raw offset %d while filling the visible result limit; no partial search payload was returned because the persisted kickstart selection could not be evaluated safely; repair the selection with `peasant kickstart` and retry: %w",
-					r.sessionID, rawOffset, visibilityErr,
-				)
-			}
-			if !visible {
-				continue
-			}
-			payload.Results = append(payload.Results, schema.SearchResult{
-				SessionID:   r.sessionID,
-				Project:     r.project,
-				ProjectHash: r.hash,
-				EntryIndex:  r.entryIndex,
-				Role:        r.role,
-				Snippet:     r.snippet,
-				// bm25 is negative (more negative = better); negate so higher =
-				// more relevant. Result order is authoritative regardless.
-				Score: -r.bm25,
-			})
-			if len(payload.Results) == limit {
-				break
-			}
-		}
-
-		nextOffset := rawOffset + len(rows)
-		if nextOffset <= rawOffset {
-			return nil, fmt.Errorf(
-				"codemap: search paging did not advance beyond raw offset %d after receiving %d rows while filling the visible result limit; no partial payload was returned because continuing could loop forever; update peasant and retry",
-				rawOffset, len(rows),
-			)
-		}
-		rawOffset = nextOffset
-		if len(rows) < pageSize {
-			break
-		}
+	rows, err := s.querySearch(ctx, match, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		payload.Results = append(payload.Results, schema.SearchResult{
+			SessionID:   r.sessionID,
+			Project:     r.project,
+			ProjectHash: r.hash,
+			EntryIndex:  r.entryIndex,
+			Role:        r.role,
+			Snippet:     r.snippet,
+			// bm25 is negative (more negative = better); negate so higher =
+			// more relevant. Result order is authoritative regardless.
+			Score: -r.bm25,
+		})
 	}
 	return payload, nil
 }

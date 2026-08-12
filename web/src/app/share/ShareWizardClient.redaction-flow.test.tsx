@@ -54,7 +54,7 @@ describe('ShareWizardClient redaction flow', () => {
       if (url.endsWith('/api/v1/web/discovery')) {
         return {
           ok: true,
-          json: async () => ({ items: [{ sessionId: REDACTION_STEP_SESSION.id, locationLabel: 'workspace', branch: 'main', selectionStatus: 'selected' }] }),
+          json: async () => ({ items: [{ sessionId: REDACTION_STEP_SESSION.id, locationLabel: 'workspace', repositoryLocationId: 'rl_workspace', branch: 'main', selectionStatus: 'selected' }] }),
         };
       }
       if (!url.endsWith('/api/v1/sessions')) {

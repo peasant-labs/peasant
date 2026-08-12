@@ -3,13 +3,14 @@ export type DiscoverySelectionStatus = 'selected' | 'unselected';
 export interface DiscoveryItem {
   sessionId: string;
   locationLabel: string;
+  repositoryLocationId: string;
   branch: string;
   selectionStatus: DiscoverySelectionStatus;
 }
 
 export type DiscoveryBySessionId = ReadonlyMap<string, DiscoveryItem>;
 
-const fields = ['sessionId', 'locationLabel', 'branch', 'selectionStatus'] as const;
+const fields = ['sessionId', 'locationLabel', 'repositoryLocationId', 'branch', 'selectionStatus'] as const;
 
 export function decodeDiscovery(payload: unknown): DiscoveryBySessionId {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) fail('response must be an object');
@@ -23,6 +24,7 @@ export function decodeDiscovery(payload: unknown): DiscoveryBySessionId {
     if (Object.keys(row).length !== fields.length || fields.some((field) => !(field in row))) fail(`items[${index}] must contain exactly ${fields.join(', ')}`);
     if (typeof row.sessionId !== 'string' || row.sessionId.length === 0) fail(`items[${index}].sessionId must be a non-empty string`);
     if (typeof row.locationLabel !== 'string' || row.locationLabel.length === 0) fail(`items[${index}].locationLabel must be a non-empty string`);
+    if (typeof row.repositoryLocationId !== 'string' || row.repositoryLocationId.length === 0) fail(`items[${index}].repositoryLocationId must be a non-empty string`);
     if (typeof row.branch !== 'string') fail(`items[${index}].branch must be a string`);
     if (row.selectionStatus !== 'selected' && row.selectionStatus !== 'unselected') fail(`items[${index}].selectionStatus must be selected or unselected`);
     if (decoded.has(row.sessionId)) fail(`items duplicates sessionId ${JSON.stringify(row.sessionId)}`);
