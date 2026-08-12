@@ -1,13 +1,13 @@
 expectedRowCount: 4
 searchQuery: recorded
 sessions:
-  - {id: session-selected-main, project: app, projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, worktree: physical-secret-main, remote: "https://user:credential-token@example.invalid/acme/app.git", branch: main, cohort: cohort-linked, searchtext: recorded selected history, status: selected, label: "example.invalid:acme/app (2)"}
-  - {id: session-linked-feature, project: app, projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, worktree: physical-secret-feature, remote: "https://user:credential-token@example.invalid/acme/app.git", branch: main, cohort: cohort-linked, searchtext: recorded linked history, status: selected, label: "example.invalid:acme/app (2)"}
-  - {id: session-independent-clone, project: app, projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, worktree: physical-secret-independent, remote: "https://user:credential-token@example.invalid/acme/app.git", branch: main, cohort: cohort-independent, searchtext: recorded independent history, status: unselected, label: "example.invalid:acme/app (1)"}
-  - {id: session-other-project, project: other, projecthash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, worktree: physical-secret-other, remote: "git@example.invalid:private/other.git", branch: release, cohort: cohort-other, searchtext: recorded other history, status: unselected, label: "example.invalid:private/other"}
+  - {id: session-selected-main, project: app, projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, worktree: app-main, remote: "https://user:credential-token@example.invalid/acme/app.git", branch: main, cohort: cohort-linked, searchtext: recorded selected history, status: selected, label: "repositories/app-main"}
+  - {id: session-linked-feature, project: app, projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, worktree: app-feature, remote: "https://user:credential-token@example.invalid/acme/app.git", branch: main, cohort: cohort-linked, searchtext: recorded linked history, status: selected, label: "repositories/app-main"}
+  - {id: session-independent-clone, project: app, projecthash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, worktree: app-independent, remote: "https://user:credential-token@example.invalid/acme/app.git", branch: main, cohort: cohort-independent, searchtext: recorded independent history, status: unselected, label: "repositories/app-independent"}
+  - {id: session-other-project, project: other, projecthash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, worktree: other, remote: "git@example.invalid:private/other.git", branch: release, cohort: cohort-other, searchtext: recorded other history, status: unselected, label: "repositories/other"}
 failures:
   - {name: missing topology identity, kind: missing-topology, status: 500, code: web_discovery_projection_failed}
   - {name: ambiguous topology failure, kind: ambiguous-topology, status: 500, code: web_discovery_projection_failed}
   - {name: invalid persisted selection, kind: invalid-selection, status: 500, code: web_discovery_projection_failed}
   - {name: unsupported query is rejected, kind: unsupported-query, status: 400, code: web_discovery_query_unsupported}
-forbidden: [credential-token, "/.git-", physical-secret, "private/other.git"]
+forbidden: [credential-token, "/.git-", fixture-host, "private/other.git"]

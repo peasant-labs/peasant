@@ -1,0 +1,40 @@
+expectedLabelCaseCount: 4
+labelCases:
+  - name: distinct clone names need two components
+    evidence:
+      - {group: app, path: /home/alice/work/app, cohort: app-a}
+      - {group: app, path: /srv/build/app-copy, cohort: app-b}
+    expected: [work/app, build/app-copy]
+  - name: equal clone names widen to distinct parent
+    evidence:
+      - {group: app, path: /home/alice/client-a/app, cohort: app-a}
+      - {group: app, path: /home/alice/client-b/app, cohort: app-b}
+    expected: [client-a/app, client-b/app]
+  - name: linked worktrees share deterministic representative
+    evidence:
+      - {group: app, path: /work/repositories/app-main, cohort: linked}
+      - {group: app, path: /work/worktrees/app-feature, cohort: linked}
+      - {group: app, path: /work/repositories/app-independent, cohort: independent}
+    expected: [repositories/app-main, repositories/app-main, repositories/app-independent]
+  - name: full common path is elided
+    evidence:
+      - {group: app, path: /private/credential/alice/app, cohort: app-a}
+      - {group: app, path: /private/credential/bob/app, cohort: app-b}
+    expected: [alice/app, bob/app]
+expectedMultiplicityCaseCount: 3
+multiplicityCases:
+  - name: linked cohort remains unique
+    evidence:
+      - {harness: claude-code, text: origin, cohort: linked}
+      - {harness: claude-code, text: origin, cohort: linked}
+    expected: [unique, unique]
+  - name: independent cohorts are ambiguous
+    evidence:
+      - {harness: claude-code, text: origin, cohort: clone-a}
+      - {harness: claude-code, text: origin, cohort: clone-b}
+    expected: [ambiguous, ambiguous]
+  - name: harnesses are independent
+    evidence:
+      - {harness: claude-code, text: origin, cohort: clone-a}
+      - {harness: opencode, text: origin, cohort: clone-b}
+    expected: [unique, unique]

@@ -188,7 +188,11 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 		harness := ingest.Harness(rows[i].ModelHarness)
 		remoteEvidence[i] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeRemoteForMatch(value(rows[i].CanonicalRemote)), CohortKey: cohortKeys[i]}
 		nameEvidence[i] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeProjectNameForMatch(rows[i].ProjectName), CohortKey: cohortKeys[i]}
-		labelEvidence[i] = selectionprojection.LocationLabelEvidence{ProjectName: rows[i].ProjectName, GitRemote: value(rows[i].CanonicalRemote), CohortKey: cohortKeys[i]}
+		presentationGroup := ingest.NormalizeRemoteForMatch(value(rows[i].CanonicalRemote))
+		if presentationGroup == "" {
+			presentationGroup = ingest.NormalizeProjectNameForMatch(rows[i].ProjectName)
+		}
+		labelEvidence[i] = selectionprojection.LocationLabelEvidence{PresentationGroup: presentationGroup, ClonePath: prepared[i].clonePath, CohortKey: cohortKeys[i]}
 	}
 	labels := selectionprojection.DistinctLocationLabels(labelEvidence)
 	for i := range prepared {

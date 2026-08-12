@@ -201,7 +201,7 @@ func seedDiscoveryHTTPStore(t *testing.T, db *store.Store, fixture discoveryHTTP
 	resolver := fixtureRepositoryResolver{identities: map[ingest.ClonePath]ingest.RepositoryIdentity{}}
 	entries := make([]ingest.StoreEntry, 0, len(fixture.Sessions))
 	for i, row := range fixture.Sessions {
-		path := filepath.Join(root, row.Worktree)
+		path := filepath.Join(root, "repositories", row.Worktree)
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatalf("create fixture worktree: %v", err)
 		}
