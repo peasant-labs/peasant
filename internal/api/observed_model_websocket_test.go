@@ -106,25 +106,3 @@ func TestHubSessionDetailEmitsObservedModelEvidence(t *testing.T) {
 		}
 	}
 }
-
-func observedModelFixtureEntries(t *testing.T, fixture observedModelWebSocketFixture) []schema.SessionEntry {
-	t.Helper()
-	entries := make([]schema.SessionEntry, len(fixture.Turns))
-	for index, source := range fixture.Turns {
-		extra, err := json.Marshal(map[string]string{"model_id": source.ObservedModel})
-		if err != nil {
-			t.Fatalf("encode observed model: %v", err)
-		}
-		extraString := string(extra)
-		entries[index] = schema.SessionEntry{
-			SessionID:      schema.SessionID(fixture.SessionID),
-			EntryIndex:     source.Index,
-			Role:           schema.Role(source.Role),
-			EntryType:      schema.EntryTypeText,
-			Depth:          source.Depth,
-			ContentPreview: &source.Content,
-			Extra:          &extraString,
-		}
-	}
-	return entries
-}
