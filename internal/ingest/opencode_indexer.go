@@ -602,10 +602,8 @@ func buildExtraJSON(msg *openCodeIndexMsg) *string {
 	if msg.Tokens != nil && msg.Tokens.Reasoning > 0 {
 		extra["tokens_reasoning"] = msg.Tokens.Reasoning
 	}
-	if msg.Role == RoleAssistant.String() {
-		if modelID, err := NewModelID(msg.ModelID); err == nil && strings.TrimSpace(msg.ModelID) == msg.ModelID {
-			extra["model_id"] = modelID.String()
-		}
+	if msg.Role == RoleAssistant.String() && validObservedModel(msg.ModelID) {
+		extra["model_id"] = msg.ModelID
 	}
 
 	// Cache fields: prefer tokens-level, fall back to top-level message fields.
