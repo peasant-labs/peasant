@@ -22,6 +22,7 @@ describe('ProjectPicker review clarity', () => {
       const search = screen.getByRole('searchbox', {
         name: localReviewClarityFixture.copy.searchAccessibleName,
       });
+      expect(search).toHaveClass('input', 'is-input');
       expect(search).toHaveAttribute('placeholder', localReviewClarityFixture.copy.searchPlaceholder);
       const searchIcon = search.closest('.input-ico')?.querySelector('svg');
       expect(searchIcon).toBeInTheDocument();

@@ -234,7 +234,6 @@ export function ProjectPicker({
           onChange={(e) => setQuery(e.target.value)}
           aria-label="search projects"
           placeholder="search projects…"
-           className="w-full"
         />
       )}
 

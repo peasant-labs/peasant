@@ -32,6 +32,7 @@ describe('MapRouter project discovery', () => {
     render(<MapRouter />);
 
     const search = await screen.findByRole('searchbox', { name: localReviewClarityFixture.copy.searchAccessibleName });
+    expect(search).toHaveClass('input', 'is-input');
     expect(search).toHaveAttribute('placeholder', localReviewClarityFixture.copy.searchPlaceholder);
     expect(search.closest('.input-ico')?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('button', { name: localReviewClarityFixture.copy.coverageHelpName })).toHaveTextContent(localReviewClarityFixture.copy.coverageVisibleLabel);
