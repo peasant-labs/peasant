@@ -118,6 +118,9 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 			entry.HasToolUse = true
 			entry.EntryType = EntryTypeToolUse
 		}
+		if entry.Role != RoleAssistant {
+			entry.Extra = removeModelObservation(entry.Extra)
+		}
 
 		// If no inline content preview, try to extract from part files.
 		// OpenCode stores content in part files only; msg.Content is always empty JSON.

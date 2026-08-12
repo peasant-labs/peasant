@@ -417,6 +417,9 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 	if entry.IsError && entry.Role == RoleTool {
 		entry.EntryType = EntryTypeToolResult
 	}
+	if entry.Role != RoleAssistant {
+		entry.Extra = removeModelObservation(entry.Extra)
+	}
 
 	// Content preview — truncate to configured limit unless fullContent is set.
 	if preview.Len() > 0 {
