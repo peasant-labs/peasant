@@ -688,8 +688,8 @@ textarea::placeholder {
   pointer-events: none;
 }
 
-/* Nested Share groups terminate into their final child instead of leaving
-   parallel rails hanging below the hierarchy. Each level forms one stair. */
+/* Each hierarchy row owns only its short elbow. Descendants start a new,
+   independently indented elbow, so no parent rail spans its whole subtree. */
 .share-hierarchy-rail {
   position: relative;
   padding-left: var(--sp-4);
@@ -697,11 +697,37 @@ textarea::placeholder {
 .share-hierarchy-rail::before {
   position: absolute;
   top: 0;
-  bottom: var(--sp-4);
+  bottom: 50%;
   left: 0;
   width: var(--sp-4);
   border-bottom: thin solid var(--rule);
   border-left: thin solid var(--rule);
+  content: '';
+  pointer-events: none;
+}
+.share-hierarchy-children {
+  position: relative;
+  margin-left: var(--sp-4);
+  padding-left: var(--sp-4);
+}
+.share-hierarchy-children::before {
+  position: absolute;
+  top: 0;
+  bottom: 50%;
+  left: 0;
+  border-left: thin solid var(--rule);
+  content: '';
+  pointer-events: none;
+}
+.share-hierarchy-child-row {
+  position: relative;
+}
+.share-hierarchy-child-row::before {
+  position: absolute;
+  top: 50%;
+  left: calc(-1 * var(--sp-4));
+  width: var(--sp-4);
+  border-top: thin solid var(--rule);
   content: '';
   pointer-events: none;
 }

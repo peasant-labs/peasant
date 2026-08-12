@@ -143,14 +143,15 @@ export function SessionPicker({
                <TriStateCheckbox {...projectState} onChange={() => toggleDescendants(projectIds)} label={`select project ${cleanName}`} />
               {cleanName}
             </h2>
-            {project.locations.map((location) => <section key={location.repositoryLocationId} className="share-hierarchy-rail ml-4" aria-label={`repository location ${location.locationLabel}`}>
-              <h3 className="px-4 py-2 font-mono text-sm text-ink-2 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)), selectableIds, selectedIds)} onChange={() => toggleDescendants(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)))} label={`select repository location ${location.locationLabel}`} />repository location · {location.locationLabel}</h3>
+            {project.locations.map((location) => <section key={location.repositoryLocationId} className="ml-4" aria-label={`repository location ${location.locationLabel}`}>
+              <h3 className="share-hierarchy-rail px-4 py-2 font-mono text-sm text-ink-2 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)), selectableIds, selectedIds)} onChange={() => toggleDescendants(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)))} label={`select repository location ${location.locationLabel}`} />repository location · {location.locationLabel}</h3>
+              <div className="share-hierarchy-children">
               {location.branches.map((branch) => {
                 const branchIds = branch.sessions.map((session) => session.id);
-                return <section key={branch.branch} className="share-hierarchy-rail ml-4" aria-label={`branch ${branch.branch || 'unknown'}`}>
-                <h4 className="px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(branchIds, selectableIds, selectedIds)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
-                <div className="ml-4">
-                  {branch.sessions.map((session) => <div key={session.id} className="flex items-center gap-3 px-4 py-3 border-t border-rule">
+                return <section key={branch.branch} aria-label={`branch ${branch.branch || 'unknown'}`}>
+                <h4 className="share-hierarchy-child-row px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(branchIds, selectableIds, selectedIds)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
+                <div className="share-hierarchy-children">
+                  {branch.sessions.map((session) => <div key={session.id} className="share-hierarchy-child-row flex items-center gap-3 px-4 py-3 border-t border-rule">
                     <Checkbox checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} onChange={(checked) => {
                       const next = new Set(selectedIds);
                       if (checked) next.add(session.id); else next.delete(session.id);
@@ -160,6 +161,7 @@ export function SessionPicker({
                   </div>)}
                 </div>
               </section>;})}
+              </div>
             </section>)}
           </section>;
         })}
