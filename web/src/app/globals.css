@@ -687,3 +687,21 @@ textarea::placeholder {
   background: var(--on-amber);
   pointer-events: none;
 }
+
+/* Nested Share groups terminate into their final child instead of leaving
+   parallel rails hanging below the hierarchy. Each level forms one stair. */
+.share-hierarchy-rail {
+  position: relative;
+  padding-left: var(--sp-4);
+}
+.share-hierarchy-rail::before {
+  position: absolute;
+  top: 0;
+  bottom: var(--sp-4);
+  left: 0;
+  width: var(--sp-4);
+  border-bottom: thin solid var(--rule);
+  border-left: thin solid var(--rule);
+  content: '';
+  pointer-events: none;
+}

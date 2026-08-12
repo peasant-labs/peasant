@@ -143,11 +143,11 @@ export function SessionPicker({
                <TriStateCheckbox {...projectState} onChange={() => toggleDescendants(projectIds)} label={`select project ${cleanName}`} />
               {cleanName}
             </h2>
-            {project.locations.map((location) => <section key={location.repositoryLocationId} className="ml-4 border-l border-rule" aria-label={`repository location ${location.locationLabel}`}>
+            {project.locations.map((location) => <section key={location.repositoryLocationId} className="share-hierarchy-rail ml-4" aria-label={`repository location ${location.locationLabel}`}>
               <h3 className="px-4 py-2 font-mono text-sm text-ink-2 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)), selectableIds, selectedIds)} onChange={() => toggleDescendants(location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)))} label={`select repository location ${location.locationLabel}`} />repository location · {location.locationLabel}</h3>
               {location.branches.map((branch) => {
                 const branchIds = branch.sessions.map((session) => session.id);
-                return <section key={branch.branch} className="ml-4 border-l border-rule" aria-label={`branch ${branch.branch || 'unknown'}`}>
+                return <section key={branch.branch} className="share-hierarchy-rail ml-4" aria-label={`branch ${branch.branch || 'unknown'}`}>
                 <h4 className="px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(branchIds, selectableIds, selectedIds)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
                 <div className="ml-4">
                   {branch.sessions.map((session) => <div key={session.id} className="flex items-center gap-3 px-4 py-3 border-t border-rule">
