@@ -47,7 +47,7 @@ ingested data, or state.
 
 > **No `apt upgrade` channel.** There is no hosted apt repository yet, so Peasant
 > will not appear in `apt update`/`apt upgrade`. You re-download the `.deb` per
-> release. A hosted, GPG-signed repo is a [deferred fast-follow](../release-runbook.md#deferred-ladder)
+> release. A hosted, GPG-signed repo is a [deferred fast-follow](../release-runbook.md#7-deferred-ladder)
 > that will be built only on demand. This matches how comparable Go CLIs (k9s, dive)
 > distribute.
 

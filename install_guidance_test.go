@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode"
@@ -14,8 +16,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed README.md docs/KICKSTART.md docs/install/arch.md docs/install/macos.md docs/install/nix.md docs/install/ubuntu.md docs/install/wsl.md
+//go:embed README.md docs/*.md docs/install/*.md
 var installGuidanceProductionFiles embed.FS
+
+// installGuidanceDir is the production directory whose every Markdown guide must be
+// registered in the fixture. Embedding the glob keeps the read hermetic while still
+// forcing a new, unregistered guide to fail the coverage guard below.
+const installGuidanceDir = "docs/install"
 
 //go:embed testdata/install_guidance.yaml
 var installGuidanceFixtureYAML []byte
@@ -42,6 +49,10 @@ type installGuidanceFixtureRow struct {
 	VersionCommand   string              `yaml:"version_command"`
 	KickstartCommand string              `yaml:"kickstart_command"`
 	KickstartLink    string              `yaml:"kickstart_link"`
+	// ReinstallMarkers are the channel-specific substrings the reinstall/upgrade
+	// section must contain. These per-channel cases live in the YAML fixture rather
+	// than an inline Go switch so a single guide change updates one file.
+	ReinstallMarkers []string `yaml:"reinstall_markers"`
 }
 
 var expectedInstallGuides = map[string]installGuideChannel{
@@ -108,6 +119,14 @@ func decodeInstallGuidanceFixture(raw []byte) (installGuidanceFixture, error) {
 		if row.KickstartLink != expectedInstallKickstartLink {
 			return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q must link the kickstart reset boundary %q", row.Path, expectedInstallKickstartLink)
 		}
+		if len(row.ReinstallMarkers) == 0 {
+			return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q must declare at least one channel reinstall marker", row.Path)
+		}
+		for _, marker := range row.ReinstallMarkers {
+			if strings.TrimSpace(marker) == "" {
+				return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q declares a blank reinstall marker", row.Path)
+			}
+		}
 	}
 	return fixture, nil
 }
@@ -166,6 +185,132 @@ func TestInstallGuidanceProductionFiles(t *testing.T) {
 	}
 }
 
+func TestInstallGuidanceCoversEveryShippedGuide(t *testing.T) {
+	t.Parallel()
+
+	fixture, err := decodeInstallGuidanceFixture(installGuidanceFixtureYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixturePaths := make(map[string]struct{}, len(fixture.Guides))
+	for _, row := range fixture.Guides {
+		fixturePaths[row.Path] = struct{}{}
+	}
+
+	entries, err := fs.ReadDir(installGuidanceProductionFiles, installGuidanceDir)
+	if err != nil {
+		t.Fatalf("read shipped install guide directory %q: %v", installGuidanceDir, err)
+	}
+
+	shippedGuides := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		shippedGuides++
+		guidePath := path.Join(installGuidanceDir, entry.Name())
+		if _, ok := expectedInstallGuides[guidePath]; !ok {
+			t.Fatalf("shipped install guide %q has no registered channel in expectedInstallGuides; add it and a fixture row", guidePath)
+		}
+		if _, ok := fixturePaths[guidePath]; !ok {
+			t.Fatalf("shipped install guide %q is not represented in testdata/install_guidance.yaml; every guide needs a fixture row", guidePath)
+		}
+	}
+
+	if shippedGuides != installGuideRowCount {
+		t.Fatalf("shipped install guide count %d does not match the guarded row count %d; update the fixture and expected set together", shippedGuides, installGuideRowCount)
+	}
+	if len(expectedInstallGuides) != installGuideRowCount {
+		t.Fatalf("expectedInstallGuides declares %d guides, want %d", len(expectedInstallGuides), installGuideRowCount)
+	}
+}
+
+// markdownLinkPattern captures the target of an inline Markdown link `](target)`.
+var markdownLinkPattern = regexp.MustCompile(`\]\(([^)]+)\)`)
+
+// TestInstallGuidanceLinksResolve verifies that every in-repo relative link and
+// in-page anchor in each guide resolves to a real embedded doc and heading. It is
+// the guard that catches an approximate fragment (for example a heading anchor that
+// silently dropped a leading section number). External `http(s)` links are out of
+// scope and skipped; targets inside fenced code blocks are ignored.
+func TestInstallGuidanceLinksResolve(t *testing.T) {
+	t.Parallel()
+
+	fixture, err := decodeInstallGuidanceFixture(installGuidanceFixtureYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, row := range fixture.Guides {
+		row := row
+		t.Run(row.Name, func(t *testing.T) {
+			t.Parallel()
+			contentBytes, err := installGuidanceProductionFiles.ReadFile(row.Path)
+			if err != nil {
+				t.Fatalf("read guide %q: %v", row.Path, err)
+			}
+			content := string(contentBytes)
+			prose := stripFencedBlocks(content)
+
+			for _, match := range markdownLinkPattern.FindAllStringSubmatch(prose, -1) {
+				target := strings.TrimSpace(match[1])
+				if target == "" || isExternalLink(target) {
+					continue
+				}
+				pathPart, fragment, _ := strings.Cut(target, "#")
+
+				if pathPart == "" {
+					if !hasMarkdownFragment(content, fragment) {
+						t.Fatalf("guide %q in-page anchor #%s does not resolve to a heading in the same file", row.Path, fragment)
+					}
+					continue
+				}
+				if strings.HasPrefix(pathPart, "/") {
+					t.Fatalf("guide %q uses absolute link %q; relative doc links keep the tree portable", row.Path, target)
+				}
+
+				resolved := path.Clean(path.Join(path.Dir(row.Path), pathPart))
+				targetBytes, err := installGuidanceProductionFiles.ReadFile(resolved)
+				if err != nil {
+					t.Fatalf("guide %q link %q resolves to %q, which is not an embedded doc; embed the target or correct the link: %v", row.Path, target, resolved, err)
+				}
+				if fragment != "" && !hasMarkdownFragment(string(targetBytes), fragment) {
+					t.Fatalf("guide %q link %q points to a missing heading anchor #%s in %q", row.Path, target, fragment, resolved)
+				}
+			}
+		})
+	}
+}
+
+// isExternalLink reports whether a Markdown link target points outside the repo
+// (an absolute URL or mail/tel scheme) and therefore is not resolved locally.
+func isExternalLink(target string) bool {
+	if strings.Contains(target, "://") {
+		return true
+	}
+	return strings.HasPrefix(target, "mailto:") || strings.HasPrefix(target, "tel:")
+}
+
+// stripFencedBlocks removes fenced code-block lines so link extraction and heading
+// scans never treat literal code as prose.
+func stripFencedBlocks(content string) string {
+	var builder strings.Builder
+	inFence := false
+	for _, line := range strings.Split(content, "\n") {
+		if isCodeFenceLine(strings.TrimSpace(line)) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		builder.WriteString(line)
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
 func assertVersionLeadsToKickstart(t *testing.T, content string, row installGuidanceFixtureRow) {
 	t.Helper()
 	lower := strings.ToLower(content)
@@ -213,37 +358,40 @@ func assertReinstallGuidance(t *testing.T, content string, row installGuidanceFi
 		t.Fatal("reinstall/upgrade section does not say that replacement leaves existing state in place")
 	}
 
-	var required []string
-	switch row.Channel {
-	case channelMacOSTarball, channelArchTarball:
-		required = []string{"tar.gz", "sudo install"}
-	case channelDebian:
-		required = []string{".deb", "apt install"}
-	case channelNixProfile:
-		required = []string{"nix profile install", "nix profile upgrade"}
-	case channelWSLDistro:
-		required = []string{"underlying distro", "apt install", "tarball"}
-	default:
-		t.Fatalf("unknown install channel %q", row.Channel)
-	}
-	for _, marker := range required {
-		if !strings.Contains(lower, marker) {
+	for _, marker := range row.ReinstallMarkers {
+		if !strings.Contains(lower, strings.ToLower(marker)) {
 			t.Fatalf("%s reinstall/upgrade section is missing channel marker %q", row.Channel, marker)
 		}
 	}
 }
 
+// isCodeFenceLine reports whether a trimmed line opens or closes a Markdown code
+// fence (``` or ~~~). Heading scanners toggle on it so a `#`-prefixed shell comment
+// inside a fenced block is never mistaken for a heading.
+func isCodeFenceLine(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+}
+
 func findInstallGuidanceSection(content string, markers ...string) string {
 	lines := strings.Split(content, "\n")
 	start := -1
+	inFence := false
 	for index, line := range lines {
-		trimmed := strings.ToLower(strings.TrimSpace(line))
-		if !strings.HasPrefix(trimmed, "## ") {
+		trimmed := strings.TrimSpace(line)
+		if isCodeFenceLine(trimmed) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		lowered := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lowered, "## ") {
 			continue
 		}
 		matches := true
 		for _, marker := range markers {
-			if !strings.Contains(trimmed, marker) {
+			if !strings.Contains(lowered, marker) {
 				matches = false
 				break
 			}
@@ -257,8 +405,17 @@ func findInstallGuidanceSection(content string, markers ...string) string {
 		return ""
 	}
 	end := len(lines)
+	inFence = false
 	for index := start + 1; index < len(lines); index++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[index]), "## ") {
+		trimmed := strings.TrimSpace(lines[index])
+		if isCodeFenceLine(trimmed) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
 			end = index
 			break
 		}
@@ -297,9 +454,24 @@ func assertKickstartLink(t *testing.T, content string, row installGuidanceFixtur
 }
 
 func hasMarkdownFragment(content, fragment string) bool {
+	inFence := false
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if isCodeFenceLine(trimmed) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
 		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// A real ATX heading separates the marker from the text with a space,
+		// so "#comment" is ignored while "## Reset ..." is honored.
+		if !strings.HasPrefix(trimmed, "# ") && !strings.HasPrefix(trimmed, "## ") &&
+			!strings.HasPrefix(trimmed, "### ") && !strings.HasPrefix(trimmed, "#### ") &&
+			!strings.HasPrefix(trimmed, "##### ") && !strings.HasPrefix(trimmed, "###### ") {
 			continue
 		}
 		heading := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))

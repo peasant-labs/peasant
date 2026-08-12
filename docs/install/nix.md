@@ -76,11 +76,11 @@ For a later setup run, read [kickstart rerun and reset behavior](../KICKSTART.md
   assets (the dashboard frontend depends on a pnpm/Next.js build that cannot run in the Nix
   sandbox yet). The CLI, ingest pipeline, analytics, and APIs all work; the embedded
   dashboard is a stub in Nix-built binaries. A real frontend derivation is a
-  [deferred](../release-runbook.md#deferred-ladder) follow-up.
+  [deferred](../release-runbook.md#7-deferred-ladder) follow-up.
 - **Version output:** `peasant version` reports a `git`-rev-suffixed version between
   tagged releases; tagged builds inject the exact version via ldflags.
 - **nixpkgs:** upstreaming to `nixpkgs` (`nix profile install nixpkgs#peasant`) is a
-  [deferred](../release-runbook.md#deferred-ladder) post-release task — it
+  [deferred](../release-runbook.md#7-deferred-ladder) post-release task — it
   requires a public repo and a tagged release. The licensing requirement is already
   met: Peasant is Apache-2.0, which nixpkgs treats as free, so the package would be
   installable without `allowUnfree`.

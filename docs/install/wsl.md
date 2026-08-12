@@ -17,7 +17,7 @@ Pick the architecture matching `uname -m` (`x86_64` → amd64, `aarch64` → arm
 
 ## WSL-specific caveats
 
-### 1. Opening the browser (`peasant web start`, `peasant login`)
+### 1. Opening the browser (`peasant web start`, `peasant village login`)
 
 Peasant opens your browser via the `$BROWSER` → `xdg-open` → `wslview` chain. Stock
 WSL distros have **no `xdg-open`** (no desktop stack). Install `wslu` so the chain can
@@ -36,11 +36,9 @@ your Windows browser by hand.
 `peasant web start` binds the dashboard port and accepts loopback connections. Under
 WSL2's default **NAT** networking, Windows auto-forwards `localhost:<port>` into the
 distro, and under **mirrored** networking (Windows 11 22H2+) localhost is shared
-outright. Either way:
-
-```
-open http://localhost:8690 in your Windows browser
-```
+outright. Either way, open the exact `http://localhost:<port>` address that `peasant
+web start` prints when it starts (the default port is `8690`, and `--port` changes it)
+in your Windows browser.
 
 If it doesn't connect, check the **Hyper-V firewall** (mirrored mode) as the first
 troubleshooting step.

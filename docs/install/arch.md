@@ -83,6 +83,6 @@ For a later setup run, read [kickstart rerun and reset behavior](../KICKSTART.md
 
 - The package has **no dependencies** — the binary is fully static.
 - A source `peasant` package (building from source rather than the prebuilt binary)
-  is [deferred](../release-runbook.md#deferred-ladder): the embedded web dashboard
+  is [deferred](../release-runbook.md#7-deferred-ladder): the embedded web dashboard
   needs a pnpm/Next.js build step that an AUR build host cannot perform cleanly
   today. Official `[extra]` inclusion is a long-term, maintainer-driven path.
