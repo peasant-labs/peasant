@@ -25,6 +25,15 @@ sudo install -m755 peasant /usr/local/bin/peasant     # or ~/bin on PATH
 peasant version
 ```
 
+## Reinstalling or upgrading
+
+For the current raw-tarball channel, repeat the download, checksum, `tar.gz` extraction, and
+`sudo install` steps with the newer version. Reinstalling or upgrading replaces the existing
+binary at the path you chose. It does not remove Peasant's configuration, database, ingested
+data, or state, and it does not run kickstart again.
+
+When you run setup again, read [kickstart rerun and reset behavior](../KICKSTART.md#reset-and-standalone-boundaries).
+
 ### macOS Gatekeeper (raw download only)
 
 The release binaries are **not yet code-signed or notarized**. When you download a
@@ -56,6 +65,15 @@ immediately — **no Gatekeeper prompt**.
 
 **Updating:** `brew update && brew upgrade --cask peasant`.
 **Removing:** `brew uninstall --cask peasant`.
+
+## Verify and start guided setup
+
+After `peasant version` succeeds on either installation path, run the guided setup wizard:
+
+```bash
+peasant version
+peasant kickstart
+```
 
 ## Homebrew architecture context
 
@@ -187,7 +205,7 @@ retired.
   for users with a Go toolchain. The embedded dashboard is stubbed in source builds.
 - Code signing + notarization (so raw downloads "just work" with no `xattr` step),
   a `.pkg` installer, and Homebrew publication are
-  [deferred](../release-runbook.md#deferred-ladder).
+  [deferred](../release-runbook.md#7-deferred-ladder).
 
 ## References
 

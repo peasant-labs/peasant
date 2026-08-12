@@ -41,6 +41,28 @@ nix build .#peasant
 ./result/bin/peasant version
 ```
 
+## Reinstalling or upgrading
+
+`nix run` does not install a persistent binary; each invocation resolves the requested flake
+reference. For a profile installation, use `nix profile upgrade peasant` for an existing profile
+entry, or run `nix profile install github:peasant-labs/peasant#peasant` when the entry is not
+present. Nix replaces the profile entry atomically and does not remove Peasant's configuration,
+database, ingested data, or state.
+
+For a flake or local build, update the input or source and run `nix build` again. Refresh the
+profile or result link you use; rebuilding does not run kickstart or remove Peasant data.
+
+## Verify and start guided setup
+
+After `peasant version` succeeds for a profile or local installation, run the guided setup wizard:
+
+```bash
+peasant version
+peasant kickstart
+```
+
+For a later setup run, read [kickstart rerun and reset behavior](../KICKSTART.md#reset-and-standalone-boundaries).
+
 ## Notes
 
 - **`vendorHash` drift:** The flake's `vendorHash` is a fixed-output hash over the
@@ -54,11 +76,11 @@ nix build .#peasant
   assets (the dashboard frontend depends on a pnpm/Next.js build that cannot run in the Nix
   sandbox yet). The CLI, ingest pipeline, analytics, and APIs all work; the embedded
   dashboard is a stub in Nix-built binaries. A real frontend derivation is a
-  [deferred](../release-runbook.md#deferred-ladder) follow-up.
+  [deferred](../release-runbook.md#7-deferred-ladder) follow-up.
 - **Version output:** `peasant version` reports a `git`-rev-suffixed version between
   tagged releases; tagged builds inject the exact version via ldflags.
 - **nixpkgs:** upstreaming to `nixpkgs` (`nix profile install nixpkgs#peasant`) is a
-  [deferred](../release-runbook.md#deferred-ladder) post-release task — it
+  [deferred](../release-runbook.md#7-deferred-ladder) post-release task — it
   requires a public repo and a tagged release. The licensing requirement is already
   met: Peasant is Apache-2.0, which nixpkgs treats as free, so the package would be
   installable without `allowUnfree`.
