@@ -52,6 +52,11 @@ type installGuidanceFixtureRow struct {
 	VersionCommand   string              `yaml:"version_command"`
 	KickstartCommand string              `yaml:"kickstart_command"`
 	KickstartLink    string              `yaml:"kickstart_link"`
+	// ReinstallSection is the exact level-2 heading text under which the guide
+	// explains reinstalling and upgrading. The locator matches this heading exactly
+	// (not a substring), so the body assertions cannot be satisfied by the heading
+	// words alone; the expected value lives in the fixture, not an inline constant.
+	ReinstallSection string `yaml:"reinstall_section"`
 	// ReinstallMarkers are the channel-specific substrings the reinstall/upgrade
 	// section must contain. These per-channel cases live in the YAML fixture rather
 	// than an inline Go switch so a single guide change updates one file.
@@ -127,6 +132,12 @@ func decodeInstallGuidanceFixture(raw []byte) (installGuidanceFixture, error) {
 		}
 		if row.KickstartLink != expectedInstallKickstartLink {
 			return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q must link the kickstart reset boundary %q", row.Path, expectedInstallKickstartLink)
+		}
+		if strings.TrimSpace(row.ReinstallSection) == "" {
+			return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q must declare the exact reinstall/upgrade section heading (reinstall_section)", row.Path)
+		}
+		if strings.HasPrefix(strings.TrimSpace(row.ReinstallSection), "#") {
+			return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q reinstall_section must be the heading TEXT only, without the leading '##' marker", row.Path)
 		}
 		if len(row.ReinstallMarkers) == 0 {
 			return installGuidanceFixture{}, fmt.Errorf("install guidance fixture guide %q must declare at least one channel reinstall marker", row.Path)
@@ -357,15 +368,14 @@ func assertVersionLeadsToKickstart(t *testing.T, content string, row installGuid
 
 func assertReinstallGuidance(t *testing.T, content string, row installGuidanceFixtureRow) {
 	t.Helper()
-	section := findInstallGuidanceSection(content, "reinstall", "upgrad")
+	section := findInstallGuidanceSection(content, row.ReinstallSection)
 	if section == "" {
-		t.Fatal("guide has no section that explains reinstalling and upgrading")
+		t.Fatalf("guide has no %q level-2 section that explains reinstalling and upgrading", row.ReinstallSection)
 	}
 	lower := strings.ToLower(section)
-	// The section is located by its heading (which already contains "reinstall"
-	// and "upgrad"), so asserting those two words back would be tautological. Check
-	// only BODY content: that the section names the replacement action and the
-	// preserved configuration and data.
+	// The section is located by its exact heading, so asserting the heading words
+	// back would be tautological. Check only BODY content: that the section names
+	// the replacement action and the preserved configuration and data.
 	for _, marker := range []string{"replace", "config", "data"} {
 		if !strings.Contains(lower, marker) {
 			t.Fatalf("reinstall/upgrade section body does not describe the non-destructive %q behavior", marker)
@@ -389,7 +399,14 @@ func isCodeFenceLine(trimmed string) bool {
 	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
 }
 
-func findInstallGuidanceSection(content string, markers ...string) string {
+// findInstallGuidanceSection returns the body of the level-2 section whose heading
+// text exactly equals heading (after trimming the "## " marker and surrounding
+// whitespace), spanning from that heading up to the next level-2 heading. Matching
+// is fence-aware: a "## "-prefixed line inside a fenced code block is never treated
+// as a heading. An exact-heading match (rather than a substring/marker match) keeps
+// the section locator from guaranteeing the words the body assertions check.
+func findInstallGuidanceSection(content, heading string) string {
+	wantHeading := strings.TrimSpace(heading)
 	lines := strings.Split(content, "\n")
 	start := -1
 	inFence := false
@@ -402,18 +419,10 @@ func findInstallGuidanceSection(content string, markers ...string) string {
 		if inFence {
 			continue
 		}
-		lowered := strings.ToLower(trimmed)
-		if !strings.HasPrefix(lowered, "## ") {
+		if !strings.HasPrefix(trimmed, "## ") {
 			continue
 		}
-		matches := true
-		for _, marker := range markers {
-			if !strings.Contains(lowered, marker) {
-				matches = false
-				break
-			}
-		}
-		if matches {
+		if strings.TrimSpace(strings.TrimPrefix(trimmed, "## ")) == wantHeading {
 			start = index
 			break
 		}
