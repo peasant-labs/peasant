@@ -267,6 +267,29 @@ describe('NodeRail commit-row session list', () => {
     expect(help).toHaveAttribute('aria-describedby', tooltip.id);
   });
 
+  it('omits outcome help when fixture tasks have no outcome', () => {
+    const testCase = localReviewClarityFixture.noOutcomeCase;
+    render(
+      <ProjectRail
+        projectHash={PROJECT_HASH}
+        projectName="alpha-project"
+        sessions={[makeSession({ id: testCase.sessionId, preview: testCase.taskTitle })]}
+        coverage={null}
+        recentTasks={[makeTask({
+          sessionId: testCase.sessionId,
+          entryIndex: testCase.entryIndex,
+          title: testCase.taskTitle,
+          outcome: undefined,
+          retryLoop: false,
+          labels: [],
+        })]}
+        recentTasksError={null}
+        nowMs={NODE_DETAIL.lastTouchMs ?? Date.now()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: localReviewClarityFixture.copy.outcomeHelpName })).not.toBeInTheDocument();
+  });
+
   it('renders canonical Strike identity and navigation in a mounted Map commit row', () => {
     const detail = {
       ...NODE_DETAIL,

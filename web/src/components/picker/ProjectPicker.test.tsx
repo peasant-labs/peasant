@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { ProjectPicker, rowsFromSummaries } from './ProjectPicker';
+import { PickerExplainer, ProjectPicker, rowsFromSummaries } from './ProjectPicker';
 import {
   localReviewClarityFixture,
   makeClarityProjectSummaries,
@@ -39,6 +39,7 @@ describe('ProjectPicker review clarity', () => {
 
       const target = screen.getByRole('link', { name: testCase.expectedLinkName });
       expect(target).toHaveAttribute('href', testCase.expectedHref);
+      expect(target).toHaveAccessibleDescription(testCase.expectedCoverageLabel);
       expect(within(target).getByLabelText(testCase.expectedCoverageLabel)).toBeInTheDocument();
 
       fireEvent.change(search, { target: { value: testCase.searchQuery } });
@@ -46,4 +47,21 @@ describe('ProjectPicker review clarity', () => {
       expect(target).toHaveAttribute('href', testCase.expectedHref);
     });
   }
+});
+
+describe('PickerExplainer fixture copy', () => {
+  it('renders the revised copy on the production component path', () => {
+    const explainer = { id: 'changes', open: true, hydrated: true, show: () => {}, hide: () => {} };
+    render(<PickerExplainer explainer={explainer} destination="changes" />);
+    const region = screen.getByRole('region');
+    expect(region).toHaveTextContent(localReviewClarityFixture.copy.explainerIntro);
+    expect(region).toHaveTextContent(localReviewClarityFixture.copy.explainerRecordedFile);
+    expect(region).toHaveTextContent(localReviewClarityFixture.copy.explainerDestinationHome);
+  });
+
+  it('renders the map destination copy from the fixture', () => {
+    const explainer = { id: 'map', open: true, hydrated: true, show: () => {}, hide: () => {} };
+    render(<PickerExplainer explainer={explainer} destination="map" />);
+    expect(screen.getByRole('region')).toHaveTextContent(localReviewClarityFixture.copy.explainerDestinationMap);
+  });
 });

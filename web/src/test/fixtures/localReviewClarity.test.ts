@@ -29,7 +29,7 @@ describe('local review clarity fixture', () => {
     expect(failedCaseStart).toBeGreaterThan(0);
     expect(() => loadLocalReviewClarityFixture(
       `${localReviewClarityFixtureSource.slice(0, failedCaseStart)}\n`,
-    )).toThrow(/exactly 3 required cases/);
+    )).toThrow(/exactly 3 required cases|missing required fields/);
   });
 
   it('rejects picker links that drift from their destination or project identity', () => {

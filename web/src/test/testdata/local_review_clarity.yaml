@@ -7,6 +7,10 @@ copy:
   outcomeHelpName: how session outcomes are estimated
   outcomeSource: computed at ingest time from recorded error patterns, not a verified result.
   outcomeLimit: the current data includes the label, not a reason for an individual result.
+  explainerIntro: Each row is a project this tool found recorded AI conversations for. The columns show recorded files out of total project files, when it was last worked on, and how many lines of work (branches) haven’t been merged back into the main version yet.
+  explainerRecordedFile: A recorded file has an edit captured during a saved AI conversation.
+  explainerDestinationHome: Click a project to see its changes.
+  explainerDestinationMap: Click a project to see its map.
 pickerCases:
   - name: shared Home picker explains coverage and search
     surface: home
@@ -54,3 +58,8 @@ outcomeCases:
     taskTitle: failed fixture task
     entryIndex: 3
     definition: "failed: a high or concentrated error pattern."
+noOutcomeCase:
+  name: mounted task list without outcomes omits heuristic help
+  sessionId: clarity-no-outcome
+  taskTitle: task without outcome
+  entryIndex: 4

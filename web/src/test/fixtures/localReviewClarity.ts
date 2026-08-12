@@ -28,6 +28,10 @@ const COPY_FIELDS = [
   'outcomeHelpName',
   'outcomeSource',
   'outcomeLimit',
+  'explainerIntro',
+  'explainerRecordedFile',
+  'explainerDestinationHome',
+  'explainerDestinationMap',
 ] as const;
 
 const PICKER_FIELDS = [
@@ -54,6 +58,7 @@ const OUTCOME_FIELDS = [
   'entryIndex',
   'definition',
 ] as const;
+const NO_OUTCOME_FIELDS = ['name', 'sessionId', 'taskTitle', 'entryIndex'] as const;
 
 export type ClarityPickerCase = {
   name: string;
@@ -84,6 +89,7 @@ export type LocalReviewClarityFixture = {
   copy: Record<(typeof COPY_FIELDS)[number], string>;
   pickerCases: ClarityPickerCase[];
   outcomeCases: ClarityOutcomeCase[];
+  noOutcomeCase: { name: string; sessionId: string; taskTitle: string; entryIndex: number };
 };
 
 export const localReviewClarityFixtureSource = readFileSync(
@@ -119,7 +125,7 @@ export function loadLocalReviewClarityFixture(
   source = localReviewClarityFixtureSource,
 ): LocalReviewClarityFixture {
   const root = requireRecord(parseStrictYAML(source, 'local review clarity fixture'), 'local review clarity fixture');
-  requireExactRequiredFields(root, ['copy', 'pickerCases', 'outcomeCases'], 'local review clarity fixture');
+  requireExactRequiredFields(root, ['copy', 'pickerCases', 'outcomeCases', 'noOutcomeCase'], 'local review clarity fixture');
 
   const copy = requireRecord(root.copy, 'local review clarity fixture.copy');
   requireExactRequiredFields(copy, COPY_FIELDS, 'local review clarity fixture.copy');
@@ -200,10 +206,18 @@ export function loadLocalReviewClarityFixture(
     throw new Error('local review clarity fixture.outcomeCases must use unique session ids');
   }
 
+  const noOutcomeCase = requireRecord(root.noOutcomeCase, 'local review clarity fixture.noOutcomeCase');
+  requireExactRequiredFields(noOutcomeCase, NO_OUTCOME_FIELDS, 'local review clarity fixture.noOutcomeCase');
+  requireNonEmptyStrings(noOutcomeCase, NO_OUTCOME_FIELDS.filter((field) => field !== 'entryIndex'), 'local review clarity fixture.noOutcomeCase');
+  if (!Number.isSafeInteger(noOutcomeCase.entryIndex) || Number(noOutcomeCase.entryIndex) < 0) {
+    throw new Error('local review clarity fixture.noOutcomeCase.entryIndex must be a nonnegative integer');
+  }
+
   return {
     copy: copy as LocalReviewClarityFixture['copy'],
     pickerCases: pickerCases as unknown as ClarityPickerCase[],
     outcomeCases: outcomeCases as unknown as ClarityOutcomeCase[],
+    noOutcomeCase: noOutcomeCase as LocalReviewClarityFixture['noOutcomeCase'],
   };
 }
 

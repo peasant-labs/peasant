@@ -188,6 +188,12 @@ const DEST = {
   },
 } as const;
 
+function coverageAccessibleName(row: PickerRow): string {
+  return row.recordedFiles !== null && row.totalFiles !== null && row.totalFiles > 0
+    ? `${row.recordedFiles} recorded files out of ${row.totalFiles} total files`
+    : "recorded and total file counts unavailable";
+}
+
 export function ProjectPicker({
   rows,
   destination,
@@ -228,7 +234,7 @@ export function ProjectPicker({
           onChange={(e) => setQuery(e.target.value)}
           aria-label="search projects"
           placeholder="search projects…"
-          style={{ width: "100%" }}
+           className="w-full"
         />
       )}
 
@@ -271,8 +277,12 @@ export function ProjectPicker({
                   key={row.hash ?? row.name}
                   href={dest.href(projectHash)}
                   aria-label={dest.aria(primary)}
+                  aria-describedby={`coverage-${row.hash ?? row.name.replace(/[^a-z0-9]+/gi, '-')}`}
                   className={`${PICKER_GRID} py-3 hover:bg-surface-hover transition-colors focus-mono cursor-pointer`}
                 >
+                  <span id={`coverage-${row.hash ?? row.name.replace(/[^a-z0-9]+/gi, '-')}`} className="sr-only">
+                    {coverageAccessibleName(row)}
+                  </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-medium text-ink truncate">{primary}</span>
                     {showPath && (
@@ -282,11 +292,7 @@ export function ProjectPicker({
                     )}
                   </span>
                   <span
-                    aria-label={
-                      row.recordedFiles !== null && row.totalFiles !== null && row.totalFiles > 0
-                        ? `${row.recordedFiles} recorded files out of ${row.totalFiles} total files`
-                        : "recorded and total file counts unavailable"
-                    }
+                    aria-label={coverageAccessibleName(row)}
                   >
                     <CoverageCell row={row} pending={statsPending} />
                   </span>
@@ -316,11 +322,7 @@ export function ProjectPicker({
                     <span className="block font-mono text-[11px] text-ink-4 truncate">project identity unavailable</span>
                   </span>
                   <span
-                    aria-label={
-                      row.recordedFiles !== null && row.totalFiles !== null && row.totalFiles > 0
-                        ? `${row.recordedFiles} recorded files out of ${row.totalFiles} total files`
-                        : "recorded and total file counts unavailable"
-                    }
+                    aria-label={coverageAccessibleName(row)}
                   >
                     <CoverageCell row={row} pending={statsPending} />
                   </span>
