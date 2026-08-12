@@ -3,6 +3,7 @@ package transcript
 import (
 	"encoding/json"
 
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 )
 
@@ -24,7 +25,7 @@ func modelObservation(entry schema.SessionEntry) entryModelObservation {
 		return entryModelObservation{}
 	}
 	var value string
-	if json.Unmarshal(raw, &value) != nil || value == "" {
+	if json.Unmarshal(raw, &value) != nil || !ingest.ValidObservedModel(value) {
 		return entryModelObservation{}
 	}
 	return entryModelObservation{present: true, value: value}

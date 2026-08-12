@@ -266,7 +266,7 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 
 	// Classify entry type and role.
 	entry.EntryType, entry.Role = classifyClaudeEntry(line)
-	if entry.Role == RoleAssistant && validObservedModel(line.Message.Model) {
+	if entry.Role == RoleAssistant && ValidObservedModel(line.Message.Model) && captureModelObservation() {
 		extra, marshalErr := json.Marshal(map[string]string{"model_id": line.Message.Model})
 		if marshalErr == nil {
 			value := string(extra)

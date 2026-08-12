@@ -9,7 +9,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
@@ -51,7 +50,7 @@ func decodeModelObservationSurvivalFixture(data []byte) (modelObservationSurviva
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, fixtureCase := range fixture.Cases {
-		if fixtureCase.Name == "" || len(fixtureCase.Entries) == 0 || len(fixtureCase.Expected) == 0 {
+		if fixtureCase.Name == "" || len(fixtureCase.Entries) == 0 || fixtureCase.Expected == nil {
 			return modelObservationSurvivalFixture{}, fmt.Errorf("model-observation survival fixture case %q is incomplete", fixtureCase.Name)
 		}
 		if _, duplicate := names[fixtureCase.Name]; duplicate {
@@ -110,32 +109,52 @@ func TestModelObservationSurvivalFixtureGuards(t *testing.T) {
 }
 
 func TestEntriesToTurns_PreservesModelObservationBoundaries(t *testing.T) {
-	assertModelObservationSurvivalFixture(t, loadModelObservationSurvivalFixture(t), EntriesToTurns)
+	results := runModelObservationSurvivalFixture(loadModelObservationSurvivalFixture(t))
+	assertModelObservationSurvivalResults(t, results)
 }
 
-func assertModelObservationSurvivalFixture(t *testing.T, fixture modelObservationSurvivalFixture, fold func([]schema.SessionEntry) []ingest.Turn) {
-	t.Helper()
+type modelObservationSurvivalResult struct {
+	Name     string
+	Failures []string
+}
+
+func runModelObservationSurvivalFixture(fixture modelObservationSurvivalFixture) []modelObservationSurvivalResult {
+	results := make([]modelObservationSurvivalResult, 0, len(fixture.Cases))
 	for _, fixtureCase := range fixture.Cases {
-		fixtureCase := fixtureCase
-		t.Run(fixtureCase.Name, func(t *testing.T) {
-			entries := make([]schema.SessionEntry, len(fixtureCase.Entries))
-			observationsByIndex := make(map[int]entryModelObservation, len(fixtureCase.Entries))
-			for index, source := range fixtureCase.Entries {
-				entries[index] = fixtureEntry(source)
-				observationsByIndex[source.Index] = modelObservation(entries[index])
+		result := modelObservationSurvivalResult{Name: fixtureCase.Name}
+		entries := make([]schema.SessionEntry, len(fixtureCase.Entries))
+		observationsByIndex := make(map[int]entryModelObservation, len(fixtureCase.Entries))
+		for index, source := range fixtureCase.Entries {
+			entries[index] = fixtureEntry(source)
+			observationsByIndex[source.Index] = modelObservation(entries[index])
+		}
+		turns := EntriesToTurns(entries)
+		if len(turns) != len(fixtureCase.Expected) {
+			result.Failures = append(result.Failures, fmt.Sprintf("surviving turns = %d, want %d; real suppression/dedup path dropped an observation boundary", len(turns), len(fixtureCase.Expected)))
+			results = append(results, result)
+			continue
+		}
+		for index, expected := range fixtureCase.Expected {
+			if turns[index].Index != expected.Index || turns[index].Role.String() != expected.Role || turns[index].Content != expected.Content {
+				result.Failures = append(result.Failures, fmt.Sprintf("surviving turn %d = (index=%d role=%q content=%q), want (index=%d role=%q content=%q)", index, turns[index].Index, turns[index].Role, turns[index].Content, expected.Index, expected.Role, expected.Content))
 			}
-			turns := fold(entries)
-			if len(turns) != len(fixtureCase.Expected) {
-				t.Fatalf("surviving turns = %d, want %d; real suppression/dedup path dropped an observation boundary", len(turns), len(fixtureCase.Expected))
+			observation := observationsByIndex[turns[index].Index]
+			if observation.present != (expected.ObservedModel != "") || observation.value != expected.ObservedModel {
+				result.Failures = append(result.Failures, fmt.Sprintf("surviving turn %d observation = (%q, present=%t), want (%q, present=%t)", index, observation.value, observation.present, expected.ObservedModel, expected.ObservedModel != ""))
 			}
-			for index, expected := range fixtureCase.Expected {
-				if turns[index].Index != expected.Index || turns[index].Role.String() != expected.Role || turns[index].Content != expected.Content {
-					t.Errorf("surviving turn %d = (index=%d role=%q content=%q), want (index=%d role=%q content=%q)", index, turns[index].Index, turns[index].Role, turns[index].Content, expected.Index, expected.Role, expected.Content)
-				}
-				observation := observationsByIndex[turns[index].Index]
-				if observation.present != (expected.ObservedModel != "") || observation.value != expected.ObservedModel {
-					t.Errorf("surviving turn %d observation = (%q, present=%t), want (%q, present=%t)", index, observation.value, observation.present, expected.ObservedModel, expected.ObservedModel != "")
-				}
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+func assertModelObservationSurvivalResults(t *testing.T, results []modelObservationSurvivalResult) {
+	t.Helper()
+	for _, result := range results {
+		result := result
+		t.Run(result.Name, func(t *testing.T) {
+			for _, failure := range result.Failures {
+				t.Error(failure)
 			}
 		})
 	}

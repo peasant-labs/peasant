@@ -1,0 +1,7 @@
+expectedCaseCount: 5
+requiredNames:
+  - assistant_exact_observation_preserved
+  - invalid_observations_ignored
+  - non_assistant_observation_ignored
+  - structural_reclassification_removes_observation
+  - unrelated_extra_fields_preserved

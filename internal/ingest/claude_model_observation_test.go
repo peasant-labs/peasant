@@ -116,48 +116,73 @@ func TestClaudeModelObservationFixtureGuards(t *testing.T) {
 }
 
 func TestClaudeIndexer_PersistsAssistantModelObservations(t *testing.T) {
-	assertClaudeModelObservationFixture(t, loadClaudeModelObservationFixture(t), func(entries []schema.SessionEntry) []schema.SessionEntry {
-		return entries
-	})
+	assertClaudeModelObservationResults(t, runClaudeModelObservationFixture(t, loadClaudeModelObservationFixture(t)))
 }
 
-func assertClaudeModelObservationFixture(t *testing.T, fixture claudeModelObservationFixture, mutate func([]schema.SessionEntry) []schema.SessionEntry) {
-	t.Helper()
-	for _, fixtureCase := range fixture.Cases {
-		fixtureCase := fixtureCase
-		t.Run(fixtureCase.Name, func(t *testing.T) {
-			sessionID := ingest.SessionID(testutil.TestSessionUUID)
-			session := ingest.DiscoveredSession{SessionID: sessionID, Harness: ingest.HarnessClaudeCode, SourcePath: "/fixture.jsonl", SourceFormat: ingest.SourceFormatJSONL}
-			entries, err := ingest.NewClaudeIndexer(testutil.NewMemFS()).IndexTranscriptBytes(context.Background(), session, []byte(strings.Join(fixtureCase.Lines, "\n")+"\n"))
-			if err != nil {
-				t.Fatalf("index fixture: %v", err)
-			}
-			if len(entries) != len(fixtureCase.ExpectedEntries) {
-				t.Fatalf("indexed entry count = %d, want %d", len(entries), len(fixtureCase.ExpectedEntries))
-			}
+type claudeModelObservationResult struct {
+	Name     string
+	Failures []string
+}
 
-			entries = mutate(entries)
-			database := storetest.Open(t)
-			storetest.SeedSession(t, database, string(sessionID))
-			if err := database.IndexSessionEntries(context.Background(), sessionID, entries); err != nil {
-				t.Fatalf("persist indexed entries: %v", err)
+func runClaudeModelObservationFixture(t *testing.T, fixture claudeModelObservationFixture) []claudeModelObservationResult {
+	t.Helper()
+	results := make([]claudeModelObservationResult, 0, len(fixture.Cases))
+	for _, fixtureCase := range fixture.Cases {
+		result := claudeModelObservationResult{Name: fixtureCase.Name}
+		sessionID := ingest.SessionID(testutil.TestSessionUUID)
+		session := ingest.DiscoveredSession{SessionID: sessionID, Harness: ingest.HarnessClaudeCode, SourcePath: "/fixture.jsonl", SourceFormat: ingest.SourceFormatJSONL}
+		entries, err := ingest.NewClaudeIndexer(testutil.NewMemFS()).IndexTranscriptBytes(context.Background(), session, []byte(strings.Join(fixtureCase.Lines, "\n")+"\n"))
+		if err != nil {
+			result.Failures = append(result.Failures, fmt.Sprintf("index fixture: %v", err))
+			results = append(results, result)
+			continue
+		}
+		if len(entries) != len(fixtureCase.ExpectedEntries) {
+			result.Failures = append(result.Failures, fmt.Sprintf("indexed entry count = %d, want %d", len(entries), len(fixtureCase.ExpectedEntries)))
+			results = append(results, result)
+			continue
+		}
+
+		database := storetest.Open(t)
+		storetest.SeedSession(t, database, string(sessionID))
+		if err := database.IndexSessionEntries(context.Background(), sessionID, entries); err != nil {
+			result.Failures = append(result.Failures, fmt.Sprintf("persist indexed entries: %v", err))
+			results = append(results, result)
+			continue
+		}
+		stored, err := database.ListEntries(context.Background(), sessionID)
+		if err != nil {
+			result.Failures = append(result.Failures, fmt.Sprintf("rehydrate indexed entries: %v", err))
+			results = append(results, result)
+			continue
+		}
+		if len(stored) != len(fixtureCase.ExpectedEntries) {
+			result.Failures = append(result.Failures, fmt.Sprintf("stored entry count = %d, want %d", len(stored), len(fixtureCase.ExpectedEntries)))
+			results = append(results, result)
+			continue
+		}
+		for index, expected := range fixtureCase.ExpectedEntries {
+			entry := stored[index]
+			if entry.EntryIndex != expected.Index || entry.Role.String() != expected.Role {
+				result.Failures = append(result.Failures, fmt.Sprintf("stored entry %d identity = (%d, %q), want (%d, %q)", index, entry.EntryIndex, entry.Role, expected.Index, expected.Role))
 			}
-			stored, err := database.ListEntries(context.Background(), sessionID)
-			if err != nil {
-				t.Fatalf("rehydrate indexed entries: %v", err)
+			got, present := modelIDFromEntry(entry)
+			if present != (expected.ObservedModel != "") || got != expected.ObservedModel {
+				result.Failures = append(result.Failures, fmt.Sprintf("stored entry %d model observation = (%q, present=%t), want (%q, present=%t)", index, got, present, expected.ObservedModel, expected.ObservedModel != ""))
 			}
-			if len(stored) != len(fixtureCase.ExpectedEntries) {
-				t.Fatalf("stored entry count = %d, want %d", len(stored), len(fixtureCase.ExpectedEntries))
-			}
-			for index, expected := range fixtureCase.ExpectedEntries {
-				entry := stored[index]
-				if entry.EntryIndex != expected.Index || entry.Role.String() != expected.Role {
-					t.Errorf("stored entry %d identity = (%d, %q), want (%d, %q)", index, entry.EntryIndex, entry.Role, expected.Index, expected.Role)
-				}
-				got, present := modelIDFromEntry(entry)
-				if present != (expected.ObservedModel != "") || got != expected.ObservedModel {
-					t.Errorf("stored entry %d model observation = (%q, present=%t), want (%q, present=%t)", index, got, present, expected.ObservedModel, expected.ObservedModel != "")
-				}
+		}
+		results = append(results, result)
+	}
+	return results
+}
+
+func assertClaudeModelObservationResults(t *testing.T, results []claudeModelObservationResult) {
+	t.Helper()
+	for _, result := range results {
+		result := result
+		t.Run(result.Name, func(t *testing.T) {
+			for _, failure := range result.Failures {
+				t.Error(failure)
 			}
 		})
 	}

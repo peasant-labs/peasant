@@ -605,7 +605,7 @@ func buildExtraJSON(msg *openCodeIndexMsg) *string {
 	if msg.Tokens != nil && msg.Tokens.Reasoning > 0 {
 		extra["tokens_reasoning"] = msg.Tokens.Reasoning
 	}
-	if msg.Role == RoleAssistant.String() && validObservedModel(msg.ModelID) {
+	if msg.Role == RoleAssistant.String() && ValidObservedModel(msg.ModelID) {
 		extra["model_id"] = msg.ModelID
 	}
 

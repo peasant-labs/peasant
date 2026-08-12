@@ -1,4 +1,7 @@
-expectedCaseCount: 2
+expectedCaseCount: 5
 requiredNames:
   - model_only_assistant_survives
   - adjacent_observation_boundaries_survive_real_dedup
+  - stale_whitespace_only_observation_is_absent
+  - stale_edge_whitespace_does_not_split_dedup
+  - exact_mixed_case_slash_and_internal_space_survive

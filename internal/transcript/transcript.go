@@ -267,15 +267,16 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	// to the session viewer. Note: system entries with short content are kept
 	// intentionally because they can carry legitimate control context.
 	//
-	// Consecutive dedup: when two adjacent turns share the same role and the same
-	// non-empty content, keep one. If one has tool calls and the other does not,
-	// prefer the one with tool calls.
+	// Consecutive dedup: when two adjacent turns share the same role, non-empty
+	// content, and valid observation presence/value, keep one. Observation is part
+	// of equivalence because a source-evidence boundary must survive even when the
+	// visible text repeats. If one has tool calls and the other does not, prefer it.
 	filtered := turns[:0]
 	for _, t := range turns {
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
 		hasObservation := turnObservations[t.Index].present
-		if !hasContent && !hasTools && !hasObservation {
+		if suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -290,7 +291,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		prev := &deduped[len(deduped)-1]
 		prevObservation := turnObservations[prev.Index]
 		currObservation := turnObservations[curr.Index]
-		observationsEqual := prevObservation.present == currObservation.present && prevObservation.value == currObservation.value
+		observationsEqual := modelObservationsEquivalent(prevObservation, currObservation)
 		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
 			prevHasTools := len(prev.ToolCalls) > 0
 			currHasTools := len(curr.ToolCalls) > 0
@@ -304,6 +305,14 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	}
 
 	return deduped
+}
+
+func suppressEmptyTurn(hasContent, hasTools, hasObservation bool) bool {
+	return shouldSuppressEmptyTurn(hasContent, hasTools, hasObservation)
+}
+
+func modelObservationsEquivalent(previous, current entryModelObservation) bool {
+	return observationsEquivalent(previous, current)
 }
 
 // extractFilePath parses tool input JSON for common file path keys.
