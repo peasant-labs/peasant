@@ -30,6 +30,57 @@ const VIEWPORTS = [{ id: 'desktop', width: 1440, height: 1000 }, { id: 'mobile',
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const fail = (message) => { throw new Error(`Search/share visual harness failed: ${message}`) }
 
+// Assert the reconstructed connector geometry describes one continuous
+// single-spine staircase per sibling list, not the old fragmented elbows.
+// `groups` are the per-list measurements returned from the in-page probe.
+function assertStaircaseGeometry(groups, label) {
+  const EPS_X = 1.0      // constant spine column / staircase alignment
+  const EPS_Y = 1.5      // segment contiguity, termination, tee-to-checkbox-centre
+  const TEE_REACH = 3.5  // tee end vs checkbox edge (label padding slack)
+  const STEP_EPS = 1.25  // per-level indent must be constant within this
+  const bad = (m) => fail(`${label}: staircase geometry — ${m}`)
+  // 1 locations list + 3 branch lists + 3 session lists for this fixture.
+  if (groups.length !== 7) bad(`expected 7 sibling lists (1 locations + 3 branches + 3 sessions), saw ${groups.length}`)
+  for (const [gi, g] of groups.entries()) {
+    if (!g.count) bad(`group ${gi} has no rows`)
+    const xs = g.nodes.map((n) => n.spineX)
+    const x0 = xs[0]
+    if (xs.some((x) => Math.abs(x - x0) > EPS_X)) bad(`group ${gi} spine column not constant: ${JSON.stringify(xs)}`)
+    if (g.nodes.some((n) => !n.spineDrawn || !n.teeDrawn)) bad(`group ${gi} has an undrawn spine or tee: ${JSON.stringify(g.nodes)}`)
+    for (const [ni, n] of g.nodes.entries()) {
+      if (Math.abs(n.teeY - n.cbCenterY) > EPS_Y) bad(`group ${gi} node ${ni} tee y ${n.teeY} != checkbox centre ${n.cbCenterY}`)
+      if (Math.abs(n.teeX1 - n.cbLeft) > TEE_REACH) bad(`group ${gi} node ${ni} tee end ${n.teeX1} does not reach checkbox edge ${n.cbLeft}`)
+      if (n.teeX0 > n.teeX1 - 1) bad(`group ${gi} node ${ni} tee has no rightward span (${n.teeX0}..${n.teeX1})`)
+      if (Math.abs(n.teeX0 - x0) > EPS_X) bad(`group ${gi} node ${ni} tee starts at ${n.teeX0}, off the spine column ${x0}`)
+    }
+    // consecutive segments abut into one continuous spine (no gaps)
+    for (let i = 0; i < g.nodes.length - 1; i++) {
+      if (Math.abs(g.nodes[i].sBot - g.nodes[i + 1].sTop) > EPS_Y) bad(`group ${gi} spine gap between rows ${i} and ${i + 1}: ${g.nodes[i].sBot} vs ${g.nodes[i + 1].sTop}`)
+    }
+    // last child terminates the spine exactly at its tee
+    const last = g.nodes[g.nodes.length - 1]
+    if (Math.abs(last.sBot - last.teeY) > EPS_Y) bad(`group ${gi} last spine ends at ${last.sBot}, not its tee ${last.teeY}`)
+    // nothing floats above the list top or past the terminating tee
+    for (const [ni, n] of g.nodes.entries()) {
+      if (n.sBot > last.teeY + EPS_Y) bad(`group ${gi} node ${ni} spine ${n.sBot} runs past the last tee ${last.teeY}`)
+      if (n.sTop < g.groupTop - EPS_Y) bad(`group ${gi} node ${ni} spine ${n.sTop} rises above group top ${g.groupTop}`)
+    }
+    // staircase: the list's spine sits under its parent row's checkbox centre
+    if (g.parentCheckboxCenterX == null) bad(`group ${gi} has no parent checkbox anchor`)
+    if (Math.abs(x0 - g.parentCheckboxCenterX) > EPS_Y) bad(`group ${gi} spine ${x0} not under parent checkbox centre ${g.parentCheckboxCenterX}`)
+  }
+  // one constant indent step across every nesting level
+  const levels = []
+  for (const x of groups.map((g) => g.nodes[0].spineX).sort((a, b) => a - b)) {
+    if (!levels.length || x - levels[levels.length - 1] > EPS_Y) levels.push(x)
+  }
+  if (levels.length < 2) bad(`expected multiple staircase levels, saw ${levels.length}`)
+  const deltas = levels.slice(1).map((x, i) => x - levels[i])
+  const dmin = Math.min(...deltas), dmax = Math.max(...deltas)
+  if (dmin < 8) bad(`nesting inset ${dmin} too small to read as a staircase`)
+  if (dmax - dmin > STEP_EPS) bad(`nesting inset delta not constant across levels: ${JSON.stringify(deltas)}`)
+}
+
 function filesBelow(directory) {
   if (!existsSync(directory)) return []
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -169,7 +220,14 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     await capture(page, gate, join(OUT, theme, viewport.id, 'search.png'), '[role="dialog"][aria-label="Command palette"]', `${theme}/${viewport.id}/search`)
   } else {
     await wait(page, '[aria-label="choose sessions to contribute"]', 'share chooser')
-    await page.click('[aria-label="select session sess-visual-share-003"]')
+    // Toggle the target session through its real checkbox so the production
+    // onChange path (selection Set + tri-state cascade) runs, then wait for it to
+    // commit before probing. On the narrow viewport this row sits below the fold
+    // and a coordinate click is scroll-flaky, so drive the element's own click
+    // (the production handler, not a synthesized selection) for a stable setup.
+    await wait(page, '[aria-label="select session sess-visual-share-003"]', 'share session checkbox', false)
+    await page.$eval('[aria-label="select session sess-visual-share-003"]', (input) => input.click())
+    await page.waitForFunction(() => document.querySelector('[aria-label="select session sess-visual-share-003"]')?.checked === true, { timeout: 10000 }).catch(() => fail('share: selecting session sess-visual-share-003 never registered'))
     await page.focus('[aria-label="select branch feat/retry-observability"]')
     const probe = await page.evaluate(() => {
       const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
@@ -186,19 +244,69 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
       const glyphs = [...chooser.querySelectorAll('.share-hierarchy-check__mixed')]
       const glyph = glyphs[0]
       const glyphStyle = glyph ? getComputedStyle(glyph) : null
-      const rails = [...chooser.querySelectorAll('.share-hierarchy-rail')].map((rail) => {
-        const style = getComputedStyle(rail, '::before')
-        const box = rail.getBoundingClientRect()
-        return { left: style.borderLeftStyle, bottom: style.borderBottomStyle, insetBottom: style.bottom, width: style.width, rowHeight: box.height, containerIsRow: /^H[34]$/.test(rail.tagName) }
+
+      // --- Single-spine staircase geometry ------------------------------------
+      // Connectors are pseudo-elements on the hierarchy rows. Pseudo-elements
+      // have no getBoundingClientRect, so each connector box is reconstructed
+      // from the host's rect (its rows/nodes carry no border, so the padding
+      // box the pseudo is positioned against coincides with the host rect) plus
+      // the resolved used values getComputedStyle returns for left/top/bottom/
+      // width/height on the pseudo. Every checkbox comparison is against the
+      // real <input> rect so wrapped mobile rows are measured, not assumed.
+      const px = (value) => (value === 'auto' || value == null ? null : parseFloat(value))
+      const rowOf = (node) => (node.classList.contains('share-tree__row') ? node : node.querySelector(':scope > .share-tree__row'))
+      const spineHost = (node, isLast) => (isLast && !node.classList.contains('share-tree__leaf') ? rowOf(node) : node)
+      function measureNode(node, isLast) {
+        const row = rowOf(node)
+        const input = row.querySelector('input[type="checkbox"]')
+        const cb = input.getBoundingClientRect()
+        const host = spineHost(node, isLast)
+        const scs = getComputedStyle(host, '::before')
+        const sr = host.getBoundingClientRect()
+        const sTop = sr.top + (px(scs.top) ?? 0)
+        const sBottomInset = px(scs.bottom)
+        const sHeight = px(scs.height)
+        const sBot = sBottomInset != null ? sr.bottom - sBottomInset : (sHeight != null ? sTop + sHeight : sr.bottom)
+        const spineX = sr.left + (px(scs.left) ?? 0)
+        const tcs = getComputedStyle(row, '::after')
+        const rr = row.getBoundingClientRect()
+        const teeY = rr.top + (px(tcs.top) ?? 0)
+        const teeX0 = rr.left + (px(tcs.left) ?? 0)
+        const teeX1 = teeX0 + (px(tcs.width) ?? 0)
+        return {
+          spineX, sTop, sBot, teeY, teeX0, teeX1,
+          cbCenterY: (cb.top + cb.bottom) / 2, cbLeft: cb.left, cbRight: cb.right,
+          spineDrawn: scs.content !== 'none' && scs.borderLeftStyle !== 'none',
+          teeDrawn: tcs.content !== 'none' && tcs.borderTopStyle !== 'none',
+        }
+      }
+      // Every sibling list is a `.share-tree` whose direct `.share-tree__node`
+      // children are its rows. Record each list plus a checkbox-centre anchor
+      // from the parent row (or the project header for the top list).
+      const groups = [...chooser.querySelectorAll('.share-tree')].map((wrapper) => {
+        const nodes = [...wrapper.children].filter((c) => c.classList.contains('share-tree__node'))
+        const measured = nodes.map((node, i) => measureNode(node, i === nodes.length - 1))
+        const parentNode = wrapper.parentElement.closest('.share-tree__node')
+        let anchorRow = null
+        if (parentNode) anchorRow = rowOf(parentNode)
+        else {
+          const section = wrapper.closest('section[aria-label^="project "]')
+          anchorRow = section ? section.querySelector(':scope > h2') : null
+        }
+        const anchorInput = anchorRow ? anchorRow.querySelector('input[type="checkbox"]') : null
+        const anchorCb = anchorInput ? anchorInput.getBoundingClientRect() : null
+        return {
+          count: measured.length,
+          nodes: measured,
+          groupTop: Math.min(...measured.map((m) => m.sTop)),
+          lastTee: measured[measured.length - 1].teeY,
+          parentCheckboxCenterX: anchorCb ? (anchorCb.left + anchorCb.right) / 2 : null,
+        }
       })
-      const childRails = [...chooser.querySelectorAll('.share-hierarchy-children')].map((rail) => getComputedStyle(rail, '::before').borderLeftStyle)
-      const joins = [...chooser.querySelectorAll('.share-hierarchy-child-row')].map((row) => {
-        const style = getComputedStyle(row, '::before')
-        return { top: style.borderTopStyle, width: style.width }
-      })
-      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor }, rails, childRails, joins }
+      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor }, groups }
     })
-    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)' || probe.rails.length !== 3 || probe.rails.some((rail) => !rail.containerIsRow || rail.left === 'none' || rail.bottom === 'none' || rail.insetBottom === '0px' || rail.insetBottom === `${rail.rowHeight}px` || rail.width === '0px') || probe.childRails.length !== 6 || probe.childRails.some((rail) => rail === 'none') || probe.joins.length !== 7 || probe.joins.some((join) => join.top === 'none' || join.width === '0px')) fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph/connected-rail probe ${JSON.stringify(probe)}`)
+    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
+    assertStaircaseGeometry(probe.groups, `${theme}/${viewport.id}/share`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)

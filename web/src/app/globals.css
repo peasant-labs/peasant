@@ -688,46 +688,86 @@ textarea::placeholder {
   pointer-events: none;
 }
 
-/* Each hierarchy row owns only its short elbow. Descendants start a new,
-   independently indented elbow, so no parent rail spans its whole subtree. */
-.share-hierarchy-rail {
+/* Single-spine staircase connectors for the Share hierarchy.
+
+   The connectors are drawn by the hierarchy ROWS, never by containers and never
+   as isolated per-row elbows. Every sibling list shares one continuous vertical
+   spine at a fixed rail column; each row turns a horizontal tee into its own
+   checkbox centre; and the last child of a list stops the spine exactly at its
+   tee. Each nested list indents by one constant step so a child's spine column
+   sits directly under its parent row's checkbox centre — the staircase.
+
+   Geometry (all token-derived, radius 0, thin hairlines):
+     --share-tree-step = tee reach (--sp-4, 16px) + half a 16px checkbox (8px)
+                       = --sp-5 (24px). This is both the indent between levels
+                         and the parent-checkbox-centre offset, so the child
+                         spine lands under the parent checkbox by construction.
+     --share-tree-tee  = --sp-4 (16px): the row's own left padding, so the tee
+                         spans exactly from the spine column to the checkbox. */
+.share-tree {
+  --share-tree-step: var(--sp-5);
+  --share-tree-tee: var(--sp-4);
   position: relative;
-  padding-left: var(--sp-4);
+  padding-left: var(--share-tree-step);
 }
-.share-hierarchy-rail::before {
+/* Each list member owns one full-height spine segment at the group's rail
+   column (its own left edge). Consecutive members abut into one continuous
+   spine because sibling boxes are flush. */
+.share-tree__node {
+  position: relative;
+}
+/* The tree's list members are <section>s so each is an accessible region, but
+   the global `section { padding: 0 var(--gutter) }` content gutter would push a
+   header away from its own spine column. Drop it on non-leaf nodes so the spine
+   (node left edge), the tee, and the header share one rail column; the leaf rows
+   are <div>s that keep their own row padding. */
+.share-tree__node:not(.share-tree__leaf) {
+  padding-left: 0;
+  padding-right: 0;
+}
+.share-tree__node::before {
   position: absolute;
   top: 0;
-  bottom: 50%;
+  bottom: 0;
   left: 0;
-  width: var(--sp-4);
-  border-bottom: thin solid var(--rule);
+  width: 0;
   border-left: thin solid var(--rule);
   content: '';
   pointer-events: none;
 }
-.share-hierarchy-children {
-  position: relative;
-  margin-left: var(--sp-4);
-  padding-left: var(--sp-4);
-}
-.share-hierarchy-children::before {
-  position: absolute;
-  top: 0;
-  bottom: 50%;
-  left: 0;
-  border-left: thin solid var(--rule);
-  content: '';
-  pointer-events: none;
-}
-.share-hierarchy-child-row {
+/* Every row turns a horizontal tee into its checkbox. items-center keeps the
+   checkbox centred, so top:50% lands on the checkbox centre even when a row
+   wraps on a narrow viewport. */
+.share-tree__row {
   position: relative;
 }
-.share-hierarchy-child-row::before {
+.share-tree__row::after {
   position: absolute;
   top: 50%;
-  left: calc(-1 * var(--sp-4));
-  width: var(--sp-4);
+  left: 0;
+  width: var(--share-tree-tee);
+  height: 0;
   border-top: thin solid var(--rule);
+  content: '';
+  pointer-events: none;
+}
+/* Last leaf: stop its own spine exactly at its tee (checkbox centre). */
+.share-tree__node.share-tree__leaf:last-child::before {
+  bottom: auto;
+  height: 50%;
+}
+/* Last non-leaf: drop the full-height segment and let the header alone draw the
+   terminating spine from the list top down to its tee. */
+.share-tree__node:not(.share-tree__leaf):last-child::before {
+  content: none;
+}
+.share-tree__node:not(.share-tree__leaf):last-child > .share-tree__row::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 50%;
+  width: 0;
+  border-left: thin solid var(--rule);
   content: '';
   pointer-events: none;
 }
