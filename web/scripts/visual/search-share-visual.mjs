@@ -134,7 +134,7 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
       const toolbar = chooser.querySelector('button')
       return { labels, locations, branches, checkboxes: boxes.length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focus: boxes[0] ? getComputedStyle(boxes[0]).outlineStyle : '' }
     })
-    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 4 || probe.selected !== 1 || probe.toolbar !== 'select all' || probe.overflow) fail(`${theme}/${viewport.id}/share: hierarchy/state probe ${JSON.stringify(probe)}`)
+    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 5 || probe.selected !== 1 || probe.toolbar !== 'select all' || probe.overflow) fail(`${theme}/${viewport.id}/share: hierarchy/state probe ${JSON.stringify(probe)}`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)

@@ -60,17 +60,21 @@ sessions:
 discovery:
   - sessionId: sess-visual-search-001
     locationLabel: worktrees/engine-main
+    repositoryLocationId: rl-engine-main
     branch: main
     selectionStatus: selected
   - sessionId: sess-visual-search-002
     locationLabel: worktrees/engine-feature
+    repositoryLocationId: rl-engine-feature
     branch: feat/retry-observability
     selectionStatus: unselected
   - sessionId: sess-visual-share-003
     locationLabel: worktrees/engine-feature
+    repositoryLocationId: rl-engine-feature
     branch: feat/retry-observability
     selectionStatus: selected
   - sessionId: sess-visual-share-004
     locationLabel: forks/engine-docs
+    repositoryLocationId: rl-engine-docs
     branch: docs/worker-guide
     selectionStatus: unselected

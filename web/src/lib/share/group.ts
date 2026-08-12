@@ -80,9 +80,9 @@ export function groupShareHierarchy(sessions: ShareHierarchySession[]): ShareHie
       project = { key, projectName: session.projectName, locations: [] };
       projects.set(key, project);
     }
-    let location = project.locations.find((item) => item.locationLabel === session.locationLabel);
+    let location = project.locations.find((item) => item.repositoryLocationId === session.repositoryLocationId);
     if (!location) {
-      location = { locationLabel: session.locationLabel, branches: [] };
+      location = { repositoryLocationId: session.repositoryLocationId, locationLabel: session.locationLabel, branches: [] };
       project.locations.push(location);
     }
     let branch = location.branches.find((item) => item.branch === session.branch);

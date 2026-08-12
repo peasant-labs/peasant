@@ -18,8 +18,8 @@ function formatDate(iso: string): string {
 
 /**
  * Secondary metadata for one session row, shown in the item's `meta` slot.
- * Token totals are NOT included here — the GroupedMultiSelect renders its own
- * per-item token column. The share-lifecycle status is shown only when it is
+ * Token totals are rendered alongside this metadata in the mounted hierarchy.
+ * The share-lifecycle status is shown only when it is
  * something other than the default (`new`), and the heuristic outcome only when
  * one was computed — so a clean, newly-discovered session reads as `id · date`.
  */
@@ -31,11 +31,9 @@ function sessionMeta(s: ShareSession): string {
 }
 
 // ---------------------------------------------------------------------------
-// Session picker — project-grouped, tri-state multi-select. The selection
-// contract is unchanged (session-id Set in/out); the body is the fairtrade
-// GroupedMultiSelect (project rows → groups, sessions → items, the old
-// session-count Badge → the group meta tally, the per-session Checkboxes → the
-// tri-state boxes). The wizard's Continue control stays here as step chrome.
+// Session picker — project → repository location → branch → session hierarchy.
+// Selection remains an eligible session-id Set; project controls preserve the
+// prior tri-state cascade while nested rows explain repository identity.
 // ---------------------------------------------------------------------------
 
 interface SessionPickerProps {
@@ -71,6 +69,14 @@ export function SessionPicker({
     [selectableIds, onSelectionChange],
   );
 
+  const toggleGroup = useCallback((ids: string[]) => {
+    const eligible = ids.filter((id) => selectableIds.has(id));
+    const allSelected = eligible.length > 0 && eligible.every((id) => selectedIds.has(id));
+    const next = new Set(selectedIds);
+    for (const id of eligible) allSelected ? next.delete(id) : next.add(id);
+    handleChange(next);
+  }, [handleChange, selectableIds, selectedIds]);
+
   const selectedCount = selectedIds.size;
   const selectedTokens = sessions.reduce((total, session) => selectedIds.has(session.id) ? total + session.totalTokens : total, 0);
   const selectedTokensLabel = selectedTokens >= 1000 ? `${Math.round(selectedTokens / 1000)}k` : String(selectedTokens);
@@ -101,9 +107,15 @@ export function SessionPicker({
         {groups.map((project) => {
           const cleanName = displayProject(project.projectName);
           const fullPath = decodeProjectPath(project.projectName);
+          const projectIds = project.locations.flatMap((location) => location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)));
+          const eligibleProjectIds = projectIds.filter((id) => selectableIds.has(id));
+          const projectSelectedCount = eligibleProjectIds.filter((id) => selectedIds.has(id)).length;
           return <section key={project.key} className="border-b border-rule last:border-b-0" aria-label={`project ${cleanName}`}>
-            <h2 className="px-4 py-3 font-mono font-semibold" title={fullPath !== cleanName ? fullPath : undefined}>{cleanName}</h2>
-            {project.locations.map((location) => <section key={location.locationLabel} className="ml-4 border-l border-rule" aria-label={`repository location ${location.locationLabel}`}>
+            <h2 className="px-4 py-3 font-mono font-semibold flex items-center gap-3" title={fullPath !== cleanName ? fullPath : undefined}>
+              <Checkbox checked={eligibleProjectIds.length > 0 && projectSelectedCount === eligibleProjectIds.length} aria-checked={projectSelectedCount > 0 && projectSelectedCount < eligibleProjectIds.length ? 'mixed' : undefined} disabled={eligibleProjectIds.length === 0} onChange={() => toggleGroup(projectIds)} aria-label={`select project ${cleanName}`} />
+              {cleanName}
+            </h2>
+            {project.locations.map((location) => <section key={location.repositoryLocationId} className="ml-4 border-l border-rule" aria-label={`repository location ${location.locationLabel}`}>
               <h3 className="px-4 py-2 font-mono text-sm text-ink-2">repository location · {location.locationLabel}</h3>
               {location.branches.map((branch) => <section key={branch.branch} className="ml-4 border-l border-rule" aria-label={`branch ${branch.branch || 'unknown'}`}>
                 <h4 className="px-4 py-2 font-mono text-sm text-ink-3">branch · {branch.branch || 'unknown'}</h4>

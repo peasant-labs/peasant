@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { groupShareHierarchy } from './group';
 import type { ShareHierarchySession } from './types';
 
-interface FixtureRow { id: string; projectName: string; locationLabel: string; branch: string }
+interface FixtureRow { id: string; projectName: string; locationLabel: string; repositoryLocationId: string; branch: string }
 interface Fixture { sessions: FixtureRow[] }
 
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/lib/share/testdata/hierarchy.yaml'), 'utf8')) as Fixture;

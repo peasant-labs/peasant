@@ -30,6 +30,7 @@ export interface ShareSession {
 
 export interface ShareHierarchySession extends ShareSession {
   locationLabel: string;
+  repositoryLocationId: string;
   branch: string;
 }
 
@@ -39,6 +40,7 @@ export interface ShareBranchGroup {
 }
 
 export interface ShareLocationGroup {
+  repositoryLocationId: string;
   locationLabel: string;
   branches: ShareBranchGroup[];
 }
@@ -49,8 +51,8 @@ export interface ShareHierarchyProject {
   locations: ShareLocationGroup[];
 }
 
-export interface ShareDiscoveryResult {
-  sessions: ShareSession[];
+export interface ShareDiscoveryResult<TSession extends ShareSession = ShareSession> {
+  sessions: TSession[];
   counts: Record<ShareStatus, number>;
 }
 

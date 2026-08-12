@@ -26,7 +26,7 @@ import { groupByProject } from '@/lib/share/group';
 import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
-import { decodeDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
+import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 
 // Prior-version Contribute wizard: superseded by the fairtrade graph shell lift,
 // a deprecation candidate retained for evidence exits until its replacement lands.
@@ -70,10 +70,10 @@ function countByStatus(sessions: ShareSession[]): Record<ShareSession['shareStat
   return counts;
 }
 
-async function fetchRealSessions(): Promise<ShareDiscoveryResult> {
-  const [response, discoveryResponse] = await Promise.all([
+async function fetchRealSessions(): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
+  const [response, metadata] = await Promise.all([
     fetch(`${getApiBaseUrl()}/api/v1/sessions`),
-    fetch(`${getApiBaseUrl()}/api/v1/web/discovery`),
+    fetchDiscovery(),
   ]);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
@@ -86,16 +86,12 @@ async function fetchRealSessions(): Promise<ShareDiscoveryResult> {
     }
     throw new Error(`Session discovery failed while loading the Share chooser: ${detail}`);
   }
-  if (!discoveryResponse.ok) {
-    throw new Error(`Share hierarchy discovery failed while loading GET /api/v1/web/discovery: the server returned HTTP ${discoveryResponse.status}. No session can be grouped safely. Retry; if this repeats, update or restart Peasant.`);
-  }
   const payload = await response.json();
   const summaries: BackendSessionSummary[] = payload.sessions ?? [];
-  const metadata = decodeDiscovery(await discoveryResponse.json());
   const sessions: ShareHierarchySession[] = summaries.map((summary) => {
     const session = mapBackendToShareSession(summary);
     const item = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
-    return { ...session, locationLabel: item.locationLabel, branch: item.branch };
+    return { ...session, locationLabel: item.locationLabel, repositoryLocationId: item.repositoryLocationId, branch: item.branch };
   });
   return {
     sessions,
@@ -183,7 +179,7 @@ export function ShareWizardClient() {
   const [labels, setLabels] = useState<LabelSelection>(() => emptyLabelSelection());
 
   // Config-aware data fetching
-  const [discovery, setDiscovery] = useState<ShareDiscoveryResult | null>(null);
+  const [discovery, setDiscovery] = useState<ShareDiscoveryResult<ShareHierarchySession> | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -209,7 +205,7 @@ export function ShareWizardClient() {
       if (useMock) {
         setFetchError(null);
         const result = fetchMockSessions();
-        setDiscovery({ ...result, sessions: result.sessions.map((session) => ({ ...session, locationLabel: 'mock repository', branch: 'main' })) });
+        setDiscovery({ ...result, sessions: result.sessions.map((session) => ({ ...session, locationLabel: 'mock repository', repositoryLocationId: `mock:${session.projectHash || session.projectName}`, branch: 'main' })) });
       } else {
         fetchRealSessions()
           .then((result) => {
@@ -230,6 +226,11 @@ export function ShareWizardClient() {
   // is the only thing that preselects, and only that one session.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const selectableIds = useMemo(
+    () => new Set(discovery?.sessions.filter((session) => session.shareStatus === 'new' || session.shareStatus === 'updated').map((session) => session.id) ?? []),
+    [discovery],
+  );
+
   useEffect(() => {
     if (!discovery) return;
 
@@ -237,7 +238,7 @@ export function ShareWizardClient() {
       deepLinkSessionId &&
       discovery.sessions.find((s) => s.id === deepLinkSessionId);
 
-    if (linked) {
+    if (linked && selectableIds.has(linked.id)) {
       // The deep-link is a drill-in: select exactly that one session, not its
       // whole project.
       const project = groupByProject(discovery.sessions).find((p) =>
@@ -253,7 +254,7 @@ export function ShareWizardClient() {
     if (deepLinkStep) {
       setStep(deepLinkStep);
     }
-  }, [discovery, deepLinkSessionId, deepLinkStep]);
+  }, [discovery, deepLinkSessionId, deepLinkStep, selectableIds]);
 
   // Redaction level. It starts - and stays - at the single level this version
   // offers.
@@ -424,7 +425,7 @@ export function ShareWizardClient() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => setSelectedIds(new Set(evidenceSessions.map((s) => s.id)))}
+                  onClick={() => setSelectedIds(new Set(evidenceSessions.map((s) => s.id).filter((id) => selectableIds.has(id))))}
                 >
                   {evidenceSessions.length === 1
                     ? 'Select this session'
@@ -437,7 +438,7 @@ export function ShareWizardClient() {
           {/* Step 1 — Choose (projects). Starts empty + select-all. */}
           {step === 'select' && (
             <SessionPicker
-              sessions={chooseSessions as ShareHierarchySession[]}
+              sessions={chooseSessions}
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
               onNext={goNext}
