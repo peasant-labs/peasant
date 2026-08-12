@@ -386,7 +386,7 @@ export function ShareWizardClient() {
           Uses the fairtrade swz layout classes (via @peasant-labs/fairtrade/components.css
           already imported in layout.tsx). Forward navigation lives inside each step
           body's own Continue/Submit button; the footer owns back + step count. */}
-      <section className="swz" aria-label="contribute to the commons" data-tour="share-nav">
+        <section className="swz share-wizard" aria-label="contribute to the commons" data-tour="share-nav">
 
         {/* Step rail — completed = olive+check, current = amber, locked = dim/disabled. */}
         <div className="swz-head">

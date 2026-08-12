@@ -729,3 +729,24 @@ textarea::placeholder {
 .share-subtree {
   padding-left: var(--sp-5);
 }
+
+/* Share wizard scroll ownership. The fairtrade `.swz-foot` is `position: sticky;
+   bottom: 0`; over a document-flow body taller than the viewport it would overlay
+   the tail of the Choose list (rows + the hierarchy rail passing under it). Bound
+   the wizard to the viewport under the app chrome (header + the breadcrumb/title
+   block above it ≈ 120px + the page bottom padding) and give the step body its
+   own scroll, so the body clips its own overflow and the action footer always
+   sits BELOW the content — never intersecting a row or the rail — in the live
+   page. Mirrors the bounded sticky-scroll pattern used elsewhere (map RailShell).
+   The flex column distributes head/body/foot without hard-coding their heights. */
+.share-wizard {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--app-header-height, 4rem) - 176px);
+  max-height: calc(100dvh - var(--app-header-height, 4rem) - 176px);
+}
+.share-wizard .swz-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}

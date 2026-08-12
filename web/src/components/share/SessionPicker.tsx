@@ -251,8 +251,9 @@ export function SessionPicker({
     <div className="flex flex-col gap-4">
       {/* Step chrome — the forward control. Stays here (the wizard owns
           next/back); the select-all + running tally live inside the picker
-          body's own toolbar. */}
-      <div className="sticky top-16 z-30 flex items-center justify-end px-5 py-3 bg-surface border border-rule">
+          body's own toolbar. Sticks to the top of the wizard body's own scroll
+          area (top-0), which owns the Choose-list scroll under the bounded shell. */}
+      <div className="sticky top-0 z-30 flex items-center justify-end px-5 py-3 bg-surface border border-rule">
         <Button
           variant="primary"
           size="sm"

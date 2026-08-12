@@ -376,14 +376,73 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     })
     if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
     assertSingleRail(probe, `${theme}/${viewport.id}/share`)
+
+    // Live-DOM footer containment: the wizard body owns the Choose-list scroll,
+    // so the sticky action footer must sit BELOW that scroll region and the last
+    // row must be reachable, fully visible, above the footer — no row, checkbox,
+    // text, or rail segment ever renders under the footer in the mounted page.
+    const footing = await page.evaluate(() => {
+      const rect = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, left: b.left, right: b.right } }
+      const body = document.querySelector('.swz-body')
+      const foot = document.querySelector('.swz-foot')
+      const svg = document.querySelector('svg.share-rail')
+      const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
+      if (!body || !foot || !svg || !chooser) return { ok: false, why: 'missing body/foot/svg/chooser' }
+      const lastInput = [...chooser.querySelectorAll('[aria-label^="select session "]')].pop()
+      const lastRow = lastInput.closest('h2, h3, h4, .px-4') || lastInput.parentElement
+      const measureAt = (scrollTop) => {
+        body.scrollTop = scrollTop
+        const b = rect(body), f = rect(foot)
+        // a row/svg counts as "under the footer" only if its VISIBLE part (clipped
+        // to the scroll viewport) intersects the footer band
+        const visibleIntersectsFoot = (el) => {
+          const r = el.getBoundingClientRect()
+          const top = Math.max(r.top, b.top), bottom = Math.min(r.bottom, b.bottom)
+          return bottom > top && bottom > f.top + 0.5 && top < f.bottom
+        }
+        const rows = [...chooser.querySelectorAll('[aria-label^="select project "], [aria-label^="select repository location "], [aria-label^="select branch "], [aria-label^="select session "]')].map((i) => i.closest('h2, h3, h4, .px-4') || i.parentElement)
+        return {
+          bodyBottom: +b.bottom.toFixed(1), footTop: +f.top.toFixed(1),
+          scrollRegionAboveFoot: b.bottom <= f.top + 1,
+          rowsUnderFoot: rows.filter(visibleIntersectsFoot).length,
+          svgUnderFoot: visibleIntersectsFoot(svg),
+        }
+      }
+      const top = measureAt(0)
+      const bottom = measureAt(body.scrollHeight)
+      const lr = rect(lastRow), b = rect(body), f = rect(foot)
+      return {
+        ok: true, top, bottom,
+        lastRowVisibleAboveFoot: lr.top >= b.top - 1 && lr.bottom <= b.bottom + 1 && lr.bottom <= f.top + 1,
+        bodyScrolls: body.scrollHeight > body.clientHeight + 1,
+      }
+    })
+    if (!footing.ok) fail(`${theme}/${viewport.id}/share: footer containment probe ${JSON.stringify(footing)}`)
+    for (const [where, m] of [['top', footing.top], ['bottom', footing.bottom]]) {
+      if (!m.scrollRegionAboveFoot) fail(`${theme}/${viewport.id}/share: scroll region bottom ${m.bodyBottom} overlaps the sticky footer top ${m.footTop} (scroll=${where})`)
+      if (m.rowsUnderFoot !== 0) fail(`${theme}/${viewport.id}/share: ${m.rowsUnderFoot} hierarchy row(s) render under the footer (scroll=${where})`)
+      if (m.svgUnderFoot) fail(`${theme}/${viewport.id}/share: the rail svg renders under the footer (scroll=${where})`)
+    }
+    if (!footing.lastRowVisibleAboveFoot) fail(`${theme}/${viewport.id}/share: the last row is not fully visible above the footer when scrolled to the bottom`)
+
+    // Full-hierarchy evidence: expand the bounded scroll for the shot (sticky
+    // resolved to its true end position) so every row + the single rail render
+    // with the footer below them, unclipped — the honest full list a user reaches
+    // by scrolling. This mutates only the capture, never shipped behaviour.
+    const captureStyle = await page.addStyleTag({ content: `
+      .share-wizard { max-height: none !important; }
+      .share-wizard .swz-body { overflow: visible !important; max-height: none !important; }
+      .share-wizard .sticky, .swz-foot { position: static !important; }
+    ` })
+    await pause(120)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
-    // Supplementary honest view: a plain viewport screenshot scrolled to the
-    // list bottom (NOT captureBeyondViewport). The full-`main` shot expands the
-    // viewport for beyond-viewport capture, which re-resolves the sticky wizard
-    // footer over the tail of a tall list (a composite artifact, not a live
-    // overlap); at a real scroll position the footer sits below the last row
-    // with its own opaque background, which this shot shows faithfully.
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await page.evaluate((el) => el.remove(), captureStyle)
+    await captureStyle.dispose().catch(() => {})
+
+    // Live bounded view: body scrolled to its end so the last row sits just above
+    // the sticky footer — the real mounted layout, footer never overlapping.
+    await pause(120)
+    await page.evaluate(() => { const b = document.querySelector('.swz-body'); if (b) b.scrollTop = b.scrollHeight })
     await pause(150)
     mkdirSync(join(OUT, theme, viewport.id), { recursive: true })
     await page.screenshot({ path: join(OUT, theme, viewport.id, 'share-list.png') })
