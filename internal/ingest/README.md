@@ -137,6 +137,22 @@ The source contracts are `RepositoryIdentityResolver` in `git.go`, the identity 
 
 ---
 
+## Claude Discovery Artifacts
+
+Claude Code stores conversation transcripts and non-conversation artifacts under
+`~/.claude/projects`. Known artifacts include `summary` records and
+`file-history-snapshot` records. File-history records reference revisions in
+`~/.claude/file-history/<uuid>/`; neither artifact type contains user or assistant
+conversation turns.
+
+Claude discovery requires at least one valid top-level `user` or `assistant` record. It applies
+the same rule to root and filesystem-nested subagent paths, so summary-only, snapshot-only, and
+mixed summary/snapshot artifacts never reach kickstart, ingest, or the local store. Discovery
+fails open for unreadable, empty, or malformed files: a future Claude transcript format must not
+be silently discarded merely because Peasant cannot classify it yet.
+
+---
+
 ## Execution Timeline
 
 ```

@@ -1,0 +1,43 @@
+declared_cases: 6
+cases:
+  - name: root file history sidecar is excluded
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}'
+  - name: mixed snapshot and conversation remains discoverable
+    files:
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","message":{"role":"user","content":"continue the conversation"}}'
+    expected:
+      - 22222222-2222-4222-8222-222222222222
+  - name: summary-only artifact is excluded
+    files:
+      - path: -workspace/44444444-4444-4444-8444-444444444444.jsonl
+        lines:
+          - '{"type":"summary","summary":"Project Vision Alignment Review","leafUuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}'
+  - name: mixed summary and file history artifact is excluded
+    files:
+      - path: -workspace/55555555-5555-4555-8555-555555555555.jsonl
+        lines:
+          - '{"type":"summary","summary":"Agent Workflow Parallelism","leafUuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}'
+          - '{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{".claude/agents/worker.md":{"version":2}}}}'
+  - name: malformed snapshot sidecar remains discoverable
+    files:
+      - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+        lines:
+          - '{"type":"file-history-snapshot","snapshot":'
+    expected:
+      - 33333333-3333-4333-8333-333333333333
+  - name: nested file history sidecar is excluded
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"root"}}'
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
+        lines:
+          - '{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}'
+    expected:
+      - 11111111-1111-4111-8111-111111111111
