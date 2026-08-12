@@ -30,55 +30,113 @@ const VIEWPORTS = [{ id: 'desktop', width: 1440, height: 1000 }, { id: 'mobile',
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const fail = (message) => { throw new Error(`Search/share visual harness failed: ${message}`) }
 
-// Assert the reconstructed connector geometry describes one continuous
-// single-spine staircase per sibling list, not the old fragmented elbows.
-// `groups` are the per-list measurements returned from the in-page probe.
-function assertStaircaseGeometry(groups, label) {
-  const EPS_X = 1.0      // constant spine column / staircase alignment
-  const EPS_Y = 1.5      // segment contiguity, termination, tee-to-checkbox-centre
-  const TEE_REACH = 3.5  // tee end vs checkbox edge (label padding slack)
-  const STEP_EPS = 1.25  // per-level indent must be constant within this
-  const bad = (m) => fail(`${label}: staircase geometry — ${m}`)
-  // 1 locations list + 3 branch lists + 3 session lists for this fixture.
-  if (groups.length !== 7) bad(`expected 7 sibling lists (1 locations + 3 branches + 3 sessions), saw ${groups.length}`)
-  for (const [gi, g] of groups.entries()) {
-    if (!g.count) bad(`group ${gi} has no rows`)
-    const xs = g.nodes.map((n) => n.spineX)
-    const x0 = xs[0]
-    if (xs.some((x) => Math.abs(x - x0) > EPS_X)) bad(`group ${gi} spine column not constant: ${JSON.stringify(xs)}`)
-    if (g.nodes.some((n) => !n.spineDrawn || !n.teeDrawn)) bad(`group ${gi} has an undrawn spine or tee: ${JSON.stringify(g.nodes)}`)
-    for (const [ni, n] of g.nodes.entries()) {
-      if (Math.abs(n.teeY - n.cbCenterY) > EPS_Y) bad(`group ${gi} node ${ni} tee y ${n.teeY} != checkbox centre ${n.cbCenterY}`)
-      if (Math.abs(n.teeX1 - n.cbLeft) > TEE_REACH) bad(`group ${gi} node ${ni} tee end ${n.teeX1} does not reach checkbox edge ${n.cbLeft}`)
-      if (n.teeX0 > n.teeX1 - 1) bad(`group ${gi} node ${ni} tee has no rightward span (${n.teeX0}..${n.teeX1})`)
-      if (Math.abs(n.teeX0 - x0) > EPS_X) bad(`group ${gi} node ${ni} tee starts at ${n.teeX0}, off the spine column ${x0}`)
-    }
-    // consecutive segments abut into one continuous spine (no gaps)
-    for (let i = 0; i < g.nodes.length - 1; i++) {
-      if (Math.abs(g.nodes[i].sBot - g.nodes[i + 1].sTop) > EPS_Y) bad(`group ${gi} spine gap between rows ${i} and ${i + 1}: ${g.nodes[i].sBot} vs ${g.nodes[i + 1].sTop}`)
-    }
-    // last child terminates the spine exactly at its tee
-    const last = g.nodes[g.nodes.length - 1]
-    if (Math.abs(last.sBot - last.teeY) > EPS_Y) bad(`group ${gi} last spine ends at ${last.sBot}, not its tee ${last.teeY}`)
-    // nothing floats above the list top or past the terminating tee
-    for (const [ni, n] of g.nodes.entries()) {
-      if (n.sBot > last.teeY + EPS_Y) bad(`group ${gi} node ${ni} spine ${n.sBot} runs past the last tee ${last.teeY}`)
-      if (n.sTop < g.groupTop - EPS_Y) bad(`group ${gi} node ${ni} spine ${n.sTop} rises above group top ${g.groupTop}`)
-    }
-    // staircase: the list's spine sits under its parent row's checkbox centre
-    if (g.parentCheckboxCenterX == null) bad(`group ${gi} has no parent checkbox anchor`)
-    if (Math.abs(x0 - g.parentCheckboxCenterX) > EPS_Y) bad(`group ${gi} spine ${x0} not under parent checkbox centre ${g.parentCheckboxCenterX}`)
+// Parse an absolute M/L path into its ordered vertices. Returns an error string
+// if the path uses anything other than a single subpath of straight segments.
+function parseRailPath(d) {
+  const tokens = d.trim().split(/[\s,]+/).filter(Boolean)
+  const pts = []
+  let moveCount = 0
+  for (let i = 0; i < tokens.length;) {
+    const cmd = tokens[i++]
+    if (cmd === 'M') moveCount++
+    else if (cmd !== 'L') return { error: `unexpected path command ${JSON.stringify(cmd)}` }
+    const x = Number(tokens[i++]); const y = Number(tokens[i++])
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { error: `non-numeric coordinate near token ${i}` }
+    pts.push({ x, y })
   }
-  // one constant indent step across every nesting level
-  const levels = []
-  for (const x of groups.map((g) => g.nodes[0].spineX).sort((a, b) => a - b)) {
-    if (!levels.length || x - levels[levels.length - 1] > EPS_Y) levels.push(x)
+  return { pts, moveCount }
+}
+
+// Assert the connector is ONE continuous Railway-style line: a single measured
+// SVG path that threads every ordered row anchor, stepping one column in/out per
+// depth change, with exactly one vertical at any y and no legacy rail elements.
+function assertSingleRail(probe, label) {
+  const EPS = 1.25      // axis-alignment, column snap, anchor/vertex match
+  const CAP_MIN = 2, CAP_MAX = 12  // start/end cap length window (drawn 6px)
+  const bad = (m) => fail(`${label}: single-rail geometry — ${m}`)
+
+  if (!probe.hasSvg) bad('no <svg class="share-rail"> connector layer mounted')
+  if (probe.pathCount !== 1) bad(`expected exactly one connector <path>, saw ${probe.pathCount}`)
+  if (probe.legacy !== 0) bad(`legacy multi-rail elements still present (count ${probe.legacy}); the .share-tree*/.share-hierarchy-* model must be gone`)
+  if (!probe.d) bad('connector path has no geometry (empty d)')
+
+  const parsed = parseRailPath(probe.d)
+  if (parsed.error) bad(`path parse: ${parsed.error}`)
+  const pts = parsed.pts
+  if (parsed.moveCount !== 1) bad(`path must be one connected subpath (single M), saw ${parsed.moveCount} M commands`)
+  if (pts.length < 3) bad(`path too short to trace the hierarchy (${pts.length} vertices)`)
+  // Every segment is axis-aligned (square steps only).
+  for (let i = 1; i < pts.length; i++) {
+    const dx = Math.abs(pts[i].x - pts[i - 1].x), dy = Math.abs(pts[i].y - pts[i - 1].y)
+    if (dx > EPS && dy > EPS) bad(`segment ${i} is diagonal (dx ${dx.toFixed(2)}, dy ${dy.toFixed(2)}) — only vertical/horizontal steps allowed`)
   }
-  if (levels.length < 2) bad(`expected multiple staircase levels, saw ${levels.length}`)
-  const deltas = levels.slice(1).map((x, i) => x - levels[i])
-  const dmin = Math.min(...deltas), dmax = Math.max(...deltas)
-  if (dmin < 8) bad(`nesting inset ${dmin} too small to read as a staircase`)
-  if (dmax - dmin > STEP_EPS) bad(`nesting inset delta not constant across levels: ${JSON.stringify(deltas)}`)
+
+  const anchors = probe.anchors
+  if (anchors.length !== 11) bad(`expected 11 ordered row anchors (1 project + 3 locations + 3 branches + 4 sessions), saw ${anchors.length}`)
+  // Anchors appear in document order top-to-bottom (monotonic y).
+  for (let i = 1; i < anchors.length; i++) {
+    if (anchors[i].y <= anchors[i - 1].y + EPS) bad(`anchor ${i} y ${anchors[i].y} is not below anchor ${i - 1} y ${anchors[i - 1].y}`)
+  }
+  // One column per depth; every anchor of a depth shares that column x.
+  const byDepth = new Map()
+  for (const a of anchors) { const l = byDepth.get(a.depth) ?? []; l.push(a.x); byDepth.set(a.depth, l) }
+  const column = new Map()
+  for (const [depth, xs] of byDepth) {
+    const sorted = xs.slice().sort((p, q) => p - q)
+    const col = sorted[Math.floor(sorted.length / 2)]
+    if (xs.some((x) => Math.abs(x - col) > EPS)) bad(`depth ${depth} anchors are not one column: ${JSON.stringify(xs)}`)
+    column.set(depth, col)
+  }
+  // Depth columns increase with depth by one constant step (the staircase read).
+  const depths = [...column.keys()].sort((a, b) => a - b)
+  const steps = depths.slice(1).map((d, i) => column.get(d) - column.get(depths[i]))
+  if (steps.length && (Math.min(...steps) < 8 || Math.max(...steps) - Math.min(...steps) > EPS)) bad(`depth columns are not one constant indent step: ${JSON.stringify(steps)}`)
+
+  // Each anchor coincides with a path vertex at (column[depth], anchorY), and
+  // those anchor-vertices occur in the path in document order.
+  const anchorVertexIndex = []
+  for (const [ai, a] of anchors.entries()) {
+    const cx = column.get(a.depth)
+    const idx = pts.findIndex((p, i) => (anchorVertexIndex.length === 0 || i > anchorVertexIndex[anchorVertexIndex.length - 1]) && Math.abs(p.x - cx) <= EPS && Math.abs(p.y - a.y) <= EPS)
+    if (idx < 0) bad(`anchor ${ai} (depth ${a.depth}, x ${cx.toFixed(1)}, y ${a.y.toFixed(1)}) has no matching path vertex in order`)
+    anchorVertexIndex.push(idx)
+  }
+
+  // Start/end caps: the path opens just above the first anchor and closes just
+  // below the last, collinear with the adjacent vertical (no extra branch).
+  const firstA = anchors[0], lastA = anchors[anchors.length - 1]
+  const head = pts[0], tail = pts[pts.length - 1]
+  if (Math.abs(head.x - column.get(firstA.depth)) > EPS) bad(`start cap x ${head.x} off the first depth column ${column.get(firstA.depth)}`)
+  const headGap = firstA.y - head.y
+  if (headGap < CAP_MIN || headGap > CAP_MAX) bad(`start cap must sit ${CAP_MIN}-${CAP_MAX}px above the first anchor, gap ${headGap.toFixed(1)}`)
+  if (Math.abs(tail.x - column.get(lastA.depth)) > EPS) bad(`end cap x ${tail.x} off the last depth column ${column.get(lastA.depth)}`)
+  const tailGap = tail.y - lastA.y
+  if (tailGap < CAP_MIN || tailGap > CAP_MAX) bad(`end cap must sit ${CAP_MIN}-${CAP_MAX}px below the last anchor, gap ${tailGap.toFixed(1)}`)
+
+  // Exactly one horizontal transition between adjacent rows iff the depth changes.
+  const isHorizontal = (i) => Math.abs(pts[i].y - pts[i - 1].y) <= EPS && Math.abs(pts[i].x - pts[i - 1].x) > EPS
+  for (let a = 1; a < anchors.length; a++) {
+    const from = anchorVertexIndex[a - 1], to = anchorVertexIndex[a]
+    let horizontals = 0
+    for (let i = from + 1; i <= to; i++) if (isHorizontal(i)) horizontals++
+    const depthChanged = anchors[a].depth !== anchors[a - 1].depth
+    if (horizontals !== (depthChanged ? 1 : 0)) bad(`between rows ${a - 1} and ${a} (depthChanged=${depthChanged}) expected ${depthChanged ? 1 : 0} horizontal step, saw ${horizontals}`)
+  }
+
+  // No parallel rails: at every sampled y the path crosses exactly one vertical.
+  const verticals = []
+  for (let i = 1; i < pts.length; i++) {
+    if (Math.abs(pts[i].x - pts[i - 1].x) <= EPS && Math.abs(pts[i].y - pts[i - 1].y) > EPS) {
+      verticals.push({ x: pts[i].x, y0: Math.min(pts[i].y, pts[i - 1].y), y1: Math.max(pts[i].y, pts[i - 1].y) })
+    }
+  }
+  const samples = []
+  for (let a = 1; a < anchors.length; a++) samples.push((anchors[a - 1].y + anchors[a].y) / 2)
+  samples.push((head.y + firstA.y) / 2, (tail.y + lastA.y) / 2)
+  for (const y of samples) {
+    const crossing = verticals.filter((v) => y > v.y0 + 0.5 && y < v.y1 - 0.5).length
+    if (crossing !== 1) bad(`at y ${y.toFixed(1)} the path crosses ${crossing} vertical segments (expected exactly one — no parallel rails)`)
+  }
 }
 
 function filesBelow(directory) {
@@ -245,68 +303,26 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
       const glyph = glyphs[0]
       const glyphStyle = glyph ? getComputedStyle(glyph) : null
 
-      // --- Single-spine staircase geometry ------------------------------------
-      // Connectors are pseudo-elements on the hierarchy rows. Pseudo-elements
-      // have no getBoundingClientRect, so each connector box is reconstructed
-      // from the host's rect (its rows/nodes carry no border, so the padding
-      // box the pseudo is positioned against coincides with the host rect) plus
-      // the resolved used values getComputedStyle returns for left/top/bottom/
-      // width/height on the pseudo. Every checkbox comparison is against the
-      // real <input> rect so wrapped mobile rows are measured, not assumed.
-      const px = (value) => (value === 'auto' || value == null ? null : parseFloat(value))
-      const rowOf = (node) => (node.classList.contains('share-tree__row') ? node : node.querySelector(':scope > .share-tree__row'))
-      const spineHost = (node, isLast) => (isLast && !node.classList.contains('share-tree__leaf') ? rowOf(node) : node)
-      function measureNode(node, isLast) {
-        const row = rowOf(node)
-        const input = row.querySelector('input[type="checkbox"]')
-        const cb = input.getBoundingClientRect()
-        const host = spineHost(node, isLast)
-        const scs = getComputedStyle(host, '::before')
-        const sr = host.getBoundingClientRect()
-        const sTop = sr.top + (px(scs.top) ?? 0)
-        const sBottomInset = px(scs.bottom)
-        const sHeight = px(scs.height)
-        const sBot = sBottomInset != null ? sr.bottom - sBottomInset : (sHeight != null ? sTop + sHeight : sr.bottom)
-        const spineX = sr.left + (px(scs.left) ?? 0)
-        const tcs = getComputedStyle(row, '::after')
-        const rr = row.getBoundingClientRect()
-        const teeY = rr.top + (px(tcs.top) ?? 0)
-        const teeX0 = rr.left + (px(tcs.left) ?? 0)
-        const teeX1 = teeX0 + (px(tcs.width) ?? 0)
-        return {
-          spineX, sTop, sBot, teeY, teeX0, teeX1,
-          cbCenterY: (cb.top + cb.bottom) / 2, cbLeft: cb.left, cbRight: cb.right,
-          spineDrawn: scs.content !== 'none' && scs.borderLeftStyle !== 'none',
-          teeDrawn: tcs.content !== 'none' && tcs.borderTopStyle !== 'none',
-        }
-      }
-      // Every sibling list is a `.share-tree` whose direct `.share-tree__node`
-      // children are its rows. Record each list plus a checkbox-centre anchor
-      // from the parent row (or the project header for the top list).
-      const groups = [...chooser.querySelectorAll('.share-tree')].map((wrapper) => {
-        const nodes = [...wrapper.children].filter((c) => c.classList.contains('share-tree__node'))
-        const measured = nodes.map((node, i) => measureNode(node, i === nodes.length - 1))
-        const parentNode = wrapper.parentElement.closest('.share-tree__node')
-        let anchorRow = null
-        if (parentNode) anchorRow = rowOf(parentNode)
-        else {
-          const section = wrapper.closest('section[aria-label^="project "]')
-          anchorRow = section ? section.querySelector(':scope > h2') : null
-        }
-        const anchorInput = anchorRow ? anchorRow.querySelector('input[type="checkbox"]') : null
-        const anchorCb = anchorInput ? anchorInput.getBoundingClientRect() : null
-        return {
-          count: measured.length,
-          nodes: measured,
-          groupTop: Math.min(...measured.map((m) => m.sTop)),
-          lastTee: measured[measured.length - 1].teeY,
-          parentCheckboxCenterX: anchorCb ? (anchorCb.left + anchorCb.right) / 2 : null,
-        }
-      })
-      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor }, groups }
+      // --- Single-line Railway-style connector ---------------------------------
+      // The whole hierarchy is traced by ONE measured SVG <path>. Capture that
+      // path's geometry plus the ordered row anchors (each real checkbox centre
+      // and its typed depth, in document order, measured against the SVG's own
+      // box so the coordinates share the path's space, wrapped rows included),
+      // and assert the legacy multi-rail model left nothing behind.
+      const svg = chooser.querySelector('svg.share-rail')
+      const pathEls = [...chooser.querySelectorAll('.share-rail__path')]
+      const legacy = chooser.querySelectorAll('.share-tree, .share-tree__node, .share-tree__row, .share-tree__leaf, .share-hierarchy-rail, .share-hierarchy-children, .share-hierarchy-child-row').length
+      const svgRect = svg ? svg.getBoundingClientRect() : { left: 0, top: 0 }
+      const depthOf = (label) => label.startsWith('select project') ? 0 : label.startsWith('select repository location') ? 1 : label.startsWith('select branch') ? 2 : label.startsWith('select session') ? 3 : -1
+      const anchors = boxes
+        .map((box) => ({ box, depth: depthOf(box.getAttribute('aria-label') || '') }))
+        .filter((entry) => entry.depth >= 0)
+        .map(({ box, depth }) => { const r = box.getBoundingClientRect(); return { depth, x: r.left + r.width / 2 - svgRect.left, y: r.top + r.height / 2 - svgRect.top } })
+
+      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor }, hasSvg: !!svg, pathCount: pathEls.length, legacy, d: pathEls[0]?.getAttribute('d') || '', anchors }
     })
     if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
-    assertStaircaseGeometry(probe.groups, `${theme}/${viewport.id}/share`)
+    assertSingleRail(probe, `${theme}/${viewport.id}/share`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
