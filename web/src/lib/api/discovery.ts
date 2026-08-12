@@ -31,6 +31,14 @@ export function decodeDiscovery(payload: unknown): DiscoveryBySessionId {
   return decoded;
 }
 
+export async function fetchDiscovery(): Promise<DiscoveryBySessionId> {
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/web/discovery`);
+  if (!response.ok) {
+    throw new Error(`Could not load GET /api/v1/web/discovery because the server returned HTTP ${response.status}. No discovery metadata can be used safely. Retry the command palette; if this repeats, restart Peasant.`);
+  }
+  return decodeDiscovery(await response.json());
+}
+
 export function requireDiscoveryItem(discovery: DiscoveryBySessionId, sessionId: string, consumer: string): DiscoveryItem {
   const item = discovery.get(sessionId);
   if (!item) fail(`${consumer} requires exactly one discovery row for session ${JSON.stringify(sessionId)}`);
@@ -40,3 +48,4 @@ export function requireDiscoveryItem(discovery: DiscoveryBySessionId, sessionId:
 function fail(reason: string): never {
   throw new Error(`Could not decode GET /api/v1/web/discovery because ${reason}. No discovery metadata can be used safely. Refresh the page; if this repeats, update or restart Peasant.`);
 }
+import { getApiBaseUrl } from './base';

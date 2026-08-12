@@ -16,18 +16,29 @@ vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle }
 
 const fetchProjectSummaries = vi.fn();
 const fetchSearch = vi.fn();
+const fetchDiscovery = vi.fn();
 const parentVisibleFixture = projectViewerStateFixture('explicit session makes parent visible');
 const PROJECT_HASH = parentVisibleFixture.summary.projects[0].projectHash;
 vi.mock('@/lib/api/map', () => ({
   fetchProjectSummaries: () => fetchProjectSummaries(),
   fetchSearch: (q: string, limit?: number) => fetchSearch(q, limit),
 }));
+vi.mock('@/lib/api/discovery', () => ({
+  fetchDiscovery: () => fetchDiscovery(),
+  requireDiscoveryItem: (discovery: Map<string, unknown>, sessionId: string) => {
+    const item = discovery.get(sessionId);
+    if (!item) throw new Error('requires exactly one discovery row');
+    return item;
+  },
+}));
 
 beforeEach(() => {
   push.mockClear();
   toggle.mockClear();
   fetchSearch.mockReset();
+  fetchDiscovery.mockReset();
   fetchSearch.mockResolvedValue({ query: '', results: [] });
+  fetchDiscovery.mockResolvedValue(new Map());
   fetchProjectSummaries.mockResolvedValue(parentVisibleFixture.summary);
 });
 afterEach(() => cleanup());
@@ -133,6 +144,9 @@ describe('CommandPalette', () => {
         },
       ],
     });
+    fetchDiscovery.mockResolvedValue(new Map([
+      ['sess-9', { sessionId: 'sess-9', locationLabel: 'alpha', branch: 'main', selectionStatus: 'unselected' }],
+    ]));
     open();
     const input = screen.getByRole('combobox');
     fireEvent.change(input, { target: { value: 'pipeline' } });
@@ -140,11 +154,24 @@ describe('CommandPalette', () => {
     await waitFor(() => expect(fetchSearch).toHaveBeenCalledWith('pipeline', 20));
     const hit = await screen.findByText('fix the [pipeline] retry');
     expect(screen.getByText('Messages')).toBeInTheDocument();
+    expect(screen.getByText(/alpha · main · unselected/)).toBeInTheDocument();
 
     fireEvent.mouseDown(hit);
     expect(push).toHaveBeenCalledWith(
       `/projects/${PROJECT_HASH}/sess-9?turn=6`,
     );
+  });
+
+  it('fails closed when a search result has no discovery row', async () => {
+    fetchSearch.mockResolvedValue({ query: 'pipeline', results: [{
+      sessionId: 'missing', project: '/work/alpha-project', projectHash: PROJECT_HASH,
+      entryIndex: 1, role: 'user', snippet: 'pipeline', score: 1,
+    }] });
+    fetchDiscovery.mockResolvedValue(new Map());
+    open();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pipeline' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent(/discovery/i);
+    expect(screen.queryByText('pipeline')).not.toBeInTheDocument();
   });
 
   it('runs the theme action and closes on Escape', () => {
