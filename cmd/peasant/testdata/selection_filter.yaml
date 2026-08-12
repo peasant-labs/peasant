@@ -1,12 +1,11 @@
 # Each case states two things the loader cross-checks against each other:
 #
-#   git_exit       which exit of DiscoveryNeedsGit the configuration reaches,
-#                  DERIVED from the row and compared with the declared token, so
-#                  a row cannot be named for an exit it does not take
+#   git_policy     whether complete-cohort preparation needs project evidence,
+#                  DERIVED from the row and compared with the declared token
 #   expected_match what the selection filter answers — a closed set of three
 #                  tokens, because the matcher is three-valued
 #
-# The (git_exit, expected_match) pair is the second layer beside the row-count
+# The (git_policy, expected_match) pair is the second layer beside the row-count
 # floor. It makes MOST rows load-bearing: where two rows share a pair, deleting
 # either leaves the pair covered by the other, and only the floor catches it.
 #
@@ -14,23 +13,23 @@
 # rows share (resolves, withheld); rendered-entry shape coverage distinguishes two
 # of them. The base two-pinned-entries conflict shares its observable behavior
 # with the variants, so the declared row-count floor is its independent guard.
-declared_rows: 8
+declared_rows: 10
 cases:
   - name: non-selected-harness-skips-git
     harness: opencode
     configured_harness: claude-code
     session_id: 11111111-1111-4111-8111-111111111111
-    git_exit: "harness-absent"
+    git_policy: "harness-absent"
     expected_match: "rejected"
     expected_git_calls: 0
-  # Named for the exit it actually takes: with no project entries configured,
-  # nothing consults git, whether or not the session is on the allowlist.
+  # With no project entries configured, cohort preparation does not need Git,
+  # whether or not the session is on the allowlist.
   - name: no-project-entries-skips-git
     harness: claude-code
     configured_harness: claude-code
     explicit_sessions: [11111111-1111-4111-8111-111111111111]
     session_id: 11111111-1111-4111-8111-111111111111
-    git_exit: "no-project-entries"
+    git_policy: "no-project-entries"
     expected_match: "selected"
     expected_git_calls: 0
   - name: session-only-harness-skips-git-for-unlisted-session
@@ -39,22 +38,22 @@ cases:
     explicit_sessions: [11111111-1111-4111-8111-111111111111]
     session_id: 22222222-2222-4222-8222-222222222222
     original_root: /workspace/tool
-    git_exit: "no-project-entries"
+    git_policy: "no-project-entries"
     expected_match: "rejected"
     expected_git_calls: 0
-  # The exit that costs the most when it is missing: a user who has BOTH project
-  # entries and pinned session IDs would otherwise pay two subprocess spawns per
-  # discovered session for an answer that cannot change.
-  - name: explicit-session-inside-a-project-restricted-harness-skips-git
+  # An explicit session still contributes physical identity to the complete
+  # cohort. Its own decision remains session-first, but sibling clone evidence
+  # must not disappear and make a remote look unique.
+  - name: explicit-session-still-prepares-project-evidence
     harness: claude-code
     configured_harness: claude-code
     projects: [{gitRemote: https://github.com/acme/tool.git, branches: [main]}]
     explicit_sessions: [11111111-1111-4111-8111-111111111111]
     session_id: 11111111-1111-4111-8111-111111111111
     original_root: /workspace/tool
-    git_exit: "explicit-session"
+    git_policy: "prepare-project-evidence"
     expected_match: "selected"
-    expected_git_calls: 0
+    expected_git_calls: 2
   - name: same-directory-resolves-once
     harness: claude-code
     configured_harness: claude-code
@@ -62,7 +61,7 @@ cases:
     session_id: 11111111-1111-4111-8111-111111111111
     second_session_id: 22222222-2222-4222-8222-222222222222
     original_root: /workspace/tool
-    git_exit: "resolves"
+    git_policy: "prepare-project-evidence"
     expected_match: "selected"
     expected_git_calls: 2
   - name: conflict-is-withheld-and-reported
@@ -74,7 +73,7 @@ cases:
     project_name: workbench
     session_id: 11111111-1111-4111-8111-111111111111
     original_root: /workspace/tool
-    git_exit: "resolves"
+    git_policy: "prepare-project-evidence"
     expected_match: "withheld"
     expected_git_calls: 2
   # An UNRESTRICTED entry is the default shape a project entry takes, and it is
@@ -89,7 +88,7 @@ cases:
     project_name: workbench
     session_id: 11111111-1111-4111-8111-111111111111
     original_root: /workspace/tool
-    git_exit: "resolves"
+    git_policy: "prepare-project-evidence"
     expected_match: "withheld"
     expected_git_calls: 2
   # The kickstart wizard writes BOTH identity fields, so a saved selection really
@@ -109,9 +108,36 @@ cases:
     project_name: satchel
     session_id: 11111111-1111-4111-8111-111111111111
     original_root: /workspace/tool
-    git_exit: "resolves"
+    git_policy: "prepare-project-evidence"
     expected_match: "withheld"
     expected_git_calls: 2
+
+  - name: auto-new-branches-keeps-an-exact-branch-denied
+    harness: claude-code
+    configured_harness: claude-code
+    exclusions:
+      branches:
+        - clonePath: /workspace/tool
+          branches: [main]
+    auto_new_branches: true
+    session_id: 33333333-3333-4333-8333-333333333333
+    original_root: /workspace/tool
+    git_policy: "prepare-project-evidence"
+    expected_match: "rejected"
+    expected_exact_exclusion: true
+    expected_git_calls: 2
+
+  - name: exact-session-denial-skips-git
+    harness: claude-code
+    configured_harness: claude-code
+    exclusions:
+      sessions: [55555555-5555-4555-8555-555555555555]
+    session_id: 55555555-5555-4555-8555-555555555555
+    original_root: /workspace/tool
+    git_policy: "no-project-entries"
+    expected_match: "rejected"
+    expected_exact_exclusion: true
+    expected_git_calls: 0
 
 # mounted_conflict drives the real `peasant harvest` command against a real git
 # repository so the withheld-conflict notice is proven where the user sees it,

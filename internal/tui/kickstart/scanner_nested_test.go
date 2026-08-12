@@ -2,11 +2,8 @@ package kickstart_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	_ "embed"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -27,17 +24,16 @@ type nestedListingsDoc struct {
 	Listings                []ftue.SessionListing `yaml:"listings"`
 }
 
+//go:embed testdata/nested_listings.yaml
+var nestedListingsData []byte
+
 func loadNestedListings(t *testing.T) nestedListingsDoc {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "nested_listings.yaml"))
-	if err != nil {
-		t.Fatalf("read nested listings fixture: %v", err)
-	}
 	var doc nestedListingsDoc
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := decodeStrictFixture(nestedListingsData, &doc); err != nil {
 		t.Fatalf("decode nested listings fixture: %v", err)
 	}
-	if doc.ExpectedListingCount != len(doc.Listings) {
+	if doc.ExpectedListingCount != len(doc.Listings) || len(doc.Listings) == 0 {
 		t.Fatalf("expectedListingCount=%d but %d listings present", doc.ExpectedListingCount, len(doc.Listings))
 	}
 	return doc
@@ -46,7 +42,7 @@ func loadNestedListings(t *testing.T) nestedListingsDoc {
 func nestedForest(t *testing.T) ([]*kit.TreeNode, nestedListingsDoc) {
 	t.Helper()
 	doc := loadNestedListings(t)
-	src := kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested))
+	src := kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested))
 	roots, err := src.Load(context.Background())
 	if err != nil {
 		t.Fatalf("scanner load: %v", err)

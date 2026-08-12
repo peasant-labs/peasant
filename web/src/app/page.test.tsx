@@ -19,6 +19,7 @@ import {
   requireRecord,
   requireUniqueNames,
 } from '@/test/strictYaml';
+import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
 
 // ChangeGraph (embedded in the home's single-project change list) now calls
 // useRouter for CommitGraph tip-row navigation; mock it here so tests never
@@ -159,14 +160,55 @@ describe('HomePage — the changes-first picker', () => {
   });
 
   it('teaches the lifecycle when no sessions exist', async () => {
+    const fixture = projectViewerStateFixture('genuine no data');
     channelData = { sessions: [] };
-    api.fetchProjectSummaries.mockResolvedValue(makeSummaries([]));
+    api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
     render(<HomePage />);
     // TeachingEmptyState renders lowercase chrome title + the copy-able command.
     expect(await screen.findByText('no ai work recorded yet')).toBeInTheDocument();
     expect(screen.getByText('peasant ingest')).toBeInTheDocument();
     // No ledger line without sessions.
     expect(screen.queryByText(/on your machine/)).not.toBeInTheDocument();
+  });
+
+  it('shows one recovery panel instead of stale rows or first-use teaching when selection hides all data', async () => {
+    const fixture = projectViewerStateFixture('all hidden by saved selection');
+    channelData = {
+      sessions: [
+        makeSession({
+          id: fixture.forbiddenIdentities[2],
+          project: fixture.forbiddenIdentities[1],
+        }),
+      ],
+    };
+    api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
+    render(<HomePage />);
+
+    const panel = await screen.findByRole('status', { name: 'project selection recovery' });
+    expect(panel).toHaveTextContent('Peasant hides 2 projects and 5 sessions.');
+    expect(panel).toHaveTextContent('The data stays ingested and indexed.');
+    expect(panel).toHaveTextContent('It is not available for a future push.');
+    expect(panel).toHaveTextContent('Peasant did not delete data.');
+    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
+    expect(screen.queryByText(/A saved project selection is limiting/)).not.toBeInTheDocument();
+    for (const identity of fixture.forbiddenIdentities) {
+      expect(document.body.textContent).not.toContain(identity);
+    }
+  });
+
+  it('renders an explicit session parent from the shared project summary without recovery guidance', async () => {
+    const fixture = projectViewerStateFixture('explicit session makes parent visible');
+    channelData = { sessions: [] };
+    api.fetchProjectSummaries.mockResolvedValue(fixture.summary);
+    render(<HomePage />);
+
+    expect(
+      await screen.findByRole('link', {
+        name: `Open the changes of ${fixture.expectedParentLabel}`,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
+    expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
   });
 
   it('shows the ledger line and the picker rows from the summary endpoint', async () => {

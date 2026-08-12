@@ -1,0 +1,27 @@
+expectedCaseCount: 5
+cases:
+  - name: superproject-command
+    failCommand: --show-superproject-working-tree
+    wantOperation: checking for a direct superproject
+    wantGitDirectory: /fixture/git-dir
+    expectedCommandMinimum: 2
+  - name: child-top-level-command
+    failCommand: /fixture/super/child rev-parse --path-format=absolute --show-toplevel
+    wantOperation: reading the canonical repository top level
+    wantGitDirectory: /fixture/git-dir
+    expectedCommandMinimum: 3
+  - name: superproject-physical-path
+    failPath: /fixture/super
+    wantOperation: normalizing the direct superproject worktree
+    wantGitDirectory: /fixture/git-dir
+    expectedCommandMinimum: 3
+  - name: superproject-top-level-command
+    failCommand: /fixture/super rev-parse --path-format=absolute --show-toplevel
+    wantOperation: reading the canonical repository top level
+    wantGitDirectory: /fixture/git-dir
+    expectedCommandMinimum: 4
+  - name: declaration-command
+    failCommand: config --file
+    wantOperation: verifying the direct .gitmodules declaration
+    wantGitDirectory: /fixture/git-dir
+    expectedCommandMinimum: 5

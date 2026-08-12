@@ -32,6 +32,7 @@ type Candidate struct {
 	Harness     ingest.Harness
 	GitRemote   string
 	ProjectName string
+	ClonePath   ingest.ClonePath
 	GitBranch   string
 }
 
@@ -63,6 +64,24 @@ func All() Policy { return Policy{mode: config.SelectionModeAll} }
 // projects or sessions the selection hides.
 func (p Policy) Active() bool { return p.mode == config.SelectionModeSelected }
 
+// ProjectionInputs returns the validated mode and canonical matcher for a
+// cohort-aware discovery projection. The caller must still compute candidate
+// identity multiplicity over its complete cohort before it uses the matcher.
+// Mode all returns a nil matcher because batch projections must bypass selected-
+// mode matching entirely.
+func (p Policy) ProjectionInputs() (config.SelectionMode, *ingest.SelectionMatcher, error) {
+	if !p.mode.IsValid() {
+		return "", nil, errorf(
+			"session visibility: uninitialized policy; no validated kickstart selection reached internal/sessionvisibility.Policy.ProjectionInputs while preparing a discovery cohort, so the caller must not expose a partial list; construct the provider with sessionvisibility.New(config.Selection), run `peasant kickstart` if the saved selection is invalid, and retry",
+		)
+	}
+	if p.mode == config.SelectionModeAll {
+		return p.mode, nil, nil
+	}
+	matcher := p.matcher
+	return p.mode, &matcher, nil
+}
+
 // Visible reports whether a candidate belongs in a user-facing list.
 func (p Policy) Visible(candidate Candidate) (bool, error) {
 	if !p.mode.IsValid() {
@@ -74,7 +93,16 @@ func (p Policy) Visible(candidate Candidate) (bool, error) {
 		return true, nil
 	}
 
-	switch p.matcher.MatchBranch(candidate.Harness, candidate.GitRemote, candidate.ProjectName, candidate.GitBranch, candidate.SessionID) {
+	switch p.matcher.MatchBranchCandidate(ingest.DiscoveryCandidate{
+		SessionID:          candidate.SessionID,
+		Harness:            candidate.Harness,
+		GitRemote:          candidate.GitRemote,
+		ProjectName:        candidate.ProjectName,
+		ClonePath:          candidate.ClonePath,
+		Branch:             candidate.GitBranch,
+		RemoteMultiplicity: ingest.DiscoveryIdentityUnique,
+		NameMultiplicity:   ingest.DiscoveryIdentityUnique,
+	}) {
 	case ingest.BranchMatchYes:
 		return true, nil
 	case ingest.BranchMatchNo:

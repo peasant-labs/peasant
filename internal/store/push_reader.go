@@ -39,6 +39,7 @@ import (
 //	19: duration_ms    (CAST(duration_minutes * 60000 AS INTEGER))
 //	20: git_remote     (from host_slugs JOIN; COALESCE to '' when unknown)
 //	21: parent_id      (nullable FK; COALESCE to '' — empty for root sessions)
+//	22: project_path   (session worktree, falling back to project canonical cwd)
 //
 // Uses JOIN session_metrics (not LEFT JOIN) — sessions without metrics are
 // excluded. This is intentional: sessions held back from push until
@@ -55,7 +56,8 @@ const sqlPushSessionsBase = `SELECT
     COALESCE(m.input_tokens, 0) + COALESCE(m.output_tokens, 0),
     CAST(m.duration_minutes * 60000 AS INTEGER),
     COALESCE(h.git_remote, ''),
-    COALESCE(s.parent_id, '')
+    COALESCE(s.parent_id, ''),
+    COALESCE(NULLIF(s.git_worktree, ''), p.canonical_cwd, '')
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 LEFT JOIN projects p ON s.project_hash = p.project_hash
@@ -300,6 +302,7 @@ func scanPushSessionRow(stmt *sqlite.Stmt) ingest.PushSessionRow {
 		TokensTotal:  stmt.ColumnInt(18),
 		DurationMs:   stmt.ColumnInt64(19),
 		GitRemote:    stmt.ColumnText(20), // COALESCE'd to '' — non-null
+		ProjectPath:  stmt.ColumnText(22), // COALESCE'd to '' — non-null
 	}
 
 	// Nullable: pushed_at (col 9)

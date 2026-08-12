@@ -1,0 +1,21 @@
+# The mounted post-save callback must use the same complete physical-clone
+# cohort as the kickstart scanner. Working directories are relative to a real
+# temporary root created by the test.
+expectedCaseCount: 2
+cases:
+  - name: selected-clone-excludes-same-remote-sibling
+    mode: selected
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: team-a/tool, branch: main, sessionId: clone-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: team-b/tool, branch: main, sessionId: clone-b}
+    selectedWorkingDirs: [team-a/tool]
+    expectSelectedSessionIds: [clone-a]
+    expectImportAll: false
+
+  - name: all-mode-bypasses-clone-selection
+    mode: all
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: team-a/tool, branch: main, sessionId: clone-a}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: team-b/tool, branch: main, sessionId: clone-b}
+    expectSelectedSessionIds: []
+    expectImportAll: true

@@ -1,0 +1,129 @@
+expectedCaseCount: 18
+cases:
+  - name: command_name_only
+    harness: claude-code
+    sourceRole: user
+    content: <command-name>/project:review</command-name>
+    expectedRole: system
+
+  - name: builtin_full_wrapper
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/compact</command-name>
+      <command-message>compact</command-message>
+      <command-args></command-args>
+    expectedRole: system
+
+  - name: skill_full_wrapper_message_first
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-message>project:review</command-message>
+      <command-name>/project:review</command-name>
+      <command-args>Fix the session viewer filter</command-args>
+    expectedRole: system
+
+  - name: name_and_arguments_only
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/review</command-name>
+      <command-args>inspect the current change</command-args>
+    expectedRole: system
+
+  - name: surrounding_and_between_whitespace
+    harness: claude-code
+    sourceRole: user
+    content: "  \n\t<command-name>/help</command-name>\r\n  <command-message>help</command-message>\n\t"
+    expectedRole: system
+
+  - name: leading_user_prose
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      Please inspect this first.
+      <command-name>/review</command-name>
+    expectedRole: user
+
+  - name: trailing_user_prose
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/review</command-name>
+      Please inspect this first.
+    expectedRole: user
+
+  - name: user_prose_between_wrappers
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/review</command-name>
+      Please keep the public API stable.
+      <command-args>inspect</command-args>
+    expectedRole: user
+
+  - name: unknown_wrapper
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/review</command-name>
+      <command-context>repository</command-context>
+    expectedRole: user
+
+  - name: missing_closing_tag
+    harness: claude-code
+    sourceRole: user
+    content: <command-name>/review
+    expectedRole: user
+
+  - name: mismatched_closing_tag
+    harness: claude-code
+    sourceRole: user
+    content: <command-name>/review</command-message>
+    expectedRole: user
+
+  - name: nested_unknown_markup
+    harness: claude-code
+    sourceRole: user
+    content: <command-name><strong>/review</strong></command-name>
+    expectedRole: user
+
+  - name: empty_command_name
+    harness: claude-code
+    sourceRole: user
+    content: <command-name>   </command-name>
+    expectedRole: user
+
+  - name: command_arguments_without_name
+    harness: claude-code
+    sourceRole: user
+    content: <command-args>inspect the current change</command-args>
+    expectedRole: user
+
+  - name: command_name_without_slash
+    harness: claude-code
+    sourceRole: user
+    content: <command-name>project:review</command-name>
+    expectedRole: user
+
+  - name: duplicate_command_name
+    harness: claude-code
+    sourceRole: user
+    content: |-
+      <command-name>/review</command-name>
+      <command-name>/review</command-name>
+    expectedRole: user
+
+  - name: complete_wrapper_at_ambiguous_preview_limit
+    harness: claude-code
+    sourceRole: user
+    content: <command-name>/review</command-name>
+    padToPreviewLimit: true
+    expectedRole: user
+
+  - name: assistant_role_is_not_reclassified
+    harness: claude-code
+    sourceRole: assistant
+    content: <command-name>/review</command-name>
+    expectedRole: assistant

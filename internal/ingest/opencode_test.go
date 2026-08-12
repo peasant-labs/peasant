@@ -145,6 +145,9 @@ func TestOpenCodeAdapter_Discover(t *testing.T) {
 	if got.OriginalRoot != ingest.ResolvedPath(root) {
 		t.Errorf("OriginalRoot = %q, want %q", got.OriginalRoot, root)
 	}
+	if got.CWD != directory {
+		t.Errorf("CWD = %q, want OpenCode session directory %q", got.CWD, directory)
+	}
 }
 
 func TestOpenCodeAdapter_Discover_EmptyStorage(t *testing.T) {

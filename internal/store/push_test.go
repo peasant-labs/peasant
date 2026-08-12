@@ -260,6 +260,12 @@ func TestStore_UnpushedSessions_ReturnsNewSessions(t *testing.T) {
 	if row.SourceFormat == "" {
 		t.Error("SourceFormat: expected non-empty string")
 	}
+	if row.ProjectHash != hash {
+		t.Errorf("ProjectHash: expected %q, got %q", hash, row.ProjectHash)
+	}
+	if row.ProjectPath != "/home/test/project" {
+		t.Errorf("ProjectPath: expected canonical cwd fallback %q, got %q", "/home/test/project", row.ProjectPath)
+	}
 }
 
 // TestStore_UnpushedSessions_PopulatesParentID exercises the REAL push-sessions
@@ -326,9 +332,10 @@ func TestStore_UnpushedSessions_PopulatesGitRemote(t *testing.T) {
 
 	remote := "git@github.com:user/repo.git"
 	branch := "main"
+	worktree := "/home/test/project/worktree"
 	hash := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	entry := makeStoreEntry(t, "88888888-8888-8888-8888-888888888888", hash, "github.com-user-repo", defaults.HarnessClaudeCode, 1700000000000, 100, 50)
-	entry.Metadata.Git = ingest.GitContext{Remote: &remote, Branch: &branch}
+	entry.Metadata.Git = ingest.GitContext{Remote: &remote, Branch: &branch, Worktree: &worktree}
 
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
@@ -343,6 +350,9 @@ func TestStore_UnpushedSessions_PopulatesGitRemote(t *testing.T) {
 	}
 	if rows[0].GitRemote != remote {
 		t.Errorf("GitRemote: expected %q, got %q", remote, rows[0].GitRemote)
+	}
+	if rows[0].ProjectPath != worktree {
+		t.Errorf("ProjectPath: expected session worktree %q, got %q", worktree, rows[0].ProjectPath)
 	}
 }
 

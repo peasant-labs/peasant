@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,13 +91,12 @@ func BuildPruneCommand() *cobra.Command {
 
 			// Apply selection filter client-side when --unselected is active.
 			if selMatcher != nil {
-				var unselectedSessions []ingest.PruneSessionRow
-				for _, s := range sessions {
-					if !s.IsSelectedBy(*selMatcher) {
-						unselectedSessions = append(unselectedSessions, s)
-					}
+				sessions, err = unselectedPruneSessions(
+					ctx, sessions, *selMatcher, ingest.NewPhysicalPathResolver(),
+				)
+				if err != nil {
+					return err
 				}
-				sessions = unselectedSessions
 			}
 
 			if len(sessions) == 0 {
@@ -192,12 +192,47 @@ func BuildPruneCommand() *cobra.Command {
 	cmd.Flags().StringVar(&before, "before", "", "Prune sessions started before this date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&after, "after", "", "Prune sessions started after this date (YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&all, "all", false, "Prune all sessions")
-	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not matching the selection config (requires selection.mode=selected)")
+	cmd.Flags().BoolVar(&unselected, "unselected", false, "Prune sessions not selected by harness, project, clone, branch, or explicit session rules (requires selection.mode=selected)")
 	cmd.Flags().BoolVar(&confirm, "confirm", false, "Skip interactive confirmation (for scripts/CI)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without deleting")
 	cmd.Flags().BoolVar(&jsonOutput, defaults.JSONFlagName, false, "Output results as JSON")
 
 	return cmd
+}
+
+// unselectedPruneSessions classifies the complete queried cohort before it
+// returns any destructive candidate. ProjectPath resolution failures remain
+// ambiguous, so a remote or name alone cannot retain one guessed clone while
+// another clone is pruned.
+func unselectedPruneSessions(
+	ctx context.Context,
+	rows []ingest.PruneSessionRow,
+	matcher ingest.SelectionMatcher,
+	resolver ingest.PathIdentityResolver,
+) ([]ingest.PruneSessionRow, error) {
+	inputs := make([]selectionCandidateInput, len(rows))
+	for index, row := range rows {
+		inputs[index] = selectionCandidateInput{
+			Harness:     row.Harness,
+			GitRemote:   row.GitRemote,
+			ProjectName: row.ProjectName,
+			ProjectHash: row.ProjectHash,
+			ProjectPath: row.ProjectPath,
+			Branch:      row.GitBranch,
+			SessionID:   row.SessionID,
+		}
+	}
+	candidates, err := prepareSelectionCandidates(ctx, inputs, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("prepare prune selection: resolve the complete stored-session cohort before matching clones: %w; no session was deleted; retry the command", err)
+	}
+	unselected := make([]ingest.PruneSessionRow, 0, len(rows))
+	for index, candidate := range candidates {
+		if matcher.MatchBranchCandidate(candidate) != ingest.BranchMatchYes {
+			unselected = append(unselected, rows[index])
+		}
+	}
+	return unselected, nil
 }
 
 // buildPruneFilter constructs a PruneFilter from CLI flag values.

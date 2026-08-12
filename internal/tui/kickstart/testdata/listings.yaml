@@ -15,35 +15,41 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: cc main session one
     sessionId: cc-main-1
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: cc main session two
     sessionId: cc-main-2
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: feature/x
+    workingDir: /fixtures/claude/acme-tool
     title: cc feature session one
     sessionId: cc-featx-1
   - harness: opencode
     projectName: acme/tool
     gitRemote: "https://github.com/acme/tool.git"
     branch: main
+    workingDir: /fixtures/opencode/acme-tool
     title: oc main session one
     sessionId: oc-main-1
   - harness: opencode
     projectName: acme/tool
     gitRemote: "https://github.com/acme/tool.git"
     branch: main
+    workingDir: /fixtures/opencode/acme-tool
     title: oc main session two
     sessionId: oc-main-2
   - harness: opencode
     projectName: acme/tool
     gitRemote: "https://github.com/acme/tool.git"
     branch: feature/y
+    workingDir: /fixtures/opencode/acme-tool
     title: oc feature session one
     sessionId: oc-featy-1

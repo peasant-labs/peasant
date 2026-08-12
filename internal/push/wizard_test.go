@@ -395,26 +395,19 @@ func TestWizard_RedactionPreview_EscGoesBack(t *testing.T) {
 // strPtr returns a pointer to s, for the *string GitBranch field.
 func strPtr(s string) *string { return &s }
 
-// conflictSelectionFixture builds a selection matcher plus three rows that
-// exercise the three BranchMatch outcomes against a REAL matcher:
+// conflictSelectionFixture builds command-prepared decisions plus three rows
+// that exercise the three BranchMatch outcomes:
 //   - kept:     repo-one, branch main → single rule admits   → Yes
 //   - excluded: repo-one, branch dev  → single rule rejects  → No  (dropped)
 //   - conflict: repo-two, branch main → two rules disagree   → WithheldConflict
 //
-// Two rules share repo-two with different branch sets so the conflict is real
-// (not synthesized by setting Locked by hand).
-func conflictSelectionFixture() (sel ingest.SelectionMatcher, kept, excluded, conflict ingest.PushSessionRow) {
+// Candidate matching is covered at the command boundary. This fixture isolates
+// the wizard's partition of those already-proven decisions.
+func conflictSelectionFixture() (sel *SessionSelection, kept, excluded, conflict ingest.PushSessionRow) {
 	const (
 		r1 = "git@github.com:user/repo-one.git"
 		r2 = "git@github.com:user/repo-two.git"
 	)
-	b := ingest.NewSelectionMatcherBuilder()
-	b.AddHarness(string(defaults.HarnessClaudeCode))
-	b.AddProject(string(defaults.HarnessClaudeCode), r1, "", "main")    // kept admit
-	b.AddProject(string(defaults.HarnessClaudeCode), r2, "", "main")    // conflict admit
-	b.AddProject(string(defaults.HarnessClaudeCode), r2, "", "feature") // conflict reject
-	sel = b.Build()
-
 	kept = ingest.PushSessionRow{
 		SessionID: "kept-001", ModelHarness: string(defaults.HarnessClaudeCode),
 		ProjectName: "alpha", GitRemote: r1, GitBranch: strPtr("main"),
@@ -427,6 +420,11 @@ func conflictSelectionFixture() (sel ingest.SelectionMatcher, kept, excluded, co
 		SessionID: "conf-003", ModelHarness: string(defaults.HarnessClaudeCode),
 		ProjectName: "beta", GitRemote: r2, GitBranch: strPtr("main"),
 	}
+	sel = NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+		ingest.SessionID(kept.SessionID):     ingest.BranchMatchYes,
+		ingest.SessionID(excluded.SessionID): ingest.BranchMatchNo,
+		ingest.SessionID(conflict.SessionID): ingest.BranchMatchWithheldConflict,
+	})
 	return sel, kept, excluded, conflict
 }
 
@@ -434,7 +432,7 @@ func TestWizardCandidates_Partition(t *testing.T) {
 	t.Parallel()
 	sel, kept, excluded, conflict := conflictSelectionFixture()
 
-	out := WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, &sel)
+	out := WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, sel)
 
 	// excluded is dropped; kept (unlocked) first, then conflict (Locked).
 	if len(out) != 2 {
@@ -460,17 +458,17 @@ func TestWizardCandidates_Partition(t *testing.T) {
 	}
 }
 
-func TestWizardCandidates_NilMatcherKeepsAll(t *testing.T) {
+func TestWizardCandidates_NilSelectionKeepsAll(t *testing.T) {
 	t.Parallel()
 	_, kept, excluded, conflict := conflictSelectionFixture()
 
 	out := WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, nil)
 	if len(out) != 3 {
-		t.Fatalf("nil matcher should keep all 3 sessions, got %d", len(out))
+		t.Fatalf("nil selection should keep all 3 sessions, got %d", len(out))
 	}
 	for i, c := range out {
 		if c.Locked {
-			t.Errorf("candidate %d (%s): nil matcher should lock nothing", i, c.Row.SessionID)
+			t.Errorf("candidate %d (%s): nil selection should lock nothing", i, c.Row.SessionID)
 		}
 	}
 }
@@ -479,7 +477,7 @@ func TestWizardCandidates_SelectedExcludesLocked(t *testing.T) {
 	t.Parallel()
 	sel, kept, excluded, conflict := conflictSelectionFixture()
 
-	m := NewPushWizard(WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, &sel))
+	m := NewPushWizard(WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, sel))
 	ids := m.SelectedSessionIDs()
 
 	if len(ids) != 1 || ids[0] != "kept-001" {

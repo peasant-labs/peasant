@@ -91,6 +91,11 @@ type Service struct {
 	store   *store.Store
 	repoFor func(path string) gitops.Repository
 	builder codegraph.Builder
+	// pathIdentityResolver turns stored worktree/canonical-cwd spellings into
+	// physical clone identity for cohort-aware project discovery. Production
+	// uses the real filesystem resolver; focused store tests inject deterministic
+	// pre-resolved fixture paths.
+	pathIdentityResolver ingest.PathIdentityResolver
 
 	// nowMs stamps MapGraphPayload.GeneratedAtMs; injectable for tests.
 	nowMs func() int64
@@ -112,18 +117,38 @@ type Service struct {
 	visibility sessionvisibility.Policy
 }
 
+// ServiceOption customizes an internal codemap service dependency.
+type ServiceOption func(*Service)
+
+// WithPathIdentityResolver injects the clone-identity boundary used by
+// ProjectSummaries. A nil resolver leaves the production resolver in place.
+func WithPathIdentityResolver(resolver ingest.PathIdentityResolver) ServiceOption {
+	return func(service *Service) {
+		if resolver != nil {
+			service.pathIdentityResolver = resolver
+		}
+	}
+}
+
 // NewService wires the service. repoFor turns a project's canonical_cwd into
 // a gitops.Repository (production: gitops.NewExecGitRepository; tests:
 // testutil.StubGitRepository).
-func NewService(s *store.Store, repoFor func(path string) gitops.Repository, builder codegraph.Builder, visibility sessionvisibility.Policy) *Service {
-	return &Service{
-		store:      s,
-		repoFor:    repoFor,
-		builder:    builder,
-		nowMs:      func() int64 { return time.Now().UnixMilli() },
-		graphCache: make(map[string]*codegraph.Graph),
-		visibility: visibility,
+func NewService(s *store.Store, repoFor func(path string) gitops.Repository, builder codegraph.Builder, visibility sessionvisibility.Policy, options ...ServiceOption) *Service {
+	service := &Service{
+		store:                s,
+		repoFor:              repoFor,
+		builder:              builder,
+		pathIdentityResolver: ingest.NewPhysicalPathResolver(),
+		nowMs:                func() int64 { return time.Now().UnixMilli() },
+		graphCache:           make(map[string]*codegraph.Graph),
+		visibility:           visibility,
 	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
 }
 
 // MapGraph builds the full map graph for a project. commit is the optional
@@ -260,6 +285,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 				Harness:     defaults.Harness(r.harness),
 				GitRemote:   r.gitRemote,
 				ProjectName: r.projectName,
+				ClonePath:   s.resolveSessionClonePath(r.gitWorktree, r.projectName),
 				GitBranch:   r.gitBranch,
 			})
 			if visibilityErr != nil {

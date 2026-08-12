@@ -2,6 +2,7 @@ package kickstart_test
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -88,11 +89,15 @@ func TestBuildForest_ChildCountsAndImportGrouping(t *testing.T) {
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
-			ingested := map[string]bool{}
-			for _, id := range c.Ingested {
-				ingested[id] = true
+			source := kickstart.NewScannerTreeSource(
+				c.Listings,
+				withFixturePathResolver(),
+				kickstart.WithIngestedSessionIDs(c.Ingested),
+			)
+			roots, err := source.Load(context.Background())
+			if err != nil {
+				t.Fatalf("scanner load: %v", err)
 			}
-			roots := kickstart.BuildForest(c.Listings, ingested)
 			if len(roots) != 1 || len(roots[0].Children) != 1 {
 				t.Fatalf("want one project with one branch, got %d projects", len(roots))
 			}

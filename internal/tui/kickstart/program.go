@@ -77,6 +77,9 @@ type ProgramDeps struct {
 	Theme theme.Theme
 	// Draft is the buffered config the flow commits atomically.
 	Draft *settings.Draft
+	// CommitGate evaluates the current selection at the receipt. Production
+	// supplies the no-project gate over the scanner's complete candidate cohort.
+	CommitGate settings.CommitGateEvaluator
 	// Source feeds the selection tree (real scanner adapter in production,
 	// fixture source in tests).
 	Source kit.TreeSource
@@ -278,6 +281,15 @@ func (p Program) Init() tea.Cmd {
 // exiting outright.
 func (p Program) Confirming() bool { return p.flowBuilt && p.flow.Confirming() }
 
+// ConfirmingNoProjects reports whether the dedicated empty-selection save
+// confirmation is open.
+func (p Program) ConfirmingNoProjects() bool {
+	return p.flowBuilt && p.flow.ConfirmingNoProjects()
+}
+
+// OnReceipt reports whether the settings flow is on review and save.
+func (p Program) OnReceipt() bool { return p.flowBuilt && p.flow.OnReceipt() }
+
 // SetSize records the render region and propagates it to the active surface.
 func (p *Program) SetSize(width, height int) {
 	p.width, p.height = width, height
@@ -403,8 +415,11 @@ func (p Program) buildFlow() Program {
 		ClaudeSessionsPresent: p.deps.ClaudeSessionsPresent,
 		Preview:               p.deps.Preview,
 	})
-	p.flow = settings.NewFlow(p.deps.Theme, reg, p.deps.Draft,
-		settings.WithConsentSummary(p.consentSummary))
+	flowOptions := []settings.FlowOption{settings.WithConsentSummary(p.consentSummary)}
+	if p.deps.CommitGate != nil {
+		flowOptions = append(flowOptions, settings.WithCommitGate(p.deps.CommitGate))
+	}
+	p.flow = settings.NewFlow(p.deps.Theme, reg, p.deps.Draft, flowOptions...)
 	p.flow.SetSize(p.width, p.height)
 	p.flowBuilt = true
 	return p

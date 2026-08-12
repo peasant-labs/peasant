@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/peasant/internal/tui/transcriptview"
 )
@@ -23,6 +24,67 @@ import (
 // flow fills it from the store's session read path, and tests fill it with
 // recorded turns directly.
 type SessionTurnsFunc func(sessionID string) ([]ingest.Turn, error)
+
+// EmptySessionPreview is the imported-but-empty session state. SourceJSON is a
+// bounded JSONL excerpt that ListingPreview renders through the JSON highlighter.
+type EmptySessionPreview struct {
+	Note       string
+	SourceJSON string
+}
+
+// EmptySessionBodyFunc distinguishes a session that the store does not hold
+// from one it holds without renderable turns. The mounted preview uses the
+// latter to show source evidence instead of falsely calling it unimported.
+type EmptySessionBodyFunc func(sessionID string) (preview EmptySessionPreview, imported bool, err error)
+
+// ListingPreviewKind identifies the non-session row a scanner preview describes.
+type ListingPreviewKind uint8
+
+const (
+	ListingPreviewUnknown ListingPreviewKind = iota
+	ListingPreviewProject
+	ListingPreviewBranch
+)
+
+// ListingPreviewContext is the resolved repository metadata shown for a project
+// or branch row. It is built from the same forest the selection tree renders.
+type ListingPreviewContext struct {
+	Kind           ListingPreviewKind
+	Project        string
+	Harnesses      []string
+	Remotes        []string
+	GitDirectories []string
+	ClonePaths     []string
+	Branches       []string
+	Branch         string
+	SessionCount   int
+}
+
+// ListingPreviewContextSource reads project and branch metadata by tree row ID.
+// ScannerTreeSource implements it from the latest successfully loaded forest.
+type ListingPreviewContextSource interface {
+	ListingPreviewContext(id string) (ListingPreviewContext, bool)
+}
+
+// ListingPreviewOption configures a ListingPreview.
+type ListingPreviewOption func(*ListingPreview)
+
+// WithEmptySessionBody configures the imported-but-empty state. It is called
+// only after SessionTurnsFunc has confirmed that the local store holds the
+// session but returned no renderable turns.
+func WithEmptySessionBody(body EmptySessionBodyFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.emptyBody = body
+	}
+}
+
+// WithListingPreviewContextSource enables project and branch detail bodies from
+// the exact scanner forest that supplied the highlighted row.
+func WithListingPreviewContextSource(source ListingPreviewContextSource) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.contexts = source
+	}
+}
 
 // notImportedBody is what the preview says for a discovered session the local
 // store does not hold yet - the normal case on a first run.
@@ -47,28 +109,34 @@ const notASessionBody = "select a session to preview it."
 // here can lay anything out. Layout happens per draw, at the pane's current
 // width, inside [transcriptview.Document].
 type ListingPreview struct {
-	byID     map[string]ftue.SessionListing
-	turns    SessionTurnsFunc
-	renderer *transcriptview.Renderer
-	th       theme.Theme
+	byID      map[string]ftue.SessionListing
+	turns     SessionTurnsFunc
+	emptyBody EmptySessionBodyFunc
+	renderer  *transcriptview.Renderer
+	th        theme.Theme
+	contexts  ListingPreviewContextSource
 }
 
 // NewListingPreview builds the selection step's preview over the discovery
 // listing and a store read seam. A nil turns func is the no-store first run:
 // every session still gets its header and is named as not yet imported.
-func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns SessionTurnsFunc) *ListingPreview {
+func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns SessionTurnsFunc, opts ...ListingPreviewOption) *ListingPreview {
 	byID := make(map[string]ftue.SessionListing, len(sessions))
 	for _, sess := range sessions {
 		if sess.SessionID != "" {
 			byID[sess.SessionID] = sess
 		}
 	}
-	return &ListingPreview{
+	preview := &ListingPreview{
 		byID:     byID,
 		turns:    turns,
 		renderer: transcriptview.New(th),
 		th:       th,
 	}
+	for _, opt := range opts {
+		opt(preview)
+	}
+	return preview
 }
 
 var _ kit.BodySource = (*ListingPreview)(nil)
@@ -78,6 +146,11 @@ var _ kit.BodySource = (*ListingPreview)(nil)
 func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 	sess, ok := p.byID[id]
 	if !ok {
+		if p.contexts != nil {
+			if context, found := p.contexts.ListingPreviewContext(id); found {
+				return listingContextBody{th: p.th, lines: listingContextLines(context)}, nil
+			}
+		}
 		return sessionBody{th: p.th, note: notASessionBody}, nil
 	}
 	body := sessionBody{th: p.th, header: headerLines(sess)}
@@ -90,11 +163,105 @@ func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 		return nil, err
 	}
 	if len(recorded) == 0 {
+		if p.emptyBody != nil {
+			preview, imported, err := p.emptyBody(id)
+			if err != nil {
+				return nil, err
+			}
+			if imported {
+				body.note = preview.Note
+				body.rawJSON = preview.SourceJSON
+				return body, nil
+			}
+		}
 		body.note = notImportedBody
 		return body, nil
 	}
 	body.transcript = p.renderer.Document(recorded)
 	return body, nil
+}
+
+func cloneListingPreviewContext(context ListingPreviewContext) ListingPreviewContext {
+	context.Harnesses = append([]string(nil), context.Harnesses...)
+	context.Remotes = append([]string(nil), context.Remotes...)
+	context.GitDirectories = append([]string(nil), context.GitDirectories...)
+	context.ClonePaths = append([]string(nil), context.ClonePaths...)
+	context.Branches = append([]string(nil), context.Branches...)
+	return context
+}
+
+func listingContextLines(context ListingPreviewContext) []string {
+	lines := []string{"project: " + previewMetadataValue(context.Project)}
+	if context.Kind == ListingPreviewBranch && context.Branch != "" {
+		lines = append(lines, "branch: "+previewMetadataValue(context.Branch))
+	}
+	if len(context.Harnesses) > 0 {
+		harnesses := make([]string, 0, len(context.Harnesses))
+		for _, harness := range context.Harnesses {
+			harnesses = append(harnesses, harnessDisplayName(harness))
+		}
+		label := "harness: "
+		if len(harnesses) > 1 {
+			label = "harnesses: "
+		}
+		lines = append(lines, label+strings.Join(harnesses, ", "))
+	}
+	if len(context.Remotes) > 0 {
+		label := "remote: "
+		if len(context.Remotes) > 1 {
+			label = "remotes: "
+		}
+		values := make([]string, 0, len(context.Remotes))
+		for _, remote := range context.Remotes {
+			values = append(values, previewMetadataValue(remote))
+		}
+		lines = append(lines, label+strings.Join(values, ", "))
+	}
+	if len(context.GitDirectories) == 1 {
+		lines = append(lines, "git directory: "+previewMetadataValue(context.GitDirectories[0]))
+	} else if len(context.GitDirectories) > 1 {
+		lines = appendPreviewList(lines, "git directories", context.GitDirectories)
+	}
+	lines = appendPreviewList(lines, "worktrees", context.ClonePaths)
+	if context.Kind == ListingPreviewProject {
+		lines = appendPreviewList(lines, "branches", context.Branches)
+	}
+	lines = append(lines, fmt.Sprintf("sessions: %d", context.SessionCount))
+	return lines
+}
+
+func appendPreviewList(lines []string, label string, values []string) []string {
+	if len(values) == 0 {
+		return lines
+	}
+	lines = append(lines, fmt.Sprintf("%s: %d", label, len(values)))
+	for _, value := range values {
+		lines = append(lines, "  "+previewMetadataValue(value))
+	}
+	return lines
+}
+
+func previewMetadataValue(value string) string {
+	return strings.Join(strings.Fields(mdrender.Sanitize(value)), " ")
+}
+
+type listingContextBody struct {
+	th    theme.Theme
+	lines []string
+}
+
+var _ kit.PreviewBody = listingContextBody{}
+
+func (b listingContextBody) Render(width int) string {
+	if width <= 0 {
+		return strings.Join(b.lines, "\n")
+	}
+	styles := b.th.Styles()
+	lines := make([]string, 0, len(b.lines))
+	for _, line := range b.lines {
+		lines = append(lines, styles.Base.Render(ansi.Wrap(line, width, "")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // headerLines names the highlighted session in the pane's own lowercase chrome.
@@ -125,6 +292,7 @@ type sessionBody struct {
 	header     []string
 	transcript transcriptview.Document
 	note       string
+	rawJSON    string
 }
 
 var _ kit.PreviewBody = sessionBody{}
@@ -157,6 +325,9 @@ func (b sessionBody) Render(width int) string {
 		// pane wrote, so it takes the same body ink the rest of the prose does.
 		parts = append(parts, styles.Base.Render(ansi.Wrap(b.note, width, "")))
 	}
+	if b.rawJSON != "" {
+		parts = append(parts, mdrender.New(b.th).Render("```json\n"+b.rawJSON+"\n```", width))
+	}
 	return strings.Join(parts, headerSeparator)
 }
 
@@ -173,6 +344,9 @@ func (b sessionBody) plain() string {
 		parts = append(parts, body)
 	} else if b.note != "" {
 		parts = append(parts, b.note)
+	}
+	if b.rawJSON != "" {
+		parts = append(parts, b.rawJSON)
 	}
 	return strings.Join(parts, headerSeparator)
 }

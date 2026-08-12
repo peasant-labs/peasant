@@ -1,0 +1,285 @@
+declaredCaseCount: 12
+declaredCandidateCaseCount: 2
+declaredCandidateCheckCount: 3
+messageBlock: |-
+  You selected no projects.
+  Your existing projects stay ingested and indexed.
+  The web viewer will not list them.
+  You cannot select them for a future push until you change this selection.
+  Peasant does not delete data.
+  Save this choice?
+paths:
+  - key: worktree
+    state: directory
+listings:
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: git@github.com:acme/tool.git
+    pathKey: worktree
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    title: parent session
+    subagentIds:
+      - 22222222-2222-4222-8222-222222222222
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: git@github.com:acme/tool.git
+    pathKey: worktree
+    branch: main
+    sessionId: 22222222-2222-4222-8222-222222222222
+    title: child session
+cases:
+  - name: first-run-user-selects-explicit-session-and-suppresses-confirmation
+    runState: first
+    initialSelection: all
+    editKeys: [right, j, right, j, space]
+    answerKeys: []
+    expectPrompt: false
+    expectCommit: true
+    expectExit: false
+    expectSelection: explicit-parent
+  - name: later-run-explicit-session-suppresses-confirmation
+    runState: later
+    initialSelection: explicit-parent
+    editKeys: []
+    answerKeys: []
+    expectPrompt: false
+    expectCommit: true
+    expectExit: false
+    expectSelection: explicit-parent
+  - name: first-run-empty-selection-confirms-and-saves-on-yes
+    runState: first
+    initialSelection: all
+    editKeys: []
+    answerKeys: [left, enter]
+    expectPrompt: true
+    expectCommit: true
+    expectExit: false
+    expectSelection: empty
+  - name: later-run-user-clears-project-confirms-and-saves-on-yes
+    runState: later
+    initialSelection: whole-project
+    editKeys: [space]
+    answerKeys: [left, enter]
+    expectPrompt: true
+    expectCommit: true
+    expectExit: false
+    expectSelection: empty
+  - name: first-run-default-no-writes-nothing
+    runState: first
+    initialSelection: all
+    editKeys: []
+    answerKeys: [enter]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: false
+    expectSelection: empty
+  - name: later-run-user-clears-project-and-default-no-writes-nothing
+    runState: later
+    initialSelection: whole-project
+    editKeys: [space]
+    answerKeys: [enter]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: false
+    expectSelection: empty
+  - name: first-run-back-writes-nothing
+    runState: first
+    initialSelection: all
+    editKeys: []
+    answerKeys: [esc]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: false
+    expectSelection: empty
+  - name: later-run-user-clears-project-and-back-writes-nothing
+    runState: later
+    initialSelection: whole-project
+    editKeys: [space]
+    answerKeys: [esc]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: false
+    expectSelection: empty
+  - name: first-run-cancel-writes-nothing
+    runState: first
+    initialSelection: all
+    editKeys: []
+    answerKeys: [q]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: true
+    expectSelection: empty
+  - name: later-run-user-clears-project-and-cancel-writes-nothing
+    runState: later
+    initialSelection: whole-project
+    editKeys: [space]
+    answerKeys: [q]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: true
+    expectSelection: empty
+  - name: first-run-interruption-writes-nothing
+    runState: first
+    initialSelection: all
+    editKeys: []
+    answerKeys: [ctrl+c]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: true
+    expectSelection: empty
+  - name: later-run-user-clears-project-and-interruption-writes-nothing
+    runState: later
+    initialSelection: whole-project
+    editKeys: [space]
+    answerKeys: [ctrl+c]
+    expectPrompt: true
+    expectCommit: false
+    expectExit: true
+    expectSelection: empty
+candidateCases:
+  - name: unresolved-sibling-keeps-pathless-identity-ambiguous
+    expectedCandidateCount: 1
+    paths:
+      - key: resolved-clone
+        state: directory
+      - key: missing-clone
+        state: missing
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: resolved-clone
+        branch: main
+        sessionId: 11111111-1111-4111-8111-111111111111
+        title: resolved session
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: missing-clone
+        branch: main
+        sessionId: 99999999-9999-4999-8999-999999999999
+        title: unavailable sibling
+    expectedCandidates:
+      - harness: claude-code
+        pathKey: resolved-clone
+        gitRemote: ""
+        projectName: ""
+        descendants:
+          - sessionId: 11111111-1111-4111-8111-111111111111
+            parentSessionId: ""
+    gateChecks:
+      - name: pathless-remote-and-name-leave-editor-clear
+        selection:
+          harness: claude-code
+          gitRemote: git@github.com:acme/tool.git
+          projectName: acme/tool
+          pathKey: ""
+        expectedEditorProjectCount: 0
+        expectedGate: confirm-no-projects
+      - name: exact-clone-path-still-selects-project
+        selection:
+          harness: claude-code
+          gitRemote: git@github.com:acme/tool.git
+          projectName: acme/tool
+          pathKey: resolved-clone
+        expectedEditorProjectCount: 1
+        expectedGate: none
+  - name: same-remote-clones-and-same-path-harnesses-stay-distinct
+    expectedCandidateCount: 4
+    paths:
+      - key: clone-a
+        state: directory
+      - key: clone-b
+        state: directory
+      - key: shared-clone
+        state: directory
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: clone-a
+        branch: main
+        sessionId: 33333333-3333-4333-8333-333333333333
+        title: clone a parent
+        subagentIds:
+          - 44444444-4444-4444-8444-444444444444
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: clone-a
+        branch: main
+        sessionId: 44444444-4444-4444-8444-444444444444
+        title: clone a child
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: clone-b
+        branch: topic
+        sessionId: 55555555-5555-4555-8555-555555555555
+        title: clone b session
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: shared-clone
+        branch: shared
+        sessionId: 66666666-6666-4666-8666-666666666666
+        title: shared claude session
+      - harness: codex
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: shared-clone
+        branch: shared
+        sessionId: 77777777-7777-4777-8777-777777777777
+        title: shared codex parent
+        subagentIds:
+          - 88888888-8888-4888-8888-888888888888
+      - harness: codex
+        projectName: acme/tool
+        gitRemote: git@github.com:acme/tool.git
+        pathKey: shared-clone
+        branch: shared
+        sessionId: 88888888-8888-4888-8888-888888888888
+        title: shared codex child
+    expectedCandidates:
+      - harness: claude-code
+        pathKey: clone-a
+        gitRemote: ""
+        projectName: ""
+        descendants:
+          - sessionId: 33333333-3333-4333-8333-333333333333
+            parentSessionId: ""
+          - sessionId: 44444444-4444-4444-8444-444444444444
+            parentSessionId: 33333333-3333-4333-8333-333333333333
+      - harness: claude-code
+        pathKey: clone-b
+        gitRemote: ""
+        projectName: ""
+        descendants:
+          - sessionId: 55555555-5555-4555-8555-555555555555
+            parentSessionId: ""
+      - harness: claude-code
+        pathKey: shared-clone
+        gitRemote: ""
+        projectName: ""
+        descendants:
+          - sessionId: 66666666-6666-4666-8666-666666666666
+            parentSessionId: ""
+      - harness: codex
+        pathKey: shared-clone
+        gitRemote: git@github.com:acme/tool.git
+        projectName: acme/tool
+        descendants:
+          - sessionId: 77777777-7777-4777-8777-777777777777
+            parentSessionId: ""
+          - sessionId: 88888888-8888-4888-8888-888888888888
+            parentSessionId: 77777777-7777-4777-8777-777777777777
+    gateChecks:
+      - name: exact-first-clone-selects-only-its-project
+        selection:
+          harness: claude-code
+          gitRemote: git@github.com:acme/tool.git
+          projectName: acme/tool
+          pathKey: clone-a
+        expectedEditorProjectCount: 1
+        expectedGate: none

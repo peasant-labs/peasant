@@ -1,0 +1,311 @@
+declared_rows: 19
+cases:
+  - name: legacy-selected-yaml-without-exclusions
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: false
+        harnesses:
+          claude-code:
+            projects:
+              - clonePaths: [/workspace/garden]
+    valid: true
+    expected_harnesses: 1
+    expected_branch_exclusions: 0
+    expected_session_exclusions: 0
+    expect_exclusions_key: false
+
+  - name: selected-exact-exclusions-round-trip
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: true
+        harnesses:
+          claude-code:
+            projects:
+              - clonePaths: [/workspace/garden]
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [feature/one, release]
+              sessions:
+                - 11111111-1111-4111-8111-111111111111
+    valid: true
+    expected_harnesses: 1
+    expected_branch_exclusions: 1
+    expected_session_exclusions: 1
+    expect_exclusions_key: true
+
+  - name: identical-evidence-is-valid-across-harnesses
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        autoIngestNewBranches: false
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [main]
+              sessions: [11111111-1111-4111-8111-111111111111]
+          opencode:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [main]
+              sessions: [11111111-1111-4111-8111-111111111111]
+    valid: true
+    expected_harnesses: 2
+    expected_branch_exclusions: 2
+    expected_session_exclusions: 2
+    expect_exclusions_key: true
+
+  - name: exclusions-require-selected-mode
+    document: |
+      version: 1
+      selection:
+        mode: all
+        autoIngestNewBranches: true
+        harnesses:
+          claude-code:
+            exclusions:
+              sessions: [11111111-1111-4111-8111-111111111111]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions'
+      - selection.mode is "all"
+
+  - name: empty-session-id-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              sessions: [""]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.sessions[0]'
+      - session ID is empty
+
+  - name: malformed-session-id-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              sessions: [not-a-session-id]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.sessions[0]'
+      - session ID "not-a-session-id" is malformed
+
+  - name: non-normalized-session-id-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              sessions: [" 11111111-1111-4111-8111-111111111111 "]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.sessions[0]'
+      - is not normalized
+
+  - name: duplicate-session-id-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              sessions:
+                - 11111111-1111-4111-8111-111111111111
+                - 11111111-1111-4111-8111-111111111111
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.sessions[1]'
+      - duplicates sessions[0]
+
+  - name: empty-clone-path-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: ""
+                  branches: [main]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].clonePath'
+      - clone path is empty
+
+  - name: relative-clone-path-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: workspace/garden
+                  branches: [main]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].clonePath'
+      - clone path "workspace/garden" is not absolute
+
+  - name: unclean-clone-path-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/archive/../garden
+                  branches: [main]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].clonePath'
+      - is not clean
+
+  - name: empty-branch-list-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: []
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].branches'
+      - branch list is empty
+
+  - name: empty-branch-name-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [""]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].branches[0]'
+      - branch name is empty
+
+  - name: non-normalized-branch-name-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [" main "]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].branches[0]'
+      - branch name " main " is not normalized
+
+  - name: duplicate-branch-name-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [main, main]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].branches[1]'
+      - duplicates branches[0]
+
+  - name: malformed-git-branch-name-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: ["feature with space"]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[0].branches[0]'
+      - is not a valid Git branch name
+
+  - name: duplicate-clone-path-row-is-rejected
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            exclusions:
+              branches:
+                - clonePath: /workspace/garden
+                  branches: [main]
+                - clonePath: /workspace/garden
+                  branches: [release]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["claude-code"].exclusions.branches[1].clonePath'
+      - duplicates branches[0].clonePath
+
+  - name: empty-harness-cannot-scope-an-exclusion
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          "":
+            exclusions:
+              sessions: [11111111-1111-4111-8111-111111111111]
+    valid: false
+    error_contains:
+      - 'selection.harnesses[""]'
+      - harness name is empty
+
+  - name: unknown-harness-cannot-scope-an-exclusion
+    document: |
+      version: 1
+      selection:
+        mode: selected
+        harnesses:
+          unknown-agent:
+            exclusions:
+              sessions: [11111111-1111-4111-8111-111111111111]
+    valid: false
+    error_contains:
+      - 'selection.harnesses["unknown-agent"]'
+      - harness "unknown-agent" is not supported

@@ -147,16 +147,21 @@ func TestApplySelection(t *testing.T) {
 		makeSession("s-unknown", "h", cc, nil, withGitRemote(remote)),                                            // kept: unknown branch (conservative)
 	}
 
-	t.Run("nil matcher keeps all", func(t *testing.T) {
+	t.Run("nil selection keeps all", func(t *testing.T) {
 		kept, withheld := push.ApplySelection(rows, nil)
 		if len(kept) != len(rows) || len(withheld) != 0 {
-			t.Fatalf("nil matcher: kept=%d withheld=%d, want kept=%d withheld=0", len(kept), len(withheld), len(rows))
+			t.Fatalf("nil selection: kept=%d withheld=%d, want kept=%d withheld=0", len(kept), len(withheld), len(rows))
 		}
 	})
 
 	t.Run("branch-aware filter", func(t *testing.T) {
-		m := ingest.NewSelectionMatcherBuilder().AddProject(cc, remote, "", "main").Build()
-		kept, withheld := push.ApplySelection(rows, &m)
+		selection := push.NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+			"s-main":    ingest.BranchMatchYes,
+			"s-feature": ingest.BranchMatchNo,
+			"s-other":   ingest.BranchMatchNo,
+			"s-unknown": ingest.BranchMatchYes,
+		})
+		kept, withheld := push.ApplySelection(rows, selection)
 		gotKept := map[string]bool{}
 		for _, s := range kept {
 			gotKept[s.SessionID] = true
@@ -173,14 +178,13 @@ func TestApplySelection(t *testing.T) {
 	})
 
 	t.Run("multi-project conflict is withheld", func(t *testing.T) {
-		m := ingest.NewSelectionMatcherBuilder().
-			AddProject(cc, remote, "", "main"). // by remote: allows main
-			AddProject(cc, "", "proj", "dev").  // by name: allows dev
-			Build()
 		conflict := []ingest.PushSessionRow{
 			makeSession("s-conflict", "h", cc, nil, withGitRemote(remote), withProjectName("proj"), withGitBranch("main")),
 		}
-		kept, withheld := push.ApplySelection(conflict, &m)
+		selection := push.NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+			"s-conflict": ingest.BranchMatchWithheldConflict,
+		})
+		kept, withheld := push.ApplySelection(conflict, selection)
 		if len(kept) != 0 {
 			t.Errorf("expected conflict session withheld (not kept), got %d kept", len(kept))
 		}
@@ -763,11 +767,15 @@ func TestPipeline_Selection_FiltersByBranch(t *testing.T) {
 			makeSession("s-other", "h", cc, nil, withGitRemote("git@github.com:other/x.git"), withGitBranch("main")), // dropped: project not selected
 		},
 	}
-	matcher := ingest.NewSelectionMatcherBuilder().AddProject(cc, remote, "", "main").Build()
+	selection := push.NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+		"s-main":    ingest.BranchMatchYes,
+		"s-feature": ingest.BranchMatchNo,
+		"s-other":   ingest.BranchMatchNo,
+	})
 
 	var stderr bytes.Buffer
 	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(),
-		push.PipelineConfig{DryRun: true, Selection: &matcher}, &stderr)
+		push.PipelineConfig{DryRun: true, Selection: selection}, &stderr)
 
 	result, err := p.Run(ctx)
 	if err != nil {
@@ -790,19 +798,18 @@ func TestPipeline_Selection_WithheldConflict_Surfaced(t *testing.T) {
 
 	// Multi-project conflict: proj-by-remote allows "main"; proj-by-name allows
 	// only "dev". A session on "main" matching both => AND-strict WithheldConflict.
-	matcher := ingest.NewSelectionMatcherBuilder().
-		AddProject(cc, remote, "", "main").
-		AddProject(cc, "", "conflictproj", "dev").
-		Build()
 	store := &testutil.StubPushStore{
 		Sessions: []ingest.PushSessionRow{
 			makeSession("s-conflict", "h", cc, nil, withGitRemote(remote), withProjectName("conflictproj"), withGitBranch("main")),
 		},
 	}
+	selection := push.NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+		"s-conflict": ingest.BranchMatchWithheldConflict,
+	})
 
 	var stderr bytes.Buffer
 	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(),
-		push.PipelineConfig{DryRun: true, Verbose: true, Selection: &matcher}, &stderr)
+		push.PipelineConfig{DryRun: true, Verbose: true, Selection: selection}, &stderr)
 
 	result, err := p.Run(ctx)
 	if err != nil {
@@ -1243,10 +1250,10 @@ func runScopedEmptyState(t *testing.T, testCase scopedEmptyStateCase, quiet bool
 		all = append(all, inScope)
 	case worldSelectionExcluded:
 		all = append(all, inScope)
-		// A selection that admits only a branch this repository's session is not on.
-		matcher := ingest.NewSelectionMatcherBuilder().
-			AddProject(string(defaults.HarnessClaudeCode), scopedGitRemote, "", "release").Build()
-		runCfg.Selection = &matcher
+		// A prepared selection excludes this repository's recorded session.
+		runCfg.Selection = push.NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+			ingest.SessionID(inScope.SessionID): ingest.BranchMatchNo,
+		})
 	}
 
 	store := &testutil.StubPushStore{

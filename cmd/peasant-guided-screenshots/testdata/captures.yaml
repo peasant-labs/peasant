@@ -1,8 +1,8 @@
 expectedSheetCount: 3
 expectedGuidedSectionCount: 5
 expectedGuidedCaptureCount: 20
-expectedSelectionStateCount: 2
-expectedSelectionCaptureCount: 4
+expectedSelectionStateCount: 5
+expectedSelectionCaptureCount: 16
 expectedSelectionSessionCount: 5
 expectedSelectionHarnessCount: 2
 expectedSelectionIngestedCount: 1
@@ -20,9 +20,9 @@ sheets:
     viewport: {width: 1800, height: 3300}
   - name: selection
     kind: selection
-    title: "final mounted selection: one global search"
+    title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 1400}
+    viewport: {width: 1800, height: 4800}
 
 guidedSections:
   - key: auto-ingest
@@ -43,14 +43,27 @@ selectionStates:
   - key: search
     query: cursor
     wantContains: ["search: cursor", harness, "cursor se"]
+  - key: project-preview
+    query: ""
+    wantContains: ["project: github:acme/tool", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+  - key: branch-preview
+    query: ""
+    wantContains: ["project: github:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+  - key: session-preview
+    query: ""
+    wantContains: ["parent ses", "harness: claude code", scrubbed-body]
 
 selection:
+  repositories:
+    - {clonePath: /fixtures/worktrees/pasture-a, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-a}
+    - {clonePath: /fixtures/worktrees/pasture-b, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-b}
   listings:
     - harness: claude-code
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
       branch: main
       title: parent session
+      workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-parent
       subagentIds: [cc-child]
     - harness: claude-code
@@ -58,6 +71,7 @@ selection:
       gitRemote: "git@github.com:acme/tool.git"
       branch: main
       title: child subagent
+      workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-child
       subagentIds: [cc-grandchild]
     - harness: claude-code
@@ -65,19 +79,26 @@ selection:
       gitRemote: "git@github.com:acme/tool.git"
       branch: main
       title: grandchild subagent
+      workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-grandchild
     - harness: claude-code
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
       branch: main
       title: imported session
+      workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-imported
     - harness: cursor
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
       branch: main
       title: cursor session
+      workingDir: /fixtures/worktrees/pasture-b
       sessionId: cur-1
+  transcripts:
+    cc-parent:
+      - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
+      - {role: assistant, entryType: text, content: "the fixture transcript is loaded through the normal preview boundary"}
   ingested: [cc-imported]
 
 guidedCaptures:
@@ -107,3 +128,15 @@ selectionCaptures:
   - {name: selection-default-dark-120x40, state: default, theme: dark, width: 120, height: 40}
   - {name: selection-search-dark-80x24, state: search, theme: dark, width: 80, height: 24}
   - {name: selection-search-dark-120x40, state: search, theme: dark, width: 120, height: 40}
+  - {name: selection-project-preview-dark-80x24, state: project-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-project-preview-dark-120x40, state: project-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-project-preview-light-80x24, state: project-preview, theme: light, width: 80, height: 24}
+  - {name: selection-project-preview-light-120x40, state: project-preview, theme: light, width: 120, height: 40}
+  - {name: selection-branch-preview-dark-80x24, state: branch-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-branch-preview-dark-120x40, state: branch-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-branch-preview-light-80x24, state: branch-preview, theme: light, width: 80, height: 24}
+  - {name: selection-branch-preview-light-120x40, state: branch-preview, theme: light, width: 120, height: 40}
+  - {name: selection-session-preview-dark-80x24, state: session-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-session-preview-dark-120x40, state: session-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-session-preview-light-80x24, state: session-preview, theme: light, width: 80, height: 24}
+  - {name: selection-session-preview-light-120x40, state: session-preview, theme: light, width: 120, height: 40}

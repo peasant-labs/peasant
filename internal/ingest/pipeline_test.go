@@ -307,6 +307,94 @@ func TestPipeline_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestPipeline_PreparesCompleteSessionFilterCohortBeforeMatching(t *testing.T) {
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+	sessionIDs := []string{testSessionID, testSessionID2}
+	sessions := make([]ingest.DiscoveredSession, 0, len(sessionIDs))
+	metadata := make(map[ingest.SessionID]*ingest.UnifiedMetadata, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, sessionID)
+		setupSourceFile(t, mfs, sourcePath)
+		session := makeDiscoveredSession(t, sessionID, sourcePath, time.Now().Add(-time.Hour))
+		sessions = append(sessions, session)
+		metadata[session.SessionID] = makeMinimalMeta(t, sessionID)
+	}
+
+	prepareCalls := 0
+	filterCalls := 0
+	prepared := make(map[ingest.SessionID]bool)
+	cfg := makePipelineConfig(testOutputDir, func(cfg *ingest.PipelineConfig) {
+		cfg.PrepareSessionFilter = func(_ context.Context, cohort []ingest.DiscoveredSession) error {
+			prepareCalls++
+			if filterCalls != 0 {
+				t.Fatalf("preparation ran after %d filter call(s)", filterCalls)
+			}
+			if len(cohort) != len(sessions) {
+				t.Fatalf("preparation cohort has %d sessions, want complete cohort of %d", len(cohort), len(sessions))
+			}
+			for _, session := range cohort {
+				prepared[session.SessionID] = true
+			}
+			return nil
+		}
+		cfg.SessionFilter = func(session ingest.DiscoveredSession) bool {
+			filterCalls++
+			if prepareCalls != 1 || len(prepared) != len(sessions) {
+				t.Fatalf("filter observed preparation calls=%d prepared=%d, want 1 and %d", prepareCalls, len(prepared), len(sessions))
+			}
+			return prepared[session.SessionID]
+		}
+	})
+	pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(sessions, metadata),
+	}, cfg)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+	if _, err := pipeline.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if prepareCalls != 1 {
+		t.Errorf("preparation calls = %d, want 1", prepareCalls)
+	}
+	if filterCalls != len(sessions) {
+		t.Errorf("filter calls = %d, want %d", filterCalls, len(sessions))
+	}
+}
+
+func TestPipeline_StopsWhenSessionFilterPreparationFails(t *testing.T) {
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	setupSourceFile(t, mfs, sourcePath)
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-time.Hour))
+	prepareErr := errors.New("cohort preparation failed")
+	filterCalled := false
+	cfg := makePipelineConfig(testOutputDir, func(cfg *ingest.PipelineConfig) {
+		cfg.PrepareSessionFilter = func(context.Context, []ingest.DiscoveredSession) error { return prepareErr }
+		cfg.SessionFilter = func(ingest.DiscoveredSession) bool {
+			filterCalled = true
+			return true
+		}
+	})
+	pipeline, err := ingest.NewPipeline(mfs, git, map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{
+			session.SessionID: makeMinimalMeta(t, testSessionID),
+		}),
+	}, cfg)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+	_, err = pipeline.Run(context.Background())
+	if !errors.Is(err, prepareErr) || !strings.Contains(err.Error(), "prepare session filter after discovery") {
+		t.Fatalf("Run error = %v, want actionable preparation failure wrapping %v", err, prepareErr)
+	}
+	if filterCalled {
+		t.Error("SessionFilter ran after preparation failed")
+	}
+}
+
 func TestPipeline_Incremental(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
