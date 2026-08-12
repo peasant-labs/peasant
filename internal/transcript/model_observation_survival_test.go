@@ -119,8 +119,10 @@ func assertModelObservationSurvivalFixture(t *testing.T, fixture modelObservatio
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
 			entries := make([]schema.SessionEntry, len(fixtureCase.Entries))
+			observationsByIndex := make(map[int]entryModelObservation, len(fixtureCase.Entries))
 			for index, source := range fixtureCase.Entries {
 				entries[index] = fixtureEntry(source)
+				observationsByIndex[source.Index] = modelObservation(entries[index])
 			}
 			turns := fold(entries)
 			if len(turns) != len(fixtureCase.Expected) {
@@ -130,7 +132,7 @@ func assertModelObservationSurvivalFixture(t *testing.T, fixture modelObservatio
 				if turns[index].Index != expected.Index || turns[index].Role.String() != expected.Role || turns[index].Content != expected.Content {
 					t.Errorf("surviving turn %d = (index=%d role=%q content=%q), want (index=%d role=%q content=%q)", index, turns[index].Index, turns[index].Role, turns[index].Content, expected.Index, expected.Role, expected.Content)
 				}
-				observation := modelObservation(entries[index])
+				observation := observationsByIndex[turns[index].Index]
 				if observation.present != (expected.ObservedModel != "") || observation.value != expected.ObservedModel {
 					t.Errorf("surviving turn %d observation = (%q, present=%t), want (%q, present=%t)", index, observation.value, observation.present, expected.ObservedModel, expected.ObservedModel != "")
 				}

@@ -17,7 +17,11 @@ cases:
       - index: 11
         role: assistant
         content: "identical answer"
+        observedModel: "Anthropic/Claude Fable-5"
       - index: 12
+        role: assistant
+        content: "identical answer"
+      - index: 13
         role: assistant
         content: "identical answer"
         observedModel: "anthropic/claude-opus-4-8"
@@ -26,10 +30,10 @@ cases:
         role: assistant
         content: "identical answer"
         observedModel: "Anthropic/Claude Fable-5"
-      - index: 11
+      - index: 12
         role: assistant
         content: "identical answer"
-      - index: 12
+      - index: 13
         role: assistant
         content: "identical answer"
         observedModel: "anthropic/claude-opus-4-8"
