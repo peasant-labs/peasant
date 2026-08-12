@@ -287,6 +287,28 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     await page.$eval('[aria-label="select session sess-visual-share-003"]', (input) => input.click())
     await page.waitForFunction(() => document.querySelector('[aria-label="select session sess-visual-share-003"]')?.checked === true, { timeout: 10000 }).catch(() => fail('share: selecting session sess-visual-share-003 never registered'))
     await page.focus('[aria-label="select branch feat/retry-observability"]')
+    // Wait for the measured connector path to reflect the settled layout: the
+    // React effect recomputes the path from live anchors on a rAF/ResizeObserver
+    // tick, so on a wrapping viewport the DOM path can momentarily lag the final
+    // row positions. Probe only once every anchor coincides with a path vertex.
+    await page.waitForFunction(() => {
+      const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
+      const svg = chooser?.querySelector('svg.share-rail')
+      const path = chooser?.querySelector('.share-rail__path')
+      const d = path?.getAttribute('d') || ''
+      if (!svg || !d) return false
+      const svgRect = svg.getBoundingClientRect()
+      const nums = d.trim().split(/[\s,]+/).filter(Boolean)
+      const verts = []
+      for (let i = 0; i < nums.length;) { const c = nums[i++]; if (c === 'M' || c === 'L') verts.push([parseFloat(nums[i++]), parseFloat(nums[i++])]) }
+      const depthOf = (l) => l.startsWith('select project') ? 0 : l.startsWith('select repository location') ? 1 : l.startsWith('select branch') ? 2 : l.startsWith('select session') ? 3 : -1
+      const inputs = [...chooser.querySelectorAll('input[type="checkbox"]')].filter((i) => depthOf(i.getAttribute('aria-label') || '') >= 0)
+      return inputs.length > 0 && inputs.every((input) => {
+        const r = input.getBoundingClientRect()
+        const x = r.left + r.width / 2 - svgRect.left, y = r.top + r.height / 2 - svgRect.top
+        return verts.some((v) => Math.abs(v[0] - x) <= 2 && Math.abs(v[1] - y) <= 2)
+      })
+    }, { timeout: 10000 }).catch(() => fail('share: connector path never settled to the mounted row anchors'))
     const probe = await page.evaluate(() => {
       const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
       const labels = [...chooser.querySelectorAll('[aria-label^="project "]')].map((e) => e.getAttribute('aria-label'))
@@ -324,6 +346,16 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
     assertSingleRail(probe, `${theme}/${viewport.id}/share`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
+    // Supplementary honest view: a plain viewport screenshot scrolled to the
+    // list bottom (NOT captureBeyondViewport). The full-`main` shot expands the
+    // viewport for beyond-viewport capture, which re-resolves the sticky wizard
+    // footer over the tail of a tall list (a composite artifact, not a live
+    // overlap); at a real scroll position the footer sits below the last row
+    // with its own opaque background, which this shot shows faithfully.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await pause(150)
+    mkdirSync(join(OUT, theme, viewport.id), { recursive: true })
+    await page.screenshot({ path: join(OUT, theme, viewport.id, 'share-list.png') })
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)
 }
