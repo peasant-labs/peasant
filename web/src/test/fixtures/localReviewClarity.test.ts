@@ -31,4 +31,18 @@ describe('local review clarity fixture', () => {
       `${localReviewClarityFixtureSource.slice(0, failedCaseStart)}\n`,
     )).toThrow(/exactly 3 required cases/);
   });
+
+  it('rejects picker links that drift from their destination or project identity', () => {
+    const driftedHref = localReviewClarityFixtureSource.replace(
+      '    expectedHref: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
+    expect(() => loadLocalReviewClarityFixture(driftedHref)).toThrow(/expectedHref must match/);
+
+    const driftedName = localReviewClarityFixtureSource.replace(
+      '    expectedLinkName: Open the map of alpha-project',
+      '    expectedLinkName: Open the map of another-project',
+    );
+    expect(() => loadLocalReviewClarityFixture(driftedName)).toThrow(/expectedLinkName must match/);
+  });
 });

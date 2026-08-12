@@ -158,6 +158,17 @@ export function loadLocalReviewClarityFixture(
     if (!/^[0-9a-f]{64}$/.test(String(row.targetProjectHash))) {
       throw new Error(`${path}.targetProjectHash must be a canonical project hash`);
     }
+    const expectedHref = row.destination === 'changes'
+      ? `/review/${row.targetProjectHash}`
+      : `/map/${row.targetProjectHash}`;
+    if (row.expectedHref !== expectedHref) {
+      throw new Error(`${path}.expectedHref must match destination and targetProjectHash`);
+    }
+    const projectLabel = String(row.targetProject).split('/').filter(Boolean).at(-1);
+    const expectedLinkName = `Open the ${row.destination} of ${projectLabel}`;
+    if (row.expectedLinkName !== expectedLinkName) {
+      throw new Error(`${path}.expectedLinkName must match destination and targetProject`);
+    }
     return row;
   });
   requireRequiredNames(pickerCases, REQUIRED_PICKER_CASE_NAMES, 'local review clarity fixture.pickerCases');

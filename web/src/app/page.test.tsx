@@ -20,6 +20,7 @@ import {
   requireUniqueNames,
 } from '@/test/strictYaml';
 import { projectViewerStateFixture } from '@/components/picker/projectViewerStateFixtures';
+import { localReviewClarityFixture, makeClarityProjectSummaries } from '@/test/fixtures/localReviewClarity';
 
 // ChangeGraph (embedded in the home's single-project change list) now calls
 // useRouter for CommitGraph tip-row navigation; mock it here so tests never
@@ -157,6 +158,24 @@ describe('HomePage — the changes-first picker', () => {
     channelError = null;
     channelErrorCode = undefined;
     vi.clearAllMocks();
+  });
+
+  it('mounts the fixture-backed changes picker with review clarity and filtering', async () => {
+    const testCase = localReviewClarityFixture.pickerCases.find((row) => row.surface === 'home')!;
+    channelData = { sessions: [makeSession({ id: 'clarity-home', project: testCase.targetProject })] };
+    api.fetchProjectSummaries.mockResolvedValue(makeSummaries(makeClarityProjectSummaries(testCase)));
+    render(<HomePage />);
+
+    const search = await screen.findByRole('searchbox', { name: localReviewClarityFixture.copy.searchAccessibleName });
+    expect(search).toHaveAttribute('placeholder', localReviewClarityFixture.copy.searchPlaceholder);
+    expect(search.closest('.input-ico')?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('button', { name: localReviewClarityFixture.copy.coverageHelpName })).toHaveTextContent(localReviewClarityFixture.copy.coverageVisibleLabel);
+    expect(screen.getByRole('link', { name: testCase.expectedLinkName })).toHaveAttribute('href', testCase.expectedHref);
+
+    fireEvent.change(search, { target: { value: 'no matching project' } });
+    expect(screen.getByText('No projects match “', { exact: false }).closest('p')).toHaveTextContent('No projects match “no matching project”.');
+    fireEvent.change(search, { target: { value: testCase.searchQuery } });
+    expect(screen.getByRole('link', { name: testCase.expectedLinkName })).toHaveAttribute('href', testCase.expectedHref);
   });
 
   it('teaches the lifecycle when no sessions exist', async () => {
