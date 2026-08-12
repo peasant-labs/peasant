@@ -1,0 +1,19 @@
+# Table-driven cases for theme.Mode.IsValid, driven by TestMode_IsValid
+# (internal/tui/theme/types_test.go). Every recognized Mode and a sample of
+# unrecognized values (empty, and a plausible-looking but undefined one), so
+# a future third Mode added without updating IsValid's switch is caught here
+# rather than only by eyeballing the switch statement.
+expectedCaseCount: 4
+cases:
+  - name: dark-is-valid
+    mode: dark
+    want: true
+  - name: light-is-valid
+    mode: light
+    want: true
+  - name: empty-is-invalid
+    mode: ""
+    want: false
+  - name: unrecognized-value-is-invalid
+    mode: dim
+    want: false

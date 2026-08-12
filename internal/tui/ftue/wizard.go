@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -114,6 +114,11 @@ const (
 // WizardAnswers accumulates user choices across pages.
 type WizardAnswers struct {
 	VillageConnected bool
+	// SelectionMode preserves the committed discovery policy while guided
+	// kickstart crosses the legacy wizard adapter. An empty value identifies
+	// legacy wizard callers whose provider/session choices retain their existing
+	// interpretation.
+	SelectionMode config.SelectionMode
 	// DaemonMode is reserved for the future daemon feature ("opt-in" or "opt-out").
 	// The wizard page is not yet shown; defaults to "opt-in".
 	DaemonMode            string
@@ -323,7 +328,7 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.executing && (msg.String() == defaults.KeyInterrupt.String() || msg.String() == defaults.KeyQuit.String() || msg.String() == defaults.KeyBack.String() || msg.String() == defaults.KeyRestart.String()) {
 			if m.journeyCancel != nil {
 				m.journeyCancel()
@@ -409,7 +414,13 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m WizardModel) View() string {
+func (m WizardModel) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	return v
+}
+
+func (m WizardModel) viewString() string {
 	if m.quitting {
 		return HelpBar.Render("Setup cancelled.\n")
 	}

@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -64,7 +65,7 @@ func TestWizard_InitialConfirm_Yes(t *testing.T) {
 	}
 
 	// confirmSel defaults to 0 (Yes), press enter to confirm.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if m.page != pageSessionReview {
 		t.Fatalf("expected pageSessionReview after enter (Yes selected), got %d", m.page)
@@ -75,9 +76,9 @@ func TestWizard_InitialConfirm_No(t *testing.T) {
 	m := NewPushWizard(testSessions())
 
 	// Move down to "No" option, then press enter.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(PushWizardModel)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if !m.quitting {
 		t.Fatal("expected quitting after selecting No")
@@ -99,14 +100,14 @@ func TestWizard_SessionReview_SpaceCycles(t *testing.T) {
 	}
 
 	// Space toggles to exclude.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	m = updated.(PushWizardModel)
 	if m.sessions[0].Action != PushExclude {
 		t.Fatalf("expected PushExclude after space, got %v", m.sessions[0].Action)
 	}
 
 	// Space toggles back.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	m = updated.(PushWizardModel)
 	if m.sessions[0].Action != PushWithRedaction {
 		t.Fatalf("expected PushWithRedaction after second space, got %v", m.sessions[0].Action)
@@ -118,7 +119,7 @@ func TestWizard_SessionReview_QSetsExclude(t *testing.T) {
 	m.page = pageSessionReview
 	m.cursor = 1
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	m = updated.(PushWizardModel)
 	if m.sessions[1].Action != PushExclude {
 		t.Fatalf("expected PushExclude after 'q', got %v", m.sessions[1].Action)
@@ -131,7 +132,7 @@ func TestWizard_SessionReview_WSetsWithRedaction(t *testing.T) {
 	m.sessions[0].Action = PushExclude
 	m.cursor = 0
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
 	m = updated.(PushWizardModel)
 	if m.sessions[0].Action != PushWithRedaction {
 		t.Fatalf("expected PushWithRedaction after 'w', got %v", m.sessions[0].Action)
@@ -144,7 +145,7 @@ func TestWizard_SessionReview_ApproveAll(t *testing.T) {
 	m.sessions[0].Action = PushExclude
 	m.sessions[1].Action = PushExclude
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(PushWizardModel)
 	for i, s := range m.sessions {
 		if s.Action != PushWithRedaction {
@@ -157,7 +158,7 @@ func TestWizard_SessionReview_ExcludeAll(t *testing.T) {
 	m := NewPushWizard(testSessions())
 	m.page = pageSessionReview
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(PushWizardModel)
 	for i, s := range m.sessions {
 		if s.Action != PushExclude {
@@ -170,28 +171,28 @@ func TestWizard_PageNavigation(t *testing.T) {
 	m := NewPushWizard(testSessions())
 
 	// Page 1 → Page 2 (confirmSel=0 is Yes, press enter)
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if m.page != pageSessionReview {
 		t.Fatalf("expected pageSessionReview, got %d", m.page)
 	}
 
 	// Page 2 → Page 3
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if m.page != pageRedactionPreview {
 		t.Fatalf("expected pageRedactionPreview, got %d", m.page)
 	}
 
 	// Page 3 → Page 4
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if m.page != pageFinalConfirm {
 		t.Fatalf("expected pageFinalConfirm, got %d", m.page)
 	}
 
 	// Page 4 confirm (confirmSel=0 is Yes, press enter)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if !m.confirmed {
 		t.Fatal("expected confirmed after enter on final page (Yes selected)")
@@ -249,7 +250,7 @@ func TestWizard_BackNavigation(t *testing.T) {
 	m.page = pageSessionReview
 
 	// Esc from session review goes back to initial confirm.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = updated.(PushWizardModel)
 	if m.page != pageInitialConfirm {
 		t.Fatalf("expected pageInitialConfirm after esc, got %d", m.page)
@@ -261,9 +262,9 @@ func TestWizard_FinalConfirm_BackNavigation(t *testing.T) {
 	m.page = pageFinalConfirm
 
 	// Move down to "No, go back" option, then press enter.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(PushWizardModel)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if m.page != pageSessionReview {
 		t.Fatalf("expected pageSessionReview after selecting 'No, go back', got %d", m.page)
@@ -281,21 +282,21 @@ func TestWizard_ConfirmSel_BoundaryClamping(t *testing.T) {
 		}
 
 		// Press Up at position 0 — should stay at 0 (no underflow).
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 		m = updated.(PushWizardModel)
 		if m.confirmSel != 0 {
 			t.Fatalf("expected confirmSel=0 after up at top, got %d", m.confirmSel)
 		}
 
 		// Press Down — should move to 1.
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		m = updated.(PushWizardModel)
 		if m.confirmSel != 1 {
 			t.Fatalf("expected confirmSel=1 after down, got %d", m.confirmSel)
 		}
 
 		// Press Down again at position 1 — should stay at 1 (no overflow).
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		m = updated.(PushWizardModel)
 		if m.confirmSel != 1 {
 			t.Fatalf("expected confirmSel=1 after down at bottom, got %d", m.confirmSel)
@@ -309,21 +310,21 @@ func TestWizard_ConfirmSel_BoundaryClamping(t *testing.T) {
 		m.confirmSel = 0
 
 		// Press Up at position 0 — should stay at 0 (no underflow).
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 		m = updated.(PushWizardModel)
 		if m.confirmSel != 0 {
 			t.Fatalf("expected confirmSel=0 after up at top, got %d", m.confirmSel)
 		}
 
 		// Press Down — should move to 1.
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		m = updated.(PushWizardModel)
 		if m.confirmSel != 1 {
 			t.Fatalf("expected confirmSel=1 after down, got %d", m.confirmSel)
 		}
 
 		// Press Down again at position 1 — should stay at 1 (no overflow).
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		m = updated.(PushWizardModel)
 		if m.confirmSel != 1 {
 			t.Fatalf("expected confirmSel=1 after down at bottom, got %d", m.confirmSel)
@@ -338,28 +339,28 @@ func TestWizard_SessionReview_Navigation(t *testing.T) {
 	m.height = 40
 
 	// Move down.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(PushWizardModel)
 	if m.cursor != 1 {
 		t.Fatalf("expected cursor=1 after down, got %d", m.cursor)
 	}
 
 	// Move down again.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(PushWizardModel)
 	if m.cursor != 2 {
 		t.Fatalf("expected cursor=2 after second down, got %d", m.cursor)
 	}
 
 	// Move down at bottom (should clamp).
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(PushWizardModel)
 	if m.cursor != 2 {
 		t.Fatalf("expected cursor=2 at bottom, got %d", m.cursor)
 	}
 
 	// Move up.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = updated.(PushWizardModel)
 	if m.cursor != 1 {
 		t.Fatalf("expected cursor=1 after up, got %d", m.cursor)
@@ -368,7 +369,7 @@ func TestWizard_SessionReview_Navigation(t *testing.T) {
 
 func TestWizard_CtrlC_Cancels(t *testing.T) {
 	m := NewPushWizard(testSessions())
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	m = updated.(PushWizardModel)
 	if !m.quitting {
 		t.Fatal("expected quitting after ctrl+c")
@@ -382,7 +383,7 @@ func TestWizard_RedactionPreview_EscGoesBack(t *testing.T) {
 	m := NewPushWizard(testSessions())
 	m.page = pageRedactionPreview
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = updated.(PushWizardModel)
 	if m.page != pageSessionReview {
 		t.Fatalf("expected pageSessionReview after esc from redaction preview, got %d", m.page)
@@ -394,26 +395,19 @@ func TestWizard_RedactionPreview_EscGoesBack(t *testing.T) {
 // strPtr returns a pointer to s, for the *string GitBranch field.
 func strPtr(s string) *string { return &s }
 
-// conflictSelectionFixture builds a selection matcher plus three rows that
-// exercise the three BranchMatch outcomes against a REAL matcher:
+// conflictSelectionFixture builds command-prepared decisions plus three rows
+// that exercise the three BranchMatch outcomes:
 //   - kept:     repo-one, branch main → single rule admits   → Yes
 //   - excluded: repo-one, branch dev  → single rule rejects  → No  (dropped)
 //   - conflict: repo-two, branch main → two rules disagree   → WithheldConflict
 //
-// Two rules share repo-two with different branch sets so the conflict is real
-// (not synthesized by setting Locked by hand).
-func conflictSelectionFixture() (sel ingest.SelectionMatcher, kept, excluded, conflict ingest.PushSessionRow) {
+// Candidate matching is covered at the command boundary. This fixture isolates
+// the wizard's partition of those already-proven decisions.
+func conflictSelectionFixture() (sel *SessionSelection, kept, excluded, conflict ingest.PushSessionRow) {
 	const (
 		r1 = "git@github.com:user/repo-one.git"
 		r2 = "git@github.com:user/repo-two.git"
 	)
-	b := ingest.NewSelectionMatcherBuilder()
-	b.AddHarness(string(defaults.HarnessClaudeCode))
-	b.AddProject(string(defaults.HarnessClaudeCode), r1, "", "main")    // kept admit
-	b.AddProject(string(defaults.HarnessClaudeCode), r2, "", "main")    // conflict admit
-	b.AddProject(string(defaults.HarnessClaudeCode), r2, "", "feature") // conflict reject
-	sel = b.Build()
-
 	kept = ingest.PushSessionRow{
 		SessionID: "kept-001", ModelHarness: string(defaults.HarnessClaudeCode),
 		ProjectName: "alpha", GitRemote: r1, GitBranch: strPtr("main"),
@@ -426,6 +420,11 @@ func conflictSelectionFixture() (sel ingest.SelectionMatcher, kept, excluded, co
 		SessionID: "conf-003", ModelHarness: string(defaults.HarnessClaudeCode),
 		ProjectName: "beta", GitRemote: r2, GitBranch: strPtr("main"),
 	}
+	sel = NewSessionSelection(map[ingest.SessionID]ingest.BranchMatch{
+		ingest.SessionID(kept.SessionID):     ingest.BranchMatchYes,
+		ingest.SessionID(excluded.SessionID): ingest.BranchMatchNo,
+		ingest.SessionID(conflict.SessionID): ingest.BranchMatchWithheldConflict,
+	})
 	return sel, kept, excluded, conflict
 }
 
@@ -433,7 +432,7 @@ func TestWizardCandidates_Partition(t *testing.T) {
 	t.Parallel()
 	sel, kept, excluded, conflict := conflictSelectionFixture()
 
-	out := WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, &sel)
+	out := WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, sel)
 
 	// excluded is dropped; kept (unlocked) first, then conflict (Locked).
 	if len(out) != 2 {
@@ -459,17 +458,17 @@ func TestWizardCandidates_Partition(t *testing.T) {
 	}
 }
 
-func TestWizardCandidates_NilMatcherKeepsAll(t *testing.T) {
+func TestWizardCandidates_NilSelectionKeepsAll(t *testing.T) {
 	t.Parallel()
 	_, kept, excluded, conflict := conflictSelectionFixture()
 
 	out := WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, nil)
 	if len(out) != 3 {
-		t.Fatalf("nil matcher should keep all 3 sessions, got %d", len(out))
+		t.Fatalf("nil selection should keep all 3 sessions, got %d", len(out))
 	}
 	for i, c := range out {
 		if c.Locked {
-			t.Errorf("candidate %d (%s): nil matcher should lock nothing", i, c.Row.SessionID)
+			t.Errorf("candidate %d (%s): nil selection should lock nothing", i, c.Row.SessionID)
 		}
 	}
 }
@@ -478,7 +477,7 @@ func TestWizardCandidates_SelectedExcludesLocked(t *testing.T) {
 	t.Parallel()
 	sel, kept, excluded, conflict := conflictSelectionFixture()
 
-	m := NewPushWizard(WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, &sel))
+	m := NewPushWizard(WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, sel))
 	ids := m.SelectedSessionIDs()
 
 	if len(ids) != 1 || ids[0] != "kept-001" {
@@ -497,21 +496,21 @@ func TestWizard_SessionReview_SkipsLocked(t *testing.T) {
 	m.cursor = 1 // cursor on the Locked row
 
 	// space must NOT toggle a Locked row.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	m = updated.(PushWizardModel)
 	if m.sessions[1].Action != PushExclude {
 		t.Errorf("space on Locked row should not change Action; got %v", m.sessions[1].Action)
 	}
 
 	// 'w' (push approve) must NOT select a Locked row.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
 	m = updated.(PushWizardModel)
 	if m.sessions[1].Action != PushExclude {
 		t.Errorf("'w' on Locked row should not select it; got %v", m.sessions[1].Action)
 	}
 
 	// 'a' (approve all) selects unlocked rows but skips Locked.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(PushWizardModel)
 	if m.sessions[0].Action != PushWithRedaction {
 		t.Errorf("'a' should select the unlocked row; got %v", m.sessions[0].Action)
@@ -521,7 +520,7 @@ func TestWizard_SessionReview_SkipsLocked(t *testing.T) {
 	}
 
 	// 'x' (exclude all) leaves the Locked row excluded (never selected).
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = updated.(PushWizardModel)
 	if m.sessions[1].Action != PushExclude {
 		t.Errorf("'x' should leave Locked row excluded; got %v", m.sessions[1].Action)
@@ -557,7 +556,7 @@ func TestWizard_RedactionPreview_NoSelectedBlocksAdvance(t *testing.T) {
 	}
 
 	// Enter should NOT advance to final confirm when nothing selected.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(PushWizardModel)
 	if m.page != pageRedactionPreview {
 		t.Fatalf("expected to stay on pageRedactionPreview when no sessions selected, got %d", m.page)
@@ -598,7 +597,12 @@ func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// would depend on the user's window. The forbid corpus one directory over
 	// normalises for the same reason: gofmt decides where a comment wraps, not the
 	// author.
-	screen := strings.Join(strings.Fields(m.redactionPreviewContent()), " ")
+	// Style-color escape sequences are stripped before the text is inspected:
+	// styled text that wraps now carries a per-line color reset at each wrap
+	// point, so a raw substring guard would see escape bytes between two words a
+	// sentence keeps together. Stripping leaves the visible text this screen
+	// prints, which is what these claims are about.
+	screen := strings.Join(strings.Fields(ansi.Strip(m.redactionPreviewContent())), " ")
 
 	// The over-claims come from the SHARED corpus, not from a list written here.
 	//

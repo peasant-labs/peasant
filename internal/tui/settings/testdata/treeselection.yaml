@@ -1,0 +1,202 @@
+# TreeSelection round-trip cases. Each case declares a provider -> remote ->
+# worktree -> session forest with LEAF states set; the test rolls interior
+# states up from the leaves (as the kit tree does) before deriving the
+# TreeSelection, so a case only pins the user-set leaf checks plus the expected
+# derived selection. expectedCaseCount guards the fixture cannot silently drop a
+# rule.
+expectedCaseCount: 7
+cases:
+  # Every session in the whole forest checked -> the standing "all" policy.
+  - name: root-all
+    expectMode: all
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-p1, label: one, state: checked, meta: {kind: session}}
+      - id: gemini
+        label: gemini
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/village
+            label: village
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/village.git"}
+            children:
+              - id: village/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-v1, label: one, state: checked, meta: {kind: session}}
+
+  # One provider fully checked, the other fully unchecked -> a whole-project pick
+  # (Branches nil) for the checked provider only.
+  - name: remote-full
+    expectMode: selected
+    expectHarnesses:
+      claude:
+        projects:
+          - {gitRemote: "git@github.com:peasant-labs/peasant.git"}
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-p1, label: one, state: checked, meta: {kind: session}}
+                  - {id: sess-p2, label: two, state: checked, meta: {kind: session}}
+      - id: gemini
+        label: gemini
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/village
+            label: village
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/village.git"}
+            children:
+              - id: village/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-v1, label: one, state: unchecked, meta: {kind: session}}
+
+  # A remote with two branches, one wholly checked and one wholly unchecked ->
+  # the checked branch appears as a Branches subset.
+  - name: branch-subset
+    expectMode: selected
+    expectHarnesses:
+      claude:
+        projects:
+          - {gitRemote: "git@github.com:peasant-labs/peasant.git", branches: [develop]}
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-p1, label: one, state: checked, meta: {kind: session}}
+              - id: peasant/feature
+                label: feature
+                meta: {kind: worktree, branch: feature}
+                children:
+                  - {id: sess-p3, label: three, state: unchecked, meta: {kind: session}}
+
+  # A single session checked inside a multi-session branch -> a loose session
+  # pick (not a branch), because the branch is not wholly selected.
+  - name: loose-sessions
+    expectMode: selected
+    expectHarnesses:
+      claude:
+        sessions: [sess-p1]
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-p1, label: one, state: checked, meta: {kind: session}}
+                  - {id: sess-p2, label: two, state: unchecked, meta: {kind: session}}
+
+  # A conflict leaf blocks the commit and is never persisted.
+  - name: conflict-blocks
+    expectMode: selected
+    expectConflict: true
+    expectHarnesses:
+      claude:
+        projects:
+          - {gitRemote: "git@github.com:peasant-labs/peasant.git", branches: [develop]}
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-p1, label: one, state: checked, meta: {kind: session}}
+              - id: peasant/deleted
+                label: deleted
+                state: conflict
+                meta: {kind: worktree, branch: gone, conflict: "worktree no longer exists"}
+
+  # A session that nests a child (subagent) session, checked whole, sits beside
+  # an unchecked sibling so the worktree is Partial. The checked parent
+  # contributes BOTH its own id and its nested child id to the allowlist, proving
+  # a session-with-children is not mistaken for a branch level and its whole
+  # subtree round-trips.
+  - name: session-with-children
+    expectMode: selected
+    expectHarnesses:
+      claude:
+        sessions: [sess-parent, sess-child]
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - id: sess-parent
+                    label: parent
+                    state: checked
+                    meta: {kind: session}
+                    children:
+                      - {id: sess-child, label: child, state: checked, meta: {kind: session}}
+                  - {id: sess-sibling, label: sibling, state: unchecked, meta: {kind: session}}
+
+  # Nothing checked -> selected mode with an empty allowlist (unchecked omitted).
+  - name: unchecked-omitted
+    expectMode: selected
+    roots:
+      - id: claude
+        label: claude
+        meta: {kind: provider}
+        children:
+          - id: github.com/peasant-labs/peasant
+            label: peasant
+            meta: {kind: remote, remote: "git@github.com:peasant-labs/peasant.git"}
+            children:
+              - id: peasant/develop
+                label: develop
+                meta: {kind: worktree, branch: develop}
+                children:
+                  - {id: sess-p1, label: one, state: unchecked, meta: {kind: session}}

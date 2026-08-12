@@ -1,0 +1,26 @@
+# Loader-guard fixture: a ratified-divergence row with no ratifiedExpected. The
+# loader must reject it — a divergence with no forward target asserts nothing, so
+# the rebuild would have no shape to meet.
+expectedScenarioCount: 1
+scenarios:
+  - name: divergence-without-target
+    oracle: ratified-divergence
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"

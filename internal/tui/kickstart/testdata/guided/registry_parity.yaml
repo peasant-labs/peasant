@@ -1,0 +1,115 @@
+# One canonical registry is mounted by both production presentations for every
+# row. The section contract and scenario counts prevent silent loss of a field,
+# conditional section, or parity behavior.
+expectedSectionCount: 6
+sections:
+  - key: selection
+    title: choose sessions to import
+    fieldKey: transcripts
+    fieldKind: tree
+    fieldText: "search:"
+    hasGuide: false
+    conditional: false
+  - key: auto-ingest
+    title: auto-ingest new branches
+    fieldKey: auto-ingest-new-branches
+    fieldKind: toggle
+    fieldText: auto-ingest new branches in fully-selected projects
+    hasGuide: true
+    fieldTextBeforeGuide: true
+    guideIntro: decide how future branches enter your saved local selection.
+    conditional: true
+  - key: privacy
+    title: privacy
+    fieldKey: redaction-level
+    fieldKind: radio
+    fieldText: redaction level
+    hasGuide: true
+    fieldTextBeforeGuide: true
+    guideIntro: preview standard redaction before a later explicit publication.
+    hasExample: true
+    conditional: false
+  - key: license
+    title: content license
+    fieldKey: content-license
+    fieldKind: radio
+    fieldText: default license attached to pushed transcripts
+    hasGuide: true
+    fieldTextBeforeGuide: true
+    guideIntro: choose the default license for a later explicit publish.
+    conditional: false
+  - key: destination
+    title: sharing
+    fieldKey: default-visibility
+    fieldKind: radio
+    fieldText: default visibility for pushed transcripts
+    hasGuide: true
+    fieldTextBeforeGuide: true
+    guideIntro: choose who may see transcripts after a later explicit publish.
+    conditional: true
+  - key: retention
+    title: claude retention
+    fieldKey: claude-retention-days
+    fieldKind: radio
+    fieldText: how long claude code keeps its transcripts
+    hasGuide: true
+    fieldTextBeforeGuide: true
+    guideIntro: choose how long claude code keeps its source transcript files.
+    conditional: true
+forbiddenRegistryOptions:
+  expectedNameCount: 5
+  names: [presentation, configmode, hide, replace, screen]
+
+expectedRowCount: 6
+rows:
+  - name: local all-mode visibility and framing
+    operation: visibility
+    selectionMode: all
+    villageConnected: false
+    claudeSessionsPresent: false
+    initialRetention: 30
+    expectedVisibleSections: [selection, privacy, license]
+
+  - name: connected selected-mode visibility and framing
+    operation: visibility
+    selectionMode: selected
+    villageConnected: true
+    claudeSessionsPresent: true
+    initialRetention: 30
+    expectedVisibleSections: [selection, auto-ingest, privacy, license, destination, retention]
+
+  - name: transient retention accessor and dirty parity
+    operation: transient-dirty
+    selectionMode: all
+    villageConnected: false
+    claudeSessionsPresent: true
+    initialRetention: 30
+    selectedRetention: 90
+    expectedVisibleSections: [selection, privacy, license, retention]
+
+  - name: yaml-backed accessor and persistence parity
+    operation: persisted-edit
+    selectionMode: all
+    villageConnected: false
+    claudeSessionsPresent: false
+    initialRetention: 30
+    selectedLicense: CC0-1.0
+    expectedVisibleSections: [selection, privacy, license]
+
+  - name: hidden section edit drop and persistence parity
+    operation: hidden-drop
+    selectionMode: selected
+    villageConnected: false
+    claudeSessionsPresent: false
+    initialRetention: 30
+    expectedAutoIngest: true
+    expectedVisibleSections: [selection, auto-ingest, privacy, license]
+
+  - name: external drift fails closed in both presentations
+    operation: drift-failure
+    selectionMode: all
+    villageConnected: false
+    claudeSessionsPresent: false
+    initialRetention: 30
+    selectedLicense: CC0-1.0
+    expectedVisibleSections: [selection, privacy, license]

@@ -1,0 +1,65 @@
+package kickstart
+
+import (
+	"fmt"
+
+	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/settings"
+)
+
+// RetentionWriter persists the Claude Code transcript-retention preference
+// (cleanupPeriodDays in ~/.claude/settings.json). It is the one seam the
+// kickstart program's retention step depends on, injected so a test can point it
+// at a temporary file and assert the write happens AFTER the config save (the
+// legacy ordering) without touching a real home directory.
+type RetentionWriter interface {
+	// WriteCleanupDays merges cleanupPeriodDays=days into the settings file,
+	// preserving every other key and creating the file when absent.
+	WriteCleanupDays(days int) error
+}
+
+// RetentionWriterFunc adapts a plain function to RetentionWriter.
+type RetentionWriterFunc func(days int) error
+
+// WriteCleanupDays calls the wrapped function.
+func (f RetentionWriterFunc) WriteCleanupDays(days int) error { return f(days) }
+
+var _ RetentionWriter = RetentionWriterFunc(nil)
+
+// DefaultRetentionWriter writes to the real ~/.claude/settings.json through the
+// strict merge-preserving atomic writer. The mounted program injects this; tests
+// inject a temp-path func over ftue.WriteClaudeCleanupDaysAt.
+func DefaultRetentionWriter() RetentionWriter {
+	return RetentionWriterFunc(ftue.WriteClaudeCleanupDays)
+}
+
+// FileRetentionWriter writes cleanupPeriodDays to an explicit settings path,
+// reusing the exact strict merge/create/atomic semantics of the production
+// writer. It exists so the retention step can be exercised against a temporary
+// file.
+func FileRetentionWriter(path string) RetentionWriter {
+	return RetentionWriterFunc(func(days int) error {
+		return ftue.WriteClaudeCleanupDaysAt(path, days)
+	})
+}
+
+// SeedRetentionInitial initializes the transient retention field's baseline and
+// working values through the one accessor used by BuildRegistry. It must run
+// before either settings presentation mounts its fields.
+func SeedRetentionInitial(d *settings.Draft, days int) error {
+	if err := settings.SeedInitial(d, retentionAccessor(), days); err != nil {
+		return fmt.Errorf("seed Claude transcript retention before mounting settings fields: %w", err)
+	}
+	return nil
+}
+
+// RetentionChanged reports whether the transient retention value differs from
+// the value seeded when the draft opened. A nil draft fails closed so a caller
+// cannot accidentally run the external writer without a committed draft.
+func RetentionChanged(d *settings.Draft) bool {
+	if d == nil {
+		return false
+	}
+	acc := retentionAccessor()
+	return acc.Get(d.Working()) != acc.Get(d.Baseline())
+}

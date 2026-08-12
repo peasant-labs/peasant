@@ -1,0 +1,128 @@
+# Row-annotation cases for the tree row renderer. Each case renders ONE session
+# row under one project root at the given width and asserts what the row does
+# and does not say. The annotations are display-only Meta a TreeSource attached:
+# childCount summarises the subagent sessions a parent groups (the parent stays
+# a leaf row), ingested marks a session the local store already holds, tracked
+# records the previous saved selection, and state is the current checkbox.
+# expectedCaseCount is the row-count guard.
+expectedCaseCount: 13
+cases:
+  - name: two-subagents-read-as-a-plural-count
+    label: parent session
+    childCount: "2"
+    ingested: false
+    width: 60
+    wantContains:
+      - "parent session"
+      - " + 2 child sessions"
+
+  - name: one-subagent-reads-as-a-singular-count
+    label: parent session
+    childCount: "1"
+    ingested: false
+    width: 60
+    wantContains:
+      - " + 1 child session"
+    wantMissing:
+      - "child sessions"
+
+  - name: no-subagents-annotates-nothing
+    label: plain session
+    childCount: ""
+    ingested: false
+    width: 60
+    wantContains:
+      - "plain session"
+    wantMissing:
+      - "child session"
+      - "already imported"
+
+  - name: zero-subagents-annotates-nothing
+    label: plain session
+    childCount: "0"
+    ingested: false
+    width: 60
+    wantMissing:
+      - "child session"
+
+  - name: stored-session-reads-as-already-imported
+    label: stored session
+    childCount: ""
+    ingested: true
+    width: 60
+    wantContains:
+      - "stored session"
+      - "already imported"
+
+  - name: a-stored-parent-carries-both-annotations
+    label: stored parent
+    childCount: "3"
+    ingested: true
+    width: 70
+    wantContains:
+      - " + 3 child sessions"
+      - "already imported"
+
+  - name: an-unreadable-count-annotates-nothing
+    label: plain session
+    childCount: not-a-number
+    ingested: false
+    width: 60
+    wantMissing:
+      - "child session"
+
+  # An out-of-range count parses to a NON-ZERO clamped value alongside a range
+  # error, so only checking the parsed number would annotate a nonsense count.
+  # The row must stay silent, which is what proves the error is consulted.
+  - name: an-out-of-range-count-annotates-nothing
+    label: plain session
+    childCount: "99999999999999999999"
+    ingested: false
+    width: 60
+    wantContains:
+      - plain session
+    wantMissing:
+      - "child session"
+      - "999"
+
+  - name: a-narrow-row-keeps-the-title-and-drops-the-count
+    label: session title
+    childCount: "2"
+    ingested: false
+    width: 24
+    wantContains:
+      - "session title"
+    wantMissing:
+      - "child session"
+
+  - name: saved-tracked-and-currently-selected-are-separate-signals
+    label: saved selected row
+    tracked: true
+    state: checked
+    width: 72
+    wantContains: ["[✓]", tracked, saved selected row]
+    wantMissing: [already imported]
+
+  - name: a-saved-row-remains-tracked-after-current-checkbox-clear
+    label: saved cleared row
+    tracked: true
+    state: unchecked
+    width: 72
+    wantContains: ["[ ]", tracked, saved cleared row]
+    wantMissing: [already imported]
+
+  - name: imported-does-not-imply-saved-tracked
+    label: local current row
+    ingested: true
+    state: checked
+    width: 72
+    wantContains: ["[✓]", already imported]
+    wantMissing: [tracked]
+
+  - name: saved-and-imported-survive-a-current-checkbox-clear
+    label: combined cleared row
+    ingested: true
+    tracked: true
+    state: unchecked
+    width: 86
+    wantContains: ["[ ]", tracked, already imported]

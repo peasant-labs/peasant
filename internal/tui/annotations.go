@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	schema "github.com/peasant-labs/schema"
 )

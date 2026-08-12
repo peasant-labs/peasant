@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -17,61 +17,73 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TestBuildKickstartCommandMountsProjectFirstScope exercises the RETAINED legacy
+// FTUE wizard's project-first scope behavior. The default kickstart command now
+// mounts the settings.Flow rebuild (covered by the internal/tui/kickstart program
+// smokes); the legacy wizard remains shipping, deprecation-candidate code, so this
+// drives it through the retained runLegacyFTUEWizard entry point rather than
+// cmd.Execute.
 func TestBuildKickstartCommandMountsProjectFirstScope(t *testing.T) {
 	sessions := []ftue.SessionListing{
 		{Harness: defaults.HarnessClaudeCode.String(), ProjectName: "tool", GitRemote: "git@github.com:acme/tool.git", WorkingDir: "/work/acme/tool", SessionID: "11111111-1111-1111-1111-111111111111"},
 		{Harness: defaults.HarnessOpenCode.String(), ProjectName: "tool", GitRemote: "https://github.com/acme/tool.git", WorkingDir: "/work/acme/tool", SessionID: "22222222-2222-2222-2222-222222222222"},
 	}
+	inventory := ftue.ProviderInventory{
+		defaults.HarnessClaudeCode: {SessionCount: 1, Enabled: true},
+		defaults.HarnessOpenCode:   {SessionCount: 1, Enabled: true},
+	}
 	var projectFrame, scopeFrame, filteredScopeFrame, nextFrame, destinationFrame, consentFrame string
-	cmd := buildKickstartCommand(kickstartCommandDeps{
-		discover: func(context.Context, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
-			return ftue.ProviderInventory{
-				defaults.HarnessClaudeCode: {SessionCount: 1, Enabled: true},
-				defaults.HarnessOpenCode:   {SessionCount: 1, Enabled: true},
-			}, sessions
+	deps := kickstartCommandDeps{
+		discover: func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+			return inventory, sessions
 		},
 		getwd: func() (string, error) { return "/work/acme/tool", nil },
 		run: func(model ftue.WizardModel) error {
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 			model = updated.(ftue.WizardModel)
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 			model = updated.(ftue.WizardModel)
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			model = updated.(ftue.WizardModel)
-			projectFrame = model.View()
+			projectFrame = model.View().Content
 			if strings.Contains(projectFrame, "[ ] tool") {
-				updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+				updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 				model = updated.(ftue.WizardModel)
 			}
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			model = updated.(ftue.WizardModel)
-			scopeFrame = model.View()
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+			scopeFrame = model.View().Content
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			model = updated.(ftue.WizardModel)
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 			model = updated.(ftue.WizardModel)
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 			model = updated.(ftue.WizardModel)
-			filteredScopeFrame = model.View()
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			filteredScopeFrame = model.View().Content
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			model = updated.(ftue.WizardModel)
-			nextFrame = model.View()
+			nextFrame = model.View().Content
 			for range 4 {
-				updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 				model = updated.(ftue.WizardModel)
 			}
-			destinationFrame = model.View()
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			destinationFrame = model.View().Content
+			updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			model = updated.(ftue.WizardModel)
-			consentFrame = model.View()
+			consentFrame = model.View().Content
 			return nil
 		},
-	})
+	}
+	// The legacy wizard is retained as a deprecation candidate; with no flow
+	// runner injected, the command falls back to it, so cmd.Execute drives the
+	// legacy project-first path exactly as before.
+	cmd := buildKickstartCommand(deps)
 	cmd.SetContext(t.Context())
 	cmd.SetArgs(nil)
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute mounted kickstart: %v", err)
 	}
+	_ = inventory
 	if strings.Contains(projectFrame, "Select Providers") {
 		t.Fatalf("first scope decision remained harness-first:\n%s", projectFrame)
 	}
@@ -163,8 +175,8 @@ func TestRemoveIfExists_MissingFileIsNonFatal(t *testing.T) {
 func TestFtueDiscover_EmptyOnMissingConfig(t *testing.T) {
 	t.Parallel()
 	// HOME/XDG are isolated to a throwaway dir by TestMain, so discovery finds no
-	// local transcript store. This exercises the empty case deterministically.
-	inventory, sessions := ftueDiscover(t.Context(), t.TempDir()+"/nonexistent/config.yaml", nil)
+	// local transcript store or db. This exercises the empty case deterministically.
+	inventory, sessions := ftueDiscover(t.Context(), t.TempDir()+"/nonexistent/config.yaml", t.TempDir()+"/nonexistent/peasant.db", nil)
 	if inventory == nil {
 		t.Error("provider inventory should never be nil")
 	}
@@ -201,7 +213,7 @@ func TestFtueDiscover_FindsStrikeBeforeOptIn(t *testing.T) {
 		t.Fatalf("write isolated Strike fixture: %v", err)
 	}
 
-	inventory, sessions := ftueDiscover(t.Context(), filepath.Join(home, "missing-config.yaml"), nil)
+	inventory, sessions := ftueDiscover(t.Context(), filepath.Join(home, "missing-config.yaml"), filepath.Join(home, "missing-peasant.db"), nil)
 	strike := inventory[defaults.HarnessStrike]
 	if strike.SessionCount != 1 {
 		t.Fatalf("Kickstart Strike count = %d, want 1 available session before opt-in", strike.SessionCount)

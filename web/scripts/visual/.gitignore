@@ -12,6 +12,7 @@
 !.gitignore
 !README.md
 !probe-peasant.mjs
+!selection-recovery-probe.mjs
 !peasant-shoot.mjs
 !boot-peasant.mjs
 !shell-nav-gate.mjs

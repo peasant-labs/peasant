@@ -1,0 +1,28 @@
+expectedRowCount: 4
+expectedRequiredHintCount: 4
+requiredHints:
+  - 'backspace: delete'
+  - 'enter: keep filter'
+  - 'esc: clear filter'
+  - 'tab: next field'
+rows:
+  - name: quit-letter-is-query-text
+    input: q
+    shadowedAction: quit
+    wantQuery: 'search: q▏'
+    forbiddenHint: 'q: quit'
+  - name: back-letter-is-query-text
+    input: b
+    shadowedAction: back
+    wantQuery: 'search: b▏'
+    forbiddenHint: 'esc: back'
+  - name: help-punctuation-is-query-text
+    input: '?'
+    shadowedAction: help
+    wantQuery: 'search: ?▏'
+    forbiddenHint: '?: help'
+  - name: facet-letter-is-query-text
+    input: f
+    shadowedAction: filter
+    wantQuery: 'search: f▏'
+    forbiddenHint: 'f: filter'

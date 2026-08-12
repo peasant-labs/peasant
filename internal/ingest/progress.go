@@ -65,10 +65,11 @@ type ProgressEvent struct {
 
 // StageProgress holds the mutable state for a single pipeline stage.
 type StageProgress struct {
-	Total  int
-	Done   int
-	Ended  bool
-	HasErr bool
+	Total   int
+	Done    int
+	Started bool
+	Ended   bool
+	HasErr  bool
 }
 
 // ProgressState is a concurrent-safe aggregation of per-stage progress.
@@ -100,20 +101,35 @@ func (ps *ProgressState) Update(ev ProgressEvent) {
 	case KindStart:
 		sp.Total = ev.Total
 		sp.Done = 0
+		sp.Started = true
 		sp.Ended = false
 		sp.HasErr = false
 	case KindAdvance:
+		sp.Started = true
 		sp.Done = ev.Done
 		if ev.Total > sp.Total {
 			sp.Total = ev.Total
 		}
 	case KindEnd:
+		sp.Started = true
 		sp.Done = ev.Done
 		if ev.Total > 0 {
 			sp.Total = ev.Total
 		}
 		sp.Ended = true
 		sp.HasErr = ev.Err != nil
+	}
+}
+
+// Reset clears every stage for a new local-ingest attempt while preserving the
+// same concurrent-safe pull source. It never replaces the ProgressState pointer
+// held by pipeline and renderer, so retry wiring cannot accidentally observe a
+// stale source from the prior attempt.
+func (ps *ProgressState) Reset() {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	for _, stage := range StageOrder {
+		ps.stages[stage] = &StageProgress{}
 	}
 }
 

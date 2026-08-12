@@ -1,0 +1,86 @@
+# Pane navigation and preview scrolling for kit.PreviewSplit, driven by
+# TestPreviewSplit_PaneNavigation (internal/tui/kit/previewsplit_pane_nav_test.go).
+#
+# The split is mounted over the three items in `items` and a content source that
+# returns `contentLines` numbered lines, rendered into a region of `width` x
+# `height`. Each case presses `presses` in order against the REAL component and
+# then asserts which pane takes input, which item the list still highlights, and
+# which content lines the viewport shows.
+#
+# expectedCaseCount is the row-count guard; contentLines is asserted against the
+# body the test actually builds, so the scroll expectations below can never be
+# read against a different amount of content than they were written for.
+expectedCaseCount: 9
+width: 40
+height: 6
+contentLines: 40
+items: [alpha, bravo, charlie]
+cases:
+  - name: input-starts-on-the-list-pane
+    presses: []
+    wantPane: left
+    wantHighlight: alpha
+    wantVisible: [line-00, line-05]
+    wantMissing: [line-06]
+
+  - name: ctrl-l-focuses-the-preview-pane
+    presses: [ctrl+l]
+    wantPane: right
+    wantHighlight: alpha
+    wantVisible: [line-00]
+    wantMissing: [line-06]
+
+  - name: ctrl-h-returns-focus-to-the-list-pane
+    presses: [ctrl+l, ctrl+h]
+    wantPane: left
+    wantHighlight: alpha
+    wantVisible: [line-00]
+    wantMissing: [line-06]
+
+  # ctrl+h sends 0x08 and backspace sends 0x7f: bubbletea decodes them as
+  # distinct keys, so backspace must NOT move focus.
+  - name: backspace-is-not-ctrl-h-and-leaves-focus-alone
+    presses: [ctrl+l, backspace]
+    wantPane: right
+    wantHighlight: alpha
+    wantVisible: [line-00]
+    wantMissing: [line-06]
+
+  - name: down-scrolls-the-preview-while-it-is-focused
+    presses: [ctrl+l, down, down]
+    wantPane: right
+    wantHighlight: alpha
+    wantVisible: [line-02, line-07]
+    wantMissing: [line-00, line-01, line-08]
+
+  # Moving the list cursor re-binds the preview to the newly-highlighted item,
+  # so the pane is loading that item's body rather than still showing the
+  # previous one - what matters here is that the keystroke drove the CURSOR and
+  # not the viewport.
+  - name: down-moves-the-list-cursor-while-the-list-is-focused
+    presses: [down]
+    wantPane: left
+    wantHighlight: bravo
+    wantVisible: [loading preview]
+    wantMissing: [line-39]
+
+  - name: shift-g-jumps-the-preview-to-its-last-line
+    presses: [ctrl+l, shift+g]
+    wantPane: right
+    wantHighlight: alpha
+    wantVisible: [line-35, line-39]
+    wantMissing: [line-00, line-34]
+
+  - name: g-returns-the-preview-to-its-first-line
+    presses: [ctrl+l, shift+g, g]
+    wantPane: right
+    wantHighlight: alpha
+    wantVisible: [line-00, line-05]
+    wantMissing: [line-06, line-39]
+
+  - name: page-down-scrolls-the-preview-by-a-full-pane
+    presses: [ctrl+l, pgdown]
+    wantPane: right
+    wantHighlight: alpha
+    wantVisible: [line-06, line-11]
+    wantMissing: [line-05, line-12]

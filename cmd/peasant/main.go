@@ -20,6 +20,7 @@ var commands = [...]func() *cobra.Command{
 	BuildSessionsCommand,
 	BuildVersionCommand,
 	BuildKickstartCommand,
+	BuildConfigCommand,
 	BuildAnnotateCommand,
 	BuildMemoryCommand,
 	BuildExportCommand,
@@ -31,6 +32,16 @@ var commands = [...]func() *cobra.Command{
 }
 
 func main() {
+	rootCmd := buildRootCommand()
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(exitCodeFor(err).Int())
+	}
+}
+
+// buildRootCommand assembles the production Cobra root from the one static
+// command registry used by main. Tests may resolve commands from this exact
+// tree without executing external command dependencies.
+func buildRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "peasant",
 		Short: "Developer observability for AI coding agent sessions",
@@ -43,10 +54,7 @@ func main() {
 	for _, build := range commands {
 		rootCmd.AddCommand(build())
 	}
-
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(exitCodeFor(err).Int())
-	}
+	return rootCmd
 }
 
 // exitCodeFor maps a command failure to the status peasant exits with.

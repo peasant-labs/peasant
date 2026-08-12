@@ -12,7 +12,13 @@ import (
 
 // Logout revokes the API key on the village and clears local credentials.
 func Logout(ctx context.Context) error {
-	creds, err := LoadCredentials()
+	return LogoutFrom(ctx, "")
+}
+
+// LogoutFrom revokes and clears credentials only from the config directory
+// selected by xdgConfigHomeOverride.
+func LogoutFrom(ctx context.Context, xdgConfigHomeOverride string) error {
+	creds, err := LoadCredentialsFrom(xdgConfigHomeOverride)
 	if err != nil {
 		return fmt.Errorf("load credentials: %w", err)
 	}
@@ -23,7 +29,7 @@ func Logout(ctx context.Context) error {
 	revokeErr := revokeRemoteKey(ctx, creds)
 
 	// Always clear local credentials, even if remote revocation failed.
-	if err := ClearCredentials(); err != nil {
+	if err := ClearCredentialsFrom(xdgConfigHomeOverride); err != nil {
 		return fmt.Errorf("clear credentials: %w", err)
 	}
 

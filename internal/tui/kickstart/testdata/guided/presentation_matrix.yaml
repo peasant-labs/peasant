@@ -1,0 +1,47 @@
+expectedSectionCount: 5
+expectedThemeCount: 2
+expectedSizeCount: 2
+expectedCaseCount: 20
+sections:
+  - key: auto-ingest
+    heading: auto-ingest new branches in fully-selected projects
+    control: '[on]'
+    intro: decide how future branches enter your saved local selection.
+  - key: privacy
+    heading: redaction level
+    control: '(•) standard'
+    intro: preview standard redaction before a later explicit publication.
+    markers: ['- before:', '+ after:']
+  - key: license
+    heading: default license attached to pushed transcripts
+    control: '(•) none (do not attach a license)'
+    intro: choose the default license for a later explicit publish.
+  - key: destination
+    heading: default visibility for pushed transcripts
+    control: '(•) private'
+    intro: choose who may see transcripts after a later explicit publish.
+  - key: retention
+    heading: how long claude code keeps its transcripts
+    control: '( ) 30 days'
+    intro: choose how long claude code keeps its source transcript files.
+cases:
+  - {name: auto-ingest-dark-80x24, section: auto-ingest, theme: dark, width: 80, height: 24}
+  - {name: auto-ingest-light-80x24, section: auto-ingest, theme: light, width: 80, height: 24}
+  - {name: auto-ingest-dark-120x40, section: auto-ingest, theme: dark, width: 120, height: 40}
+  - {name: auto-ingest-light-120x40, section: auto-ingest, theme: light, width: 120, height: 40}
+  - {name: privacy-dark-80x24, section: privacy, theme: dark, width: 80, height: 24}
+  - {name: privacy-light-80x24, section: privacy, theme: light, width: 80, height: 24}
+  - {name: privacy-dark-120x40, section: privacy, theme: dark, width: 120, height: 40}
+  - {name: privacy-light-120x40, section: privacy, theme: light, width: 120, height: 40}
+  - {name: license-dark-80x24, section: license, theme: dark, width: 80, height: 24}
+  - {name: license-light-80x24, section: license, theme: light, width: 80, height: 24}
+  - {name: license-dark-120x40, section: license, theme: dark, width: 120, height: 40}
+  - {name: license-light-120x40, section: license, theme: light, width: 120, height: 40}
+  - {name: destination-dark-80x24, section: destination, theme: dark, width: 80, height: 24}
+  - {name: destination-light-80x24, section: destination, theme: light, width: 80, height: 24}
+  - {name: destination-dark-120x40, section: destination, theme: dark, width: 120, height: 40}
+  - {name: destination-light-120x40, section: destination, theme: light, width: 120, height: 40}
+  - {name: retention-dark-80x24, section: retention, theme: dark, width: 80, height: 24}
+  - {name: retention-light-80x24, section: retention, theme: light, width: 80, height: 24}
+  - {name: retention-dark-120x40, section: retention, theme: dark, width: 120, height: 40}
+  - {name: retention-light-120x40, section: retention, theme: light, width: 120, height: 40}

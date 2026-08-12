@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -58,9 +59,21 @@ type claudeJSONLLine struct {
 	} `json:"message"`
 }
 
+// claudeTeammateIdentity is deliberately private to discovery. Claude's team
+// metadata is useful for relating separately stored transcripts, but is not a
+// public session contract.
+type claudeTeammateIdentity struct {
+	team string
+	name string
+}
+
 // contentBlock is a typed block inside an assistant message content array.
 type contentBlock struct {
 	Type string `json:"type"`
+}
+
+type claudeFileOpener interface {
+	Open(path string) (io.ReadCloser, error)
 }
 
 // Discover walks each configured source path looking for *.jsonl files.
@@ -162,6 +175,9 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		rootIndex := make(map[string]int)
 
 		for _, entry := range rootEntries {
+			if !a.hasClaudeConversationRecord(entry.path) {
+				continue
+			}
 			sid, _ := NewSessionID(entry.sessionID) // already validated in pass 1
 
 			info, err := a.fs.Stat(entry.path)
@@ -189,6 +205,9 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 
 		for _, entry := range subagentEntries {
+			if !a.hasClaudeConversationRecord(entry.path) {
+				continue
+			}
 			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
 			subSID, _ := NewSessionID(entry.subagentID)       // already validated
 
@@ -219,7 +238,164 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
+	a.linkClaudeTeammates(sessions)
 	return sessions, nil
+}
+
+// linkClaudeTeammates links independently persisted Claude root transcripts.
+// A relationship is accepted only when both sides provide one unambiguous
+// complete identity. Files that cannot be read or parsed simply provide no
+// evidence and do not make discovery fail.
+func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession) {
+	rootByPath := make(map[ResolvedPath]int)
+	for i := range sessions {
+		if sessions[i].ParentUUID == nil {
+			rootByPath[sessions[i].SourcePath] = i
+		}
+	}
+
+	identities := make(map[claudeTeammateIdentity][]int)
+	spawns := make(map[claudeTeammateIdentity]map[int]struct{})
+	for i := range sessions {
+		if _, ok := rootByPath[sessions[i].SourcePath]; !ok {
+			continue
+		}
+		identity, spawnRecords := a.readClaudeTeammateEvidence(sessions[i].SourcePath)
+		if identity != nil {
+			identities[*identity] = append(identities[*identity], i)
+		}
+		for _, spawn := range spawnRecords {
+			if spawns[spawn] == nil {
+				spawns[spawn] = make(map[int]struct{})
+			}
+			spawns[spawn][i] = struct{}{}
+		}
+	}
+
+	for identity, children := range identities {
+		parents := spawns[identity]
+		if len(children) != 1 || len(parents) != 1 {
+			continue
+		}
+		child := children[0]
+		var parent int
+		for parent = range parents {
+		}
+		if child == parent {
+			continue
+		}
+		parentID := sessions[parent].SessionID
+		sessions[child].ParentUUID = &parentID
+		sessions[parent].SubagentPaths = append(sessions[parent].SubagentPaths, sessions[child].SourcePath)
+	}
+}
+
+func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTeammateIdentity, []claudeTeammateIdentity) {
+	data, err := a.fs.ReadFile(path.String())
+	if err != nil {
+		return nil, nil
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	var identity *claudeTeammateIdentity
+	var invalidIdentity bool
+	var spawns []claudeTeammateIdentity
+	for scanner.Scan() {
+		var value map[string]any
+		if json.Unmarshal(scanner.Bytes(), &value) != nil {
+			continue
+		}
+		_, hasTeam := value["teamName"]
+		_, hasName := value["agentName"]
+		if hasTeam || hasName {
+			team, teamOK := value["teamName"].(string)
+			name, nameOK := value["agentName"].(string)
+			if !teamOK || !nameOK || team == "" || name == "" {
+				invalidIdentity = true
+			} else {
+				candidate := claudeTeammateIdentity{team: team, name: name}
+				if identity == nil {
+					identity = &candidate
+				} else if *identity != candidate {
+					invalidIdentity = true
+				}
+			}
+		}
+		if spawn, ok := claudeTeammateSpawn(value); ok {
+			spawns = append(spawns, spawn)
+		}
+	}
+	if invalidIdentity {
+		identity = nil
+	}
+	return identity, spawns
+}
+
+// hasClaudeConversationRecord reports whether path contains at least one native
+// user or assistant record. Claude stores summary and file-history records in
+// session-shaped JSONL files, but neither represents a renderable conversation.
+// Unreadable, empty, or malformed files fail open so discovery can surface them
+// for diagnostics rather than silently discarding a future transcript format.
+func (a *ClaudeAdapter) hasClaudeConversationRecord(path string) bool {
+	var reader io.Reader
+	var closeFile func() error
+	if opener, ok := a.fs.(claudeFileOpener); ok {
+		file, err := opener.Open(path)
+		if err != nil {
+			return true
+		}
+		reader = file
+		closeFile = file.Close
+	} else {
+		data, err := a.fs.ReadFile(path)
+		if err != nil {
+			return true
+		}
+		reader = bytes.NewReader(data)
+	}
+	if closeFile != nil {
+		defer closeFile()
+	}
+
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	var validRecords int
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var value struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(line, &value) != nil {
+			return true
+		}
+		validRecords++
+		if value.Type == "user" || value.Type == "assistant" {
+			return true
+		}
+	}
+	return scanner.Err() != nil || validRecords == 0
+}
+
+// claudeTeammateSpawn recognizes only the top-level native tool result. Tool
+// output may contain arbitrary JSON-shaped text, so recursive matching would
+// let an unrelated tool payload forge discovery evidence.
+func claudeTeammateSpawn(value map[string]any) (claudeTeammateIdentity, bool) {
+	result, ok := value["toolUseResult"].(map[string]any)
+	if !ok {
+		return claudeTeammateIdentity{}, false
+	}
+	if status, _ := result["status"].(string); status != "teammate_spawned" {
+		return claudeTeammateIdentity{}, false
+	}
+	team, teamOK := result["team_name"].(string)
+	name, nameOK := result["name"].(string)
+	if !teamOK || !nameOK || team == "" || name == "" {
+		return claudeTeammateIdentity{}, false
+	}
+	return claudeTeammateIdentity{team: team, name: name}, true
 }
 
 // claudeSessionHints holds metadata extracted from the first few JSONL lines.
@@ -257,17 +433,13 @@ func (a *ClaudeAdapter) extractClaudeHints(path string) claudeSessionHints {
 		if hints.cwd == "" && line.CWD != "" {
 			hints.cwd = line.CWD
 		}
-		// Extract title from first user message.
+		// Derive the display title from the first user message. The shared
+		// redaction-free pipeline strips Claude's own markup (system-reminder
+		// blocks, command/query wrappers) and caps the length, so the raw markup
+		// no longer leaks into the title.
 		if hints.title == "" && line.Type == "user" && line.Message.Role == "user" {
-			text := extractTextFromContent(line.Message.Content)
-			if text != "" {
-				if idx := strings.IndexByte(text, '\n'); idx >= 0 {
-					text = text[:idx]
-				}
-				if len(text) > 80 {
-					text = text[:77] + "..."
-				}
-				hints.title = text
+			if text := extractTextFromContent(line.Message.Content); text != "" {
+				hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
 			}
 		}
 		// Stop early if we have everything.

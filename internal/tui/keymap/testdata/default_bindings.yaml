@@ -1,0 +1,146 @@
+# Table-driven expectations for keymap.Default(), driven by
+# TestDefault_Bindings (internal/tui/keymap/keymap_test.go). Keyed by action
+# name (keymap.ActionID.String()) rather than position, so reordering the
+# enum's declaration can never silently pair a row with the wrong action.
+#
+# expectedBindingCount is checked against BOTH len(keymap.AllActions()) and
+# len(bindings) here, AND every action in AllActions() must have a row (the
+# test fails closed on a missing row rather than skipping it) - this is the
+# fixture-coverage half of "one Default() keymap, no drift": a new ActionID
+# added to the enum without a Default() binding AND without a row here fails
+# in two independent places (this fixture's count guard, and
+# TestDefault_Bindings' per-action lookup).
+expectedBindingCount: 33
+bindings:
+  - action: quit
+    keys: ["q", "ctrl+c"]
+    helpKey: "q"
+    helpDesc: "quit"
+  - action: confirm
+    keys: ["enter"]
+    helpKey: "enter"
+    helpDesc: "confirm"
+  - action: back
+    keys: ["esc", "b"]
+    helpKey: "esc"
+    helpDesc: "back"
+  - action: up
+    keys: ["up", "k"]
+    helpKey: "↑/k"
+    helpDesc: "up"
+  - action: down
+    keys: ["down", "j"]
+    helpKey: "↓/j"
+    helpDesc: "down"
+  - action: left
+    keys: ["left", "h"]
+    helpKey: "←/h"
+    helpDesc: "left"
+  - action: right
+    keys: ["right", "l"]
+    helpKey: "→/l"
+    helpDesc: "right"
+  - action: page-up
+    keys: ["pgup", "ctrl+u"]
+    helpKey: "PgUp"
+    helpDesc: "page up"
+  - action: page-down
+    keys: ["pgdown", "ctrl+d"]
+    helpKey: "PgDn"
+    helpDesc: "page down"
+  - action: top
+    keys: ["g"]
+    helpKey: "g"
+    helpDesc: "go to top"
+  - action: bottom
+    keys: ["shift+g", "G"]
+    helpKey: "shift+g"
+    helpDesc: "go to bottom"
+  - action: next-project
+    keys: ["shift+j", "J"]
+    helpKey: "shift+j"
+    helpDesc: "next project"
+  - action: prev-project
+    keys: ["shift+k", "K"]
+    helpKey: "shift+k"
+    helpDesc: "prev project"
+  - action: search
+    keys: ["/"]
+    helpKey: "/"
+    helpDesc: "search"
+  - action: focus-pane-left
+    keys: ["ctrl+h"]
+    helpKey: "ctrl+h"
+    helpDesc: "focus left pane"
+  - action: focus-pane-right
+    keys: ["ctrl+l"]
+    helpKey: "ctrl+l"
+    helpDesc: "focus right pane"
+  - action: next-field
+    keys: ["tab"]
+    helpKey: "tab"
+    helpDesc: "next field"
+  - action: prev-field
+    keys: ["shift+tab"]
+    helpKey: "shift+tab"
+    helpDesc: "prev field"
+  - action: toggle
+    keys: ["space"]
+    helpKey: "space"
+    helpDesc: "select"
+  - action: select-all
+    keys: ["a"]
+    helpKey: "a"
+    helpDesc: "select all"
+  - action: select-under-project
+    keys: ["shift+a", "A"]
+    helpKey: "shift+a"
+    helpDesc: "select project"
+  - action: expand
+    keys: ["right", "l"]
+    helpKey: "→/l"
+    helpDesc: "expand"
+  - action: collapse
+    keys: ["left", "h"]
+    helpKey: "←/h"
+    helpDesc: "collapse"
+  - action: expand-level
+    keys: ["shift+l", "L"]
+    helpKey: "shift+l"
+    helpDesc: "expand branches"
+  - action: collapse-level
+    keys: ["shift+h", "H"]
+    helpKey: "shift+h"
+    helpDesc: "collapse branches"
+  - action: expand-all
+    keys: ["ctrl+p"]
+    helpKey: "ctrl+p"
+    helpDesc: "expand all"
+  - action: collapse-all
+    keys: ["ctrl+o"]
+    helpKey: "ctrl+o"
+    helpDesc: "collapse all"
+  - action: save
+    keys: ["ctrl+s"]
+    helpKey: "ctrl+s"
+    helpDesc: "save"
+  - action: help
+    keys: ["?"]
+    helpKey: "?"
+    helpDesc: "help"
+  - action: filter
+    keys: ["f"]
+    helpKey: "f"
+    helpDesc: "filter"
+  - action: delete-filter
+    keys: ["backspace", "ctrl+h"]
+    helpKey: "backspace"
+    helpDesc: "delete"
+  - action: keep-filter
+    keys: ["enter"]
+    helpKey: "enter"
+    helpDesc: "keep filter"
+  - action: clear-filter
+    keys: ["esc"]
+    helpKey: "esc"
+    helpDesc: "clear filter"

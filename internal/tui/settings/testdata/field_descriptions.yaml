@@ -1,0 +1,44 @@
+# Cases for the field-description and per-option help render capability. Each
+# case renders the flow at one step and asserts which plain-text fragments the
+# body shows (present), which it must NOT show (absent), and — for the lone
+# toggle — that a given fragment appears exactly labelOnce times, proving the
+# section header no longer doubles the toggle's own label.
+#
+# expectedCaseCount guards the table cannot silently lose a case.
+expectedCaseCount: 5
+cases:
+  # The always-shown description line renders under a toggle.
+  - name: toggle-description-shown
+    step: 0
+    present: ["turn this on to import new branches"]
+    absent: []
+    labelOnce: ""
+
+  # The toggle's label is drawn once (by its own control), not a second time as
+  # a section header.
+  - name: toggle-label-not-doubled
+    step: 0
+    present: []
+    absent: []
+    labelOnce: "auto-ingest new branches"
+
+  # A radio shows its always-shown description line.
+  - name: radio-description-shown
+    step: 1
+    present: ["choose how much sensitive data"]
+    absent: []
+    labelOnce: ""
+
+  # A radio shows the highlighted option's help, keyed to the current selection.
+  - name: radio-highlighted-help-shown
+    step: 1
+    present: ["removes file paths"]
+    absent: []
+    labelOnce: ""
+
+  # Only the highlighted option's help is shown, not every option's.
+  - name: radio-other-option-help-hidden
+    step: 1
+    present: []
+    absent: ["removes everything at maximum"]
+    labelOnce: ""

@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -627,7 +627,7 @@ func pressSpaceOnSessionRow(t *testing.T, page *TreeSelectPage) {
 	// each, and the caller asserts the tick actually moved, so a layout change
 	// fails loudly instead of toggling a different row.
 	page.cursor = 3
-	page.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	page.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 }
 
 func TestConfigSaveTo_ExactPathPreservesLoadedSettings(t *testing.T) {
@@ -779,7 +779,7 @@ func TestWizardStreamsIngestProgressThroughOrderedJourneyOnce(t *testing.T) {
 	go func() { finished <- wizard.startJourney(nil, nil)() }()
 	<-ingestStarted
 
-	view := wizard.View()
+	view := wizard.View().Content
 	if !strings.Contains(view, "Discover") || !strings.Contains(view, "Extract") || !strings.Contains(view, "1/2") {
 		t.Fatalf("ordered journey did not render detailed ingest progress: %s", view)
 	}
@@ -805,7 +805,7 @@ func TestWizardRetryRejectsStaleProgressTick(t *testing.T) {
 		t.Fatalf("completed journey did not invalidate its progress generation: executing=%v token=%d", wizard.executing, wizard.journeyProgressToken)
 	}
 
-	model, retryCmd := wizard.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, retryCmd := wizard.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	wizard = model.(WizardModel)
 	if retryCmd == nil || !wizard.executing || wizard.journeyProgressToken != 3 {
 		t.Fatalf("retry did not start exactly one new progress generation: executing=%v token=%d cmd=%v", wizard.executing, wizard.journeyProgressToken, retryCmd != nil)
@@ -834,9 +834,9 @@ func TestWizardExecutionCancellationWaitsForMountedRunner(t *testing.T) {
 			finished := make(chan tea.Msg, 1)
 			go func() { finished <- cmd() }()
 			<-runner.started
-			key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(fixture.Key)}
+			key := tea.KeyPressMsg{Text: fixture.Key}
 			if fixture.Key == "ctrl-c" {
-				key = tea.KeyMsg{Type: tea.KeyCtrlC}
+				key = tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 			}
 			model, quitCmd := wizard.Update(key)
 			wizard = model.(WizardModel)
@@ -848,7 +848,7 @@ func TestWizardExecutionCancellationWaitsForMountedRunner(t *testing.T) {
 			if wizard.executing || wizard.journeyResult == nil || len(wizard.journeyResult.Effects) != 2 {
 				t.Fatalf("finished cancellation did not preserve effects: %+v", wizard.journeyResult)
 			}
-			view := wizard.View()
+			view := wizard.View().Content
 			if !strings.Contains(view, "config:") || !strings.Contains(view, "cancelled=1") {
 				t.Fatalf("cancellation receipt omitted persisted effects: %s", view)
 			}

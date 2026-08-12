@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -170,7 +170,7 @@ func projectSessionsMatch(project ProjectCatalogEntry, needle string) bool {
 }
 
 func (p *ProjectSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return p, nil
 	}
@@ -182,11 +182,11 @@ func (p *ProjectSelectPage) Update(msg tea.Msg) (Page, tea.Cmd) {
 			p.cursor, p.offset = 0, 0
 		case key.Matches(keyMsg, p.keymap.Confirm):
 			p.searching = false
-		case keyMsg.Type == tea.KeyBackspace && len(p.filter) > 0:
+		case keyMsg.Code == tea.KeyBackspace && len(p.filter) > 0:
 			p.filter = p.filter[:len(p.filter)-1]
 			p.cursor, p.offset = 0, 0
-		case keyMsg.Type == tea.KeyRunes:
-			p.filter += string(keyMsg.Runes)
+		case keyMsg.Text != "":
+			p.filter += keyMsg.Text
 			p.cursor, p.offset = 0, 0
 		}
 		return p, nil
@@ -495,13 +495,13 @@ func (p *ProjectScopePage) toggle(row projectScopeRow) {
 }
 
 func (p *ProjectScopePage) Update(msg tea.Msg) (Page, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return p, nil
 	}
 	rows := p.rows()
 	switch {
-	case keyMsg.Type == tea.KeyTab:
+	case keyMsg.Code == tea.KeyTab:
 		p.focusRight = !p.focusRight
 	case p.focusRight && key.Matches(keyMsg, p.keymap.Up) && p.harnessCursor > 0:
 		p.harnessCursor--

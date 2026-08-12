@@ -146,27 +146,48 @@ workflow assertion, fixture, and this runbook together.
 
 ## 3. Cutting the initial final or a release candidate
 
-### Initial `v0.1.0` bootstrap
+### Initial `v0.1.0` bootstrap record
 
-The public-root repository deliberately has no inherited product tags. Its first release
-is the exact final `v0.1.0`, without manufacturing an rc for already validated private
-history.
+The public-root repository began without inherited product tags, so release PR #18
+used the exact `--initial-final v0.1.0` exception instead of manufacturing an rc for
+already validated private history. The guard proved the complete `v*` namespace was
+empty and no `v0.1.0` Release existed before the releaser App created the annotated
+tag. The published GitHub Release is now the durable evidence that self-disables this
+bootstrap. Every later final follows the normal same-version ancestor-rc flow. The
+`skip_upload: true` settings kept AUR and Homebrew untouched by this final.
 
-1. Confirm the public repository has no `v*` tag, no published `v0.1.0` GitHub
-   Release, and an active `v*` ruleset whose sole bypass actor is GitHub App ID
-   `3988034` (`peasant-labs-releaser`).
-2. Open a PR into `develop` titled `release(v0.1.0): initial public release`.
-3. The final guard runs with `--initial-final v0.1.0`. It scans the complete `v*` tag
-   namespace and queries the GitHub Release for `v0.1.0`; missing or ambiguous evidence
-   blocks publication.
-4. Merge through the protected release-PR path. The releaser App updates the Nix vendor
-   hash if required, creates the annotated tag, and triggers the ordinary Nix, E2E,
-   installed-package, Goreleaser, and smoke gates.
-5. Once the GitHub Release exists, that durable record self-disables the bootstrap.
-   Every later final follows the normal same-version ancestor-rc rule even while the
-   exact policy remains configured.
+### `v0.1.0` startup recovery record
 
-Current `skip_upload: true` settings keep AUR and Homebrew untouched by this final.
+The App-created `v0.1.0` tag points to commit
+`807a1b68c8ec1952db6c289f383f42cbb0701db9`, but its first Release run
+(`30946834984`) ended with `startup_failure` before GitHub created any jobs. The
+cause was missing caller permissions for reusable workflows. PR #20 fixed that
+graph for future tags, but GitHub reruns retain the workflow stored at the
+original tag and therefore cannot consume the fix.
+
+PR #21 added a reviewed, expiring recovery path for this exact incident. Its first
+dispatch, run [`30952716604`](https://github.com/peasant-labs/peasant/actions/runs/30952716604),
+failed closed in the GitHub-evidence step because the repository `GITHUB_TOKEN`
+redacted `bypass_actors` from the ruleset response. Nix, publication, and smoke were
+all empty and skipped, and no Release was created.
+
+PR #22 bound the redacted response to the admin-verified ruleset node and exact
+creation/update timestamps, required `current_user_can_bypass: never`, and proved
+the failed attempt never reached mutable work. Replacement run
+[`30954397604`](https://github.com/peasant-labs/peasant/actions/runs/30954397604)
+executed at recovery commit `73ea8eeb40904e439df9d939569c17959c8edca5`, using
+exact-tag E2E run `30948998607` and Release E2E run `30948998662`. Preflight, Nix
+vendor-hash freshness, publication, and native amd64/arm64 smoke all passed on the
+first attempt.
+
+The resulting full [v0.1.0 Release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0)
+contains four archives, two `.deb` packages, two `.rpm` packages, and
+`checksums.txt`. All eight artifact checksums verify; the checksum manifest's
+SHA-256 digest is `aad6b68481d61691b0f30a92c80301895210da049185d87878cad37f89d94dbd`.
+The annotated tag object remains `b1f8fe4b9a40ac32c1d7e1a8748cb11575595c4f`
+and still peels to `807a1b68c8ec1952db6c289f383f42cbb0701db9`. AUR and
+Homebrew remained disabled. The one-time workflow and verifier were removed after
+success, so this incident record is not an executable redispatch procedure.
 
 ### Later release candidates
 

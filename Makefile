@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash
+.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test
 
 VERSION ?= dev
 
@@ -64,6 +64,12 @@ lint: web-stub
 
 check: fmt lint
 	ast-grep scan --config sgconfig.yml .
+	# The key grep gate (internal/tui/gates/astrules/, enforced by
+	# keys_astgrep_test.go) shells out to ast-grep too, but is gated behind
+	# the "astgrep" build tag so a plain `go test ./...` never depends on the
+	# binary - ast-grep is ALREADY a hard `make check` dependency via the
+	# untagged scan above, so this adds no new external requirement here.
+	go test -tags=astgrep -race ./internal/tui/gates/...
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml
 	go test -race ./...
 
@@ -124,6 +130,14 @@ e2e-schema-parity:
 # retraction drops one) with verbose output. See docs/e2e.md.
 demo:
 	go test -race -tags=e2e -count=1 -v -run TestSkipGateDemo ./internal/e2e/...
+
+# Manual visual evidence for the mounted guided TUI. The build tag keeps the
+# harness and its tests out of default Go builds and tests.
+guided-screenshots:
+	go run -tags=guided_screenshots ./cmd/peasant-guided-screenshots
+
+guided-screenshots-test:
+	go test -race -tags=guided_screenshots ./cmd/peasant-guided-screenshots
 
 build: web
 	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$(VERSION)" -o bin/peasant ./cmd/peasant

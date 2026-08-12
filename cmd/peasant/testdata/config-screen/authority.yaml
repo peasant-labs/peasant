@@ -1,0 +1,10 @@
+expectedRows: 8
+forbidden:
+  - kickstart.NewProgram
+  - kickstart.Program
+  - IngestFunc
+  - internal/ingest
+  - internal/push
+  - publisher
+  - PublicationReceipt
+  - JourneyRunner

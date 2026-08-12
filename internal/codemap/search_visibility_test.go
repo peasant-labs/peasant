@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -46,6 +47,7 @@ type searchSessionFixture struct {
 	GitRemote   string `yaml:"git_remote"`
 	ProjectName string `yaml:"project_name"`
 	GitBranch   string `yaml:"git_branch"`
+	GitWorktree string `yaml:"git_worktree"`
 }
 
 type searchVisibilityExpected struct {
@@ -82,6 +84,11 @@ func decodeSearchVisibilityCorpus(data []byte) (testcase.Corpus[searchVisibility
 		}
 		if (tc.Classification == testcase.MustFail) != (tc.Expected.ErrorContains != "") {
 			return testcase.Corpus[searchVisibilityInput, searchVisibilityExpected]{}, fmt.Errorf("search visibility fixture case %q must pair must-fail with error_contains", tc.Name)
+		}
+		for _, session := range tc.Input.Sessions {
+			if session.GitWorktree != "" && (!filepath.IsAbs(session.GitWorktree) || filepath.Clean(session.GitWorktree) != session.GitWorktree) {
+				return testcase.Corpus[searchVisibilityInput, searchVisibilityExpected]{}, fmt.Errorf("search visibility fixture case %q has non-exact git_worktree %q", tc.Name, session.GitWorktree)
+			}
 		}
 	}
 	if err := testutil.ValidateSemanticNames(manifest, actualNames, "search visibility"); err != nil {
@@ -161,7 +168,13 @@ func TestSearch_AppliesVisibilityBeforeSemanticLimit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("selection policy: %v", err)
 			}
-			svc := codemap.NewService(s, func(string) gitops.Repository { return noRepo() }, codegraph.NewGraphBuilder(), policy)
+			svc := codemap.NewService(
+				s,
+				func(string) gitops.Repository { return noRepo() },
+				codegraph.NewGraphBuilder(),
+				policy,
+				codemap.WithPathIdentityResolver(selectionStatePathResolver{}),
+			)
 			payload, err := svc.Search(context.Background(), tc.Input.Query, tc.Input.Limit)
 			if tc.Classification == testcase.MustFail {
 				if err == nil || !sessionvisibility.IsError(err) || !strings.Contains(err.Error(), tc.Expected.ErrorContains) {
@@ -219,6 +232,9 @@ func seedSearchVisibilitySession(t *testing.T, s *store.Store, fixture searchSes
 	}
 	if fixture.GitBranch != "" {
 		metadata.Git.Branch = &fixture.GitBranch
+	}
+	if fixture.GitWorktree != "" {
+		metadata.Git.Worktree = &fixture.GitWorktree
 	}
 	if err := s.InsertSessions(context.Background(), []ingest.StoreEntry{{Metadata: metadata}}); err != nil {
 		t.Fatalf("seed search session %s: %v", fixture.ID, err)

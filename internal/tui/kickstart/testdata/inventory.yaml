@@ -1,0 +1,81 @@
+# Canonical scan inventory the kickstart equivalence oracle drives its scenarios
+# over. It is the full PROJECT -> BRANCH -> SESSION forest a scan of the shared
+# fixture machine would return (project-first, matching the original FTUE
+# ProjectScopePage hierarchy - the harness is a per-session property carried on
+# the leaf, NOT a top-level grouping axis), matching the inventory the
+# selection-config goldens were captured against
+# (internal/tui/ftue/testdata/equivalence/legacy_goldens.yaml header):
+#
+#   claude-code  git@github.com:acme/tool.git      branches: main, feature/x
+#   opencode     https://github.com/acme/tool.git  branch:   main
+#
+# The two harnesses record the SAME logical project under different remote URLs,
+# so they form two project nodes; each session leaf carries its harness in Meta so
+# the round-trip rebuilds the harness-keyed SelectionConfig. Every node starts
+# Unchecked; a scenario checks the sessions its scope names and the round-trip
+# derives the persisted SelectionConfig. Each branch carries MORE THAN ONE session
+# so a single-session pick leaves its branch Partial (a session allowlist entry),
+# while a branch- or project-level pick checks every session in scope and rolls
+# the branch/project up to Checked (a project entry) - the exact grain distinction
+# the goldens pin. expectedNodeCount is the row-count guard: a fixture edit that
+# adds or drops a node without updating the count fails loudly.
+name: inventory
+expectedNodeCount: 11
+roots:
+  - id: git@github.com:acme/tool.git
+    label: "github:acme/tool"
+    meta:
+      remote: "git@github.com:acme/tool.git"
+      projectName: acme/tool
+      projectHarness: claude-code
+      projectIdentity: fixture-claude-tool
+      clonePath: /fixtures/claude/acme-tool
+    children:
+      - id: main
+        label: main
+        meta:
+          branch: main
+        children:
+          - id: cc-main-1
+            label: cc main session one
+            meta:
+              harness: claude-code
+          - id: cc-main-2
+            label: cc main session two
+            meta:
+              harness: claude-code
+      - id: feature/x
+        label: feature/x
+        meta:
+          branch: feature/x
+        children:
+          - id: cc-featx-1
+            label: cc feature session one
+            meta:
+              harness: claude-code
+          - id: cc-featx-2
+            label: cc feature session two
+            meta:
+              harness: claude-code
+  - id: https://github.com/acme/tool.git
+    label: "github:acme/tool"
+    meta:
+      remote: "https://github.com/acme/tool.git"
+      projectName: acme/tool
+      projectHarness: opencode
+      projectIdentity: fixture-opencode-tool
+      clonePath: /fixtures/opencode/acme-tool
+    children:
+      - id: main
+        label: main
+        meta:
+          branch: main
+        children:
+          - id: oc-main-1
+            label: oc main session one
+            meta:
+              harness: opencode
+          - id: oc-main-2
+            label: oc main session two
+            meta:
+              harness: opencode

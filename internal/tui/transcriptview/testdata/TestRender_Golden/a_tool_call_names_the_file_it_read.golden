@@ -1,0 +1,2 @@
+[1;38;2;154;167;121mtool Read internal/ingest/pipeline.go[m
+[38;2;154;167;121m│[m func (p *Pipeline) Run(ctx context.Context) error {

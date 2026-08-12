@@ -109,8 +109,15 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 		if err != nil {
 			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("create kickstart publication redactor: %w", err)
 		}
-		selection := cfg.SelectionMatcher()
-		runCfg := push.PipelineConfig{FilterSessionIDs: ids, Selection: &selection, Visibility: request.Answers.EffectiveVisibility, License: request.Answers.License, CommandBinding: githooks.Binding{ConfigPath: configPath, ConfigDir: configDirOverride(cmd), DataDir: dataDirOverride(cmd)}}
+		runCfg := push.PipelineConfig{FilterSessionIDs: ids, Visibility: request.Answers.EffectiveVisibility, License: request.Answers.License, CommandBinding: githooks.Binding{ConfigPath: configPath, ConfigDir: configDirOverride(cmd), DataDir: dataDirOverride(cmd)}}
+		if cfg.Selection.Mode == config.SelectionModeSelected {
+			matcher := cfg.SelectionMatcher()
+			selection, selectionErr := preparePushSelection(ctx, db, matcher, ingest.NewPhysicalPathResolver())
+			if selectionErr != nil {
+				return nil, retrySessions(ftue.StagePublication, ids), selectionErr
+			}
+			runCfg.Selection = selection
+		}
 		client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
 		result, runErr := push.NewPipeline(db, client, creds, cfg, &ingest.OSFileSystem{}, runCfg, redactor, io.Discard).Run(ctx)
 		return classifyKickstartPublication(ids, result, runErr)

@@ -1,0 +1,99 @@
+# Cases for the kickstart re-scan: what a scan reuses from a compatible local
+# database and what it still resolves from git.
+#
+# Every row is one Claude session written to an in-memory transcript root and
+# driven through the real discovery core against a real store. The claude slug
+# below decodes to no directory on any machine, so the only directory a scan can
+# ask git about is the session's own working directory - one directory per row,
+# which is what makes "this session cost zero git lookups" countable per row.
+declared_rows: 6
+claude_slug: "-peasant-rescan-fixture-acme-tool"
+# What the injected git resolver answers for any directory it is asked about.
+# A row that expects these values proves the scan walked git; a row that expects
+# its recorded values proves it did not.
+resolved_remote: "git@github.com:acme/resolved-by-git.git"
+resolved_branch: "resolved-by-git"
+cases:
+  - name: recorded session with a settled source reuses the record
+    session_id: "11111111-1111-1111-1111-111111111111"
+    session_cwd: "/peasant-rescan/settled"
+    record: complete
+    recorded_remote: "git@github.com:acme/recorded-settled.git"
+    recorded_branch: "recorded-settled"
+    recorded_title: "recorded settled title"
+    recorded_schema_version: current
+    source_age: settled
+    want_resolution: reused
+    want_remote: "git@github.com:acme/recorded-settled.git"
+    want_branch: "recorded-settled"
+    want_title: "recorded settled title"
+
+  - name: recorded session whose source changed after ingest is resolved again
+    session_id: "22222222-2222-2222-2222-222222222222"
+    session_cwd: "/peasant-rescan/changed"
+    record: complete
+    recorded_remote: "git@github.com:acme/recorded-changed.git"
+    recorded_branch: "recorded-changed"
+    recorded_title: "recorded changed title"
+    recorded_schema_version: current
+    source_age: changed
+    want_resolution: resolved
+    want_remote: "git@github.com:acme/resolved-by-git.git"
+    want_branch: "resolved-by-git"
+    want_title: ""
+
+  - name: recorded session still being written keeps its record
+    session_id: "33333333-3333-3333-3333-333333333333"
+    session_cwd: "/peasant-rescan/active"
+    record: complete
+    recorded_remote: "git@github.com:acme/recorded-active.git"
+    recorded_branch: "recorded-active"
+    recorded_title: "recorded active title"
+    recorded_schema_version: current
+    source_age: active
+    want_resolution: reused
+    want_remote: "git@github.com:acme/recorded-active.git"
+    want_branch: "recorded-active"
+    want_title: "recorded active title"
+
+  - name: session recorded under an older metadata version is resolved again
+    session_id: "44444444-4444-4444-4444-444444444444"
+    session_cwd: "/peasant-rescan/behind"
+    record: complete
+    recorded_remote: "git@github.com:acme/recorded-behind.git"
+    recorded_branch: "recorded-behind"
+    recorded_title: "recorded behind title"
+    recorded_schema_version: behind
+    source_age: settled
+    want_resolution: resolved
+    want_remote: "git@github.com:acme/resolved-by-git.git"
+    want_branch: "resolved-by-git"
+    want_title: ""
+
+  - name: session the store never recorded is resolved
+    session_id: "55555555-5555-5555-5555-555555555555"
+    session_cwd: "/peasant-rescan/unrecorded"
+    record: none
+    recorded_remote: ""
+    recorded_branch: ""
+    recorded_title: ""
+    recorded_schema_version: current
+    source_age: settled
+    want_resolution: resolved
+    want_remote: "git@github.com:acme/resolved-by-git.git"
+    want_branch: "resolved-by-git"
+    want_title: ""
+
+  - name: recorded session whose metrics row is gone is still known
+    session_id: "66666666-6666-6666-6666-666666666666"
+    session_cwd: "/peasant-rescan/without-metrics"
+    record: without-metrics
+    recorded_remote: "git@github.com:acme/recorded-without-metrics.git"
+    recorded_branch: "recorded-without-metrics"
+    recorded_title: ""
+    recorded_schema_version: current
+    source_age: settled
+    want_resolution: reused
+    want_remote: "git@github.com:acme/recorded-without-metrics.git"
+    want_branch: "recorded-without-metrics"
+    want_title: ""

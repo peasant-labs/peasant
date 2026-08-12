@@ -1,0 +1,41 @@
+# Closed-set fixture for keymap.ActionID, driven by TestActionID_ClosedSet
+# (internal/tui/keymap/keymap_test.go). Rows are asserted in
+# keymap.AllActions() declaration order, and expectedActionCount is checked
+# against BOTH len(AllActions()) and len(actions) here - so adding a new
+# ActionID to the enum without adding its row here fails this test, rather
+# than shipping an action with no fixture coverage at all.
+expectedActionCount: 33
+actions:
+  - name: quit
+  - name: confirm
+  - name: back
+  - name: up
+  - name: down
+  - name: left
+  - name: right
+  - name: page-up
+  - name: page-down
+  - name: top
+  - name: bottom
+  - name: next-project
+  - name: prev-project
+  - name: search
+  - name: focus-pane-left
+  - name: focus-pane-right
+  - name: next-field
+  - name: prev-field
+  - name: toggle
+  - name: select-all
+  - name: select-under-project
+  - name: expand
+  - name: collapse
+  - name: expand-level
+  - name: collapse-level
+  - name: expand-all
+  - name: collapse-all
+  - name: save
+  - name: help
+  - name: filter
+  - name: delete-filter
+  - name: keep-filter
+  - name: clear-filter

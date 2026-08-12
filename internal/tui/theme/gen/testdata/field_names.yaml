@@ -1,0 +1,24 @@
+# Table-driven cases for gen.FieldName (kebab-case fairtrade token name ->
+# exported Go struct field name), driven by TestFieldName
+# (internal/tui/theme/gen/gen_test.go). Covers a single-word token, a
+# numeric-suffixed token, a three-segment token, a two-segment token starting
+# with "on", and the deepest real token name in the fairtrade "color" group
+# (amber-fill-ink) so the segment-joining logic is exercised at more than one
+# depth.
+expectedCaseCount: 5
+cases:
+  - name: single-word
+    tokenName: canvas
+    want: Canvas
+  - name: numeric-suffix
+    tokenName: surface-2
+    want: Surface2
+  - name: three-segments
+    tokenName: amber-fill-ink
+    want: AmberFillInk
+  - name: leading-preposition-segment
+    tokenName: on-amber
+    want: OnAmber
+  - name: compound-adjective
+    tokenName: ink-strong
+    want: InkStrong

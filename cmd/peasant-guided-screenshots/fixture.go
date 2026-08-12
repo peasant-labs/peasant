@@ -1,0 +1,420 @@
+//go:build guided_screenshots
+
+package main
+
+import (
+	"bytes"
+	_ "embed"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	requiredSheetCount             = 3
+	requiredGuidedSectionCount     = 5
+	requiredGuidedCaptureCount     = 20
+	requiredSelectionStateCount    = 5
+	requiredSelectionCaptureCount  = 16
+	requiredSelectionSessionCount  = 5
+	requiredSelectionHarnessCount  = 2
+	requiredSelectionIngestedCount = 1
+)
+
+type sheetName string
+
+const (
+	sheetGuidedDark  sheetName = "guided-dark"
+	sheetGuidedLight sheetName = "guided-light"
+	sheetSelection   sheetName = "selection"
+)
+
+type sheetKind string
+
+const (
+	sheetKindGuided    sheetKind = "guided"
+	sheetKindSelection sheetKind = "selection"
+)
+
+type captureTheme string
+
+const (
+	captureThemeDark  captureTheme = "dark"
+	captureThemeLight captureTheme = "light"
+)
+
+func (t captureTheme) valid() bool {
+	return t == captureThemeDark || t == captureThemeLight
+}
+
+type guidedSection string
+
+const (
+	guidedSectionAutoIngest  guidedSection = kickstart.SectionAutoIngest
+	guidedSectionPrivacy     guidedSection = kickstart.SectionPrivacy
+	guidedSectionLicense     guidedSection = kickstart.SectionLicense
+	guidedSectionDestination guidedSection = kickstart.SectionDestination
+	guidedSectionRetention   guidedSection = kickstart.SectionRetention
+)
+
+func (s guidedSection) valid() bool {
+	switch s {
+	case guidedSectionAutoIngest, guidedSectionPrivacy, guidedSectionLicense,
+		guidedSectionDestination, guidedSectionRetention:
+		return true
+	default:
+		return false
+	}
+}
+
+type selectionState string
+
+const (
+	selectionStateDefault        selectionState = "default"
+	selectionStateSearch         selectionState = "search"
+	selectionStateProjectPreview selectionState = "project-preview"
+	selectionStateBranchPreview  selectionState = "branch-preview"
+	selectionStateSessionPreview selectionState = "session-preview"
+)
+
+func (s selectionState) valid() bool {
+	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview || s == selectionStateBranchPreview || s == selectionStateSessionPreview
+}
+
+func (s selectionState) requiresBothThemes() bool {
+	return s == selectionStateProjectPreview || s == selectionStateBranchPreview || s == selectionStateSessionPreview
+}
+
+type viewportFixture struct {
+	Width  int `yaml:"width"`
+	Height int `yaml:"height"`
+}
+
+type sheetFixture struct {
+	Name     sheetName       `yaml:"name"`
+	Kind     sheetKind       `yaml:"kind"`
+	Title    string          `yaml:"title"`
+	Theme    captureTheme    `yaml:"theme"`
+	Viewport viewportFixture `yaml:"viewport"`
+}
+
+type guidedSectionFixture struct {
+	Key          guidedSection `yaml:"key"`
+	WantContains []string      `yaml:"wantContains"`
+}
+
+type selectionStateFixture struct {
+	Key          selectionState `yaml:"key"`
+	Query        string         `yaml:"query"`
+	WantContains []string       `yaml:"wantContains"`
+}
+
+type guidedCaptureFixture struct {
+	Name    string        `yaml:"name"`
+	Section guidedSection `yaml:"section"`
+	Theme   captureTheme  `yaml:"theme"`
+	Width   int           `yaml:"width"`
+	Height  int           `yaml:"height"`
+}
+
+type selectionCaptureFixture struct {
+	Name   string         `yaml:"name"`
+	State  selectionState `yaml:"state"`
+	Theme  captureTheme   `yaml:"theme"`
+	Width  int            `yaml:"width"`
+	Height int            `yaml:"height"`
+}
+
+type selectionFixture struct {
+	Repositories []selectionRepositoryFixture      `yaml:"repositories"`
+	Listings     []ftue.SessionListing             `yaml:"listings"`
+	Transcripts  map[string][]selectionTurnFixture `yaml:"transcripts"`
+	Ingested     []string                          `yaml:"ingested"`
+}
+
+type selectionRepositoryFixture struct {
+	ClonePath    string `yaml:"clonePath"`
+	CohortKey    string `yaml:"cohortKey"`
+	GitDirectory string `yaml:"gitDirectory"`
+}
+
+type selectionTurnFixture struct {
+	Role      ingest.Role      `yaml:"role"`
+	EntryType ingest.EntryType `yaml:"entryType"`
+	Content   string           `yaml:"content"`
+}
+
+type captureDocument struct {
+	ExpectedSheetCount             int                       `yaml:"expectedSheetCount"`
+	ExpectedGuidedSectionCount     int                       `yaml:"expectedGuidedSectionCount"`
+	ExpectedGuidedCaptureCount     int                       `yaml:"expectedGuidedCaptureCount"`
+	ExpectedSelectionStateCount    int                       `yaml:"expectedSelectionStateCount"`
+	ExpectedSelectionCaptureCount  int                       `yaml:"expectedSelectionCaptureCount"`
+	ExpectedSelectionSessionCount  int                       `yaml:"expectedSelectionSessionCount"`
+	ExpectedSelectionHarnessCount  int                       `yaml:"expectedSelectionHarnessCount"`
+	ExpectedSelectionIngestedCount int                       `yaml:"expectedSelectionIngestedCount"`
+	Sheets                         []sheetFixture            `yaml:"sheets"`
+	GuidedSections                 []guidedSectionFixture    `yaml:"guidedSections"`
+	SelectionStates                []selectionStateFixture   `yaml:"selectionStates"`
+	Selection                      selectionFixture          `yaml:"selection"`
+	GuidedCaptures                 []guidedCaptureFixture    `yaml:"guidedCaptures"`
+	SelectionCaptures              []selectionCaptureFixture `yaml:"selectionCaptures"`
+}
+
+//go:embed testdata/captures.yaml
+var captureFixtureData []byte
+
+func decodeCaptureDocument(data []byte) (captureDocument, error) {
+	var document captureDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		return document, fmt.Errorf("decode screenshot fixture: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("found a second YAML document")
+		}
+		return document, fmt.Errorf("screenshot fixture must contain exactly one YAML document: %w", err)
+	}
+	if err := validateDeclaredCounts(document); err != nil {
+		return document, err
+	}
+	if err := validateSheets(document.Sheets); err != nil {
+		return document, err
+	}
+	if err := validateGuidedMatrix(document.GuidedSections, document.GuidedCaptures); err != nil {
+		return document, err
+	}
+	if err := validateSelectionMatrix(document.SelectionStates, document.SelectionCaptures); err != nil {
+		return document, err
+	}
+	if err := validateSelectionData(document.Selection); err != nil {
+		return document, err
+	}
+	return document, nil
+}
+
+func validateDeclaredCounts(document captureDocument) error {
+	if document.ExpectedSelectionHarnessCount != requiredSelectionHarnessCount {
+		return fmt.Errorf("screenshot fixture selection harnesses: declared=%d required=%d",
+			document.ExpectedSelectionHarnessCount, requiredSelectionHarnessCount)
+	}
+	checks := []struct {
+		name     string
+		declared int
+		actual   int
+		required int
+	}{
+		{name: "sheets", declared: document.ExpectedSheetCount, actual: len(document.Sheets), required: requiredSheetCount},
+		{name: "guided sections", declared: document.ExpectedGuidedSectionCount, actual: len(document.GuidedSections), required: requiredGuidedSectionCount},
+		{name: "guided captures", declared: document.ExpectedGuidedCaptureCount, actual: len(document.GuidedCaptures), required: requiredGuidedCaptureCount},
+		{name: "selection states", declared: document.ExpectedSelectionStateCount, actual: len(document.SelectionStates), required: requiredSelectionStateCount},
+		{name: "selection captures", declared: document.ExpectedSelectionCaptureCount, actual: len(document.SelectionCaptures), required: requiredSelectionCaptureCount},
+		{name: "selection sessions", declared: document.ExpectedSelectionSessionCount, actual: len(document.Selection.Listings), required: requiredSelectionSessionCount},
+		{name: "selection ingested sessions", declared: document.ExpectedSelectionIngestedCount, actual: len(document.Selection.Ingested), required: requiredSelectionIngestedCount},
+	}
+	for _, check := range checks {
+		if check.declared != check.required || check.actual != check.required {
+			return fmt.Errorf("screenshot fixture %s: declared=%d actual=%d required=%d",
+				check.name, check.declared, check.actual, check.required)
+		}
+	}
+	return nil
+}
+
+func validateSheets(sheets []sheetFixture) error {
+	required := map[sheetName]struct {
+		kind          sheetKind
+		theme         captureTheme
+		width, height int
+	}{
+		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
+		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 4800},
+	}
+	seen := make(map[sheetName]bool, len(sheets))
+	for _, sheet := range sheets {
+		want, ok := required[sheet.Name]
+		if !ok || seen[sheet.Name] || strings.TrimSpace(sheet.Title) == "" ||
+			sheet.Kind != want.kind || sheet.Theme != want.theme ||
+			sheet.Viewport.Width != want.width || sheet.Viewport.Height != want.height {
+			return fmt.Errorf("screenshot fixture has an unknown, duplicate, or invalid sheet: %#v", sheet)
+		}
+		seen[sheet.Name] = true
+	}
+	for name := range required {
+		if !seen[name] {
+			return fmt.Errorf("screenshot fixture omits required sheet %q", name)
+		}
+	}
+	return nil
+}
+
+func validateGuidedMatrix(sections []guidedSectionFixture, captures []guidedCaptureFixture) error {
+	sectionRows := make(map[guidedSection]guidedSectionFixture, len(sections))
+	for _, section := range sections {
+		if !section.Key.valid() || sectionRows[section.Key].Key != "" || !nonEmptyStrings(section.WantContains) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate guided section: %#v", section)
+		}
+		sectionRows[section.Key] = section
+	}
+	for _, key := range []guidedSection{
+		guidedSectionAutoIngest, guidedSectionPrivacy, guidedSectionLicense,
+		guidedSectionDestination, guidedSectionRetention,
+	} {
+		if sectionRows[key].Key == "" {
+			return fmt.Errorf("screenshot fixture omits guided section %q", key)
+		}
+	}
+
+	seenNames := make(map[string]bool, len(captures))
+	pairs := make(map[string]int, len(captures))
+	for _, capture := range captures {
+		wantName := fmt.Sprintf("%s-%s-%dx%d", capture.Section, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != wantName || seenNames[capture.Name] || sectionRows[capture.Section].Key == "" ||
+			!capture.Theme.valid() || !validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate guided capture: %#v", capture)
+		}
+		seenNames[capture.Name] = true
+		pairs[guidedPair(capture.Section, capture.Theme, capture.Width, capture.Height)]++
+	}
+	for section := range sectionRows {
+		for _, captureTheme := range []captureTheme{captureThemeDark, captureThemeLight} {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				pair := guidedPair(section, captureTheme, viewport.Width, viewport.Height)
+				if pairs[pair] != 1 {
+					return fmt.Errorf("screenshot fixture guided pair %q has %d captures, want exactly one", pair, pairs[pair])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateSelectionMatrix(states []selectionStateFixture, captures []selectionCaptureFixture) error {
+	stateRows := make(map[selectionState]selectionStateFixture, len(states))
+	for _, state := range states {
+		if !state.Key.valid() || stateRows[state.Key].Key != "" || !nonEmptyStrings(state.WantContains) ||
+			(state.Key == selectionStateDefault && state.Query != "") ||
+			(state.Key == selectionStateSearch && strings.TrimSpace(state.Query) == "") {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate selection state: %#v", state)
+		}
+		stateRows[state.Key] = state
+	}
+	for _, state := range []selectionState{selectionStateDefault, selectionStateSearch, selectionStateProjectPreview, selectionStateBranchPreview, selectionStateSessionPreview} {
+		if stateRows[state].Key == "" {
+			return fmt.Errorf("screenshot fixture omits selection state %q", state)
+		}
+	}
+
+	seenNames := make(map[string]bool, len(captures))
+	pairs := make(map[string]int, len(captures))
+	for _, capture := range captures {
+		wantName := fmt.Sprintf("selection-%s-%s-%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != wantName || seenNames[capture.Name] || stateRows[capture.State].Key == "" ||
+			!capture.Theme.valid() || (!capture.State.requiresBothThemes() && capture.Theme != captureThemeDark) ||
+			!validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate selection capture: %#v", capture)
+		}
+		seenNames[capture.Name] = true
+		pair := fmt.Sprintf("%s/%s/%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		pairs[pair]++
+	}
+	for state := range stateRows {
+		themes := []captureTheme{captureThemeDark}
+		if state.requiresBothThemes() {
+			themes = append(themes, captureThemeLight)
+		}
+		for _, captureTheme := range themes {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				pair := fmt.Sprintf("%s/%s/%dx%d", state, captureTheme, viewport.Width, viewport.Height)
+				if pairs[pair] != 1 {
+					return fmt.Errorf("screenshot fixture selection pair %q has %d captures, want exactly one", pair, pairs[pair])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateSelectionData(selection selectionFixture) error {
+	if len(selection.Repositories) == 0 {
+		return fmt.Errorf("screenshot fixture selection repositories are empty")
+	}
+	if len(selection.Transcripts) == 0 {
+		return fmt.Errorf("screenshot fixture selection transcripts are empty")
+	}
+	repositories := make(map[string]selectionRepositoryFixture, len(selection.Repositories))
+	for _, repository := range selection.Repositories {
+		if strings.TrimSpace(repository.ClonePath) == "" || strings.TrimSpace(repository.CohortKey) == "" || strings.TrimSpace(repository.GitDirectory) == "" || repositories[repository.ClonePath].ClonePath != "" {
+			return fmt.Errorf("screenshot fixture has an incomplete or duplicate selection repository: %#v", repository)
+		}
+		repositories[repository.ClonePath] = repository
+	}
+	sessionIDs := make(map[string]bool, len(selection.Listings))
+	harnesses := make(map[string]bool)
+	for _, listing := range selection.Listings {
+		if strings.TrimSpace(listing.SessionID) == "" || strings.TrimSpace(listing.Harness) == "" ||
+			strings.TrimSpace(listing.Title) == "" || sessionIDs[listing.SessionID] || repositories[listing.WorkingDir].ClonePath == "" {
+			return fmt.Errorf("screenshot fixture has an incomplete or duplicate selection session: %#v", listing)
+		}
+		sessionIDs[listing.SessionID] = true
+		harnesses[listing.Harness] = true
+	}
+	for sessionID, turns := range selection.Transcripts {
+		if !sessionIDs[sessionID] || len(turns) == 0 {
+			return fmt.Errorf("screenshot fixture transcript %q is unknown or empty", sessionID)
+		}
+		for index, turn := range turns {
+			if !turn.Role.IsValid() || !turn.EntryType.IsValid() || strings.TrimSpace(turn.Content) == "" {
+				return fmt.Errorf("screenshot fixture transcript %q turn %d is invalid or empty", sessionID, index)
+			}
+		}
+	}
+	if len(harnesses) != requiredSelectionHarnessCount {
+		return fmt.Errorf("screenshot fixture selection harnesses: actual=%d required=%d",
+			len(harnesses), requiredSelectionHarnessCount)
+	}
+	for _, listing := range selection.Listings {
+		for _, childID := range listing.SubagentIDs {
+			if !sessionIDs[childID] {
+				return fmt.Errorf("screenshot fixture session %q references unknown child %q", listing.SessionID, childID)
+			}
+		}
+	}
+	seenIngested := make(map[string]bool, len(selection.Ingested))
+	for _, sessionID := range selection.Ingested {
+		if !sessionIDs[sessionID] || seenIngested[sessionID] {
+			return fmt.Errorf("screenshot fixture ingested session %q is unknown or duplicated", sessionID)
+		}
+		seenIngested[sessionID] = true
+	}
+	return nil
+}
+
+func validCaptureSize(width, height int) bool {
+	return (width == 80 && height == 24) || (width == 120 && height == 40)
+}
+
+func guidedPair(section guidedSection, captureTheme captureTheme, width, height int) string {
+	return fmt.Sprintf("%s/%s/%dx%d", section, captureTheme, width, height)
+}
+
+func nonEmptyStrings(values []string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return true
+}

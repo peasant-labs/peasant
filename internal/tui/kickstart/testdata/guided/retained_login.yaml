@@ -1,0 +1,133 @@
+# Visibility login must retain the one mounted settings flow. The first case
+# exercises the complete selection presentation before authentication. The
+# remaining cases delay the original tree result across every visibility-login
+# modal window, proving that asynchronous field messages still reach their owner.
+expectedCaseCount: 4
+expectedPromptDeliveries: 1
+expectedAuthInFlightDeliveries: 1
+expectedAfterLoginDeliveries: 1
+expectedCommitAfterDeliveryCount: 3
+cases:
+  - name: complete-selection-presentation-survives-login
+    scenario: preserve-presentation
+    fixture: faceted
+    width: 140
+    height: 16
+    savedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    beforeLoginKeys:
+      [f, down, left, down, down, "/", s, h, a, r, e, enter, space,
+       ctrl+l, down]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          sessions: [cc-2]
+        opencode:
+          sessions: [oc-1]
+    expectedSourceLoads: 1
+    expectedPreviewID: cc-2
+    stateLineLabels:
+      - 'search: share'
+      - 'claude code 2'
+      - 'feature-x'
+      - 'share bridge scan'
+      - 'retained preview cc-2 line 3'
+    wantViewContains:
+      - 'search: share'
+      - 'claude code 2'
+      - 'feature-x'
+      - 'share bridge scan'
+      - 'retained preview cc-2 line 3'
+    wantViewMissing:
+      - 'ingest pipeline refactor'
+      - 'develop'
+
+  - name: pending-tree-result-reaches-selection-while-sharing-is-current
+    scenario: pending-tree-result
+    delivery: after-login
+    fixture: faceted
+    width: 140
+    height: 30
+    savedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSourceLoads: 1
+    commitAfterDelivery: true
+    wantViewContains:
+      - 'ingest pipeline refactor'
+      - 'commit detector fix'
+      - 'share bridge scan'
+      - 'governance audit trigger'
+    wantViewMissing:
+      - 'scanning projects'
+
+  - name: pending-tree-result-reaches-selection-during-visibility-prompt
+    scenario: pending-tree-result
+    delivery: visibility-prompt
+    fixture: faceted
+    width: 140
+    height: 30
+    savedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSourceLoads: 1
+    commitAfterDelivery: true
+    wantViewContains:
+      - 'ingest pipeline refactor'
+      - 'commit detector fix'
+      - 'share bridge scan'
+      - 'governance audit trigger'
+    wantViewMissing:
+      - 'scanning projects'
+
+  - name: pending-tree-result-reaches-selection-during-visibility-auth
+    scenario: pending-tree-result
+    delivery: auth-in-flight
+    fixture: faceted
+    width: 140
+    height: 30
+    savedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [oc-1]
+    expectedSourceLoads: 1
+    commitAfterDelivery: true
+    wantViewContains:
+      - 'ingest pipeline refactor'
+      - 'commit detector fix'
+      - 'share bridge scan'
+      - 'governance audit trigger'
+    wantViewMissing:
+      - 'scanning projects'

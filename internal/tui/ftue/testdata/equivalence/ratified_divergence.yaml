@@ -1,0 +1,65 @@
+# Selection-config equivalence oracle: exact physical clone identity.
+#
+# Selecting everything is the scenario where the rebuilt kickstart adds the
+# resolver-produced physical identities that the current wizard cannot write.
+#
+# Both flows enumerate today's projects in mode:selected. The rebuilt flow also
+# persists each exact current clone path. A project discovered later stays clear.
+#
+# `golden` here records what the current wizard ACTUALLY writes today so the
+# divergence is concrete and testable: the test drives the wizard, asserts it
+# writes `golden`, and asserts `golden` differs from `ratifiedExpected` — making
+# the divergence a live, non-vacuous requirement rather than a comment.
+expectedScenarioCount: 1
+scenarios:
+  - name: select-everything-root-check
+    doc: >
+      User selects every project across every harness (root-check). The current
+      wizard enumerates them into mode:selected; the rebuilt flow must preserve
+      that wording and mode while adding the exact current clone paths.
+    oracle: ratified-divergence
+    wantImport: true
+    autoIngestNewBranches: false
+    providers:
+      - harness: claude-code
+        importAll: false
+      - harness: opencode
+        importAll: false
+    scopes:
+      - level: project
+        sessions:
+          - harness: claude-code
+            gitRemote: "git@github.com:acme/tool.git"
+            branch: main
+            sessionId: cc-main-1
+      - level: project
+        sessions:
+          - harness: opencode
+            gitRemote: "https://github.com/acme/tool.git"
+            branch: main
+            sessionId: oc-main-1
+    # What the CURRENT wizard actually persists for select-everything.
+    golden:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+        opencode:
+          projects:
+            - gitRemote: "https://github.com/acme/tool.git"
+    # What the rebuilt kickstart must emit: the same exact-current policy plus
+    # resolver output for each clone.
+    ratifiedExpected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+              clonePaths: [/fixtures/claude/acme-tool]
+        opencode:
+          projects:
+            - gitRemote: "https://github.com/acme/tool.git"
+              clonePaths: [/fixtures/opencode/acme-tool]

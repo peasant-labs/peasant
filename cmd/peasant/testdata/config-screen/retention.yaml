@@ -1,0 +1,53 @@
+expectedRows: 6
+cases:
+  - name: clean seeded save preserves both files and skips retention writer
+    scenario: clean-save
+    initialRetention: 90
+    selectedRetention: 90
+    editLicense: false
+    expectScreenDirty: false
+    expectDraftDirty: false
+    expectWriterCalls: 0
+    viewScanSteps: 8
+    wantViewContains: [ctrl+s, save]
+    wantViewMissing: [press enter to save, review your changes]
+  - name: retention-only edit is visible without changing yaml dirty state
+    scenario: retention-only-dirty
+    initialRetention: 30
+    selectedRetention: 90
+    editLicense: false
+    expectScreenDirty: true
+    expectDraftDirty: false
+    expectWriterCalls: 0
+  - name: confirmed discard preserves both files and skips retention writer
+    scenario: discard
+    initialRetention: 90
+    selectedRetention: 365
+    editLicense: true
+    expectScreenDirty: true
+    expectDraftDirty: true
+    expectWriterCalls: 0
+  - name: changed save commits config before one merge-preserving retention write
+    scenario: ordered-save
+    initialRetention: 30
+    selectedRetention: 365
+    editLicense: true
+    expectScreenDirty: true
+    expectDraftDirty: true
+    expectWriterCalls: 1
+  - name: visible validation failure changes neither file and skips writer
+    scenario: validation-failure
+    initialRetention: 30
+    selectedRetention: 30
+    editLicense: false
+    expectScreenDirty: false
+    expectDraftDirty: false
+    expectWriterCalls: 0
+  - name: drift failure preserves the external edit and skips retention writer
+    scenario: drift-failure
+    initialRetention: 365
+    selectedRetention: 99999
+    editLicense: true
+    expectScreenDirty: true
+    expectDraftDirty: true
+    expectWriterCalls: 0

@@ -1,0 +1,83 @@
+# Table-driven mapping from a theme.Styles bundle field+property to the
+# Palette token it must derive its color from. Driven by
+# TestStyles_DeriveFromPaletteTokens (internal/tui/theme/styles_test.go),
+# which resolves both sides via reflection: paletteField names the Palette
+# field, checked in BOTH terminal modes against the derived Styles field's
+# actual foreground/background/borderForeground color (via lipgloss's Get*
+# accessors).
+#
+# This is the "components use tokens ONLY" contract made checkable: every
+# Styles field a kit component can reach is pinned here to a named token, in
+# both modes, so a future edit that reads the wrong Palette field or forgets
+# to thread Mode through is caught structurally rather than only by
+# eyeballing a screenshot.
+expectedCaseCount: 17
+cases:
+  - name: base-foreground-uses-ink
+    stylesField: Base
+    property: foreground
+    paletteField: Ink
+  - name: base-background-uses-canvas
+    stylesField: Base
+    property: background
+    paletteField: Canvas
+  - name: surface-foreground-uses-ink
+    stylesField: Surface
+    property: foreground
+    paletteField: Ink
+  - name: surface-background-uses-surface
+    stylesField: Surface
+    property: background
+    paletteField: Surface
+  - name: surface-hover-foreground-uses-ink
+    stylesField: SurfaceHover
+    property: foreground
+    paletteField: Ink
+  - name: surface-hover-background-uses-surface-hover
+    stylesField: SurfaceHover
+    property: background
+    paletteField: SurfaceHover
+  - name: header-foreground-uses-ink-strong
+    stylesField: Header
+    property: foreground
+    paletteField: InkStrong
+  - name: muted-foreground-uses-ink-3
+    stylesField: Muted
+    property: foreground
+    paletteField: Ink3
+  - name: border-uses-rule
+    stylesField: Border
+    property: borderForeground
+    paletteField: Rule
+  - name: border-focus-uses-focus-ring
+    stylesField: BorderFocus
+    property: borderForeground
+    paletteField: FocusRing
+  - name: selected-foreground-uses-amber-fill-ink
+    stylesField: Selected
+    property: foreground
+    paletteField: AmberFillInk
+  - name: selected-background-uses-amber-fill
+    stylesField: Selected
+    property: background
+    paletteField: AmberFill
+  - name: success-foreground-uses-success
+    stylesField: Success
+    property: foreground
+    paletteField: Success
+  - name: warning-foreground-uses-warning
+    stylesField: Warning
+    property: foreground
+    paletteField: Warning
+  - name: danger-foreground-uses-danger
+    stylesField: Danger
+    property: foreground
+    paletteField: Danger
+  - name: diff-add-foreground-uses-add-text
+    stylesField: DiffAdd
+    property: foreground
+    paletteField: AddText
+  - name: diff-del-foreground-uses-del-text
+    stylesField: DiffDel
+    property: foreground
+    paletteField: DelText

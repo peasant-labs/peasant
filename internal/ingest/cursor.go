@@ -235,8 +235,8 @@ func (a *CursorAdapter) extractCursorHints(path string) cursorSessionHints {
 			continue
 		}
 		if cursorLineRole(line) == RoleUser {
-			if title := extractCursorText(line.content()); title != "" {
-				return cursorSessionHints{title: title}
+			if text := extractCursorText(line.content()); text != "" {
+				return cursorSessionHints{title: simpleTitle(text, defaults.HarnessCursor)}
 			}
 		}
 	}

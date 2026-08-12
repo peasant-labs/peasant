@@ -1,0 +1,37 @@
+expectedCaseCount: 6
+expectedTreeCaseCount: 3
+expectedPreviewCaseCount: 3
+expectedReversedCount: 2
+expectedForeignCount: 2
+expectedOwnerSwapCount: 2
+cases:
+  - name: two-trees-accept-first-completions-in-reverse-order
+    component: tree
+    delivery: reversed
+    firstID: tree-alpha
+    secondID: tree-beta
+  - name: tree-rejects-a-foreign-first-generation-result
+    component: tree
+    delivery: foreign
+    firstID: tree-foreign-alpha
+    secondID: tree-foreign-beta
+  - name: tree-rejects-results-whose-owner-ids-are-swapped
+    component: tree
+    delivery: owner-swap
+    firstID: tree-swap-alpha
+    secondID: tree-swap-beta
+  - name: two-preview-splits-accept-first-completions-in-reverse-order
+    component: preview
+    delivery: reversed
+    firstID: preview-alpha
+    secondID: preview-beta
+  - name: preview-split-rejects-a-foreign-first-sequence-result
+    component: preview
+    delivery: foreign
+    firstID: preview-foreign-alpha
+    secondID: preview-foreign-beta
+  - name: preview-split-rejects-results-whose-owner-ids-are-swapped
+    component: preview
+    delivery: owner-swap
+    firstID: preview-swap-alpha
+    secondID: preview-swap-beta

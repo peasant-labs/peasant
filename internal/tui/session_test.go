@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui"
 	"github.com/peasant-labs/schema"
@@ -38,7 +38,7 @@ func openDetailView(t *testing.T, m tui.SessionModel) tui.SessionModel {
 	// First send a window size so the viewport is initialized.
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	// Then press Enter to open the detail view for the first session.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	return m
 }
 
@@ -186,7 +186,7 @@ func TestSessionDetail_AnnotationEditorOpensOnA(t *testing.T) {
 	m = openDetailView(t, m)
 
 	// Press 'a' to open the annotation picker.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m, _ = m.Update(tea.KeyPressMsg{Text: "a"})
 
 	view := m.View()
 	// The editor modal should be visible in the view.
@@ -206,10 +206,10 @@ func TestSessionDetail_EscapeClosesEditor(t *testing.T) {
 
 	m := tui.NewSession(sessions).WithAnnotationTypes(types)
 	m = openDetailView(t, m)
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m, _ = m.Update(tea.KeyPressMsg{Text: "a"})
 
 	// Press Esc to close.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	// The model should no longer be in editor mode; View() should not show the picker.
 	if !m.InDetail() {

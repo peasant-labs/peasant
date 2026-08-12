@@ -1,0 +1,237 @@
+# Recorded transcripts the turn renderer draws, and what each rendered pane must
+# carry.
+#
+# The first case is the one that matters most, and it is shaped like REAL data
+# rather than like a rich markdown sample: a person's opening prompt is plain
+# prose with no markdown in it at all, and the code arrives later, in the agent's
+# reply. A fixture that put fenced code in the first turn would pass while the
+# mounted pane showed a wall of plain characters, which is exactly how a previous
+# round of golden snapshots stayed green over an empty-looking preview.
+#
+# wantColored names the PALETTE TOKEN a span must be styled with, not a hex
+# value, so an assertion cannot silently agree with whatever the code emits.
+# wantLabels pins the role tags the pane must show.
+#
+# expectedCaseCount is the row-count guard; tokenNames is the closed set every
+# wantColored token must come from.
+#
+# kinds pins the collapse from (role, entry type) to a rendering kind, including
+# the shapes a role-only read would flatten: a reasoning block and a tool call
+# are BOTH recorded with the assistant's role. expectedKindCaseCount is its
+# row-count guard, and every kind in the renderer's closed set must appear as
+# some row's want.
+expectedCaseCount: 7
+expectedTokenNameCount: 6
+tokenNames: [teal, mauve, olive, ink-3, danger, ink]
+expectedKindCaseCount: 9
+kinds:
+  - name: a person's message
+    role: user
+    entryType: text
+    want: user
+  - name: an agent's reply
+    role: assistant
+    entryType: text
+    want: assistant
+  - name: an agent's reasoning
+    role: assistant
+    entryType: thinking
+    want: thinking
+  - name: a tool invocation
+    role: assistant
+    entryType: tool_use
+    want: tool
+  - name: a tool result
+    role: tool
+    entryType: tool_result
+    want: tool
+  - name: a harness error
+    role: assistant
+    entryType: error
+    want: system
+  - name: a harness system message
+    role: system
+    entryType: text
+    want: system
+  - name: a run result the harness recorded
+    role: assistant
+    entryType: result
+    want: system
+  # Entry type is consulted BEFORE role: a reasoning block recorded with the
+  # user's role is still a reasoning block, and reading role first would draw it
+  # as something the person said.
+  - name: a reasoning block recorded under the user's role
+    role: user
+    entryType: thinking
+    want: thinking
+cases:
+  - name: a plain prompt then a reply carrying code
+    theme: dark
+    width: 64
+    turns:
+      - role: user
+        entryType: text
+        content: |
+          the ingest pipeline leaves a partial session behind when a write
+          fails halfway. can you make it atomic?
+      - role: assistant
+        entryType: text
+        content: |
+          write to a temp directory first, then rename it into place.
+
+          ```go
+          func write(dst string) error {
+              return os.Rename(tmp, dst)
+          }
+          ```
+      - role: assistant
+        entryType: tool_use
+        content: ""
+        toolCalls:
+          - name: Bash
+            arguments: go test ./internal/ingest/
+            result: |
+              ok  github.com/peasant-labs/peasant/internal/ingest  0.412s
+    wantLabels: [you, assistant, tool]
+    wantVisible:
+      - the ingest pipeline leaves a partial session behind
+      - write to a temp directory first
+      - func write
+      - tool Bash go test ./internal/ingest/
+      - 0.412s
+    wantColored:
+      # The role tags are drawn from the palette, one distinct token per voice.
+      - text: you
+        token: teal
+      - text: assistant
+        token: mauve
+      - text: tool
+        token: olive
+      # A keyword inside the fenced block: the evidence the reply went through
+      # the markdown renderer and its code highlighter, not through plain text.
+      - text: func
+        token: mauve
+
+  - name: a plain-only session still renders
+    theme: dark
+    width: 50
+    turns:
+      - role: user
+        entryType: text
+        content: what does peasant do with my transcripts?
+      - role: assistant
+        entryType: text
+        content: it indexes them locally and shows them back to you.
+    wantLabels: [you, assistant]
+    wantVisible:
+      - what does peasant do with my transcripts?
+      - it indexes them locally
+
+  - name: a reasoning block is muted and labelled
+    theme: dark
+    width: 48
+    turns:
+      - role: assistant
+        entryType: thinking
+        content: the rename is atomic on the same filesystem only.
+    wantLabels: [thinking]
+    wantVisible:
+      - the rename is atomic
+    wantColored:
+      - text: thinking
+        token: ink-3
+
+  - name: a failed tool call is named as failed
+    theme: dark
+    width: 60
+    turns:
+      - role: assistant
+        entryType: tool_use
+        content: ""
+        toolCalls:
+          - name: Bash
+            arguments: go build ./...
+            result: |
+              internal/ingest/pipeline.go:41:2: undefined: renameAtomic
+            isError: true
+    wantLabels: [tool]
+    wantVisible:
+      - tool Bash go build ./... failed
+      - 'undefined: renameAtomic'
+    wantColored:
+      - text: tool
+        token: danger
+
+  - name: a tool call names the file it read
+    theme: dark
+    width: 60
+    turns:
+      - role: assistant
+        entryType: tool_use
+        content: ""
+        toolCalls:
+          - name: Read
+            arguments: '{"file_path":"internal/ingest/pipeline.go","offset":180}'
+            result: |
+              func (p *Pipeline) Run(ctx context.Context) error {
+            filePath: internal/ingest/pipeline.go
+    wantLabels: [tool]
+    wantVisible:
+      - tool Read internal/ingest/pipeline.go
+    wantMissing:
+      # The raw argument blob is replaced by the path the harness extracted.
+      - '"offset":180'
+
+  - name: a long tool result is bounded and says so
+    theme: dark
+    width: 60
+    turns:
+      - role: assistant
+        entryType: tool_use
+        content: ""
+        toolCalls:
+          - name: Bash
+            arguments: ls internal
+            result: |
+              line one
+              line two
+              line three
+              line four
+              line five
+              line six
+              line seven
+              line eight
+              line nine
+              line ten
+              line eleven
+    wantLabels: [tool]
+    wantVisible:
+      - line one
+      - line eight
+      - (3 more lines)
+    wantMissing:
+      - line nine
+      - line eleven
+
+  - name: the same reply in the light palette
+    theme: light
+    width: 64
+    turns:
+      - role: user
+        entryType: text
+        content: make the write atomic please.
+      - role: assistant
+        entryType: text
+        content: |
+          done:
+
+          ```go
+          func write(dst string) error { return nil }
+          ```
+    wantLabels: [you, assistant]
+    wantVisible:
+      - make the write atomic please.
+      - func write
+    wantColored:
+      - text: you
+        token: teal

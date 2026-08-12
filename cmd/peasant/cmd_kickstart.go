@@ -9,9 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -20,25 +19,60 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
 
 type kickstartCommandDeps struct {
-	discover     func(context.Context, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
-	getwd        func() (string, error)
-	run          func(ftue.WizardModel) error
-	existingUser func(string) string
+	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
+	getwd    func() (string, error)
+	// pathResolver and repositoryResolver keep exact worktree identity separate
+	// from transient Git repository topology at the command boundary. Production
+	// uses physical/Git resolvers; mounted tests can supply deterministic values.
+	pathResolver       ingest.PathIdentityResolver
+	repositoryResolver ingest.RepositoryIdentityResolver
+	// run is the retained legacy terminal boundary. Production selects runFlow;
+	// tests for still-shipping legacy behavior deliberately omit runFlow.
+	run func(ftue.WizardModel) error
+	// runFlow is the guided orchestration selected by the production builder.
+	// runModel is only its terminal execution boundary, so tests can inspect the
+	// real mounted Program without replacing the production path decision.
+	runFlow  func(*cobra.Command, kickstartCommandDeps, string, ftue.ProviderInventory, []ftue.SessionListing) error
+	runModel func(tea.Model) error
+	// readRetention is the external Claude settings read used before Flow mounts.
+	readRetention func() (int, bool)
+	existingUser  func(string) string
+	// alreadyConnected reads the same isolated credential directory the command
+	// was configured with; localIngest returns one runner and its exact
+	// concurrent progress source so Program never observes a different attempt.
+	alreadyConnected func(configDir string) bool
+	localIngest      func(*cobra.Command, string, []ftue.SessionListing) (kickstart.IngestFunc, kickstart.ProgressSource)
+	// flowIngest is a focused test seam for the post-save callback. Production
+	// uses localIngest so the runner and progress source always share one attempt.
+	flowIngest kickstart.IngestFunc
 }
 
 func defaultKickstartCommandDeps() kickstartCommandDeps {
 	return kickstartCommandDeps{
-		discover: ftueDiscover,
-		getwd:    os.Getwd,
+		discover:           ftueDiscover,
+		getwd:              os.Getwd,
+		pathResolver:       ingest.NewPhysicalPathResolver(),
+		repositoryResolver: ingest.NewGitRepositoryIdentityResolver(),
 		run: func(model ftue.WizardModel) error {
-			_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+			_, err := tea.NewProgram(model).Run()
 			return err
 		},
+		runFlow: runKickstartFlow,
+		runModel: func(model tea.Model) error {
+			_, err := tea.NewProgram(model).Run()
+			return err
+		},
+		readRetention: ftue.ReadClaudeCleanupDays,
+		alreadyConnected: func(configDir string) bool {
+			return villageAlreadyConnected(configDir)
+		},
+		localIngest: kickstartLocalIngest,
 		existingUser: func(configDir string) string {
 			if creds, err := auth.LoadCredentialsFrom(configDir); err == nil && creds != nil && creds.IsValid() {
 				return creds.Username
@@ -96,35 +130,77 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// Discover real transcript counts before entering the TUI alt-screen.
 			// Non-fatal: empty counts are displayed if config is missing or paths are empty.
 			// Show a progress spinner during discovery since git resolution can take several seconds.
+			// A database this build can reuse turns that resolution into a lookup
+			// for every session already recorded and unchanged since.
 			spinner := newDiscoverySpinner(os.Stderr)
-			inventory, sessions := deps.discover(ctx, configPath, spinner)
+			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
+			inventory, sessions := deps.discover(ctx, configPath, dbPath, spinner)
 			spinner.Stop()
 
-			runner, progress := buildFTUEIngestRunner(cmd, configPath)
-			invocationPWD, _ := deps.getwd()
-
-			model := ftue.NewWizard(
-				ftue.WithExistingUser(existingUser),
-				ftue.WithProviderInventory(inventory),
-				ftue.WithSessions(sessions),
-				ftue.WithIngestRunner(runner),
-				ftue.WithProgress(progress),
-				ftue.WithExistingSelection(existingSelection),
-				ftue.WithConfigPersistence(configPath, loadedConfig),
-				ftue.WithConfigSnapshot(configSnapshot, configExisted),
-				ftue.WithInvocationPWD(invocationPWD),
-				ftue.WithJourneyRunner(buildKickstartJourneyRunner(cmd, configPath, loadedConfig, configSnapshot, configExisted, runner)),
-				ftue.WithJourneyContext(ctx),
-			)
-			if err := deps.run(model); err != nil {
-				return fmt.Errorf("setup wizard failed: %w", err)
+			// Mount the rebuilt onboarding: the declarative settings.Flow rendered
+			// on the kit, sequenced through optional login/visibility guidance,
+			// local ingest, and persistent completion. This is the default
+			// production entry point (deps.runFlow is wired). The legacy page-based
+			// FTUE wizard is retained as a deprecation candidate and is reached only
+			// when no flow runner is injected (its direct coverage drives
+			// runLegacyFTUEWizard); its view layer is retired in a separate,
+			// user-confirmed step.
+			if deps.runFlow != nil {
+				if err := deps.runFlow(cmd, deps, configPath, inventory, sessions); err != nil {
+					return fmt.Errorf("setup flow failed: %w", err)
+				}
+				return nil
 			}
-			return nil
+			return runLegacyFTUEWizard(cmd, deps, ctx, configPath, existingUser,
+				inventory, sessions, existingSelection, loadedConfig, configSnapshot, configExisted)
 		},
 	}
 
 	cmd.Flags().BoolVar(&reset, "reset", false, "Remove config, credentials, database, ingested data, and state (full reset)")
 	return cmd
+}
+
+// runLegacyFTUEWizard builds and runs the original page-based FTUE wizard.
+//
+// Deprecated: the mounted onboarding entry point is now runKickstartFlow (the
+// settings.Flow rebuilt on the kit). This constructor is RETAINED as a
+// deprecation candidate so the legacy wizard, its journey runner, and its
+// still-shipping page code stay compiled and exercisable until the FTUE view
+// layer is retired in a separate, user-confirmed step; it is not called on the
+// default kickstart path. Do not delete without that confirmation.
+func runLegacyFTUEWizard(
+	cmd *cobra.Command,
+	deps kickstartCommandDeps,
+	ctx context.Context,
+	configPath string,
+	existingUser string,
+	inventory ftue.ProviderInventory,
+	sessions []ftue.SessionListing,
+	existingSelection *config.SelectionConfig,
+	loadedConfig *config.Config,
+	configSnapshot []byte,
+	configExisted bool,
+) error {
+	runner, progress := buildFTUEIngestRunner(cmd, configPath)
+	invocationPWD, _ := deps.getwd()
+
+	model := ftue.NewWizard(
+		ftue.WithExistingUser(existingUser),
+		ftue.WithProviderInventory(inventory),
+		ftue.WithSessions(sessions),
+		ftue.WithIngestRunner(runner),
+		ftue.WithProgress(progress),
+		ftue.WithExistingSelection(existingSelection),
+		ftue.WithConfigPersistence(configPath, loadedConfig),
+		ftue.WithConfigSnapshot(configSnapshot, configExisted),
+		ftue.WithInvocationPWD(invocationPWD),
+		ftue.WithJourneyRunner(buildKickstartJourneyRunner(cmd, configPath, loadedConfig, configSnapshot, configExisted, runner)),
+		ftue.WithJourneyContext(ctx),
+	)
+	if err := deps.run(model); err != nil {
+		return fmt.Errorf("setup wizard failed: %w", err)
+	}
+	return nil
 }
 
 // resetAll removes the config file, credentials, database, peasant-sync directory, and state directory.
@@ -135,7 +211,7 @@ func resetAll(cmd *cobra.Command, configPath string) error {
 	}
 
 	// 2. Credentials.
-	if err := auth.ClearCredentials(); err != nil {
+	if err := auth.ClearCredentialsFrom(configDirOverride(cmd)); err != nil {
 		return fmt.Errorf("reset credentials: %w", err)
 	}
 
@@ -194,17 +270,36 @@ func removeAllIfExists(path string) error {
 // typed provider inventory plus a flat session listing for display in the wizard.
 // Errors are silenced — the wizard shows zero counts instead of failing.
 // The optional spinner is updated with progress during discovery and git resolution.
-func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+//
+// dbPath names the local analytics database. When it already carries this
+// build's schema, the sessions it recorded are reused instead of being resolved
+// from git again (see loadKnownSessions); a missing or unusable database simply
+// resolves everything.
+func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return ftue.ProviderInventory{}, nil
+	}
+	return ftueDiscoverWith(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{},
+		loadKnownSessions(ctx, dbPath), spinner)
+}
+
+// ftueDiscoverWith is the discovery core, with the filesystem, the git resolver,
+// and the store-recorded session index injected. A non-empty index turns the
+// per-session git resolution — the multi-second part of a scan — into a lookup
+// for every session the store already holds and whose source has not changed.
+func ftueDiscoverWith(
+	ctx context.Context,
+	cfg *config.Config,
+	fs ingest.FileSystem,
+	git ingest.GitResolver,
+	known knownSessionIndex,
+	spinner *discoverySpinner,
+) (ftue.ProviderInventory, []ftue.SessionListing) {
 	inventory := ftue.ProviderInventory{}
 	var sessions []ftue.SessionListing
 
-	cfg, err := loadConfig(configPath)
-	if err != nil {
-		return inventory, nil
-	}
-
-	fs := &ingest.OSFileSystem{}
-	git := &ingest.ExecGitResolver{}
+	staleness := configStaleness(cfg)
 
 	for provider, factory := range ingest.DefaultAdapterRegistry {
 		src, _, ok := resolveConfiguredSource(cfg, provider)
@@ -245,18 +340,21 @@ func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpin
 				date = d.CreatedAt
 			}
 			projectName := d.ProjectName
-			var gitRemote string
+			title := d.Title
 			branchName := d.Branch // prefer per-session branch from session data
+			workingDir := d.CWD
+			var gitRemote string
+			// claudeProjectDir is the decoded project directory for a Claude
+			// session, kept so the git resolution below can read its remote.
+			claudeProjectDir := ""
 
 			// Claude-specific: decode project slug to filesystem path for project name.
 			if provider == defaults.HarnessClaudeCode {
 				slug := filepath.Base(filepath.Dir(string(d.SourcePath)))
 				if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
+					claudeProjectDir = decoded
 					if projectName == "" {
 						projectName = shortenPath(decoded)
-					}
-					if remote, err := git.RemoteURL(ctx, decoded); err == nil && remote != "" {
-						gitRemote = remote
 					}
 				}
 				if projectName == "" {
@@ -264,50 +362,93 @@ func ftueDiscover(ctx context.Context, configPath string, spinner *discoverySpin
 				}
 			}
 
-			// For all providers: if we still need git remote, try to resolve
-			// from the session's CWD or project directory.
-			if gitRemote == "" {
-				// Try the session's working directory first (most accurate).
-				if d.CWD != "" {
-					if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
-						gitRemote = remote
-					}
+			if record, ok := known.reusable(d, staleness); ok {
+				// The store already resolved this session and its source has not
+				// moved since, so reuse what it recorded rather than paying for
+				// git again. Values discovery itself carries still win: they come
+				// from the source file, which is never staler than the record.
+				gitRemote = record.GitRemote
+				if branchName == "" {
+					branchName = record.Branch
 				}
-				// Fall back to OriginalRoot or source file directory.
-				if gitRemote == "" && d.ProjectName != "" {
-					dir := string(d.OriginalRoot)
-					if dir == "" {
-						dir = filepath.Dir(string(d.SourcePath))
-					}
-					if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
-						gitRemote = remote
-					}
+				if title == "" {
+					title = record.Title
 				}
+				if workingDir == "" {
+					workingDir = record.workingDirectory()
+				}
+			} else {
+				gitRemote, branchName = resolveSessionGit(ctx, git, d, claudeProjectDir, branchName)
 			}
 
-			// If we still don't have a branch, try resolving from CWD.
-			// This is a last resort — prefers session-recorded branch above.
-			if branchName == "" && d.CWD != "" {
-				if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
-					branchName = branch
-				}
-			}
 			sessions = append(sessions, ftue.SessionListing{
 				Harness:     provider.String(),
 				ProjectName: projectName,
 				GitRemote:   gitRemote,
 				Branch:      branchName,
-				Title:       d.Title,
+				Title:       title,
 				Date:        date,
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
-				WorkingDir:  d.CWD,
+				WorkingDir:  workingDir,
 			})
 		}
 		discovery.SessionCount = rootCount
 		inventory[provider] = discovery
 	}
 	return inventory, sessions
+}
+
+// resolveSessionGit walks git for one discovered session's remote and branch.
+// This is the multi-second part of a scan: one process per lookup, per session.
+// claudeProjectDir is the decoded Claude project directory when there is one,
+// and branchName is the branch the session data already carries.
+func resolveSessionGit(
+	ctx context.Context,
+	git ingest.GitResolver,
+	d ingest.DiscoveredSession,
+	claudeProjectDir string,
+	branchName string,
+) (string, string) {
+	var gitRemote string
+
+	// Claude records the project directory in its path, which is the most
+	// precise place to ask.
+	if claudeProjectDir != "" {
+		if remote, err := git.RemoteURL(ctx, claudeProjectDir); err == nil && remote != "" {
+			gitRemote = remote
+		}
+	}
+
+	// For all providers: if we still need git remote, try to resolve
+	// from the session's CWD or project directory.
+	if gitRemote == "" {
+		// Try the session's working directory first (most accurate).
+		if d.CWD != "" {
+			if remote, err := git.RemoteURL(ctx, d.CWD); err == nil && remote != "" {
+				gitRemote = remote
+			}
+		}
+		// Fall back to OriginalRoot or source file directory.
+		if gitRemote == "" && d.ProjectName != "" {
+			dir := string(d.OriginalRoot)
+			if dir == "" {
+				dir = filepath.Dir(string(d.SourcePath))
+			}
+			if remote, err := git.RemoteURL(ctx, dir); err == nil && remote != "" {
+				gitRemote = remote
+			}
+		}
+	}
+
+	// If we still don't have a branch, try resolving from CWD.
+	// This is a last resort — prefers session-recorded branch above.
+	if branchName == "" && d.CWD != "" {
+		if branch, err := git.Branch(ctx, d.CWD); err == nil && branch != "" {
+			branchName = branch
+		}
+	}
+	return gitRemote, branchName
 }
 
 // filterRootSessions returns only root sessions (no subagents).
@@ -386,8 +527,17 @@ func (a *progressAdapter) Snapshot() map[string]ftue.StageProgress {
 // after the user confirms import. The config is re-loaded at call time so it picks
 // up the file the wizard just saved.
 func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRunnerFunc, ftue.ProgressSnapshot) {
+	runner, progress := buildFTUEIngestRunnerWithProgress(cmd, configPath)
+	return runner, &progressAdapter{state: progress}
+}
+
+// buildFTUEIngestRunnerWithProgress constructs the retained runner together with
+// the exact ProgressState it writes. Guided kickstart consumes the native state
+// through its narrow ProgressSource boundary; the legacy wizard receives the
+// compatibility adapter above. Both presentations therefore observe the same
+// pipeline run rather than parallel counters.
+func buildFTUEIngestRunnerWithProgress(cmd *cobra.Command, configPath string) (ftue.IngestRunnerFunc, *ingest.ProgressState) {
 	progState := ingest.NewProgressState()
-	adapter := &progressAdapter{state: progState}
 	return func(ctx context.Context, answers ftue.WizardAnswers) (*ftue.IngestResult, error) {
 		// Suppress log output so it doesn't corrupt the TUI alt-screen.
 		origLogger := slog.Default()
@@ -421,20 +571,11 @@ func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRu
 			return nil, fmt.Errorf("resolve output path: %w", err)
 		}
 
-		staleness := time.Duration(cfg.Output.StalenessThresholdSec) * time.Second
-		if staleness == 0 {
-			staleness = time.Duration(defaults.ConfigStalenessThresholdSec) * time.Second
-		}
+		staleness := configStaleness(cfg)
 
 		// Map selected sessions to AllowedSessionIDs filter, expanding
 		// parent sessions to include their subagent children.
-		allowedIDs := expandAllowedSessionIDs(answers.EffectiveSelectedSessions())
-		if allowedIDs == nil && hasRestrictedProviderSelection(answers.ProviderSelections) {
-			// An explicitly empty individual selection means import nothing. A nil
-			// map means allow all to Pipeline, so preserve the empty selection as a
-			// non-nil map.
-			allowedIDs = map[ingest.SessionID]bool{}
-		}
+		allowedIDs := kickstartAllowedSessionIDs(answers)
 
 		pipelineCfg := ingest.PipelineConfig{
 			Sources:            sources,
@@ -488,7 +629,20 @@ func buildFTUEIngestRunner(cmd *cobra.Command, configPath string) (ftue.IngestRu
 			Duration:       result.Duration,
 			ProviderCounts: providerCounts,
 		}, nil
-	}, adapter
+	}, progState
+}
+
+// kickstartAllowedSessionIDs preserves the difference between unrestricted
+// legacy wizard input and a committed selected-mode policy that currently
+// matches no discovered sessions. Pipeline uses nil to mean allow all, so the
+// latter must cross this adapter as an allocated empty set.
+func kickstartAllowedSessionIDs(answers ftue.WizardAnswers) map[ingest.SessionID]bool {
+	allowed := expandAllowedSessionIDs(answers.EffectiveSelectedSessions())
+	if allowed == nil && (answers.SelectionMode == config.SelectionModeSelected ||
+		hasRestrictedProviderSelection(answers.ProviderSelections)) {
+		return map[ingest.SessionID]bool{}
+	}
+	return allowed
 }
 
 func hasRestrictedProviderSelection(selections []ftue.ProviderSelection) bool {

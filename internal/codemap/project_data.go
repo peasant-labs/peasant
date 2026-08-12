@@ -57,6 +57,7 @@ func (s *Service) loadProjectData(ctx context.Context, projectHash schema.Projec
 			Harness:     defaults.Harness(session.harness),
 			GitRemote:   session.gitRemote,
 			ProjectName: session.projectName,
+			ClonePath:   s.resolveSessionClonePath(session.gitWorktree, session.projectName),
 			GitBranch:   session.gitBranch,
 		})
 		if visibilityErr != nil {

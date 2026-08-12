@@ -1,0 +1,188 @@
+# What the selection step's preview pane says for each kind of highlighted row.
+#
+# The listing is the same discovery shape the tree is folded from; stored names
+# the RECORDED TURNS the local store already holds, keyed by session id - the
+# whole transcript, not a first message, because the whole transcript is what
+# the pane now shows.
+#
+# The stored sessions are shaped like real data rather than like a rich markdown
+# sample: an opening prompt is plain prose with no markdown in it, and code
+# arrives later, in the agent's reply. A fixture that put fenced code in the
+# first turn would pass while the mounted pane showed a wall of plain
+# characters.
+#
+# Each case highlights one row id and declares the lines the pane must and must
+# not carry. Every session case lists its own title under wantMissing: the pane
+# deliberately does NOT repeat it, because a title is derived from the first
+# user message and that message is the first thing the transcript below renders.
+# expectedCaseCount is the row-count guard.
+expectedCaseCount: 6
+repositories:
+  - {clonePath: /fixtures/acme-tool, repositoryPath: /fixtures/repos/acme-tool.git}
+  - {clonePath: /fixtures/acme-tool-linked, repositoryPath: /fixtures/repos/acme-tool-linked.git, cohortKey: "fixture:/fixtures/repos/acme-tool.git"}
+listings:
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
+    branch: main
+    title: please refactor the ingest pipeline
+    sessionId: stored-1
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
+    branch: main
+    title: fresh session
+    sessionId: fresh-1
+  - harness: cursor
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
+    branch: ""
+    title: branchless session
+    sessionId: fresh-2
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    workingDir: /fixtures/acme-tool
+    branch: main
+    title: a talk with no code in it
+    sessionId: stored-plain
+  - harness: codex
+    projectName: acme/tool
+    gitRemote: "https://github.com/acme/tool.git"
+    workingDir: /fixtures/acme-tool-linked
+    branch: main
+    title: codex worktree session
+    sessionId: fresh-3
+stored:
+  stored-1:
+    - role: user
+      entryType: text
+      content: please refactor the ingest pipeline so a failed write leaves nothing behind.
+    - role: assistant
+      entryType: text
+      content: |
+        write to a temp directory, then rename it into place.
+
+        ```go
+        func write(dst string) error {
+            return os.Rename(tmp, dst)
+        }
+        ```
+    - role: assistant
+      entryType: tool_use
+      content: ""
+      toolCalls:
+        - name: Bash
+          arguments: go test ./internal/ingest/
+          result: |
+            ok  github.com/peasant-labs/peasant/internal/ingest  0.412s
+  # A session that is nothing but plain prose, both sides. This is the shape a
+  # short real session actually has, and the one a markdown-rich fixture would
+  # never catch going blank.
+  stored-plain:
+    - role: user
+      entryType: text
+      content: what does peasant do with my transcripts?
+    - role: assistant
+      entryType: text
+      content: it indexes them locally and shows them back to you.
+cases:
+  - name: an-imported-session-shows-its-whole-transcript
+    highlight: stored-1
+    width: 60
+    wantContains:
+      # the pane's own header chrome
+      - "harness: claude code"
+      - "project: acme/tool"
+      - "branch: main"
+      # every voice in the conversation is tagged
+      - you
+      - assistant
+      - tool
+      # the first turn, the later code, and the tool step
+      - please refactor the ingest pipeline so a failed write
+      - write to a temp directory
+      - func write
+      - tool Bash go test ./internal/ingest/
+      - 0.412s
+    wantMissing:
+      - not imported yet
+      - select a session to preview it
+
+  - name: a-plain-only-session-still-renders
+    highlight: stored-plain
+    width: 60
+    wantContains:
+      - "harness: claude code"
+      - you
+      - assistant
+      - what does peasant do with my transcripts?
+      - it indexes them locally
+    wantMissing:
+      - not imported yet
+      # The title is not repeated above the transcript that produced it.
+      - a talk with no code in it
+
+  - name: a-not-yet-imported-session-says-so
+    highlight: fresh-1
+    width: 60
+    wantContains:
+      - "harness: claude code"
+      - "project: acme/tool"
+      - not imported yet
+    wantMissing:
+      - fresh session
+
+  - name: a-session-with-no-branch-omits-the-branch-line
+    highlight: fresh-2
+    width: 60
+    wantContains:
+      - "harness: cursor"
+      - not imported yet
+    wantMissing:
+      - "branch:"
+      - branchless session
+
+  - name: a-project-row-shows-combined-repository-context
+    highlightKind: project
+    highlight: "github:acme/tool"
+    width: 60
+    wantContains:
+      - "project: github:acme/tool"
+      - "harnesses: claude code, codex, cursor"
+      - "remote: github.com/acme/tool"
+      - "git directories: 2"
+      - /fixtures/repos/acme-tool.git
+      - /fixtures/repos/acme-tool-linked.git
+      - "worktrees: 2"
+      - /fixtures/acme-tool
+      - /fixtures/acme-tool-linked
+      - "branches: 2"
+      - (unknown branch)
+      - main
+      - "sessions: 5"
+    wantMissing:
+      - select a session to preview it
+
+  - name: a-branch-row-shows-combined-branch-context
+    highlightKind: branch
+    highlight: main
+    width: 60
+    wantContains:
+      - "project: github:acme/tool"
+      - "branch: main"
+      - "harnesses: claude code, codex"
+      - "remote: github.com/acme/tool"
+      - "git directories: 2"
+      - /fixtures/repos/acme-tool.git
+      - /fixtures/repos/acme-tool-linked.git
+      - "worktrees: 2"
+      - /fixtures/acme-tool
+      - /fixtures/acme-tool-linked
+      - "sessions: 4"
+    wantMissing:
+      - select a session to preview it
+      - "branches:"
