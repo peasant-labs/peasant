@@ -28,6 +28,27 @@ export interface ShareSession {
   outcome?: string;
 }
 
+export interface ShareHierarchySession extends ShareSession {
+  locationLabel: string;
+  branch: string;
+}
+
+export interface ShareBranchGroup {
+  branch: string;
+  sessions: ShareHierarchySession[];
+}
+
+export interface ShareLocationGroup {
+  locationLabel: string;
+  branches: ShareBranchGroup[];
+}
+
+export interface ShareHierarchyProject {
+  key: string;
+  projectName: string;
+  locations: ShareLocationGroup[];
+}
+
 export interface ShareDiscoveryResult {
   sessions: ShareSession[];
   counts: Record<ShareStatus, number>;

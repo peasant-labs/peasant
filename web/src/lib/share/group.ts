@@ -1,7 +1,7 @@
 // Pure helpers for project-primary selection. No React, no I/O — trivially
 // unit-testable and reused by the Choose step.
 
-import type { ShareSession, ShareStatus, ShareProject } from './types';
+import type { ShareSession, ShareStatus, ShareProject, ShareHierarchyProject, ShareHierarchySession } from './types';
 
 function emptyRollup(): Record<ShareStatus, number> {
   return { new: 0, updated: 0, shared: 0, held: 0, error: 0, pushing: 0 };
@@ -69,4 +69,28 @@ export function groupByProject(sessions: ShareSession[]): ShareProject[] {
   // Most recently active project first.
   projects.sort((a, b) => (a.dateRange.end < b.dateRange.end ? 1 : -1));
   return projects;
+}
+
+export function groupShareHierarchy(sessions: ShareHierarchySession[]): ShareHierarchyProject[] {
+  const projects = new Map<string, ShareHierarchyProject>();
+  for (const session of sessions) {
+    const key = session.projectHash || session.projectName;
+    let project = projects.get(key);
+    if (!project) {
+      project = { key, projectName: session.projectName, locations: [] };
+      projects.set(key, project);
+    }
+    let location = project.locations.find((item) => item.locationLabel === session.locationLabel);
+    if (!location) {
+      location = { locationLabel: session.locationLabel, branches: [] };
+      project.locations.push(location);
+    }
+    let branch = location.branches.find((item) => item.branch === session.branch);
+    if (!branch) {
+      branch = { branch: session.branch, sessions: [] };
+      location.branches.push(branch);
+    }
+    branch.sessions.push(session);
+  }
+  return Array.from(projects.values());
 }

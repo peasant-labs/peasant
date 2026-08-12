@@ -1,0 +1,13 @@
+sessions:
+  - id: session-a
+    projectName: alpha
+    locationLabel: workspace a
+    branch: main
+  - id: session-b
+    projectName: alpha
+    locationLabel: workspace b
+    branch: main
+  - id: session-c
+    projectName: alpha
+    locationLabel: workspace a
+    branch: feature

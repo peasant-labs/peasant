@@ -16,7 +16,7 @@ import {
   type RedactionCache,
 } from '@/components/share/RedactionStep';
 import { PushStep } from '@/components/share/PushStep';
-import type { ShareDiscoveryResult, ShareSession, LabelSelection } from '@/lib/share/types';
+import type { ShareDiscoveryResult, ShareSession, ShareHierarchySession, LabelSelection } from '@/lib/share/types';
 import { emptyLabelSelection } from '@/lib/share/types';
 import {
   DEFAULT_REDACTION_LEVEL,
@@ -26,6 +26,7 @@ import { groupByProject } from '@/lib/share/group';
 import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
+import { decodeDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 
 // Prior-version Contribute wizard: superseded by the fairtrade graph shell lift,
 // a deprecation candidate retained for evidence exits until its replacement lands.
@@ -70,7 +71,10 @@ function countByStatus(sessions: ShareSession[]): Record<ShareSession['shareStat
 }
 
 async function fetchRealSessions(): Promise<ShareDiscoveryResult> {
-  const response = await fetch(`${getApiBaseUrl()}/api/v1/sessions`);
+  const [response, discoveryResponse] = await Promise.all([
+    fetch(`${getApiBaseUrl()}/api/v1/sessions`),
+    fetch(`${getApiBaseUrl()}/api/v1/web/discovery`),
+  ]);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
     try {
@@ -82,9 +86,17 @@ async function fetchRealSessions(): Promise<ShareDiscoveryResult> {
     }
     throw new Error(`Session discovery failed while loading the Share chooser: ${detail}`);
   }
+  if (!discoveryResponse.ok) {
+    throw new Error(`Share hierarchy discovery failed while loading GET /api/v1/web/discovery: the server returned HTTP ${discoveryResponse.status}. No session can be grouped safely. Retry; if this repeats, update or restart Peasant.`);
+  }
   const payload = await response.json();
   const summaries: BackendSessionSummary[] = payload.sessions ?? [];
-  const sessions = summaries.map(mapBackendToShareSession);
+  const metadata = decodeDiscovery(await discoveryResponse.json());
+  const sessions: ShareHierarchySession[] = summaries.map((summary) => {
+    const session = mapBackendToShareSession(summary);
+    const item = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
+    return { ...session, locationLabel: item.locationLabel, branch: item.branch };
+  });
   return {
     sessions,
     counts: countByStatus(sessions),
@@ -196,7 +208,8 @@ export function ShareWizardClient() {
     if (config) {
       if (useMock) {
         setFetchError(null);
-        setDiscovery(fetchMockSessions());
+        const result = fetchMockSessions();
+        setDiscovery({ ...result, sessions: result.sessions.map((session) => ({ ...session, locationLabel: 'mock repository', branch: 'main' })) });
       } else {
         fetchRealSessions()
           .then((result) => {
@@ -424,7 +437,7 @@ export function ShareWizardClient() {
           {/* Step 1 — Choose (projects). Starts empty + select-all. */}
           {step === 'select' && (
             <SessionPicker
-              sessions={chooseSessions}
+              sessions={chooseSessions as ShareHierarchySession[]}
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
               onNext={goNext}

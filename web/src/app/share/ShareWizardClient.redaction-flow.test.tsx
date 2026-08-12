@@ -51,6 +51,12 @@ describe('ShareWizardClient redaction flow', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith('/api/v1/web/discovery')) {
+        return {
+          ok: true,
+          json: async () => ({ items: [{ sessionId: REDACTION_STEP_SESSION.id, locationLabel: 'workspace', branch: 'main', selectionStatus: 'selected' }] }),
+        };
+      }
       if (!url.endsWith('/api/v1/sessions')) {
         throw new Error(`unexpected fetch in mounted redaction-flow test: ${url}`);
       }

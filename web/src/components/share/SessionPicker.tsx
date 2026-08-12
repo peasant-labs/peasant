@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
-import { GroupedMultiSelect, Button } from '@/lib/ft-ui';
-import type { ShareSession } from '@/lib/share/types';
-import { groupByProject, isSelectable } from '@/lib/share/group';
+import { Button, Checkbox } from '@/lib/ft-ui';
+import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
+import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
 import { summarizePrompt } from '@peasant-labs/transcript-browser';
 
@@ -39,7 +39,7 @@ function sessionMeta(s: ShareSession): string {
 // ---------------------------------------------------------------------------
 
 interface SessionPickerProps {
-  sessions: ShareSession[];
+  sessions: ShareHierarchySession[];
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
   onNext: () => void;
@@ -51,32 +51,7 @@ export function SessionPicker({
   onSelectionChange,
   onNext,
 }: SessionPickerProps) {
-  const groups = useMemo(
-    () =>
-      groupByProject(sessions).map((project) => {
-        // Decode Claude-encoded / host-slug paths BEFORE truncation so the
-        // group title is never an opaque blob. The clean name is the label; the
-        // full path rides along as a native tooltip when it adds information.
-        const cleanName = displayProject(project.projectName);
-        const fullPath = decodeProjectPath(project.projectName);
-        const showPath = fullPath !== cleanName;
-        return {
-          id: project.key,
-          label: showPath ? (
-            <span title={fullPath}>{cleanName}</span>
-          ) : (
-            cleanName
-          ),
-          items: project.sessions.map((s) => ({
-            id: s.id,
-            label: summarizePrompt(s.preview) || `${s.id.slice(5, 13)}…`,
-            meta: sessionMeta(s),
-            tokens: s.totalTokens,
-          })),
-        };
-      }),
-    [sessions],
-  );
+  const groups = useMemo(() => groupShareHierarchy(sessions), [sessions]);
 
   // Only `new`/`updated` sessions can be contributed. The picker still shows
   // every session (so the project counts stay honest), but a non-selectable
@@ -97,6 +72,8 @@ export function SessionPicker({
   );
 
   const selectedCount = selectedIds.size;
+  const selectedTokens = sessions.reduce((total, session) => selectedIds.has(session.id) ? total + session.totalTokens : total, 0);
+  const selectedTokensLabel = selectedTokens >= 1000 ? `${Math.round(selectedTokens / 1000)}k` : String(selectedTokens);
 
   return (
     <div className="flex flex-col gap-4">
@@ -114,13 +91,37 @@ export function SessionPicker({
         </Button>
       </div>
 
-      <GroupedMultiSelect
-        groups={groups}
-        value={selectedIds}
-        onChange={handleChange}
-        tokenLabel="tokens"
-        ariaLabel="choose sessions to contribute"
-      />
+      <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
+        <div className="px-4 py-3 border-b border-rule flex items-center justify-between gap-3">
+          <div className="gms-tally font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>
+          <Button size="sm" variant="ghost" pressed={selectedCount === selectableIds.size && selectableIds.size > 0} onClick={() => handleChange(selectedCount === selectableIds.size ? new Set() : new Set(selectableIds))}>
+            {selectedCount === selectableIds.size && selectableIds.size > 0 ? 'deselect all' : 'select all'}
+          </Button>
+        </div>
+        {groups.map((project) => {
+          const cleanName = displayProject(project.projectName);
+          const fullPath = decodeProjectPath(project.projectName);
+          return <section key={project.key} className="border-b border-rule last:border-b-0" aria-label={`project ${cleanName}`}>
+            <h2 className="px-4 py-3 font-mono font-semibold" title={fullPath !== cleanName ? fullPath : undefined}>{cleanName}</h2>
+            {project.locations.map((location) => <section key={location.locationLabel} className="ml-4 border-l border-rule" aria-label={`repository location ${location.locationLabel}`}>
+              <h3 className="px-4 py-2 font-mono text-sm text-ink-2">repository location · {location.locationLabel}</h3>
+              {location.branches.map((branch) => <section key={branch.branch} className="ml-4 border-l border-rule" aria-label={`branch ${branch.branch || 'unknown'}`}>
+                <h4 className="px-4 py-2 font-mono text-sm text-ink-3">branch · {branch.branch || 'unknown'}</h4>
+                <div className="ml-4">
+                  {branch.sessions.map((session) => <div key={session.id} className="flex items-center gap-3 px-4 py-3 border-t border-rule">
+                    <Checkbox checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} onChange={(checked) => {
+                      const next = new Set(selectedIds);
+                      if (checked) next.add(session.id); else next.delete(session.id);
+                      handleChange(next);
+                    }} aria-label={`select session ${session.id}`} />
+                    <div className="min-w-0"><div>{summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`}</div><div className="font-mono text-xs text-ink-3">{sessionMeta(session)} · {session.totalTokens.toLocaleString()} tokens</div></div>
+                  </div>)}
+                </div>
+              </section>)}
+            </section>)}
+          </section>;
+        })}
+      </div>
     </div>
   );
 }

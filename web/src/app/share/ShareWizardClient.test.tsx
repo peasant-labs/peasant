@@ -197,6 +197,10 @@ describe('ShareWizardClient', () => {
       ok: true,
       json: async () => backendSessions,
     });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ items: [{ sessionId: 'retry-1', locationLabel: 'workspace', branch: 'main', selectionStatus: 'selected' }] }),
+    });
 
     const user = userEvent.setup();
     await user.click(screen.getByText('Retry'));
