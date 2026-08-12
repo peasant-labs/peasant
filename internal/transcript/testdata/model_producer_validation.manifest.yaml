@@ -1,0 +1,9 @@
+expectedCaseCount: 7
+requiredNames:
+  - root_assistant_exact_valid
+  - nested_assistant_exact_valid
+  - user_observation_rejected
+  - tool_observation_rejected
+  - system_observation_rejected
+  - empty_observation_is_absent
+  - edge_whitespace_rejected

@@ -1,0 +1,5 @@
+expectedCaseCount: 3
+requiredNames:
+  - enriched_capable_target_uploads_exact_evidence
+  - enriched_unknown_target_refuses_before_upload
+  - legacy_unknown_target_remains_compatible

@@ -1,0 +1,36 @@
+cases:
+  - name: root_assistant_exact_valid
+    role: assistant
+    depth: 0
+    observedModel: Anthropic/Claude Fable-5
+    accepted: true
+  - name: nested_assistant_exact_valid
+    role: assistant
+    depth: 1
+    observedModel: anthropic/claude-opus-4-8
+    accepted: true
+  - name: user_observation_rejected
+    role: user
+    depth: 0
+    observedModel: anthropic/claude-fable-5
+    accepted: false
+  - name: tool_observation_rejected
+    role: tool
+    depth: 0
+    observedModel: anthropic/claude-fable-5
+    accepted: false
+  - name: system_observation_rejected
+    role: system
+    depth: 0
+    observedModel: anthropic/claude-fable-5
+    accepted: false
+  - name: empty_observation_is_absent
+    role: user
+    depth: 0
+    observedModel: ""
+    accepted: true
+  - name: edge_whitespace_rejected
+    role: assistant
+    depth: 0
+    observedModel: " anthropic/claude-fable-5"
+    accepted: false

@@ -1,0 +1,6 @@
+expectedCaseCount: 4
+requiredNames:
+  - source_observations_project_exactly
+  - earliest_root_observation_beats_stored_metadata
+  - nested_observation_does_not_replace_root_seed
+  - legacy_without_observations_uses_stored_metadata

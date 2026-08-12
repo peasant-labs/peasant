@@ -1,0 +1,6 @@
+expectedCaseCount: 4
+requiredNames:
+  - exact_observed_model_capability
+  - legacy_response_without_capabilities
+  - unknown_capability_does_not_authorize
+  - wrong_observed_model_version_does_not_authorize

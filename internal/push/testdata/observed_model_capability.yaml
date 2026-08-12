@@ -1,0 +1,18 @@
+cases:
+  - name: enriched_capable_target_uploads_exact_evidence
+    observedModel: Anthropic/Claude Fable-5
+    advertisement:
+      - capability: observed_model
+        version: "1.0.0"
+    wantUploads: 1
+    wantError: false
+  - name: enriched_unknown_target_refuses_before_upload
+    observedModel: anthropic/claude-opus-4-8
+    advertisement: []
+    wantUploads: 0
+    wantError: true
+  - name: legacy_unknown_target_remains_compatible
+    observedModel: ""
+    advertisement: []
+    wantUploads: 1
+    wantError: false
