@@ -170,6 +170,9 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		rootIndex := make(map[string]int)
 
 		for _, entry := range rootEntries {
+			if a.isClaudeFileHistorySnapshot(entry.path) {
+				continue
+			}
 			sid, _ := NewSessionID(entry.sessionID) // already validated in pass 1
 
 			info, err := a.fs.Stat(entry.path)
@@ -197,6 +200,9 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 
 		for _, entry := range subagentEntries {
+			if a.isClaudeFileHistorySnapshot(entry.path) {
+				continue
+			}
 			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
 			subSID, _ := NewSessionID(entry.subagentID)       // already validated
 
@@ -318,6 +324,36 @@ func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTe
 		identity = nil
 	}
 	return identity, spawns
+}
+
+// isClaudeFileHistorySnapshot reports whether path contains only Claude Code's
+// file-history snapshot records. Those records point to saved file revisions,
+// not a user/assistant conversation, and therefore are not importable sessions.
+// Discovery fails open for unreadable, empty, malformed, or mixed files so a
+// future transcript format cannot be silently discarded.
+func (a *ClaudeAdapter) isClaudeFileHistorySnapshot(path string) bool {
+	data, err := a.fs.ReadFile(path)
+	if err != nil {
+		return false
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	var records int
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var value struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(line, &value) != nil || value.Type != "file-history-snapshot" {
+			return false
+		}
+		records++
+	}
+	return scanner.Err() == nil && records > 0
 }
 
 // claudeTeammateSpawn recognizes only the top-level native tool result. Tool

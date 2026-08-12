@@ -137,6 +137,23 @@ The source contracts are `RepositoryIdentityResolver` in `git.go`, the identity 
 
 ---
 
+## Claude Discovery Artifacts
+
+Claude Code stores both conversation transcripts and file-history sidecars under
+`~/.claude/projects`. A sidecar is a JSONL file containing only
+`file-history-snapshot` records. Its records reference revisions in
+`~/.claude/file-history/<uuid>/`; they do not contain user or assistant messages,
+session timing, Git metadata, or transcript turns.
+
+Claude discovery excludes only non-empty JSONL files whose every valid record is
+explicitly `file-history-snapshot`. It applies the same rule to root and filesystem-nested
+subagent paths, so these implementation artifacts never reach kickstart, ingest, or the local
+store. Discovery fails open for unreadable, empty, malformed, or mixed-format files: a future
+Claude transcript format must not be silently discarded because it happens to share a directory
+with file-history records.
+
+---
+
 ## Execution Timeline
 
 ```
