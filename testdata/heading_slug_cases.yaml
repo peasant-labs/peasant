@@ -1,0 +1,50 @@
+declared_slug_cases: 8
+# Each case pins one heading to the fragment GitHub GFM would generate for it.
+# The punctuation/spacing cases (ampersand, colon, parentheses) are the ones an
+# approximate "collapse every run to one hyphen" slugger would get wrong.
+slug_cases:
+  - heading: Reset and standalone boundaries
+    slug: reset-and-standalone-boundaries
+  - heading: 7. Deferred ladder
+    slug: 7-deferred-ladder
+  - heading: "Current path: raw binary tarball"
+    slug: current-path-raw-binary-tarball
+  - heading: Models & providers
+    slug: models--providers
+  - heading: macOS Gatekeeper (raw download only)
+    slug: macos-gatekeeper-raw-download-only
+  - heading: Build-tag gating
+    slug: build-tag-gating
+  - heading: "Config screen: keys & flags"
+    slug: config-screen-keys--flags
+  - heading: Push & pull
+    slug: push--pull
+declared_duplicate_documents: 3
+# Document-wide duplicate disambiguation: the second, third, ... occurrence of a
+# base slug gets a "-1", "-2", ... suffix in heading order, exactly as GitHub does.
+duplicate_documents:
+  - name: identical-headings
+    headings:
+      - Overview
+      - Overview
+      - Overview
+    fragments:
+      - overview
+      - overview-1
+      - overview-2
+  - name: interleaved-duplicates
+    headings:
+      - Notes
+      - Other section
+      - Notes
+    fragments:
+      - notes
+      - other-section
+      - notes-1
+  - name: punctuation-duplicates
+    headings:
+      - Models & providers
+      - Models & providers
+    fragments:
+      - models--providers
+      - models--providers-1
