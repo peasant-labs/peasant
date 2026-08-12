@@ -5,24 +5,39 @@ cases:
     modelID: "Anthropic/Claude Fable-5"
     expectedRole: assistant
     expectedModel: "Anthropic/Claude Fable-5"
-  - name: invalid_observations_ignored
-    messageID: msg_002_invalid
+  - name: empty_observation_ignored
+    messageID: msg_002_empty
+    role: assistant
+    modelID: ""
+    expectedRole: assistant
+  - name: whitespace_only_observation_ignored
+    messageID: msg_003_whitespace
+    role: assistant
+    modelID: "  "
+    expectedRole: assistant
+  - name: edge_whitespace_observation_ignored
+    messageID: msg_004_edge
     role: assistant
     modelID: " stale/model"
     expectedRole: assistant
   - name: non_assistant_observation_ignored
-    messageID: msg_003_user
+    messageID: msg_005_user
     role: user
     modelID: "must-not-be-stored"
     expectedRole: user
+  - name: system_observation_ignored
+    messageID: msg_006_system
+    role: system
+    modelID: "must-not-be-stored"
+    expectedRole: system
   - name: structural_reclassification_removes_observation
-    messageID: msg_004_structural
+    messageID: msg_007_structural
     role: assistant
     modelID: "anthropic/claude-opus-4-8"
     structuralPartType: compaction
     expectedRole: system
   - name: unrelated_extra_fields_preserved
-    messageID: msg_005_extra
+    messageID: msg_008_extra
     role: assistant
     modelID: " rejected/model"
     reasoningTokens: 71

@@ -1,7 +1,10 @@
-expectedCaseCount: 5
+expectedCaseCount: 8
 requiredNames:
   - assistant_exact_observation_preserved
-  - invalid_observations_ignored
+  - empty_observation_ignored
+  - whitespace_only_observation_ignored
+  - edge_whitespace_observation_ignored
   - non_assistant_observation_ignored
+  - system_observation_ignored
   - structural_reclassification_removes_observation
   - unrelated_extra_fields_preserved
