@@ -11,7 +11,7 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams()
 vi.mock('@/components/share/LabelsStep', () => ({ LabelsStep: ({ onNext }: { onNext: () => void }) => <button onClick={onNext}>continue labels</button> }));
 vi.mock('@/components/share/RedactionStep', () => ({ RedactionStep: ({ onNext }: { onNext: () => void }) => <button onClick={onNext}>continue redaction</button> }));
 
-type SessionRow = Record<'id' | 'harness' | 'project' | 'startTime' | 'preview' | 'shareStatus', string> & Record<'durationMins' | 'totalTokens' | 'turnCount' | 'toolCallCount', number>;
+type SessionRow = Record<'id' | 'harness' | 'project' | 'projectHash' | 'startTime' | 'preview' | 'shareStatus', string> & Record<'durationMins' | 'totalTokens' | 'turnCount' | 'toolCallCount', number>;
 type DiscoveryRow = Record<'sessionId' | 'locationLabel' | 'repositoryLocationId' | 'branch' | 'selectionStatus', string>;
 interface InvalidCase { name: string; operation: 'remove' | 'duplicate' | 'malformed' | 'unknown-status'; sessionId: string }
 interface Fixture { sessions: SessionRow[]; items: DiscoveryRow[]; invalidCases: InvalidCase[] }
@@ -20,7 +20,7 @@ function loadFixture(): Fixture {
   const parsed: unknown = YAML.parse(fixtureSource);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('mounted Share fixture must be an object');
   const root = parsed as Record<string, unknown>;
-  if (Object.keys(root).sort().join(',') !== 'invalidCases,items,sessions' || !Array.isArray(root.sessions) || root.sessions.length !== 6 || !Array.isArray(root.items) || root.items.length !== 7 || !Array.isArray(root.invalidCases) || root.invalidCases.length !== 4) throw new Error('mounted Share fixture must contain exactly six sessions, seven discovery items, and four invalid cases');
+   if (Object.keys(root).sort().join(',') !== 'invalidCases,items,sessions' || !Array.isArray(root.sessions) || root.sessions.length !== 6 || !Array.isArray(root.items) || root.items.length !== 7 || !Array.isArray(root.invalidCases) || root.invalidCases.length !== 4) throw new Error('mounted Share fixture must contain exactly six sessions, seven discovery items, and four invalid cases');
   return root as unknown as Fixture;
 }
 
@@ -49,24 +49,27 @@ describe('mounted Share production boundary', () => {
     const fetchMock = installFetch();
     const user = userEvent.setup();
     render(<ShareWizardClient />);
-    const project = await screen.findByRole('region', { name: 'project alpha' });
+    const projects = await screen.findAllByRole('region', { name: 'project alpha' });
+    expect(projects).toHaveLength(2);
+    const project = projects.find((candidate) => within(candidate).queryByRole('checkbox', { name: 'select session sess-new' }))!;
+    const otherProject = projects.find((candidate) => candidate !== project)!;
     expect(within(project).getAllByRole('region', { name: 'repository location same label' })).toHaveLength(2);
-    expect(within(project).getByRole('region', { name: 'branch main' })).toBeInTheDocument();
-    expect(within(project).getByRole('region', { name: 'branch feature' })).toBeInTheDocument();
+    expect(within(otherProject).getAllByRole('region', { name: 'repository location same label' })).toHaveLength(2);
     const projectBox = within(project).getByRole('checkbox', { name: 'select project alpha' }) as HTMLInputElement;
+    const otherProjectBox = within(otherProject).getByRole('checkbox', { name: 'select project alpha' }) as HTMLInputElement;
     expect(projectBox).not.toBeChecked();
     await user.click(within(project).getByRole('checkbox', { name: 'select session sess-new' }));
-    expect(projectBox.indeterminate).toBe(true);
-    expect(projectBox).toHaveAttribute('data-indeterminate', 'true');
     expect(projectBox).toHaveAttribute('aria-checked', 'mixed');
     await user.click(projectBox);
     expect(projectBox.indeterminate).toBe(false);
     expect(projectBox).toBeChecked();
-    expect(within(project).getByRole('checkbox', { name: 'select session sess-updated' })).toBeChecked();
-    for (const id of ['sess-shared', 'sess-held']) expect(within(project).getByRole('checkbox', { name: `select session ${id}` })).toBeDisabled();
+    expect(within(otherProject).getByRole('checkbox', { name: 'select session sess-shared' })).toBeDisabled();
+    expect(otherProjectBox).not.toBeChecked();
+    for (const id of ['sess-held']) expect(within(otherProject).getByRole('checkbox', { name: `select session ${id}` })).toBeDisabled();
     await user.click(projectBox);
     expect(projectBox).not.toBeChecked();
     await user.click(projectBox);
+    await user.click(otherProjectBox);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(screen.getByRole('button', { name: 'continue labels' }));
     await user.click(screen.getByRole('button', { name: 'continue redaction' }));

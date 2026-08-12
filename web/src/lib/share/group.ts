@@ -13,9 +13,9 @@ export function isSelectable(s: ShareSession): boolean {
 }
 
 /**
- * Group sessions into projects. The grouping key is `projectHash` when present
- * (the real backend doesn't emit one yet) and `projectName` otherwise, so the
- * UI behaves identically against mock and real data.
+ * Group sessions into projects by the canonical, schema-owned project hash.
+ * Display names are not identities: two projects may intentionally have the
+ * same name.
  *
  * Projects are ordered by their most recent activity (newest first). Sessions
  * inside a project keep the same ordering.
@@ -25,7 +25,10 @@ export function groupByProject(sessions: ShareSession[]): ShareProject[] {
   const map = new Map<string, ShareSession[]>();
 
   for (const s of sessions) {
-    const key = s.projectHash !== '' ? s.projectHash : s.projectName;
+    const key = s.projectHash.trim();
+    if (!key) {
+      throw new Error(`Share project grouping cannot safely identify session ${JSON.stringify(s.id)} because projectHash is empty. Refresh the page; if this repeats, update or restart Peasant.`);
+    }
     let arr = map.get(key);
     if (!arr) {
       arr = [];
@@ -74,7 +77,10 @@ export function groupByProject(sessions: ShareSession[]): ShareProject[] {
 export function groupShareHierarchy(sessions: ShareHierarchySession[]): ShareHierarchyProject[] {
   const projects = new Map<string, ShareHierarchyProject>();
   for (const session of sessions) {
-    const key = session.projectHash || session.projectName;
+    const key = session.projectHash.trim();
+    if (!key) {
+      throw new Error(`Share hierarchy cannot safely group session ${JSON.stringify(session.id)} because projectHash is empty. Refresh the page; if this repeats, update or restart Peasant.`);
+    }
     let project = projects.get(key);
     if (!project) {
       project = { key, projectName: session.projectName, locations: [] };

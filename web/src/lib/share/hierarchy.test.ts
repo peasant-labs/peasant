@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { groupShareHierarchy } from './group';
 import type { ShareHierarchySession } from './types';
 
-interface FixtureRow { id: string; projectName: string; locationLabel: string; repositoryLocationId: string; branch: string }
+interface FixtureRow { id: string; projectName: string; projectHash: string; locationLabel: string; repositoryLocationId: string; branch: string }
 interface Fixture { sessions: FixtureRow[] }
 
 const fixture = parse(readFileSync(resolve(process.cwd(), 'src/lib/share/testdata/hierarchy.yaml'), 'utf8')) as Fixture;
@@ -14,7 +14,7 @@ describe('Share hierarchy fixture', () => {
   it('keeps repository locations and branches as separate hierarchy levels', () => {
     expect(fixture.sessions).toHaveLength(3);
     const sessions = fixture.sessions.map((row): ShareHierarchySession => ({
-      ...row, provider: 'claude-code', projectHash: '', hostSlug: '', startTime: '2026-08-12T00:00:00Z',
+      ...row, provider: 'claude-code', hostSlug: '', startTime: '2026-08-12T00:00:00Z',
       durationMins: 1, totalTokens: 1, turnCount: 1, model: '', shareStatus: 'new', preview: row.id,
     }));
     const hierarchy = groupShareHierarchy(sessions);

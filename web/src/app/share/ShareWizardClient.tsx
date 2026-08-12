@@ -40,6 +40,8 @@ interface BackendSessionSummary {
   turnCount: number;
   toolCallCount: number;
   project?: string;
+  /** Canonical project identity from the schema-owned SessionSummary wire. */
+  projectHash?: string;
   /** Redaction-safe first user message — see SessionSummary.preview (Go). */
   preview?: string;
   /** Heuristic outcome — see SessionSummary.outcome (Go). */
@@ -48,11 +50,15 @@ interface BackendSessionSummary {
 }
 
 function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession {
+  const projectHash = backend.projectHash?.trim();
+  if (!projectHash) {
+    throw new Error(`Share chooser cannot safely group session ${JSON.stringify(backend.id)} because the sessions response omitted projectHash. Refresh the page; if this repeats, update or restart Peasant.`);
+  }
   return {
     id: backend.id,
     provider: backend.harness as ShareSession['provider'],
     projectName: backend.project ?? 'Unknown Project',
-    projectHash: '',
+    projectHash,
     hostSlug: '',
     startTime: backend.startTime,
     durationMins: Math.round(backend.durationMins),

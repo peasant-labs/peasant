@@ -58,14 +58,13 @@ export interface ShareDiscoveryResult<TSession extends ShareSession = ShareSessi
 
 /**
  * A project is the primary unit of contribution. Sessions group into projects
- * by `projectHash` (falling back to `projectName` when the hash is empty, as
- * the real backend doesn't yet emit a hash). Derived purely from sessions —
+ * by the canonical `projectHash`; `projectName` is display text only. Derived purely from sessions —
  * see {@link groupByProject}.
  */
 export interface ShareProject {
   projectName: string;
   projectHash: string;
-  /** Stable key for React lists and selection — hash if present, else name. */
+  /** Stable key for React lists and selection — the canonical project hash. */
   key: string;
   sessions: ShareSession[];
   sessionCount: number;
