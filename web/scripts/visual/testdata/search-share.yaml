@@ -24,6 +24,7 @@ sessions:
     turnCount: 34
     toolCallCount: 12
     project: peasant-labs/engine
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     preview: "Wire retry handling into the queue worker"
     outcome: resolved
   - id: sess-visual-search-002
@@ -34,6 +35,7 @@ sessions:
     turnCount: 18
     toolCallCount: 7
     project: peasant-labs/engine
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     preview: "Review the retry branch before merging"
     outcome: partial
   - id: sess-visual-share-003
@@ -44,6 +46,7 @@ sessions:
     turnCount: 52
     toolCallCount: 19
     project: peasant-labs/engine
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     preview: "Refactor the worker after the retry audit"
     outcome: failed
   - id: sess-visual-share-004
@@ -54,6 +57,7 @@ sessions:
     turnCount: 10
     toolCallCount: 4
     project: peasant-labs/engine
+    projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     preview: "Document the queue worker deployment"
     outcome: resolved
 discovery:

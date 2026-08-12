@@ -22,7 +22,7 @@ const CHROME = process.env.CHROME_PATH
 const FIXTURE = join(HERE, 'testdata/search-share.yaml')
 const FEATURE_BYTES = Object.freeze({
   search: ['data-search-annotation', 'repositoryLocationId'],
-  share: ['share-project-check__mixed', 'choose sessions to contribute'],
+  share: ['share-project-check__mixed', 'choose sessions to contribute', 'omitted projectHash'],
   discoveryRoute: '/api/v1/web/discovery',
 })
 const THEMES = ['dark', 'light']
@@ -41,8 +41,9 @@ function readFixture() {
   const document = YAML.parseDocument(readFileSync(FIXTURE, 'utf8'), { strict: true, uniqueKeys: true })
   if (document.errors.length) fail(`fixture ${relative(REPO, FIXTURE)} is invalid: ${document.errors.map((e) => e.message).join('; ')}`)
   const fixture = document.toJS()
-  if (fixture.marker !== undefined || fixture.search.results.length < 2 || fixture.sessions.length < 4 || fixture.discovery.length !== fixture.sessions.length) {
-    fail('fixture must omit feature markers and contain two search rows, four sessions, and one discovery row per session')
+  const projectHashesValid = fixture.sessions.every((session) => typeof session.projectHash === 'string' && /^[a-f0-9]{64}$/.test(session.projectHash))
+  if (fixture.marker !== undefined || fixture.search.results.length < 2 || fixture.sessions.length < 4 || fixture.discovery.length !== fixture.sessions.length || !projectHashesValid) {
+    fail('fixture must omit feature markers, contain two search rows, four sessions with canonical projectHash values, and one discovery row per session')
   }
   return fixture
 }
