@@ -54,7 +54,8 @@ peasant web stop
 ## First-run onboarding
 
 `peasant kickstart` discovers recordings from the configured harnesses and groups
-them by canonical project identity. The project-first wizard lets you choose projects,
+them by [canonical project identity](internal/ingest/README.md#repository-identity-during-discovery).
+The project-first wizard lets you choose projects,
 narrow them by branch or individual session, and apply one global harness filter
 without widening that scope. You can keep the selected work local or authenticate and
 publish it to Village, privately by default, after reviewing Standard redaction and a
@@ -463,37 +464,61 @@ config file for a single run.
 
 ### Selection index
 
-The kickstart wizard persists the user's project/branch/session selections as a **selection
-index** in `config.yaml`. This controls which sessions `peasant ingest` processes on subsequent
-runs.
+The kickstart wizard saves the selection index in `config.yaml`. This example shows its persisted
+shape.
 
+<!-- verified-example: selection-config -->
 ```yaml
 selection:
-  mode: selected                    # "all" = no filter, "selected" = apply allowlist
-  autoIngestNewBranches: false      # auto-include new branches in fully-selected projects
-  providers:
-    claude:
+  mode: selected
+  autoIngestNewBranches: true
+  harnesses:
+    claude-code:
       projects:
-        - gitRemote: "git@github.com:user/repo.git"
+        - gitRemote: https://github.com/example/atlas.git
+          clonePaths:
+            - /projects/atlas
+            - /projects/atlas-review
           branches:
             - main
-            - feature/foo
-        - name: "local-project"     # fallback when no git remote
-      sessions:                     # explicit session-level picks
-        - "abc123-uuid"
+            - release
+      sessions:
+        - 11111111-1111-4111-8111-111111111111
+      exclusions:
+        branches:
+          - clonePath: /projects/atlas-review
+            branches:
+              - experiment
+        sessions:
+          - 22222222-2222-4222-8222-222222222222
 ```
 
-| `selection.mode` | Behavior |
-|-------------------|----------|
-| `all` (default) | Ingest everything from enabled providers — no filter applied |
-| `selected` | Only ingest sessions matching the per-provider project/branch/session allowlist |
+Kickstart writes the real `clonePaths` values. The paths in this example are sample paths.
 
-When `mode` is `selected`, the ingest pipeline resolves each discovered session's git remote and
-branch, then checks against the allowlist. Sessions not matching any entry are skipped. The
-`--session` CLI flag overrides the selection index entirely.
+| Field or value | Purpose |
+|----------------|---------|
+| `mode: all` | Do not apply a selection filter. |
+| `mode: selected` | Apply the rules under `harnesses`. |
+| `autoIngestNewBranches` | Store the choice for newly found branches. |
+| `harnesses` | Group project and explicit session rules by recording harness. |
+| `projects[].gitRemote` / `name` | Store the project label fields. |
+| `projects[].clonePaths` | Store the resolved physical clone paths for one project entry. |
+| `projects[].branches` | Store an optional branch list. An empty list means all branches for the entry. |
+| `sessions` | Store explicit session IDs. |
+| `exclusions.branches` | Deny named branches only for one exact physical clone path. |
+| `exclusions.sessions` | Deny exact session IDs for one recording harness. |
 
-Re-running `peasant kickstart` loads the existing selection index so prior choices are pre-populated
-in the tree. `peasant kickstart --reset` wipes the selection along with all other data.
+Use the kickstart guide for each user job:
+
+| User job | Guide |
+|----------|-------|
+| Run kickstart again or change saved choices | [Restore saved choices](docs/KICKSTART.md#restore-saved-choices) |
+| Understand `clonePaths` and local clone identity | [Physical clone identity](docs/KICKSTART.md#physical-clone-identity) |
+| Understand exact branch and session exclusions | [Exact exclusions](docs/KICKSTART.md#exact-exclusions) |
+| Open an old selected entry without `clonePaths` | [Convert old pathless selected rules](docs/KICKSTART.md#convert-old-pathless-selected-rules) |
+| Open a config that uses `mode: all` | [Convert an old all-projects setting](docs/KICKSTART.md#convert-an-old-all-projects-setting) |
+| Save when no selected work is available | [Save with no effective project](docs/KICKSTART.md#save-with-no-effective-project) |
+| Understand project lists, push choices, direct links, and manual deletion | [Viewer lists and stored data](docs/KICKSTART.md#viewer-lists-and-stored-data) |
 
 ## Web dashboard
 

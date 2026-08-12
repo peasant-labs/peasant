@@ -107,6 +107,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					ModTime:      modTime,
 					Title:        ses.Title,
 					ProjectName:  filepath.Base(ses.Directory),
+					CWD:          ses.Directory,
 					CreatedAt:    createdAt,
 				}
 

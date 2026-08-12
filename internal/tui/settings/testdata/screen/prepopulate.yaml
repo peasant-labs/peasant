@@ -1,9 +1,9 @@
 expectedRows: 2
 cases:
-  - name: all mode checks the complete project-first forest
+  - name: all mode checks the complete project-first forest and derives exact paths
     mode: all
     selectedSessions: []
-    expectMode: all
+    expectMode: selected
     expectChecked: [session-one, session-two]
   - name: selected mode checks only the saved project-first session
     mode: selected

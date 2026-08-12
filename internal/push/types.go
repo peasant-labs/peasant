@@ -35,10 +35,10 @@ type PipelineConfig struct {
 	// FilterSessionIDs, when non-nil, restricts the push to only these session IDs.
 	// Set by the push wizard after user confirmation.
 	FilterSessionIDs []string
-	// Selection, when non-nil, restricts the push to sessions admitted by the
-	// branch-aware selection matcher (built from config selection.mode=selected).
-	// nil means no selection filter (push everything otherwise eligible).
-	Selection *ingest.SelectionMatcher
+	// Selection, when non-nil, restricts the push to command-prepared decisions
+	// computed from the complete stored-session cohort. nil means no selection
+	// filter (push everything otherwise eligible).
+	Selection *SessionSelection
 	// Repository is an additional AND filter supplied by --repository. It uses
 	// ingestion's canonical project identity and can only narrow the configured
 	// selection. nil means no repository narrowing.
@@ -46,6 +46,36 @@ type PipelineConfig struct {
 	// CommandBinding is the typed, explicitly-bound config/data/state context
 	// used to render recovery commands. Its zero value uses Peasant's defaults.
 	CommandBinding githooks.Binding
+}
+
+// SessionSelection is the immutable branch-aware decision set prepared at the
+// command boundary. A missing session fails closed. This keeps raw database path
+// strings and filesystem resolution out of the push service while letting the
+// wizard, dry run, annotation gate, and real pipeline consume one decision set.
+type SessionSelection struct {
+	decisions map[ingest.SessionID]ingest.BranchMatch
+}
+
+// NewSessionSelection copies the complete command-prepared decision set.
+func NewSessionSelection(decisions map[ingest.SessionID]ingest.BranchMatch) *SessionSelection {
+	copied := make(map[ingest.SessionID]ingest.BranchMatch, len(decisions))
+	for sessionID, decision := range decisions {
+		copied[sessionID] = decision
+	}
+	return &SessionSelection{decisions: copied}
+}
+
+// Decision returns the prepared result for sessionID. Rows that appear after
+// preparation or otherwise lack cohort evidence fail closed.
+func (s *SessionSelection) Decision(sessionID ingest.SessionID) ingest.BranchMatch {
+	if s == nil {
+		return ingest.BranchMatchYes
+	}
+	decision, ok := s.decisions[sessionID]
+	if !ok {
+		return ingest.BranchMatchNo
+	}
+	return decision
 }
 
 // PushStatus represents the outcome of pushing a single session.

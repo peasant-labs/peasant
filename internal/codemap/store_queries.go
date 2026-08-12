@@ -25,7 +25,8 @@ const (
 	// sqlSessionsForProject lists the project's sessions, newest first.
 	sqlSessionsForProject = `SELECT
 	s.session_id, s.start_ms, s.end_ms, COALESCE(s.git_branch, ''), s.model_harness,
-    COALESCE(p.canonical_remote, ''), COALESCE(p.canonical_cwd, '')
+    COALESCE(p.canonical_remote, ''), COALESCE(p.canonical_cwd, ''),
+    COALESCE(s.git_worktree, ''), COALESCE(s.parent_id, '')
 FROM sessions s
 LEFT JOIN projects p ON p.project_hash = s.project_hash
 WHERE s.project_hash = ?
@@ -119,7 +120,8 @@ ORDER BY v.target_session_id, v.type_id,
     s.model_harness,
     COALESCE(s.git_branch, ''),
     COALESCE(p.canonical_remote, ''),
-    COALESCE(p.canonical_cwd, '')
+    COALESCE(p.canonical_cwd, ''),
+    COALESCE(s.git_worktree, '')
 FROM session_entries_fts f
 JOIN session_entries e ON e.rowid = f.rowid
 JOIN sessions s        ON s.session_id = f.session_id
@@ -153,6 +155,8 @@ type sessionRow struct {
 	harness     string
 	gitRemote   string
 	projectName string
+	gitWorktree string
+	parentID    string
 }
 
 // metricRow is the session_metrics subset the payloads consume.
@@ -186,6 +190,7 @@ type searchRow struct {
 	gitBranch   string
 	gitRemote   string
 	projectName string
+	gitWorktree string
 }
 
 // querySearch runs one deterministic page of the FTS5 MATCH query. match is
@@ -219,6 +224,7 @@ func (s *Service) querySearch(ctx context.Context, match string, limit, offset i
 				gitBranch:   stmt.ColumnText(8),
 				gitRemote:   stmt.ColumnText(9),
 				projectName: stmt.ColumnText(10),
+				gitWorktree: stmt.ColumnText(11),
 			})
 			return nil
 		},
@@ -304,6 +310,8 @@ func (s *Service) querySessions(ctx context.Context, projectHash schema.ProjectH
 				harness:     stmt.ColumnText(4),
 				gitRemote:   stmt.ColumnText(5),
 				projectName: stmt.ColumnText(6),
+				gitWorktree: stmt.ColumnText(7),
+				parentID:    stmt.ColumnText(8),
 			})
 			return nil
 		},

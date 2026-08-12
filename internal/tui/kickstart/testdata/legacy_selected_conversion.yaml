@@ -1,0 +1,302 @@
+expectedCaseCount: 9
+expectedCaseNames:
+  - overlap-unions-stored-clones-and-preserves-exclusions
+  - unrestricted-rule-dominates-and-groups-stored-clones
+  - non-git-same-name-clones-remain-separate
+  - disjoint-rules-retain-stored-clone-with-union
+  - remote-precedence-and-asymmetric-missing-remote-fallback
+  - exact-cohort-splits-residual-and-preserves-outside-shape
+  - unresolved-rows-add-only-canonical-yes-after-exclusions
+  - failed-worktree-does-not-use-canonical-fallback
+  - exact-selected-input-is-field-equivalent-without-resolution
+cases:
+  - name: overlap-unions-stored-clones-and-preserves-exclusions
+    expectedStoredCount: 3
+    expectedResolverCallCount: 3
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", branches: [dev, main]}
+            - {gitRemote: "https://github.com/acme/tool.git", branches: [main, release]}
+            - {gitRemote: "github.com/acme/tool", branches: [dev, main]}
+          sessions: [10000000-0000-4000-8000-000000000001]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/team-a/tool, branches: [blocked]}
+            sessions: [10000000-0000-4000-8000-000000000009]
+    stored:
+      - {sessionId: 20000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/tool, branch: main, gitWorktree: /fixtures/team-a/tool}
+      - {sessionId: 20000000-0000-4000-8000-000000000002, harness: claude-code, gitRemote: "https://github.com/acme/tool.git", branch: dev, gitWorktree: /fixtures/team-a/tool}
+      - {sessionId: 20000000-0000-4000-8000-000000000003, harness: claude-code, gitRemote: "git@github.com:acme/tool.git", branch: release, gitWorktree: /fixtures/team-b/tool}
+    expectedResolverCalls: [/fixtures/team-a/tool, /fixtures/team-a/tool, /fixtures/team-b/tool]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: github.com/acme/tool
+              clonePaths: [/fixtures/team-a/tool, /fixtures/team-b/tool]
+              branches: [dev, main, release]
+          sessions: [10000000-0000-4000-8000-000000000001]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/team-a/tool, branches: [blocked]}
+            sessions: [10000000-0000-4000-8000-000000000009]
+
+  - name: unrestricted-rule-dominates-and-groups-stored-clones
+    expectedStoredCount: 2
+    expectedResolverCallCount: 2
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git"}
+            - {name: alpha, branches: [main]}
+            - {name: beta, branches: [release]}
+    stored:
+      - {sessionId: 30000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/tool, branch: main, gitWorktree: /fixtures/alpha, canonicalCwd: /fixtures/alpha}
+      - {sessionId: 30000000-0000-4000-8000-000000000002, harness: claude-code, gitRemote: github.com/acme/tool, branch: release, gitWorktree: /fixtures/beta, canonicalCwd: /fixtures/beta}
+    expectedResolverCalls: [/fixtures/alpha, /fixtures/beta]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/alpha, /fixtures/beta]}
+
+  - name: non-git-same-name-clones-remain-separate
+    expectedStoredCount: 2
+    expectedResolverCallCount: 2
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        opencode:
+          projects:
+            - {name: app}
+    stored:
+      - {sessionId: 40000000-0000-4000-8000-000000000001, harness: opencode, branch: main, canonicalCwd: /fixtures/team-a/app}
+      - {sessionId: 40000000-0000-4000-8000-000000000002, harness: opencode, branch: main, canonicalCwd: /fixtures/team-b/app}
+    expectedResolverCalls: [/fixtures/team-a/app, /fixtures/team-b/app]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        opencode:
+          projects:
+            - {name: app, clonePaths: [/fixtures/team-a/app]}
+            - {name: app, clonePaths: [/fixtures/team-b/app]}
+
+  - name: disjoint-rules-retain-stored-clone-with-union
+    expectedStoredCount: 1
+    expectedResolverCallCount: 1
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/tool, branches: [main]}
+            - {gitRemote: github.com/acme/tool, branches: [release]}
+          exclusions:
+            sessions: [50000000-0000-4000-8000-000000000009]
+    stored:
+      - {sessionId: 50000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/tool, branch: main, gitWorktree: /fixtures/disjoint/tool}
+    expectedResolverCalls: [/fixtures/disjoint/tool]
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/disjoint/tool], branches: [main, release]}
+          exclusions:
+            sessions: [50000000-0000-4000-8000-000000000009]
+
+  - name: remote-precedence-and-asymmetric-missing-remote-fallback
+    expectedStoredCount: 3
+    expectedResolverCallCount: 3
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/new, name: conflict, branches: [main]}
+        opencode:
+          projects:
+            - {gitRemote: github.com/acme/new, name: missing-row, branches: [dev]}
+        cursor:
+          projects:
+            - {name: missing-rule, branches: [release]}
+    stored:
+      - {sessionId: 60000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/old, branch: main, gitWorktree: /fixtures/conflict, canonicalCwd: /fixtures/conflict}
+      - {sessionId: 60000000-0000-4000-8000-000000000002, harness: opencode, branch: dev, canonicalCwd: /fixtures/missing-row}
+      - {sessionId: 60000000-0000-4000-8000-000000000003, harness: cursor, gitRemote: github.com/acme/new, branch: release, gitWorktree: /fixtures/missing-rule, canonicalCwd: /fixtures/missing-rule}
+    expectedResolverCalls: [/fixtures/conflict, /fixtures/missing-row, /fixtures/missing-rule]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          projects:
+            - {name: missing-row, clonePaths: [/fixtures/missing-row], branches: [dev]}
+        cursor:
+          projects:
+            - {gitRemote: github.com/acme/new, clonePaths: [/fixtures/missing-rule], branches: [release]}
+
+  - name: exact-cohort-splits-residual-and-preserves-outside-shape
+    expectedStoredCount: 1
+    expectedResolverCallCount: 1
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: Raw-Residual
+              name: raw-name
+              clonePaths: [/fixtures/cohort/a, /fixtures/residual/b]
+              branches: [dev, main]
+            - name: untouched
+              clonePaths: [/fixtures/outside/c]
+              branches: []
+            - gitRemote: github.com/acme/tool
+              branches: [main, release]
+          sessions: [70000000-0000-4000-8000-000000000001]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/outside/c, branches: [private]}
+    stored:
+      - {sessionId: 70000000-0000-4000-8000-000000000002, harness: claude-code, gitRemote: github.com/acme/tool, branch: main, gitWorktree: /fixtures/cohort/a}
+    expectedResolverCalls: [/fixtures/cohort/a]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: Raw-Residual
+              name: raw-name
+              clonePaths: [/fixtures/residual/b]
+              branches: [dev, main]
+            - {gitRemote: github.com/acme/tool, clonePaths: [/fixtures/cohort/a], branches: [dev, main, release]}
+            - name: untouched
+              clonePaths: [/fixtures/outside/c]
+              branches: []
+          sessions: [70000000-0000-4000-8000-000000000001]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/outside/c, branches: [private]}
+
+  - name: unresolved-rows-add-only-canonical-yes-after-exclusions
+    expectedStoredCount: 9
+    expectedResolverCallCount: 0
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/yes, branches: [main]}
+            - {gitRemote: github.com/acme/no, branches: [release]}
+            - {gitRemote: github.com/acme/conflict, branches: [main]}
+            - {gitRemote: github.com/acme/conflict, branches: [release]}
+            - {gitRemote: github.com/acme/unknown, branches: [main]}
+            - {gitRemote: github.com/acme/denied}
+            - {gitRemote: github.com/acme/contradictory}
+          sessions: [80000000-0000-4000-8000-000000000000]
+          exclusions:
+            sessions: [80000000-0000-4000-8000-000000000004]
+    stored:
+      - {sessionId: 80000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/yes, branch: main}
+      - {sessionId: 80000000-0000-4000-8000-000000000002, harness: claude-code, gitRemote: github.com/acme/no, branch: main}
+      - {sessionId: 80000000-0000-4000-8000-000000000003, harness: claude-code, gitRemote: github.com/acme/conflict, branch: main}
+      - {sessionId: 80000000-0000-4000-8000-000000000004, harness: claude-code, gitRemote: github.com/acme/denied, branch: main}
+      - {sessionId: 80000000-0000-4000-8000-000000000005, harness: claude-code, gitRemote: github.com/acme/unknown}
+      - {sessionId: 80000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/yes, branch: main}
+      - {sessionId: 80000000-0000-4000-8000-000000000006, harness: claude-code, gitRemote: github.com/acme/contradictory, branch: main}
+      - {sessionId: 80000000-0000-4000-8000-000000000006, harness: claude-code, gitRemote: github.com/acme/contradictory, branch: release}
+      - {sessionId: not-a-session-id, harness: claude-code, gitRemote: github.com/acme/yes, branch: main}
+    expectedResolverCalls: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          sessions:
+            - 80000000-0000-4000-8000-000000000000
+            - 80000000-0000-4000-8000-000000000001
+            - 80000000-0000-4000-8000-000000000005
+          exclusions:
+            sessions: [80000000-0000-4000-8000-000000000004]
+
+  - name: failed-worktree-does-not-use-canonical-fallback
+    expectedStoredCount: 1
+    expectedResolverCallCount: 1
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          projects:
+            - {gitRemote: github.com/acme/tool, branches: [main]}
+    stored:
+      - sessionId: 90000000-0000-4000-8000-000000000001
+        harness: opencode
+        gitRemote: github.com/acme/tool
+        branch: main
+        gitWorktree: /fixtures/missing/worktree
+        canonicalCwd: /fixtures/available/project
+    resolverFailures: [/fixtures/missing/worktree]
+    expectedResolverCalls: [/fixtures/missing/worktree]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        opencode:
+          sessions: [90000000-0000-4000-8000-000000000001]
+
+  - name: exact-selected-input-is-field-equivalent-without-resolution
+    expectedStoredCount: 1
+    expectedResolverCallCount: 0
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/exact.git"
+              name: exact-raw
+              clonePaths: [/fixtures/exact]
+              branches: []
+          sessions: []
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/exact, branches: [private]}
+            sessions: []
+    stored:
+      - {sessionId: a0000000-0000-4000-8000-000000000001, harness: claude-code, gitRemote: github.com/acme/exact, branch: main, gitWorktree: /fixtures/exact}
+    expectedResolverCalls: []
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/exact.git"
+              name: exact-raw
+              clonePaths: [/fixtures/exact]
+              branches: []
+          sessions: []
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/exact, branches: [private]}
+            sessions: []

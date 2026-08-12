@@ -886,11 +886,16 @@ func (w *configScreenWorld) dependencies(t *testing.T) configCommandDeps {
 	t.Helper()
 	return configCommandDeps{
 		discover: func(context.Context, string, string) configDiscovery {
+			projectPath := filepath.Join(w.dir, "fixture-project")
+			if err := os.MkdirAll(projectPath, defaults.PrivateDirPerm); err != nil {
+				t.Fatalf("create config-screen fixture project: %v", err)
+			}
 			var source kit.TreeSource = kickstart.NewScannerTreeSource([]ftue.SessionListing{
 				{
 					Harness:     string(defaults.HarnessClaudeCode),
 					ProjectName: "fixture project",
 					SessionID:   "fixture-session",
+					WorkingDir:  projectPath,
 				},
 			})
 			if w.sourceName == "conflict" {

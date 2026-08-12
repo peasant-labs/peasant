@@ -15,6 +15,7 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: parent session
     sessionId: sess-parent
     subagentIds: [sess-child]
@@ -22,6 +23,7 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: child subagent
     sessionId: sess-child
     subagentIds: [sess-grandchild]
@@ -29,11 +31,13 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: grandchild subagent
     sessionId: sess-grandchild
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: second parent session
     sessionId: sess-p2

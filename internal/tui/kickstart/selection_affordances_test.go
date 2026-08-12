@@ -130,11 +130,17 @@ func selectionAffordanceProgram(t *testing.T, saved config.SelectionConfig, drai
 	if err != nil {
 		t.Fatalf("open selection affordance draft: %v", err)
 	}
+	source := kickstart.NewScannerTreeSource(renderDoc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(renderDoc.Ingested))
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
-		Theme:   th,
-		Draft:   draft,
-		Source:  kickstart.NewScannerTreeSource(renderDoc.Listings, kickstart.WithIngestedSessionIDs(renderDoc.Ingested)),
-		Preview: kickstart.NewListingPreview(th, renderDoc.Listings, turnsFromPrompts(renderDoc.Stored)),
+		Theme:  th,
+		Draft:  draft,
+		Source: source,
+		Preview: kickstart.NewListingPreview(
+			th,
+			renderDoc.Listings,
+			turnsFromPrompts(renderDoc.Stored),
+			kickstart.WithListingPreviewContextSource(source),
+		),
 	})
 	program.SetSize(132, 30)
 	if drainInitial {

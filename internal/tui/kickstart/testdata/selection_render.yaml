@@ -44,7 +44,8 @@ renderAssertions:
   rows:
     - case: default-dark
       wantContains:
-        [+ 2 child sessions, already imported, harness, claude code, cursor]
+        [+ 2 child sessions, already imported, harness, claude code, cursor,
+         "project: github:acme/tool", "git directory: /fixtures/claude/acme-tool"]
       wantMissing: [child subagent, grandchild subagent]
     - case: narrowed-dark
       wantContains: [+ 2 child sessions, claude code]
@@ -74,7 +75,7 @@ renderAssertions:
     - case: overflow-middle-dark
       wantContains: ["↑  ▾", "↓      [✓]"]
     - case: overflow-bottom-dark
-      wantContains: ["↑ "]
+      wantContains: ["↑▾"]
       wantMissing: [↕, "↓ "]
 # The stored body is markdown, as a recorded first message from a person to a
 # coding agent usually is: the pane renders it rather than showing the raw
@@ -118,6 +119,7 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: parent session
     sessionId: cc-parent
     subagentIds: [cc-child]
@@ -125,6 +127,7 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: child subagent
     sessionId: cc-child
     subagentIds: [cc-grandchild]
@@ -132,18 +135,21 @@ listings:
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: grandchild subagent
     sessionId: cc-grandchild
   - harness: claude-code
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/claude/acme-tool
     title: imported session
     sessionId: cc-imported
   - harness: cursor
     projectName: acme/tool
     gitRemote: "git@github.com:acme/tool.git"
     branch: main
+    workingDir: /fixtures/cursor/acme-tool
     title: cursor session
     sessionId: cur-1
 ingested:

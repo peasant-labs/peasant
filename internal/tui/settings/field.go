@@ -102,6 +102,10 @@ type Field interface {
 	blur()
 	setSize(width, height int)
 	availableActions() []keymap.ActionID
+	// actionKeymap returns the bindings and contextual help text for this field.
+	// Keys remain app-wide; a field may make one action's scope explicit in its
+	// help description.
+	actionKeymap() keymap.Keymap
 	// capturesPrintableInput reports whether the currently-focused component is
 	// editing free text. Flow consults it only for key messages whose Text is
 	// non-empty, before resolving global printable actions such as q, b, and ?.
@@ -132,9 +136,12 @@ type baseField struct {
 	when  func(d *Draft) bool
 }
 
-func (b baseField) Key() string                  { return b.key }
-func (b baseField) Label() string                { return b.label }
-func (b baseField) Description() string          { return b.desc }
+func (b baseField) Key() string         { return b.key }
+func (b baseField) Label() string       { return b.label }
+func (b baseField) Description() string { return b.desc }
+func (b baseField) actionKeymap() keymap.Keymap {
+	return keymap.Default()
+}
 func (b baseField) capturesPrintableInput() bool { return false }
 
 func (b baseField) When(d *Draft) bool {

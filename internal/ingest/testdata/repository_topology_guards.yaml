@@ -1,0 +1,15 @@
+expectedCaseCount: 3
+cases:
+  - name: child-outside-direct-superproject
+    kind: containment
+    wantErrorText: checking submodule containment
+    wantGitDirectory: /fixture/outside-child.git
+  - name: repeated-physical-superproject
+    kind: cycle
+    wantErrorText: repeats in its own superproject chain
+    wantGitDirectory: /fixture/child.git
+  - name: nested-submodule-depth-limit
+    kind: depth
+    nestedDepth: 33
+    wantErrorText: exceeds the supported depth
+    wantGitDirectory: /fixture/deep-child.git

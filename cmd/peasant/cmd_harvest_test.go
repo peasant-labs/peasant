@@ -1132,9 +1132,16 @@ func TestHarvestCmd_SinceFlag_ValidDuration(t *testing.T) {
 }
 
 // --- selection filter tests ---
-// These drive buildSelectionFilterWithRecorder, the closure runHarvest itself
-// builds. Cases that do not exercise a withheld conflict discard the recorder
+// These drive the prepared filter runHarvest itself builds. Cases that do not
+// exercise a withheld conflict discard the recorder
 // explicitly here, so the discard is visible in the test that chooses it.
+
+func prepareHarvestFilterForTest(t *testing.T, filter *harvestSelectionFilter, sessions ...ingest.DiscoveredSession) {
+	t.Helper()
+	if err := filter.Prepare(context.Background(), sessions); err != nil {
+		t.Fatalf("prepare harvest selection cohort: %v", err)
+	}
+}
 
 // TestBuildSelectionFilter_ProviderNotInSelection verifies that a session from an
 // unselected provider is rejected.
@@ -1146,12 +1153,13 @@ func TestBuildSelectionFilter_ProviderNotInSelection(t *testing.T) {
 		string(defaults.HarnessClaudeCode): {},
 	}
 
-	filter, _ := buildSelectionFilterWithRecorder(cfg, nil)
+	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
 	session := ingest.DiscoveredSession{
 		SessionID: "sess-1",
 		Harness:   ingest.HarnessOpenCode,
 	}
-	if filter(session) {
+	prepareHarvestFilterForTest(t, filter, session)
+	if filter.Match(session) {
 		t.Error("filter should reject session from unselected provider")
 	}
 }
@@ -1166,13 +1174,14 @@ func TestBuildSelectionFilter_ProviderImportAll(t *testing.T) {
 		string(defaults.HarnessClaudeCode): {}, // empty = import all
 	}
 
-	filter, _ := buildSelectionFilterWithRecorder(cfg, nil)
+	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
 	session := ingest.DiscoveredSession{
 		SessionID:   "any-session",
 		Harness:     ingest.HarnessClaudeCode,
 		ProjectName: "anything",
 	}
-	if !filter(session) {
+	prepareHarvestFilterForTest(t, filter, session)
+	if !filter.Match(session) {
 		t.Error("filter should pass all sessions for import-all provider")
 	}
 }
@@ -1188,21 +1197,24 @@ func TestBuildSelectionFilter_ExplicitSessionID(t *testing.T) {
 		},
 	}
 
-	filter, _ := buildSelectionFilterWithRecorder(cfg, nil)
+	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
 
 	// Matching session ID should pass.
-	if !filter(ingest.DiscoveredSession{
+	target := ingest.DiscoveredSession{
 		SessionID: "target-sess",
 		Harness:   ingest.HarnessClaudeCode,
-	}) {
+	}
+	other := ingest.DiscoveredSession{
+		SessionID: "other-sess",
+		Harness:   ingest.HarnessClaudeCode,
+	}
+	prepareHarvestFilterForTest(t, filter, target, other)
+	if !filter.Match(target) {
 		t.Error("filter should pass explicitly listed session ID")
 	}
 
 	// Non-matching session ID should fail.
-	if filter(ingest.DiscoveredSession{
-		SessionID: "other-sess",
-		Harness:   ingest.HarnessClaudeCode,
-	}) {
+	if filter.Match(other) {
 		t.Error("filter should reject session not in allowlist")
 	}
 }
@@ -1221,21 +1233,26 @@ func TestBuildSelectionFilter_ProjectMatchByName(t *testing.T) {
 		},
 	}
 
-	filter, _ := buildSelectionFilterWithRecorder(cfg, nil)
+	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
 
-	if !filter(ingest.DiscoveredSession{
+	selected := ingest.DiscoveredSession{
 		SessionID:   "sess-1",
 		Harness:     ingest.HarnessClaudeCode,
 		ProjectName: "my-project",
-	}) {
-		t.Error("filter should pass session matching project by name")
+		CWD:         "/workspace/my-project",
 	}
-
-	if filter(ingest.DiscoveredSession{
+	other := ingest.DiscoveredSession{
 		SessionID:   "sess-2",
 		Harness:     ingest.HarnessClaudeCode,
 		ProjectName: "other-project",
-	}) {
+		CWD:         "/workspace/other-project",
+	}
+	prepareHarvestFilterForTest(t, filter, selected, other)
+	if !filter.Match(selected) {
+		t.Error("filter should pass session matching project by name")
+	}
+
+	if filter.Match(other) {
 		t.Error("filter should reject session from different project")
 	}
 }
@@ -1258,24 +1275,30 @@ func TestBuildSelectionFilter_ProjectMatchByGitRemote_MixedFormsNormalize(t *tes
 	}
 
 	stubGit := &stubBranchGitResolver{remote: "git@github.com:example-org/garden-app.git"}
-	filter, _ := buildSelectionFilterWithRecorder(cfg, stubGit)
+	filter, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
 
-	if !filter(ingest.DiscoveredSession{
+	session := ingest.DiscoveredSession{
 		SessionID:  "sess-1",
 		Harness:    ingest.HarnessClaudeCode,
 		SourcePath: "/tmp/test/session.json",
-	}) {
+		CWD:        "/tmp/test",
+	}
+	prepareHarvestFilterForTest(t, filter, session)
+	if !filter.Match(session) {
 		t.Error("filter should pass a session whose local SSH remote names the same repo as an HTTPS-form config rule")
 	}
 
 	// A different repo, in the same SSH form family, must not match.
 	stubGitOther := &stubBranchGitResolver{remote: "git@github.com:example-org/other-repo.git"}
-	filterOther, _ := buildSelectionFilterWithRecorder(cfg, stubGitOther)
-	if filterOther(ingest.DiscoveredSession{
+	filterOther, _ := buildSelectionFilterWithResolver(cfg, stubGitOther, fixturePathIdentityResolver{})
+	other := ingest.DiscoveredSession{
 		SessionID:  "sess-2",
 		Harness:    ingest.HarnessClaudeCode,
 		SourcePath: "/tmp/test/session2.json",
-	}) {
+		CWD:        "/tmp/test",
+	}
+	prepareHarvestFilterForTest(t, filterOther, other)
+	if filterOther.Match(other) {
 		t.Error("filter should reject a session whose remote names a different repo")
 	}
 }
@@ -1298,15 +1321,18 @@ func TestBuildSelectionFilter_BranchFilter(t *testing.T) {
 		},
 	}
 
-	filter, _ := buildSelectionFilterWithRecorder(cfg, nil)
+	filter, _ := buildSelectionFilterWithResolver(cfg, nil, fixturePathIdentityResolver{})
 
 	// Without a git resolver, branch cannot be resolved, so even a matching project
 	// with branch filtering won't pass (branch is empty, not in allowlist).
-	if filter(ingest.DiscoveredSession{
+	session := ingest.DiscoveredSession{
 		SessionID:   "sess-1",
 		Harness:     ingest.HarnessClaudeCode,
 		ProjectName: "my-project",
-	}) {
+		CWD:         "/workspace/my-project",
+	}
+	prepareHarvestFilterForTest(t, filter, session)
+	if filter.Match(session) {
 		t.Error("filter should reject when branch cannot be resolved and auto-ingest is off")
 	}
 }
@@ -1331,22 +1357,25 @@ func TestBuildSelectionFilter_AutoIngestNewBranches(t *testing.T) {
 
 	// Use a stub git resolver that returns a "feature" branch (not in allowlist).
 	stubGit := &stubBranchGitResolver{branch: "feature-xyz"}
-	filter, _ := buildSelectionFilterWithRecorder(cfg, stubGit)
+	filter, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
 
 	session := ingest.DiscoveredSession{
 		SessionID:   "sess-1",
 		Harness:     ingest.HarnessOpenCode,
 		SourcePath:  "/tmp/test/session.json",
 		ProjectName: "my-project",
+		CWD:         "/tmp/test",
 	}
-	if !filter(session) {
+	prepareHarvestFilterForTest(t, filter, session)
+	if !filter.Match(session) {
 		t.Error("filter should pass new branch when AutoIngestNewBranches is true")
 	}
 
 	// Disable auto-ingest: same session should now be rejected.
 	cfg.Selection.AutoIngestNewBranches = false
-	filter2, _ := buildSelectionFilterWithRecorder(cfg, stubGit)
-	if filter2(session) {
+	filter2, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
+	prepareHarvestFilterForTest(t, filter2, session)
+	if filter2.Match(session) {
 		t.Error("filter should reject new branch when AutoIngestNewBranches is false")
 	}
 }
@@ -1404,24 +1433,30 @@ func TestBuildSelectionFilter_ProjectMatchByGitRemote(t *testing.T) {
 	}
 
 	stubGit := &stubBranchGitResolver{remote: "https://github.com/org/repo.git"}
-	filter, _ := buildSelectionFilterWithRecorder(cfg, stubGit)
+	filter, _ := buildSelectionFilterWithResolver(cfg, stubGit, fixturePathIdentityResolver{})
 
-	if !filter(ingest.DiscoveredSession{
+	session := ingest.DiscoveredSession{
 		SessionID:  "sess-1",
 		Harness:    ingest.HarnessOpenCode,
 		SourcePath: "/tmp/test/session.json",
-	}) {
+		CWD:        "/tmp/test",
+	}
+	prepareHarvestFilterForTest(t, filter, session)
+	if !filter.Match(session) {
 		t.Error("filter should pass session matching project by git remote")
 	}
 
 	// Different remote should not match.
 	stubGit2 := &stubBranchGitResolver{remote: "https://github.com/org/other-repo.git"}
-	filter2, _ := buildSelectionFilterWithRecorder(cfg, stubGit2)
-	if filter2(ingest.DiscoveredSession{
+	filter2, _ := buildSelectionFilterWithResolver(cfg, stubGit2, fixturePathIdentityResolver{})
+	other := ingest.DiscoveredSession{
 		SessionID:  "sess-2",
 		Harness:    ingest.HarnessOpenCode,
 		SourcePath: "/tmp/test/session.json",
-	}) {
+		CWD:        "/tmp/test",
+	}
+	prepareHarvestFilterForTest(t, filter2, other)
+	if filter2.Match(other) {
 		t.Error("filter should reject session from different git remote")
 	}
 }

@@ -1,0 +1,34 @@
+declared_cases: 3
+cases:
+  - name: real_run_exact_child_deny_overrides_selected_parent
+    dry_run: false
+    parent_session_id: 81000000-0000-4000-8000-000000000001
+    child_session_id: 81000000-0000-4000-8000-000000000002
+    selected_roots: [81000000-0000-4000-8000-000000000001]
+    excluded_sessions: [81000000-0000-4000-8000-000000000002]
+    expected_statuses:
+      81000000-0000-4000-8000-000000000001: new
+      81000000-0000-4000-8000-000000000002: unchanged
+    expected_written: [81000000-0000-4000-8000-000000000001]
+
+  - name: dry_run_uses_exact_child_deny
+    dry_run: true
+    parent_session_id: 82000000-0000-4000-8000-000000000001
+    child_session_id: 82000000-0000-4000-8000-000000000002
+    selected_roots: [82000000-0000-4000-8000-000000000001]
+    excluded_sessions: [82000000-0000-4000-8000-000000000002]
+    expected_statuses:
+      82000000-0000-4000-8000-000000000001: new
+      82000000-0000-4000-8000-000000000002: unchanged
+    expected_written: []
+
+  - name: dry_run_preserves_rejected_parent_inheritance
+    dry_run: true
+    parent_session_id: 83000000-0000-4000-8000-000000000001
+    child_session_id: 83000000-0000-4000-8000-000000000002
+    selected_roots: []
+    excluded_sessions: []
+    expected_statuses:
+      83000000-0000-4000-8000-000000000001: unchanged
+      83000000-0000-4000-8000-000000000002: unchanged
+    expected_written: []

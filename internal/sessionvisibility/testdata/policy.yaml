@@ -77,6 +77,38 @@ cases:
           - {name: alpha, branches: [main]}
     candidate: {harness: claude-code, session_id: session-dev, project_name: alpha, git_branch: dev}
     result: hidden
+  - name: exact_branch_exclusion
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha, clonePaths: [/workspace/alpha-a]}
+        exclusions:
+          branches:
+            - {clonePath: /workspace/alpha-a, branches: [main]}
+    candidate: {harness: claude-code, session_id: session-denied-branch, project_name: alpha, clone_path: /workspace/alpha-a, git_branch: main}
+    result: hidden
+  - name: branch_exclusion_does_not_cross_clone_boundary
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha, clonePaths: [/workspace/alpha-a, /workspace/alpha-b]}
+        exclusions:
+          branches:
+            - {clonePath: /workspace/alpha-a, branches: [main]}
+    candidate: {harness: claude-code, session_id: session-sibling-branch, project_name: alpha, clone_path: /workspace/alpha-b, git_branch: main}
+    result: visible
+  - name: project_admitted_exact_session_exclusion
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha, clonePaths: [/workspace/alpha-session]}
+        exclusions:
+          sessions: [session-denied-exact]
+    candidate: {harness: claude-code, session_id: session-denied-exact, project_name: alpha, clone_path: /workspace/alpha-session, git_branch: release}
+    result: hidden
   - name: conflicting_branch_rules
     mode: selected
     harnesses:

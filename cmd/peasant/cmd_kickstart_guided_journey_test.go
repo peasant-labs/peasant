@@ -214,6 +214,10 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 					program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 				}
 				program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				if program.ConfirmingNoProjects() {
+					program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+					program, command = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+				}
 				if command == nil {
 					t.Fatal("mounted receipt confirmation did not start local ingest")
 				}

@@ -12,6 +12,11 @@ import {
   rowsFromSessions,
   type PickerRow,
 } from "@/components/picker/ProjectPicker";
+import {
+  ProjectListState,
+  SelectionRecoveryPanel,
+  projectListState,
+} from "@/components/picker/SelectionRecoveryPanel";
 import { ExplainerToggle, useExplainer } from "@/components/Explainer";
 import { Skeleton, SkeletonList } from "@/lib/skeleton";
 import type { SessionsPayload, SessionSummary } from "@/types/messages";
@@ -214,6 +219,10 @@ export default function HomePage() {
     selectionFailureLatched ||
     discoveryErrorCode(summariesError) === DiscoveryErrorCode.SelectionVisibility;
 
+  const summaryListState = summaries === null ? null : projectListState(summaries);
+  const selectionRecovery =
+    summaryListState === ProjectListState.SelectionRecovery ? summaries?.selection ?? null : null;
+
   // A persisted kickstart selection is narrowing this list AND actually
   // hiding something right now — distinct from summariesSelectionFailed
   // (a broken selection that errors outright). This is a working selection
@@ -221,7 +230,7 @@ export default function HomePage() {
   // reading as broken. Never names which
   // projects/sessions are hidden — counts only.
   const activeSelectionNotice =
-    !summariesSelectionFailed && summaries && summaries.selection.active
+    !summariesSelectionFailed && !selectionRecovery && summaries && summaries.selection.active
       && (summaries.selection.hiddenProjects > 0 || summaries.selection.hiddenSessions > 0)
       ? summaries.selection
       : null;
@@ -229,14 +238,16 @@ export default function HomePage() {
     () =>
       sessionsError || summariesSelectionFailed
         ? []
+        : selectionRecovery
+        ? []
         : summaries && summaries.projects.length > 0
         ? rowsFromSummaries(summaries)
         : rowsFromSessions(sessions),
-    [summaries, sessions, sessionsError, summariesSelectionFailed],
+    [summaries, sessions, sessionsError, summariesSelectionFailed, selectionRecovery],
   );
 
   const totalSessions =
-    sessionsError || summariesSelectionFailed
+    sessionsError || summariesSelectionFailed || selectionRecovery
       ? 0
       : sessions.length > 0
       ? sessions.length
@@ -416,11 +427,15 @@ export default function HomePage() {
         status={wsStatus}
         empty={isEmpty}
         emptyState={
-          <TeachingEmptyState
-            title="no ai work recorded yet"
-            body="run the command below in your terminal. it scans this computer for your ai coding conversations (claude code, codex, and others) and shows what it finds here."
-            command="peasant ingest"
-          />
+          selectionRecovery ? (
+            <SelectionRecoveryPanel {...selectionRecovery} />
+          ) : (
+            <TeachingEmptyState
+              title="no ai work recorded yet"
+              body="run the command below in your terminal. it scans this computer for your ai coding conversations (claude code, codex, and others) and shows what it finds here."
+              command="peasant ingest"
+            />
+          )
         }
         skeletonRows={4}
       >

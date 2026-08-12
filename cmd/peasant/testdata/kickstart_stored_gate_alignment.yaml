@@ -1,0 +1,243 @@
+declaredCases: 8
+declaredStoredRows: 9
+declaredScannerRows: 1
+cases:
+  - name: db-only explicit session aligns gate viewer and push
+    behavior: stored-explicit
+    storeState: readable
+    selection:
+      kind: explicit-session
+      sessionId: 71000000-0000-4000-8000-000000000001
+    paths:
+      - key: selected-canonical
+        state: directory
+      - key: selected-worktree
+        state: directory
+      - key: sibling-canonical
+        state: directory
+      - key: sibling-worktree
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 71000000-0000-4000-8000-000000000001
+        projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        projectName: stored-alignment
+        gitRemote: git@github.com:example/stored-alignment.git
+        branch: main
+        canonicalPathKey: selected-canonical
+        worktreePathKey: selected-worktree
+      - harness: claude-code
+        sessionId: 71000000-0000-4000-8000-000000000002
+        projectHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        projectName: stored-alignment
+        gitRemote: git@github.com:example/stored-alignment.git
+        branch: topic
+        canonicalPathKey: sibling-canonical
+        worktreePathKey: sibling-worktree
+    scannerRows:
+      - harness: claude-code
+        sessionId: 71000000-0000-4000-8000-000000000002
+        projectName: stored-alignment
+        gitRemote: git@github.com:example/stored-alignment.git
+        branch: topic
+        worktreePathKey: sibling-worktree
+    expectedGate: none
+    expectedCandidateCount: 2
+    expectedDescendantCount: 2
+    expectedViewerProjects: 1
+    expectedViewerSessions: 1
+    expectedPushSessionIds:
+      - 71000000-0000-4000-8000-000000000001
+
+  - name: unresolved stored explicit session keeps stable parent evidence
+    behavior: stored-unresolved-explicit
+    storeState: readable
+    selection:
+      kind: explicit-session
+      sessionId: 74000000-0000-4000-8000-000000000001
+    paths:
+      - key: unavailable-canonical
+        state: missing
+      - key: unavailable-worktree
+        state: missing
+    storedRows:
+      - harness: claude-code
+        sessionId: 74000000-0000-4000-8000-000000000001
+        projectHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        projectName: unavailable-stored-alignment
+        gitRemote: git@github.com:example/unavailable-stored-alignment.git
+        branch: main
+        canonicalPathKey: unavailable-canonical
+        worktreePathKey: unavailable-worktree
+    scannerRows: []
+    expectedGate: none
+    expectedCandidateCount: 1
+    expectedDescendantCount: 1
+    expectedViewerProjects: 1
+    expectedViewerSessions: 1
+    expectedPushSessionIds:
+      - 74000000-0000-4000-8000-000000000001
+
+  - name: canonical clone selection keeps project and worktree carriers distinct
+    behavior: stored-canonical-clone
+    storeState: readable
+    selection:
+      kind: clone-path
+      clonePathKey: canonical-project
+    paths:
+      - key: canonical-project
+        state: directory
+      - key: separate-session-worktree
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 75000000-0000-4000-8000-000000000001
+        projectHash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        projectName: canonical-project
+        gitRemote: git@github.com:example/canonical-project.git
+        branch: topic
+        canonicalPathKey: canonical-project
+        worktreePathKey: separate-session-worktree
+    scannerRows: []
+    expectedGate: none
+    expectedCandidateCount: 1
+    expectedDescendantCount: 1
+    expectedViewerProjects: 1
+    expectedViewerSessions: 0
+    expectedPushSessionIds: []
+
+  - name: unique db-only non-git name aligns gate viewer and push
+    behavior: stored-unique-name
+    storeState: readable
+    selection:
+      kind: project-name
+      projectName: atlas
+    paths:
+      - key: unique-name/atlas
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 76000000-0000-4000-8000-000000000001
+        projectHash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        projectName: atlas
+        gitRemote: ""
+        branch: main
+        canonicalPathKey: unique-name/atlas
+        worktreePathKey: ""
+    scannerRows: []
+    expectedGate: none
+    expectedCandidateCount: 1
+    expectedDescendantCount: 1
+    expectedViewerProjects: 1
+    expectedViewerSessions: 1
+    expectedPushSessionIds:
+      - 76000000-0000-4000-8000-000000000001
+
+  - name: pathless name migrates all matching db-only projects
+    behavior: stored-name-migration
+    storeState: readable
+    selection:
+      kind: project-name
+      projectName: atlas
+    paths:
+      - key: ambiguous-one/atlas
+        state: directory
+      - key: ambiguous-two/atlas
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 77000000-0000-4000-8000-000000000001
+        projectHash: 1111111111111111111111111111111111111111111111111111111111111111
+        projectName: atlas
+        gitRemote: ""
+        branch: main
+        canonicalPathKey: ambiguous-one/atlas
+        worktreePathKey: ""
+      - harness: claude-code
+        sessionId: 77000000-0000-4000-8000-000000000002
+        projectHash: 2222222222222222222222222222222222222222222222222222222222222222
+        projectName: atlas
+        gitRemote: ""
+        branch: main
+        canonicalPathKey: ambiguous-two/atlas
+        worktreePathKey: ""
+    scannerRows: []
+    expectedGate: none
+    expectedCandidateCount: 2
+    expectedDescendantCount: 2
+    expectedViewerProjects: 2
+    expectedViewerSessions: 2
+    expectedPushSessionIds:
+      - 77000000-0000-4000-8000-000000000001
+      - 77000000-0000-4000-8000-000000000002
+
+  - name: no effective stored or scanner descendant confirms
+    behavior: empty-control
+    storeState: readable
+    selection:
+      kind: explicit-session
+      sessionId: 72000000-0000-4000-8000-000000000099
+    paths:
+      - key: canonical-only
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 72000000-0000-4000-8000-000000000001
+        projectHash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        projectName: stored-control
+        gitRemote: git@github.com:example/stored-control.git
+        branch: main
+        canonicalPathKey: canonical-only
+        worktreePathKey: ""
+    scannerRows: []
+    expectedGate: confirm-no-projects
+    expectedCandidateCount: 1
+    expectedDescendantCount: 1
+    expectedViewerProjects: 0
+    expectedViewerSessions: 0
+    expectedPushSessionIds: []
+
+  - name: selected mode rejects a stored evidence query failure
+    behavior: store-read-failure
+    storeState: query-failure
+    selection:
+      kind: explicit-session
+      sessionId: 73000000-0000-4000-8000-000000000001
+    paths:
+      - key: unused
+        state: directory
+    storedRows: []
+    scannerRows: []
+    expectedGate: error
+    expectedCandidateCount: 0
+    expectedDescendantCount: 0
+    expectedViewerProjects: 0
+    expectedViewerSessions: 0
+    expectedPushSessionIds: []
+
+  - name: selected mode rejects an invalid stored project hash
+    behavior: store-invalid-project-hash
+    storeState: invalid-project-hash
+    corruptProjectHash: not-a-project-hash
+    selection:
+      kind: explicit-session
+      sessionId: 78000000-0000-4000-8000-000000000001
+    paths:
+      - key: corrupt-project
+        state: directory
+    storedRows:
+      - harness: claude-code
+        sessionId: 78000000-0000-4000-8000-000000000001
+        projectHash: 3333333333333333333333333333333333333333333333333333333333333333
+        projectName: corrupt-project
+        gitRemote: ""
+        branch: main
+        canonicalPathKey: corrupt-project
+        worktreePathKey: ""
+    scannerRows: []
+    expectedGate: error
+    expectedCandidateCount: 0
+    expectedDescendantCount: 0
+    expectedViewerProjects: 0
+    expectedViewerSessions: 0
+    expectedPushSessionIds: []

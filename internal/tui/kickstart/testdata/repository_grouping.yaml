@@ -1,0 +1,309 @@
+# Repository grouping is transient. Every expected selection keeps exact
+# worktree paths, while repositoryPath only controls scanner roots and remote or
+# name multiplicity.
+expectedCaseCount: 7
+expectedTopologyFailureCount: 6
+expectedNames:
+  - linked-worktrees-group-with-independent-clone
+  - linked-superproject-submodules-share-one-logical-cohort
+  - same-remote-distinct-submodule-paths-stay-separate
+  - harnesses-share-project-and-branch-rows
+  - shared-branch-restores-only-descendant-worktrees
+  - non-git-fallback-keeps-physical-roots
+  - exact-exclusion-stays-on-linked-worktree
+topologyFailures:
+  - {name: common-directory-command-fails, failurePoint: common-directory-command, clonePath: /fixtures/failures/common-a, siblingPath: /fixtures/failures/common-b, gitRemote: "git@github.com:acme/tool.git", projectName: tool}
+  - {name: superproject-command-fails, failurePoint: superproject-command, clonePath: /fixtures/failures/super-a, siblingPath: /fixtures/failures/super-b, gitRemote: "git@github.com:acme/tool.git", projectName: tool}
+  - {name: containment-check-fails, failurePoint: containment, clonePath: /fixtures/failures/containment-a, siblingPath: /fixtures/failures/containment-b, gitRemote: "git@github.com:acme/tool.git", projectName: tool}
+  - {name: declaration-check-fails, failurePoint: declaration, clonePath: /fixtures/failures/declaration-a, siblingPath: /fixtures/failures/declaration-b, gitRemote: "git@github.com:acme/tool.git", projectName: tool}
+  - {name: recursion-depth-check-fails, failurePoint: recursion-depth, clonePath: /fixtures/failures/depth-a, siblingPath: /fixtures/failures/depth-b, gitRemote: "git@github.com:acme/tool.git", projectName: tool}
+  - {name: physical-path-resolution-fails, failurePoint: physical-path-resolution, clonePath: /fixtures/failures/physical-a, siblingPath: /fixtures/failures/physical-b, gitRemote: "git@github.com:acme/tool.git", projectName: tool}
+cases:
+  - name: linked-worktrees-group-with-independent-clone
+    repositories:
+      - {clonePath: /fixtures/tool-main, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-linked, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-independent, repositoryPath: /fixtures/repos/tool-independent.git}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-main, branch: main, sessionId: 11111111-1111-4111-8111-111111111111}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", workingDir: /fixtures/tool-linked, branch: review, sessionId: 22222222-2222-4222-8222-222222222222}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-independent, branch: main, sessionId: 33333333-3333-4333-8333-333333333333}
+    expectedRoots:
+      - repositoryPath: /fixtures/repos/tool.git
+        clonePaths: [/fixtures/tool-main, /fixtures/tool-linked]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-main, /fixtures/tool-linked]
+        branches:
+          main: [/fixtures/tool-main]
+          review: [/fixtures/tool-linked]
+        remoteMultiplicity: ambiguous
+      - repositoryPath: /fixtures/repos/tool-independent.git
+        clonePaths: [/fixtures/tool-independent]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-independent]
+        branches:
+          main: [/fixtures/tool-independent]
+        remoteMultiplicity: ambiguous
+    action: project
+    actionRepositoryPath: /fixtures/repos/tool.git
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked, /fixtures/tool-main]}
+    expectedChecked:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expectedUnchecked: [33333333-3333-4333-8333-333333333333]
+
+  - name: linked-superproject-submodules-share-one-logical-cohort
+    repositories:
+      - {clonePath: /fixtures/super-a/pasture, cohortKey: "submodule:fixture-super:7:pasture", repositoryPath: /fixtures/gitdirs/super-a/pasture}
+      - {clonePath: /fixtures/super-b/pasture, cohortKey: "submodule:fixture-super:7:pasture", repositoryPath: /fixtures/gitdirs/super-b/pasture}
+    listings:
+      - {harness: claude-code, projectName: pasture, gitRemote: "git@github.com:acme/pasture.git", workingDir: /fixtures/super-a/pasture, branch: main, title: claude pasture session, sessionId: 10101010-1010-4010-8010-101010101010}
+      - {harness: codex, projectName: pasture, gitRemote: "https://github.com/acme/pasture.git", workingDir: /fixtures/super-b/pasture, branch: main, title: codex pasture session, sessionId: 20202020-2020-4020-8020-202020202020}
+    expectedRoots:
+      - cohortKey: "submodule:fixture-super:7:pasture"
+        repositoryPath: /fixtures/gitdirs/super-a/pasture
+        clonePaths: [/fixtures/super-a/pasture, /fixtures/super-b/pasture]
+        remotes: [github.com/acme/pasture]
+        candidateClonePaths:
+          claude-code: [/fixtures/super-a/pasture]
+          codex: [/fixtures/super-b/pasture]
+        branches:
+          main: [/fixtures/super-a/pasture, /fixtures/super-b/pasture]
+        remoteMultiplicity: unique
+    action: project
+    actionRepositoryPath: /fixtures/gitdirs/super-a/pasture
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/pasture.git", clonePaths: [/fixtures/super-a/pasture]}
+        codex:
+          projects:
+            - {gitRemote: "https://github.com/acme/pasture.git", clonePaths: [/fixtures/super-b/pasture]}
+    expectedChecked:
+      - 10101010-1010-4010-8010-101010101010
+      - 20202020-2020-4020-8020-202020202020
+    expectedUnchecked: []
+
+  - name: same-remote-distinct-submodule-paths-stay-separate
+    repositories:
+      - {clonePath: /fixtures/super/modules/pasture-a, cohortKey: "submodule:fixture-super:17:modules/pasture-a", repositoryPath: /fixtures/gitdirs/modules/pasture-a}
+      - {clonePath: /fixtures/super/modules/pasture-b, cohortKey: "submodule:fixture-super:17:modules/pasture-b", repositoryPath: /fixtures/gitdirs/modules/pasture-b}
+    listings:
+      - {harness: claude-code, projectName: pasture, gitRemote: "git@github.com:acme/pasture.git", workingDir: /fixtures/super/modules/pasture-a, branch: main, sessionId: 30303030-3030-4030-8030-303030303030}
+      - {harness: claude-code, projectName: pasture, gitRemote: "https://github.com/acme/pasture.git", workingDir: /fixtures/super/modules/pasture-b, branch: main, sessionId: 40404040-4040-4040-8040-404040404040}
+    expectedRoots:
+      - cohortKey: "submodule:fixture-super:17:modules/pasture-a"
+        repositoryPath: /fixtures/gitdirs/modules/pasture-a
+        clonePaths: [/fixtures/super/modules/pasture-a]
+        remotes: [github.com/acme/pasture]
+        candidateClonePaths:
+          claude-code: [/fixtures/super/modules/pasture-a]
+        branches:
+          main: [/fixtures/super/modules/pasture-a]
+        remoteMultiplicity: ambiguous
+      - cohortKey: "submodule:fixture-super:17:modules/pasture-b"
+        repositoryPath: /fixtures/gitdirs/modules/pasture-b
+        clonePaths: [/fixtures/super/modules/pasture-b]
+        remotes: [github.com/acme/pasture]
+        candidateClonePaths:
+          claude-code: [/fixtures/super/modules/pasture-b]
+        branches:
+          main: [/fixtures/super/modules/pasture-b]
+        remoteMultiplicity: ambiguous
+    action: project
+    actionRepositoryPath: /fixtures/gitdirs/modules/pasture-a
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/pasture.git", clonePaths: [/fixtures/super/modules/pasture-a]}
+    expectedChecked: [30303030-3030-4030-8030-303030303030]
+    expectedUnchecked: [40404040-4040-4040-8040-404040404040]
+
+  - name: harnesses-share-project-and-branch-rows
+    repositories:
+      - {clonePath: /fixtures/tool-main, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-linked, repositoryPath: /fixtures/repos/tool.git}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-main, branch: main, title: claude main session, sessionId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}
+      - {harness: codex, projectName: tool, gitRemote: "https://github.com/acme/tool.git", workingDir: /fixtures/tool-linked, branch: main, title: codex main session, sessionId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb}
+    expectedRoots:
+      - repositoryPath: /fixtures/repos/tool.git
+        clonePaths: [/fixtures/tool-main, /fixtures/tool-linked]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-main]
+          codex: [/fixtures/tool-linked]
+        branches:
+          main: [/fixtures/tool-main, /fixtures/tool-linked]
+        remoteMultiplicity: unique
+    action: project
+    actionRepositoryPath: /fixtures/repos/tool.git
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main]}
+        codex:
+          projects:
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/tool-linked]}
+    expectedChecked:
+      - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+      - bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    expectedUnchecked: []
+    facet:
+      harness: claude-code
+      project: "github:acme/tool"
+      branch: main
+      wantSessions: [claude main session]
+      wantMissingSessions: [codex main session]
+
+  - name: shared-branch-restores-only-descendant-worktrees
+    repositories:
+      - {clonePath: /fixtures/tool-main, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-linked, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-independent, repositoryPath: /fixtures/repos/tool-independent.git}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-main, branch: topic, sessionId: 11111111-1111-4111-8111-111111111111}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", workingDir: /fixtures/tool-linked, branch: topic, sessionId: 22222222-2222-4222-8222-222222222222}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-independent, branch: topic, sessionId: 33333333-3333-4333-8333-333333333333}
+    expectedRoots:
+      - repositoryPath: /fixtures/repos/tool.git
+        clonePaths: [/fixtures/tool-main, /fixtures/tool-linked]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-main, /fixtures/tool-linked]
+        branches:
+          topic: [/fixtures/tool-main, /fixtures/tool-linked]
+        remoteMultiplicity: ambiguous
+      - repositoryPath: /fixtures/repos/tool-independent.git
+        clonePaths: [/fixtures/tool-independent]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-independent]
+        branches:
+          topic: [/fixtures/tool-independent]
+        remoteMultiplicity: ambiguous
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked, /fixtures/tool-main], branches: [topic]}
+    action: none
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked, /fixtures/tool-main], branches: [topic]}
+    expectedChecked:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expectedUnchecked: [33333333-3333-4333-8333-333333333333]
+
+  - name: non-git-fallback-keeps-physical-roots
+    repositories:
+      - {clonePath: /fixtures/team-a/app, fail: true}
+      - {clonePath: /fixtures/team-b/app, fail: true}
+    listings:
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-a/app, branch: main, sessionId: 44444444-4444-4444-8444-444444444444}
+      - {harness: claude-code, projectName: app, workingDir: /fixtures/team-b/app, branch: main, sessionId: 55555555-5555-4555-8555-555555555555}
+    expectedRoots:
+      - repositoryPath: /fixtures/team-a/app
+        clonePaths: [/fixtures/team-a/app]
+        remotes: []
+        candidateClonePaths:
+          claude-code: [/fixtures/team-a/app]
+        branches:
+          main: [/fixtures/team-a/app]
+        remoteMultiplicity: unique
+      - repositoryPath: /fixtures/team-b/app
+        clonePaths: [/fixtures/team-b/app]
+        remotes: []
+        candidateClonePaths:
+          claude-code: [/fixtures/team-b/app]
+        branches:
+          main: [/fixtures/team-b/app]
+        remoteMultiplicity: unique
+    action: project
+    actionRepositoryPath: /fixtures/team-a/app
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: app, clonePaths: [/fixtures/team-a/app]}
+    expectedChecked: [44444444-4444-4444-8444-444444444444]
+    expectedUnchecked: [55555555-5555-4555-8555-555555555555]
+
+  - name: exact-exclusion-stays-on-linked-worktree
+    repositories:
+      - {clonePath: /fixtures/tool-main, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-linked, repositoryPath: /fixtures/repos/tool.git}
+      - {clonePath: /fixtures/tool-independent, repositoryPath: /fixtures/repos/tool-independent.git}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-main, branch: main, sessionId: 66666666-6666-4666-8666-666666666666}
+      - {harness: claude-code, projectName: tool, gitRemote: "https://github.com/acme/tool.git", workingDir: /fixtures/tool-linked, branch: review, sessionId: 77777777-7777-4777-8777-777777777777}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/tool-independent, branch: review, sessionId: 88888888-8888-4888-8888-888888888888}
+    expectedRoots:
+      - repositoryPath: /fixtures/repos/tool.git
+        clonePaths: [/fixtures/tool-main, /fixtures/tool-linked]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-main, /fixtures/tool-linked]
+        branches:
+          main: [/fixtures/tool-main]
+          review: [/fixtures/tool-linked]
+        remoteMultiplicity: ambiguous
+      - repositoryPath: /fixtures/repos/tool-independent.git
+        clonePaths: [/fixtures/tool-independent]
+        remotes: [github.com/acme/tool]
+        candidateClonePaths:
+          claude-code: [/fixtures/tool-independent]
+        branches:
+          review: [/fixtures/tool-independent]
+        remoteMultiplicity: ambiguous
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main, /fixtures/tool-linked]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/tool-linked, branches: [review]}
+    action: none
+    expectedSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main, /fixtures/tool-linked]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/tool-linked, branches: [review]}
+    expectedChecked: [66666666-6666-4666-8666-666666666666]
+    expectedUnchecked:
+      - 77777777-7777-4777-8777-777777777777
+      - 88888888-8888-4888-8888-888888888888

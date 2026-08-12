@@ -1,0 +1,211 @@
+# Pure conversion cases use pre-resolved absolute path spellings. Real path
+# failure behavior uses the production resolver and temporary directories in the
+# focused conversion test.
+expectedCaseCount: 9
+cases:
+  - name: stored-worktree-selects-only-its-same-remote-clone
+    expectedStoredCount: 1
+    expectedScanCount: 2
+    expectedResolverCallCount: 3
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: false
+    stored:
+      - sessionId: stored-a
+        harness: claude-code
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: old-branch
+        gitWorktree: /fixtures/team-a/tool
+        canonicalCwd: /fixtures/team-b/tool
+        title: team-b-label-must-not-win
+        ingestedMs: 1770000000000
+        schemaVersion: 7
+    scan:
+      - {sessionId: stored-a, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main}
+      - {sessionId: sibling-b, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: release}
+    expectedResolverCalls:
+      - /fixtures/team-a/tool
+      - /fixtures/team-a/tool
+      - /fixtures/team-b/tool
+    expectedInitialHarnesses:
+      claude-code:
+        projects:
+          - gitRemote: "git@github.com:acme/tool.git"
+            clonePaths: [/fixtures/team-a/tool]
+
+  - name: canonical-cwd-selects-one-duplicate-name-project
+    expectedStoredCount: 1
+    expectedScanCount: 2
+    expectedResolverCallCount: 3
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: true
+    stored:
+      - {sessionId: stored-b, harness: opencode, canonicalCwd: /fixtures/team-b/app, title: app}
+    scan:
+      - {sessionId: app-a, harness: opencode, projectName: app, workingDir: /fixtures/team-a/app, branch: main}
+      - {sessionId: app-b, harness: opencode, projectName: app, workingDir: /fixtures/team-b/app, branch: main}
+    expectedResolverCalls:
+      - /fixtures/team-b/app
+      - /fixtures/team-a/app
+      - /fixtures/team-b/app
+    expectedInitialHarnesses:
+      opencode:
+        projects:
+          - name: app
+            clonePaths: [/fixtures/team-b/app]
+
+  - name: repeated-stored-sessions-count-as-one-physical-clone
+    expectedStoredCount: 2
+    expectedScanCount: 3
+    expectedResolverCallCount: 5
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: false
+    stored:
+      - {sessionId: historical-a-one, harness: claude-code, gitWorktree: /fixtures/team-a/tool}
+      - {sessionId: historical-a-two, harness: claude-code, gitWorktree: /fixtures/team-a/tool}
+    scan:
+      - {sessionId: current-a-one, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main}
+      - {sessionId: current-a-two, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: release}
+      - {sessionId: current-b, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: main}
+    expectedResolverCalls:
+      - /fixtures/team-a/tool
+      - /fixtures/team-a/tool
+      - /fixtures/team-a/tool
+      - /fixtures/team-a/tool
+      - /fixtures/team-b/tool
+    expectedInitialHarnesses:
+      claude-code:
+        projects:
+          - gitRemote: "git@github.com:acme/tool.git"
+            clonePaths: [/fixtures/team-a/tool]
+
+  - name: stored-clones-merge-under-one-remote-entry
+    expectedStoredCount: 2
+    expectedScanCount: 2
+    expectedResolverCallCount: 4
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: true
+    stored:
+      - {sessionId: stored-a, harness: claude-code, gitWorktree: /fixtures/team-a/tool}
+      - {sessionId: stored-b, harness: claude-code, gitWorktree: /fixtures/team-b/tool}
+    scan:
+      - {sessionId: current-a, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-a/tool, branch: main}
+      - {sessionId: current-b, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/team-b/tool, branch: release}
+    expectedResolverCalls:
+      - /fixtures/team-a/tool
+      - /fixtures/team-b/tool
+      - /fixtures/team-a/tool
+      - /fixtures/team-b/tool
+    expectedInitialHarnesses:
+      claude-code:
+        projects:
+          - gitRemote: "git@github.com:acme/tool.git"
+            clonePaths: [/fixtures/team-a/tool, /fixtures/team-b/tool]
+
+  - name: stored-harness-keeps-a-shared-path-separate
+    expectedStoredCount: 1
+    expectedScanCount: 2
+    expectedResolverCallCount: 3
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: false
+    stored:
+      - {sessionId: opencode-stored, harness: opencode, gitWorktree: /fixtures/shared/tool}
+    scan:
+      - {sessionId: claude-current, harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/shared/tool, branch: main}
+      - {sessionId: opencode-current, harness: opencode, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/shared/tool, branch: main}
+    expectedResolverCalls:
+      - /fixtures/shared/tool
+      - /fixtures/shared/tool
+      - /fixtures/shared/tool
+    expectedInitialHarnesses:
+      opencode:
+        projects:
+          - gitRemote: "git@github.com:acme/tool.git"
+            clonePaths: [/fixtures/shared/tool]
+
+  - name: changed-path-stays-unmatched-despite-id-remote-name-and-date
+    expectedStoredCount: 1
+    expectedScanCount: 1
+    expectedResolverCallCount: 2
+    expectedSelectedProjectCount: 0
+    expectedUnmatchedCount: 1
+    autoIngestNewBranches: false
+    stored:
+      - sessionId: same-session
+        harness: claude-code
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        gitWorktree: /fixtures/old/tool
+        canonicalCwd: /fixtures/old/tool
+        title: same-label
+        ingestedMs: 1770000000000
+        schemaVersion: 7
+    scan:
+      - sessionId: same-session
+        harness: claude-code
+        projectName: tool
+        gitRemote: "git@github.com:acme/tool.git"
+        workingDir: /fixtures/new/tool
+        branch: main
+        title: same-label
+        date: 2026-02-02T02:40:00Z
+    expectedResolverCalls:
+      - /fixtures/old/tool
+      - /fixtures/new/tool
+    expectedUnmatchedHarnesses:
+      claude-code:
+        sessions: [same-session]
+
+  - name: empty-stored-path-stays-under-its-original-harness
+    expectedStoredCount: 1
+    expectedScanCount: 1
+    expectedResolverCallCount: 1
+    expectedSelectedProjectCount: 0
+    expectedUnmatchedCount: 1
+    autoIngestNewBranches: true
+    stored:
+      - {sessionId: pathless-session, harness: opencode, gitRemote: "git@github.com:acme/tool.git", title: tool}
+    scan:
+      - {sessionId: pathless-session, harness: opencode, projectName: tool, gitRemote: "git@github.com:acme/tool.git", workingDir: /fixtures/current/tool, branch: main}
+    expectedResolverCalls:
+      - /fixtures/current/tool
+    expectedUnmatchedHarnesses:
+      opencode:
+        sessions: [pathless-session]
+
+  - name: exact-path-can-select-a-project-without-remote-or-name
+    expectedStoredCount: 1
+    expectedScanCount: 1
+    expectedResolverCallCount: 2
+    expectedSelectedProjectCount: 1
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: false
+    stored:
+      - {sessionId: anonymous-stored, harness: claude-code, gitWorktree: /fixtures/anonymous/project}
+    scan:
+      - {sessionId: anonymous-current, harness: claude-code, workingDir: /fixtures/anonymous/project}
+    expectedResolverCalls:
+      - /fixtures/anonymous/project
+      - /fixtures/anonymous/project
+    expectedInitialHarnesses:
+      claude-code:
+        projects:
+          - clonePaths: [/fixtures/anonymous/project]
+
+  - name: empty-store-leaves-the-complete-current-scan-clear
+    expectedStoredCount: 0
+    expectedScanCount: 2
+    expectedResolverCallCount: 2
+    expectedSelectedProjectCount: 0
+    expectedUnmatchedCount: 0
+    autoIngestNewBranches: true
+    scan:
+      - {sessionId: new-a, harness: claude-code, projectName: one, gitRemote: "git@github.com:acme/one.git", workingDir: /fixtures/new/one, branch: main}
+      - {sessionId: new-b, harness: opencode, projectName: two, gitRemote: "git@github.com:acme/two.git", workingDir: /fixtures/new/two, branch: main}
+    expectedResolverCalls:
+      - /fixtures/new/one
+      - /fixtures/new/two
