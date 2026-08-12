@@ -58,6 +58,85 @@ invariants, assumptions), see [AGENTS.md](AGENTS.md).
 
 ---
 
+## Repository Identity During Discovery
+
+The ingest package owns the transient Git topology resolver used when kickstart reshapes discovered
+sessions into its project-first tree. This identity is separate from the remote-derived project label
+and from the exact path used by selection, import, push, and prune.
+
+| Value | Purpose | Persisted or rendered? |
+|-------|---------|------------------------|
+| `ClonePath` | Exact resolved physical worktree used at selection and side-effect boundaries | Persisted when selected; shown in project and branch previews |
+| `RepositoryCohortKey` | Opaque key used to group discovered sessions into one logical project root | Never persisted or rendered |
+| `RepositoryPath` / `GitDirectory` | Physical Git directory retained as diagnostic evidence | Shown in project and branch previews; never persisted as selection |
+| Git remote | Matcher evidence and the source of labels such as `github:owner/repo` | May be persisted and rendered; never used alone as a cohort key |
+
+Peasant invokes the external executable named `git` from its process `PATH` through an argument-list
+`exec.CommandContext` call. The `--git-common-dir` flag belongs to Git's `rev-parse` command:
+
+```text
+git -C <physical-clone-path> rev-parse --path-format=absolute --git-common-dir
+```
+
+The resolver also asks Git for `--show-superproject-working-tree` and `--show-toplevel` when it needs
+to prove a direct submodule relationship. It verifies the exact relative path through the direct
+superproject's `.gitmodules` file. Remote equality is not topology evidence.
+
+### Cohort construction
+
+An ordinary repository derives its cohort from its resolved physical Git common directory:
+
+```text
+repo:<length-prefixed physical Git common directory>
+```
+
+A declared submodule derives its cohort recursively from the direct superproject cohort and the
+declared relative submodule path:
+
+```text
+submodule:<length-prefixed superproject cohort><length-prefixed relative path>
+```
+
+This produces the following project-root behavior:
+
+| Discovered checkouts | Project roots |
+|----------------------|---------------|
+| Main worktree and linked worktrees of one repository | One |
+| Same declared submodule path across linked worktrees of one superproject | One |
+| Independent clones of the same remote | Separate |
+| Same submodule path beneath independent superproject clones | Separate |
+| Different declared submodule paths that point to the same remote | Separate |
+| Undeclared repository nested inside another repository | Separate |
+
+Independent clones are intentionally not aggregated by remote. They can therefore appear as separate
+project nodes with the same remote-derived label. The preview's Git-directory and worktree evidence
+distinguishes those nodes. A remote label describes where a repository points; it does not prove that
+two local repositories share Git object or worktree topology.
+
+### Root uniqueness and fail-safe splitting
+
+Within one scanner load, the project forest is keyed by `RepositoryCohortKey`, so one cohort key can
+emit at most one project root. A refresh replaces the prior forest, and stale asynchronous results are
+discarded rather than appended. Two visible project nodes with the same label therefore have different
+cohort keys; they are not duplicate insertions of one key.
+
+When topology cannot be proved, discovery fails safe instead of grouping by remote:
+
+- A failure before Git's common directory is available falls back to the exact `ClonePath`.
+- A later topology failure falls back to the resolved physical `GitDirectory` when available.
+- A working directory that cannot be resolved does not produce a project root for that load.
+
+This conservative fallback can split checkouts that would otherwise belong to one logical project,
+for example when one linked worktree resolves successfully while another has inaccessible or stale Git
+metadata. That duplicate-looking presentation is preferred over merging independent repositories and
+widening selection or side-effect scope. Repairing the Git metadata allows a later scan to prove and
+restore the shared cohort.
+
+The source contracts are `RepositoryIdentityResolver` in `git.go`, the identity value types in
+`path_identity.go`, and the mounted forest fold in `internal/tui/kickstart/scanner.go`.
+
+---
+
 ## Execution Timeline
 
 ```
