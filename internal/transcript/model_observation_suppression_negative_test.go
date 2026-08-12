@@ -12,7 +12,6 @@ import (
 
 func TestNegativeSuppressionDropsModelOnlyAssistant(t *testing.T) {
 	fixture := loadModelObservationSurvivalFixture(t)
-	fixture.Cases = fixture.Cases[:1]
 	assertModelObservationSurvivalFixture(t, fixture, func(entries []schema.SessionEntry) []ingest.Turn {
 		turns := EntriesToTurns(entries)
 		kept := turns[:0]

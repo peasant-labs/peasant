@@ -12,7 +12,6 @@ import (
 
 func TestNegativeDedupIgnoresModelObservation(t *testing.T) {
 	fixture := loadModelObservationSurvivalFixture(t)
-	fixture.Cases = fixture.Cases[1:]
 	assertModelObservationSurvivalFixture(t, fixture, func(entries []schema.SessionEntry) []ingest.Turn {
 		turns := EntriesToTurns(entries)
 		deduped := make([]ingest.Turn, 0, len(turns))
