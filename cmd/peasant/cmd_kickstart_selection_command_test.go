@@ -434,12 +434,15 @@ func (selectionCommandRenderPathResolver) Resolve(string) (ingest.ClonePath, err
 
 type selectionCommandRenderRepositoryResolver struct{}
 
-func (selectionCommandRenderRepositoryResolver) ResolveRepositoryPath(context.Context, ingest.ClonePath) (ingest.RepositoryPath, error) {
-	return ingest.RepositoryPath(selectionCommandRenderRepositoryPath), nil
+func (selectionCommandRenderRepositoryResolver) ResolveRepositoryIdentity(context.Context, ingest.ClonePath) (ingest.RepositoryIdentity, error) {
+	return ingest.RepositoryIdentity{
+		CohortKey:    ingest.RepositoryCohortKey("repo:39:" + selectionCommandRenderRepositoryPath),
+		GitDirectory: ingest.RepositoryPath(selectionCommandRenderRepositoryPath),
+	}, nil
 }
 
 var _ ingest.PathIdentityResolver = selectionCommandRenderPathResolver{}
-var _ ingest.RepositoryPathResolver = selectionCommandRenderRepositoryResolver{}
+var _ ingest.RepositoryIdentityResolver = selectionCommandRenderRepositoryResolver{}
 
 func seedSelectionCommandStoredEvidence(t *testing.T, dataHome string, listings []ftue.SessionListing) {
 	t.Helper()

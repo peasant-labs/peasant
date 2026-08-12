@@ -172,7 +172,7 @@ func TestListingPreview_BodyPerRowKind(t *testing.T) {
 	source := kickstart.NewScannerTreeSource(
 		doc.Listings,
 		withFixturePathResolver(),
-		kickstart.WithRepositoryPathResolver(fixtureRepositoryResolver(doc.Repositories)),
+		kickstart.WithRepositoryIdentityResolver(fixtureRepositoryResolver(doc.Repositories)),
 	)
 	roots, err := source.Load(context.Background())
 	if err != nil {

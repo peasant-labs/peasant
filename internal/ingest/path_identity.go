@@ -15,14 +15,34 @@ type ClonePath string
 // String returns the resolved physical path.
 func (p ClonePath) String() string { return string(p) }
 
-// RepositoryPath is a transient, resolved physical Git common-directory
-// identity. Linked worktrees of one repository share this value, while
-// independent clones do not. It is grouping evidence only: persisted selection
-// and every destructive or publishing boundary continue to use ClonePath.
+// RepositoryCohortKey is opaque transient grouping evidence. It identifies one
+// logical repository cohort without claiming to be a filesystem path. Persisted
+// selection and every destructive or publishing boundary continue to use
+// ClonePath.
+type RepositoryCohortKey string
+
+// String returns the opaque repository cohort key.
+func (k RepositoryCohortKey) String() string { return string(k) }
+
+// RepositoryPath is a resolved physical Git directory used for diagnostics and
+// previews. It is never a grouping key and never enters persisted selection.
 type RepositoryPath string
 
-// String returns the resolved physical Git common-directory path.
+// String returns the resolved physical Git directory path.
 func (p RepositoryPath) String() string { return string(p) }
+
+// RepositoryIdentity keeps logical grouping separate from the physical Git
+// directory that explains the resolved topology. Values are copied across
+// boundaries so callers cannot mutate resolver-owned state.
+type RepositoryIdentity struct {
+	CohortKey    RepositoryCohortKey
+	GitDirectory RepositoryPath
+}
+
+// String returns only the opaque grouping key. The physical Git directory must
+// be selected explicitly through GitDirectory before it can be displayed or
+// passed to path-aware code.
+func (i RepositoryIdentity) String() string { return i.CohortKey.String() }
 
 // PathIdentityResolver resolves a directory spelling to its physical clone
 // identity.

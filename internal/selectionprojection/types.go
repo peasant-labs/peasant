@@ -18,9 +18,10 @@ type SessionCandidate struct {
 	Branch          string
 	ParentSessionID ingest.SessionID
 	ClonePath       ingest.ClonePath
-	// RepositoryPath is optional transient multiplicity evidence. Exact
-	// selection still matches ClonePath.
-	RepositoryPath ingest.RepositoryPath
+	// RepositoryCohortKey is optional transient multiplicity evidence. Exact
+	// selection still matches ClonePath, and this opaque key is never displayed
+	// or persisted.
+	RepositoryCohortKey ingest.RepositoryCohortKey
 }
 
 // ProjectCandidate is one available project and its available descendant
@@ -32,11 +33,11 @@ type ProjectCandidate struct {
 	GitRemote       string
 	ProjectName     string
 	ClonePath       ingest.ClonePath
-	// RepositoryPath is optional transient multiplicity evidence. Producers
-	// that do not resolve Git common directories retain the established
-	// ClonePath-based behavior.
-	RepositoryPath ingest.RepositoryPath
-	Descendants    []SessionCandidate
+	// RepositoryCohortKey is optional transient multiplicity evidence. Producers
+	// that do not resolve Git topology retain the established ClonePath-based
+	// behavior.
+	RepositoryCohortKey ingest.RepositoryCohortKey
+	Descendants         []SessionCandidate
 }
 
 // ProjectAdmission names the selection evidence that made a project effective.

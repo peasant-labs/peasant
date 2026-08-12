@@ -83,6 +83,34 @@ func TestPhysicalPathResolver_RejectsUnresolvableSymlinkWithActionableError(t *t
 	requireActionablePathError(t, err, "symbolic links could not be resolved")
 }
 
+func TestRepositoryIdentityStringReturnsOnlyOpaqueCohortKey(t *testing.T) {
+	t.Parallel()
+	identity := ingest.RepositoryIdentity{
+		CohortKey:    ingest.RepositoryCohortKey("submodule:opaque-key"),
+		GitDirectory: ingest.RepositoryPath("/fixtures/private/git-directory"),
+	}
+	if got := identity.String(); got != identity.CohortKey.String() {
+		t.Fatalf("RepositoryIdentity.String()=%q, want cohort key %q", got, identity.CohortKey)
+	}
+	if strings.Contains(identity.String(), identity.GitDirectory.String()) {
+		t.Fatalf("RepositoryIdentity.String() exposed physical Git directory %q", identity.GitDirectory)
+	}
+}
+
+func TestExecGitResolver_RepositoryIdentityErrorIsActionable(t *testing.T) {
+	t.Parallel()
+	_, err := ingest.NewGitRepositoryIdentityResolver().ResolveRepositoryIdentity(t.Context(), "")
+	if err == nil {
+		t.Fatal("ResolveRepositoryIdentity returned no error for an empty ClonePath")
+	}
+	message := err.Error()
+	for _, required := range []string{"what:", "why:", "where:", "when:", "meaning:", "fix:"} {
+		if !strings.Contains(message, required) {
+			t.Fatalf("repository identity error lacks %q: %s", required, message)
+		}
+	}
+}
+
 func requireActionablePathError(t *testing.T, err error, reason string) {
 	t.Helper()
 	if err == nil {

@@ -43,22 +43,22 @@ type ProjectionCase struct {
 
 // ProjectCandidate is the fixture spelling of a production project candidate.
 type ProjectCandidate struct {
-	ParentProjectID string             `yaml:"parent_project_id"`
-	Harness         string             `yaml:"harness"`
-	GitRemote       string             `yaml:"git_remote"`
-	ProjectName     string             `yaml:"project_name"`
-	ClonePath       string             `yaml:"clone_path"`
-	RepositoryPath  string             `yaml:"repository_path"`
-	Descendants     []SessionCandidate `yaml:"descendants"`
+	ParentProjectID     string             `yaml:"parent_project_id"`
+	Harness             string             `yaml:"harness"`
+	GitRemote           string             `yaml:"git_remote"`
+	ProjectName         string             `yaml:"project_name"`
+	ClonePath           string             `yaml:"clone_path"`
+	RepositoryCohortKey string             `yaml:"repository_cohort_key"`
+	Descendants         []SessionCandidate `yaml:"descendants"`
 }
 
 // SessionCandidate is the fixture spelling of one available descendant.
 type SessionCandidate struct {
-	SessionID       string `yaml:"session_id"`
-	Branch          string `yaml:"branch"`
-	ParentSessionID string `yaml:"parent_session_id"`
-	ClonePath       string `yaml:"clone_path"`
-	RepositoryPath  string `yaml:"repository_path"`
+	SessionID           string `yaml:"session_id"`
+	Branch              string `yaml:"branch"`
+	ParentSessionID     string `yaml:"parent_session_id"`
+	ClonePath           string `yaml:"clone_path"`
+	RepositoryCohortKey string `yaml:"repository_cohort_key"`
 }
 
 // ProjectAdmission is the closed fixture spelling of a production admission.
@@ -160,21 +160,21 @@ func (c ProjectionCase) ProductionCandidates() ([]selectionprojection.ProjectCan
 				}
 			}
 			descendants[sessionIndex] = selectionprojection.SessionCandidate{
-				SessionID:       sessionID,
-				Branch:          session.Branch,
-				ParentSessionID: parentSessionID,
-				ClonePath:       ingest.ClonePath(session.ClonePath),
-				RepositoryPath:  ingest.RepositoryPath(session.RepositoryPath),
+				SessionID:           sessionID,
+				Branch:              session.Branch,
+				ParentSessionID:     parentSessionID,
+				ClonePath:           ingest.ClonePath(session.ClonePath),
+				RepositoryCohortKey: ingest.RepositoryCohortKey(session.RepositoryCohortKey),
 			}
 		}
 		result[projectIndex] = selectionprojection.ProjectCandidate{
-			ParentProjectID: selectionprojection.ParentProjectID(project.ParentProjectID),
-			Harness:         ingest.Harness(project.Harness),
-			GitRemote:       project.GitRemote,
-			ProjectName:     project.ProjectName,
-			ClonePath:       ingest.ClonePath(project.ClonePath),
-			RepositoryPath:  ingest.RepositoryPath(project.RepositoryPath),
-			Descendants:     descendants,
+			ParentProjectID:     selectionprojection.ParentProjectID(project.ParentProjectID),
+			Harness:             ingest.Harness(project.Harness),
+			GitRemote:           project.GitRemote,
+			ProjectName:         project.ProjectName,
+			ClonePath:           ingest.ClonePath(project.ClonePath),
+			RepositoryCohortKey: ingest.RepositoryCohortKey(project.RepositoryCohortKey),
+			Descendants:         descendants,
 		}
 	}
 	return result, nil
@@ -316,8 +316,8 @@ func (c ProjectionCase) validate() error {
 		if err := validateClonePath(c.Name, candidate.ParentProjectID, "clone_path", candidate.ClonePath); err != nil {
 			return err
 		}
-		if err := validateClonePath(c.Name, candidate.ParentProjectID, "repository_path", candidate.RepositoryPath); err != nil {
-			return err
+		if strings.TrimSpace(candidate.RepositoryCohortKey) != candidate.RepositoryCohortKey {
+			return fmt.Errorf("validate effective-project fixture %q candidate %q: repository_cohort_key has surrounding whitespace", c.Name, candidate.ParentProjectID)
 		}
 		projectSessionIDs := make(map[string]struct{}, len(candidate.Descendants))
 		for sessionIndex, session := range candidate.Descendants {
@@ -332,8 +332,8 @@ func (c ProjectionCase) validate() error {
 			if err := validateClonePath(c.Name, candidate.ParentProjectID, "descendant clone_path", session.ClonePath); err != nil {
 				return err
 			}
-			if err := validateClonePath(c.Name, candidate.ParentProjectID, "descendant repository_path", session.RepositoryPath); err != nil {
-				return err
+			if strings.TrimSpace(session.RepositoryCohortKey) != session.RepositoryCohortKey {
+				return fmt.Errorf("validate effective-project fixture %q candidate %q: descendant repository_cohort_key has surrounding whitespace", c.Name, candidate.ParentProjectID)
 			}
 		}
 		for _, session := range candidate.Descendants {

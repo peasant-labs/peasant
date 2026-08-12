@@ -202,7 +202,7 @@ func TestScannerTreeSource_UsesPhysicalCloneIdentityAndCompleteMultiplicity(t *t
 	for _, project := range roots {
 		clonePath := project.Meta[settings.MetaClonePath]
 		byPath[clonePath] = project
-		wantID := (kickstart.RepositoryIdentity{RepositoryPath: ingest.RepositoryPath(clonePath)}).String()
+		wantID := clonePath
 		if project.ID != wantID || project.Meta[settings.MetaProjectIdentity] != wantID {
 			t.Fatalf("project identity = id %q meta %q, want %q", project.ID, project.Meta[settings.MetaProjectIdentity], wantID)
 		}
@@ -312,8 +312,9 @@ func TestScannerTreeSource_RepositoryRootAndBranchSpanHarnesses(t *testing.T) {
 	if got := (kickstart.ProjectIdentity{ClonePath: ingest.ClonePath("/fixtures/tool")}).String(); got != "" {
 		t.Fatalf("project identity without a harness = %q, want unavailable", got)
 	}
-	if got := (kickstart.RepositoryIdentity{RepositoryPath: ingest.RepositoryPath("/fixtures/tool")}).String(); got != "/fixtures/tool" {
-		t.Fatalf("repository identity = %q, want harness-independent path", got)
+	wantKey := ingest.RepositoryCohortKey("fixture:14:/fixtures/tool")
+	if got := wantKey.String(); got != "fixture:14:/fixtures/tool" {
+		t.Fatalf("repository identity = %q, want opaque harness-independent key", got)
 	}
 	clone := filepath.Join(t.TempDir(), "tool")
 	if err := os.MkdirAll(clone, 0o755); err != nil {

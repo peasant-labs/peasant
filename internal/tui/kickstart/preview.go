@@ -41,7 +41,7 @@ type ListingPreviewContext struct {
 	Project        string
 	Harnesses      []string
 	Remotes        []string
-	RepositoryPath string
+	GitDirectories []string
 	ClonePaths     []string
 	Branches       []string
 	Branch         string
@@ -151,6 +151,7 @@ func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 func cloneListingPreviewContext(context ListingPreviewContext) ListingPreviewContext {
 	context.Harnesses = append([]string(nil), context.Harnesses...)
 	context.Remotes = append([]string(nil), context.Remotes...)
+	context.GitDirectories = append([]string(nil), context.GitDirectories...)
 	context.ClonePaths = append([]string(nil), context.ClonePaths...)
 	context.Branches = append([]string(nil), context.Branches...)
 	return context
@@ -183,8 +184,10 @@ func listingContextLines(context ListingPreviewContext) []string {
 		}
 		lines = append(lines, label+strings.Join(values, ", "))
 	}
-	if context.RepositoryPath != "" {
-		lines = append(lines, "git directory: "+previewMetadataValue(context.RepositoryPath))
+	if len(context.GitDirectories) == 1 {
+		lines = append(lines, "git directory: "+previewMetadataValue(context.GitDirectories[0]))
+	} else if len(context.GitDirectories) > 1 {
+		lines = appendPreviewList(lines, "git directories", context.GitDirectories)
 	}
 	lines = appendPreviewList(lines, "worktrees", context.ClonePaths)
 	if context.Kind == ListingPreviewProject {

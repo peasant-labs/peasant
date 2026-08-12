@@ -50,10 +50,9 @@ type TreeSelection struct {
 const (
 	MetaRemote = "remote"
 	MetaBranch = "branch"
-	// MetaProjectIdentity carries the scanner's stable root identity. For Git
-	// scanner roots it is the transient repository common-directory path shared
-	// across harnesses; exact harness/worktree identity remains on session
-	// descendants. It is never a display label or persisted config field.
+	// MetaProjectIdentity carries the scanner's stable opaque root identity.
+	// Exact harness/worktree identity remains on session descendants. It is never
+	// a display label or persisted config field.
 	MetaProjectIdentity = "projectIdentity"
 	// MetaProjectHarness is the compatibility key used by older single-harness
 	// exact trees. Current scanner roots can span harnesses and recover each
@@ -65,9 +64,9 @@ const (
 	MetaProjectName = "projectName"
 	// MetaClonePath carries a resolver-produced physical identity path.
 	MetaClonePath = "clonePath"
-	// MetaRepositoryPath carries the transient Git common-directory grouping
-	// path. It never enters config.SelectionConfig.
-	MetaRepositoryPath = "repositoryPath"
+	// MetaGitDirectory carries one physical Git directory for diagnostics. It is
+	// not a grouping key and never enters config.SelectionConfig.
+	MetaGitDirectory = "gitDirectory"
 	// MetaRemoteMultiplicity and MetaNameMultiplicity carry the complete-cohort
 	// uniqueness proof used by DiscoveryCandidate matching.
 	MetaRemoteMultiplicity = "remoteMultiplicity"

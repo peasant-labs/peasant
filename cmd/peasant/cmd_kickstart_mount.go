@@ -65,7 +65,7 @@ func runKickstartFlow(
 	}
 	repositoryResolver := deps.repositoryResolver
 	if repositoryResolver == nil {
-		repositoryResolver = ingest.NewGitRepositoryPathResolver()
+		repositoryResolver = ingest.NewGitRepositoryIdentityResolver()
 	}
 	flowConfig, err := prepareKickstartFlowConfig(loaded, sessions, storedSessions, identityResolver)
 	if err != nil {
@@ -93,7 +93,7 @@ func runKickstartFlow(
 	source := kickstart.NewScannerTreeSource(
 		sessions,
 		kickstart.WithPathIdentityResolver(identityResolver),
-		kickstart.WithRepositoryPathResolver(repositoryResolver),
+		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
 		kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
 	)
 	commitGateCandidates, err := source.CommitGateCandidates(storedSessions)

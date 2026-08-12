@@ -47,7 +47,7 @@ func (s *ScannerTreeSource) CommitGateCandidates(
 }
 
 type commitGateProjectCohort struct {
-	identity RepositoryIdentity
+	identity ingest.RepositoryIdentity
 	parentID selectionprojection.ParentProjectID
 	harness  ingest.Harness
 	rows     []PreparedSessionListing
@@ -63,13 +63,13 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 	projects := make(map[string]*commitGateProjectCohort)
 	projectOrder := make([]string, 0)
 	for _, row := range prepared {
-		if !row.ProjectIdentity.available() || !row.RepositoryIdentity.available() || row.Listing.SessionID == "" {
+		if !row.ProjectIdentity.available() || !repositoryIdentityAvailable(row.RepositoryIdentity) || row.Listing.SessionID == "" {
 			continue
 		}
 		if _, err := ingest.NewSessionID(row.Listing.SessionID); err != nil {
 			continue
 		}
-		key := row.ProjectIdentity.Harness.String() + "\x00" + row.RepositoryIdentity.String()
+		key := row.ProjectIdentity.Harness.String() + "\x00" + row.RepositoryIdentity.CohortKey.String()
 		project := projects[key]
 		if project == nil {
 			project = &commitGateProjectCohort{
@@ -92,11 +92,11 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 		// complete scanner-cohort ambiguity must still prevent a resolved sibling
 		// from exposing remote or name fallback evidence.
 		gitRemote := ""
-		if project.identity.available() && representative.Candidate.RemoteMultiplicity == ingest.DiscoveryIdentityUnique {
+		if repositoryIdentityAvailable(project.identity) && representative.Candidate.RemoteMultiplicity == ingest.DiscoveryIdentityUnique {
 			gitRemote = representative.Listing.GitRemote
 		}
 		projectName := ""
-		if project.identity.available() && representative.Candidate.NameMultiplicity == ingest.DiscoveryIdentityUnique {
+		if repositoryIdentityAvailable(project.identity) && representative.Candidate.NameMultiplicity == ingest.DiscoveryIdentityUnique {
 			projectName = representative.Listing.ProjectName
 		}
 		rows := append([]PreparedSessionListing(nil), project.rows...)
@@ -116,10 +116,10 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 			}
 			seenSessions[sessionID] = struct{}{}
 			descendant := selectionprojection.SessionCandidate{
-				SessionID:      sessionID,
-				Branch:         row.Listing.Branch,
-				ClonePath:      row.Candidate.ClonePath,
-				RepositoryPath: row.RepositoryIdentity.RepositoryPath,
+				SessionID:           sessionID,
+				Branch:              row.Listing.Branch,
+				ClonePath:           row.Candidate.ClonePath,
+				RepositoryCohortKey: row.RepositoryIdentity.CohortKey,
 			}
 			if relation := parents[sessionID]; relation != nil && !relation.ambiguous {
 				descendant.ParentSessionID = relation.parent
@@ -127,13 +127,13 @@ func projectCandidatesFromPreparedListings(prepared []PreparedSessionListing) []
 			descendants = append(descendants, descendant)
 		}
 		candidates = append(candidates, selectionprojection.ProjectCandidate{
-			ParentProjectID: project.parentID,
-			Harness:         project.harness,
-			GitRemote:       gitRemote,
-			ProjectName:     projectName,
-			ClonePath:       clonePath,
-			RepositoryPath:  project.identity.RepositoryPath,
-			Descendants:     descendants,
+			ParentProjectID:     project.parentID,
+			Harness:             project.harness,
+			GitRemote:           gitRemote,
+			ProjectName:         projectName,
+			ClonePath:           clonePath,
+			RepositoryCohortKey: project.identity.CohortKey,
+			Descendants:         descendants,
 		})
 	}
 	return candidates
@@ -153,10 +153,10 @@ type commitGateStoredCandidateKey struct {
 func storedCommitGateCandidates(
 	rows []store.IngestedSessionRow,
 	resolver ingest.PathIdentityResolver,
-	repositoryResolver ingest.RepositoryPathResolver,
+	repositoryResolver ingest.RepositoryIdentityResolver,
 ) ([]selectionprojection.ProjectCandidate, error) {
 	resolvedPaths := make(map[string]ingest.ClonePath)
-	repositoryPaths := make(map[ingest.ClonePath]ingest.RepositoryPath)
+	repositoryIdentities := make(map[ingest.ClonePath]ingest.RepositoryIdentity)
 	seen := make(map[commitGateStoredCandidateKey]struct{}, len(rows))
 	candidates := make([]selectionprojection.ProjectCandidate, 0, len(rows))
 	for index, row := range rows {
@@ -174,10 +174,10 @@ func storedCommitGateCandidates(
 		}
 		projectPath := resolveCommitGatePath(row.CanonicalCwd, resolver, resolvedPaths)
 		sessionPath := resolveCommitGatePath(row.GitWorktree, resolver, resolvedPaths)
-		projectRepositoryPath := resolveCommitGateRepositoryPath(projectPath, repositoryResolver, repositoryPaths)
-		sessionRepositoryPath := resolveCommitGateRepositoryPath(sessionPath, repositoryResolver, repositoryPaths)
-		if sessionRepositoryPath == "" {
-			sessionRepositoryPath = projectRepositoryPath
+		projectRepositoryIdentity := resolveCommitGateRepositoryIdentity(projectPath, repositoryResolver, repositoryIdentities)
+		sessionRepositoryIdentity := resolveCommitGateRepositoryIdentity(sessionPath, repositoryResolver, repositoryIdentities)
+		if !repositoryIdentityAvailable(sessionRepositoryIdentity) {
+			sessionRepositoryIdentity = projectRepositoryIdentity
 		}
 		parentProjectID := selectionprojection.ParentProjectID(projectHash.String())
 		key := commitGateStoredCandidateKey{
@@ -195,42 +195,44 @@ func storedCommitGateCandidates(
 		}
 		seen[key] = struct{}{}
 		candidates = append(candidates, selectionprojection.ProjectCandidate{
-			ParentProjectID: parentProjectID,
-			Harness:         harness,
-			GitRemote:       row.GitRemote,
-			ProjectName:     row.CanonicalCwd,
-			ClonePath:       projectPath,
-			RepositoryPath:  projectRepositoryPath,
+			ParentProjectID:     parentProjectID,
+			Harness:             harness,
+			GitRemote:           row.GitRemote,
+			ProjectName:         row.CanonicalCwd,
+			ClonePath:           projectPath,
+			RepositoryCohortKey: projectRepositoryIdentity.CohortKey,
 			Descendants: []selectionprojection.SessionCandidate{{
-				SessionID:      sessionID,
-				Branch:         row.Branch,
-				ClonePath:      sessionPath,
-				RepositoryPath: sessionRepositoryPath,
+				SessionID:           sessionID,
+				Branch:              row.Branch,
+				ClonePath:           sessionPath,
+				RepositoryCohortKey: sessionRepositoryIdentity.CohortKey,
 			}},
 		})
 	}
 	return candidates, nil
 }
 
-func resolveCommitGateRepositoryPath(
+func resolveCommitGateRepositoryIdentity(
 	clonePath ingest.ClonePath,
-	resolver ingest.RepositoryPathResolver,
-	resolved map[ingest.ClonePath]ingest.RepositoryPath,
-) ingest.RepositoryPath {
+	resolver ingest.RepositoryIdentityResolver,
+	resolved map[ingest.ClonePath]ingest.RepositoryIdentity,
+) ingest.RepositoryIdentity {
 	if clonePath == "" {
-		return ""
+		return ingest.RepositoryIdentity{}
 	}
 	if path, ok := resolved[clonePath]; ok {
 		return path
 	}
-	path := ingest.RepositoryPath(clonePath.String())
+	identity := fallbackRepositoryIdentity(clonePath)
 	if resolver != nil {
-		if commonPath, err := resolver.ResolveRepositoryPath(context.Background(), clonePath); err == nil && commonPath != "" {
-			path = commonPath
+		if resolvedIdentity, err := resolver.ResolveRepositoryIdentity(context.Background(), clonePath); err == nil && repositoryIdentityAvailable(resolvedIdentity) {
+			identity = resolvedIdentity
+		} else if resolvedIdentity.GitDirectory != "" {
+			identity = fallbackRepositoryIdentityFromGitDirectory(resolvedIdentity.GitDirectory)
 		}
 	}
-	resolved[clonePath] = path
-	return path
+	resolved[clonePath] = identity
+	return identity
 }
 
 func resolveCommitGatePath(

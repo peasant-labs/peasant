@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -20,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/repository_grouping.yaml
@@ -34,9 +36,20 @@ const (
 )
 
 type repositoryGroupingDocument struct {
-	ExpectedCaseCount int                      `yaml:"expectedCaseCount"`
-	ExpectedNames     []string                 `yaml:"expectedNames"`
-	Cases             []repositoryGroupingCase `yaml:"cases"`
+	ExpectedCaseCount            int                      `yaml:"expectedCaseCount"`
+	ExpectedTopologyFailureCount int                      `yaml:"expectedTopologyFailureCount"`
+	ExpectedNames                []string                 `yaml:"expectedNames"`
+	Cases                        []repositoryGroupingCase `yaml:"cases"`
+	TopologyFailures             []topologyFailureFixture `yaml:"topologyFailures"`
+}
+
+type topologyFailureFixture struct {
+	Name         string `yaml:"name"`
+	FailurePoint string `yaml:"failurePoint"`
+	ClonePath    string `yaml:"clonePath"`
+	SiblingPath  string `yaml:"siblingPath"`
+	GitRemote    string `yaml:"gitRemote"`
+	ProjectName  string `yaml:"projectName"`
 }
 
 type repositoryGroupingCase struct {
@@ -56,11 +69,13 @@ type repositoryGroupingCase struct {
 
 type repositoryPathFixture struct {
 	ClonePath      string `yaml:"clonePath"`
+	CohortKey      string `yaml:"cohortKey"`
 	RepositoryPath string `yaml:"repositoryPath"`
 	Fail           bool   `yaml:"fail"`
 }
 
 type repositoryRootExpectation struct {
+	CohortKey           string              `yaml:"cohortKey"`
 	RepositoryPath      string              `yaml:"repositoryPath"`
 	ClonePaths          []string            `yaml:"clonePaths"`
 	Remotes             []string            `yaml:"remotes"`
@@ -86,6 +101,9 @@ func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
 	if document.ExpectedCaseCount != len(document.Cases) || document.ExpectedCaseCount != len(document.ExpectedNames) || len(document.Cases) == 0 {
 		t.Fatalf("repository grouping manifest count=%d names=%d cases=%d", document.ExpectedCaseCount, len(document.ExpectedNames), len(document.Cases))
 	}
+	if document.ExpectedTopologyFailureCount != len(document.TopologyFailures) || len(document.TopologyFailures) == 0 {
+		t.Fatalf("repository topology failure manifest count=%d cases=%d", document.ExpectedTopologyFailureCount, len(document.TopologyFailures))
+	}
 	seen := map[string]bool{}
 	for index, testCase := range document.Cases {
 		testutil.RequireFixtureFields(t, "repository grouping", testCase.Name, []testutil.FixtureField{
@@ -108,6 +126,21 @@ func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
 				t.Fatalf("repository grouping case %q root %q requires repository, root paths, and harness candidate paths", testCase.Name, root.RepositoryPath)
 			}
 		}
+		fixtureByClonePath := make(map[string]repositoryPathFixture, len(testCase.Repositories))
+		for _, repository := range testCase.Repositories {
+			if repository.ClonePath == "" {
+				t.Fatalf("repository grouping case %q has an empty fixture clone path", testCase.Name)
+			}
+			if _, duplicate := fixtureByClonePath[repository.ClonePath]; duplicate {
+				t.Fatalf("repository grouping case %q repeats fixture clone path %q", testCase.Name, repository.ClonePath)
+			}
+			fixtureByClonePath[repository.ClonePath] = repository
+		}
+		for _, listing := range testCase.Listings {
+			if _, ok := fixtureByClonePath[listing.WorkingDir]; !ok {
+				t.Fatalf("repository grouping case %q listing %q has no repository fixture for %q", testCase.Name, listing.SessionID, listing.WorkingDir)
+			}
+		}
 		if testCase.Action != repositoryGroupingNone && testCase.Action != repositoryGroupingProject && testCase.Action != repositoryGroupingBranch {
 			t.Fatalf("repository grouping case %q has unknown action %q", testCase.Name, testCase.Action)
 		}
@@ -128,25 +161,140 @@ func loadRepositoryGroupingDocument(t *testing.T) repositoryGroupingDocument {
 			}
 		}
 	}
+	failureNames := make(map[string]bool, len(document.TopologyFailures))
+	for _, failure := range document.TopologyFailures {
+		testutil.RequireFixtureFields(t, "repository topology failure", failure.Name, []testutil.FixtureField{
+			{Key: "name", Value: failure.Name},
+			{Key: "failurePoint", Value: failure.FailurePoint},
+			{Key: "clonePath", Value: failure.ClonePath},
+			{Key: "siblingPath", Value: failure.SiblingPath},
+			{Key: "gitRemote", Value: failure.GitRemote},
+			{Key: "projectName", Value: failure.ProjectName},
+		})
+		if failureNames[failure.Name] {
+			t.Fatalf("duplicate repository topology failure case %q", failure.Name)
+		}
+		failureNames[failure.Name] = true
+	}
 	return document
 }
 
-type fixtureRepositoryPathResolver struct {
+type fixtureRepositoryIdentityResolver struct {
 	paths map[ingest.ClonePath]repositoryPathFixture
 }
 
-func (r fixtureRepositoryPathResolver) ResolveRepositoryPath(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryPath, error) {
+func (r fixtureRepositoryIdentityResolver) ResolveRepositoryIdentity(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryIdentity, error) {
 	fixture, ok := r.paths[clonePath]
 	if !ok {
-		return "", fmt.Errorf("fixture has no repository identity for clone %q", clonePath)
+		return ingest.RepositoryIdentity{}, fmt.Errorf("fixture has no repository identity for clone %q", clonePath)
 	}
 	if fixture.Fail {
-		return "", fmt.Errorf("fixture marks clone %q as non-Git", clonePath)
+		return ingest.RepositoryIdentity{}, fmt.Errorf("fixture marks clone %q as non-Git", clonePath)
 	}
-	return ingest.RepositoryPath(fixture.RepositoryPath), nil
+	cohortKey := fixture.CohortKey
+	if cohortKey == "" {
+		cohortKey = "fixture:" + fixture.RepositoryPath
+	}
+	return ingest.RepositoryIdentity{
+		CohortKey:    ingest.RepositoryCohortKey(cohortKey),
+		GitDirectory: ingest.RepositoryPath(fixture.RepositoryPath),
+	}, nil
 }
 
-var _ ingest.RepositoryPathResolver = fixtureRepositoryPathResolver{}
+var _ ingest.RepositoryIdentityResolver = fixtureRepositoryIdentityResolver{}
+
+type failingRepositoryIdentityResolver struct{}
+
+func (failingRepositoryIdentityResolver) ResolveRepositoryIdentity(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryIdentity, error) {
+	return ingest.RepositoryIdentity{}, fmt.Errorf("fixture topology failure for %q", clonePath)
+}
+
+var _ ingest.RepositoryIdentityResolver = failingRepositoryIdentityResolver{}
+
+type failingTopologyWithGitDirectoryResolver map[ingest.ClonePath]ingest.RepositoryPath
+
+func (r failingTopologyWithGitDirectoryResolver) ResolveRepositoryIdentity(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryIdentity, error) {
+	gitDirectory, ok := r[clonePath]
+	if !ok {
+		return ingest.RepositoryIdentity{}, fmt.Errorf("fixture has no physical Git directory for %q", clonePath)
+	}
+	return ingest.RepositoryIdentity{GitDirectory: gitDirectory}, fmt.Errorf("fixture topology failure after resolving Git directory %q", gitDirectory)
+}
+
+var _ ingest.RepositoryIdentityResolver = failingTopologyWithGitDirectoryResolver{}
+
+func TestScannerRepositoryTopologyFailuresFallBackToExactClonePaths(t *testing.T) {
+	t.Parallel()
+	document := loadRepositoryGroupingDocument(t)
+	for _, failure := range document.TopologyFailures {
+		failure := failure
+		t.Run(failure.Name, func(t *testing.T) {
+			t.Parallel()
+			listings := []ftue.SessionListing{
+				{Harness: string(defaults.HarnessClaudeCode), ProjectName: failure.ProjectName, GitRemote: failure.GitRemote, WorkingDir: failure.ClonePath, Branch: "main", SessionID: "12121212-1212-4212-8212-121212121212"},
+				{Harness: string(defaults.HarnessClaudeCode), ProjectName: failure.ProjectName, GitRemote: failure.GitRemote, WorkingDir: failure.SiblingPath, Branch: "main", SessionID: "34343434-3434-4434-8434-343434343434"},
+			}
+			source := kickstart.NewScannerTreeSource(
+				listings,
+				withFixturePathResolver(),
+				kickstart.WithRepositoryIdentityResolver(failingRepositoryIdentityResolver{}),
+			)
+			roots := loadRepositoryGroupingRoots(t, source)
+			if len(roots) != 2 {
+				t.Fatalf("failure point %q roots=%d, want 2 exact-path roots", failure.FailurePoint, len(roots))
+			}
+			candidates, err := source.CommitGateCandidates(nil)
+			if err != nil {
+				t.Fatalf("failure point %q commit-gate candidates: %v", failure.FailurePoint, err)
+			}
+			if len(candidates) != 2 {
+				t.Fatalf("failure point %q commit-gate candidates=%d, want 2", failure.FailurePoint, len(candidates))
+			}
+			byPath := make(map[string]selectionprojection.ProjectCandidate, len(candidates))
+			for _, candidate := range candidates {
+				byPath[candidate.RepositoryCohortKey.String()] = candidate
+			}
+			for index, wantPath := range []string{failure.ClonePath, failure.SiblingPath} {
+				root := repositoryRootByCohortKey(t, roots, wantPath)
+				if got := repositoryRootGitDirectories(root); !reflect.DeepEqual(got, []string{wantPath}) {
+					t.Fatalf("failure point %q row %d Git directories=%v, want exact path %q", failure.FailurePoint, index, got, wantPath)
+				}
+				candidate, ok := byPath[wantPath]
+				if !ok {
+					t.Fatalf("failure point %q lacks exact candidate path %q", failure.FailurePoint, wantPath)
+				}
+				if candidate.GitRemote != "" || candidate.ProjectName != "" {
+					t.Fatalf("failure point %q row %d exposed remote/name fallback: %#v", failure.FailurePoint, index, candidate)
+				}
+			}
+		})
+	}
+}
+
+func TestScannerRepositoryTopologyFailureUsesPhysicalGitDirectoryCohort(t *testing.T) {
+	t.Parallel()
+	cloneA := ingest.ClonePath("/fixtures/failures/worktree-a")
+	cloneB := ingest.ClonePath("/fixtures/failures/worktree-b")
+	gitDirectory := ingest.RepositoryPath("/fixtures/failures/shared.git")
+	resolver := failingTopologyWithGitDirectoryResolver{cloneA: gitDirectory, cloneB: gitDirectory}
+	listings := []ftue.SessionListing{
+		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "tool", GitRemote: "git@github.com:acme/tool.git", WorkingDir: cloneA.String(), Branch: "main", SessionID: "56565656-5656-4656-8656-565656565656"},
+		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "tool", GitRemote: "git@github.com:acme/tool.git", WorkingDir: cloneB.String(), Branch: "review", SessionID: "78787878-7878-4878-8878-787878787878"},
+	}
+	source := kickstart.NewScannerTreeSource(listings, withFixturePathResolver(), kickstart.WithRepositoryIdentityResolver(resolver))
+	roots := loadRepositoryGroupingRoots(t, source)
+	if len(roots) != 1 {
+		t.Fatalf("physical Git-directory fallback roots=%d, want 1", len(roots))
+	}
+	root := roots[0]
+	if root.Meta[settings.MetaProjectIdentity] != gitDirectory.String() || !reflect.DeepEqual(repositoryRootGitDirectories(root), []string{gitDirectory.String()}) {
+		t.Fatalf("physical Git-directory fallback root=%#v directories=%v", root.Meta, repositoryRootGitDirectories(root))
+	}
+	paths, _, _ := repositoryRootEvidence(root)
+	if want := []string{cloneA.String(), cloneB.String()}; !reflect.DeepEqual(paths, want) {
+		t.Fatalf("physical Git-directory fallback exact paths=%v, want %v", paths, want)
+	}
+}
 
 func TestScannerRepositoryGroupingAndExactRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -270,7 +418,7 @@ func TestProductionRepositoryResolverGroupsRealLinkedWorktreeButNotIndependentCl
 	runRepositoryGit(t, root, "clone", origin, independent)
 
 	pathResolver := ingest.NewPhysicalPathResolver()
-	repositoryResolver := ingest.NewGitRepositoryPathResolver()
+	repositoryResolver := ingest.NewGitRepositoryIdentityResolver()
 	mainClone, err := pathResolver.Resolve(main)
 	if err != nil {
 		t.Fatalf("resolve main clone path: %v", err)
@@ -283,26 +431,26 @@ func TestProductionRepositoryResolverGroupsRealLinkedWorktreeButNotIndependentCl
 	if err != nil {
 		t.Fatalf("resolve independent clone path: %v", err)
 	}
-	mainRepository, err := repositoryResolver.ResolveRepositoryPath(context.Background(), mainClone)
+	mainRepository, err := repositoryResolver.ResolveRepositoryIdentity(context.Background(), mainClone)
 	if err != nil {
 		t.Fatalf("resolve main repository path: %v", err)
 	}
-	linkedRepository, err := repositoryResolver.ResolveRepositoryPath(context.Background(), linkedClone)
+	linkedRepository, err := repositoryResolver.ResolveRepositoryIdentity(context.Background(), linkedClone)
 	if err != nil {
 		t.Fatalf("resolve linked repository path: %v", err)
 	}
-	independentRepository, err := repositoryResolver.ResolveRepositoryPath(context.Background(), independentClone)
+	independentRepository, err := repositoryResolver.ResolveRepositoryIdentity(context.Background(), independentClone)
 	if err != nil {
 		t.Fatalf("resolve independent repository path: %v", err)
 	}
 	if mainClone == linkedClone || mainClone == independentClone || linkedClone == independentClone {
 		t.Fatalf("exact worktree paths are not distinct: main=%q linked=%q independent=%q", mainClone, linkedClone, independentClone)
 	}
-	if mainRepository != linkedRepository {
-		t.Fatalf("main and linked repository paths differ: %q != %q", mainRepository, linkedRepository)
+	if mainRepository.CohortKey != linkedRepository.CohortKey || mainRepository.GitDirectory != linkedRepository.GitDirectory {
+		t.Fatalf("main and linked repository identities differ: %#v != %#v", mainRepository, linkedRepository)
 	}
-	if independentRepository == mainRepository {
-		t.Fatalf("independent clone reused repository path %q", independentRepository)
+	if independentRepository.CohortKey == mainRepository.CohortKey {
+		t.Fatalf("independent clone reused repository cohort %q", independentRepository.CohortKey)
 	}
 
 	listings := []ftue.SessionListing{
@@ -317,17 +465,17 @@ func TestProductionRepositoryResolverGroupsRealLinkedWorktreeButNotIndependentCl
 	if prepared[0].Candidate.ClonePath != mainClone || prepared[1].Candidate.ClonePath != linkedClone || prepared[2].Candidate.ClonePath != independentClone {
 		t.Fatalf("prepared exact paths changed: %#v", prepared)
 	}
-	if prepared[0].RepositoryIdentity.RepositoryPath != mainRepository || prepared[1].RepositoryIdentity.RepositoryPath != mainRepository {
+	if prepared[0].RepositoryIdentity != mainRepository || prepared[1].RepositoryIdentity != mainRepository {
 		t.Fatalf("prepared linked repository identities differ: %#v", prepared)
 	}
-	if prepared[2].RepositoryIdentity.RepositoryPath != independentRepository {
-		t.Fatalf("prepared independent repository identity=%q, want %q", prepared[2].RepositoryIdentity.RepositoryPath, independentRepository)
+	if prepared[2].RepositoryIdentity != independentRepository {
+		t.Fatalf("prepared independent repository identity=%#v, want %#v", prepared[2].RepositoryIdentity, independentRepository)
 	}
 
 	roots, err := kickstart.NewScannerTreeSource(
 		listings,
 		kickstart.WithPathIdentityResolver(pathResolver),
-		kickstart.WithRepositoryPathResolver(repositoryResolver),
+		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
 	).Load(context.Background())
 	if err != nil {
 		t.Fatalf("load real Git repository forest: %v", err)
@@ -335,16 +483,161 @@ func TestProductionRepositoryResolverGroupsRealLinkedWorktreeButNotIndependentCl
 	if len(roots) != 2 {
 		t.Fatalf("real Git repository roots=%d, want 2", len(roots))
 	}
-	grouped := repositoryRootByPath(t, roots, mainRepository.String())
+	grouped := repositoryRootByPath(t, roots, mainRepository.GitDirectory.String())
 	paths, _, _ := repositoryRootEvidence(grouped)
 	if want := sortedCopy([]string{mainClone.String(), linkedClone.String()}); !reflect.DeepEqual(paths, want) {
 		t.Fatalf("grouped real worktree paths=%v, want %v", paths, want)
 	}
-	independentRoot := repositoryRootByPath(t, roots, independentRepository.String())
+	independentRoot := repositoryRootByPath(t, roots, independentRepository.GitDirectory.String())
 	paths, _, _ = repositoryRootEvidence(independentRoot)
 	if want := []string{independentClone.String()}; !reflect.DeepEqual(paths, want) {
 		t.Fatalf("independent real clone paths=%v, want %v", paths, want)
 	}
+}
+
+func TestProductionRepositoryResolverGroupsLinkedWorktreeSubmodulesByTopology(t *testing.T) {
+	root := t.TempDir()
+	submoduleOrigin := filepath.Join(root, "submodule-origin.git")
+	submoduleSeed := filepath.Join(root, "submodule-seed")
+	superOrigin := filepath.Join(root, "super-origin.git")
+	superMain := filepath.Join(root, "super-main")
+	superLinkedA := filepath.Join(root, "super-linked-a")
+	superLinkedB := filepath.Join(root, "super-linked-b")
+	superIndependent := filepath.Join(root, "super-independent")
+	standaloneNested := filepath.Join(superLinkedA, "standalone")
+
+	runRepositoryGit(t, root, "init", "--bare", submoduleOrigin)
+	runRepositoryGit(t, root, "init", "--initial-branch=main", submoduleSeed)
+	configureRepositoryFixture(t, submoduleSeed)
+	if err := os.WriteFile(filepath.Join(submoduleSeed, "README.md"), []byte("submodule fixture\n"), 0o600); err != nil {
+		t.Fatalf("write submodule fixture: %v", err)
+	}
+	runRepositoryGit(t, submoduleSeed, "add", "README.md")
+	runRepositoryGit(t, submoduleSeed, "commit", "-m", "initial submodule fixture")
+	runRepositoryGit(t, submoduleSeed, "remote", "add", "origin", submoduleOrigin)
+	runRepositoryGit(t, submoduleSeed, "push", "-u", "origin", "main")
+	runRepositoryGit(t, submoduleOrigin, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	runRepositoryGit(t, root, "init", "--bare", superOrigin)
+	runRepositoryGit(t, root, "init", "--initial-branch=main", superMain)
+	configureRepositoryFixture(t, superMain)
+	runRepositoryGit(t, superMain, "-c", "protocol.file.allow=always", "submodule", "add", submoduleOrigin, "pasture")
+	runRepositoryGit(t, superMain, "-c", "protocol.file.allow=always", "submodule", "add", submoduleOrigin, "pasture-copy")
+	runRepositoryGit(t, superMain, "commit", "-am", "declare submodule fixtures")
+	runRepositoryGit(t, superMain, "remote", "add", "origin", superOrigin)
+	runRepositoryGit(t, superMain, "push", "-u", "origin", "main")
+	runRepositoryGit(t, superOrigin, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	runRepositoryGit(t, superMain, "worktree", "add", "-b", "linked-a", superLinkedA)
+	runRepositoryGit(t, superMain, "worktree", "add", "-b", "linked-b", superLinkedB)
+	for _, worktree := range []string{superLinkedA, superLinkedB} {
+		runRepositoryGit(t, worktree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "pasture", "pasture-copy")
+	}
+	runRepositoryGit(t, root, "-c", "protocol.file.allow=always", "clone", "--recurse-submodules", superOrigin, superIndependent)
+	runRepositoryGit(t, superLinkedA, "-c", "protocol.file.allow=always", "clone", submoduleOrigin, standaloneNested)
+
+	resolver := ingest.NewPhysicalPathResolver()
+	repositoryResolver := ingest.NewGitRepositoryIdentityResolver()
+	linkedAPath := mustResolveClonePath(t, resolver, filepath.Join(superLinkedA, "pasture"))
+	linkedBPath := mustResolveClonePath(t, resolver, filepath.Join(superLinkedB, "pasture"))
+	independentPath := mustResolveClonePath(t, resolver, filepath.Join(superIndependent, "pasture"))
+	distinctPath := mustResolveClonePath(t, resolver, filepath.Join(superLinkedA, "pasture-copy"))
+	standalonePath := mustResolveClonePath(t, resolver, standaloneNested)
+	linkedAIdentity := mustResolveRepositoryIdentity(t, repositoryResolver, linkedAPath)
+	linkedBIdentity := mustResolveRepositoryIdentity(t, repositoryResolver, linkedBPath)
+	independentIdentity := mustResolveRepositoryIdentity(t, repositoryResolver, independentPath)
+	distinctIdentity := mustResolveRepositoryIdentity(t, repositoryResolver, distinctPath)
+	standaloneIdentity := mustResolveRepositoryIdentity(t, repositoryResolver, standalonePath)
+
+	if linkedAIdentity.CohortKey != linkedBIdentity.CohortKey {
+		t.Fatalf("same-path linked-worktree submodules differ: %q != %q", linkedAIdentity.CohortKey, linkedBIdentity.CohortKey)
+	}
+	if linkedAIdentity.GitDirectory == linkedBIdentity.GitDirectory {
+		t.Fatalf("linked-worktree submodule Git directories unexpectedly match: %q", linkedAIdentity.GitDirectory)
+	}
+	if independentIdentity.CohortKey == linkedAIdentity.CohortKey {
+		t.Fatalf("independent superproject clone reused linked cohort %q", independentIdentity.CohortKey)
+	}
+	if distinctIdentity.CohortKey == linkedAIdentity.CohortKey {
+		t.Fatalf("distinct declared submodule path reused cohort %q", distinctIdentity.CohortKey)
+	}
+	if standaloneIdentity.CohortKey == linkedAIdentity.CohortKey || !strings.HasPrefix(standaloneIdentity.CohortKey.String(), "repo:") {
+		t.Fatalf("undeclared nested clone was treated as the declared submodule cohort: standalone=%q declared=%q", standaloneIdentity.CohortKey, linkedAIdentity.CohortKey)
+	}
+	if !strings.Contains(linkedAIdentity.CohortKey.String(), "pasture") || !strings.Contains(distinctIdentity.CohortKey.String(), "pasture-copy") {
+		t.Fatalf("submodule cohort keys do not retain length-prefixed path components: pasture=%q copy=%q", linkedAIdentity.CohortKey, distinctIdentity.CohortKey)
+	}
+
+	listings := []ftue.SessionListing{
+		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "pasture", GitRemote: submoduleOrigin, WorkingDir: linkedAPath.String(), Branch: "main", SessionID: "51515151-5151-4151-8151-515151515151"},
+		{Harness: string(defaults.HarnessCodex), ProjectName: "pasture", GitRemote: submoduleOrigin, WorkingDir: linkedBPath.String(), Branch: "main", SessionID: "61616161-6161-4161-8161-616161616161"},
+		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "pasture", GitRemote: submoduleOrigin, WorkingDir: independentPath.String(), Branch: "main", SessionID: "71717171-7171-4171-8171-717171717171"},
+		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "pasture", GitRemote: submoduleOrigin, WorkingDir: distinctPath.String(), Branch: "main", SessionID: "81818181-8181-4181-8181-818181818181"},
+		{Harness: string(defaults.HarnessClaudeCode), ProjectName: "pasture", GitRemote: submoduleOrigin, WorkingDir: standalonePath.String(), Branch: "main", SessionID: "91919191-9191-4191-8191-919191919191"},
+	}
+	source := kickstart.NewScannerTreeSource(
+		listings,
+		kickstart.WithPathIdentityResolver(resolver),
+		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
+	)
+	roots := loadRepositoryGroupingRoots(t, source)
+	if len(roots) != 4 {
+		t.Fatalf("real submodule topology roots=%d, want 4", len(roots))
+	}
+	grouped := repositoryRootByCohortKey(t, roots, linkedAIdentity.CohortKey.String())
+	if len(grouped.Children) != 1 || grouped.Children[0].Meta[settings.MetaBranch] != "main" || len(grouped.Children[0].Children) != 2 {
+		t.Fatalf("same-path linked submodules did not share one main branch: %#v", grouped.Children)
+	}
+	context, ok := source.ListingPreviewContext(grouped.ID)
+	if !ok {
+		t.Fatal("grouped submodule project has no preview context")
+	}
+	wantGitDirectories := sortedCopy([]string{linkedAIdentity.GitDirectory.String(), linkedBIdentity.GitDirectory.String()})
+	if !reflect.DeepEqual(context.GitDirectories, wantGitDirectories) {
+		t.Fatalf("grouped submodule preview Git directories=%v, want %v", context.GitDirectories, wantGitDirectories)
+	}
+
+	setNodeState(grouped, kit.Checked)
+	rollup(grouped)
+	selection := settings.FromTreeNodes(roots).ToSelectionConfig(false)
+	for harness, clonePath := range map[string]string{string(defaults.HarnessClaudeCode): linkedAPath.String(), string(defaults.HarnessCodex): linkedBPath.String()} {
+		configured, ok := selection.Harnesses[harness]
+		if !ok || len(configured.Projects) != 1 || !reflect.DeepEqual(configured.Projects[0].ClonePaths, []string{clonePath}) {
+			t.Fatalf("grouped submodule selection for %s=%#v, want exact path %q", harness, configured, clonePath)
+		}
+	}
+	encoded, err := yaml.Marshal(selection)
+	if err != nil {
+		t.Fatalf("marshal grouped submodule selection: %v", err)
+	}
+	if strings.Contains(string(encoded), linkedAIdentity.CohortKey.String()) || strings.Contains(string(encoded), linkedAIdentity.GitDirectory.String()) || strings.Contains(string(encoded), linkedBIdentity.GitDirectory.String()) {
+		t.Fatalf("grouped submodule selection persisted transient repository identity:\n%s", encoded)
+	}
+}
+
+func configureRepositoryFixture(t *testing.T, directory string) {
+	t.Helper()
+	runRepositoryGit(t, directory, "config", "user.email", "fixture@example.invalid")
+	runRepositoryGit(t, directory, "config", "user.name", "Fixture User")
+	runRepositoryGit(t, directory, "config", "commit.gpgsign", "false")
+}
+
+func mustResolveClonePath(t *testing.T, resolver ingest.PathIdentityResolver, path string) ingest.ClonePath {
+	t.Helper()
+	resolved, err := resolver.Resolve(path)
+	if err != nil {
+		t.Fatalf("resolve clone path %q: %v", path, err)
+	}
+	return resolved
+}
+
+func mustResolveRepositoryIdentity(t *testing.T, resolver ingest.RepositoryIdentityResolver, path ingest.ClonePath) ingest.RepositoryIdentity {
+	t.Helper()
+	identity, err := resolver.ResolveRepositoryIdentity(context.Background(), path)
+	if err != nil {
+		t.Fatalf("resolve repository identity for %q: %v", path, err)
+	}
+	return identity
 }
 
 func runRepositoryGit(t *testing.T, dir string, args ...string) {
@@ -357,22 +650,22 @@ func runRepositoryGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func fixtureRepositoryResolver(fixtures []repositoryPathFixture) fixtureRepositoryPathResolver {
+func fixtureRepositoryResolver(fixtures []repositoryPathFixture) fixtureRepositoryIdentityResolver {
 	paths := make(map[ingest.ClonePath]repositoryPathFixture, len(fixtures))
 	for _, fixture := range fixtures {
 		paths[ingest.ClonePath(fixture.ClonePath)] = fixture
 	}
-	return fixtureRepositoryPathResolver{paths: paths}
+	return fixtureRepositoryIdentityResolver{paths: paths}
 }
 
 func repositoryGroupingSource(
 	listings []ftue.SessionListing,
-	repositoryResolver ingest.RepositoryPathResolver,
+	repositoryResolver ingest.RepositoryIdentityResolver,
 ) *kickstart.ScannerTreeSource {
 	return kickstart.NewScannerTreeSource(
 		listings,
 		withFixturePathResolver(),
-		kickstart.WithRepositoryPathResolver(repositoryResolver),
+		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
 	)
 }
 
@@ -400,23 +693,24 @@ func assertRepositoryGroupingCandidates(
 	}
 	byRepositoryHarness := make(map[string]selectionprojection.ProjectCandidate, len(candidates))
 	for _, candidate := range candidates {
-		key := candidate.RepositoryPath.String() + "\x00" + candidate.Harness.String()
+		key := candidate.RepositoryCohortKey.String() + "\x00" + candidate.Harness.String()
 		if _, duplicate := byRepositoryHarness[key]; duplicate {
-			t.Fatalf("repository/harness %q/%q appears in more than one commit-gate candidate", candidate.RepositoryPath, candidate.Harness)
+			t.Fatalf("repository/harness %q/%q appears in more than one commit-gate candidate", candidate.RepositoryCohortKey, candidate.Harness)
 		}
 		byRepositoryHarness[key] = candidate
 	}
 	for _, want := range expected {
+		wantKey := expectedRepositoryCohortKey(want)
 		for harness, wantPaths := range want.CandidateClonePaths {
-			candidate, ok := byRepositoryHarness[want.RepositoryPath+"\x00"+harness]
+			candidate, ok := byRepositoryHarness[wantKey+"\x00"+harness]
 			if !ok {
 				t.Fatalf("missing commit-gate candidate for repository %q harness %q", want.RepositoryPath, harness)
 			}
 			pathSet := map[string]struct{}{}
 			for _, descendant := range candidate.Descendants {
 				pathSet[descendant.ClonePath.String()] = struct{}{}
-				if descendant.RepositoryPath != candidate.RepositoryPath {
-					t.Fatalf("repository %q descendant %q carries repository path %q", want.RepositoryPath, descendant.SessionID, descendant.RepositoryPath)
+				if descendant.RepositoryCohortKey != candidate.RepositoryCohortKey {
+					t.Fatalf("repository %q descendant %q carries repository cohort %q", want.RepositoryPath, descendant.SessionID, descendant.RepositoryCohortKey)
 				}
 			}
 			paths := make([]string, 0, len(pathSet))
@@ -443,25 +737,25 @@ func assertRepositoryGroupingRoots(t *testing.T, roots []*kit.TreeNode, expected
 	if len(roots) != len(expected) {
 		t.Fatalf("repository roots=%d, want %d", len(roots), len(expected))
 	}
-	byRepository := make(map[string]*kit.TreeNode, len(roots))
+	byCohort := make(map[string]*kit.TreeNode, len(roots))
 	rowIDs := make(map[string]string)
 	for _, root := range roots {
-		path := root.Meta[settings.MetaRepositoryPath]
-		if _, duplicate := byRepository[path]; duplicate {
-			t.Fatalf("repository path %q appears in more than one root", path)
+		cohortKey := root.Meta[settings.MetaProjectIdentity]
+		if _, duplicate := byCohort[cohortKey]; duplicate {
+			t.Fatalf("repository cohort %q appears in more than one root", cohortKey)
 		}
-		byRepository[path] = root
-		assertUniqueRepositoryRowID(t, rowIDs, root.ID, "project "+path)
+		byCohort[cohortKey] = root
+		assertUniqueRepositoryRowID(t, rowIDs, root.ID, "project "+cohortKey)
 		for _, branch := range root.Children {
-			assertUniqueRepositoryRowID(t, rowIDs, branch.ID, "branch "+path+"/"+branch.Meta[settings.MetaBranch])
+			assertUniqueRepositoryRowID(t, rowIDs, branch.ID, "branch "+cohortKey+"/"+branch.Meta[settings.MetaBranch])
 		}
 	}
 	for _, want := range expected {
-		root := byRepository[want.RepositoryPath]
+		wantIdentity := expectedRepositoryCohortKey(want)
+		root := byCohort[wantIdentity]
 		if root == nil {
-			t.Fatalf("missing repository root %q; got %v", want.RepositoryPath, repositoryRootPaths(roots))
+			t.Fatalf("missing repository cohort %q; got %v", wantIdentity, repositoryRootCohortKeys(roots))
 		}
-		wantIdentity := (kickstart.RepositoryIdentity{RepositoryPath: ingest.RepositoryPath(want.RepositoryPath)}).String()
 		if root.ID != wantIdentity || root.Meta[settings.MetaProjectIdentity] != wantIdentity {
 			t.Fatalf("root identity id=%q meta=%q, want %q", root.ID, root.Meta[settings.MetaProjectIdentity], wantIdentity)
 		}
@@ -498,13 +792,14 @@ func assertRepositoryGroupingPreviewContexts(
 ) {
 	t.Helper()
 	for _, want := range expected {
-		root := repositoryRootByPath(t, roots, want.RepositoryPath)
+		root := repositoryRootByCohortKey(t, roots, expectedRepositoryCohortKey(want))
 		context, ok := source.ListingPreviewContext(root.ID)
 		if !ok {
 			t.Fatalf("repository %q has no project preview context", want.RepositoryPath)
 		}
 		clonePaths, branches, sessionCount := repositoryRootEvidence(root)
-		if context.Kind != kickstart.ListingPreviewProject || context.Project != root.Label || context.RepositoryPath != want.RepositoryPath {
+		wantGitDirectories := repositoryRootGitDirectories(root)
+		if context.Kind != kickstart.ListingPreviewProject || context.Project != root.Label || !reflect.DeepEqual(context.GitDirectories, wantGitDirectories) {
 			t.Fatalf("repository %q project preview identity=%#v", want.RepositoryPath, context)
 		}
 		if !reflect.DeepEqual(context.Harnesses, sortedMapKeys(want.CandidateClonePaths)) ||
@@ -523,7 +818,7 @@ func assertRepositoryGroupingPreviewContexts(
 			wantHarnesses := repositoryBranchHarnesses(branch)
 			wantPaths := sortedCopy(branches[branchName])
 			if branchContext.Kind != kickstart.ListingPreviewBranch || branchContext.Project != root.Label ||
-				branchContext.Branch != branchName || branchContext.RepositoryPath != want.RepositoryPath ||
+				branchContext.Branch != branchName || !reflect.DeepEqual(branchContext.GitDirectories, repositoryRootGitDirectoriesForBranches([]*kit.TreeNode{branch})) ||
 				!reflect.DeepEqual(branchContext.Harnesses, wantHarnesses) ||
 				!reflect.DeepEqual(sortedCopy(branchContext.Remotes), sortedCopy(want.Remotes)) ||
 				!reflect.DeepEqual(branchContext.ClonePaths, wantPaths) || branchContext.SessionCount != len(branch.Children) {
@@ -531,6 +826,22 @@ func assertRepositoryGroupingPreviewContexts(
 			}
 		}
 	}
+}
+
+func repositoryRootGitDirectories(root *kit.TreeNode) []string {
+	return repositoryRootGitDirectoriesForBranches(root.Children)
+}
+
+func repositoryRootGitDirectoriesForBranches(branches []*kit.TreeNode) []string {
+	set := make(map[string]struct{})
+	for _, branch := range branches {
+		for _, session := range branch.Children {
+			if gitDirectory := session.Meta[settings.MetaGitDirectory]; gitDirectory != "" {
+				set[gitDirectory] = struct{}{}
+			}
+		}
+	}
+	return sortedMapKeys(set)
 }
 
 func assertUniqueRepositoryRowID(t *testing.T, seen map[string]string, id, description string) {
@@ -610,10 +921,10 @@ func containsFixtureString(values []string, target string) bool {
 	return false
 }
 
-func repositoryRootPaths(roots []*kit.TreeNode) []string {
+func repositoryRootCohortKeys(roots []*kit.TreeNode) []string {
 	paths := make([]string, 0, len(roots))
 	for _, root := range roots {
-		paths = append(paths, root.Meta[settings.MetaRepositoryPath])
+		paths = append(paths, root.Meta[settings.MetaProjectIdentity])
 	}
 	sort.Strings(paths)
 	return paths
@@ -622,11 +933,24 @@ func repositoryRootPaths(roots []*kit.TreeNode) []string {
 func repositoryRootByPath(t *testing.T, roots []*kit.TreeNode, repositoryPath string) *kit.TreeNode {
 	t.Helper()
 	for _, root := range roots {
-		if root.Meta[settings.MetaRepositoryPath] == repositoryPath {
-			return root
+		for _, gitDirectory := range repositoryRootGitDirectories(root) {
+			if gitDirectory == repositoryPath {
+				return root
+			}
 		}
 	}
 	t.Fatalf("repository root %q is unavailable", repositoryPath)
+	return nil
+}
+
+func repositoryRootByCohortKey(t *testing.T, roots []*kit.TreeNode, cohortKey string) *kit.TreeNode {
+	t.Helper()
+	for _, root := range roots {
+		if root.Meta[settings.MetaProjectIdentity] == cohortKey {
+			return root
+		}
+	}
+	t.Fatalf("repository cohort %q is unavailable", cohortKey)
 	return nil
 }
 
@@ -637,8 +961,22 @@ func repositoryBranchByName(t *testing.T, root *kit.TreeNode, branchName string)
 			return branch
 		}
 	}
-	t.Fatalf("branch %q is unavailable under repository %q", branchName, root.Meta[settings.MetaRepositoryPath])
+	t.Fatalf("branch %q is unavailable under repository cohort %q", branchName, root.Meta[settings.MetaProjectIdentity])
 	return nil
+}
+
+func fixtureRepositoryCohortKey(repositoryPath string) string {
+	return "fixture:" + repositoryPath
+}
+
+func expectedRepositoryCohortKey(expected repositoryRootExpectation) string {
+	if expected.CohortKey != "" {
+		return expected.CohortKey
+	}
+	if strings.HasPrefix(expected.RepositoryPath, "/fixtures/team-") {
+		return expected.RepositoryPath
+	}
+	return fixtureRepositoryCohortKey(expected.RepositoryPath)
 }
 
 func assertUncheckedSessionIDs(t *testing.T, roots []*kit.TreeNode, expected []string) {

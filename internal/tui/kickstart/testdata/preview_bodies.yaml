@@ -19,7 +19,7 @@
 expectedCaseCount: 6
 repositories:
   - {clonePath: /fixtures/acme-tool, repositoryPath: /fixtures/repos/acme-tool.git}
-  - {clonePath: /fixtures/acme-tool-linked, repositoryPath: /fixtures/repos/acme-tool.git}
+  - {clonePath: /fixtures/acme-tool-linked, repositoryPath: /fixtures/repos/acme-tool-linked.git, cohortKey: "fixture:/fixtures/repos/acme-tool.git"}
 listings:
   - harness: claude-code
     projectName: acme/tool
@@ -154,7 +154,9 @@ cases:
       - "project: github:acme/tool"
       - "harnesses: claude code, codex, cursor"
       - "remote: github.com/acme/tool"
-      - "git directory: /fixtures/repos/acme-tool.git"
+      - "git directories: 2"
+      - /fixtures/repos/acme-tool.git
+      - /fixtures/repos/acme-tool-linked.git
       - "worktrees: 2"
       - /fixtures/acme-tool
       - /fixtures/acme-tool-linked
@@ -174,7 +176,9 @@ cases:
       - "branch: main"
       - "harnesses: claude code, codex"
       - "remote: github.com/acme/tool"
-      - "git directory: /fixtures/repos/acme-tool.git"
+      - "git directories: 2"
+      - /fixtures/repos/acme-tool.git
+      - /fixtures/repos/acme-tool-linked.git
       - "worktrees: 2"
       - /fixtures/acme-tool
       - /fixtures/acme-tool-linked

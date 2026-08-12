@@ -139,7 +139,7 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 			realScanner := kickstart.NewScannerTreeSource(
 				mountedListings(testCase.Listings, paths),
 				kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
-				kickstart.WithRepositoryPathResolver(mountedRepositoryResolver(t, testCase.Paths, paths)),
+				kickstart.WithRepositoryIdentityResolver(mountedRepositoryResolver(t, testCase.Paths, paths)),
 			)
 			source := &mountedRecordingTreeSource{inner: realScanner}
 			program := kickstart.NewProgram(kickstart.ProgramDeps{
@@ -174,20 +174,20 @@ func TestMountedTouchedSelectionActions(t *testing.T) {
 	}
 }
 
-type mountedRepositoryPathResolver map[ingest.ClonePath]ingest.RepositoryPath
+type mountedRepositoryIdentityResolver map[ingest.ClonePath]ingest.RepositoryIdentity
 
-func (r mountedRepositoryPathResolver) ResolveRepositoryPath(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryPath, error) {
+func (r mountedRepositoryIdentityResolver) ResolveRepositoryIdentity(_ context.Context, clonePath ingest.ClonePath) (ingest.RepositoryIdentity, error) {
 	path, ok := r[clonePath]
 	if !ok {
-		return "", fmt.Errorf("mounted fixture has no repository identity for clone %q", clonePath)
+		return ingest.RepositoryIdentity{}, fmt.Errorf("mounted fixture has no repository identity for clone %q", clonePath)
 	}
 	return path, nil
 }
 
-func mountedRepositoryResolver(t *testing.T, fixtures []mountedPathFixture, paths map[string]string) mountedRepositoryPathResolver {
+func mountedRepositoryResolver(t *testing.T, fixtures []mountedPathFixture, paths map[string]string) mountedRepositoryIdentityResolver {
 	t.Helper()
 	resolver := ingest.NewPhysicalPathResolver()
-	result := mountedRepositoryPathResolver{}
+	result := mountedRepositoryIdentityResolver{}
 	for _, fixture := range fixtures {
 		clonePath, err := resolver.Resolve(paths[fixture.Key])
 		if err != nil {
@@ -201,12 +201,15 @@ func mountedRepositoryResolver(t *testing.T, fixtures []mountedPathFixture, path
 		if err != nil {
 			t.Fatalf("resolve mounted repository key %q for clone %q: %v", repositoryKey, fixture.Key, err)
 		}
-		result[clonePath] = ingest.RepositoryPath(repositoryPath.String())
+		result[clonePath] = ingest.RepositoryIdentity{
+			CohortKey:    ingest.RepositoryCohortKey("fixture:" + repositoryPath.String()),
+			GitDirectory: ingest.RepositoryPath(repositoryPath.String()),
+		}
 	}
 	return result
 }
 
-var _ ingest.RepositoryPathResolver = mountedRepositoryPathResolver{}
+var _ ingest.RepositoryIdentityResolver = mountedRepositoryIdentityResolver{}
 
 func mountedTouchedRune(action mountedTouchedAction) rune {
 	switch action {

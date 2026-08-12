@@ -10,7 +10,8 @@ import (
 type cohortIdentityKind uint8
 
 const (
-	cohortIdentityPhysicalPath cohortIdentityKind = iota
+	cohortIdentityRepositoryCohort cohortIdentityKind = iota
+	cohortIdentityPhysicalPath
 	cohortIdentityParentProject
 )
 
@@ -83,14 +84,14 @@ func prepareCohort(candidates []ProjectCandidate) []preparedProject {
 	remoteMultiplicity := make(map[string]*identityMultiplicity)
 	nameMultiplicity := make(map[string]*identityMultiplicity)
 	for _, candidate := range candidates {
-		recordCandidateIdentity(remoteMultiplicity, nameMultiplicity, candidate, candidate.ClonePath, candidate.RepositoryPath)
+		recordCandidateIdentity(remoteMultiplicity, nameMultiplicity, candidate, candidate.ClonePath, candidate.RepositoryCohortKey)
 		for _, descendant := range candidate.Descendants {
 			recordCandidateIdentity(
 				remoteMultiplicity,
 				nameMultiplicity,
 				candidate,
 				effectiveClonePath(candidate, descendant),
-				effectiveRepositoryPath(candidate, descendant),
+				effectiveRepositoryCohortKey(candidate, descendant),
 			)
 		}
 	}
@@ -136,19 +137,19 @@ func recordCandidateIdentity(
 	nameMultiplicity map[string]*identityMultiplicity,
 	candidate ProjectCandidate,
 	clonePath ingest.ClonePath,
-	repositoryPath ingest.RepositoryPath,
+	repositoryCohortKey ingest.RepositoryCohortKey,
 ) {
-	identity, proven := candidateIdentity(candidate, clonePath, repositoryPath)
+	identity, proven := candidateIdentity(candidate, clonePath, repositoryCohortKey)
 	recordIdentity(remoteMultiplicity, ingest.NormalizeRemoteForMatch(candidate.GitRemote), identity, proven)
 	recordIdentity(nameMultiplicity, ingest.NormalizeProjectNameForMatch(candidate.ProjectName), identity, proven)
 }
 
-func candidateIdentity(candidate ProjectCandidate, clonePath ingest.ClonePath, repositoryPath ingest.RepositoryPath) (cohortIdentity, bool) {
-	if repositoryPath != "" {
+func candidateIdentity(candidate ProjectCandidate, clonePath ingest.ClonePath, repositoryCohortKey ingest.RepositoryCohortKey) (cohortIdentity, bool) {
+	if repositoryCohortKey != "" {
 		return cohortIdentity{
 			Harness: candidate.Harness,
-			Kind:    cohortIdentityPhysicalPath,
-			Value:   repositoryPath.String(),
+			Kind:    cohortIdentityRepositoryCohort,
+			Value:   repositoryCohortKey.String(),
 		}, true
 	}
 	if clonePath != "" {
@@ -209,11 +210,11 @@ func effectiveClonePath(project ProjectCandidate, descendant SessionCandidate) i
 	return project.ClonePath
 }
 
-func effectiveRepositoryPath(project ProjectCandidate, descendant SessionCandidate) ingest.RepositoryPath {
-	if descendant.RepositoryPath != "" {
-		return descendant.RepositoryPath
+func effectiveRepositoryCohortKey(project ProjectCandidate, descendant SessionCandidate) ingest.RepositoryCohortKey {
+	if descendant.RepositoryCohortKey != "" {
+		return descendant.RepositoryCohortKey
 	}
-	return project.RepositoryPath
+	return project.RepositoryCohortKey
 }
 
 func discoveryCandidate(
