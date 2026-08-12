@@ -659,3 +659,31 @@ textarea::placeholder {
   background: hsl(var(--diff-del));
   color: hsl(var(--diff-del-text));
 }
+/* Native indeterminate state needs a visible shape because aria alone does not
+   communicate partial project selection. The dash remains visible without colour. */
+.check .check-box:indeterminate,
+.check .check-box[data-indeterminate='true'] {
+  background: var(--amber);
+  border-color: var(--amber-dim);
+}
+.check .check-box:indeterminate::after,
+.check .check-box[data-indeterminate='true']::after {
+  width: 10px;
+  height: 2px;
+  border: 0;
+  background: var(--on-amber);
+  transform: none;
+  opacity: 1;
+}
+.share-project-check {
+  position: relative;
+}
+.share-project-check__mixed {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 10px;
+  height: 2px;
+  background: var(--on-amber);
+  pointer-events: none;
+}

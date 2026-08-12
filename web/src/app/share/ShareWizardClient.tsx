@@ -22,7 +22,7 @@ import {
   DEFAULT_REDACTION_LEVEL,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
-import { groupByProject } from '@/lib/share/group';
+import { groupByProject, isSelectable } from '@/lib/share/group';
 import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
@@ -44,6 +44,7 @@ interface BackendSessionSummary {
   preview?: string;
   /** Heuristic outcome — see SessionSummary.outcome (Go). */
   outcome?: string;
+  shareStatus?: ShareSession['shareStatus'];
 }
 
 function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession {
@@ -58,7 +59,7 @@ function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession 
     totalTokens: backend.totalTokens,
     turnCount: backend.turnCount,
     model: '',
-    shareStatus: 'new',
+    shareStatus: backend.shareStatus ?? 'new',
     preview: backend.preview ?? '',
     outcome: backend.outcome,
   };
@@ -227,7 +228,7 @@ export function ShareWizardClient() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const selectableIds = useMemo(
-    () => new Set(discovery?.sessions.filter((session) => session.shareStatus === 'new' || session.shareStatus === 'updated').map((session) => session.id) ?? []),
+    () => new Set(discovery?.sessions.filter(isSelectable).map((session) => session.id) ?? []),
     [discovery],
   );
 

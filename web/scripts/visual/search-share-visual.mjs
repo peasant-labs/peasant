@@ -134,19 +134,24 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     await capture(page, gate, join(OUT, theme, viewport.id, 'search.png'), '[role="dialog"][aria-label="Command palette"]', `${theme}/${viewport.id}/search`)
   } else {
     await wait(page, '[aria-label="choose sessions to contribute"]', 'share chooser')
-    await page.evaluate(() => document.querySelector('[aria-label="select session sess-visual-share-003"]')?.click())
+    await page.click('[aria-label="select session sess-visual-share-003"]')
+    await page.focus('[aria-label^="select project "]')
     const probe = await page.evaluate(() => {
       const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
       const labels = [...chooser.querySelectorAll('[aria-label^="project "]')].map((e) => e.getAttribute('aria-label'))
       const locations = [...chooser.querySelectorAll('[aria-label^="repository location "]')].map((e) => e.getAttribute('aria-label'))
       const branches = [...chooser.querySelectorAll('[aria-label^="branch "]')].map((e) => e.getAttribute('aria-label'))
       const boxes = [...chooser.querySelectorAll('input[type="checkbox"]')]
+      const projectBox = chooser.querySelector('[aria-label^="select project "]')
       const disabled = boxes.filter((box) => box.disabled).length
       const selected = boxes.filter((box) => box.checked).length
       const toolbar = chooser.querySelector('button')
-      return { labels, locations, branches, checkboxes: boxes.length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focus: boxes[0] ? getComputedStyle(boxes[0]).outlineStyle : '' }
+      const focusStyle = projectBox ? getComputedStyle(projectBox) : null
+      const glyph = chooser.querySelector('.share-project-check__mixed')
+      const glyphStyle = glyph ? getComputedStyle(glyph) : null
+      return { labels, locations, branches, checkboxes: boxes.length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === projectBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, mixed: projectBox?.indeterminate, ariaMixed: projectBox?.getAttribute('aria-checked'), glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor } }
     })
-    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 5 || probe.selected !== 1 || probe.toolbar !== 'select all' || probe.overflow) fail(`${theme}/${viewport.id}/share: hierarchy/state probe ${JSON.stringify(probe)}`)
+    if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 5 || probe.selected !== 1 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || !probe.mixed || probe.ariaMixed !== 'mixed' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
   }
   if (diagnostics.length) fail(`${theme}/${viewport.id}/${kind}: browser diagnostics ${JSON.stringify(diagnostics.slice(0, 3))}`)

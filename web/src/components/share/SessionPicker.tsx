@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Button, Checkbox } from '@/lib/ft-ui';
 import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
@@ -43,6 +43,20 @@ interface SessionPickerProps {
   onNext: () => void;
 }
 
+function ProjectCheckbox({ checked, mixed, disabled, onChange, label }: {
+  checked: boolean;
+  mixed: boolean;
+  disabled: boolean;
+  onChange: () => void;
+  label: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = mixed;
+  }, [mixed]);
+  return <label className="check share-project-check"><input ref={ref} type="checkbox" className="check-box" checked={checked} data-indeterminate={mixed || undefined} aria-checked={mixed ? 'mixed' : checked} disabled={disabled} onChange={onChange} aria-label={label} />{mixed && <span className="share-project-check__mixed" aria-hidden="true" />}</label>;
+}
+
 export function SessionPicker({
   sessions,
   selectedIds,
@@ -51,10 +65,8 @@ export function SessionPicker({
 }: SessionPickerProps) {
   const groups = useMemo(() => groupShareHierarchy(sessions), [sessions]);
 
-  // Only `new`/`updated` sessions can be contributed. The picker still shows
-  // every session (so the project counts stay honest), but a non-selectable
-  // session can never enter the selection: we intersect every change GMS
-  // reports — including select-all and per-group cascades — with this set.
+  // The hierarchy shows every session so its counts stay honest. Every row,
+  // project, evidence, and select-all action is intersected with this set.
   const selectableIds = useMemo(
     () => new Set(sessions.filter(isSelectable).map((s) => s.id)),
     [sessions],
@@ -112,7 +124,7 @@ export function SessionPicker({
           const projectSelectedCount = eligibleProjectIds.filter((id) => selectedIds.has(id)).length;
           return <section key={project.key} className="border-b border-rule last:border-b-0" aria-label={`project ${cleanName}`}>
             <h2 className="px-4 py-3 font-mono font-semibold flex items-center gap-3" title={fullPath !== cleanName ? fullPath : undefined}>
-              <Checkbox checked={eligibleProjectIds.length > 0 && projectSelectedCount === eligibleProjectIds.length} aria-checked={projectSelectedCount > 0 && projectSelectedCount < eligibleProjectIds.length ? 'mixed' : undefined} disabled={eligibleProjectIds.length === 0} onChange={() => toggleGroup(projectIds)} aria-label={`select project ${cleanName}`} />
+              <ProjectCheckbox checked={eligibleProjectIds.length > 0 && projectSelectedCount === eligibleProjectIds.length} mixed={projectSelectedCount > 0 && projectSelectedCount < eligibleProjectIds.length} disabled={eligibleProjectIds.length === 0} onChange={() => toggleGroup(projectIds)} label={`select project ${cleanName}`} />
               {cleanName}
             </h2>
             {project.locations.map((location) => <section key={location.repositoryLocationId} className="ml-4 border-l border-rule" aria-label={`repository location ${location.locationLabel}`}>

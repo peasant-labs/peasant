@@ -33,9 +33,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => currentSearchParams,
 }));
 
-// The Choose step body is the fairtrade GroupedMultiSelect. Its sticky toolbar
-// carries the running "<n> selected · <tokens> tokens" tally (split across
-// spans) — read its normalized text content to assert on the selection state.
+// The mounted hierarchy toolbar carries the running selection and token tally.
 function gmsTally(): string {
   const el = document.querySelector('.gms-tally');
   return (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
