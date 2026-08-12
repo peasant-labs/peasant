@@ -227,6 +227,7 @@ type claudeIndexLine struct {
 	Content    json.RawMessage `json:"content"` // Top-level content (system entries use this, not message.content)
 	Message    struct {
 		Role    string          `json:"role"`
+		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
 			InputTokens              int `json:"input_tokens"`

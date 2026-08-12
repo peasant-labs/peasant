@@ -234,7 +234,10 @@ type IndexLogEntry struct {
 // v11: reclassify empty progress/direct/queue-operation entries to role=system;
 //
 //	reclassify "Tool loaded." wrappers with tool_result siblings to role=system.
-const CurrentIndexVersion = 11
+//
+// v12: preserve exact assistant model observations during Claude indexing and
+// retain observation boundaries through transcript suppression and deduplication.
+const CurrentIndexVersion = 12
 
 // --- PruneFilter ---
 
