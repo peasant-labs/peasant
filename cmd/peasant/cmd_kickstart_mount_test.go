@@ -39,6 +39,7 @@ const (
 	mountImportedSessionID  = "3f1c9a52-7b64-4e18-9a0d-2c5e8f7b1a44"
 	mountTruncatedSessionID = "8d2e4b71-1c93-4f05-b6a7-9e3d0c5a2f68"
 	mountFreshSessionID     = "b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05"
+	mountEmptySessionID     = "c60b9f74-9e36-4a22-a75e-7c4b5d9f1e80"
 	mountProjectRowID       = "git@github.com:acme/tool.git"
 	expectedMountSeedRows   = 1
 )
@@ -48,6 +49,46 @@ type mountRetentionSeedFixture struct {
 	CleanupDays    int    `yaml:"cleanupDays"`
 	SelectedOption string `yaml:"selectedOption"`
 	CleanReceipt   string `yaml:"cleanReceipt"`
+}
+
+func TestKickstartPreview_ImportedEmptySessionShowsRawSource(t *testing.T) {
+	dataHome := t.TempDir()
+	sourcePath := filepath.Join(t.TempDir(), "snapshot.jsonl")
+	source := []byte(`{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"AGENTS.md":{"version":1}}}}` + "\n")
+	if err := os.WriteFile(sourcePath, source, 0o600); err != nil {
+		t.Fatalf("write empty-turn source: %v", err)
+	}
+
+	dbPath := defaults.ResolveDBFilePathWith(dataHome).String()
+	if err := os.MkdirAll(filepath.Dir(dbPath), defaults.PrivateDirPerm); err != nil {
+		t.Fatalf("create data directory: %v", err)
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer db.Close()
+	now := time.Now().UnixMilli()
+	entry := storeEntryFor(mountEmptySessionID, now)
+	entry.Metadata.Source.FilePath = sourcePath
+	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
+		t.Fatalf("insert empty-turn session: %v", err)
+	}
+
+	sessions := []ftue.SessionListing{{Harness: string(defaults.HarnessClaudeCode), SessionID: mountEmptySessionID, ProjectName: "acme/tool"}}
+	body, err := kickstartPreview(mountTestCmd(t, dataHome), db, theme.New(theme.ModeDark), sessions).Body(mountEmptySessionID)
+	if err != nil {
+		t.Fatalf("preview imported empty session: %v", err)
+	}
+	got := flattenPane(body.Render(100))
+	for _, want := range []string{"imported, but no renderable transcript turns were produced", "raw source records", "file-history-snapshot", "trackedFileBackups"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("preview must contain %q; got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "not imported yet") {
+		t.Errorf("imported empty session must not be described as unimported; got:\n%s", got)
+	}
 }
 
 type mountContractDocument struct {

@@ -32,6 +32,12 @@ func (f *OSFileSystem) ReadFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// Open implements the optional streaming reader Claude discovery uses to avoid
+// loading every normal transcript before it can reject file-history sidecars.
+func (f *OSFileSystem) Open(path string) (io.ReadCloser, error) {
+	return os.Open(path)
+}
+
 func (f *OSFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(path, data, perm)
 }

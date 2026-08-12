@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +24,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
+
+const kickstartRawSourcePreviewLimit = 16 * 1024
 
 // runKickstartFlow mounts the rebuilt onboarding: the declarative settings.Flow
 // (the single atomic config commit point) sequenced after an optional village
@@ -339,6 +345,7 @@ func kickstartPreview(
 	sessions []ftue.SessionListing,
 	contexts ...kickstart.ListingPreviewContextSource,
 ) kit.BodySource {
+	ctx := cmd.Context()
 	var turns kickstart.SessionTurnsFunc
 	if db != nil {
 		ctx := cmd.Context()
@@ -365,10 +372,70 @@ func kickstartPreview(
 		}
 	}
 	var opts []kickstart.ListingPreviewOption
+	if db != nil {
+		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
+	}
 	if len(contexts) > 0 && contexts[0] != nil {
 		opts = append(opts, kickstart.WithListingPreviewContextSource(contexts[0]))
 	}
 	return kickstart.NewListingPreview(th, sessions, turns, opts...)
+}
+
+// kickstartImportedEmptySessionBody gives an already stored session with no
+// renderable turns an honest preview. Source records are bounded so a malformed
+// or unusually large transcript cannot monopolize the interactive preview.
+func kickstartImportedEmptySessionBody(ctx context.Context, db *store.Store) kickstart.EmptySessionBodyFunc {
+	return func(sessionID string) (kickstart.EmptySessionPreview, bool, error) {
+		info, err := db.SessionSourceInfo(ctx, sessionID)
+		if err != nil {
+			return kickstart.EmptySessionPreview{}, false, fmt.Errorf("read source information for imported session %q: %w", sessionID, err)
+		}
+		const noTurns = "imported, but no renderable transcript turns were produced."
+		if info == nil {
+			return kickstart.EmptySessionPreview{}, false, nil
+		}
+		if info.SourcePath == "" {
+			return kickstart.EmptySessionPreview{Note: noTurns + "\n\nraw source is unavailable."}, true, nil
+		}
+
+		file, err := os.Open(info.SourcePath)
+		if err != nil {
+			return kickstart.EmptySessionPreview{Note: noTurns + "\n\nraw source is unavailable."}, true, nil
+		}
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, kickstartRawSourcePreviewLimit+1))
+		if err != nil {
+			return kickstart.EmptySessionPreview{}, false, fmt.Errorf("read source for imported session %q: %w", sessionID, err)
+		}
+		truncated := len(data) > kickstartRawSourcePreviewLimit
+		if truncated {
+			data = data[:kickstartRawSourcePreviewLimit]
+			if newline := bytes.LastIndexByte(data, '\n'); newline >= 0 {
+				data = data[:newline]
+			}
+		}
+
+		var records []string
+		for _, line := range bytes.Split(data, []byte("\n")) {
+			line = bytes.TrimSpace(line)
+			if len(line) == 0 {
+				continue
+			}
+			var pretty bytes.Buffer
+			if json.Indent(&pretty, line, "", "  ") == nil {
+				records = append(records, pretty.String())
+			}
+		}
+		if len(records) == 0 {
+			return kickstart.EmptySessionPreview{Note: noTurns + "\n\nraw source records are unavailable or malformed."}, true, nil
+		}
+
+		note := noTurns + "\n\nraw source records:"
+		if truncated {
+			note += "\n\nsource preview truncated."
+		}
+		return kickstart.EmptySessionPreview{Note: note, SourceJSON: strings.Join(records, "\n")}, true, nil
+	}
 }
 
 // themeModeFor picks the palette mode from config, defaulting to dark when the
