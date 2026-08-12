@@ -175,7 +175,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		rootIndex := make(map[string]int)
 
 		for _, entry := range rootEntries {
-			if a.isClaudeFileHistorySnapshot(entry.path) {
+			if !a.hasClaudeConversationRecord(entry.path) {
 				continue
 			}
 			sid, _ := NewSessionID(entry.sessionID) // already validated in pass 1
@@ -205,7 +205,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 
 		for _, entry := range subagentEntries {
-			if a.isClaudeFileHistorySnapshot(entry.path) {
+			if !a.hasClaudeConversationRecord(entry.path) {
 				continue
 			}
 			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
@@ -331,25 +331,25 @@ func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTe
 	return identity, spawns
 }
 
-// isClaudeFileHistorySnapshot reports whether path contains only Claude Code's
-// file-history snapshot records. Those records point to saved file revisions,
-// not a user/assistant conversation, and therefore are not importable sessions.
-// Discovery fails open for unreadable, empty, malformed, or mixed files so a
-// future transcript format cannot be silently discarded.
-func (a *ClaudeAdapter) isClaudeFileHistorySnapshot(path string) bool {
+// hasClaudeConversationRecord reports whether path contains at least one native
+// user or assistant record. Claude stores summary and file-history records in
+// session-shaped JSONL files, but neither represents a renderable conversation.
+// Unreadable, empty, or malformed files fail open so discovery can surface them
+// for diagnostics rather than silently discarding a future transcript format.
+func (a *ClaudeAdapter) hasClaudeConversationRecord(path string) bool {
 	var reader io.Reader
 	var closeFile func() error
 	if opener, ok := a.fs.(claudeFileOpener); ok {
 		file, err := opener.Open(path)
 		if err != nil {
-			return false
+			return true
 		}
 		reader = file
 		closeFile = file.Close
 	} else {
 		data, err := a.fs.ReadFile(path)
 		if err != nil {
-			return false
+			return true
 		}
 		reader = bytes.NewReader(data)
 	}
@@ -359,7 +359,7 @@ func (a *ClaudeAdapter) isClaudeFileHistorySnapshot(path string) bool {
 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
-	var records int
+	var validRecords int
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
@@ -368,12 +368,15 @@ func (a *ClaudeAdapter) isClaudeFileHistorySnapshot(path string) bool {
 		var value struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal(line, &value) != nil || value.Type != "file-history-snapshot" {
-			return false
+		if json.Unmarshal(line, &value) != nil {
+			return true
 		}
-		records++
+		validRecords++
+		if value.Type == "user" || value.Type == "assistant" {
+			return true
+		}
 	}
-	return scanner.Err() == nil && records > 0
+	return scanner.Err() != nil || validRecords == 0
 }
 
 // claudeTeammateSpawn recognizes only the top-level native tool result. Tool

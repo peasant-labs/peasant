@@ -46,14 +46,14 @@ func loadClaudeSnapshotFilterFixtures(t *testing.T) claudeSnapshotFilterFixtures
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("Claude snapshot filter fixture must contain exactly one YAML document: %v", err)
 	}
-	const expectedCases = 4
+	const expectedCases = 6
 	if fixtures.DeclaredCases != expectedCases || len(fixtures.Cases) != expectedCases {
 		t.Fatalf("Claude snapshot filter fixture case guard failed: declared=%d actual=%d expected=%d", fixtures.DeclaredCases, len(fixtures.Cases), expectedCases)
 	}
 	return fixtures
 }
 
-func TestClaudeAdapter_DiscoverFiltersFileHistorySnapshots(t *testing.T) {
+func TestClaudeAdapter_DiscoverRequiresConversationRecords(t *testing.T) {
 	for _, fixture := range loadClaudeSnapshotFilterFixtures(t).Cases {
 		t.Run(fixture.Name, func(t *testing.T) {
 			fs := testutil.NewMemFS()
