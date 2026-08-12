@@ -146,14 +146,35 @@ describe('CommandPalette', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/search?q=pipeline&limit=20')));
     const hit = await screen.findByText('fix the [pipeline] retry');
     expect(screen.getAllByText('Messages')).toHaveLength(2);
-    expect(screen.getByText(/alpha-main · main · selected/)).toBeInTheDocument();
-
-    expect(screen.getByText(/alpha-feature · main · unselected/)).toBeInTheDocument();
+    expect(screen.getAllByTestId('search-annotation')).toHaveLength(2);
+    expect(screen.getAllByTestId('search-annotation')[0]).toHaveTextContent('alpha-main·main·selected');
+    expect(screen.getAllByTestId('search-annotation')[1]).toHaveTextContent('alpha-feature·main·unselected');
     expect(screen.getByText("<script>alert('unsafe')</script> pipeline")).toBeInTheDocument();
     expect(screen.queryByText(/opaque-location/)).not.toBeInTheDocument();
     const unselectedHit = screen.getByText("<script>alert('unsafe')</script> pipeline");
     fireEvent.mouseDown(unselectedHit);
     expect(push).toHaveBeenCalledWith(`/projects/${PROJECT_HASH}/sess-unselected?turn=7`);
+  });
+
+  it('keeps discovery metadata visible and fully described for each result', async () => {
+    const valid = validFixture.search as Record<string, unknown>;
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/search') return Response.json(valid);
+      if (url.pathname === '/api/v1/web/discovery') return Response.json(validFixture.discovery);
+      if (url.pathname === '/api/v1/projects/summary') return Response.json(parentVisibleFixture.summary);
+      throw new Error(`unexpected test request ${url.pathname}`);
+    });
+    open();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'pipeline' } });
+
+    const annotation = (await screen.findAllByTestId('search-annotation'))[1];
+    expect(annotation).toBeVisible();
+    const resultButton = annotation.closest('button');
+    expect(resultButton).not.toBeNull();
+    const descriptionId = resultButton?.getAttribute('aria-describedby');
+    expect(descriptionId).toBeTruthy();
+    expect(document.getElementById(descriptionId ?? '')).toHaveTextContent('alpha-feature·main·unselected');
   });
 
   it.each(invalidFixtures.map((row) => [String(row.name), row] as const))('fails closed for %s', async (_name, row) => {

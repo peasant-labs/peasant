@@ -283,8 +283,8 @@ export function CommandPalette() {
       {/* Scrim — click to dismiss.
           DESIGN_SYSTEM: bg-black/55 is the sanctioned modal-backdrop exception
           to the no-opacity-surface rule (same scrim the TourOverlay uses). */}
-      <button
-        type="button"
+                  <button
+                   type="button"
         aria-label="Close command palette"
         className="absolute inset-0 bg-black/55 cursor-default"
         onClick={close}
@@ -355,24 +355,32 @@ export function CommandPalette() {
                     e.preventDefault();
                     c.run();
                   }}
-                  className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] focus-mono cursor-pointer ${
-                    i === activeIndex ? 'bg-surface-hover text-ink' : 'text-ink-2'
-                  }`}
-                >
-                   <span className="min-w-0 truncate">
-                     {c.searchAnnotation ? (
-                       <>
-                         <span>{c.label}</span>
-                         <span className="ml-2 text-ink-3">
-                           {c.searchAnnotation.discovery.locationLabel}
-                           {' · '}{c.searchAnnotation.discovery.branch || 'no branch'}
-                           {' · '}{c.searchAnnotation.discovery.selectionStatus}
-                         </span>
-                       </>
-                     ) : c.label}
+                   aria-describedby={c.searchAnnotation ? `${listId}-${i}-description` : undefined}
+                   className={`flex w-full flex-col items-stretch gap-1.5 px-3 py-2 text-left text-[13px] focus-mono cursor-pointer sm:flex-row sm:items-start sm:justify-between sm:gap-3 ${
+                     i === activeIndex ? 'bg-surface-hover text-ink' : 'text-ink-2'
+                   }`}
+                 >
+                    <span className="min-w-0 break-words">
+                      {c.label}
+                    </span>
+                   <span className="flex shrink-0 items-center justify-between gap-3 sm:ml-auto sm:justify-end">
+                     {c.searchAnnotation && (
+                       <span
+                         id={`${listId}-${i}-description`}
+                         data-search-annotation="true"
+                         data-testid="search-annotation"
+                         className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-snug text-ink-3"
+                       >
+                         <span className="break-all">{c.searchAnnotation.discovery.locationLabel}</span>
+                         <span aria-hidden="true">·</span>
+                         <span>{c.searchAnnotation.discovery.branch || 'no branch'}</span>
+                         <span aria-hidden="true">·</span>
+                         <span>{c.searchAnnotation.discovery.selectionStatus}</span>
+                       </span>
+                     )}
+                     <span className="v2-eyebrow shrink-0">{c.group}</span>
                    </span>
-                  <span className="v2-eyebrow shrink-0">{c.group}</span>
-                </button>
+                 </button>
               </li>
             ))
           ) : null}
