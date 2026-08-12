@@ -35,7 +35,13 @@ cases:
     role: assistant
     modelID: "anthropic/claude-opus-4-8"
     structuralPartType: compaction
+    reasoningTokens: 41
+    cacheRead: 43
+    cacheWrite: 47
     expectedRole: system
+    expectedReasoningTokens: 41
+    expectedCacheRead: 43
+    expectedCacheWrite: 47
   - name: unrelated_extra_fields_preserved
     messageID: msg_008_extra
     role: assistant
