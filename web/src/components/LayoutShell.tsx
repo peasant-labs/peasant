@@ -14,7 +14,6 @@ function LayoutInner({ children }: { children: ReactNode }) {
   return (
     <TourProvider>
       <TopNavbar connected={connected} />
-      <span data-visual-build-marker="peasant-88-search-share" aria-hidden="true" className="hidden" />
       {children}
       <CommandPalette />
       {process.env.NODE_ENV === 'development' && <DevAnnotateOverlay />}

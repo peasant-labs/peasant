@@ -4,7 +4,7 @@
  * Usage: node search-share-visual.mjs [--self-test]
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import YAML from 'yaml'
@@ -19,8 +19,12 @@ const OUT = process.env.CAPTURES || join(HERE, 'review-capture', 'search-share')
 const PORT = process.env.PEASANT_SEARCH_SHARE_PORT || '8718'
 const ORIGIN = `http://localhost:${PORT}`
 const CHROME = process.env.CHROME_PATH
-const MARKER = 'peasant-88-search-share'
 const FIXTURE = join(HERE, 'testdata/search-share.yaml')
+const FEATURE_BYTES = Object.freeze({
+  search: ['data-search-annotation', 'repositoryLocationId'],
+  share: ['share-project-check__mixed', 'choose sessions to contribute'],
+  discoveryRoute: '/api/v1/web/discovery',
+})
 const THEMES = ['dark', 'light']
 const VIEWPORTS = [{ id: 'desktop', width: 1440, height: 1000 }, { id: 'mobile', width: 390, height: 844 }]
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -37,21 +41,26 @@ function readFixture() {
   const document = YAML.parseDocument(readFileSync(FIXTURE, 'utf8'), { strict: true, uniqueKeys: true })
   if (document.errors.length) fail(`fixture ${relative(REPO, FIXTURE)} is invalid: ${document.errors.map((e) => e.message).join('; ')}`)
   const fixture = document.toJS()
-  if (fixture.marker !== MARKER || fixture.search.results.length < 2 || fixture.sessions.length < 4 || fixture.discovery.length !== fixture.sessions.length) {
-    fail(`fixture must contain marker ${MARKER}, two search rows, four sessions, and one discovery row per session`)
+  if (fixture.marker !== undefined || fixture.search.results.length < 2 || fixture.sessions.length < 4 || fixture.discovery.length !== fixture.sessions.length) {
+    fail('fixture must omit feature markers and contain two search rows, four sessions, and one discovery row per session')
   }
   return fixture
 }
 function assertProvenance() {
   const chunks = join(WEB, 'out/_next/static/chunks')
   if (!existsSync(BIN) || !existsSync(chunks)) fail(`missing ${relative(REPO, BIN)} or exported chunks; run make build in this worktree first`)
-  const source = join(WEB, 'src/components/LayoutShell.tsx')
-  const chunk = filesBelow(chunks).find((path) => path.endsWith('.js') && readFileSync(path, 'utf8').includes(MARKER))
-  const binaryHasMarker = readFileSync(BIN).includes(MARKER)
-  if (!chunk || !binaryHasMarker || statSync(BIN).mtimeMs < statSync(source).mtimeMs || statSync(chunk).mtimeMs < statSync(source).mtimeMs) {
-    fail(`stale provenance: source=${relative(REPO, source)} chunk=${chunk ? relative(REPO, chunk) : 'missing'} binaryMarker=${binaryHasMarker}; rebuild this exact worktree`)
+  const javascript = filesBelow(chunks).filter((path) => path.endsWith('.js')).map((path) => ({ path, content: readFileSync(path, 'utf8') }))
+  const featureChunks = Object.fromEntries(Object.entries(FEATURE_BYTES).filter(([name]) => name !== 'discoveryRoute').map(([name, signatures]) => {
+    const match = javascript.find(({ content }) => signatures.every((signature) => content.includes(signature)))
+    return [name, match]
+  }))
+  const binary = readFileSync(BIN)
+  const missingBinaryBytes = Object.values(FEATURE_BYTES).flat().filter((signature) => !binary.includes(Buffer.from(signature)))
+  const missingChunks = Object.entries(featureChunks).filter(([, chunk]) => !chunk).map(([name]) => name)
+  if (missingChunks.length || missingBinaryBytes.length || !binary.includes(Buffer.from(FEATURE_BYTES.discoveryRoute))) {
+    fail(`stale provenance: missing shipped feature chunks=${missingChunks.join(',') || 'none'}, missing binary bytes=${missingBinaryBytes.join(',') || 'none'}, discoveryRoute=${binary.includes(Buffer.from(FEATURE_BYTES.discoveryRoute))}; rebuild this exact worktree`)
   }
-  return chunk
+  return Object.values(featureChunks).map(({ path }) => path)
 }
 function response(body) { return { status: 200, contentType: 'application/json', body: JSON.stringify(body) } }
 function installMocks(page, fixture, diagnostics) {
@@ -73,12 +82,10 @@ async function wait(page, selector, label, visible = true) {
 }
 async function assertCommon(page, theme, label) {
   const result = await page.evaluate((expected) => {
-    const marker = document.querySelector('[data-visual-build-marker="peasant-88-search-share"]')
     const body = document.body.getBoundingClientRect()
-    const style = marker ? getComputedStyle(marker) : null
-    return { theme: document.documentElement.getAttribute('data-theme'), marker: !!marker, body: { width: body.width, height: body.height }, font: getComputedStyle(document.body).fontFamily, markerDisplay: style?.display }
+    return { theme: document.documentElement.getAttribute('data-theme'), body: { width: body.width, height: body.height }, font: getComputedStyle(document.body).fontFamily }
   }, theme)
-  if (result.theme !== theme || !result.marker || result.body.width < 100 || result.body.height < 100 || !/Atkinson/i.test(result.font)) fail(`${label}: chrome/theme/marker/font probe ${JSON.stringify(result)}`)
+  if (result.theme !== theme || result.body.width < 100 || result.body.height < 100 || !/Atkinson/i.test(result.font)) fail(`${label}: chrome/theme/font probe ${JSON.stringify(result)}`)
 }
 async function capture(page, gate, file, selector, label) {
   mkdirSync(dirname(file), { recursive: true })
@@ -101,7 +108,6 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
   if (theme === 'light') await page.evaluate(() => { document.documentElement.setAttribute('data-theme', 'light'); document.documentElement.setAttribute('data-tb-theme', 'light') })
   await assertCommon(page, theme, `${theme}/${viewport.id}/${kind}`)
   if (kind === 'search') {
-    await wait(page, '[data-visual-build-marker="peasant-88-search-share"]', 'mounted application chrome', false)
     await pause(500)
     await page.keyboard.down('Control')
     await page.keyboard.press('k')
@@ -187,14 +193,12 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
 
 if (process.argv.includes('--self-test')) {
   const fixture = readFixture()
-  if (fixture.marker !== MARKER) process.exit(1)
-  console.log(`OK search-share visual self-test: ${fixture.sessions.length} sessions, ${fixture.discovery.length} discovery rows, marker=${MARKER}`)
+  console.log(`OK search-share visual self-test: ${fixture.sessions.length} sessions, ${fixture.discovery.length} discovery rows, feature bytes=search/share/discovery-route`)
   process.exit(0)
 }
 if (!CHROME) fail('CHROME_PATH is unset; set it to google-chrome or chromium')
 const fixture = readFixture()
-const chunk = assertProvenance()
-console.log(`provenance source=web/src/components/LayoutShell.tsx chunk=${relative(REPO, chunk)} binaryMarker=true`)
+const chunks = assertProvenance()
 mkdirSync(OUT, { recursive: true })
 const puppeteer = (await import(process.env.PUPPETEER_CORE || 'puppeteer-core')).default
 const server = spawn(BIN, ['web', 'start', '--port', PORT, '--foreground', '--no-browser', '--mock-data-store=web,sessions,search'], { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] })
@@ -205,6 +209,14 @@ try {
   let healthy = false
   for (let i = 0; i < 40 && !healthy; i++) { healthy = (await fetch(`${ORIGIN}/api/v1/health`).catch(() => null))?.status === 200; if (!healthy) await pause(250) }
   if (!healthy) fail(`real binary did not become healthy on ${ORIGIN}: ${serverError.trim()}`)
+  for (const chunk of chunks) {
+    const chunkPath = `/_next/static/chunks/${relative(join(WEB, 'out/_next/static/chunks'), chunk).split('\\').join('/')}`
+    const served = await fetch(`${ORIGIN}${chunkPath}`)
+    const body = await served.text()
+    const expected = Object.values(FEATURE_BYTES).flat().some((signature) => body.includes(signature))
+    if (served.status !== 200 || !expected) fail(`served provenance: ${chunkPath} returned HTTP ${served.status} without verified feature bytes; stop stale servers, rebuild this exact worktree, and rerun the visual harness`)
+  }
+  console.log(`provenance chunks=${chunks.map((chunk) => relative(REPO, chunk)).join(',')} binaryBytes=search/share/discovery-route served=true`)
   const gate = new SurfaceGate(await browser.newPage())
   for (const theme of THEMES) for (const viewport of VIEWPORTS) for (const kind of ['search', 'share']) {
     const page = await browser.newPage()
