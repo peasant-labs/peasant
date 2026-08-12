@@ -58,6 +58,14 @@ type claudeJSONLLine struct {
 	} `json:"message"`
 }
 
+// claudeTeammateIdentity is deliberately private to discovery. Claude's team
+// metadata is useful for relating separately stored transcripts, but is not a
+// public session contract.
+type claudeTeammateIdentity struct {
+	team string
+	name string
+}
+
 // contentBlock is a typed block inside an assistant message content array.
 type contentBlock struct {
 	Type string `json:"type"`
@@ -219,7 +227,116 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
+	a.linkClaudeTeammates(sessions)
 	return sessions, nil
+}
+
+// linkClaudeTeammates links independently persisted Claude root transcripts.
+// A relationship is accepted only when both sides provide one unambiguous
+// complete identity. Files that cannot be read or parsed simply provide no
+// evidence and do not make discovery fail.
+func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession) {
+	rootByPath := make(map[ResolvedPath]int)
+	for i := range sessions {
+		if sessions[i].ParentUUID == nil {
+			rootByPath[sessions[i].SourcePath] = i
+		}
+	}
+
+	identities := make(map[claudeTeammateIdentity][]int)
+	spawns := make(map[claudeTeammateIdentity]map[int]struct{})
+	for i := range sessions {
+		if _, ok := rootByPath[sessions[i].SourcePath]; !ok {
+			continue
+		}
+		identity, spawnRecords := a.readClaudeTeammateEvidence(sessions[i].SourcePath)
+		if identity != nil {
+			identities[*identity] = append(identities[*identity], i)
+		}
+		for _, spawn := range spawnRecords {
+			if spawns[spawn] == nil {
+				spawns[spawn] = make(map[int]struct{})
+			}
+			spawns[spawn][i] = struct{}{}
+		}
+	}
+
+	for identity, children := range identities {
+		parents := spawns[identity]
+		if len(children) != 1 || len(parents) != 1 {
+			continue
+		}
+		child := children[0]
+		var parent int
+		for parent = range parents {
+		}
+		if child == parent {
+			continue
+		}
+		parentID := sessions[parent].SessionID
+		sessions[child].ParentUUID = &parentID
+		sessions[parent].SubagentPaths = append(sessions[parent].SubagentPaths, sessions[child].SourcePath)
+	}
+}
+
+func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTeammateIdentity, []claudeTeammateIdentity) {
+	data, err := a.fs.ReadFile(path.String())
+	if err != nil {
+		return nil, nil
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
+	var identity *claudeTeammateIdentity
+	var invalidIdentity bool
+	var spawns []claudeTeammateIdentity
+	for scanner.Scan() {
+		var value map[string]any
+		if json.Unmarshal(scanner.Bytes(), &value) != nil {
+			continue
+		}
+		_, hasTeam := value["teamName"]
+		_, hasName := value["agentName"]
+		if hasTeam || hasName {
+			team, teamOK := value["teamName"].(string)
+			name, nameOK := value["agentName"].(string)
+			if !teamOK || !nameOK || team == "" || name == "" {
+				invalidIdentity = true
+			} else {
+				candidate := claudeTeammateIdentity{team: team, name: name}
+				if identity == nil {
+					identity = &candidate
+				} else if *identity != candidate {
+					invalidIdentity = true
+				}
+			}
+		}
+		if spawn, ok := claudeTeammateSpawn(value); ok {
+			spawns = append(spawns, spawn)
+		}
+	}
+	if invalidIdentity {
+		identity = nil
+	}
+	return identity, spawns
+}
+
+// claudeTeammateSpawn recognizes only the top-level native tool result. Tool
+// output may contain arbitrary JSON-shaped text, so recursive matching would
+// let an unrelated tool payload forge discovery evidence.
+func claudeTeammateSpawn(value map[string]any) (claudeTeammateIdentity, bool) {
+	result, ok := value["toolUseResult"].(map[string]any)
+	if !ok {
+		return claudeTeammateIdentity{}, false
+	}
+	if status, _ := result["status"].(string); status != "teammate_spawned" {
+		return claudeTeammateIdentity{}, false
+	}
+	team, teamOK := result["team_name"].(string)
+	name, nameOK := result["name"].(string)
+	if !teamOK || !nameOK || team == "" || name == "" {
+		return claudeTeammateIdentity{}, false
+	}
+	return claudeTeammateIdentity{team: team, name: name}, true
 }
 
 // claudeSessionHints holds metadata extracted from the first few JSONL lines.
