@@ -180,6 +180,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 
 	// Pass 3: Emit turns.
 	turns := make([]ingest.Turn, 0, len(entries))
+	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
 		if suppress[e.EntryIndex] {
 			continue
@@ -254,6 +255,9 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		}
 
 		turns = append(turns, t)
+		if observation := modelObservation(e); observation.present {
+			turnObservations[t.Index] = observation
+		}
 	}
 
 	// Post-processing: empty entry suppression and consecutive dedup.
@@ -270,7 +274,8 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	for _, t := range turns {
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
-		if !hasContent && !hasTools {
+		hasObservation := turnObservations[t.Index].present
+		if !hasContent && !hasTools && !hasObservation {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -283,7 +288,10 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			continue
 		}
 		prev := &deduped[len(deduped)-1]
-		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" {
+		prevObservation := turnObservations[prev.Index]
+		currObservation := turnObservations[curr.Index]
+		observationsEqual := prevObservation.present == currObservation.present && prevObservation.value == currObservation.value
+		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
 			prevHasTools := len(prev.ToolCalls) > 0
 			currHasTools := len(curr.ToolCalls) > 0
 			if currHasTools && !prevHasTools {

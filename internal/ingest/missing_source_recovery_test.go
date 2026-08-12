@@ -121,6 +121,10 @@ func TestPipeline_AutoDetectMissingSourcesKeepsExistingEntriesStale(t *testing.T
 			metricsStore.LookupSessionLocationFunc = func(context.Context, ingest.SessionID) (string, string, error) {
 				return "missing-host", "", nil
 			}
+			wantOutputPath := fixtureCase.OutputTranscriptPath
+			if wantOutputPath != "/sync/missing-host/"+fixtureCase.SessionID+"/"+fixtureCase.SessionID+"--transcript.jsonl" {
+				t.Fatalf("fixture output path %q does not match production reconstruction", wantOutputPath)
+			}
 
 			fs := testutil.NewMemFS()
 			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), map[ingest.Harness]ingest.AdapterFactory{

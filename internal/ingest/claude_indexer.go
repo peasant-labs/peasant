@@ -266,6 +266,15 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 
 	// Classify entry type and role.
 	entry.EntryType, entry.Role = classifyClaudeEntry(line)
+	if entry.Role == RoleAssistant {
+		if modelID, err := NewModelID(line.Message.Model); err == nil && strings.TrimSpace(line.Message.Model) == line.Message.Model {
+			extra, marshalErr := json.Marshal(map[string]string{"model_id": modelID.String()})
+			if marshalErr == nil {
+				value := string(extra)
+				entry.Extra = &value
+			}
+		}
+	}
 
 	// Timestamp.
 	entry.TimestampMs = parseIndexTimestamp(line.Timestamp)
