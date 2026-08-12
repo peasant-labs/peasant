@@ -1,0 +1,4 @@
+expectedCaseCount: 2
+requiredNames:
+  - model_only_assistant_survives
+  - adjacent_observation_boundaries_survive_real_dedup

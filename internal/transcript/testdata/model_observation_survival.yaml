@@ -1,0 +1,35 @@
+cases:
+  - name: model_only_assistant_survives
+    entries:
+      - index: 4
+        role: assistant
+        observedModel: "Anthropic/Claude Fable-5"
+    expected:
+      - index: 4
+        role: assistant
+        observedModel: "Anthropic/Claude Fable-5"
+  - name: adjacent_observation_boundaries_survive_real_dedup
+    entries:
+      - index: 10
+        role: assistant
+        content: "identical answer"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 11
+        role: assistant
+        content: "identical answer"
+      - index: 12
+        role: assistant
+        content: "identical answer"
+        observedModel: "anthropic/claude-opus-4-8"
+    expected:
+      - index: 10
+        role: assistant
+        content: "identical answer"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 11
+        role: assistant
+        content: "identical answer"
+      - index: 12
+        role: assistant
+        content: "identical answer"
+        observedModel: "anthropic/claude-opus-4-8"

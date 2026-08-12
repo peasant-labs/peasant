@@ -1,0 +1,10 @@
+cases:
+  - name: missing_every_source_keeps_existing_entries_stale
+    sessionID: "99d59925-36bc-424c-a789-8be54d9702ba"
+    sourcePath: "/missing/raw-session.jsonl"
+    outputTranscriptPath: "/sync/missing-host/99d59925-36bc-424c-a789-8be54d9702ba/99d59925-36bc-424c-a789-8be54d9702ba--transcript.jsonl"
+    existingEntry:
+      index: 7
+      role: assistant
+      content: "existing indexed answer"
+      observedModel: "Anthropic/Claude Fable-5"
