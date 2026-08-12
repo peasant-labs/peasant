@@ -1,0 +1,76 @@
+marker: peasant-88-search-share
+search:
+  query: retry
+  results:
+    - sessionId: sess-visual-search-001
+      project: peasant-labs/engine
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      entryIndex: 4
+      role: user
+      snippet: "[retry] queue handling keeps the worker observable"
+      score: 0.98
+    - sessionId: sess-visual-search-002
+      project: peasant-labs/engine
+      projectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      entryIndex: 8
+      role: assistant
+      snippet: "review the [retry] branch before merging"
+      score: 0.82
+sessions:
+  - id: sess-visual-search-001
+    harness: claude-code
+    startTime: "2026-02-24T09:15:00Z"
+    durationMins: 47
+    totalTokens: 128450
+    turnCount: 34
+    toolCallCount: 12
+    project: peasant-labs/engine
+    preview: "Wire retry handling into the queue worker"
+    outcome: resolved
+  - id: sess-visual-search-002
+    harness: opencode
+    startTime: "2026-02-23T14:30:00Z"
+    durationMins: 22
+    totalTokens: 56200
+    turnCount: 18
+    toolCallCount: 7
+    project: peasant-labs/engine
+    preview: "Review the retry branch before merging"
+    outcome: partial
+  - id: sess-visual-share-003
+    harness: claude-code
+    startTime: "2026-02-22T10:00:00Z"
+    durationMins: 65
+    totalTokens: 201800
+    turnCount: 52
+    toolCallCount: 19
+    project: peasant-labs/engine
+    preview: "Refactor the worker after the retry audit"
+    outcome: failed
+  - id: sess-visual-share-004
+    harness: gemini-cli
+    startTime: "2026-02-21T16:45:00Z"
+    durationMins: 15
+    totalTokens: 31500
+    turnCount: 10
+    toolCallCount: 4
+    project: peasant-labs/engine
+    preview: "Document the queue worker deployment"
+    outcome: resolved
+discovery:
+  - sessionId: sess-visual-search-001
+    locationLabel: worktrees/engine-main
+    branch: main
+    selectionStatus: selected
+  - sessionId: sess-visual-search-002
+    locationLabel: worktrees/engine-feature
+    branch: feat/retry-observability
+    selectionStatus: unselected
+  - sessionId: sess-visual-share-003
+    locationLabel: worktrees/engine-feature
+    branch: feat/retry-observability
+    selectionStatus: selected
+  - sessionId: sess-visual-share-004
+    locationLabel: forks/engine-docs
+    branch: docs/worker-guide
+    selectionStatus: unselected
