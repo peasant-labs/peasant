@@ -123,20 +123,37 @@ function assertSingleRail(probe, label) {
     if (horizontals !== (depthChanged ? 1 : 0)) bad(`between rows ${a - 1} and ${a} (depthChanged=${depthChanged}) expected ${depthChanged ? 1 : 0} horizontal step, saw ${horizontals}`)
   }
 
-  // No parallel rails: at every sampled y the path crosses exactly one vertical.
+  // No parallel rails: densely sample y across the whole trace (every ~4px, and
+  // every adjacent-anchor midpoint), skipping the junction bands, and require
+  // exactly one vertical segment crossing each — proving a single spine with no
+  // per-list spine or ancestor rail running alongside its descendants.
   const verticals = []
+  const junctions = []
   for (let i = 1; i < pts.length; i++) {
-    if (Math.abs(pts[i].x - pts[i - 1].x) <= EPS && Math.abs(pts[i].y - pts[i - 1].y) > EPS) {
-      verticals.push({ x: pts[i].x, y0: Math.min(pts[i].y, pts[i - 1].y), y1: Math.max(pts[i].y, pts[i - 1].y) })
-    }
+    const dx = Math.abs(pts[i].x - pts[i - 1].x), dy = Math.abs(pts[i].y - pts[i - 1].y)
+    if (dx <= EPS && dy > EPS) verticals.push({ x: pts[i].x, y0: Math.min(pts[i].y, pts[i - 1].y), y1: Math.max(pts[i].y, pts[i - 1].y) })
+    if (dy <= EPS && dx > EPS) junctions.push(pts[i].y) // horizontal step y
   }
-  const samples = []
-  for (let a = 1; a < anchors.length; a++) samples.push((anchors[a - 1].y + anchors[a].y) / 2)
-  samples.push((head.y + firstA.y) / 2, (tail.y + lastA.y) / 2)
+  for (const p of pts) junctions.push(p.y)
+  const nearJunction = (y) => junctions.some((jy) => Math.abs(y - jy) <= 1.5)
+  const samples = new Set()
+  for (let y = head.y + 1; y < tail.y; y += 4) samples.add(+y.toFixed(2))
+  for (let a = 1; a < anchors.length; a++) samples.add(+((anchors[a - 1].y + anchors[a].y) / 2).toFixed(2))
+  samples.add(+((head.y + firstA.y) / 2).toFixed(2))
+  samples.add(+((tail.y + lastA.y) / 2).toFixed(2))
+  let checked = 0
   for (const y of samples) {
+    if (nearJunction(y)) continue
     const crossing = verticals.filter((v) => y > v.y0 + 0.5 && y < v.y1 - 0.5).length
     if (crossing !== 1) bad(`at y ${y.toFixed(1)} the path crosses ${crossing} vertical segments (expected exactly one — no parallel rails)`)
+    checked++
   }
+  if (checked < anchors.length) bad(`no-parallel-rails sampling too sparse (${checked} usable samples)`)
+
+  // Exactly one connector layer, and no row element draws a pseudo-element
+  // connector border (guards against reintroducing either legacy rail model).
+  if (probe.svgCount !== 1) bad(`expected exactly one <svg class="share-rail">, saw ${probe.svgCount}`)
+  if (probe.pseudoConnectors !== 0) bad(`${probe.pseudoConnectors} hierarchy row element(s) still draw a ::before/::after connector border — no pseudo-element rails allowed`)
 }
 
 function filesBelow(directory) {
@@ -333,7 +350,21 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
       // and assert the legacy multi-rail model left nothing behind.
       const svg = chooser.querySelector('svg.share-rail')
       const pathEls = [...chooser.querySelectorAll('.share-rail__path')]
+      const svgCount = chooser.querySelectorAll('svg.share-rail').length
       const legacy = chooser.querySelectorAll('.share-tree, .share-tree__node, .share-tree__row, .share-tree__leaf, .share-hierarchy-rail, .share-hierarchy-children, .share-hierarchy-child-row').length
+      // No structural row element may draw a ::before/::after connector BORDER
+      // (either legacy rail model did). Scope excludes the checkbox controls
+      // (.check) whose own checkmark/mixed pseudo-elements legitimately use
+      // borders; element/real borders (e.g. the project section divider) are not
+      // pseudo-elements and are not counted here.
+      const rowsRoot = chooser.querySelector('.share-rail-rows')
+      const drawsPseudoBorder = (el, which) => {
+        const s = getComputedStyle(el, which)
+        if (s.content === 'none') return false
+        return [['borderLeftStyle', 'borderLeftWidth'], ['borderTopStyle', 'borderTopWidth'], ['borderRightStyle', 'borderRightWidth'], ['borderBottomStyle', 'borderBottomWidth']]
+          .some(([style, width]) => s[style] !== 'none' && parseFloat(s[width]) > 0)
+      }
+      const pseudoConnectors = rowsRoot ? [...rowsRoot.querySelectorAll('*')].filter((el) => !el.closest('.check') && (drawsPseudoBorder(el, '::before') || drawsPseudoBorder(el, '::after'))).length : -1
       const svgRect = svg ? svg.getBoundingClientRect() : { left: 0, top: 0 }
       const depthOf = (label) => label.startsWith('select project') ? 0 : label.startsWith('select repository location') ? 1 : label.startsWith('select branch') ? 2 : label.startsWith('select session') ? 3 : -1
       const anchors = boxes
@@ -341,7 +372,7 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
         .filter((entry) => entry.depth >= 0)
         .map(({ box, depth }) => { const r = box.getBoundingClientRect(); return { depth, x: r.left + r.width / 2 - svgRect.left, y: r.top + r.height / 2 - svgRect.top } })
 
-      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor }, hasSvg: !!svg, pathCount: pathEls.length, legacy, d: pathEls[0]?.getAttribute('d') || '', anchors }
+      return { labels, locations, branches, checkboxes: boxes.length, hierarchyMixed: hierarchyBoxes.filter((box) => box.indeterminate && box.getAttribute('aria-checked') === 'mixed').length, disabled, selected, toolbar: toolbar?.textContent?.trim(), overflow: chooser.scrollWidth > chooser.clientWidth, focused: document.activeElement === focusedBox, focus: focusStyle?.outlineStyle, focusWidth: focusStyle?.outlineWidth, focusColor: focusStyle?.outlineColor, glyphs: glyphs.length, glyph: { opacity: glyphStyle?.opacity, width: glyphStyle?.width, height: glyphStyle?.height, background: glyphStyle?.backgroundColor }, hasSvg: !!svg, svgCount, pathCount: pathEls.length, legacy, pseudoConnectors, d: pathEls[0]?.getAttribute('d') || '', anchors }
     })
     if (probe.labels.length !== 1 || probe.locations.length !== 3 || probe.branches.length !== 3 || probe.checkboxes !== 11 || probe.selected !== 1 || probe.hierarchyMixed !== 3 || probe.glyphs !== 3 || probe.toolbar !== 'select all' || probe.overflow || !probe.focused || probe.focusWidth === '0px' || probe.focusColor === 'rgba(0, 0, 0, 0)' || probe.glyph.opacity !== '1' || probe.glyph.width === '0px' || probe.glyph.height === '0px' || probe.glyph.background === 'rgba(0, 0, 0, 0)') fail(`${theme}/${viewport.id}/share: hierarchy/state/focus/mixed-glyph probe ${JSON.stringify(probe)}`)
     assertSingleRail(probe, `${theme}/${viewport.id}/share`)
