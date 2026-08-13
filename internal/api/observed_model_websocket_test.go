@@ -10,7 +10,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -63,11 +65,27 @@ func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixtu
 
 func TestHubSessionDetailEmitsObservedModelEvidence(t *testing.T) {
 	fixture := loadObservedModelWebSocketFixture(t)
-	session := ingest.Session{ID: ingest.SessionID(fixture.SessionID), Model: fixture.StoredModel}
-	for _, source := range fixture.Turns {
-		session.Turns = append(session.Turns, ingest.Turn{Index: source.Index, Role: schema.Role(source.Role), Depth: source.Depth, Content: source.Content, ObservedModel: ingest.ObservedModelID(source.ObservedModel)})
+	db := openTestStore(t)
+	stored := makeStoreEntry(t, fixture.SessionID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fixture-host", defaults.HarnessClaudeCode, 1700000000000, 1, 1, "fixture-project", len(fixture.Turns), 0, 1000)
+	model, err := ingest.NewModelID(fixture.StoredModel)
+	if err != nil {
+		t.Fatalf("stored model: %v", err)
 	}
-	provider := &wsMockProvider{sessions: []ingest.Session{session}}
+	stored.Metadata.Model = model
+	if err := db.InsertSessions(context.Background(), []ingest.StoreEntry{stored}); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	entries := make([]schema.SessionEntry, 0, len(fixture.Turns))
+	for _, source := range fixture.Turns {
+		extraBytes, _ := json.Marshal(map[string]string{"model_id": source.ObservedModel})
+		extra := string(extraBytes)
+		content := source.Content
+		entries = append(entries, schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: source.Index, Role: schema.Role(source.Role), Depth: source.Depth, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &content, Extra: &extra})
+	}
+	if err := db.IndexSessionEntries(context.Background(), ingest.SessionID(fixture.SessionID), entries); err != nil {
+		t.Fatalf("persist entries: %v", err)
+	}
+	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
 	hub := api.NewHub(provider)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

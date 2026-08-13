@@ -30,3 +30,21 @@ cases:
         - observed_model_v1
         - observed_model_v1
     supportsObservedModel: true
+  - name: unknown_before_known_token_is_tolerated
+    response:
+      annotationSchemaVersion: "1.0"
+      pushContractVersion: "0.1.1"
+      minPushContractVersion: "0.1.0"
+      contentCapabilities:
+        - future_evidence_v1
+        - observed_model_v1
+    supportsObservedModel: true
+  - name: unknown_after_known_token_is_tolerated
+    response:
+      annotationSchemaVersion: "1.0"
+      pushContractVersion: "0.1.1"
+      minPushContractVersion: "0.1.0"
+      contentCapabilities:
+        - observed_model_v1
+        - future_evidence_v1
+    supportsObservedModel: true

@@ -15,3 +15,18 @@ cases:
     advertisement: []
     wantUploads: 1
     wantError: false
+  - name: enriched_dry_run_remains_local_without_refusal
+    observedModel: Anthropic/Claude Fable-5
+    advertisement: []
+    dryRun: true
+    wantUploads: 0
+    wantError: false
+  - name: schema_evidence_bypasses_aggressive_content_redaction
+    observedModel: Anthropic/Claude Fable-5
+    advertisement:
+      - observed_model_v1
+    redactPattern: Anthropic/Claude Fable-5|private-project-text
+    content: private-project-text remains ordinary transcript content
+    wantContent: " remains ordinary transcript content"
+    wantUploads: 1
+    wantError: false

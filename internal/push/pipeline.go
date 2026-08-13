@@ -25,8 +25,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
-	"github.com/peasant-labs/peasant/internal/transcript"
-	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -817,14 +815,12 @@ func (p *Pipeline) pushSession(
 		// metrics stays nil — graceful degradation
 	}
 
-	// 3. Fetch session entries from the store (non-fatal on error).
+	// 3. Fetch session entries from the store. Transcript bytes and schema-owned
+	// evidence are indivisible publication input, so an unreadable entry set fails closed.
 	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
 	if entriesErr != nil {
-		slog.Warn("failed to list entries, continuing without",
-			"session_id", sess.SessionID,
-			"error", entriesErr,
-		)
-		// entries stays nil — graceful degradation
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
+			"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline.pushSession ListEntries\n  when: before redaction, capability negotiation, content construction, or upload\n  meaning: no transcript bytes, metadata, receipt, or audit record were sent or written\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, entriesErr)}
 	}
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
@@ -872,10 +868,6 @@ func (p *Pipeline) pushSession(
 			Status:    PushStatusError,
 			Error:     entriesErr,
 		}
-	}
-	hasObservedModel, observationErr := transcript.ValidateObservedModelEntries(entries)
-	if observationErr != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: observationErr}
 	}
 
 	// 4. Load the producer-owned durable associations. Unlike metrics and
@@ -949,6 +941,11 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
+	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
+	}
+	requiredCapabilities := schema.RequiredContentCapabilities(*content.SessionDetail)
 
 	// 5. DRY-RUN DIVERGENCE. Everything above — read metadata, the metadata/model
 	// guards, redaction, mapping, and the client-side schema validation — is the
@@ -968,7 +965,8 @@ func (p *Pipeline) pushSession(
 			Status:    status,
 		}
 	}
-	if hasObservedModel && !village.SupportsObservedModel(contentCapabilities) {
+	missingCapabilities := schema.MissingContentCapabilities(contentCapabilities, requiredCapabilities)
+	if len(missingCapabilities) > 0 {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,
@@ -1013,7 +1011,7 @@ func (p *Pipeline) pushSession(
 	// remain, and are no longer the only things protecting a publish.
 	// Raw project, path, branch, and remote fields are consent-gated before this
 	// document is assembled; redaction is defense in depth, not a consent gate.
-	transcriptBytes, err := marshalTranscriptContent(&meta, entries, emit, p.cfg.Push.Fields, p.redactor)
+	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
 	if err != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,

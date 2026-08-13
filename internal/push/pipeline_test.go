@@ -2004,9 +2004,7 @@ func TestPipeline_EntriesAbsent_PushSucceedsWithoutEntries(t *testing.T) {
 	}
 }
 
-func TestPipeline_EntriesError_PushSucceedsWithoutEntries(t *testing.T) {
-	// When ListEntries returns an error, the pipeline should degrade gracefully:
-	// push the session without entries (no abort).
+func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -2029,20 +2027,17 @@ func TestPipeline_EntriesError_PushSucceedsWithoutEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if result.New != 1 {
-		t.Errorf("new: got %d, want 1", result.New)
+	if result.Errors != 1 {
+		t.Errorf("errors: got %d, want 1", result.Errors)
 	}
-
-	// Should still have pushed (no entries key).
-	if len(pub.Calls) != 1 {
-		t.Fatalf("expected 1 HTTP call, got %d", len(pub.Calls))
+	if len(pub.Calls) != 0 {
+		t.Fatalf("entry read failure made %d HTTP calls, want 0", len(pub.Calls))
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(pub.Calls[0].MetadataJSON, &payload); err != nil {
-		t.Fatalf("unmarshal published metadata: %v", err)
-	}
-	if _, exists := payload["entries"]; exists {
-		t.Error("entries key should be absent when ListEntries fails")
+	message := result.Sessions[0].Error.Error()
+	for _, fragment := range []string{"what:", "why:", "where:", "when:", "meaning:", "fix:", "no transcript bytes"} {
+		if !strings.Contains(message, fragment) {
+			t.Errorf("actionable entry-read error missing %q: %s", fragment, message)
+		}
 	}
 }
 

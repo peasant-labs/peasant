@@ -1,6 +1,8 @@
-expectedCaseCount: 4
+expectedCaseCount: 6
 requiredNames:
   - exact_observed_model_capability
   - legacy_response_without_capabilities
   - unknown_capability_does_not_authorize
   - duplicate_known_token_is_tolerated_by_reader
+  - unknown_before_known_token_is_tolerated
+  - unknown_after_known_token_is_tolerated

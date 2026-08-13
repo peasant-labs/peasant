@@ -105,7 +105,8 @@ func TestVillageClient_ContentCapabilityAdvertisement(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetSchemaVersion: %v", err)
 			}
-			if got := village.SupportsObservedModel(response.ContentCapabilities); got != fixtureCase.SupportsObservedModel {
+			got := len(schema.MissingContentCapabilities(response.ContentCapabilities, []schema.ContentCapability{schema.ContentCapabilityObservedModelV1})) == 0
+			if got != fixtureCase.SupportsObservedModel {
 				t.Fatalf("SupportsObservedModel=%t, want %t; capabilities=%+v", got, fixtureCase.SupportsObservedModel, response.ContentCapabilities)
 			}
 		})

@@ -14,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -30,6 +31,10 @@ type observedModelCapabilityCase struct {
 	Advertisement []schema.ContentCapability `yaml:"advertisement"`
 	WantUploads   int                        `yaml:"wantUploads"`
 	WantError     bool                       `yaml:"wantError"`
+	DryRun        bool                       `yaml:"dryRun"`
+	RedactPattern string                     `yaml:"redactPattern"`
+	Content       string                     `yaml:"content"`
+	WantContent   string                     `yaml:"wantContent"`
 }
 
 type observedModelCapabilityFixture struct {
@@ -72,7 +77,10 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			fs := testutil.NewMemFS()
 			seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
 			entry := schema.SessionEntry{SessionID: schema.SessionID(testutil.TestSessionUUID), EntryIndex: 1, Harness: defaults.HarnessClaudeCode, Role: schema.RoleAssistant, EntryType: schema.EntryTypeText}
-			content := "answer"
+			content := fixtureCase.Content
+			if content == "" {
+				content = "answer"
+			}
 			entry.ContentPreview = &content
 			if fixtureCase.ObservedModel != "" {
 				extra, _ := json.Marshal(map[string]string{"model_id": fixtureCase.ObservedModel})
@@ -88,7 +96,15 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 				ContentCapabilities: fixtureCase.Advertisement,
 			}}
 			var stderr bytes.Buffer
-			pipeline := newTestPipeline(store, publisher, fs, baseTestConfig(), push.PipelineConfig{Concurrency: 1}, &stderr)
+			var redactor ingest.TextRedactor
+			if fixtureCase.RedactPattern != "" {
+				var err error
+				redactor, err = redact.NewRedactor(redact.Standard, []redact.UserPattern{{ID: "publication-project-pattern", Category: redact.CategoryProject, Pattern: fixtureCase.RedactPattern}}, redact.XDGPaths{})
+				if err != nil {
+					t.Fatalf("build custom redactor: %v", err)
+				}
+			}
+			pipeline := push.NewPipeline(store, publisher, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{Concurrency: 1, DryRun: fixtureCase.DryRun}, redactor, &stderr)
 			result, err := pipeline.Run(context.Background())
 			if err != nil {
 				t.Fatalf("Run: %v", err)
@@ -99,6 +115,14 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			gotError := result.Errors > 0
 			if gotError != fixtureCase.WantError {
 				t.Fatalf("error=%t, want %t; result=%+v", gotError, fixtureCase.WantError, result)
+			}
+			if fixtureCase.DryRun {
+				if publisher.SchemaVersionCalls != 0 || len(store.SavedPublicationIDs) != 0 || len(store.PushLogs) != 0 || len(store.PublicationAttempts) != 0 {
+					t.Fatalf("dry run side effects: schema=%d uploads=%d persistence=%d audit=%d attempts=%d", publisher.SchemaVersionCalls, len(publisher.Calls), len(store.SavedPublicationIDs), len(store.PushLogs), len(store.PublicationAttempts))
+				}
+				if len(result.Sessions) != 1 || result.Sessions[0].Status != push.PushStatusNew {
+					t.Fatalf("dry run forecast=%+v, want one new session without capability refusal", result)
+				}
 			}
 			if fixtureCase.WantError {
 				message := result.Sessions[0].Error.Error()
@@ -115,6 +139,9 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 				}
 				if got := envelope.SessionDetail.Turns[0].ObservedModel.String(); got != fixtureCase.ObservedModel {
 					t.Fatalf("uploaded observedModel=%q, want %q", got, fixtureCase.ObservedModel)
+				}
+				if fixtureCase.WantContent != "" && envelope.SessionDetail.Turns[0].Content != fixtureCase.WantContent {
+					t.Fatalf("uploaded content=%q, want %q", envelope.SessionDetail.Turns[0].Content, fixtureCase.WantContent)
 				}
 			}
 		})

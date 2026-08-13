@@ -113,7 +113,63 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 				"push can be retried, but it will fail the same way until the rule that reshaped the document is fixed",
 			err)
 	}
+	if len(redactedEntries) != len(entries) {
+		return nil, fmt.Errorf("redact transcript entries for publication: entry count changed from %d to %d during redaction; schema-owned evidence cannot be matched safely, so nothing was uploaded; fix the custom redaction rule so it rewrites values without reshaping the entry list, then retry", len(entries), len(redactedEntries))
+	}
+	for index := range entries {
+		modelID, present, err := observedModelFromExtra(entries[index].Extra)
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			restored, err := restoreObservedModelExtra(redactedEntries[index].Extra, modelID)
+			if err != nil {
+				return nil, err
+			}
+			redactedEntries[index].Extra = restored
+		}
+	}
 	return redactedEntries, nil
+}
+
+func observedModelFromExtra(extra *string) (string, bool, error) {
+	if extra == nil {
+		return "", false, nil
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(*extra), &document); err != nil {
+		return "", false, nil
+	}
+	raw, present := document["model_id"]
+	if !present {
+		return "", false, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false, fmt.Errorf("preserve observed-model evidence during publication redaction: model_id is not a string: %w; nothing was uploaded; repair or re-index the entry, then retry", err)
+	}
+	return value, true, nil
+}
+
+func restoreObservedModelExtra(extra *string, value string) (*string, error) {
+	if extra == nil {
+		return nil, fmt.Errorf("preserve observed-model evidence during publication redaction: redaction removed the entry Extra document; nothing was uploaded; fix the custom rule so it does not reshape entries, then retry")
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(*extra), &document); err != nil {
+		return nil, fmt.Errorf("preserve observed-model evidence during publication redaction: redacted Extra is unreadable: %w; nothing was uploaded; fix the custom rule, then retry", err)
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	document["model_id"] = raw
+	restored, err := json.Marshal(document)
+	if err != nil {
+		return nil, err
+	}
+	result := string(restored)
+	return &result, nil
 }
 
 // redactJSONDocument redacts a marshalled document and PROVES it did.
@@ -187,6 +243,10 @@ func marshalTranscriptContent(
 	if err != nil {
 		return nil, err
 	}
+	return marshalBuiltTranscriptContent(content, redactor)
+}
+
+func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) ([]byte, error) {
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)
@@ -226,7 +286,19 @@ func marshalTranscriptContent(
 				"this with the session id printed above; retrying will fail the same way until the rule is corrected",
 			check.Kind, err)
 	}
-	return redacted, nil
+	if content.SessionDetail != nil && check.SessionDetail != nil {
+		restoreObservedModels(content.SessionDetail.Turns, check.SessionDetail.Turns)
+	}
+	return json.Marshal(check)
+}
+
+func restoreObservedModels(source, destination []schema.TurnDetail) {
+	for index := range source {
+		if index >= len(destination) {
+			return
+		}
+		destination[index].ObservedModel = source[index].ObservedModel
+	}
 }
 
 // metadataToSession projects on-disk metadata onto the SessionToDetail input
