@@ -1,9 +1,12 @@
 import { GRAPH_APP_SECTIONS } from '@peasant-labs/fairtrade/graph';
+import { UI_CAPABILITY, type UICapabilityToken } from '@/lib/capabilities/tokens';
 
 /**
  * App navigation sections — the single source of truth for the top nav, and
- * the seam the breadcrumbs and a future Cmd+K command palette read from, so
- * "what sections exist and where they live" is defined once.
+ * the seam the breadcrumbs and the Cmd+K command palette read from, so
+ * "what sections exist, where they live, and what capability they require" is
+ * defined once. This is the only capability-visibility policy point: consumers
+ * hold no raw section-visibility logic.
  *
  * Graph shell IA: Analytics · Changes · Code map (nav order — from
  * @peasant-labs/fairtrade/graph's GRAPH_APP_SECTIONS, analytics-first). Home
@@ -23,6 +26,13 @@ export interface NavSection {
   tourId?: string;
   /** Hover description (also reusable as a palette hint). */
   title?: string;
+  /**
+   * The server-advertised capability token required to expose this section in
+   * persistent chrome. Absent means always visible; present means the section
+   * is discoverable only when the capability set contains this token. Direct
+   * routes are unaffected — this gates discoverability, not reachability.
+   */
+  requiredCapability?: UICapabilityToken;
 }
 
 type GraphSectionId = 'analytics' | 'map' | 'changes';
@@ -41,6 +51,7 @@ const ROUTES: Record<GraphSectionId, Omit<NavSection, 'id' | 'label'>> = {
     href: '/map',
     activePrefixes: ['/map', '/projects'],
     title: 'See a project as a map of its code areas and how they connect.',
+    requiredCapability: UI_CAPABILITY.codeMapNavigationV1,
   },
   analytics: {
     href: '/analytics',
@@ -63,6 +74,32 @@ export const NAV_SECTIONS: NavSection[] = GRAPH_NAV.map((section) => {
   const route = ROUTES[section.id];
   return { ...route, id: section.id, label: section.label };
 });
+
+/**
+ * Whether a section's discoverability requirement is met by the advertised
+ * capability set. A section with no `requiredCapability` is always visible; one
+ * with a requirement is visible only when the set contains that exact token.
+ * Gated routes stay reachable by URL — this governs persistent chrome only.
+ */
+function sectionMeetsCapability(section: NavSection, capabilities: ReadonlySet<string>): boolean {
+  return section.requiredCapability === undefined || capabilities.has(section.requiredCapability);
+}
+
+/** The nav sections to expose given the server's advertised capability set. */
+export function visibleNavSections(capabilities: ReadonlySet<string>): NavSection[] {
+  return NAV_SECTIONS.filter((section) => sectionMeetsCapability(section, capabilities));
+}
+
+/**
+ * Whether the section `id` is discoverable given the advertised capability set.
+ * The single predicate consumers (e.g. the command palette's per-project "· map"
+ * jumps) use for capability-gated visibility — no raw section-id visibility
+ * booleans live outside this module and the capabilities provider.
+ */
+export function isSectionVisible(id: NavSection['id'], capabilities: ReadonlySet<string>): boolean {
+  const section = NAV_SECTIONS.find((s) => s.id === id);
+  return section !== undefined && sectionMeetsCapability(section, capabilities);
+}
 
 /**
  * Whether `pathname` is within a section. Changes owns `/` exactly (plus its

@@ -12,8 +12,8 @@ importers:
         specifier: 0.0.11
         version: 0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.1.1-rc2
+        version: 0.1.1-rc2
       '@peasant-labs/transcript-browser':
         specifier: 0.0.6
         version: 0.0.6(@peasant-labs/fairtrade@0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1))(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -755,6 +755,10 @@ packages:
 
   '@peasant-labs/schema@0.1.0':
     resolution: {integrity: sha512-TEQEmab+Fn6DCvq6CxTF8zrrSygDW2zHZ56fj9shMp2ySWNUSrf3RkrhcKTnaf1kRCRAHt4AyDJY+VTHrd1rFQ==}
+    engines: {node: '>=24'}
+
+  '@peasant-labs/schema@0.1.1-rc2':
+    resolution: {integrity: sha512-1R0qTQXA4O4/aEt50qQZeEhxuiwFtZdfx1psA6kgsb2XVJ8DLUOP0x542GLRc1Xa/DTVU8fpriRQpLyNfXesUw==}
     engines: {node: '>=24'}
 
   '@peasant-labs/transcript-browser@0.0.6':
@@ -3064,6 +3068,11 @@ snapshots:
       - redux
 
   '@peasant-labs/schema@0.1.0':
+    dependencies:
+      yaml: 2.9.0
+      zod: 4.4.3
+
+  '@peasant-labs/schema@0.1.1-rc2':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3

@@ -49,6 +49,9 @@ type ServerConfig struct {
 	DevProxyAddr string // e.g. "localhost:3000"
 	WebAssets    fs.FS  // embedded SPA assets (nil in dev mode)
 	MockConfig   *MockConfigResponse
+	// Experimental unlocks shelved web surfaces (the code map section).
+	// Set from `peasant web start --experimental`; default off.
+	Experimental bool
 	// Store is the SQLite analytics store, used to wire the annotation REST handlers.
 	// Nil disables annotation endpoints (returns 503).
 	Store *store.Store
@@ -96,6 +99,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("POST "+defaults.RouteShutdown.String(), s.handleShutdown(ctx))
 	mux.HandleFunc(defaults.RouteWS.String(), s.handleWebSocket)
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
+	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
@@ -243,6 +247,42 @@ func (s *Server) handleMockConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to marshal config"}`, http.StatusInternalServerError)
 		return
 	}
+	w.Write(data)
+}
+
+// handleUICapabilities advertises the UI capability tokens enabled for this
+// running server process so the bundled SPA can decide at runtime which
+// optional surfaces to make discoverable. Always available — a default
+// (non-experimental) server advertises no tokens (the uiCapabilities field is
+// omitted). The advertised set is derived once from server config via the
+// single flag->token policy point (uiCapabilitiesForConfig) and canonicalized
+// (validated, deduped, sorted) by newUICapabilitiesResponse.
+//
+// The response carries Cache-Control: no-store because the capability set is
+// per-process: a cached answer reused across a restart with different flags
+// would advertise stale capabilities.
+func (s *Server) handleUICapabilities(w http.ResponseWriter, _ *http.Request) {
+	resp, err := newUICapabilitiesResponse(uiCapabilitiesForConfig(s.cfg))
+	if err != nil {
+		http.Error(
+			w,
+			fmt.Sprintf(
+				`{"error":"failed to build UI capabilities advertisement: %s"}`,
+				err.Error(),
+			),
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, `{"error":"failed to marshal UI capabilities response"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+	w.Header().Set(defaults.HeaderCacheControl, defaults.CacheControlNoStore)
 	w.Write(data)
 }
 

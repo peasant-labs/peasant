@@ -705,8 +705,10 @@ backed by an in-memory SQLite store. The WebSocket E2E pattern in `AGENTS.md` ex
 ## Experimental features
 
 Some features are shelved in the default build and gated behind a flag: the
-`peasant memory` command group (Go build tag `-tags=experimental`) and the
-`/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`). See
+`peasant memory` command group (Go build tag `-tags=experimental`), the
+`/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`), and the
+code map's web navigation entry points (`peasant web start --experimental`, a
+discoverability gate that never removes the underlying `/map` routes). See
 [EXPERIMENTAL.md](EXPERIMENTAL.md) for how to enable them, and
 [docs/memory.md](docs/memory.md) for the agent-memory reference.
 
@@ -797,6 +799,15 @@ byte-fresh + immutable by that module's own gates. Peasant **consumes** the
 published module by pinning it in `go.mod`; it does not regenerate or vendor the
 specs. To change the contract, land it in the schema repo (regenerate there, and
 version-bump for any released-surface change) and then re-pin peasant's `go.mod`.
+
+This includes Peasant's local web server. Adding, removing, or changing an
+externally observable HTTP or WebSocket route, method, request or response
+payload, message, capability token, or status behavior requires a corresponding
+change to the Peasant Local OpenAPI specification in the schema repository.
+The implementation and contract may be prototyped together on unmerged branches
+to validate the design. Before the Peasant change merges or ships, land and tag
+the schema contract, re-pin Peasant to that release, and verify the implementation
+against it. Local handler structs are not a substitute for the canonical contract.
 
 See [`docs/contract/versioning-procedure.md`](docs/contract/versioning-procedure.md).
 

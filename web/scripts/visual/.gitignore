@@ -16,6 +16,7 @@
 !peasant-shoot.mjs
 !boot-peasant.mjs
 !shell-nav-gate.mjs
+!shell-nav-default-gate.mjs
 !surface-gate.mjs
 !stitch-sxs.mjs
 !changes-shoot.mjs

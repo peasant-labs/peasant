@@ -42,6 +42,10 @@ web/.vite/
 # Agent stuff
 .worktrees/
 
+# Local-only visual review captures (shell nav gates, provenance-verified
+# screenshots). Disposable per-round evidence — never commit the PNGs.
+review-capture/
+
 # Local-only raw Cursor bytes for fixture scrubbing (never commit)
 
 # Internal design docs (not for public release)

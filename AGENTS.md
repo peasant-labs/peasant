@@ -74,6 +74,13 @@ ast-grep scan --config sgconfig.yml .
 - The API and wire types are owned by [`github.com/peasant-labs/schema`](https://github.com/peasant-labs/schema).
   Contract changes land and receive a module tag there before Peasant updates its dependency. Do
   not hand-edit generated OpenAPI artifacts.
+- Peasant web endpoints are part of the schema-owned Peasant Local API contract. Adding, removing,
+  or changing an externally observable HTTP or WebSocket route, method, request, response, message,
+  capability token, or status behavior requires a schema-repository PR that updates the Peasant
+  Local OpenAPI specification. You may prototype the consumer and contract together on unmerged
+  branches to validate the design. Before the Peasant change merges or ships, land and tag the
+  schema contract, re-pin Peasant to that release, and verify the implementation against it. See
+  [`docs/contract/versioning-procedure.md`](docs/contract/versioning-procedure.md).
 - Redaction rules and their canonical fixtures are owned by
   [`github.com/peasant-labs/redact`](https://github.com/peasant-labs/redact). Keep Peasant's mounted
   command, ingest, configuration, and API integration coverage when updating that dependency.
