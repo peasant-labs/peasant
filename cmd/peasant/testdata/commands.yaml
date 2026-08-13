@@ -30,7 +30,30 @@ commands:
       - { name: since, type: string, default: "" }
     subcommands:
       - use: logs
+        flags:
+          - { name: dry-run, type: bool, default: "false" }
+          - { name: force, type: bool, default: "false" }
+          - { name: all, type: bool, default: "false" }
+          - { name: verbose, type: bool, default: "false" }
+          - { name: debug, type: bool, default: "false", hidden: true }
+          - { name: json, type: bool, default: "false" }
+          - { name: session, type: stringSlice, default: "[]" }
+          - { name: since, type: string, default: "" }
+          - { name: source-provider, type: string, default: "" }
+          - { name: source-path, type: string, default: "" }
+          - { name: output, type: string, default: "" }
+          - { name: include-active, type: bool, default: "false" }
       - use: index
+        flags:
+          - { name: dry-run, type: bool, default: "false" }
+          - { name: force, type: bool, default: "false" }
+          - { name: all, type: bool, default: "false" }
+          - { name: verbose, type: bool, default: "false" }
+          - { name: debug, type: bool, default: "false", hidden: true }
+          - { name: json, type: bool, default: "false" }
+          - { name: session, type: stringSlice, default: "[]" }
+          - { name: since, type: string, default: "" }
+          - { name: detect-commits, type: bool, default: "false" }
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }
@@ -51,6 +74,8 @@ commands:
           - { name: dev, type: bool, default: "false" }
           - { name: foreground, type: bool, default: "false" }
           - { name: no-browser, type: bool, default: "false" }
+          - { name: verbose, type: bool, default: "false" }
+          - { name: experimental, type: bool, default: "false" }
           - { name: mock-data-store, type: string, default: "" }
       - use: stop
         flags:
@@ -63,8 +88,18 @@ commands:
       - { name: force, type: bool, default: "false" }
       - { name: source-provider, type: string, default: "" }
       - { name: visibility, type: string, default: "" }
+      - { name: license, type: string, default: "" }
       - { name: json, type: bool, default: "false" }
       - { name: verbose, type: bool, default: "false" }
+      - { name: quiet, type: bool, default: "false" }
+      - { name: non-interactive, type: bool, default: "false" }
+      - { name: yes, type: bool, default: "false" }
+      - { name: annotation-id, type: stringArray, default: "[]" }
+      - { name: annotation-hash, type: stringArray, default: "[]" }
+      - { name: timing, type: bool, default: "false" }
+      - { name: concurrency, type: int, default: "0" }
+      - { name: repository, type: string, default: "" }
+      - { name: timeout, type: duration, default: "0s" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
@@ -120,6 +155,8 @@ commands:
 
   - name: Login
     use: login
+    flags:
+      - { name: local, type: bool, default: "false", hidden: true }
 
   - name: Logout
     use: logout
@@ -141,6 +178,7 @@ commands:
           - { name: project, type: string, default: "" }
           - { name: unannotated, type: bool, default: "false" }
           - { name: seed, type: int64, default: "0" }
+          - { name: session-from-file, type: string, default: "" }
       - use: import
         flags:
           - { name: from-file, type: string, default: "" }
@@ -185,3 +223,4 @@ commands:
           - { name: annotator, type: string, default: "" }
           - { name: session, type: string, default: "" }
           - { name: paired, type: bool, default: "false" }
+          - { name: summary, type: bool, default: "false" }

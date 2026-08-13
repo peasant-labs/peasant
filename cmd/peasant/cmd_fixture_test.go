@@ -9,8 +9,16 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 )
+
+// autoRegisteredFlags are the flags cobra may register on a command without a
+// builder declaring them (so they are legitimately absent from the fixture).
+// Only these names are exempt from exact-set flag verification.
+var autoRegisteredFlags = map[string]struct{}{
+	"help": {},
+}
 
 // ---- YAML fixture schema ----
 
@@ -269,7 +277,9 @@ func runExitCases(t *testing.T, topUse string, builder func() *cobra.Command, ca
 
 func verifyFlags(t *testing.T, cmd *cobra.Command, expected []flagFixture) {
 	t.Helper()
+	expectedByName := make(map[string]struct{}, len(expected))
 	for _, ef := range expected {
+		expectedByName[ef.Name] = struct{}{}
 		f := cmd.Flags().Lookup(ef.Name)
 		if f == nil {
 			t.Errorf("flag --%s not registered on %q", ef.Name, cmd.Name())
@@ -285,6 +295,26 @@ func verifyFlags(t *testing.T, cmd *cobra.Command, expected []flagFixture) {
 			t.Errorf("flag --%s on %q: hidden want %v, got %v", ef.Name, cmd.Name(), ef.Hidden, f.Hidden)
 		}
 	}
+
+	// Exact-set verification: every flag this command itself introduces (its own
+	// local and persistent flags, excluding flags inherited from a parent) must
+	// be declared in the fixture. A subset-only check let real flags (e.g. web
+	// start's --experimental and --verbose) go unfixtured — exactly the
+	// silent-addition regression this fixture exists to catch. Only cobra's
+	// auto-registered flags (help) are exempt; builders never define those.
+	inherited := cmd.InheritedFlags()
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if inherited.Lookup(f.Name) != nil {
+			return // inherited from a parent command; owned by that command's fixture
+		}
+		if _, ok := expectedByName[f.Name]; ok {
+			return
+		}
+		if _, ok := autoRegisteredFlags[f.Name]; ok {
+			return
+		}
+		t.Errorf("flag --%s registered on %q is not declared in commands.yaml; add it to the fixture (exact-set flag verification)", f.Name, cmd.Name())
+	})
 }
 
 func verifySubcommands(t *testing.T, parent *cobra.Command, expected []subCmdFixture) {
