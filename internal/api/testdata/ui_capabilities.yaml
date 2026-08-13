@@ -1,0 +1,39 @@
+# Fixture corpus for the GET /api/v1/config/capabilities advertisement.
+#
+# endpoint_cases drive the real running server through its HTTP handler and
+# assert the advertised token set plus the Content-Type and Cache-Control
+# headers. producer_cases drive the response constructor
+# (newUICapabilitiesResponse) directly to prove canonicalization (dedupe + sort)
+# and the fail-loud rejection of out-of-inventory tokens — situations a
+# correctly-configured server never reaches through uiCapabilitiesForConfig, so
+# they can only be exercised at the construction seam.
+declared_endpoint_rows: 2
+declared_producer_rows: 3
+
+endpoint_cases:
+  - name: default-server-advertises-nothing
+    experimental: false
+    expected_tokens: []
+  - name: experimental-server-advertises-code-map
+    experimental: true
+    expected_tokens:
+      - code_map_navigation_v1
+
+producer_cases:
+  - name: duplicate-input-is-deduplicated-and-sorted
+    input_tokens:
+      - code_map_navigation_v1
+      - code_map_navigation_v1
+    expect_error: false
+    expected_tokens:
+      - code_map_navigation_v1
+  - name: empty-input-yields-empty-advertisement
+    input_tokens: []
+    expect_error: false
+    expected_tokens: []
+  - name: out-of-inventory-token-is-rejected
+    input_tokens:
+      - not_a_real_capability
+    expect_error: true
+    error_contains: closed capability inventory
+    expected_tokens: []

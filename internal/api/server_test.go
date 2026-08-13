@@ -142,55 +142,6 @@ func TestServer_MockConfig_ReturnsConfig(t *testing.T) {
 	}
 }
 
-func TestServer_FeaturesConfig_ReportsExperimentalGate(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		experimental bool
-	}{
-		{name: "default server answers false", experimental: false},
-		{name: "experimental server answers true", experimental: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			srv := api.NewServer(api.ServerConfig{Port: 0, Experimental: tc.experimental})
-			if err := srv.Listen(ctx); err != nil {
-				t.Fatalf("Listen: %v", err)
-			}
-
-			baseURL := "http://" + srv.Addr().String()
-
-			errCh := make(chan error, 1)
-			go func() { errCh <- srv.Serve(ctx) }()
-
-			resp, err := http.Get(baseURL + "/api/v1/config/features")
-			if err != nil {
-				t.Fatalf("GET /api/v1/config/features: %v", err)
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
-			}
-
-			body, _ := io.ReadAll(resp.Body)
-			var result api.FeaturesConfigResponse
-			if err := json.Unmarshal(body, &result); err != nil {
-				t.Fatalf("unmarshal response: %v", err)
-			}
-			if result.Experimental != tc.experimental {
-				t.Errorf("Experimental = %v, want %v", result.Experimental, tc.experimental)
-			}
-
-			cancel()
-			if err := <-errCh; err != nil {
-				t.Errorf("shutdown: %v", err)
-			}
-		})
-	}
-}
-
 func TestServer_MockConfig_NotConfigured(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
