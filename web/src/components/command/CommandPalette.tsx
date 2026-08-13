@@ -248,14 +248,14 @@ export function CommandPalette() {
       messages.flatMap((r) => {
         const projectHash = parseProjectHash(r.projectHash);
         if (!projectHash) return [];
-         return [{
-         id: `msg:${r.sessionId}:${r.entryIndex}`,
-         label: messageLabel(r.snippet),
-         group: 'Messages',
-         keywords: r.project,
-         searchAnnotation: { discovery: r.discovery },
-         run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
-      }];
+        return [{
+          id: `msg:${r.sessionId}:${r.entryIndex}`,
+          label: messageLabel(r.snippet),
+          group: 'Messages',
+          keywords: r.project,
+          searchAnnotation: { discovery: r.discovery },
+          run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
+        }];
       }),
     [messages, go],
   );
