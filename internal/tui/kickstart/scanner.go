@@ -3,14 +3,13 @@ package kickstart
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
+	"github.com/peasant-labs/peasant/internal/selectionprojection"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -188,16 +187,6 @@ type scannerProjectAgg struct {
 	branches map[string]*scannerBranchAgg
 }
 
-type multiplicityKey struct {
-	harness ingest.Harness
-	text    string
-}
-
-type identityCohort struct {
-	identities map[string]struct{}
-	unresolved bool
-}
-
 // PrepareSessionListings resolves every non-empty WorkingDir first, then annotates
 // every listing from the complete cohort. Session count never affects
 // multiplicity: each normalized remote/name counts distinct RepositoryIdentity
@@ -216,8 +205,8 @@ func prepareSessionListings(
 	repositoryResolver ingest.RepositoryIdentityResolver,
 ) []PreparedSessionListing {
 	cohort := make([]PreparedSessionListing, len(sessions))
-	remoteCohorts := map[multiplicityKey]*identityCohort{}
-	nameCohorts := map[multiplicityKey]*identityCohort{}
+	remoteEvidence := make([]selectionprojection.CohortEvidence, len(sessions))
+	nameEvidence := make([]selectionprojection.CohortEvidence, len(sessions))
 	repositoryIdentities := map[ingest.ClonePath]ingest.RepositoryIdentity{}
 
 	for index, listing := range sessions {
@@ -252,51 +241,18 @@ func prepareSessionListings(
 			}
 		}
 		cohort[index] = row
-		addCohortIdentity(remoteCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeRemoteForMatch(listing.GitRemote)}, row.RepositoryIdentity)
-		addCohortIdentity(nameCohorts, multiplicityKey{harness: harness, text: ingest.NormalizeProjectNameForMatch(listing.ProjectName)}, row.RepositoryIdentity)
+		remoteEvidence[index] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeRemoteForMatch(listing.GitRemote), CohortKey: row.RepositoryIdentity.CohortKey}
+		nameEvidence[index] = selectionprojection.CohortEvidence{Harness: harness, Text: ingest.NormalizeProjectNameForMatch(listing.ProjectName), CohortKey: row.RepositoryIdentity.CohortKey}
 	}
 
+	remoteMultiplicities := selectionprojection.CohortMultiplicities(remoteEvidence)
+	nameMultiplicities := selectionprojection.CohortMultiplicities(nameEvidence)
 	for index := range cohort {
 		row := &cohort[index]
-		row.Candidate.RemoteMultiplicity = cohortMultiplicity(
-			remoteCohorts,
-			multiplicityKey{harness: row.Candidate.Harness, text: ingest.NormalizeRemoteForMatch(row.Candidate.GitRemote)},
-		)
-		row.Candidate.NameMultiplicity = cohortMultiplicity(
-			nameCohorts,
-			multiplicityKey{harness: row.Candidate.Harness, text: ingest.NormalizeProjectNameForMatch(row.Candidate.ProjectName)},
-		)
+		row.Candidate.RemoteMultiplicity = remoteMultiplicities[index]
+		row.Candidate.NameMultiplicity = nameMultiplicities[index]
 	}
 	return cohort
-}
-
-func addCohortIdentity(cohorts map[multiplicityKey]*identityCohort, key multiplicityKey, identity ingest.RepositoryIdentity) {
-	if key.text == "" {
-		return
-	}
-	cohort := cohorts[key]
-	if cohort == nil {
-		cohort = &identityCohort{identities: map[string]struct{}{}}
-		cohorts[key] = cohort
-	}
-	if !repositoryIdentityAvailable(identity) {
-		cohort.unresolved = true
-		return
-	}
-	cohort.identities[identity.CohortKey.String()] = struct{}{}
-}
-
-func cohortMultiplicity(cohorts map[multiplicityKey]*identityCohort, key multiplicityKey) ingest.DiscoveryIdentityMultiplicity {
-	// Empty identity text cannot match. Mark it explicitly unique so every
-	// candidate is fully annotated without granting any matching evidence.
-	if key.text == "" {
-		return ingest.DiscoveryIdentityUnique
-	}
-	cohort := cohorts[key]
-	if cohort != nil && !cohort.unresolved && len(cohort.identities) == 1 {
-		return ingest.DiscoveryIdentityUnique
-	}
-	return ingest.DiscoveryIdentityAmbiguous
 }
 
 // buildForest folds a fully resolved and annotated scanner cohort into the ordered
@@ -627,7 +583,7 @@ func scannerProjectLabels(order []string, projects map[string]*scannerProjectAgg
 			paths[index] = representativeClonePath(projects[key].rows, projects[key].identity.GitDirectory)
 		}
 		for index, key := range keys {
-			shortPath := shortestDistinctCloneSuffix(paths[index], paths)
+			shortPath := selectionprojection.ShortestDistinctCloneSuffix(paths[index], paths)
 			if shortPath == "" {
 				labels[key] = name
 				continue
@@ -653,58 +609,6 @@ func projectFallbackName(sess ftue.SessionListing) string {
 		fallback = "(unknown project)"
 	}
 	return fallback
-}
-
-func shortestDistinctCloneSuffix(clonePath ingest.ClonePath, cohort []ingest.ClonePath) string {
-	parts := clonePathParts(clonePath)
-	if len(parts) == 0 {
-		return ""
-	}
-	width := 2
-	if len(parts) < width {
-		width = len(parts)
-	}
-	for width < len(parts) && !cloneSuffixUnique(parts, width, clonePath, cohort) {
-		width++
-	}
-	suffix := filepath.Join(parts[len(parts)-width:]...)
-	if width == len(parts) && len(parts) > 2 {
-		return "…" + string(filepath.Separator) + suffix
-	}
-	return suffix
-}
-
-func clonePathParts(clonePath ingest.ClonePath) []string {
-	if clonePath == "" {
-		return nil
-	}
-	clean := filepath.Clean(clonePath.String())
-	volume := filepath.VolumeName(clean)
-	remainder := strings.TrimPrefix(clean, volume)
-	parts := strings.FieldsFunc(remainder, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	if volume != "" {
-		parts = append([]string{volume}, parts...)
-	}
-	return parts
-}
-
-func cloneSuffixUnique(parts []string, width int, own ingest.ClonePath, cohort []ingest.ClonePath) bool {
-	suffix := filepath.Join(parts[len(parts)-width:]...)
-	for _, candidate := range cohort {
-		if candidate == own {
-			continue
-		}
-		candidateParts := clonePathParts(candidate)
-		if len(candidateParts) < width {
-			continue
-		}
-		if filepath.Join(candidateParts[len(candidateParts)-width:]...) == suffix {
-			return false
-		}
-	}
-	return true
 }
 
 // sortListings orders a branch's sessions by date (oldest first), then by ID

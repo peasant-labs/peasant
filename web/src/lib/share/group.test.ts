@@ -43,14 +43,8 @@ describe('groupByProject', () => {
     expect(one.statusRollup.shared).toBe(1);
   });
 
-  it('falls back to projectName as the key when projectHash is empty (real backend)', () => {
-    const projects = groupByProject([
-      session({ id: 'a', projectHash: '', projectName: 'real-proj' }),
-      session({ id: 'b', projectHash: '', projectName: 'real-proj' }),
-    ]);
-    expect(projects).toHaveLength(1);
-    expect(projects[0].key).toBe('real-proj');
-    expect(projects[0].sessionCount).toBe(2);
+  it('fails safely when canonical project identity is missing', () => {
+    expect(() => groupByProject([session({ id: 'a', projectHash: '' })])).toThrow(/projectHash is empty/);
   });
 
   it('orders projects by most recent activity first', () => {

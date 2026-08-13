@@ -7,6 +7,7 @@ import { SearchIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 import { NAV_SECTIONS } from '@/lib/nav/sections';
 import { fetchProjectSummaries, fetchSearch } from '@/lib/api/map';
+import { fetchDiscovery, requireDiscoveryItem, type DiscoveryItem } from '@/lib/api/discovery';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
 import { mapHref, parseProjectHash, reviewHref, transcriptHref } from '@/lib/navigation/projectRoutes';
@@ -34,7 +35,24 @@ export interface Command {
   group: string;
   /** Extra text folded into the match (e.g. the raw project path). */
   keywords?: string;
+  searchAnnotation?: SearchAnnotation;
   run: () => void;
+}
+
+export interface SearchAnnotation {
+  discovery: DiscoveryItem;
+}
+
+export interface AnnotatedSearchResult extends SearchResult, SearchAnnotation {}
+
+export function annotateSearchResults(
+  results: SearchResult[],
+  discovery: ReadonlyMap<string, DiscoveryItem>,
+): AnnotatedSearchResult[] {
+  return results.map((result) => ({
+    ...result,
+    discovery: requireDiscoveryItem(discovery, result.sessionId, 'command palette search'),
+  }));
 }
 
 /** Case-insensitive subsequence-free substring filter over label + keywords. */
@@ -97,7 +115,8 @@ export function CommandPalette() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [projectError, setProjectError] = useState<unknown>(null);
   const [projectReload, setProjectReload] = useState(0);
-  const [messages, setMessages] = useState<SearchResult[]>([]);
+  const [messages, setMessages] = useState<AnnotatedSearchResult[]>([]);
+  const [searchError, setSearchError] = useState<unknown>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
 
@@ -106,6 +125,7 @@ export function CommandPalette() {
     setQuery('');
     setActiveIndex(0);
     setMessages([]);
+    setSearchError(null);
   }, [setOpen]);
 
   const go = useCallback(
@@ -139,12 +159,18 @@ export function CommandPalette() {
     }
     let cancelled = false;
     const handle = setTimeout(() => {
-      fetchSearch(q, 20)
-        .then((p) => {
-          if (!cancelled) setMessages(p.results);
+      Promise.all([fetchSearch(q, 20), fetchDiscovery()])
+        .then(([search, discovery]) => {
+          if (!cancelled) {
+            setMessages(annotateSearchResults(search.results, discovery));
+            setSearchError(null);
+          }
         })
-        .catch(() => {
-          if (!cancelled) setMessages([]);
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setMessages([]);
+            setSearchError(error);
+          }
         });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
@@ -212,12 +238,13 @@ export function CommandPalette() {
       messages.flatMap((r) => {
         const projectHash = parseProjectHash(r.projectHash);
         if (!projectHash) return [];
-        return [{
-        id: `msg:${r.sessionId}:${r.entryIndex}`,
-        label: messageLabel(r.snippet),
-        group: 'Messages',
-        keywords: r.project,
-        run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
+         return [{
+         id: `msg:${r.sessionId}:${r.entryIndex}`,
+         label: messageLabel(r.snippet),
+         group: 'Messages',
+         keywords: r.project,
+         searchAnnotation: { discovery: r.discovery },
+         run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
       }];
       }),
     [messages, go],
@@ -256,8 +283,8 @@ export function CommandPalette() {
       {/* Scrim — click to dismiss.
           DESIGN_SYSTEM: bg-black/55 is the sanctioned modal-backdrop exception
           to the no-opacity-surface rule (same scrim the TourOverlay uses). */}
-      <button
-        type="button"
+                  <button
+                   type="button"
         aria-label="Close command palette"
         className="absolute inset-0 bg-black/55 cursor-default"
         onClick={close}
@@ -287,26 +314,31 @@ export function CommandPalette() {
         </div>
 
         <ul id={listId} role="listbox" className="max-h-[50vh] overflow-y-auto py-1">
-          {projectError !== null && (
-            <li role="alert" className="px-3 py-3 text-base leading-relaxed text-danger">
-              <p>{discoveryErrorMessage(projectError)}</p>
-              <button
+           {(projectError !== null || searchError !== null) && (
+             <li role="alert" className="px-3 py-3 text-base leading-relaxed text-danger">
+               <p>{discoveryErrorMessage(projectError ?? searchError)}</p>
+               <button
                 type="button"
                 className="mt-3 border border-rule px-3 py-2 font-mono text-sm text-ink focus-mono"
-                onClick={() => {
-                  setProjectError(null);
-                  setProjectReload((value) => value + 1);
-                }}
-              >
-                retry project discovery
+                 onClick={() => {
+                   if (projectError !== null) {
+                     setProjectError(null);
+                     setProjectReload((value) => value + 1);
+                   } else {
+                     setSearchError(null);
+                     setQuery((value) => `${value} `);
+                   }
+                 }}
+               >
+                 {projectError !== null ? 'retry project discovery' : 'retry search discovery'}
               </button>
             </li>
           )}
-          {!projectError && results.length === 0 ? (
+           {!projectError && !searchError && results.length === 0 ? (
             <li className="px-3 py-6 text-center text-[13px] text-ink-3">
               no matches{projects === null ? ' · loading…' : '.'}
             </li>
-          ) : !projectError ? (
+           ) : !projectError && !searchError ? (
             results.map((c, i) => (
               <li
                 key={c.id}
@@ -314,7 +346,7 @@ export function CommandPalette() {
                 role="option"
                 aria-selected={i === activeIndex}
               >
-                <button
+                 <button
                   type="button"
                   // Pointer hover mirrors keyboard highlight; mousedown (not
                   // click) so the input's blur doesn't beat the navigation.
@@ -323,13 +355,32 @@ export function CommandPalette() {
                     e.preventDefault();
                     c.run();
                   }}
-                  className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[13px] focus-mono cursor-pointer ${
-                    i === activeIndex ? 'bg-surface-hover text-ink' : 'text-ink-2'
-                  }`}
-                >
-                  <span className="min-w-0 truncate">{c.label}</span>
-                  <span className="v2-eyebrow shrink-0">{c.group}</span>
-                </button>
+                   aria-describedby={c.searchAnnotation ? `${listId}-${i}-description` : undefined}
+                   className={`flex w-full flex-col items-stretch gap-1.5 px-3 py-2 text-left text-[13px] focus-mono cursor-pointer sm:flex-row sm:items-start sm:justify-between sm:gap-3 ${
+                     i === activeIndex ? 'bg-surface-hover text-ink' : 'text-ink-2'
+                   }`}
+                 >
+                    <span className="min-w-0 break-words">
+                      {c.label}
+                    </span>
+                   <span className="flex shrink-0 items-center justify-between gap-3 sm:ml-auto sm:justify-end">
+                     {c.searchAnnotation && (
+                       <span
+                         id={`${listId}-${i}-description`}
+                         data-search-annotation="true"
+                         data-testid="search-annotation"
+                         className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-snug text-ink-3"
+                       >
+                         <span className="break-all">{c.searchAnnotation.discovery.locationLabel}</span>
+                         <span aria-hidden="true">·</span>
+                         <span>{c.searchAnnotation.discovery.branch || 'no branch'}</span>
+                         <span aria-hidden="true">·</span>
+                         <span>{c.searchAnnotation.discovery.selectionStatus}</span>
+                       </span>
+                     )}
+                     <span className="v2-eyebrow shrink-0">{c.group}</span>
+                   </span>
+                 </button>
               </li>
             ))
           ) : null}
