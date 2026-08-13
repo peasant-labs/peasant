@@ -176,10 +176,10 @@ func isolatedXDGEnv(t *testing.T) []string {
 	t.Helper()
 	root := t.TempDir()
 	overrides := map[string]string{
-		"HOME":            root,
-		"XDG_CONFIG_HOME": filepath.Join(root, "config"),
-		"XDG_DATA_HOME":   filepath.Join(root, "data"),
-		"XDG_STATE_HOME":  filepath.Join(root, "state"),
+		"HOME":                             root,
+		defaults.EnvXDGConfigHome.String(): filepath.Join(root, "config"),
+		defaults.EnvXDGDataHome.String():   filepath.Join(root, "data"),
+		defaults.EnvXDGStateHome.String():  filepath.Join(root, "state"),
 	}
 	base := os.Environ()
 	env := make([]string, 0, len(base)+len(overrides))
