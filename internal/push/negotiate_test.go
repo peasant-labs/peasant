@@ -10,7 +10,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
 
@@ -36,10 +35,10 @@ var cliVersion = defaults.PublishSchemaVersion
 // --- negotiate() matrix (FAILS until L3) ---
 
 func TestNegotiate_Within_EmitsAtCLIVersion(t *testing.T) {
-	pub := &testutil.StubPublisher{SchemaVersionResp: &village.SchemaVersionResponse{SchemaVersionResponse: schema.SchemaVersionResponse{
+	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
 		PushContractVersion:    cliVersion, // current == cli → within
-	}}}
+	}}
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
@@ -56,10 +55,10 @@ func TestNegotiate_Within_EmitsAtCLIVersion(t *testing.T) {
 }
 
 func TestNegotiate_OlderThanMin_AbortsUpgradeCLI(t *testing.T) {
-	pub := &testutil.StubPublisher{SchemaVersionResp: &village.SchemaVersionResponse{SchemaVersionResponse: schema.SchemaVersionResponse{
+	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.2.0"),
 		PushContractVersion:    schema.PushContractVersion("0.5.0"),
-	}}}
+	}}
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
@@ -81,10 +80,10 @@ func TestNegotiate_OlderThanMin_AbortsUpgradeCLI(t *testing.T) {
 
 func TestNegotiate_AheadOfCurrent_DowngradeEmitsWithWarning(t *testing.T) {
 	current := schema.PushContractVersion("0.0.5") // below cli 0.1.1, same major
-	pub := &testutil.StubPublisher{SchemaVersionResp: &village.SchemaVersionResponse{SchemaVersionResponse: schema.SchemaVersionResponse{
+	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
 		MinPushContractVersion: schema.PushContractVersion("0.0.1"),
 		PushContractVersion:    current,
-	}}}
+	}}
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 
@@ -111,7 +110,7 @@ func TestNegotiate_AheadOfCurrent_DowngradeEmitsWithWarning(t *testing.T) {
 }
 
 func TestNegotiate_Unadvertised_ProceedsAtCLIVersion(t *testing.T) {
-	pub := &testutil.StubPublisher{SchemaVersionResp: &village.SchemaVersionResponse{}} // empty window
+	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{}} // empty window
 	var stderr bytes.Buffer
 	p := newNegotiatePipeline(pub, &stderr)
 

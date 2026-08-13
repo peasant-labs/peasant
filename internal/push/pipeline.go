@@ -749,7 +749,7 @@ func (p *Pipeline) pushSession(
 	visibility schema.Visibility,
 	license schema.License,
 	emit schema.PushContractVersion,
-	contentCapabilities []village.ContentCapabilityAdvertisement,
+	contentCapabilities []schema.ContentCapability,
 ) SessionPushResult {
 	// 1. Read metadata.json via injected FileSystem. The path is resolved by the
 	// shared ingest helper so subagent sessions (which live under
@@ -974,8 +974,8 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
 			Error: fmt.Errorf(
-				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise %q version %q\n  where: push.Pipeline.pushSession\n  when: after GET /api/v1/schema/version and before content construction or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
-				sess.SessionID, village.ContentCapabilityObservedModel, village.ObservedModelCapabilityVersion,
+				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise the exact %q capability token\n  where: push.Pipeline.pushSession\n  when: after GET /api/v1/schema/version and before content construction or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
+				sess.SessionID, schema.ContentCapabilityObservedModelV1,
 			),
 		}
 	}

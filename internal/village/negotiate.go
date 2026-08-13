@@ -30,14 +30,7 @@ import (
 // it; tests inject a double. Push composes it into its constructor-required
 // transport, while pull consumes this narrow contract directly.
 type SchemaVersionQuerier interface {
-	GetSchemaVersion(ctx context.Context) (*SchemaVersionResponse, int, error)
-}
-
-// SchemaVersionResponse extends the released schema module's legacy response
-// with Village's additive, independently versioned content capabilities.
-type SchemaVersionResponse struct {
-	schema.SchemaVersionResponse
-	ContentCapabilities []ContentCapabilityAdvertisement `json:"contentCapabilities"`
+	GetSchemaVersion(ctx context.Context) (*schema.SchemaVersionResponse, int, error)
 }
 
 // ContractNegotiation is the typed outcome of comparing the CLI's contract

@@ -30,20 +30,18 @@ type contentCapabilityCase struct {
 }
 
 type contentCapabilityResponse struct {
-	AnnotationSchemaVersion string                                   `yaml:"annotationSchemaVersion"`
-	PushContractVersion     schema.PushContractVersion               `yaml:"pushContractVersion"`
-	MinPushContractVersion  schema.PushContractVersion               `yaml:"minPushContractVersion"`
-	ContentCapabilities     []village.ContentCapabilityAdvertisement `yaml:"contentCapabilities"`
+	AnnotationSchemaVersion string                     `yaml:"annotationSchemaVersion"`
+	PushContractVersion     schema.PushContractVersion `yaml:"pushContractVersion"`
+	MinPushContractVersion  schema.PushContractVersion `yaml:"minPushContractVersion"`
+	ContentCapabilities     []schema.ContentCapability `yaml:"contentCapabilities"`
 }
 
-func (r contentCapabilityResponse) wire() village.SchemaVersionResponse {
-	return village.SchemaVersionResponse{
-		SchemaVersionResponse: schema.SchemaVersionResponse{
-			AnnotationSchemaVersion: r.AnnotationSchemaVersion,
-			PushContractVersion:     r.PushContractVersion,
-			MinPushContractVersion:  r.MinPushContractVersion,
-		},
-		ContentCapabilities: r.ContentCapabilities,
+func (r contentCapabilityResponse) wire() schema.SchemaVersionResponse {
+	return schema.SchemaVersionResponse{
+		AnnotationSchemaVersion: r.AnnotationSchemaVersion,
+		PushContractVersion:     r.PushContractVersion,
+		MinPushContractVersion:  r.MinPushContractVersion,
+		ContentCapabilities:     r.ContentCapabilities,
 	}
 }
 
@@ -84,6 +82,13 @@ func TestVillageClient_ContentCapabilityAdvertisement(t *testing.T) {
 	for _, fixtureCase := range loadContentCapabilityFixture(t).Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
+			advertisementErr := schema.ValidateContentCapabilityAdvertisements(fixtureCase.Response.ContentCapabilities)
+			if fixtureCase.Name == "exact_observed_model_capability" && advertisementErr != nil {
+				t.Fatalf("canonical server advertisement rejected: %v", advertisementErr)
+			}
+			if fixtureCase.Name == "duplicate_known_token_is_tolerated_by_reader" && advertisementErr == nil {
+				t.Fatal("duplicate server advertisement unexpectedly passed producer validation")
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/api/v1/schema/version" {
 					t.Fatalf("request path=%q", r.URL.Path)

@@ -14,7 +14,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -26,11 +25,11 @@ var observedModelCapabilityFixtureYAML []byte
 var observedModelCapabilityManifestYAML []byte
 
 type observedModelCapabilityCase struct {
-	Name          string                                   `yaml:"name"`
-	ObservedModel string                                   `yaml:"observedModel"`
-	Advertisement []village.ContentCapabilityAdvertisement `yaml:"advertisement"`
-	WantUploads   int                                      `yaml:"wantUploads"`
-	WantError     bool                                     `yaml:"wantError"`
+	Name          string                     `yaml:"name"`
+	ObservedModel string                     `yaml:"observedModel"`
+	Advertisement []schema.ContentCapability `yaml:"advertisement"`
+	WantUploads   int                        `yaml:"wantUploads"`
+	WantError     bool                       `yaml:"wantError"`
 }
 
 type observedModelCapabilityFixture struct {
@@ -84,9 +83,9 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 				Sessions: []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, defaults.HarnessClaudeCode.String(), nil)},
 				Entries:  map[ingest.SessionID][]schema.SessionEntry{ingest.SessionID(testutil.TestSessionUUID): {entry}},
 			}
-			publisher := &testutil.StubPublisher{SchemaVersionResp: &village.SchemaVersionResponse{
-				SchemaVersionResponse: schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion},
-				ContentCapabilities:   fixtureCase.Advertisement,
+			publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{
+				MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion,
+				ContentCapabilities: fixtureCase.Advertisement,
 			}}
 			var stderr bytes.Buffer
 			pipeline := newTestPipeline(store, publisher, fs, baseTestConfig(), push.PipelineConfig{Concurrency: 1}, &stderr)

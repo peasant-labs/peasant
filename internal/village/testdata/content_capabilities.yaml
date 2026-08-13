@@ -5,8 +5,7 @@ cases:
       pushContractVersion: "0.1.1"
       minPushContractVersion: "0.1.0"
       contentCapabilities:
-        - capability: observed_model
-          version: "1.0.0"
+        - observed_model_v1
     supportsObservedModel: true
   - name: legacy_response_without_capabilities
     response:
@@ -20,15 +19,14 @@ cases:
       pushContractVersion: "0.1.1"
       minPushContractVersion: "0.1.0"
       contentCapabilities:
-        - capability: future_evidence
-          version: "1.0.0"
+        - future_evidence_v1
     supportsObservedModel: false
-  - name: wrong_observed_model_version_does_not_authorize
+  - name: duplicate_known_token_is_tolerated_by_reader
     response:
       annotationSchemaVersion: "1.0"
       pushContractVersion: "0.1.1"
       minPushContractVersion: "0.1.0"
       contentCapabilities:
-        - capability: observed_model
-          version: "2.0.0"
-    supportsObservedModel: false
+        - observed_model_v1
+        - observed_model_v1
+    supportsObservedModel: true

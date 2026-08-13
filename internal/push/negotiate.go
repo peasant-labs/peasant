@@ -40,7 +40,7 @@ type Transport interface {
 // body), the push proceeds at the CLI version — the village's server-side
 // validation still rejects bad harness/model. A village that advertises
 // [Min,Current] drives the within/older/ahead matrix.
-func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, []village.ContentCapabilityAdvertisement, error) {
+func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, []schema.ContentCapability, error) {
 	cli := defaults.PublishSchemaVersion
 
 	resp, _, err := p.transport.GetSchemaVersion(ctx)
