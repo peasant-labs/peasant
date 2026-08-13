@@ -1,0 +1,50 @@
+Code-map discoverability gate — visual capture provenance
+=========================================================
+
+Captured: 2026-08-13 (local)
+Repo:     peasant (worktree peasant-95--feat--experimental-code-map)
+Branch:   95-feature-move-code-map-on-web-ui-to-only-show-on-feature-flag---experimental
+
+BUILD UNDER TEST
+----------------
+git HEAD sha : 96bcba0cb698099278bb6cb3b9d6c313234311ea
+binary path  : bin/peasant
+binary built : 2026-08-13 05:52:21.259 -0700 (make build → pnpm build + go build)
+web dist     : web/out (Next.js export, embedded via //go:embed all:web/out)
+
+BUILD-PROVENANCE PROOF (grep the served bytes for a marker only this epoch introduces)
+--------------------------------------------------------------------------------------
+marker token : code_map_navigation_v1
+  in dist    : web/out/_next/static/chunks/app/layout-1537baa58c90f1e3.js
+  in binary  : bin/peasant (2 occurrences: Go inventory const + embedded web bundle)
+endpoint     : "config/capabilities" present in the same dist chunk
+Live wire confirmation:
+  default server      GET /api/v1/config/capabilities -> {}
+  --experimental server GET /api/v1/config/capabilities -> {"uiCapabilities":["code_map_navigation_v1"]}
+
+GATES RUN (both green against the real binary serving the real embedded dist)
+-----------------------------------------------------------------------------
+1. shell-nav-default-gate.mjs (NEW — default boot, WITHOUT --experimental)
+   boot: ./bin/peasant web start --port 8691 --foreground --no-browser \
+           --mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations
+   asserted: top nav = exactly `analytics · changes` (canonical order, active amber pill);
+             code map absent from nav AND from the command palette (palette populated with
+             per-project `· changes` jumps + base `go to` nav commands, so absence is non-vacuous);
+             direct /map/<project> STILL renders the mounted `.gmp-root` body (route preserved).
+   result: PASS (both themes)
+
+2. shell-nav-gate.mjs (experimental boot, WITH --experimental, 3 sections)
+   boot: ./bin/peasant web start --port 8692 --foreground --no-browser --experimental \
+           --mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations
+   demo: fairtrade dist served at http://localhost:5180
+   result: PASS (both themes, all 3 sections; responsive matrix 1460/768/540/480/390 all green)
+
+CAPTURES (untracked; full persistent shell = header + section nav + active state + mounted body)
+------------------------------------------------------------------------------------------------
+review-capture/default/{dark,light}/{shell-analytics,shell-changes,shell-map-route-preserved}.png
+review-capture/experimental/{dark,light}/{shell-analytics,shell-changes,shell-map}.png
+review-capture/experimental-demo/{dark,light}/{shell-analytics,shell-changes,shell-map}.png   (fairtrade fidelity reference)
+
+  - default-mode shell-map-route-preserved.png is the route-preservation proof: /map/<project>
+    renders its mounted body even though the section is undiscoverable in the default nav/palette.
+  - 12 peasant-app PNGs (2 themes x [3 default frames + 3 experimental frames]).
