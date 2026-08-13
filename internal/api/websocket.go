@@ -287,7 +287,11 @@ func (h *Hub) sendSnapshots(ctx context.Context, conn *Conn, subs []ChannelSubsc
 				conn.Send(topicError(sub, "failed to load session detail", findErr))
 				continue
 			}
-			detail := transcript.SessionToDetail(session)
+			detail, validationErr := transcript.SessionToDetailValidated(session)
+			if validationErr != nil {
+				conn.Send(topicError(sub, "failed to emit session detail because observed model evidence is invalid; repair and re-index the source session before retrying", validationErr))
+				continue
+			}
 			refs, childErr := h.provider.ChildSessionsForParent(ctx, sub.ID)
 			if childErr != nil {
 				slog.Error("failed to load child sessions", "parent_id", sub.ID, "err", childErr)

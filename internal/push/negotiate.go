@@ -40,7 +40,7 @@ type Transport interface {
 // body), the push proceeds at the CLI version — the village's server-side
 // validation still rejects bad harness/model. A village that advertises
 // [Min,Current] drives the within/older/ahead matrix.
-func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, error) {
+func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, []schema.ContentCapability, error) {
 	cli := defaults.PublishSchemaVersion
 
 	resp, _, err := p.transport.GetSchemaVersion(ctx)
@@ -53,10 +53,10 @@ func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, e
 			fmt.Fprintf(p.stderr,
 				"notice: schema-version preflight unavailable (%v); emitting CLI contract v%s\n", err, cli)
 		}
-		return cli, nil
+		return cli, nil, nil
 	}
 	if resp == nil {
-		return cli, nil
+		return cli, nil, nil
 	}
 
 	min := resp.MinPushContractVersion
@@ -64,14 +64,14 @@ func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, e
 
 	switch village.ClassifyContract(cli, min, current) {
 	case village.NegotiationOlderThanMin:
-		return "", village.UpgradeCLIError(cli, min)
+		return "", nil, village.UpgradeCLIError(cli, min)
 	case village.NegotiationAheadOfCurrent:
 		if !village.CanDowngrade(cli, current) {
-			return "", village.CannotDowngradeError(cli, current)
+			return "", nil, village.CannotDowngradeError(cli, current)
 		}
 		fmt.Fprint(p.stderr, village.DowngradeEmitWarning(cli, current))
-		return current, nil
+		return current, resp.ContentCapabilities, nil
 	default: // within or unadvertised
-		return cli, nil
+		return cli, resp.ContentCapabilities, nil
 	}
 }

@@ -1,0 +1,4 @@
+expectedCaseCount: 2
+requiredNames:
+  - assistant_observations_keep_exact_order
+  - invalid_assistant_observations_are_omitted

@@ -1,0 +1,22 @@
+sessionId: 92929292-9292-9292-9292-929292929292
+turns:
+  - index: 1
+    name: first_root_observation
+    role: assistant
+    depth: 0
+    content: first answer
+    observedModel: Anthropic/Claude Fable-5
+  - index: 2
+    name: later_root_observation
+    role: assistant
+    depth: 0
+    content: later answer
+    observedModel: anthropic/claude-opus-4-8
+expectedSeed: Anthropic/Claude Fable-5
+expectedObservedModels:
+  - Anthropic/Claude Fable-5
+  - anthropic/claude-opus-4-8
+expectedCaseCount: 2
+requiredNames:
+  - first_root_observation
+  - later_root_observation

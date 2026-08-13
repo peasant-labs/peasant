@@ -1,0 +1,77 @@
+cases:
+  - name: model_only_assistant_survives
+    entries:
+      - index: 4
+        role: assistant
+        observedModel: "Anthropic/Claude Fable-5"
+    expected:
+      - index: 4
+        role: assistant
+        observedModel: "Anthropic/Claude Fable-5"
+  - name: adjacent_observation_boundaries_survive_real_dedup
+    entries:
+      - index: 10
+        role: assistant
+        content: "identical answer"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 11
+        role: assistant
+        content: "identical answer"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 12
+        role: assistant
+        content: "identical answer"
+      - index: 13
+        role: assistant
+        content: "identical answer"
+        observedModel: "anthropic/claude-opus-4-8"
+    expected:
+      - index: 10
+        role: assistant
+        content: "identical answer"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 12
+        role: assistant
+        content: "identical answer"
+      - index: 13
+        role: assistant
+        content: "identical answer"
+        observedModel: "anthropic/claude-opus-4-8"
+  - name: stale_whitespace_only_observation_is_absent
+    entries:
+      - index: 20
+        role: assistant
+        observedModel: "  "
+    expected: []
+  - name: stale_edge_whitespace_does_not_split_dedup
+    entries:
+      - index: 30
+        role: assistant
+        content: "same historical answer"
+      - index: 31
+        role: assistant
+        content: "same historical answer"
+        observedModel: " stale/model"
+    expected:
+      - index: 30
+        role: assistant
+        content: "same historical answer"
+  - name: exact_mixed_case_slash_and_internal_space_survive
+    entries:
+      - index: 40
+        role: assistant
+        content: "first"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 41
+        role: assistant
+        content: "second"
+        observedModel: "custom/model with space"
+    expected:
+      - index: 40
+        role: assistant
+        content: "first"
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 41
+        role: assistant
+        content: "second"
+        observedModel: "custom/model with space"

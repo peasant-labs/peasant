@@ -1,0 +1,92 @@
+cases:
+  - name: source_observations_project_exactly
+    assertions: [observations]
+    inputPath: fold
+    storedModel: Anthropic/Claude Fable-5
+    entries:
+      - index: 1
+        role: assistant
+        depth: 0
+        content: first root
+        observedModel: Anthropic/Claude Fable-5
+      - index: 2
+        role: assistant
+        depth: 0
+        content: omitted root
+      - index: 3
+        role: assistant
+        depth: 0
+        content: changed root
+        observedModel: anthropic/claude-opus-4-8
+      - index: 4
+        role: assistant
+        depth: 0
+        content: repeated root
+        observedModel: anthropic/claude-opus-4-8
+    expectedSeed: Anthropic/Claude Fable-5
+    expectedObservedModels:
+      - Anthropic/Claude Fable-5
+      - ""
+      - anthropic/claude-opus-4-8
+      - anthropic/claude-opus-4-8
+  - name: earliest_root_observation_beats_stored_metadata
+    assertions: [seed]
+    inputPath: detail
+    storedModel: legacy/stored-model
+    entries:
+      - index: 10
+        role: user
+        depth: 0
+        content: request
+      - index: 11
+        role: assistant
+        depth: 0
+        content: first answer
+        observedModel: anthropic/claude-fable-5
+      - index: 12
+        role: assistant
+        depth: 0
+        content: later answer
+        observedModel: anthropic/claude-opus-4-8
+    expectedSeed: anthropic/claude-fable-5
+    expectedObservedModels:
+      - ""
+      - anthropic/claude-fable-5
+      - anthropic/claude-opus-4-8
+  - name: nested_observation_does_not_replace_root_seed
+    assertions: [seed]
+    inputPath: detail
+    storedModel: anthropic/claude-fable-5
+    entries:
+      - index: 20
+        role: assistant
+        depth: 0
+        content: root answer
+        observedModel: anthropic/claude-fable-5
+      - index: 21
+        role: assistant
+        depth: 1
+        parentIndex: 20
+        content: inline subagent answer
+        observedModel: anthropic/claude-opus-4-8
+      - index: 22
+        role: assistant
+        depth: 0
+        content: next root answer
+    expectedSeed: anthropic/claude-fable-5
+    expectedObservedModels:
+      - anthropic/claude-fable-5
+      - anthropic/claude-opus-4-8
+      - ""
+  - name: legacy_without_observations_uses_stored_metadata
+    assertions: [seed, observations]
+    inputPath: detail
+    storedModel: legacy/stored-model
+    entries:
+      - index: 30
+        role: assistant
+        depth: 0
+        content: legacy answer
+    expectedSeed: legacy/stored-model
+    expectedObservedModels:
+      - ""

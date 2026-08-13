@@ -1,0 +1,55 @@
+cases:
+  - name: assistant_exact_observation_preserved
+    messageID: msg_001_exact
+    role: assistant
+    modelID: "Anthropic/Claude Fable-5"
+    expectedRole: assistant
+    expectedModel: "Anthropic/Claude Fable-5"
+  - name: empty_observation_ignored
+    messageID: msg_002_empty
+    role: assistant
+    modelID: ""
+    expectedRole: assistant
+  - name: whitespace_only_observation_ignored
+    messageID: msg_003_whitespace
+    role: assistant
+    modelID: "  "
+    expectedRole: assistant
+  - name: edge_whitespace_observation_ignored
+    messageID: msg_004_edge
+    role: assistant
+    modelID: " stale/model"
+    expectedRole: assistant
+  - name: non_assistant_observation_ignored
+    messageID: msg_005_user
+    role: user
+    modelID: "must-not-be-stored"
+    expectedRole: user
+  - name: system_observation_ignored
+    messageID: msg_006_system
+    role: system
+    modelID: "must-not-be-stored"
+    expectedRole: system
+  - name: structural_reclassification_removes_observation
+    messageID: msg_007_structural
+    role: assistant
+    modelID: "anthropic/claude-opus-4-8"
+    structuralPartType: compaction
+    reasoningTokens: 41
+    cacheRead: 43
+    cacheWrite: 47
+    expectedRole: system
+    expectedReasoningTokens: 41
+    expectedCacheRead: 43
+    expectedCacheWrite: 47
+  - name: unrelated_extra_fields_preserved
+    messageID: msg_008_extra
+    role: assistant
+    modelID: " rejected/model"
+    reasoningTokens: 71
+    cacheRead: 83
+    cacheWrite: 97
+    expectedRole: assistant
+    expectedReasoningTokens: 71
+    expectedCacheRead: 83
+    expectedCacheWrite: 97

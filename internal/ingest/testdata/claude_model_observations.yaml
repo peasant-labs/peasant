@@ -1,0 +1,31 @@
+cases:
+  - name: assistant_observations_keep_exact_order
+    lines:
+      - '{"type":"assistant","uuid":"assistant-a","message":{"role":"assistant","model":"Anthropic/Claude Fable-5","content":[{"type":"text","text":"same answer"}]}}'
+      - '{"type":"assistant","uuid":"assistant-repeat","message":{"role":"assistant","model":"Anthropic/Claude Fable-5","content":[]}}'
+      - '{"type":"user","uuid":"user-with-model","message":{"role":"user","model":"must-not-be-stored","content":"next"}}'
+      - '{"type":"assistant","uuid":"assistant-b","message":{"role":"assistant","model":"anthropic/claude-opus-4-8","content":[{"type":"text","text":"same answer"}]}}'
+    expectedEntries:
+      - index: 0
+        role: assistant
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 1
+        role: assistant
+        observedModel: "Anthropic/Claude Fable-5"
+      - index: 2
+        role: user
+      - index: 3
+        role: assistant
+        observedModel: "anthropic/claude-opus-4-8"
+  - name: invalid_assistant_observations_are_omitted
+    lines:
+      - '{"type":"assistant","uuid":"empty-model","message":{"role":"assistant","model":"","content":"empty"}}'
+      - '{"type":"assistant","uuid":"whitespace-model","message":{"role":"assistant","model":"  ","content":"whitespace"}}'
+      - '{"type":"assistant","uuid":"edge-whitespace-model","message":{"role":"assistant","model":" claude-opus-4-8","content":"edge"}}'
+    expectedEntries:
+      - index: 0
+        role: assistant
+      - index: 1
+        role: assistant
+      - index: 2
+        role: assistant

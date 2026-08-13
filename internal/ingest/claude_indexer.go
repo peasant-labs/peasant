@@ -227,6 +227,7 @@ type claudeIndexLine struct {
 	Content    json.RawMessage `json:"content"` // Top-level content (system entries use this, not message.content)
 	Message    struct {
 		Role    string          `json:"role"`
+		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
 			InputTokens              int `json:"input_tokens"`
@@ -265,6 +266,13 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 
 	// Classify entry type and role.
 	entry.EntryType, entry.Role = classifyClaudeEntry(line)
+	if entry.Role == RoleAssistant && ValidObservedModel(line.Message.Model) && captureModelObservation() {
+		extra, marshalErr := json.Marshal(map[string]string{"model_id": line.Message.Model})
+		if marshalErr == nil {
+			value := string(extra)
+			entry.Extra = &value
+		}
+	}
 
 	// Timestamp.
 	entry.TimestampMs = parseIndexTimestamp(line.Timestamp)
@@ -408,6 +416,9 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 	}
 	if entry.IsError && entry.Role == RoleTool {
 		entry.EntryType = EntryTypeToolResult
+	}
+	if entry.Role != RoleAssistant {
+		entry.Extra = removeModelObservation(entry.Extra)
 	}
 
 	// Content preview — truncate to configured limit unless fullContent is set.

@@ -182,20 +182,32 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// side-effecting upload + persistence, which pushSession skips when DryRun is
 	// set. No village negotiation (no HTTP), so the forecast emits the CLI's own
 	// contract version; no audit log.
-	if p.runCfg.DryRun {
+	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
 		for _, sess := range sessions {
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion)
+			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
 		return result, nil // no audit log for dry-run
+	}
+	// Fail local transcript reads before the first remote negotiation. pushSession
+	// reads again under its per-session operation so concurrent store changes also
+	// fail closed rather than publishing stale preflight bytes.
+	for _, sess := range sessions {
+		sessionID, _ := ingest.NewSessionID(sess.SessionID)
+		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
+			sr := entryReadFailure(sess, readErr, entryReadPreflight)
+			result.Sessions = append(result.Sessions, sr)
+			result.countStatus(sr.Status)
+			return result, nil
+		}
 	}
 
 	// 6b. Version-negotiation preflight: query the village's accepted
 	// contract window and decide the emit version. Aborts the whole push on an
 	// upgrade-CLI or non-downgradable mismatch; downgrade-emits (with a one-line
 	// warning) when the CLI is ahead. Skipped above for dry-run (no HTTP).
-	emit, err := p.negotiate(ctx)
+	emit, capabilities, err := p.negotiate(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -227,7 +239,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 			}
 			mu.Unlock()
 
-			sr := p.pushSession(gctx, sess, visibility, license, emit)
+			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -747,6 +759,7 @@ func (p *Pipeline) pushSession(
 	visibility schema.Visibility,
 	license schema.License,
 	emit schema.PushContractVersion,
+	contentCapabilities []schema.ContentCapability,
 ) SessionPushResult {
 	// 1. Read metadata.json via injected FileSystem. The path is resolved by the
 	// shared ingest helper so subagent sessions (which live under
@@ -814,14 +827,11 @@ func (p *Pipeline) pushSession(
 		// metrics stays nil — graceful degradation
 	}
 
-	// 3. Fetch session entries from the store (non-fatal on error).
+	// 3. Fetch session entries from the store. Transcript bytes and schema-owned
+	// evidence are indivisible publication input, so an unreadable entry set fails closed.
 	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
 	if entriesErr != nil {
-		slog.Warn("failed to list entries, continuing without",
-			"session_id", sess.SessionID,
-			"error", entriesErr,
-		)
-		// entries stays nil — graceful degradation
+		return entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
 	}
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
@@ -942,6 +952,11 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
+	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
+	}
+	requiredCapabilities := schema.RequiredContentCapabilities(*content.SessionDetail)
 
 	// 5. DRY-RUN DIVERGENCE. Everything above — read metadata, the metadata/model
 	// guards, redaction, mapping, and the client-side schema validation — is the
@@ -959,6 +974,18 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Title:     title,
 			Status:    status,
+		}
+	}
+	missingCapabilities := missingContentCapabilities(contentCapabilities, requiredCapabilities)
+	if len(missingCapabilities) > 0 {
+		return SessionPushResult{
+			SessionID: sess.SessionID,
+			HostSlug:  sess.HostSlug,
+			Status:    PushStatusError,
+			Error: fmt.Errorf(
+				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise the exact %q capability token\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
+				sess.SessionID, schema.ContentCapabilityObservedModelV1,
+			),
 		}
 	}
 
@@ -995,7 +1022,7 @@ func (p *Pipeline) pushSession(
 	// remain, and are no longer the only things protecting a publish.
 	// Raw project, path, branch, and remote fields are consent-gated before this
 	// document is assembled; redaction is defense in depth, not a consent gate.
-	transcriptBytes, err := marshalTranscriptContent(&meta, entries, emit, p.cfg.Push.Fields, p.redactor)
+	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
 	if err != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
@@ -1134,6 +1161,24 @@ func (p *Pipeline) pushSession(
 		Title:     title,
 		Status:    status,
 	}
+}
+
+type entryReadStage uint8
+
+const (
+	entryReadPreflight entryReadStage = iota
+	entryReadPostNegotiation
+)
+
+func entryReadFailure(sess ingest.PushSessionRow, err error, stage entryReadStage) SessionPushResult {
+	when := "before remote capability negotiation, redaction, content construction, or upload"
+	meaning := "no transcript bytes or metadata were uploaded, and no publication receipt, attempt, or run audit was persisted"
+	if stage == entryReadPostNegotiation {
+		when = "after run-level capability negotiation and before redaction, content construction, or upload"
+		meaning = "no transcript bytes or metadata were uploaded, and no publication receipt or attempt was persisted; the ordinary local run audit still records this failed session"
+	}
+	return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
+		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: %s\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err, when, meaning)}
 }
 
 func promoteAuthoritativePublishFields(document map[string]json.RawMessage) error {

@@ -951,6 +951,9 @@ func TestPipeline_License(t *testing.T) {
 }
 
 func TestPipeline_DryRun_NoHTTPNoStoreWrites(t *testing.T) {
+	if push.DryRunCapabilityMutation {
+		t.Skip("the mounted capability fixture owns the dry-run decision mutation")
+	}
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -2004,9 +2007,7 @@ func TestPipeline_EntriesAbsent_PushSucceedsWithoutEntries(t *testing.T) {
 	}
 }
 
-func TestPipeline_EntriesError_PushSucceedsWithoutEntries(t *testing.T) {
-	// When ListEntries returns an error, the pipeline should degrade gracefully:
-	// push the session without entries (no abort).
+func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -2029,20 +2030,51 @@ func TestPipeline_EntriesError_PushSucceedsWithoutEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if result.New != 1 {
-		t.Errorf("new: got %d, want 1", result.New)
+	if result.Errors != 1 {
+		t.Errorf("errors: got %d, want 1", result.Errors)
 	}
+	if len(pub.Calls) != 0 {
+		t.Fatalf("entry read failure made %d HTTP calls, want 0", len(pub.Calls))
+	}
+	if pub.SchemaVersionCalls != 0 || len(pub.AuthoritativeCalls) != 0 || len(store.SavedPublicationIDs) != 0 || len(store.PushLogs) != 0 || len(store.PublicationAttempts) != 0 {
+		t.Fatalf("entry-read failure side effects: schema=%d authoritative=%d persistence=%d audit=%d attempts=%d", pub.SchemaVersionCalls, len(pub.AuthoritativeCalls), len(store.SavedPublicationIDs), len(store.PushLogs), len(store.PublicationAttempts))
+	}
+	message := result.Sessions[0].Error.Error()
+	for _, fragment := range []string{"what:", "why:", "where:", "when:", "meaning:", "fix:", "no transcript bytes"} {
+		if !strings.Contains(message, fragment) {
+			t.Errorf("actionable entry-read error missing %q: %s", fragment, message)
+		}
+	}
+	if !strings.Contains(message, "no publication receipt, attempt, or run audit was persisted") {
+		t.Fatalf("truthful preflight consequence missing: %s", message)
+	}
+	if strings.Contains(message, "run audit still records") {
+		t.Fatalf("preflight diagnostic falsely claims an audit: %s", message)
+	}
+}
 
-	// Should still have pushed (no entries key).
-	if len(pub.Calls) != 1 {
-		t.Fatalf("expected 1 HTTP call, got %d", len(pub.Calls))
+func TestPipeline_EntriesRereadErrorReportsPostNegotiationStage(t *testing.T) {
+	fs := testutil.NewMemFS()
+	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+	store := &testutil.StubPushStore{
+		Sessions:       []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, string(defaults.HarnessClaudeCode), nil)},
+		ListEntriesErr: fmt.Errorf("database changed after preflight"), ListEntriesFailOnCall: 2,
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(pub.Calls[0].MetadataJSON, &payload); err != nil {
-		t.Fatalf("unmarshal published metadata: %v", err)
+	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion}}
+	var stderr bytes.Buffer
+	result, err := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, exists := payload["entries"]; exists {
-		t.Error("entries key should be absent when ListEntries fails")
+	if result.Errors != 1 || pub.SchemaVersionCalls != 1 || len(pub.Calls) != 0 || len(pub.AuthoritativeCalls) != 0 || len(store.SavedPublicationIDs) != 0 || len(store.PushLogs) != 1 || len(store.PublicationAttempts) != 0 {
+		t.Fatalf("reread result=%+v schema=%d uploads=%d authoritative=%d persistence=%d audit=%d attempts=%d", result, pub.SchemaVersionCalls, len(pub.Calls), len(pub.AuthoritativeCalls), len(store.SavedPublicationIDs), len(store.PushLogs), len(store.PublicationAttempts))
+	}
+	message := result.Sessions[0].Error.Error()
+	if !strings.Contains(message, "after run-level capability negotiation and before redaction, content construction, or upload") {
+		t.Fatalf("post-negotiation stage missing: %s", message)
+	}
+	if !strings.Contains(message, "the ordinary local run audit still records this failed session") {
+		t.Fatalf("truthful audit consequence missing: %s", message)
 	}
 }
 

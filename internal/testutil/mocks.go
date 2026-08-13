@@ -1085,7 +1085,9 @@ type StubPushStore struct {
 	// GetQualityMetricsErr is returned by GetQualityMetrics when non-nil.
 	GetQualityMetricsErr error
 	// ListEntriesErr is returned by ListEntries when non-nil.
-	ListEntriesErr error
+	ListEntriesErr        error
+	ListEntriesFailOnCall int
+	ListEntriesCalls      int
 	// AssociationsErr is returned by ListCurrentSessionCommitAssociations when non-nil.
 	AssociationsErr error
 }
@@ -1185,7 +1187,11 @@ func (s *StubPushStore) GetQualityMetrics(_ context.Context, sessionID ingest.Se
 func (s *StubPushStore) ListEntries(_ context.Context, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ListEntriesErr != nil {
+	s.ListEntriesCalls++
+	if s.ListEntriesFailOnCall > 0 && s.ListEntriesCalls == s.ListEntriesFailOnCall {
+		return nil, s.ListEntriesErr
+	}
+	if s.ListEntriesErr != nil && s.ListEntriesFailOnCall == 0 {
 		return nil, s.ListEntriesErr
 	}
 	if s.Entries == nil {

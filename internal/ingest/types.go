@@ -30,6 +30,14 @@ func NewModelID(raw string) (ModelID, error) {
 	return schema.NewModelID(raw)
 }
 
+// ObservedModelID is exact source evidence from one assistant-generated turn.
+type ObservedModelID = schema.ObservedModelID
+
+// NewObservedModelID validates exact source-observed model bytes.
+func NewObservedModelID(raw string) (ObservedModelID, error) {
+	return schema.NewObservedModelID(raw)
+}
+
 // --- ProjectHash ---
 
 // ProjectHash is a SHA-256 hex digest of the project's origin URL or local path.
@@ -234,7 +242,10 @@ type IndexLogEntry struct {
 // v11: reclassify empty progress/direct/queue-operation entries to role=system;
 //
 //	reclassify "Tool loaded." wrappers with tool_result siblings to role=system.
-const CurrentIndexVersion = 11
+//
+// v12: preserve exact assistant model observations during Claude indexing and
+// retain observation boundaries through transcript suppression and deduplication.
+const CurrentIndexVersion = 12
 
 // --- PruneFilter ---
 

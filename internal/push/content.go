@@ -31,10 +31,24 @@ import (
 // SessionDetailPayload.SchemaVersion are both stamped from emit in lockstep
 // (envelope wins on any future disagreement; see schema.TranscriptContent).
 func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) schema.TranscriptContent {
-	session := metadataToSession(meta, fields)
-	session.Turns = transcript.EntriesToTurns(entries)
+	content, _ := BuildTranscriptContentValidated(meta, entries, emit, fields)
+	return content
+}
 
-	payload := transcript.SessionToDetail(session)
+// BuildTranscriptContentValidated builds content through the producer trust
+// boundary and returns attribution failures to outward-facing callers.
+func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) (schema.TranscriptContent, error) {
+	session := metadataToSession(meta, fields)
+	turns, err := transcript.EntriesToTurnsValidated(entries)
+	if err != nil {
+		return schema.TranscriptContent{}, err
+	}
+	session.Turns = turns
+
+	payload, err := transcript.SessionToDetailValidated(session)
+	if err != nil {
+		return schema.TranscriptContent{}, err
+	}
 	payload.TurnCount = len(payload.Turns)
 	payload.SchemaVersion = emit
 
@@ -42,7 +56,7 @@ func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.Sessi
 		ContractVersion: emit,
 		Kind:            schema.ContentKindSessionDetail,
 		SessionDetail:   payload,
-	}
+	}, nil
 }
 
 // RedactEntries returns the stored entries with every string value redacted at
@@ -99,7 +113,63 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 				"push can be retried, but it will fail the same way until the rule that reshaped the document is fixed",
 			err)
 	}
+	if len(redactedEntries) != len(entries) {
+		return nil, fmt.Errorf("redact transcript entries for publication: entry count changed from %d to %d during redaction; schema-owned evidence cannot be matched safely, so nothing was uploaded; fix the custom redaction rule so it rewrites values without reshaping the entry list, then retry", len(entries), len(redactedEntries))
+	}
+	for index := range entries {
+		modelID, present, err := observedModelFromExtra(entries[index].Extra)
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			restored, err := restoreObservedModelExtra(redactedEntries[index].Extra, modelID)
+			if err != nil {
+				return nil, err
+			}
+			redactedEntries[index].Extra = restored
+		}
+	}
 	return redactedEntries, nil
+}
+
+func observedModelFromExtra(extra *string) (string, bool, error) {
+	if extra == nil {
+		return "", false, nil
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(*extra), &document); err != nil {
+		return "", false, nil
+	}
+	raw, present := document["model_id"]
+	if !present {
+		return "", false, nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false, fmt.Errorf("preserve observed-model evidence during publication redaction: model_id is not a string: %w; nothing was uploaded; repair or re-index the entry, then retry", err)
+	}
+	return value, true, nil
+}
+
+func restoreObservedModelExtra(extra *string, value string) (*string, error) {
+	if extra == nil {
+		return nil, fmt.Errorf("preserve observed-model evidence during publication redaction: redaction removed the entry Extra document; nothing was uploaded; fix the custom rule so it does not reshape entries, then retry")
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(*extra), &document); err != nil {
+		return nil, fmt.Errorf("preserve observed-model evidence during publication redaction: redacted Extra is unreadable: %w; nothing was uploaded; fix the custom rule, then retry", err)
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	document["model_id"] = raw
+	restored, err := json.Marshal(document)
+	if err != nil {
+		return nil, err
+	}
+	result := string(restored)
+	return &result, nil
 }
 
 // redactJSONDocument redacts a marshalled document and PROVES it did.
@@ -169,7 +239,14 @@ func marshalTranscriptContent(
 	fields config.PushFieldVisibility,
 	redactor redact.JSONRedactor,
 ) ([]byte, error) {
-	content := BuildTranscriptContent(meta, entries, emit, fields)
+	content, err := BuildTranscriptContentValidated(meta, entries, emit, fields)
+	if err != nil {
+		return nil, err
+	}
+	return marshalBuiltTranscriptContent(content, redactor)
+}
+
+func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) ([]byte, error) {
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)
@@ -209,7 +286,32 @@ func marshalTranscriptContent(
 				"this with the session id printed above; retrying will fail the same way until the rule is corrected",
 			check.Kind, err)
 	}
-	return redacted, nil
+	if (content.SessionDetail == nil) != (check.SessionDetail == nil) {
+		return nil, transcriptShapeRedactionError("sessionDetail presence changed")
+	}
+	if content.SessionDetail != nil {
+		if err := restoreObservedModels(content.SessionDetail.Turns, check.SessionDetail.Turns); err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(check)
+}
+
+func restoreObservedModels(source, destination []schema.TurnDetail) error {
+	if len(source) != len(destination) {
+		return transcriptShapeRedactionError(fmt.Sprintf("turn count changed from %d to %d", len(source), len(destination)))
+	}
+	for index := range source {
+		if source[index].Index != destination[index].Index || source[index].Role != destination[index].Role || source[index].Depth != destination[index].Depth {
+			return transcriptShapeRedactionError(fmt.Sprintf("turn identity changed at position %d", index))
+		}
+		destination[index].ObservedModel = source[index].ObservedModel
+	}
+	return nil
+}
+
+func transcriptShapeRedactionError(reason string) error {
+	return fmt.Errorf("transcript redaction changed evidence-bearing structure\n  what: %s\n  why: observedModel evidence can only be restored onto the exact validated turn sequence\n  where: push.marshalBuiltTranscriptContent\n  when: after local content validation and redaction, before serialization or upload\n  meaning: nothing was uploaded because the redacted payload could diverge from the capability-gated payload\n  fix: correct the custom redaction rule so it rewrites string values without removing, reordering, or truncating transcript structure, then retry", reason)
 }
 
 // metadataToSession projects on-disk metadata onto the SessionToDetail input

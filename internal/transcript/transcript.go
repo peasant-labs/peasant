@@ -274,6 +274,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 
 	// Pass 3: Emit turns.
 	turns := make([]ingest.Turn, 0, len(entries))
+	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
 		if suppress[e.EntryIndex] {
 			continue
@@ -302,6 +303,11 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			TokensIn:    e.TokensIn,
 			TokensOut:   e.TokensOut,
 			PartType:    e.PartType,
+		}
+		observation := modelObservation(e)
+		projectedObservation := projectModelObservation(observation)
+		if projectedObservation != "" {
+			assignProjectedModelObservation(&t, projectedObservation)
 		}
 
 		// Attach folded ToolCalls from depth=1 children.
@@ -348,6 +354,9 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		}
 
 		turns = append(turns, t)
+		if observation.present {
+			turnObservations[t.Index] = observation
+		}
 	}
 
 	// Post-processing: empty entry suppression and consecutive dedup.
@@ -357,14 +366,16 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	// to the session viewer. Note: system entries with short content are kept
 	// intentionally because they can carry legitimate control context.
 	//
-	// Consecutive dedup: when two adjacent turns share the same role and the same
-	// non-empty content, keep one. If one has tool calls and the other does not,
-	// prefer the one with tool calls.
+	// Consecutive dedup: when two adjacent turns share the same role, non-empty
+	// content, and valid observation presence/value, keep one. Observation is part
+	// of equivalence because a source-evidence boundary must survive even when the
+	// visible text repeats. If one has tool calls and the other does not, prefer it.
 	filtered := turns[:0]
 	for _, t := range turns {
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
-		if !hasContent && !hasTools {
+		hasObservation := turnObservations[t.Index].present
+		if suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -377,7 +388,10 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			continue
 		}
 		prev := &deduped[len(deduped)-1]
-		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" {
+		prevObservation := turnObservations[prev.Index]
+		currObservation := turnObservations[curr.Index]
+		observationsEqual := modelObservationsEquivalent(prevObservation, currObservation)
+		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
 			prevHasTools := len(prev.ToolCalls) > 0
 			currHasTools := len(curr.ToolCalls) > 0
 			if currHasTools && !prevHasTools {
@@ -390,6 +404,14 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	}
 
 	return deduped
+}
+
+func suppressEmptyTurn(hasContent, hasTools, hasObservation bool) bool {
+	return shouldSuppressEmptyTurn(hasContent, hasTools, hasObservation)
+}
+
+func modelObservationsEquivalent(previous, current entryModelObservation) bool {
+	return observationsEquivalent(previous, current)
 }
 
 // extractFilePath parses tool input JSON for common file path keys.
@@ -459,6 +481,15 @@ func SessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	return sessionToDetail(s)
 }
 
+// SessionToDetailValidated is the canonical producer trust boundary. Callers
+// that can surface failures use it so invalid attribution never reaches a wire.
+func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, error) {
+	if err := validateSessionObservedModelEvidence(s); err != nil {
+		return nil, err
+	}
+	return sessionToDetail(s), nil
+}
+
 // sessionToDetail converts a full Session to a SessionDetailPayload.
 func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	turns := make([]schema.TurnDetail, len(s.Turns))
@@ -478,20 +509,23 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 			}
 		}
 		turns[i] = schema.TurnDetail{
-			Index:       t.Index,
-			Role:        t.Role,
-			Content:     t.Content,
-			ToolCalls:   toolCalls,
-			Timestamp:   t.Timestamp,
-			Depth:       t.Depth,
-			ParentIndex: t.ParentIndex,
-			EntryType:   t.EntryType,
-			HasThinking: t.HasThinking,
-			StopReason:  t.StopReason,
-			TokensIn:    t.TokensIn,
-			TokensOut:   t.TokensOut,
+			Index:         t.Index,
+			Role:          t.Role,
+			Content:       t.Content,
+			ToolCalls:     toolCalls,
+			Timestamp:     t.Timestamp,
+			Depth:         t.Depth,
+			ParentIndex:   t.ParentIndex,
+			EntryType:     t.EntryType,
+			HasThinking:   t.HasThinking,
+			StopReason:    t.StopReason,
+			TokensIn:      t.TokensIn,
+			TokensOut:     t.TokensOut,
+			ObservedModel: t.ObservedModel,
 		}
 	}
+
+	model := sessionModelSeed(s)
 
 	// Derive source and status from session fields.
 	source := "imported"
@@ -525,7 +559,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		Source:           source,
 		Status:           status,
 		Project:          s.Project,
-		Model:            s.Model,
+		Model:            model,
 		WorkingDirectory: s.ProjectPath,
 		GitBranch:        s.GitBranch,
 		GitRemote:        s.GitRemote,

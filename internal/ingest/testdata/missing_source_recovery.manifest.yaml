@@ -1,0 +1,3 @@
+expectedCaseCount: 1
+requiredNames:
+  - missing_every_source_keeps_existing_entries_stale
