@@ -2045,6 +2045,12 @@ func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
 			t.Errorf("actionable entry-read error missing %q: %s", fragment, message)
 		}
 	}
+	if !strings.Contains(message, "no publication receipt, attempt, or run audit was persisted") {
+		t.Fatalf("truthful preflight consequence missing: %s", message)
+	}
+	if strings.Contains(message, "run audit still records") {
+		t.Fatalf("preflight diagnostic falsely claims an audit: %s", message)
+	}
 }
 
 func TestPipeline_EntriesRereadErrorReportsPostNegotiationStage(t *testing.T) {
