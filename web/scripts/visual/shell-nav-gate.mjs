@@ -8,8 +8,9 @@
    marker, pointed at a route/view that does not mount, blank-bodied, or not themed
    correctly.
 
-   Start a real app first, for example:
-     ./bin/peasant web start --port 8690 --foreground --no-browser \
+   Start a real app first, for example (--experimental is REQUIRED: the code map
+   nav section is shelved behind it, and this gate asserts all three sections):
+     ./bin/peasant web start --port 8690 --foreground --no-browser --experimental \
        --mock-data-store=web,dashboard,sessions,trends,map,review,qualitySessions,annotations
 
    Run:

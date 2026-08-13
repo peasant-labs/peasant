@@ -1,0 +1,79 @@
+# HTTP scenarios for GET /api/v1/config/capabilities and the expected
+# discoverability of the code-map section (top-nav tab + command-palette
+# entries). The capability boundary fails closed: only an OK response whose body
+# validates against the schema envelope AND advertises the code-map token makes
+# the section discoverable. Every other outcome — still loading, thrown fetch,
+# error status, malformed body, null-bearing body, empty advertisement, or an
+# advertisement of only unknown tokens — hides the section from persistent
+# chrome. Direct /map and /projects routes are unaffected (not exercised here).
+#
+# Row fields (strict):
+#   name           unique case label
+#   expectVisible  whether the code map must appear in nav AND palette
+#   pending        (optional) fetch never resolves — the loading state
+#   throw          (optional) fetch rejects
+#   status         (optional) HTTP status for the response (default 200)
+#   body           (optional) JSON response body
+cases:
+  - name: loading
+    expectVisible: false
+    pending: true
+
+  - name: fetch-throws
+    expectVisible: false
+    throw: true
+
+  - name: http-500
+    expectVisible: false
+    status: 500
+
+  - name: malformed-body
+    expectVisible: false
+    status: 200
+    body:
+      uiCapabilities:
+        not: an-array
+
+  - name: null-capabilities
+    expectVisible: false
+    status: 200
+    body:
+      uiCapabilities: null
+
+  - name: empty-object
+    expectVisible: false
+    status: 200
+    body: {}
+
+  - name: empty-array
+    expectVisible: false
+    status: 200
+    body:
+      uiCapabilities: []
+
+  - name: unknown-token-only
+    expectVisible: false
+    status: 200
+    body:
+      uiCapabilities:
+        - some_unrecognized_token_v9
+
+  # Uses the REAL code-map token so the ONLY reason the section stays hidden is
+  # the extra top-level key: zUICapabilitiesResponse is .strict(), so an
+  # otherwise-valid envelope with any unknown top-level field fails the parse and
+  # falls closed. This is maximally distinguishing — dropping .strict() would flip
+  # this case to visible while every other case is unchanged.
+  - name: unknown-top-level-key-with-real-token
+    expectVisible: false
+    status: 200
+    body:
+      uiCapabilities:
+        - code_map_navigation_v1
+      surprise: true
+
+  - name: code-map-token
+    expectVisible: true
+    status: 200
+    body:
+      uiCapabilities:
+        - code_map_navigation_v1

@@ -2,6 +2,7 @@
 
 import { type ReactNode } from 'react';
 import { WebSocketProvider, useConnectionState } from '@/contexts/WebSocketContext';
+import { ServerCapabilitiesProvider } from '@/contexts/ServerCapabilitiesContext';
 import { TopNavbar } from '@/components/TopNavbar';
 import { CommandPalette } from '@/components/command/CommandPalette';
 import { DevAnnotateOverlay } from '@/components/dev/DevAnnotateOverlay';
@@ -29,7 +30,9 @@ function LayoutInner({ children }: { children: ReactNode }) {
 export function LayoutShell({ children }: { children: ReactNode }) {
   return (
     <WebSocketProvider>
-      <LayoutInner>{children}</LayoutInner>
+      <ServerCapabilitiesProvider>
+        <LayoutInner>{children}</LayoutInner>
+      </ServerCapabilitiesProvider>
     </WebSocketProvider>
   );
 }
