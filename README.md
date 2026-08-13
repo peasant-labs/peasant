@@ -798,6 +798,15 @@ published module by pinning it in `go.mod`; it does not regenerate or vendor the
 specs. To change the contract, land it in the schema repo (regenerate there, and
 version-bump for any released-surface change) and then re-pin peasant's `go.mod`.
 
+This includes Peasant's local web server. Adding, removing, or changing an
+externally observable HTTP or WebSocket route, method, request or response
+payload, message, capability token, or status behavior requires a corresponding
+change to the Peasant Local OpenAPI specification in the schema repository.
+The implementation and contract may be prototyped together on unmerged branches
+to validate the design. Before the Peasant change merges or ships, land and tag
+the schema contract, re-pin Peasant to that release, and verify the implementation
+against it. Local handler structs are not a substitute for the canonical contract.
+
 See [`docs/contract/versioning-procedure.md`](docs/contract/versioning-procedure.md).
 
 ### Schema versioning
