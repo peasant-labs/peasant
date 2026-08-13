@@ -8,11 +8,15 @@ vi.mock('next/navigation', () => ({
   usePathname: () => currentPathname,
 }));
 
-// The code map section is gated on the server's --experimental flag
-// (ServerFeaturesContext). Tests flip this instead of mocking the fetch.
+// The code map section is gated on the server-advertised capability set
+// (ServerCapabilitiesContext). Tests flip `experimental` instead of mocking the
+// fetch; the mock maps it to the code-map capability token.
 let experimental = false;
-vi.mock('@/contexts/ServerFeaturesContext', () => ({
-  useServerFeatures: () => ({ experimental }),
+vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
+  useServerCapabilities: () => ({
+    status: 'ready',
+    capabilities: new Set(experimental ? ['code_map_navigation_v1'] : []),
+  }),
 }));
 
 describe('TopNavbar — graph shell nav', () => {
