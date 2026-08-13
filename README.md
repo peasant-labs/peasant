@@ -705,8 +705,10 @@ backed by an in-memory SQLite store. The WebSocket E2E pattern in `AGENTS.md` ex
 ## Experimental features
 
 Some features are shelved in the default build and gated behind a flag: the
-`peasant memory` command group (Go build tag `-tags=experimental`) and the
-`/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`). See
+`peasant memory` command group (Go build tag `-tags=experimental`), the
+`/review` page's real-data mode (env `NEXT_PUBLIC_EXPERIMENTAL_REVIEW=1`), and the
+code map's web navigation entry points (`peasant web start --experimental`, a
+discoverability gate that never removes the underlying `/map` routes). See
 [EXPERIMENTAL.md](EXPERIMENTAL.md) for how to enable them, and
 [docs/memory.md](docs/memory.md) for the agent-memory reference.
 
