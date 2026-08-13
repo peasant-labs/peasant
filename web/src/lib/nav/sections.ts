@@ -65,6 +65,23 @@ export const NAV_SECTIONS: NavSection[] = GRAPH_NAV.map((section) => {
 });
 
 /**
+ * Sections shelved behind `peasant web start --experimental` (reported by
+ * GET /api/v1/config/features). The code map is experimental: its routes stay
+ * reachable by URL, but no persistent chrome advertises it on a default server.
+ */
+const EXPERIMENTAL_SECTION_IDS: ReadonlySet<string> = new Set(['map']);
+
+/** Whether a section is hidden from persistent chrome on a default (non-experimental) server. */
+export function isExperimentalSection(section: NavSection): boolean {
+  return EXPERIMENTAL_SECTION_IDS.has(section.id);
+}
+
+/** The nav sections to expose given the server's experimental gate. */
+export function visibleNavSections(experimental: boolean): NavSection[] {
+  return experimental ? NAV_SECTIONS : NAV_SECTIONS.filter((s) => !isExperimentalSection(s));
+}
+
+/**
  * Whether `pathname` is within a section. Changes owns `/` exactly (plus its
  * activePrefixes); the others match their href prefix plus any extra prefixes.
  */

@@ -5,7 +5,8 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { SearchIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
-import { NAV_SECTIONS } from '@/lib/nav/sections';
+import { visibleNavSections } from '@/lib/nav/sections';
+import { useServerFeatures } from '@/contexts/ServerFeaturesContext';
 import { fetchProjectSummaries, fetchSearch } from '@/lib/api/map';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
 import { displayProject } from '@/lib/quality/utils';
@@ -91,6 +92,9 @@ export function CommandPalette() {
   const { open, setOpen } = useCommandPaletteHotkey();
   const router = useRouter();
   const { toggle: toggleTheme } = useTheme();
+  // The code map section is shelved behind `peasant web start --experimental`;
+  // without it, neither the "go to" section nor per-project map jumps appear.
+  const { experimental } = useServerFeatures();
 
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -162,7 +166,7 @@ export function CommandPalette() {
   }, [query]);
 
   const commands = useMemo<Command[]>(() => {
-    const navCmds: Command[] = NAV_SECTIONS.map((s) => ({
+    const navCmds: Command[] = visibleNavSections(experimental).map((s) => ({
       id: `nav:${s.href}`,
       label: `go to ${s.label}`,
       group: 'Go to',
@@ -192,17 +196,21 @@ export function CommandPalette() {
           keywords: p.project,
           run: go(reviewHref(projectHash)),
         },
-        {
-          id: `proj-map:${p.projectHash}`,
-          label: `${name} · map`,
-          group: 'Project',
-          keywords: p.project,
-          run: go(mapHref(projectHash)),
-        },
+        ...(experimental
+          ? [
+              {
+                id: `proj-map:${p.projectHash}`,
+                label: `${name} · map`,
+                group: 'Project',
+                keywords: p.project,
+                run: go(mapHref(projectHash)),
+              },
+            ]
+          : []),
       ];
     });
     return [...projectCmds, ...navCmds, ...actionCmds];
-  }, [projects, go, toggleTheme, close]);
+  }, [projects, go, toggleTheme, close, experimental]);
 
   // Server-ranked transcript hits — deep-link each to its task turn. Kept OUT
   // of filterCommands (the snippet may not contain the literal query) and

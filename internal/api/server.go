@@ -40,6 +40,17 @@ const (
 // alias maintains backward compatibility.
 type MockConfigResponse = schema.MockConfigResponse
 
+// FeaturesConfigResponse is the JSON response for GET /api/v1/config/features.
+// It is a local dashboard contract (server → its own bundled SPA), not a
+// shared wire type; move it to the schema module if it ever crosses that
+// boundary.
+type FeaturesConfigResponse struct {
+	// Experimental reports whether the server was started with
+	// `peasant web start --experimental`, unlocking shelved web surfaces
+	// (currently the code map section).
+	Experimental bool `json:"experimental"`
+}
+
 // ServerConfig holds the configuration for the web dashboard server.
 type ServerConfig struct {
 	Port         int
@@ -49,6 +60,9 @@ type ServerConfig struct {
 	DevProxyAddr string // e.g. "localhost:3000"
 	WebAssets    fs.FS  // embedded SPA assets (nil in dev mode)
 	MockConfig   *MockConfigResponse
+	// Experimental unlocks shelved web surfaces (the code map section).
+	// Set from `peasant web start --experimental`; default off.
+	Experimental bool
 	// Store is the SQLite analytics store, used to wire the annotation REST handlers.
 	// Nil disables annotation endpoints (returns 503).
 	Store *store.Store
@@ -93,6 +107,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("POST "+defaults.RouteShutdown.String(), s.handleShutdown(ctx))
 	mux.HandleFunc(defaults.RouteWS.String(), s.handleWebSocket)
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
+	mux.HandleFunc("GET "+defaults.RouteConfigFeatures.String(), s.handleFeaturesConfig)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
 	mux.HandleFunc("GET /api/v1/annotations/review-sessions", s.handleReviewSessions)
@@ -235,6 +250,20 @@ func (s *Server) handleMockConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data, err := json.Marshal(s.cfg.MockConfig)
+	if err != nil {
+		http.Error(w, `{"error":"failed to marshal config"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Write(data)
+}
+
+// handleFeaturesConfig reports the server's feature gates so the bundled SPA
+// can decide at runtime which shelved surfaces to expose. Always available —
+// a default (non-experimental) server answers {"experimental":false}.
+func (s *Server) handleFeaturesConfig(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+
+	data, err := json.Marshal(FeaturesConfigResponse{Experimental: s.cfg.Experimental})
 	if err != nil {
 		http.Error(w, `{"error":"failed to marshal config"}`, http.StatusInternalServerError)
 		return

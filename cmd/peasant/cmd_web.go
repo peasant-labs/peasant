@@ -37,12 +37,13 @@ func BuildWebCommand() *cobra.Command {
 	}
 
 	var (
-		webPort       int
-		webDev        bool
-		webFg         bool
-		webNoBrowser  bool
-		webVerbose    bool
-		mockDataStore string
+		webPort         int
+		webDev          bool
+		webFg           bool
+		webNoBrowser    bool
+		webVerbose      bool
+		webExperimental bool
+		mockDataStore   string
 	)
 
 	webStartCmd := &cobra.Command{
@@ -54,10 +55,10 @@ func BuildWebCommand() *cobra.Command {
 			}
 			if webFg || webDev {
 				cfgPath := resolveConfigPath(cmd)
-				return runWebForeground(cmd, cfgPath, webPort, webDev, mockDataStore)
+				return runWebForeground(cmd, cfgPath, webPort, webDev, mockDataStore, webExperimental)
 			}
 			cfgPath := resolveConfigPath(cmd)
-			return runWebBackground(cfgPath, webPort, webNoBrowser, webVerbose, mockDataStore)
+			return runWebBackground(cfgPath, webPort, webNoBrowser, webVerbose, mockDataStore, webExperimental)
 		},
 	}
 	webStartCmd.Flags().IntVar(&webPort, "port", defaults.DefaultPort, "Port to listen on")
@@ -65,6 +66,7 @@ func BuildWebCommand() *cobra.Command {
 	webStartCmd.Flags().BoolVar(&webFg, "foreground", false, "Run in foreground (no background fork)")
 	webStartCmd.Flags().BoolVar(&webNoBrowser, "no-browser", false, "Don't auto-open browser")
 	webStartCmd.Flags().BoolVar(&webVerbose, "verbose", false, "Enable verbose logging (debug level)")
+	webStartCmd.Flags().BoolVar(&webExperimental, "experimental", false, "Expose experimental web surfaces (the code map section)")
 	webStartCmd.Flags().StringVar(&mockDataStore, "mock-data-store", "", "Use mock data store (comma-separated: web,tui,api or dashboard,sessions,trends,metrics,qualitySessions)")
 
 	webStopCmd := &cobra.Command{
@@ -101,7 +103,7 @@ func toMockConfigResponse(cfg *config.MockConfig) *api.MockConfigResponse {
 }
 
 // runWebForeground runs the server in the current process.
-func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool, mockDataStore string) error {
+func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool, mockDataStore string, experimental bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -184,6 +186,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 		DevProxyAddr: devProxy,
 		WebAssets:    webFS,
 		MockConfig:   toMockConfigResponse(&cfg.Sources.Mock),
+		Experimental: experimental,
 		Store:        analyticsStore,
 		Config:       cfg,
 	})
@@ -192,7 +195,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 }
 
 // runWebBackground forks the server as a background process.
-func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mockDataStore string) error {
+func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mockDataStore string, experimental bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot find executable: %w", err)
@@ -204,6 +207,9 @@ func runWebBackground(cfgPath string, port int, noBrowser bool, verbose bool, mo
 	}
 	if verbose {
 		args = append(args, "--verbose")
+	}
+	if experimental {
+		args = append(args, "--experimental")
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = nil

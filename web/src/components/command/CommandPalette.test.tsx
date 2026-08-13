@@ -23,6 +23,13 @@ vi.mock('@/lib/api/map', () => ({
   fetchSearch: (q: string, limit?: number) => fetchSearch(q, limit),
 }));
 
+// The code map section is gated on the server's --experimental flag
+// (ServerFeaturesContext). Tests flip this instead of mocking the fetch.
+let experimental = false;
+vi.mock('@/contexts/ServerFeaturesContext', () => ({
+  useServerFeatures: () => ({ experimental }),
+}));
+
 beforeEach(() => {
   push.mockClear();
   toggle.mockClear();
@@ -30,7 +37,10 @@ beforeEach(() => {
   fetchSearch.mockResolvedValue({ query: '', results: [] });
   fetchProjectSummaries.mockResolvedValue(parentVisibleFixture.summary);
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  experimental = false;
+});
 
 describe('filterCommands', () => {
   const cmds: Command[] = [
@@ -67,7 +77,8 @@ describe('CommandPalette', () => {
     expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 
-  it('navigates to a nav section on Enter', () => {
+  it('navigates to a nav section on Enter (experimental server)', () => {
+    experimental = true;
     open();
     const input = screen.getByRole('combobox');
     fireEvent.change(input, { target: { value: 'Go to Code Map' } });
@@ -75,7 +86,17 @@ describe('CommandPalette', () => {
     expect(push).toHaveBeenCalledWith('/map');
   });
 
+  it('offers no code map jumps on a default (non-experimental) server', async () => {
+    open();
+    // Project commands appear once the summary fetch resolves.
+    await waitFor(() => expect(screen.getByText('alpha-project · changes')).toBeInTheDocument());
+
+    expect(screen.queryByText('go to code map')).not.toBeInTheDocument();
+    expect(screen.queryByText('alpha-project · map')).not.toBeInTheDocument();
+  });
+
   it('lists the explicit session parent from the shared summary and jumps to its map', async () => {
+    experimental = true;
     open();
     const input = screen.getByRole('combobox');
     // Project commands appear once the summary fetch resolves.
@@ -88,6 +109,7 @@ describe('CommandPalette', () => {
   });
 
   it('retries failed project discovery on the same surface and repopulates projects', async () => {
+    experimental = true;
     const callsBefore = fetchProjectSummaries.mock.calls.length;
     fetchProjectSummaries
       .mockRejectedValueOnce(new Error('database unavailable'))

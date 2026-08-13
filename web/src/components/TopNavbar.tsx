@@ -7,7 +7,8 @@ import { GraphSectionNav } from "@peasant-labs/fairtrade/graph";
 import { Share2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_SECTIONS, isSectionActive, type NavSection } from "@/lib/nav/sections";
+import { visibleNavSections, isSectionActive, type NavSection } from "@/lib/nav/sections";
+import { useServerFeatures } from "@/contexts/ServerFeaturesContext";
 import { CONNECTION } from "@/components/ConnectionState";
 import { OPEN_COMMAND_PALETTE_EVENT } from "@/components/command/CommandPalette";
 
@@ -21,8 +22,10 @@ export function TopNavbar({ connected }: TopNavbarProps) {
   const { theme, toggle } = useTheme();
 
   // Sections come from the shared IA module — one source for the nav,
-  // breadcrumbs, and (future) Cmd+K palette.
-  const links = NAV_SECTIONS;
+  // breadcrumbs, and (future) Cmd+K palette. The code map section is shelved
+  // behind `peasant web start --experimental`, so a default server shows two.
+  const { experimental } = useServerFeatures();
+  const links = visibleNavSections(experimental);
   const activeSection = links.find((link) => isSectionActive(link, pathname));
 
   return (

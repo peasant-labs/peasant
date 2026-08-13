@@ -8,13 +8,22 @@ vi.mock('next/navigation', () => ({
   usePathname: () => currentPathname,
 }));
 
+// The code map section is gated on the server's --experimental flag
+// (ServerFeaturesContext). Tests flip this instead of mocking the fetch.
+let experimental = false;
+vi.mock('@/contexts/ServerFeaturesContext', () => ({
+  useServerFeatures: () => ({ experimental }),
+}));
+
 describe('TopNavbar — graph shell nav', () => {
   afterEach(() => {
     cleanup();
     currentPathname = '/';
+    experimental = false;
   });
 
-  it('renders exactly the three graph-shell links in analytics-first order with their routes', () => {
+  it('renders exactly the three graph-shell links in analytics-first order on an experimental server', () => {
+    experimental = true;
     render(<TopNavbar connected />);
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
 
@@ -41,6 +50,15 @@ describe('TopNavbar — graph shell nav', () => {
     expect(screen.queryByText('Review')).not.toBeInTheDocument();
     expect(screen.queryByText('Share')).not.toBeInTheDocument();
     expect(screen.queryByText('Contribute')).not.toBeInTheDocument();
+  });
+
+  it('shelves the code map link on a default (non-experimental) server', () => {
+    render(<TopNavbar connected />);
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+
+    expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
+    const labels = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
+    expect(labels).toEqual(['analytics', 'changes']);
   });
 
   it('mounts the persistent share action on the production /share route', () => {
@@ -75,6 +93,7 @@ describe('TopNavbar — graph shell nav', () => {
   }
 
   it('marks Changes active on / with aria-current', () => {
+    experimental = true;
     currentPathname = '/';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'changes' }));
@@ -82,6 +101,7 @@ describe('TopNavbar — graph shell nav', () => {
   });
 
   it('marks Changes active on /review/* paths', () => {
+    experimental = true;
     currentPathname = '/review/peasant';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'changes' }));
@@ -89,6 +109,7 @@ describe('TopNavbar — graph shell nav', () => {
   });
 
   it('marks Map active on /map/* paths', () => {
+    experimental = true;
     currentPathname = '/map/peasant';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'code map' }));
@@ -96,6 +117,7 @@ describe('TopNavbar — graph shell nav', () => {
   });
 
   it('marks Map active on /projects/{name}/{id} viewer routes', () => {
+    experimental = true;
     currentPathname = '/projects/peasant/sess-0001';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'code map' }));

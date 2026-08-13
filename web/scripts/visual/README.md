@@ -225,7 +225,9 @@ lockfile is regenerated. Run the Fairtrade demo from the checkout matching that 
 ### 2. `./bin/peasant web start` — run the real binary
 - **cmd:** `cd PEASANT && ./bin/peasant web start --port 8690 --foreground --no-browser --mock-data-store=web,sessions,qualitySessions,annotations,review`
 - **when:** to hit the SERVED HTTP routes (the real artifact). `review` in the mock store is
-  REQUIRED for `/review`.
+  REQUIRED for `/review`. Add `--experimental` when a gate drives the NAV to the code map
+  (`shell-nav-gate.mjs`): the code map section is shelved from the shell chrome by default
+  (see `EXPERIMENTAL.md`), though `/map/<project>/` stays directly routable either way.
 - **expect:** `curl -sf localhost:8690/api/v1/health`; serves `/review/<project>/`,
   `/projects/<project>/<session>/` (transcript), `/` (dashboard), `/map/<project>/`.
 

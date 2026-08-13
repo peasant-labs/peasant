@@ -31,6 +31,7 @@ const (
 	RouteShutdown          Route = "/api/v1/shutdown"
 	RouteWS                Route = "/api/v1/ws"
 	RouteConfigMock        Route = "/api/v1/config/mock"
+	RouteConfigFeatures    Route = "/api/v1/config/features"
 	RouteSessions          Route = "/api/v1/sessions"
 	RouteAnnotations       Route = "/api/v1/annotations"
 	RouteAnnotationsBatch  Route = "/api/v1/annotations/batch"
