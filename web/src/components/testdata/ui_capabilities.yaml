@@ -58,6 +58,19 @@ cases:
       uiCapabilities:
         - some_unrecognized_token_v9
 
+  # Uses the REAL code-map token so the ONLY reason the section stays hidden is
+  # the extra top-level key: zUICapabilitiesResponse is .strict(), so an
+  # otherwise-valid envelope with any unknown top-level field fails the parse and
+  # falls closed. This is maximally distinguishing — dropping .strict() would flip
+  # this case to visible while every other case is unchanged.
+  - name: unknown-top-level-key-with-real-token
+    expectVisible: false
+    status: 200
+    body:
+      uiCapabilities:
+        - code_map_navigation_v1
+      surprise: true
+
   - name: code-map-token
     expectVisible: true
     status: 200

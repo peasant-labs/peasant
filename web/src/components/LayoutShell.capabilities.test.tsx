@@ -74,8 +74,8 @@ const fixture = requireRecord(
 );
 requireExactRequiredFields(fixture, ['cases'], 'ui capabilities fixture');
 const cases = fixture.cases as CapabilityCase[];
-if (!Array.isArray(cases) || cases.length !== 9) {
-  throw new Error(`ui capabilities fixture must contain exactly 9 cases, got ${Array.isArray(cases) ? cases.length : 'non-array'}`);
+if (!Array.isArray(cases) || cases.length !== 10) {
+  throw new Error(`ui capabilities fixture must contain exactly 10 cases, got ${Array.isArray(cases) ? cases.length : 'non-array'}`);
 }
 requireUniqueNames(cases as unknown as Record<string, unknown>[], 'ui capabilities fixture.cases');
 if (cases.filter((c) => c.expectVisible).length !== 1) {
