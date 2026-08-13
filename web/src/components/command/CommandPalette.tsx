@@ -5,8 +5,8 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { SearchIcon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
-import { visibleNavSections } from '@/lib/nav/sections';
-import { useServerFeatures } from '@/contexts/ServerFeaturesContext';
+import { visibleNavSections, isSectionVisible } from '@/lib/nav/sections';
+import { useServerCapabilities } from '@/contexts/ServerCapabilitiesContext';
 import { fetchProjectSummaries, fetchSearch } from '@/lib/api/map';
 import { fetchDiscovery, requireDiscoveryItem, type DiscoveryItem } from '@/lib/api/discovery';
 import { discoveryErrorMessage } from '@/lib/selectionGuidance';
@@ -110,9 +110,11 @@ export function CommandPalette() {
   const { open, setOpen } = useCommandPaletteHotkey();
   const router = useRouter();
   const { toggle: toggleTheme } = useTheme();
-  // The code map section is shelved behind `peasant web start --experimental`;
-  // without it, neither the "go to" section nor per-project map jumps appear.
-  const { experimental } = useServerFeatures();
+  // The code map section is gated on the server-advertised capability set;
+  // without its token, neither the "go to" section nor per-project map jumps
+  // appear. Visibility policy lives in sections.ts — this reads the predicate.
+  const { capabilities } = useServerCapabilities();
+  const mapVisible = isSectionVisible('map', capabilities);
 
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -192,7 +194,7 @@ export function CommandPalette() {
   }, [query]);
 
   const commands = useMemo<Command[]>(() => {
-    const navCmds: Command[] = visibleNavSections(experimental).map((s) => ({
+    const navCmds: Command[] = visibleNavSections(capabilities).map((s) => ({
       id: `nav:${s.href}`,
       label: `go to ${s.label}`,
       group: 'Go to',
@@ -222,7 +224,7 @@ export function CommandPalette() {
           keywords: p.project,
           run: go(reviewHref(projectHash)),
         },
-        ...(experimental
+        ...(mapVisible
           ? [
               {
                 id: `proj-map:${p.projectHash}`,
@@ -236,7 +238,7 @@ export function CommandPalette() {
       ];
     });
     return [...projectCmds, ...navCmds, ...actionCmds];
-  }, [projects, go, toggleTheme, close, experimental]);
+  }, [projects, go, toggleTheme, close, capabilities, mapVisible]);
 
   // Server-ranked transcript hits — deep-link each to its task turn. Kept OUT
   // of filterCommands (the snippet may not contain the literal query) and
@@ -246,14 +248,14 @@ export function CommandPalette() {
       messages.flatMap((r) => {
         const projectHash = parseProjectHash(r.projectHash);
         if (!projectHash) return [];
-         return [{
-         id: `msg:${r.sessionId}:${r.entryIndex}`,
-         label: messageLabel(r.snippet),
-         group: 'Messages',
-         keywords: r.project,
-         searchAnnotation: { discovery: r.discovery },
-         run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
-      }];
+        return [{
+          id: `msg:${r.sessionId}:${r.entryIndex}`,
+          label: messageLabel(r.snippet),
+          group: 'Messages',
+          keywords: r.project,
+          searchAnnotation: { discovery: r.discovery },
+          run: go(transcriptHref(projectHash, r.sessionId, { turn: r.entryIndex })),
+        }];
       }),
     [messages, go],
   );

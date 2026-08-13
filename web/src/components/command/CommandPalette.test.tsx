@@ -17,6 +17,16 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 const toggle = vi.fn();
 vi.mock('@/hooks/useTheme', () => ({ useTheme: () => ({ theme: 'light', toggle }) }));
 
+// These existing cases exercise map-related commands, so advertise the code-map
+// capability. Capability-matrix cases (map absent vs present) are owned by the
+// develop-merge test-union slice; this mock keeps the map-assuming cases green.
+vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
+  useServerCapabilities: () => ({
+    status: 'ready',
+    capabilities: new Set(['code_map_navigation_v1']),
+  }),
+}));
+
 const parentVisibleFixture = projectViewerStateFixture('explicit session makes parent visible');
 const PROJECT_HASH = parentVisibleFixture.summary.projects[0].projectHash;
 const fixturePath = resolve(process.cwd(), 'src/components/command/testdata/search_discovery.yaml');
@@ -123,8 +133,11 @@ describe('CommandPalette', () => {
     open();
     const input = screen.getByRole('combobox');
     fireEvent.change(input, { target: { value: 'a' } });
-    // Give the debounce window time to (not) fire.
-    await new Promise((r) => setTimeout(r, 250));
+    // Give the debounce window time to (not) fire. Wrapped in act so the
+    // first-open project fetch settling inside this window is flushed cleanly.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/search'));
     expect(screen.queryByText('Messages')).not.toBeInTheDocument();
   });
