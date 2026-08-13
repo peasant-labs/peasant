@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	expectedUICapabilityEndpointRows = 2
-	expectedUICapabilityProducerRows = 3
+	expectedUICapabilityEndpointRows     = 2
+	expectedUICapabilityProducerRows     = 3
+	expectedUICapabilityCanonicalizeRows = 3
 )
 
 //go:embed testdata/ui_capabilities.yaml
@@ -30,10 +31,12 @@ var uiCapabilitiesYAML []byte
 // constructor's canonicalization and fail-loud rejection at the seam a running
 // server never reaches.
 type uiCapabilityFixtures struct {
-	DeclaredEndpointRows int                    `yaml:"declared_endpoint_rows"`
-	DeclaredProducerRows int                    `yaml:"declared_producer_rows"`
-	EndpointCases        []uiCapabilityEndpoint `yaml:"endpoint_cases"`
-	ProducerCases        []uiCapabilityProducer `yaml:"producer_cases"`
+	DeclaredEndpointRows     int                        `yaml:"declared_endpoint_rows"`
+	DeclaredProducerRows     int                        `yaml:"declared_producer_rows"`
+	DeclaredCanonicalizeRows int                        `yaml:"declared_canonicalize_rows"`
+	EndpointCases            []uiCapabilityEndpoint     `yaml:"endpoint_cases"`
+	ProducerCases            []uiCapabilityProducer     `yaml:"producer_cases"`
+	CanonicalizeCases        []uiCapabilityCanonicalize `yaml:"canonicalize_cases"`
 }
 
 // uiCapabilityEndpoint is one server-config -> advertised-tokens expectation
@@ -51,6 +54,17 @@ type uiCapabilityProducer struct {
 	InputTokens    []string `yaml:"input_tokens"`
 	ExpectError    bool     `yaml:"expect_error"`
 	ErrorContains  string   `yaml:"error_contains"`
+	ExpectedTokens []string `yaml:"expected_tokens"`
+}
+
+// uiCapabilityCanonicalize is one arbitrary-token-input -> canonical-output
+// expectation exercised through canonicalizeTokens directly. These inputs need
+// no inventory membership: the pure seam is the only place multi-token dedupe +
+// lexicographic ordering can be exercised, because the closed single-token
+// inventory can never feed the response constructor more than one distinct token.
+type uiCapabilityCanonicalize struct {
+	Name           string   `yaml:"name"`
+	InputTokens    []string `yaml:"input_tokens"`
 	ExpectedTokens []string `yaml:"expected_tokens"`
 }
 
@@ -95,6 +109,12 @@ func loadUICapabilityFixtures(t *testing.T) uiCapabilityFixtures {
 			fixtures.DeclaredProducerRows, len(fixtures.ProducerCases), expectedUICapabilityProducerRows,
 		)
 	}
+	if fixtures.DeclaredCanonicalizeRows != expectedUICapabilityCanonicalizeRows || len(fixtures.CanonicalizeCases) != expectedUICapabilityCanonicalizeRows {
+		t.Fatalf(
+			"validate ui-capabilities canonicalize row guard: declared=%d, actual=%d, required=%d",
+			fixtures.DeclaredCanonicalizeRows, len(fixtures.CanonicalizeCases), expectedUICapabilityCanonicalizeRows,
+		)
+	}
 
 	endpointNames := make(map[string]struct{}, len(fixtures.EndpointCases))
 	for _, c := range fixtures.EndpointCases {
@@ -115,6 +135,16 @@ func loadUICapabilityFixtures(t *testing.T) uiCapabilityFixtures {
 			t.Fatalf("validate ui-capabilities fixtures: duplicate producer case %q", c.Name)
 		}
 		producerNames[c.Name] = struct{}{}
+	}
+	canonicalizeNames := make(map[string]struct{}, len(fixtures.CanonicalizeCases))
+	for _, c := range fixtures.CanonicalizeCases {
+		if strings.TrimSpace(c.Name) == "" {
+			t.Fatal("validate ui-capabilities fixtures: canonicalize case name is empty")
+		}
+		if _, dup := canonicalizeNames[c.Name]; dup {
+			t.Fatalf("validate ui-capabilities fixtures: duplicate canonicalize case %q", c.Name)
+		}
+		canonicalizeNames[c.Name] = struct{}{}
 	}
 
 	return fixtures
@@ -216,6 +246,26 @@ func TestUICapabilities_Producer(t *testing.T) {
 			}
 			if err := assertTokensEqual(tc.ExpectedTokens, resp.UICapabilities); err != nil {
 				t.Errorf("canonical tokens: %v", err)
+			}
+		})
+	}
+}
+
+// TestUICapabilities_Canonicalize drives canonicalizeTokens directly with
+// arbitrary multi-token inputs (no inventory membership) to prove the dedupe +
+// lexicographic sort is real. This is the only seam that can exercise multi-token
+// ordering: the closed single-token inventory can never feed the response
+// constructor more than one distinct token, so deleting the sort step must fail
+// here even though the endpoint and producer cases stay green.
+func TestUICapabilities_Canonicalize(t *testing.T) {
+	fixtures := loadUICapabilityFixtures(t)
+
+	for _, tc := range fixtures.CanonicalizeCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			got := canonicalizeTokens(tc.InputTokens)
+			if err := assertTokensEqual(tc.ExpectedTokens, got); err != nil {
+				t.Errorf("canonicalized tokens: %v", err)
 			}
 		})
 	}

@@ -3,12 +3,17 @@
 # endpoint_cases drive the real running server through its HTTP handler and
 # assert the advertised token set plus the Content-Type and Cache-Control
 # headers. producer_cases drive the response constructor
-# (newUICapabilitiesResponse) directly to prove canonicalization (dedupe + sort)
-# and the fail-loud rejection of out-of-inventory tokens — situations a
-# correctly-configured server never reaches through uiCapabilitiesForConfig, so
-# they can only be exercised at the construction seam.
+# (newUICapabilitiesResponse) directly to prove the fail-loud rejection of
+# out-of-inventory tokens — situations a correctly-configured server never
+# reaches through uiCapabilitiesForConfig, so they can only be exercised at the
+# construction seam. canonicalize_cases drive the pure canonicalizeTokens seam
+# with arbitrary multi-token strings (no inventory membership), which is the only
+# way to exercise multi-token lexicographic ordering and dedupe: the closed
+# single-token inventory can never feed the constructor more than one distinct
+# token, so without these cases the sort step would be unfalsifiable.
 declared_endpoint_rows: 2
 declared_producer_rows: 3
+declared_canonicalize_rows: 3
 
 endpoint_cases:
   - name: default-server-advertises-nothing
@@ -36,4 +41,28 @@ producer_cases:
       - not_a_real_capability
     expect_error: true
     error_contains: closed capability inventory
+    expected_tokens: []
+
+canonicalize_cases:
+  - name: out-of-order-distinct-tokens-are-sorted
+    input_tokens:
+      - zebra_token
+      - alpha_token
+      - mango_token
+    expected_tokens:
+      - alpha_token
+      - mango_token
+      - zebra_token
+  - name: duplicates-are-deduped-and-sorted
+    input_tokens:
+      - delta_token
+      - beta_token
+      - delta_token
+      - alpha_token
+    expected_tokens:
+      - alpha_token
+      - beta_token
+      - delta_token
+  - name: empty-input-yields-empty
+    input_tokens: []
     expected_tokens: []

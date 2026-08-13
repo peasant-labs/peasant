@@ -67,28 +67,46 @@ func uiCapabilitiesForConfig(cfg ServerConfig) []UICapability {
 	return caps
 }
 
+// canonicalizeTokens puts already-validated token strings into the server's
+// canonical advertisement form: duplicates removed (first occurrence wins) and
+// the survivors sorted lexicographically, so the advertised set is stable
+// regardless of the order producers appended tokens. Input membership is the
+// caller's responsibility; this is a pure step over raw strings. An input with
+// no distinct tokens yields nil so the wire field is omitted.
+func canonicalizeTokens(tokens []string) []string {
+	seen := make(map[string]struct{}, len(tokens))
+	canonical := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		canonical = append(canonical, t)
+	}
+	if len(canonical) == 0 {
+		return nil
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
 // newUICapabilitiesResponse validates every token against the closed inventory,
-// removes duplicates, sorts the survivors lexicographically, and returns the
+// then canonicalizes the survivors (dedupe + lexicographic sort) into the
 // schema-owned envelope. It errors (never silently skips) on any out-of-inventory
 // token so a producer bug surfaces as an actionable construction failure rather
 // than a stale or bogus advertisement. An empty input yields an empty envelope
 // (the uiCapabilities field is omitted on the wire).
 func newUICapabilitiesResponse(caps []UICapability) (schema.UICapabilitiesResponse, error) {
-	seen := make(map[UICapability]struct{}, len(caps))
 	tokens := make([]string, 0, len(caps))
 	for _, c := range caps {
 		if err := c.Validate(); err != nil {
 			return schema.UICapabilitiesResponse{}, err
 		}
-		if _, dup := seen[c]; dup {
-			continue
-		}
-		seen[c] = struct{}{}
 		tokens = append(tokens, string(c))
 	}
-	if len(tokens) == 0 {
+	canonical := canonicalizeTokens(tokens)
+	if len(canonical) == 0 {
 		return schema.UICapabilitiesResponse{}, nil
 	}
-	sort.Strings(tokens)
-	return schema.UICapabilitiesResponse{UICapabilities: tokens}, nil
+	return schema.UICapabilitiesResponse{UICapabilities: canonical}, nil
 }
