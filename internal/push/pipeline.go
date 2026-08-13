@@ -182,13 +182,25 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// side-effecting upload + persistence, which pushSession skips when DryRun is
 	// set. No village negotiation (no HTTP), so the forecast emits the CLI's own
 	// contract version; no audit log.
-	if p.runCfg.DryRun {
+	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
 		for _, sess := range sessions {
 			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
 		return result, nil // no audit log for dry-run
+	}
+	// Fail local transcript reads before the first remote negotiation. pushSession
+	// reads again under its per-session operation so concurrent store changes also
+	// fail closed rather than publishing stale preflight bytes.
+	for _, sess := range sessions {
+		sessionID, _ := ingest.NewSessionID(sess.SessionID)
+		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
+			sr := entryReadFailure(sess, readErr)
+			result.Sessions = append(result.Sessions, sr)
+			result.countStatus(sr.Status)
+			return result, nil
+		}
 	}
 
 	// 6b. Version-negotiation preflight: query the village's accepted
@@ -819,8 +831,7 @@ func (p *Pipeline) pushSession(
 	// evidence are indivisible publication input, so an unreadable entry set fails closed.
 	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
 	if entriesErr != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
-			"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline.pushSession ListEntries\n  when: before redaction, capability negotiation, content construction, or upload\n  meaning: no transcript bytes, metadata, receipt, or audit record were sent or written\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, entriesErr)}
+		return entryReadFailure(sess, entriesErr)
 	}
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
@@ -972,7 +983,7 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
 			Error: fmt.Errorf(
-				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise the exact %q capability token\n  where: push.Pipeline.pushSession\n  when: after GET /api/v1/schema/version and before content construction or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
+				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise the exact %q capability token\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
 				sess.SessionID, schema.ContentCapabilityObservedModelV1,
 			),
 		}
@@ -1150,6 +1161,11 @@ func (p *Pipeline) pushSession(
 		Title:     title,
 		Status:    status,
 	}
+}
+
+func entryReadFailure(sess ingest.PushSessionRow, err error) SessionPushResult {
+	return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
+		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript preflight\n  when: before remote capability negotiation, redaction, content construction, or upload\n  meaning: no transcript bytes, metadata, receipt, audit record, or publication attempt were sent or written\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err)}
 }
 
 func promoteAuthoritativePublishFields(document map[string]json.RawMessage) error {

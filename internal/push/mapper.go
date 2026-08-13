@@ -200,7 +200,27 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return redacted, nil
+	var redactedRequest schema.PublishRequest
+	if err := json.Unmarshal(redacted, &redactedRequest); err != nil {
+		return nil, fmt.Errorf("restore schema-owned evidence after publish-request redaction: decode failed: %w; no request was created; fix the redaction rule and retry", err)
+	}
+	if len(redactedRequest.Entries) != len(req.Entries) {
+		return nil, fmt.Errorf("restore schema-owned evidence after publish-request redaction: entry count changed from %d to %d; no request was created because model evidence cannot be matched safely; fix the redaction rule and retry", len(req.Entries), len(redactedRequest.Entries))
+	}
+	for index := range req.Entries {
+		modelID, present, evidenceErr := observedModelFromExtra(req.Entries[index].Extra)
+		if evidenceErr != nil {
+			return nil, evidenceErr
+		}
+		if present {
+			restored, restoreErr := restoreObservedModelExtra(redactedRequest.Entries[index].Extra, modelID)
+			if restoreErr != nil {
+				return nil, restoreErr
+			}
+			redactedRequest.Entries[index].Extra = restored
+		}
+	}
+	return json.Marshal(redactedRequest)
 }
 
 // conditionalStringPtr returns nil if include is false or val is nil.

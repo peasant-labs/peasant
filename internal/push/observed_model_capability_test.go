@@ -35,6 +35,7 @@ type observedModelCapabilityCase struct {
 	RedactPattern string                     `yaml:"redactPattern"`
 	Content       string                     `yaml:"content"`
 	WantContent   string                     `yaml:"wantContent"`
+	ShapeMutation string                     `yaml:"shapeMutation"`
 }
 
 type observedModelCapabilityFixture struct {
@@ -104,6 +105,9 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 					t.Fatalf("build custom redactor: %v", err)
 				}
 			}
+			if fixtureCase.ShapeMutation != "" {
+				redactor = shapeChangingRedactor{mutation: fixtureCase.ShapeMutation}
+			}
 			pipeline := push.NewPipeline(store, publisher, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{Concurrency: 1, DryRun: fixtureCase.DryRun}, redactor, &stderr)
 			result, err := pipeline.Run(context.Background())
 			if err != nil {
@@ -126,7 +130,15 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			}
 			if fixtureCase.WantError {
 				message := result.Sessions[0].Error.Error()
-				for _, fragment := range []string{"enriched transcript push refused", "  what:", "  why: the target Village did not advertise", "  where: push.Pipeline.pushSession", "  when:", "  meaning:", "  fix:", "before content construction or upload", "no transcript bytes or metadata were sent", "silently removing", "then retry"} {
+				if fixtureCase.ShapeMutation != "" {
+					for _, fragment := range []string{"what:", "why:", "where:", "when:", "meaning:", "fix:", "nothing was uploaded", "evidence-bearing structure"} {
+						if !strings.Contains(message, fragment) {
+							t.Errorf("shape refusal missing %q: %s", fragment, message)
+						}
+					}
+					return
+				}
+				for _, fragment := range []string{"enriched transcript push refused", "  what:", "  why: the target Village did not advertise", "  where: push.Pipeline.pushSession", "  when:", "  meaning:", "  fix:", "after local canonical content construction and validation", "before serialization or upload", "no transcript bytes or metadata were sent", "silently removing", "then retry"} {
 					if !strings.Contains(message, fragment) {
 						t.Errorf("actionable refusal missing %q: %s", fragment, message)
 					}
@@ -143,7 +155,50 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 				if fixtureCase.WantContent != "" && envelope.SessionDetail.Turns[0].Content != fixtureCase.WantContent {
 					t.Fatalf("uploaded content=%q, want %q", envelope.SessionDetail.Turns[0].Content, fixtureCase.WantContent)
 				}
+				if fixtureCase.RedactPattern != "" {
+					if len(publisher.AuthoritativeCalls) != 1 || len(publisher.AuthoritativeCalls[0].Entries) != 1 {
+						t.Fatalf("authoritative metadata entries=%+v, want one", publisher.AuthoritativeCalls)
+					}
+					modelID, present := modelIDFromExtra(t, publisher.AuthoritativeCalls[0].Entries[0].Extra)
+					if !present || modelID != fixtureCase.ObservedModel {
+						t.Fatalf("metadata model_id=(%q,%t), want (%q,true)", modelID, present, fixtureCase.ObservedModel)
+					}
+					if got := *publisher.AuthoritativeCalls[0].Entries[0].ContentPreview; got != fixtureCase.WantContent {
+						t.Fatalf("metadata content=%q, want %q", got, fixtureCase.WantContent)
+					}
+				}
 			}
 		})
 	}
+}
+
+type shapeChangingRedactor struct{ mutation string }
+
+func (r shapeChangingRedactor) RedactMetadata(meta *ingest.UnifiedMetadata) *ingest.UnifiedMetadata {
+	return meta
+}
+func (r shapeChangingRedactor) Level() string          { return "standard" }
+func (r shapeChangingRedactor) RuleSetVersion() string { return "test" }
+func (r shapeChangingRedactor) RedactJSON(value any) any {
+	document, ok := value.(map[string]any)
+	if !ok || document["kind"] != string(schema.ContentKindSessionDetail) {
+		return value
+	}
+	if r.mutation == "remove_session_detail" {
+		delete(document, "sessionDetail")
+	}
+	return document
+}
+
+func modelIDFromExtra(t *testing.T, extra *string) (string, bool) {
+	t.Helper()
+	if extra == nil {
+		return "", false
+	}
+	var document map[string]string
+	if err := json.Unmarshal([]byte(*extra), &document); err != nil {
+		t.Fatalf("decode entry extra: %v", err)
+	}
+	value, present := document["model_id"]
+	return value, present
 }

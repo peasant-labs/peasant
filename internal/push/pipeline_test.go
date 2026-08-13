@@ -2033,6 +2033,9 @@ func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
 	if len(pub.Calls) != 0 {
 		t.Fatalf("entry read failure made %d HTTP calls, want 0", len(pub.Calls))
 	}
+	if pub.SchemaVersionCalls != 0 || len(pub.AuthoritativeCalls) != 0 || len(store.SavedPublicationIDs) != 0 || len(store.PushLogs) != 0 || len(store.PublicationAttempts) != 0 {
+		t.Fatalf("entry-read failure side effects: schema=%d authoritative=%d persistence=%d audit=%d attempts=%d", pub.SchemaVersionCalls, len(pub.AuthoritativeCalls), len(store.SavedPublicationIDs), len(store.PushLogs), len(store.PublicationAttempts))
+	}
 	message := result.Sessions[0].Error.Error()
 	for _, fragment := range []string{"what:", "why:", "where:", "when:", "meaning:", "fix:", "no transcript bytes"} {
 		if !strings.Contains(message, fragment) {

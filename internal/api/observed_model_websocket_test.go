@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/coder/websocket"
@@ -34,6 +35,8 @@ type observedModelWebSocketFixture struct {
 	StoredModel            string                       `yaml:"storedModel"`
 	Turns                  []observedModelWebSocketTurn `yaml:"turns"`
 	ExpectedSeed           string                       `yaml:"expectedSeed"`
+	InvalidRole            string                       `yaml:"invalidRole"`
+	InvalidObservedModel   string                       `yaml:"invalidObservedModel"`
 	ExpectedObservedModels []string                     `yaml:"expectedObservedModels"`
 	ExpectedCaseCount      int                          `yaml:"expectedCaseCount"`
 	RequiredNames          []string                     `yaml:"requiredNames"`
@@ -45,7 +48,7 @@ func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixtu
 	if err := yaml.Unmarshal(observedModelWebSocketFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode observed model websocket fixture: %v", err)
 	}
-	if fixture.SessionID == "" || fixture.StoredModel == "" || fixture.ExpectedSeed == "" || fixture.ExpectedCaseCount != 2 || len(fixture.Turns) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
+	if fixture.SessionID == "" || fixture.StoredModel == "" || fixture.ExpectedSeed == "" || fixture.InvalidRole == "" || fixture.InvalidObservedModel == "" || fixture.ExpectedCaseCount != 2 || len(fixture.Turns) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
 		t.Fatalf("observed model websocket fixture inventory is incomplete: %+v", fixture)
 	}
 	seen := map[string]bool{}
@@ -61,6 +64,56 @@ func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixtu
 		}
 	}
 	return fixture
+}
+
+func TestHubSessionDetailRejectsPersistedNonAssistantEvidence(t *testing.T) {
+	fixture := loadObservedModelWebSocketFixture(t)
+	db := openTestStore(t)
+	stored := makeStoreEntry(t, fixture.SessionID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fixture-host", defaults.HarnessClaudeCode, 1700000000000, 1, 1, "fixture-project", 1, 0, 1000)
+	if err := db.InsertSessions(context.Background(), []ingest.StoreEntry{stored}); err != nil {
+		t.Fatal(err)
+	}
+	extraBytes, _ := json.Marshal(map[string]string{"model_id": fixture.InvalidObservedModel})
+	extra, content := string(extraBytes), "invalid attribution"
+	entry := schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: 1, Role: schema.Role(fixture.InvalidRole), Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &content, Extra: &extra}
+	if err := db.IndexSessionEntries(context.Background(), ingest.SessionID(fixture.SessionID), []schema.SessionEntry{entry}); err != nil {
+		t.Fatal(err)
+	}
+	hub := api.NewHub(api.NewStoreDataProvider(db, sessionvisibility.All()))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+	server := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
+	defer server.Close()
+	connection, _, err := websocket.Dial(ctx, "ws://"+server.Listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close(websocket.StatusNormalClosure, "")
+	_, _, _ = connection.Read(ctx)
+	subscription, _ := json.Marshal(api.ClientMessage{Type: api.MsgSubscribe, Channels: []api.ChannelSubscription{{Topic: api.TopicSessionDetail, ID: fixture.SessionID}}})
+	if err := connection.Write(ctx, websocket.MessageText, subscription); err != nil {
+		t.Fatal(err)
+	}
+	_, data, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var message struct {
+		Type    api.MessageType `json:"type"`
+		Message string          `json:"message"`
+	}
+	if err := json.Unmarshal(data, &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.Type != api.MsgError {
+		t.Fatalf("message type=%q, want %q; body=%s", message.Type, api.MsgError, data)
+	}
+	for _, fragment := range []string{"observed model evidence is invalid", "what:", "why:", "where:", "when:", "meaning:", "fix:"} {
+		if !strings.Contains(message.Message, fragment) {
+			t.Errorf("mounted error missing %q: %s", fragment, message.Message)
+		}
+	}
 }
 
 func TestHubSessionDetailEmitsObservedModelEvidence(t *testing.T) {

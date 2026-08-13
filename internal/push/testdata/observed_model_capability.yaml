@@ -30,3 +30,10 @@ cases:
     wantContent: " remains ordinary transcript content"
     wantUploads: 1
     wantError: false
+  - name: redaction_cannot_remove_evidence_bearing_structure
+    observedModel: Anthropic/Claude Fable-5
+    advertisement:
+      - observed_model_v1
+    shapeMutation: remove_session_detail
+    wantUploads: 0
+    wantError: true

@@ -286,19 +286,32 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 				"this with the session id printed above; retrying will fail the same way until the rule is corrected",
 			check.Kind, err)
 	}
-	if content.SessionDetail != nil && check.SessionDetail != nil {
-		restoreObservedModels(content.SessionDetail.Turns, check.SessionDetail.Turns)
+	if (content.SessionDetail == nil) != (check.SessionDetail == nil) {
+		return nil, transcriptShapeRedactionError("sessionDetail presence changed")
+	}
+	if content.SessionDetail != nil {
+		if err := restoreObservedModels(content.SessionDetail.Turns, check.SessionDetail.Turns); err != nil {
+			return nil, err
+		}
 	}
 	return json.Marshal(check)
 }
 
-func restoreObservedModels(source, destination []schema.TurnDetail) {
+func restoreObservedModels(source, destination []schema.TurnDetail) error {
+	if len(source) != len(destination) {
+		return transcriptShapeRedactionError(fmt.Sprintf("turn count changed from %d to %d", len(source), len(destination)))
+	}
 	for index := range source {
-		if index >= len(destination) {
-			return
+		if source[index].Index != destination[index].Index || source[index].Role != destination[index].Role || source[index].Depth != destination[index].Depth {
+			return transcriptShapeRedactionError(fmt.Sprintf("turn identity changed at position %d", index))
 		}
 		destination[index].ObservedModel = source[index].ObservedModel
 	}
+	return nil
+}
+
+func transcriptShapeRedactionError(reason string) error {
+	return fmt.Errorf("transcript redaction changed evidence-bearing structure\n  what: %s\n  why: observedModel evidence can only be restored onto the exact validated turn sequence\n  where: push.marshalBuiltTranscriptContent\n  when: after local content validation and redaction, before serialization or upload\n  meaning: nothing was uploaded because the redacted payload could diverge from the capability-gated payload\n  fix: correct the custom redaction rule so it rewrites string values without removing, reordering, or truncating transcript structure, then retry", reason)
 }
 
 // metadataToSession projects on-disk metadata onto the SessionToDetail input
