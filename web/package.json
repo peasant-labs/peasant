@@ -17,6 +17,8 @@
     "test:watch": "vitest",
     "probe:peasant": "node scripts/visual/probe-peasant.mjs",
     "probe:selection-recovery": "node scripts/visual/selection-recovery-probe.mjs",
+    "visual:search-share:self-test": "node scripts/visual/search-share-visual.mjs --self-test",
+    "visual:search-share": "node scripts/visual/search-share-visual.mjs",
     "shoot:peasant": "node scripts/visual/peasant-shoot.mjs",
     "shoot:changes": "node scripts/visual/changes-shoot.mjs",
     "boot:peasant": "node scripts/visual/boot-peasant.mjs",

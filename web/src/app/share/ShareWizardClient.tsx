@@ -16,16 +16,17 @@ import {
   type RedactionCache,
 } from '@/components/share/RedactionStep';
 import { PushStep } from '@/components/share/PushStep';
-import type { ShareDiscoveryResult, ShareSession, LabelSelection } from '@/lib/share/types';
+import type { ShareDiscoveryResult, ShareSession, ShareHierarchySession, LabelSelection } from '@/lib/share/types';
 import { emptyLabelSelection } from '@/lib/share/types';
 import {
   DEFAULT_REDACTION_LEVEL,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
-import { groupByProject } from '@/lib/share/group';
+import { groupByProject, isSelectable } from '@/lib/share/group';
 import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
+import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
 
 // Prior-version Contribute wizard: superseded by the fairtrade graph shell lift,
 // a deprecation candidate retained for evidence exits until its replacement lands.
@@ -39,25 +40,32 @@ interface BackendSessionSummary {
   turnCount: number;
   toolCallCount: number;
   project?: string;
+  /** Canonical project identity from the schema-owned SessionSummary wire. */
+  projectHash?: string;
   /** Redaction-safe first user message — see SessionSummary.preview (Go). */
   preview?: string;
   /** Heuristic outcome — see SessionSummary.outcome (Go). */
   outcome?: string;
+  shareStatus?: ShareSession['shareStatus'];
 }
 
 function mapBackendToShareSession(backend: BackendSessionSummary): ShareSession {
+  const projectHash = backend.projectHash?.trim();
+  if (!projectHash) {
+    throw new Error(`Share chooser cannot safely group session ${JSON.stringify(backend.id)} because the sessions response omitted projectHash. Refresh the page; if this repeats, update or restart Peasant.`);
+  }
   return {
     id: backend.id,
     provider: backend.harness as ShareSession['provider'],
     projectName: backend.project ?? 'Unknown Project',
-    projectHash: '',
+    projectHash,
     hostSlug: '',
     startTime: backend.startTime,
     durationMins: Math.round(backend.durationMins),
     totalTokens: backend.totalTokens,
     turnCount: backend.turnCount,
     model: '',
-    shareStatus: 'new',
+    shareStatus: backend.shareStatus ?? 'new',
     preview: backend.preview ?? '',
     outcome: backend.outcome,
   };
@@ -69,8 +77,11 @@ function countByStatus(sessions: ShareSession[]): Record<ShareSession['shareStat
   return counts;
 }
 
-async function fetchRealSessions(): Promise<ShareDiscoveryResult> {
-  const response = await fetch(`${getApiBaseUrl()}/api/v1/sessions`);
+async function fetchRealSessions(): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
+  const [response, metadata] = await Promise.all([
+    fetch(`${getApiBaseUrl()}/api/v1/sessions`),
+    fetchDiscovery(),
+  ]);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
     try {
@@ -84,7 +95,11 @@ async function fetchRealSessions(): Promise<ShareDiscoveryResult> {
   }
   const payload = await response.json();
   const summaries: BackendSessionSummary[] = payload.sessions ?? [];
-  const sessions = summaries.map(mapBackendToShareSession);
+  const sessions: ShareHierarchySession[] = summaries.map((summary) => {
+    const session = mapBackendToShareSession(summary);
+    const item = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
+    return { ...session, locationLabel: item.locationLabel, repositoryLocationId: item.repositoryLocationId, branch: item.branch };
+  });
   return {
     sessions,
     counts: countByStatus(sessions),
@@ -171,7 +186,7 @@ export function ShareWizardClient() {
   const [labels, setLabels] = useState<LabelSelection>(() => emptyLabelSelection());
 
   // Config-aware data fetching
-  const [discovery, setDiscovery] = useState<ShareDiscoveryResult | null>(null);
+  const [discovery, setDiscovery] = useState<ShareDiscoveryResult<ShareHierarchySession> | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
@@ -196,7 +211,8 @@ export function ShareWizardClient() {
     if (config) {
       if (useMock) {
         setFetchError(null);
-        setDiscovery(fetchMockSessions());
+        const result = fetchMockSessions();
+        setDiscovery({ ...result, sessions: result.sessions.map((session) => ({ ...session, locationLabel: 'mock repository', repositoryLocationId: `mock:${session.projectHash || session.projectName}`, branch: 'main' })) });
       } else {
         fetchRealSessions()
           .then((result) => {
@@ -217,6 +233,11 @@ export function ShareWizardClient() {
   // is the only thing that preselects, and only that one session.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const selectableIds = useMemo(
+    () => new Set(discovery?.sessions.filter(isSelectable).map((session) => session.id) ?? []),
+    [discovery],
+  );
+
   useEffect(() => {
     if (!discovery) return;
 
@@ -224,7 +245,7 @@ export function ShareWizardClient() {
       deepLinkSessionId &&
       discovery.sessions.find((s) => s.id === deepLinkSessionId);
 
-    if (linked) {
+    if (linked && selectableIds.has(linked.id)) {
       // The deep-link is a drill-in: select exactly that one session, not its
       // whole project.
       const project = groupByProject(discovery.sessions).find((p) =>
@@ -240,7 +261,7 @@ export function ShareWizardClient() {
     if (deepLinkStep) {
       setStep(deepLinkStep);
     }
-  }, [discovery, deepLinkSessionId, deepLinkStep]);
+  }, [discovery, deepLinkSessionId, deepLinkStep, selectableIds]);
 
   // Redaction level. It starts - and stays - at the single level this version
   // offers.
@@ -365,7 +386,7 @@ export function ShareWizardClient() {
           Uses the fairtrade swz layout classes (via @peasant-labs/fairtrade/components.css
           already imported in layout.tsx). Forward navigation lives inside each step
           body's own Continue/Submit button; the footer owns back + step count. */}
-      <section className="swz" aria-label="contribute to the commons" data-tour="share-nav">
+        <section className="swz share-wizard" aria-label="contribute to the commons" data-tour="share-nav">
 
         {/* Step rail — completed = olive+check, current = amber, locked = dim/disabled. */}
         <div className="swz-head">
@@ -411,7 +432,7 @@ export function ShareWizardClient() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => setSelectedIds(new Set(evidenceSessions.map((s) => s.id)))}
+                  onClick={() => setSelectedIds(new Set(evidenceSessions.map((s) => s.id).filter((id) => selectableIds.has(id))))}
                 >
                   {evidenceSessions.length === 1
                     ? 'Select this session'

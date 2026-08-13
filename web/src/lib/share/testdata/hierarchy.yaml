@@ -1,0 +1,19 @@
+sessions:
+  - id: session-a
+    projectName: alpha
+    projectHash: hash-alpha
+    locationLabel: workspace a
+    repositoryLocationId: rl-a
+    branch: main
+  - id: session-b
+    projectName: alpha
+    projectHash: hash-alpha
+    locationLabel: workspace b
+    repositoryLocationId: rl-b
+    branch: main
+  - id: session-c
+    projectName: alpha
+    projectHash: hash-alpha
+    locationLabel: workspace renamed
+    repositoryLocationId: rl-a
+    branch: feature

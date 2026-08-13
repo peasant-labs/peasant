@@ -1,0 +1,41 @@
+valid:
+  items:
+    - sessionId: session-a
+      locationLabel: app 1
+      repositoryLocationId: rl_a
+      branch: main
+      selectionStatus: selected
+    - sessionId: session-b
+      locationLabel: app 2
+      repositoryLocationId: rl_b
+      branch: feature
+      selectionStatus: unselected
+invalid:
+  - name: duplicate-session
+    payload:
+      items:
+        - sessionId: session-a
+          locationLabel: app
+          repositoryLocationId: rl_a
+          branch: main
+          selectionStatus: selected
+        - sessionId: session-a
+          locationLabel: app
+          repositoryLocationId: rl_a
+          branch: main
+          selectionStatus: selected
+  - name: unknown-status
+    payload:
+      items:
+        - sessionId: session-a
+          locationLabel: app
+          repositoryLocationId: rl_a
+          branch: main
+          selectionStatus: maybe
+  - name: missing-status
+    payload:
+      items:
+        - sessionId: session-a
+          locationLabel: app
+          repositoryLocationId: rl_a
+          branch: main
