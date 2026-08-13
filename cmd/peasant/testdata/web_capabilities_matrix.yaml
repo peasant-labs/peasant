@@ -1,0 +1,35 @@
+# Real-binary matrix for the web capability advertisement across the four
+# foreground/background x default/experimental invocations of `peasant web start`.
+#
+# Each case boots the actual built binary on a free port with isolated XDG dirs,
+# polls GET /api/v1/config/capabilities, and asserts the advertised token set
+# plus the JSON content type and no-store cache header. The direct /map and
+# /projects routes must stay mounted (200 + HTML from the SPA handler) in every
+# case, since capabilities gate discoverability only, never routes.
+#
+# The background cases are the forwarding proof: `web start` without --foreground
+# forks a foreground child, so the advertised set is correct only if
+# --experimental is forwarded to that child. Deleting the forwarding line in
+# cmd_web.go makes exactly experimental-background go red (its advert collapses
+# to empty) while default-background stays green (guarding inverted forwarding).
+declared_rows: 4
+
+cases:
+  - name: default-foreground
+    experimental: false
+    foreground: true
+    expected_tokens: []
+  - name: experimental-foreground
+    experimental: true
+    foreground: true
+    expected_tokens:
+      - code_map_navigation_v1
+  - name: experimental-background
+    experimental: true
+    foreground: false
+    expected_tokens:
+      - code_map_navigation_v1
+  - name: default-background
+    experimental: false
+    foreground: false
+    expected_tokens: []
