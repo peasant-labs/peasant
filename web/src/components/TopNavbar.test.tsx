@@ -9,13 +9,14 @@ vi.mock('next/navigation', () => ({
 }));
 
 // The code map section is gated on the server-advertised capability set
-// (ServerCapabilitiesContext). Tests flip `experimental` instead of mocking the
-// fetch; the mock maps it to the code-map capability token.
-let experimental = false;
+// (ServerCapabilitiesContext). Tests drive the ReadonlySet<string> of advertised
+// tokens directly — the same shape the real provider exposes — so the mock reads
+// as the token set the shell reacts to, not a boolean proxy.
+let capabilities: ReadonlySet<string> = new Set();
 vi.mock('@/contexts/ServerCapabilitiesContext', () => ({
   useServerCapabilities: () => ({
     status: 'ready',
-    capabilities: new Set(experimental ? ['code_map_navigation_v1'] : []),
+    capabilities,
   }),
 }));
 
@@ -23,11 +24,11 @@ describe('TopNavbar — graph shell nav', () => {
   afterEach(() => {
     cleanup();
     currentPathname = '/';
-    experimental = false;
+    capabilities = new Set();
   });
 
   it('renders exactly the three graph-shell links in analytics-first order on an experimental server', () => {
-    experimental = true;
+    capabilities = new Set(['code_map_navigation_v1']);
     render(<TopNavbar connected />);
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
 
@@ -97,7 +98,7 @@ describe('TopNavbar — graph shell nav', () => {
   }
 
   it('marks Changes active on / with aria-current', () => {
-    experimental = true;
+    capabilities = new Set(['code_map_navigation_v1']);
     currentPathname = '/';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'changes' }));
@@ -105,7 +106,7 @@ describe('TopNavbar — graph shell nav', () => {
   });
 
   it('marks Changes active on /review/* paths', () => {
-    experimental = true;
+    capabilities = new Set(['code_map_navigation_v1']);
     currentPathname = '/review/peasant';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'changes' }));
@@ -113,7 +114,7 @@ describe('TopNavbar — graph shell nav', () => {
   });
 
   it('marks Map active on /map/* paths', () => {
-    experimental = true;
+    capabilities = new Set(['code_map_navigation_v1']);
     currentPathname = '/map/peasant';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'code map' }));
@@ -121,7 +122,7 @@ describe('TopNavbar — graph shell nav', () => {
   });
 
   it('marks Map active on /projects/{name}/{id} viewer routes', () => {
-    experimental = true;
+    capabilities = new Set(['code_map_navigation_v1']);
     currentPathname = '/projects/peasant/sess-0001';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'code map' }));
