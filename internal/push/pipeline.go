@@ -1176,7 +1176,7 @@ func entryReadFailure(sess ingest.PushSessionRow, err error, stage entryReadStag
 		when = "after run-level capability negotiation and before redaction, content construction, or upload"
 	}
 	return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
-		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: no transcript bytes, metadata, receipt, audit record, or publication attempt were sent or written\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err, when)}
+		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: no transcript bytes or metadata were uploaded, and no publication receipt or attempt was persisted; the ordinary local run audit still records this failed session\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err, when)}
 }
 
 func promoteAuthoritativePublishFields(document map[string]json.RawMessage) error {

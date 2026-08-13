@@ -2067,6 +2067,9 @@ func TestPipeline_EntriesRereadErrorReportsPostNegotiationStage(t *testing.T) {
 	if !strings.Contains(message, "after run-level capability negotiation and before redaction, content construction, or upload") {
 		t.Fatalf("post-negotiation stage missing: %s", message)
 	}
+	if !strings.Contains(message, "the ordinary local run audit still records this failed session") {
+		t.Fatalf("truthful audit consequence missing: %s", message)
+	}
 }
 
 // TestPipeline_PublishesCurrentDurableAssociations verifies the mounted push
