@@ -155,7 +155,7 @@ func TestSearchVisibilityFixtureGuards(t *testing.T) {
 	}
 }
 
-func TestSearch_AppliesVisibilityBeforeSemanticLimit(t *testing.T) {
+func TestSearch_IncludesAllStoredMatches(t *testing.T) {
 	corpus := loadSearchVisibilityCorpus(t)
 	for _, tc := range corpus.Cases {
 		tc := tc

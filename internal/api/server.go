@@ -69,6 +69,9 @@ type ServerConfig struct {
 	// Config is the loaded application config. Used by the sync handler for
 	// redaction settings and push configuration. Nil disables sync endpoints.
 	Config *config.Config
+	// RepositoryIdentityResolver resolves private discovery rows into logical
+	// repository cohorts. Nil uses the production Git topology resolver.
+	RepositoryIdentityResolver ingest.RepositoryIdentityResolver
 }
 
 // Server is the HTTP server for the web dashboard.
@@ -109,6 +112,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
 	mux.HandleFunc("GET "+defaults.RouteConfigFeatures.String(), s.handleFeaturesConfig)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
+	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
 	mux.HandleFunc("GET /api/v1/annotations/review-sessions", s.handleReviewSessions)
 	mux.HandleFunc("POST "+defaults.RouteLocalFeedback.String(), s.handleLocalFeedback)
