@@ -460,6 +460,7 @@ type PushSessionRow struct {
 	HostSlug       string
 	ProjectHash    string
 	ProjectName    string
+	ProjectPath    string // raw session worktree, falling back to the project's canonical cwd
 	StartMs        int64
 	EndMs          int64
 	IngestedMs     int64
@@ -477,9 +478,10 @@ type PushSessionRow struct {
 	DurationMs     int64
 }
 
-// IsSelectedByBranch reports the branch-aware selection result for this row,
-// used by the push path only (ingest/prune use the project-level Matches).
-// A nil GitBranch is treated as an unknown branch ("").
+// IsSelectedByBranch reports the branch-aware selection result for this row
+// using the legacy positional matcher. Clone-aware command paths must resolve
+// ProjectPath across the complete row cohort and call MatchBranchCandidate
+// instead. A nil GitBranch is treated as an unknown branch ("").
 func (r PushSessionRow) IsSelectedByBranch(sel SelectionMatcher) BranchMatch {
 	branch := ""
 	if r.GitBranch != nil {

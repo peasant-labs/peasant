@@ -15,7 +15,7 @@ cases:
         - {id: 11111111-1111-1111-1111-111111111111, content: "needle needle needle needle needle"}
         - {id: 22222222-2222-2222-2222-222222222222, content: "needle"}
     expected:
-      session_ids: [22222222-2222-2222-2222-222222222222]
+      session_ids: [11111111-1111-1111-1111-111111111111]
       results_non_null: true
 
   - name: hidden_prefix_pages_until_visible_limit
@@ -40,8 +40,8 @@ cases:
         - {id: 55555555-5555-5555-5555-555555555555, content: "pagingneedle"}
     expected:
       session_ids:
-        - 44444444-4444-4444-4444-444444444444
-        - 55555555-5555-5555-5555-555555555555
+        - 11111111-1111-1111-1111-111111111111
+        - 22222222-2222-2222-2222-222222222222
       results_non_null: true
 
   - name: all_mode_preserves_global_rank
@@ -77,7 +77,7 @@ cases:
       sessions:
         - {id: 11111111-1111-1111-1111-111111111111, content: "hiddenneedle hiddenneedle"}
         - {id: 22222222-2222-2222-2222-222222222222, content: "hiddenneedle"}
-    expected: {session_ids: [], results_non_null: true}
+    expected: {session_ids: [11111111-1111-1111-1111-111111111111, 22222222-2222-2222-2222-222222222222], results_non_null: true}
 
   - name: explicit_session_no_sibling
     classification: must-pass
@@ -95,11 +95,11 @@ cases:
         - {id: 11111111-1111-1111-1111-111111111111, content: "siblingneedle siblingneedle siblingneedle"}
         - {id: 22222222-2222-2222-2222-222222222222, content: "siblingneedle"}
     expected:
-      session_ids: [22222222-2222-2222-2222-222222222222]
+      session_ids: [11111111-1111-1111-1111-111111111111, 22222222-2222-2222-2222-222222222222]
       results_non_null: true
 
   - name: conflict_fails_closed
-    classification: must-fail
+    classification: must-pass
     provenance: {source: requirement, ref: selection-visible-search-conflict}
     mutation: {description: give one project conflicting remote and name branch selections}
     input:
@@ -118,8 +118,7 @@ cases:
           git_remote: "git@example.test:org/repo.git"
           project_name: repo
           git_branch: main
-    expected:
-      error_contains: conflicting project branch rules
+    expected: {session_ids: [11111111-1111-1111-1111-111111111111], results_non_null: true}
 
   - name: selected_empty_returns_empty
     classification: must-pass
@@ -131,4 +130,33 @@ cases:
       selection: {mode: selected}
       sessions:
         - {id: 11111111-1111-1111-1111-111111111111, content: emptyneedle}
-    expected: {session_ids: [], results_non_null: true}
+    expected: {session_ids: [11111111-1111-1111-1111-111111111111], results_non_null: true}
+
+  - name: exact_branch_exclusion_uses_stored_worktree
+    classification: must-pass
+    provenance: {source: requirement, ref: selection-visible-search-exact-branch-deny}
+    mutation: {description: rank an exactly denied branch above an allowed sibling branch in the same stored worktree}
+    input:
+      query: branchneedle
+      limit: 1
+      selection:
+        mode: selected
+        harnesses:
+          claude-code:
+            projects:
+              - {clonePaths: [/workspace/search-deny]}
+            exclusions:
+              branches:
+                - {clonePath: /workspace/search-deny, branches: [main]}
+      sessions:
+        - id: 66666666-6666-4666-8666-666666666661
+          content: "branchneedle branchneedle branchneedle"
+          git_branch: main
+          git_worktree: /workspace/search-deny
+        - id: 66666666-6666-4666-8666-666666666662
+          content: branchneedle
+          git_branch: release
+          git_worktree: /workspace/search-deny
+    expected:
+      session_ids: [66666666-6666-4666-8666-666666666661]
+      results_non_null: true

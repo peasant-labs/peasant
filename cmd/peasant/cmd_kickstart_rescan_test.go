@@ -343,6 +343,7 @@ func rescanStoreEntry(t *testing.T, fixtures rescanFixtures, c rescanCase, index
 	ingestedMs := ingestedAt.UnixMilli()
 	remote := c.RecordedRemote
 	branch := c.RecordedBranch
+	worktree := c.SessionCWD
 	return ingest.StoreEntry{
 		Metadata: &ingest.UnifiedMetadata{
 			SchemaVersion: c.RecordedSchemaVersion.version(t, c.Name),
@@ -353,7 +354,7 @@ func rescanStoreEntry(t *testing.T, fixtures rescanFixtures, c rescanCase, index
 			Timestamp:     ingest.TimestampInfo{Start: ingestedMs - 60000, End: ingestedMs, Ingested: &ingestedMs},
 			Source:        ingest.SourceInfo{FilePath: string(sourcePath), Format: ingest.SourceFormatJSONL},
 			Project:       ingest.ProjectInfo{Hash: projectHash, Name: "rescan-project", FilePath: c.SessionCWD},
-			Git:           ingest.GitContext{Remote: &remote, Branch: &branch},
+			Git:           ingest.GitContext{Remote: &remote, Branch: &branch, Worktree: &worktree},
 			Stats:         ingest.StatsInfo{TurnCount: 1, ToolCallCount: 0, DurationMs: 60000},
 		},
 		Session: ingest.DiscoveredSession{
@@ -412,6 +413,21 @@ func TestKickstartRescan_ReusesRecordedSessions(t *testing.T) {
 	known := loadKnownSessions(t.Context(), dbPath)
 	if len(known) == 0 {
 		t.Fatal("a database this build just wrote must be reusable, but no recorded session was loaded from it")
+	}
+	for _, fixture := range fixtures.Cases {
+		if !fixture.Record.seeded() {
+			continue
+		}
+		record, ok := known[fixture.SessionID]
+		if !ok {
+			t.Fatalf("recorded session %s is missing from the reusable kickstart index", fixture.SessionID)
+		}
+		if record.GitWorktree != fixture.SessionCWD {
+			t.Errorf("session %s reusable worktree = %q, want %q", fixture.SessionID, record.GitWorktree, fixture.SessionCWD)
+		}
+		if record.CanonicalCwd != fixture.SessionCWD {
+			t.Errorf("session %s reusable canonical cwd = %q, want %q", fixture.SessionID, record.CanonicalCwd, fixture.SessionCWD)
+		}
 	}
 
 	git := newDirCountingGitResolver(fixtures.ResolvedRemote, fixtures.ResolvedBranch)

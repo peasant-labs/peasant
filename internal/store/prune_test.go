@@ -25,7 +25,7 @@ const (
 )
 
 // seedPruneSession inserts a session with minimal data for prune tests.
-func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash string, provider defaults.Harness, startMs int64) {
+func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash string, provider defaults.Harness, startMs int64, gitValues ...string) {
 	t.Helper()
 	ingested := startMs + 120000
 	entry := ingest.StoreEntry{
@@ -50,6 +50,12 @@ func seedPruneSession(t *testing.T, s *store.Store, sessionID, projectHash strin
 				Format:   schema.SourceFormatJSONL,
 			},
 		},
+	}
+	if len(gitValues) > 0 {
+		entry.Metadata.Git.Worktree = &gitValues[0]
+	}
+	if len(gitValues) > 1 {
+		entry.Metadata.Git.Branch = &gitValues[1]
 	}
 	if err := s.InsertSessions(context.Background(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("seedPruneSession(%s): %v", sessionID, err)
@@ -156,6 +162,34 @@ func TestStore_QueryPrunableSessions_BySessionID(t *testing.T) {
 	}
 	if rows[0].SessionID != schema.SessionID(pruneSessionB) {
 		t.Errorf("expected session B, got %s", rows[0].SessionID)
+	}
+	if rows[0].ProjectHash != pruneProjectI {
+		t.Errorf("ProjectHash = %q, want %q", rows[0].ProjectHash, pruneProjectI)
+	}
+	if rows[0].ProjectPath != "/test/project" {
+		t.Errorf("ProjectPath = %q, want canonical cwd fallback %q", rows[0].ProjectPath, "/test/project")
+	}
+}
+
+func TestStore_QueryPrunableSessions_PrefersSessionWorktree(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	worktree := "/test/project-worktree"
+	branch := "release"
+	seedPruneSession(t, s, pruneSessionA, pruneProjectH, defaults.HarnessClaudeCode, 1700000000000, worktree, branch)
+
+	rows, err := s.QueryPrunableSessions(context.Background(), ingest.PruneFilter{All: true})
+	if err != nil {
+		t.Fatalf("QueryPrunableSessions: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("QueryPrunableSessions returned %d rows, want 1", len(rows))
+	}
+	if rows[0].ProjectPath != worktree {
+		t.Errorf("ProjectPath = %q, want session worktree %q", rows[0].ProjectPath, worktree)
+	}
+	if rows[0].GitBranch != branch {
+		t.Errorf("GitBranch = %q, want recorded branch %q", rows[0].GitBranch, branch)
 	}
 }
 

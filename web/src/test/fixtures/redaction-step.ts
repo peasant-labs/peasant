@@ -113,6 +113,7 @@ export const REDACTION_STEP_DISCOVERY_PAYLOAD = {
       turnCount: REDACTION_STEP_SESSION.turnCount,
       toolCallCount: 0,
       project: REDACTION_STEP_SESSION.projectName,
+      projectHash: REDACTION_STEP_SESSION.projectHash,
       preview: REDACTION_STEP_SESSION.preview,
     },
   ],

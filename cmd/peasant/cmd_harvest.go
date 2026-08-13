@@ -393,7 +393,11 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	// 6d. Wire selection index into SessionFilter (unless --all clears filters).
 	var selectionConflicts *selectionConflictRecorder
 	if !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
-		pipelineCfg.SessionFilter, selectionConflicts = buildSelectionFilterWithRecorder(cfg, git)
+		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
+		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
+		pipelineCfg.SessionFilter = selectionFilter.Match
+		pipelineCfg.SessionExclusionFilter = selectionFilter.Excludes
+		selectionConflicts = recorder
 	}
 
 	// 7. Count custom patterns before the dry-run branch (visible in both modes).
@@ -1124,54 +1128,161 @@ func (r *selectionConflictRecorder) notice(w io.Writer, configPath string) {
 	}
 }
 
-func buildSelectionFilterWithRecorder(cfg *config.Config, git ingest.GitResolver) (func(ingest.DiscoveredSession) bool, *selectionConflictRecorder) {
-	matcher := cfg.SelectionMatcher()
+type preparedHarvestSelection struct {
+	candidate ingest.DiscoveryCandidate
+	decision  ingest.DiscoveryDecision
+	excluded  bool
+	session   ingest.DiscoveredSession
+}
+
+type harvestSelectionFilter struct {
+	matcher               ingest.SelectionMatcher
+	autoIngestNewBranches bool
+	git                   ingest.GitResolver
+	pathResolver          ingest.PathIdentityResolver
+	projectHarnesses      map[ingest.Harness]bool
+	prepared              map[ingest.SessionID]preparedHarvestSelection
+	recordedConflicts     map[ingest.SessionID]bool
+	recorder              *selectionConflictRecorder
+}
+
+func buildSelectionFilterWithRecorder(cfg *config.Config, git ingest.GitResolver) (*harvestSelectionFilter, *selectionConflictRecorder) {
+	return buildSelectionFilterWithResolver(cfg, git, ingest.NewPhysicalPathResolver())
+}
+
+func buildSelectionFilterWithResolver(
+	cfg *config.Config,
+	git ingest.GitResolver,
+	pathResolver ingest.PathIdentityResolver,
+) (*harvestSelectionFilter, *selectionConflictRecorder) {
 	recorder := &selectionConflictRecorder{}
+	projectHarnesses := make(map[ingest.Harness]bool)
+	for harness, selection := range cfg.Selection.Harnesses {
+		if len(selection.Projects) > 0 || len(selection.Exclusions.Branches) > 0 {
+			projectHarnesses[ingest.Harness(harness)] = true
+		}
+	}
+	filter := &harvestSelectionFilter{
+		matcher:               cfg.SelectionMatcher(),
+		autoIngestNewBranches: cfg.Selection.AutoIngestNewBranches,
+		git:                   git,
+		pathResolver:          pathResolver,
+		projectHarnesses:      projectHarnesses,
+		recorder:              recorder,
+	}
+	return filter, recorder
+}
+
+// Prepare materializes every discovered session before the first Match call.
+// Decisions are cached by session ID; Match is lookup-only and fails closed if
+// the pipeline supplies a session outside the prepared cohort.
+func (f *harvestSelectionFilter) Prepare(ctx context.Context, sessions []ingest.DiscoveredSession) error {
 	type gitContext struct{ remote, branch string }
-	resolved := make(map[string]gitContext)
-
-	return func(session ingest.DiscoveredSession) bool {
-		needsGit := matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)
-		// Resolve the session's working directory once (used for both remote and branch lookups).
-		dir := string(session.OriginalRoot)
-		if dir == "" {
-			dir = filepath.Dir(string(session.SourcePath))
+	resolvedGit := make(map[string]gitContext)
+	inputs := make([]selectionCandidateInput, len(sessions))
+	for index, session := range sessions {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if needsGit && git != nil && session.Harness == defaults.HarnessClaudeCode {
-			slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
-			if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
-				dir = decoded
-			}
-		}
-
-		// Resolve git remote for project matching. Normalized the same way as
-		// the config side above — git.RemoteURL typically
-		// returns whatever raw form `git remote -v` shows (often SSH), which
-		// must be canonicalized before comparison just like the stored form.
+		projectPath := discoveredSessionProjectPath(session)
+		branch := session.Branch
 		gitRemote := ""
-		projectName := session.ProjectName
-		branch := ""
-		if needsGit && git != nil {
-			ctx, ok := resolved[dir]
-			if !ok {
-				if remote, err := git.RemoteURL(context.Background(), dir); err == nil {
-					ctx.remote = remote
+		if (f.projectHarnesses[session.Harness] || f.matcher.DiscoveryNeedsGit(session.Harness, session.SessionID)) && f.git != nil {
+			dir := discoveredSessionGitDirectory(session, projectPath)
+			if dir != "" {
+				gitCtx, ok := resolvedGit[dir]
+				if !ok {
+					if remote, err := f.git.RemoteURL(ctx, dir); err == nil {
+						gitCtx.remote = remote
+					}
+					if resolvedBranch, err := f.git.Branch(ctx, dir); err == nil {
+						gitCtx.branch = resolvedBranch
+					}
+					resolvedGit[dir] = gitCtx
 				}
-				if resolvedBranch, err := git.Branch(context.Background(), dir); err == nil {
-					ctx.branch = resolvedBranch
+				gitRemote = gitCtx.remote
+				if gitCtx.branch != "" {
+					branch = gitCtx.branch
 				}
-				resolved[dir] = ctx
 			}
-			gitRemote, branch = ctx.remote, ctx.branch
 		}
+		inputs[index] = selectionCandidateInput{
+			Harness:     session.Harness,
+			GitRemote:   gitRemote,
+			ProjectName: session.ProjectName,
+			ProjectPath: projectPath,
+			Branch:      branch,
+			SessionID:   session.SessionID,
+		}
+	}
 
-		decision := matcher.MatchDiscoveryDecision(session.Harness, gitRemote, projectName, branch, session.SessionID, cfg.Selection.AutoIngestNewBranches)
-		switch decision.Match {
-		case ingest.BranchMatchYes:
-			return true
-		case ingest.BranchMatchWithheldConflict:
-			recorder.conflicts = append(recorder.conflicts, selectionConflict{session: session, branch: branch, entries: decision.Conflicting()})
+	candidates, err := prepareSelectionCandidates(ctx, inputs, f.pathResolver)
+	if err != nil {
+		return err
+	}
+	f.prepared = make(map[ingest.SessionID]preparedHarvestSelection, len(candidates))
+	f.recordedConflicts = make(map[ingest.SessionID]bool)
+	f.recorder.conflicts = nil
+	for index, candidate := range candidates {
+		f.prepared[candidate.SessionID] = preparedHarvestSelection{
+			candidate: candidate,
+			decision:  f.matcher.MatchDiscoveryCandidateDecision(candidate, f.autoIngestNewBranches),
+			excluded:  f.matcher.ExcludesCandidate(candidate),
+			session:   sessions[index],
 		}
+	}
+	return nil
+}
+
+// Excludes reports the exact-denial result cached during complete-cohort
+// preparation. An unknown session fails closed so a child outside that cohort
+// cannot inherit a selected parent's result.
+func (f *harvestSelectionFilter) Excludes(session ingest.DiscoveredSession) bool {
+	prepared, ok := f.prepared[session.SessionID]
+	return !ok || prepared.excluded
+}
+
+func (f *harvestSelectionFilter) Match(session ingest.DiscoveredSession) bool {
+	prepared, ok := f.prepared[session.SessionID]
+	if !ok {
 		return false
-	}, recorder
+	}
+	switch prepared.decision.Match {
+	case ingest.BranchMatchYes:
+		return true
+	case ingest.BranchMatchWithheldConflict:
+		if !f.recordedConflicts[session.SessionID] {
+			f.recorder.conflicts = append(f.recorder.conflicts, selectionConflict{
+				session: prepared.session,
+				branch:  prepared.candidate.Branch,
+				entries: prepared.decision.Conflicting(),
+			})
+			f.recordedConflicts[session.SessionID] = true
+		}
+	}
+	return false
+}
+
+func discoveredSessionProjectPath(session ingest.DiscoveredSession) string {
+	if filepath.IsAbs(session.CWD) {
+		return filepath.Clean(session.CWD)
+	}
+	if session.Harness == defaults.HarnessClaudeCode {
+		slug := filepath.Base(filepath.Dir(string(session.SourcePath)))
+		if decoded := decodeClaudeSlugToPath(slug); decoded != "" {
+			return decoded
+		}
+	}
+	return ""
+}
+
+func discoveredSessionGitDirectory(session ingest.DiscoveredSession, projectPath string) string {
+	if projectPath != "" {
+		return projectPath
+	}
+	dir := string(session.OriginalRoot)
+	if dir == "" && session.SourcePath != "" {
+		dir = filepath.Dir(string(session.SourcePath))
+	}
+	return dir
 }

@@ -1,17 +1,10 @@
-# Selection-config equivalence oracle: the ONE ratified divergence.
+# Selection-config equivalence oracle: exact physical clone identity.
 #
-# Selecting everything ("root-check") is the single scenario where the kickstart
-# rebuild must NOT reproduce what the current wizard writes.
+# Selecting everything is the scenario where the rebuilt kickstart adds the
+# resolver-produced physical identities that the current wizard cannot write.
 #
-# What the current project-first wizard does: selecting every project produces a
-# scoped, enumerated allowlist (mode:selected) listing exactly today's projects.
-# A project discovered LATER is therefore NOT ingested until onboarding is re-run.
-#
-# The ratified behaviour: root-check means "ingest everything" as a standing
-# policy — mode:all — so projects discovered after onboarding are auto-included
-# without re-running the wizard. This is an intentional behaviour change, ratified
-# rather than patched into the current wizard, so the rebuild is measured against
-# `ratifiedExpected`, not against `golden`.
+# Both flows enumerate today's projects in mode:selected. The rebuilt flow also
+# persists each exact current clone path. A project discovered later stays clear.
 #
 # `golden` here records what the current wizard ACTUALLY writes today so the
 # divergence is concrete and testable: the test drives the wizard, asserts it
@@ -22,8 +15,8 @@ scenarios:
   - name: select-everything-root-check
     doc: >
       User selects every project across every harness (root-check). The current
-      wizard enumerates them into mode:selected; the rebuilt flow must instead
-      persist mode:all so later-discovered projects are auto-ingested.
+      wizard enumerates them into mode:selected; the rebuilt flow must preserve
+      that wording and mode while adding the exact current clone paths.
     oracle: ratified-divergence
     wantImport: true
     autoIngestNewBranches: false
@@ -45,9 +38,7 @@ scenarios:
             gitRemote: "https://github.com/acme/tool.git"
             branch: main
             sessionId: oc-main-1
-    # What the CURRENT wizard actually persists for select-everything (driven and
-    # asserted by the test). Enumerated, mode:selected — the behaviour the ratified
-    # policy deliberately replaces.
+    # What the CURRENT wizard actually persists for select-everything.
     golden:
       mode: selected
       autoIngestNewBranches: false
@@ -58,9 +49,17 @@ scenarios:
         opencode:
           projects:
             - gitRemote: "https://github.com/acme/tool.git"
-    # What the REBUILT kickstart MUST emit: mode:all as a standing policy, with new
-    # branches auto-ingested. The current wizard has no code path that produces
-    # this, so it is a forward expectation the rebuild is measured against.
+    # What the rebuilt kickstart must emit: the same exact-current policy plus
+    # resolver output for each clone.
     ratifiedExpected:
-      mode: all
-      autoIngestNewBranches: true
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - gitRemote: "git@github.com:acme/tool.git"
+              clonePaths: [/fixtures/claude/acme-tool]
+        opencode:
+          projects:
+            - gitRemote: "https://github.com/acme/tool.git"
+              clonePaths: [/fixtures/opencode/acme-tool]

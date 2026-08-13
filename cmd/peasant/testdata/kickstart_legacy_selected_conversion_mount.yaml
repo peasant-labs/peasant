@@ -1,0 +1,149 @@
+expectedScenarioCount: 3
+expectedJourneyCount: 6
+expectedScenarioNames:
+  - stored-clones-only
+  - disjoint-rules-retain-stored-clone
+  - unmatched-default-no
+expectedJourneyNames:
+  - stored-clones-only/commit-and-exact-rerun
+  - disjoint-rules-retain-stored-clone/commit-and-exact-rerun
+  - unmatched-default-no/default-no
+  - unmatched-default-no/back
+  - unmatched-default-no/quit
+  - unmatched-default-no/cancel
+scenarios:
+  - name: stored-clones-only
+    expectedStoredCount: 2
+    expectedScanCount: 2
+    expectedSelectedProjectCount: 1
+    expectedExplicitSessionCount: 0
+    initialSelection:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", branches: [dev, main]}
+            - {gitRemote: "https://github.com/acme/tool.git", branches: [main, release]}
+    paths:
+      - {key: physical/a, state: directory}
+      - {key: aliases/a, state: symlink, targetKey: physical/a}
+      - {key: stored/b, state: directory}
+      - {key: scanner/c, state: directory}
+    stored:
+      - sessionId: 11000000-0000-4000-8000-000000000001
+        harness: claude-code
+        projectHash: "1111111111111111111111111111111111111111111111111111111111111111"
+        hostSlug: github.com--acme--tool-a
+        gitRemote: github.com/acme/tool
+        branch: main
+        gitWorktreePathKey: aliases/a
+        canonicalCwdPathKey: physical/a
+        title: tool a
+        ingestedMs: 1770000010000
+      - sessionId: 12000000-0000-4000-8000-000000000002
+        harness: claude-code
+        projectHash: "2222222222222222222222222222222222222222222222222222222222222222"
+        hostSlug: github.com--acme--tool-b
+        gitRemote: github.com/acme/tool
+        branch: main
+        gitWorktreePathKey: stored/b
+        canonicalCwdPathKey: stored/b
+        title: tool b
+        ingestedMs: 1770000011000
+    scan:
+      - {sessionId: 11000000-0000-4000-8000-000000000001, harness: claude-code, projectName: tool, gitRemote: github.com/acme/tool, pathKey: physical/a, branch: main, title: tool a, date: 2026-02-02T02:41:00Z}
+      - {sessionId: 13000000-0000-4000-8000-000000000003, harness: claude-code, projectName: tool, gitRemote: github.com/acme/tool, pathKey: scanner/c, branch: main, title: scanner only, date: 2026-02-02T02:41:02Z}
+    expectedProjects:
+      - harness: claude-code
+        gitRemote: github.com/acme/tool
+        pathKeys: [physical/a, stored/b]
+        branches: [dev, main, release]
+    expectedClearPathKeys: [scanner/c]
+    journeys:
+      - name: commit-and-exact-rerun
+        action: commit
+        expectPrompt: false
+        expectCommit: true
+        expectExit: false
+        rerun: true
+
+  - name: disjoint-rules-retain-stored-clone
+    expectedStoredCount: 1
+    expectedScanCount: 2
+    expectedSelectedProjectCount: 1
+    expectedExplicitSessionCount: 0
+    initialSelection:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/disjoint, branches: [main]}
+            - {gitRemote: github.com/acme/disjoint, branches: [release]}
+    paths:
+      - {key: stored/disjoint, state: directory}
+      - {key: scanner/new, state: directory}
+    stored:
+      - sessionId: 21000000-0000-4000-8000-000000000001
+        harness: claude-code
+        projectHash: "3333333333333333333333333333333333333333333333333333333333333333"
+        hostSlug: github.com--acme--disjoint
+        gitRemote: github.com/acme/disjoint
+        branch: main
+        gitWorktreePathKey: stored/disjoint
+        canonicalCwdPathKey: stored/disjoint
+        title: disjoint
+        ingestedMs: 1770000020000
+    scan:
+      - {sessionId: 21000000-0000-4000-8000-000000000001, harness: claude-code, projectName: disjoint, gitRemote: github.com/acme/disjoint, pathKey: stored/disjoint, branch: main, title: disjoint, date: 2026-02-02T02:42:00Z}
+      - {sessionId: 22000000-0000-4000-8000-000000000002, harness: claude-code, projectName: disjoint, gitRemote: github.com/acme/disjoint, pathKey: scanner/new, branch: main, title: scanner only, date: 2026-02-02T02:42:01Z}
+    expectedProjects:
+      - harness: claude-code
+        gitRemote: github.com/acme/disjoint
+        pathKeys: [stored/disjoint]
+        branches: [main, release]
+    expectedClearPathKeys: [scanner/new]
+    journeys:
+      - name: commit-and-exact-rerun
+        action: commit
+        expectPrompt: false
+        expectCommit: true
+        expectExit: false
+        rerun: true
+
+  - name: unmatched-default-no
+    expectedStoredCount: 1
+    expectedScanCount: 2
+    expectedSelectedProjectCount: 0
+    expectedExplicitSessionCount: 0
+    initialSelection:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: github.com/acme/missing, branches: [main]}
+    paths:
+      - {key: stored/other, state: directory}
+      - {key: scanner/missing, state: directory}
+    stored:
+      - sessionId: 31000000-0000-4000-8000-000000000001
+        harness: claude-code
+        projectHash: "4444444444444444444444444444444444444444444444444444444444444444"
+        hostSlug: github.com--acme--other
+        gitRemote: github.com/acme/other
+        branch: main
+        gitWorktreePathKey: stored/other
+        canonicalCwdPathKey: stored/other
+        title: other
+        ingestedMs: 1770000030000
+    scan:
+      - {sessionId: 31000000-0000-4000-8000-000000000001, harness: claude-code, projectName: other, gitRemote: github.com/acme/other, pathKey: stored/other, branch: main, title: other, date: 2026-02-02T02:43:00Z}
+      - {sessionId: 32000000-0000-4000-8000-000000000002, harness: claude-code, projectName: missing, gitRemote: github.com/acme/missing, pathKey: scanner/missing, branch: main, title: scanner only, date: 2026-02-02T02:43:01Z}
+    expectedClearPathKeys: [stored/other, scanner/missing]
+    journeys:
+      - {name: default-no, action: no, expectPrompt: true, expectCommit: false, expectExit: false, rerun: false}
+      - {name: back, action: back, expectPrompt: true, expectCommit: false, expectExit: false, rerun: false}
+      - {name: quit, action: quit, expectPrompt: true, expectCommit: false, expectExit: true, rerun: false}
+      - {name: cancel, action: cancel, expectPrompt: true, expectCommit: false, expectExit: true, rerun: false}

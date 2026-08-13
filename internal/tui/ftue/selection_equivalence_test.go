@@ -25,9 +25,8 @@ import (
 // user's config.yaml actually holds, not a hand-authored guess, and it round-trips
 // through the config types so it cannot rot silently.
 //
-// One scenario is a deliberate, ratified DIVERGENCE rather than a captured golden:
-// selecting everything ("root-check"). See ratifiedDivergenceFixtureBytes and the
-// TestSelectionEquivalence_RatifiedDivergence doc for the full rationale.
+// One scenario is a deliberate DIVERGENCE rather than a captured golden:
+// selecting everything now persists the exact resolver-produced clone paths.
 
 //go:embed testdata/equivalence/legacy_goldens.yaml
 var legacyGoldenFixtureBytes []byte
@@ -62,8 +61,8 @@ const (
 	// persists for the inputs — the equivalence target the rebuild must match.
 	oracleLegacyCaptured equivalenceOracle = "legacy-captured"
 	// oracleRatifiedDivergence means the current wizard's captured output (golden)
-	// is a documented, ratified DIVERGENCE from what the rebuilt flow must emit
-	// (ratifiedExpected). Used only for select-everything / root-check.
+	// is a documented DIVERGENCE from what the rebuilt flow must emit
+	// (ratifiedExpected). Used only for the exact-current-list transition.
 	oracleRatifiedDivergence equivalenceOracle = "ratified-divergence"
 )
 
@@ -90,9 +89,8 @@ type selectionEquivalenceScenario struct {
 	// enumerated) so the divergence is concrete and testable rather than asserted.
 	Golden goldenSelection `yaml:"golden"`
 	// RatifiedExpected is set ONLY on a ratified-divergence row: the SelectionConfig
-	// the rebuilt kickstart MUST emit for these inputs (root-check → mode:all
-	// standing policy). The current wizard has no code path that produces it, so it
-	// is a forward expectation, not a captured golden.
+	// the rebuilt kickstart MUST emit for these inputs, including physical clone
+	// paths. The current wizard has no code path that produces those identities.
 	RatifiedExpected *goldenSelection `yaml:"ratifiedExpected,omitempty"`
 }
 
@@ -119,9 +117,10 @@ type goldenHarness struct {
 }
 
 type goldenProject struct {
-	GitRemote string   `yaml:"gitRemote,omitempty"`
-	Name      string   `yaml:"name,omitempty"`
-	Branches  []string `yaml:"branches,omitempty"`
+	GitRemote  string   `yaml:"gitRemote,omitempty"`
+	Name       string   `yaml:"name,omitempty"`
+	ClonePaths []string `yaml:"clonePaths,omitempty"`
+	Branches   []string `yaml:"branches,omitempty"`
 }
 
 func (g goldenSelection) toConfig() config.SelectionConfig {
@@ -132,9 +131,10 @@ func (g goldenSelection) toConfig() config.SelectionConfig {
 			var projects []config.ProjectSelection
 			for _, p := range h.Projects {
 				projects = append(projects, config.ProjectSelection{
-					GitRemote: p.GitRemote,
-					Name:      p.Name,
-					Branches:  p.Branches,
+					GitRemote:  p.GitRemote,
+					Name:       p.Name,
+					ClonePaths: p.ClonePaths,
+					Branches:   p.Branches,
 				})
 			}
 			harnesses[name] = config.SelectionHarnessConfig{
@@ -337,16 +337,11 @@ func TestSelectionEquivalence_LegacyGoldens(t *testing.T) {
 	}
 }
 
-// TestSelectionEquivalence_RatifiedDivergence pins the ONE deliberate divergence:
-// selecting everything (root-check). The current project-first wizard enumerates
-// today's projects into mode:selected, so a project discovered LATER would not be
-// auto-included. The ratified standing policy is that root-check means mode:all, so
-// future projects are ingested without re-running onboarding. This is an
-// intentional behaviour change, ratified rather than a legacy patch, so the rebuilt
-// kickstart is measured against ratifiedExpected here — NOT against what the current
-// wizard writes. The test still drives the current wizard to prove the golden it
-// writes today is real, and asserts that golden differs from the target so the
-// divergence is a live, non-vacuous requirement.
+// TestSelectionEquivalence_RatifiedDivergence pins the physical-identity
+// divergence. The current wizard enumerates today's projects in mode:selected
+// but cannot persist resolver-produced clone paths. The rebuilt target keeps the
+// exact-current policy and adds those paths. Driving the current wizard keeps the
+// pathless golden as a live non-vacuity control.
 func TestSelectionEquivalence_RatifiedDivergence(t *testing.T) {
 	doc := loadSelectionEquivalence(t, ratifiedDivergenceFixtureBytes)
 	if len(doc.Scenarios) < ratifiedDivergenceFloor {
@@ -374,9 +369,13 @@ func TestSelectionEquivalence_RatifiedDivergence(t *testing.T) {
 				t.Fatalf("the ratified divergence is vacuous: the current wizard already emits the target mode:%s selection, "+
 					"so there is nothing for the rebuild to change", target.Mode)
 			}
-			if target.Mode != config.SelectionModeAll {
-				t.Errorf("ratified divergence target mode = %q, want %q (root-check → ingest-all standing policy so future "+
-					"projects are auto-included)", target.Mode, config.SelectionModeAll)
+			if target.Mode != config.SelectionModeSelected {
+				t.Errorf("physical-identity target mode = %q, want %q (select all saves the exact current list)", target.Mode, config.SelectionModeSelected)
+			}
+			for harness, configured := range target.Harnesses {
+				if len(configured.Projects) != 1 || len(configured.Projects[0].ClonePaths) != 1 {
+					t.Errorf("physical-identity target for %q lacks one clone path: %#v", harness, configured)
+				}
 			}
 
 			// The target is itself a well-formed config the rebuilt flow can persist:

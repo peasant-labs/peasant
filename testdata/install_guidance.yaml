@@ -1,0 +1,53 @@
+declared_rows: 5
+guides:
+  - name: macos
+    path: docs/install/macos.md
+    channel: macos-tarball
+    version_command: peasant version
+    kickstart_command: peasant kickstart
+    kickstart_link: ../KICKSTART.md#reset-and-standalone-boundaries
+    reinstall_section: Reinstalling or upgrading
+    reinstall_markers:
+      - tar.gz
+      - sudo install
+  - name: ubuntu
+    path: docs/install/ubuntu.md
+    channel: debian-package
+    version_command: peasant version
+    kickstart_command: peasant kickstart
+    kickstart_link: ../KICKSTART.md#reset-and-standalone-boundaries
+    reinstall_section: Reinstalling or upgrading
+    reinstall_markers:
+      - .deb
+      - apt install
+  - name: arch
+    path: docs/install/arch.md
+    channel: arch-tarball
+    version_command: peasant version
+    kickstart_command: peasant kickstart
+    kickstart_link: ../KICKSTART.md#reset-and-standalone-boundaries
+    reinstall_section: Reinstalling or upgrading
+    reinstall_markers:
+      - tar.gz
+      - sudo install
+  - name: nix
+    path: docs/install/nix.md
+    channel: nix-profile
+    version_command: peasant version
+    kickstart_command: peasant kickstart
+    kickstart_link: ../KICKSTART.md#reset-and-standalone-boundaries
+    reinstall_section: Reinstalling or upgrading
+    reinstall_markers:
+      - nix profile install
+      - nix profile upgrade
+  - name: wsl
+    path: docs/install/wsl.md
+    channel: wsl-distro
+    version_command: peasant version
+    kickstart_command: peasant kickstart
+    kickstart_link: ../KICKSTART.md#reset-and-standalone-boundaries
+    reinstall_section: Reinstalling or upgrading
+    reinstall_markers:
+      - underlying distro
+      - apt install
+      - tarball

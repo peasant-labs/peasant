@@ -1,0 +1,142 @@
+declared_rows: 11
+cases:
+  - name: exact unique teammate spawn links roots
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate work"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"teammate started"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        subagent_paths:
+          - /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+      - session_id: 22222222-2222-4222-8222-222222222222
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+  - name: teammate without matching spawn stays root
+    files:
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 22222222-2222-4222-8222-222222222222
+  - name: duplicate parent identity is ambiguous
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"first spawn"}}'
+      - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+        lines:
+          - '{"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"second spawn"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+      - session_id: 33333333-3333-4333-8333-333333333333
+      - session_id: 22222222-2222-4222-8222-222222222222
+  - name: repeated spawn from one parent remains linked
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"first spawn result"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"repeated spawn result"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        subagent_paths:
+          - /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+      - session_id: 22222222-2222-4222-8222-222222222222
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+  - name: duplicate teammate identity is ambiguous
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"first teammate"}}'
+      - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+        lines:
+          - '{"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"second teammate"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+      - session_id: 22222222-2222-4222-8222-222222222222
+      - session_id: 33333333-3333-4333-8333-333333333333
+  - name: agent call without native spawn stays root
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Agent","input":{"name":"tests"}}]}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+      - session_id: 22222222-2222-4222-8222-222222222222
+  - name: incomplete native spawn stays root
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","name":"tests"},"message":{"role":"user","content":"incomplete spawn"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+      - session_id: 22222222-2222-4222-8222-222222222222
+  - name: nested spawn shaped tool payload stays root
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":[{"type":"tool_result","content":{"toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"}}}]}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+      - session_id: 22222222-2222-4222-8222-222222222222
+  - name: teammate delivery without native spawn stays root
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Another Claude session sent a message: <teammate-message teammate_id=\"tests\">available</teammate-message>"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+      - session_id: 22222222-2222-4222-8222-222222222222
+  - name: shutdown event does not remove established link
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"<teammate-message teammate_id=\"tests\">{\"type\":\"shutdown_request\"}</teammate-message>"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        subagent_paths:
+          - /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+      - session_id: 22222222-2222-4222-8222-222222222222
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+  - name: filesystem nested subagent remains linked
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"root"}}'
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
+        lines:
+          - '{"sessionId":"agent-a3aee4f","type":"user","message":{"role":"user","content":"nested"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        subagent_paths:
+          - /claude/-workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
+      - session_id: agent-a3aee4f
+        parent_uuid: 11111111-1111-4111-8111-111111111111

@@ -43,10 +43,14 @@ type Flow struct {
 	cur        int       // 0..len(steps); == len(steps) is the receipt step
 	focusField int       // index of the focused field within the current step
 
-	overlay    kit.Overlay
-	confirm    kit.Confirm
-	confirming bool
-	helping    bool
+	overlay        kit.Overlay
+	exitConfirm    kit.Confirm
+	confirmingExit bool
+
+	noProjectsConfirm    kit.Confirm
+	confirmingNoProjects bool
+	commitGate           CommitGateEvaluator
+	helping              bool
 
 	committed bool
 	exited    bool
@@ -56,8 +60,8 @@ type Flow struct {
 	viewOffset    int
 }
 
-// FlowOption configures presentation-owned behavior without changing Registry
-// fields or their persistence contract.
+// FlowOption configures optional presentation-owned behavior without changing
+// existing settings flows, Registry fields, or their persistence contract.
 type FlowOption func(*Flow)
 
 // WithConsentSummary installs the final consent summary rendered by the guided
@@ -80,7 +84,7 @@ func NewFlow(t theme.Theme, reg Registry, d *Draft, opts ...FlowOption) Flow {
 			fld.mount(t)
 		}
 	}
-	f := Flow{th: t, reg: reg, draft: d, confirm: kit.NewConfirm(t, exitPrompt), overlay: kit.NewOverlay(t)}
+	f := Flow{th: t, reg: reg, draft: d, exitConfirm: kit.NewConfirm(t, exitPrompt), overlay: kit.NewOverlay(t)}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&f)
@@ -115,7 +119,11 @@ func (f Flow) Committed() bool { return f.committed }
 func (f Flow) Exited() bool { return f.exited }
 
 // Confirming reports whether the exit-confirm modal is currently shown.
-func (f Flow) Confirming() bool { return f.confirming }
+func (f Flow) Confirming() bool { return f.confirmingExit }
+
+// ConfirmingNoProjects reports whether the dedicated empty-selection save
+// confirmation is shown. It is separate from the no-save exit modal.
+func (f Flow) ConfirmingNoProjects() bool { return f.confirmingNoProjects }
 
 // Helping reports whether the keybinding help overlay is currently shown.
 func (f Flow) Helping() bool { return f.helping }
@@ -251,14 +259,38 @@ func (f *Flow) retreat() {
 	f.enterStep()
 }
 
-// commit drops hidden edits, validates every visible field, then performs the
-// single atomic commit. Any failure sets err and writes nothing.
+// commit drops hidden edits, validates every visible field, evaluates the
+// optional save gate, then performs the single atomic commit. Any failure sets
+// err and writes nothing.
 func (f *Flow) commit() tea.Cmd {
 	f.reg.dropHiddenEdits(f.draft)
 	if err := f.reg.validateVisible(f.draft); err != nil {
 		f.err = err
 		return nil
 	}
+	if f.commitGate != nil {
+		switch gate := f.commitGate(f.draft.Working().Selection); gate {
+		case CommitGateNone:
+			// Continue through the one existing Draft.Commit path.
+		case CommitGateConfirmNoProjects:
+			f.confirmingNoProjects = true
+			f.noProjectsConfirm = kit.NewConfirm(f.th, noProjectsConfirmationQuestion)
+			f.noProjectsConfirm.Focus()
+			return nil
+		default:
+			f.err = fmt.Errorf(
+				"save settings: the commit gate returned unknown decision %d.\n"+
+					"what: the save safety check could not choose a supported action.\n"+
+					"where: settings.Flow.commit.\n"+
+					"means: nothing was written and ingest did not start.\n"+
+					"fix: update Peasant and run kickstart again.", gate)
+			return nil
+		}
+	}
+	return f.commitDraft()
+}
+
+func (f *Flow) commitDraft() tea.Cmd {
 	if err := f.draft.Commit(); err != nil {
 		f.err = err
 		return nil
@@ -267,23 +299,28 @@ func (f *Flow) commit() tea.Cmd {
 	return tea.Quit
 }
 
-// Update dispatches a message. A modal owns keyboard input, but component-owned
-// asynchronous work reaches its mounted field before modal key handling. After
-// that barrier, esc opens the exit modal, step navigation follows, and every
-// remaining key goes to the focused field.
+// Update dispatches a message. Component-owned asynchronous work reaches its
+// mounted field before modal key handling. Save and exit confirmations then own
+// key input; printable editor input precedes global shortcuts.
 func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
+	if f.committed || f.exited {
+		return f, nil
+	}
 	keyMsg, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
 		// Async results belong to mounted fields, not the current step or modal.
 		return f.forwardAsync(msg)
 	}
-	if f.confirming {
-		return f.updateConfirm(msg)
+	if f.confirmingNoProjects {
+		return f.updateNoProjectsConfirm(msg)
+	}
+	if f.confirmingExit {
+		return f.updateExitConfirm(msg)
 	}
 	if f.helping {
 		// While the help overlay is up, ? or esc closes it and every other key
 		// is swallowed so it cannot leak into the underlying step.
-		if action, ok := keymap.Match(keymap.Default(), keyMsg, helpAvailability{}); ok {
+		if action, ok := keymap.Match(f.actionKeymap(), keyMsg, helpAvailability{}); ok {
 			switch action {
 			case keymap.ActionHelp, keymap.ActionBack:
 				f.helping = false
@@ -297,7 +334,7 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 		// global bindings such as q (quit), b (back), and ? (help).
 		return f.forwardToFields(msg)
 	}
-	action, ok := keymap.Match(keymap.Default(), keyMsg, f.dispatchAvailability(keyMsg))
+	action, ok := keymap.Match(f.actionKeymap(), keyMsg, f.dispatchAvailability(keyMsg))
 	if ok {
 		switch action {
 		case keymap.ActionHelp:
@@ -306,9 +343,9 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 		case keymap.ActionBack, keymap.ActionQuit:
 			// esc and q both leave settings, and both prompt the same
 			// confirm-exit modal first; a confirmed exit writes nothing.
-			f.confirming = true
-			f.confirm = kit.NewConfirm(f.th, exitPrompt)
-			f.confirm.Focus()
+			f.confirmingExit = true
+			f.exitConfirm = kit.NewConfirm(f.th, exitPrompt)
+			f.exitConfirm.Focus()
 			return f, nil
 		case keymap.ActionNextField:
 			f.ResumeNextField()
@@ -333,20 +370,13 @@ func (f Flow) Update(msg tea.Msg) (Flow, tea.Cmd) {
 	return f.forwardToFields(msg)
 }
 
-func (f Flow) focusedFieldCapturesPrintableInput() bool {
-	if f.OnReceipt() || f.focusField < 0 || f.focusField >= len(f.steps[f.cur].Fields) {
-		return false
-	}
-	return f.steps[f.cur].Fields[f.focusField].capturesPrintableInput()
-}
-
-// updateConfirm drives the exit-confirm modal.
-func (f Flow) updateConfirm(msg tea.Msg) (Flow, tea.Cmd) {
+// updateExitConfirm drives the exit-confirm modal.
+func (f Flow) updateExitConfirm(msg tea.Msg) (Flow, tea.Cmd) {
 	var cmd tea.Cmd
-	f.confirm, cmd = f.confirm.Update(msg)
+	f.exitConfirm, cmd = f.exitConfirm.Update(msg)
 	if cmd != nil {
 		if res, ok := runResult(cmd).(kit.ConfirmResultMsg); ok {
-			f.confirming = false
+			f.confirmingExit = false
 			if res.OK {
 				// Confirmed exit writes NOTHING.
 				f.exited = true
@@ -356,6 +386,41 @@ func (f Flow) updateConfirm(msg tea.Msg) (Flow, tea.Cmd) {
 		}
 	}
 	return f, cmd
+}
+
+func (f Flow) focusedFieldCapturesPrintableInput() bool {
+	if f.OnReceipt() || f.focusField < 0 || f.focusField >= len(f.steps[f.cur].Fields) {
+		return false
+	}
+	return f.steps[f.cur].Fields[f.focusField].capturesPrintableInput()
+}
+
+// updateNoProjectsConfirm drives the dedicated save confirmation. No and Back
+// return to the receipt. q and ctrl+c cancel the flow immediately. None of
+// those paths commit or start ingest. Only Yes reaches commitDraft.
+func (f Flow) updateNoProjectsConfirm(msg tea.Msg) (Flow, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		if action, matched := keymap.Match(keymap.Default(), keyMsg, quitOnlyAvailability{}); matched && action == keymap.ActionQuit {
+			f.confirmingNoProjects = false
+			f.exited = true
+			return f, tea.Quit
+		}
+	}
+
+	var cmd tea.Cmd
+	f.noProjectsConfirm, cmd = f.noProjectsConfirm.Update(msg)
+	if cmd == nil {
+		return f, nil
+	}
+	result, ok := runResult(cmd).(kit.ConfirmResultMsg)
+	if !ok {
+		return f, cmd
+	}
+	f.confirmingNoProjects = false
+	if !result.OK {
+		return f, nil
+	}
+	return f, f.commitDraft()
 }
 
 // forwardToFields sends msg to the current step's focused interactive field.
@@ -402,7 +467,7 @@ func (f Flow) dispatchAvailability(keyMsg tea.KeyPressMsg) flowAvailability {
 }
 
 // View renders the current step (or receipt) inside a kit.Frame, overlaying the
-// exit-confirm modal when it is shown.
+// active save or exit confirmation when one is shown.
 func (f Flow) View() string {
 	layout := kit.NewFrame(f.th).WithTitle(f.title()).WithFooter(" ")
 	layout.SetSize(f.width, f.height)
@@ -414,11 +479,16 @@ func (f Flow) View() string {
 	frame.SetContent(windowBodyAt(body, frame.InnerHeight(), state.offset))
 	base := frame.View()
 	if f.helping {
-		return f.overlay.Push(helpLayer{th: f.th, entries: keymap.HelpEntries(keymap.Default(), availability)}).View(base)
+		return f.overlay.Push(helpLayer{th: f.th, entries: keymap.HelpEntries(f.actionKeymap(), availability)}).View(base)
 	}
-	if f.confirming {
-		f.confirm.SetSize(kit.ConfirmMinSize.Width, kit.ConfirmMinSize.Height)
-		return f.overlay.Push(confirmLayer{c: f.confirm}).View(base)
+	if f.confirmingNoProjects {
+		width := noProjectsConfirmationWidth(f.width)
+		f.noProjectsConfirm.SetSize(width, kit.ConfirmMinSize.Height)
+		return f.overlay.Push(noProjectsConfirmLayer{th: f.th, c: f.noProjectsConfirm}).View(base)
+	}
+	if f.confirmingExit {
+		f.exitConfirm.SetSize(kit.ConfirmMinSize.Width, kit.ConfirmMinSize.Height)
+		return f.overlay.Push(confirmLayer{c: f.exitConfirm}).View(base)
 	}
 	return base
 }
@@ -461,8 +531,15 @@ func (f Flow) title() string {
 	return f.steps[f.cur].Title
 }
 
+func (f Flow) actionKeymap() keymap.Keymap {
+	if !f.OnReceipt() && f.focusField >= 0 && f.focusField < len(f.steps[f.cur].Fields) {
+		return f.steps[f.cur].Fields[f.focusField].actionKeymap()
+	}
+	return keymap.Default()
+}
+
 func (f Flow) footer(availability keymap.Availability) string {
-	return keymap.FooterView(f.th, keymap.Default(), availability)
+	return keymap.FooterView(f.th, f.actionKeymap(), availability)
 }
 
 // body renders the current step's fields, or the receipt, through Flow's
@@ -829,6 +906,39 @@ func dedupeActions(in []keymap.ActionID) []keymap.ActionID {
 type confirmLayer struct{ c kit.Confirm }
 
 func (l confirmLayer) View() string { return l.c.View() }
+
+// noProjectsConfirmLayer keeps the accepted impact text separate from the exit
+// modal while delegating the actual yes/no interaction to kit.Confirm.
+type noProjectsConfirmLayer struct {
+	th theme.Theme
+	c  kit.Confirm
+}
+
+func (l noProjectsConfirmLayer) View() string {
+	return l.th.Styles().Base.Render(noProjectsConfirmationEffects) + "\n" + l.c.View()
+}
+
+func noProjectsConfirmationWidth(maxWidth int) int {
+	width := lipgloss.Width(noProjectsConfirmationQuestion)
+	for _, line := range strings.Split(noProjectsConfirmationEffects, "\n") {
+		if lineWidth := lipgloss.Width(line); lineWidth > width {
+			width = lineWidth
+		}
+	}
+	if width < kit.ConfirmMinSize.Width {
+		width = kit.ConfirmMinSize.Width
+	}
+	if maxWidth > 0 && width > maxWidth {
+		return maxWidth
+	}
+	return width
+}
+
+type quitOnlyAvailability struct{}
+
+func (quitOnlyAvailability) AvailableActions() []keymap.ActionID {
+	return []keymap.ActionID{keymap.ActionQuit}
+}
 
 // helpAvailability reports the actions the help overlay itself dispatches -
 // only ? (toggle) and esc (back), both of which close the overlay.

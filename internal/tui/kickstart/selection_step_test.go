@@ -19,10 +19,16 @@ func selectionStepView(t *testing.T, width, height int) string {
 	t.Helper()
 	doc := loadNestedListings(t)
 	stored := map[string]string{"sess-p2": "please refactor the ingest pipeline"}
-	preview := kickstart.NewListingPreview(theme.New(theme.ModeDark), doc.Listings, turnsFromPrompts(stored))
+	source := kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested))
+	preview := kickstart.NewListingPreview(
+		theme.New(theme.ModeDark),
+		doc.Listings,
+		turnsFromPrompts(stored),
+		kickstart.WithListingPreviewContextSource(source),
+	)
 
 	p, _ := newTestProgram(t, kickstart.ProgramDeps{
-		Source:  kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested)),
+		Source:  source,
 		Preview: preview,
 	})
 	p.SetSize(width, height)
@@ -50,8 +56,9 @@ func TestSelectionStep_RendersCountsSplitFacetAndPreview(t *testing.T) {
 		// The facet gutter, named in lowercase chrome.
 		"harness",
 		"claude code",
-		// The preview names the highlighted row; the cursor opens on the project.
-		"select a session to preview it",
+		// The cursor opens on the project, whose resolved context fills the preview.
+		"project:",
+		"worktrees:",
 	} {
 		if !strings.Contains(stripRender(view), want) {
 			t.Errorf("selection step must show %q; view:\n%s", want, view)
@@ -72,22 +79,37 @@ func TestSelectionStep_PreviewFollowsTheCursor(t *testing.T) {
 	t.Parallel()
 	doc := loadNestedListings(t)
 	stored := map[string]string{"sess-p2": "please refactor the ingest pipeline"}
-	preview := kickstart.NewListingPreview(theme.New(theme.ModeDark), doc.Listings, turnsFromPrompts(stored))
+	source := kickstart.NewScannerTreeSource(doc.Listings, withFixturePathResolver(), kickstart.WithIngestedSessionIDs(doc.Ingested))
+	preview := kickstart.NewListingPreview(
+		theme.New(theme.ModeDark),
+		doc.Listings,
+		turnsFromPrompts(stored),
+		kickstart.WithListingPreviewContextSource(source),
+	)
 
 	p, _ := newTestProgram(t, kickstart.ProgramDeps{
-		Source:  kickstart.NewScannerTreeSource(doc.Listings, kickstart.WithIngestedSessionIDs(doc.Ingested)),
+		Source:  source,
 		Preview: preview,
 	})
 	p.SetSize(120, 30)
 	p = declineOAuth(t, p)
 
-	// Rows are project, branch, then the two parent sessions: step onto the
-	// already-imported one and drain the preview load it triggers.
+	// Rows are project, branch, then the two parent sessions. The first move
+	// proves the mounted branch row has its own repository context before the
+	// remaining moves reach the imported session transcript.
 	for i := 0; i < 3; i++ {
 		var cmd tea.Cmd
 		p, cmd = p.Update(tea.KeyPressMsg{Code: 'j'})
 		for _, msg := range collectMsgs(cmd) {
 			p, _ = p.Update(msg)
+		}
+		if i == 0 {
+			branchView := stripRender(p.View())
+			for _, want := range []string{"branch: main", "worktrees:", "sessions:"} {
+				if !strings.Contains(branchView, want) {
+					t.Fatalf("branch preview must show %q; view:\n%s", want, branchView)
+				}
+			}
 		}
 	}
 

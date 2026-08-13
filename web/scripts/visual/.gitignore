@@ -12,6 +12,7 @@
 !.gitignore
 !README.md
 !probe-peasant.mjs
+!selection-recovery-probe.mjs
 !peasant-shoot.mjs
 !boot-peasant.mjs
 !shell-nav-gate.mjs
@@ -26,8 +27,10 @@
 !transcript-input-gate.mjs
 !validate-mock-coordinates.mjs
 !strike-smoke-fixture.mjs
+!search-share-visual.mjs
 !testdata/
 !testdata/transcript-input.yaml
+!testdata/search-share.yaml
 # baseline/ holds the committed golden references (not ephemeral captures) so the
 # gates are self-contained — no /tmp dependency.
 !baseline/

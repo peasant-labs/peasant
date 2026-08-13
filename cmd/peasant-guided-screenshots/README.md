@@ -47,6 +47,7 @@ local and gitignored.
 
 - all five guided sections in dark and light themes at `80x24` and `120x40`;
 - the default and retained global-search selection states at both sizes;
+- project, branch, and scrubbed transcript preview states in both themes at both sizes;
 - synthetic discovery data, row-count guards, required text, and exact matrix coverage; and
 - the three accepted contact-sheet names and pixel dimensions.
 

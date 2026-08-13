@@ -38,6 +38,9 @@ type StoreDataProvider struct {
 	// NewStoreDataProvider (see store_adapter_map.go).
 	codemap    *codemap.Service
 	visibility sessionvisibility.Policy
+	// pathIdentityResolver resolves stored session worktrees into exact clone
+	// identities before user-facing discovery matching.
+	pathIdentityResolver ingest.PathIdentityResolver
 	// fs reads a session's ORIGINAL source transcript file so SessionByID can
 	// overlay full turn content over the DB's bounded content_preview (see
 	// transcript.BuildContentOverlay). Defaulted to the real OS filesystem by
@@ -49,18 +52,34 @@ type StoreDataProvider struct {
 // NewStoreDataProvider creates a StoreDataProvider backed by the given store,
 // reading source transcripts from the real OS filesystem.
 func NewStoreDataProvider(s *store.Store, visibility sessionvisibility.Policy) *StoreDataProvider {
-	return NewStoreDataProviderWithFS(s, visibility, &ingest.OSFileSystem{})
+	return NewStoreDataProviderWithFSAndResolver(s, visibility, &ingest.OSFileSystem{}, ingest.NewPhysicalPathResolver())
 }
 
 // NewStoreDataProviderWithFS is NewStoreDataProvider with an injectable
 // FileSystem, for tests that need SessionByID's content-overlay re-index to
 // read from a MemFS fixture instead of disk.
 func NewStoreDataProviderWithFS(s *store.Store, visibility sessionvisibility.Policy, fs ingest.FileSystem) *StoreDataProvider {
+	return NewStoreDataProviderWithFSAndResolver(s, visibility, fs, ingest.NewPhysicalPathResolver())
+}
+
+// NewStoreDataProviderWithFSAndResolver is NewStoreDataProvider with injectable
+// filesystem and physical-path boundaries. Production constructors supply the
+// real implementations; focused discovery tests can supply deterministic ones.
+func NewStoreDataProviderWithFSAndResolver(
+	s *store.Store,
+	visibility sessionvisibility.Policy,
+	fs ingest.FileSystem,
+	resolver ingest.PathIdentityResolver,
+) *StoreDataProvider {
+	if resolver == nil {
+		resolver = ingest.NewPhysicalPathResolver()
+	}
 	return &StoreDataProvider{
-		store:      s,
-		codemap:    newCodemapService(s, visibility),
-		visibility: visibility,
-		fs:         fs,
+		store:                s,
+		codemap:              newCodemapService(s, visibility, resolver),
+		visibility:           visibility,
+		pathIdentityResolver: resolver,
+		fs:                   fs,
 	}
 }
 
@@ -160,8 +179,29 @@ func (p *StoreDataProvider) visibleSessionRow(row *store.SessionRow) (bool, erro
 		Harness:     defaults.Harness(row.ModelHarness),
 		GitRemote:   remote,
 		ProjectName: row.ProjectName,
+		ClonePath:   p.resolveSessionClonePath(row),
 		GitBranch:   branch,
 	})
+}
+
+func (p *StoreDataProvider) resolveSessionClonePath(row *store.SessionRow) ingest.ClonePath {
+	raw := row.GitWorktree
+	// SessionRow.ProjectName is the canonical cwd when one exists and otherwise
+	// the project hash. A hash is display fallback, not path evidence.
+	if raw == "" && row.ProjectName != row.ProjectHash {
+		raw = row.ProjectName
+	}
+	if raw == "" || p.pathIdentityResolver == nil {
+		return ""
+	}
+	resolved, err := p.pathIdentityResolver.Resolve(raw)
+	if err != nil {
+		// Stored paths can disappear. Keep discovery available, but do not cast
+		// unavailable text into exact identity or fall back from a recorded
+		// worktree to a possibly different project path.
+		return ""
+	}
+	return resolved
 }
 
 func (p *StoreDataProvider) visibleSessionRows(ctx context.Context) ([]store.SessionRow, error) {

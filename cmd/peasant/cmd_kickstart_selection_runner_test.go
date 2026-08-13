@@ -248,7 +248,7 @@ func TestKickstartSelectedEmptyMutationStaysAllocated(t *testing.T) {
 		mutations++
 		cfg := config.BaseConfig()
 		cfg.Selection = row.Selection
-		answers := deriveKickstartAnswers(cfg, listings)
+		answers := deriveKickstartAnswers(cfg, listings, ingest.NewPhysicalPathResolver())
 		if answers.SelectionMode != config.SelectionModeSelected {
 			t.Fatalf("selection runner mutation %q lost committed mode across adapter: %q", row.Name, answers.SelectionMode)
 		}

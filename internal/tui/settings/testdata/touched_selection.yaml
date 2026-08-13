@@ -1,0 +1,524 @@
+expectedCaseCount: 11
+expectedFieldCaseCount: 9
+expectedNames:
+  - unrelated-action-preserves-distinct-policies-and-exclusions
+  - scanner-absent-policy-survives-branch-deny
+  - multi-path-project-clear-splits-only-target
+  - auto-branch-deny
+  - explicit-only-branch-off-clears-final-positive
+  - branch-reselect-clears-deny
+  - project-admitted-session-deny
+  - project-admitted-session-reselect-needs-no-positive-id
+  - unadmitted-session-reselect-adds-positive-id
+  - project-select-clears-visible-denies
+  - session-under-denied-branch-fails-closed
+expectedFieldNames:
+  - conflict-toggle-is-a-true-no-op
+  - satisfied-select-under-is-a-true-no-op
+  - invalid-clone-path-rolls-back
+  - unknown-branch-rolls-back
+  - invalid-session-id-rolls-back
+  - load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
+  - grouped-satisfied-select-under-is-a-true-no-op
+  - project-toggle-spans-harnesses
+  - branch-toggle-spans-harnesses
+fieldCases:
+  - name: conflict-toggle-is-a-true-no-op
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [release]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [down, down, toggle]
+    expectedSessionState: conflict
+    expectedSetCount: 0
+    expectReconcileError: false
+
+  - name: satisfied-select-under-is-a-true-no-op
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [select-under]
+    expectedSessionState: checked
+    expectedSetCount: 0
+    expectReconcileError: false
+
+  - name: invalid-clone-path-rolls-back
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: invalid-project
+    harness: claude-code
+    clonePath: relative/project
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [toggle]
+    expectedSessionState: unchecked
+    expectedSetCount: 0
+    expectReconcileError: true
+
+  - name: unknown-branch-rolls-back
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: (unknown branch)
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [toggle]
+    expectedSessionState: checked
+    expectedSetCount: 0
+    expectReconcileError: true
+
+  - name: invalid-session-id-rolls-back
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: not-a-session-uuid
+    keys: [down, down, toggle]
+    expectedSessionState: checked
+    expectedSetCount: 0
+    expectReconcileError: true
+
+  - name: load-navigation-preview-filter-expansion-spinner-refresh-are-zero-write
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+    projectIdentity: exact-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    keys: [down, spinner, filter, collapse, refresh]
+    withPreview: true
+    expectedSessionState: checked
+    expectedSetCount: 0
+    expectReconcileError: false
+
+  - name: grouped-satisfied-select-under-is-a-true-no-op
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a, /fixtures/a-linked]}
+    projectIdentity: repository-project-a
+    harness: claude-code
+    clonePath: /fixtures/a
+    linkedClonePath: /fixtures/a-linked
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: 11111111-1111-4111-8111-111111111111
+    linkedSessionId: 22222222-2222-4222-8222-222222222222
+    keys: [select-under]
+    expectedSessionState: checked
+    expectedSetCount: 0
+    expectReconcileError: false
+
+  - name: project-toggle-spans-harnesses
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: /fixtures/repos/tool.git
+    harness: claude-code
+    linkedHarness: codex
+    clonePath: /fixtures/tool-main
+    linkedClonePath: /fixtures/tool-linked
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    linkedSessionId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    keys: [toggle]
+    expectedSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main]}
+        codex:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked]}
+
+  - name: branch-toggle-spans-harnesses
+    current: {mode: selected, autoIngestNewBranches: false}
+    projectIdentity: /fixtures/repos/tool.git
+    harness: claude-code
+    linkedHarness: codex
+    clonePath: /fixtures/tool-main
+    linkedClonePath: /fixtures/tool-linked
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    sessionId: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+    linkedSessionId: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+    keys: [down, toggle]
+    expectedSessionState: checked
+    expectedSetCount: 1
+    expectReconcileError: false
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-main], branches: [main]}
+        codex:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/tool-linked], branches: [main]}
+cases:
+  - name: unrelated-action-preserves-distinct-policies-and-exclusions
+    operation: project-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/b], branches: [release]}
+          sessions: [99999999-9999-4999-8999-999999999999]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/b, branches: [topic]}
+            sessions: [88888888-8888-4888-8888-888888888888]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/c
+      gitRemote: "git@github.com:acme/other.git"
+      projectName: other
+      visibleSessions:
+        - {branch: dev, sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/b], branches: [release]}
+            - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/fixtures/c]}
+          sessions: [99999999-9999-4999-8999-999999999999]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/b, branches: [topic]}
+            sessions: [88888888-8888-4888-8888-888888888888]
+
+  - name: scanner-absent-policy-survives-branch-deny
+    operation: branch-off
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/b], branches: [release]}
+            - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/fixtures/c]}
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/c
+      gitRemote: "git@github.com:acme/other.git"
+      projectName: other
+      branch: dev
+      visibleSessions:
+        - {branch: dev, sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+            - {gitRemote: "https://github.com/acme/tool.git", clonePaths: [/fixtures/b], branches: [release]}
+            - {gitRemote: "git@github.com:acme/other.git", clonePaths: [/fixtures/c]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/c, branches: [dev]}
+
+  - name: multi-path-project-clear-splits-only-target
+    operation: project-off
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a, /fixtures/b], branches: [main]}
+            - {name: keep, clonePaths: [/fixtures/keep]}
+          sessions: [11111111-1111-4111-8111-111111111111, 99999999-9999-4999-8999-999999999999]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      projectName: tool
+      visibleSessions:
+        - {branch: main, sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/b], branches: [main]}
+            - {name: keep, clonePaths: [/fixtures/keep]}
+          sessions: [99999999-9999-4999-8999-999999999999]
+
+  - name: auto-branch-deny
+    operation: branch-off
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: topic
+      visibleSessions:
+        - {branch: topic, sessionId: 22222222-2222-4222-8222-222222222222}
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [topic]}
+
+  - name: explicit-only-branch-off-clears-final-positive
+    operation: branch-off
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      visibleSessions:
+        - {branch: main, sessionId: 11111111-1111-4111-8111-111111111111}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+
+  - name: branch-reselect-clears-deny
+    operation: branch-on
+    current:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [topic, release]}
+            sessions: [22222222-2222-4222-8222-222222222222]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: topic
+      visibleSessions:
+        - {branch: topic, sessionId: 22222222-2222-4222-8222-222222222222}
+    expected:
+      mode: selected
+      autoIngestNewBranches: true
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a], branches: [main, topic]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [release]}
+
+  - name: project-admitted-session-deny
+    operation: session-off
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          sessions: [33333333-3333-4333-8333-333333333333]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      sessionId: 33333333-3333-4333-8333-333333333333
+      visibleSessions:
+        - {branch: main, sessionId: 33333333-3333-4333-8333-333333333333}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            sessions: [33333333-3333-4333-8333-333333333333]
+
+  - name: project-admitted-session-reselect-needs-no-positive-id
+    operation: session-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            sessions: [33333333-3333-4333-8333-333333333333, 44444444-4444-4444-8444-444444444444]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      sessionId: 33333333-3333-4333-8333-333333333333
+      visibleSessions:
+        - {branch: main, sessionId: 33333333-3333-4333-8333-333333333333}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            sessions: [44444444-4444-4444-8444-444444444444]
+
+  - name: unadmitted-session-reselect-adds-positive-id
+    operation: session-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: keep, clonePaths: [/fixtures/keep]}
+          exclusions:
+            sessions: [55555555-5555-4555-8555-555555555555]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      sessionId: 55555555-5555-4555-8555-555555555555
+      visibleSessions:
+        - {branch: main, sessionId: 55555555-5555-4555-8555-555555555555}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: keep, clonePaths: [/fixtures/keep]}
+          sessions: [55555555-5555-4555-8555-555555555555]
+
+  - name: project-select-clears-visible-denies
+    operation: project-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: keep, clonePaths: [/fixtures/keep]}
+          sessions: [66666666-6666-4666-8666-666666666666]
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [main, release]}
+              - {clonePath: /fixtures/keep, branches: [gone]}
+            sessions: [66666666-6666-4666-8666-666666666666, 77777777-7777-4777-8777-777777777777]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      visibleSessions:
+        - {branch: main, sessionId: 66666666-6666-4666-8666-666666666666}
+        - {branch: release, sessionId: 77777777-7777-4777-8777-777777777777}
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {name: keep, clonePaths: [/fixtures/keep]}
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/keep, branches: [gone]}
+
+  - name: session-under-denied-branch-fails-closed
+    operation: session-on
+    current:
+      mode: selected
+      autoIngestNewBranches: false
+      harnesses:
+        claude-code:
+          projects:
+            - {gitRemote: "git@github.com:acme/tool.git", clonePaths: [/fixtures/a]}
+          exclusions:
+            branches:
+              - {clonePath: /fixtures/a, branches: [main]}
+            sessions: [77777777-7777-4777-8777-777777777777]
+    scope:
+      harness: claude-code
+      clonePath: /fixtures/a
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      sessionId: 77777777-7777-4777-8777-777777777777
+      visibleSessions:
+        - {branch: main, sessionId: 77777777-7777-4777-8777-777777777777}
+    expectErrorContains: broader exact branch exclusion

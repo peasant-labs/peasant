@@ -89,47 +89,45 @@ func (n conflictNotice) axes() []testutil.FixtureField {
 	}
 }
 
-// selectionGitExit is the closed set of ways discovery decides whether resolving
-// git can change the answer. Each row DECLARES one and the loader DERIVES the
-// same value from the row's configuration, so a row cannot carry the name of an
-// exit it never reaches.
-type selectionGitExit string
+// selectionGitPolicy is the closed set of cohort preparation policies. Each row
+// declares one and the loader derives it from the configuration, so a fixture
+// cannot claim that project evidence was skipped when preparation required it.
+type selectionGitPolicy string
 
 const (
-	gitExitHarnessAbsent   selectionGitExit = "harness-absent"
-	gitExitNoProjects      selectionGitExit = "no-project-entries"
-	gitExitExplicitSession selectionGitExit = "explicit-session"
-	gitExitResolves        selectionGitExit = "resolves"
+	gitPolicyHarnessAbsent      selectionGitPolicy = "harness-absent"
+	gitPolicyNoProjects         selectionGitPolicy = "no-project-entries"
+	gitPolicyProjectEvidence    selectionGitPolicy = "prepare-project-evidence"
+	expectedSelectionFilterRows                    = 10
 )
 
 type selectionFilterFixture struct {
-	Name             string                    `yaml:"name"`
-	Harness          ingest.Harness            `yaml:"harness"`
-	Configured       string                    `yaml:"configured_harness"`
-	Projects         []config.ProjectSelection `yaml:"projects"`
-	ExplicitSessions []string                  `yaml:"explicit_sessions"`
-	ProjectName      string                    `yaml:"project_name"`
-	SessionID        string                    `yaml:"session_id"`
-	SecondSessionID  string                    `yaml:"second_session_id"`
-	OriginalRoot     string                    `yaml:"original_root"`
-	GitExit          selectionGitExit          `yaml:"git_exit"`
-	ExpectedMatch    testutil.SelectionOutcome `yaml:"expected_match"`
-	ExpectedGitCalls int                       `yaml:"expected_git_calls"`
+	Name             string                     `yaml:"name"`
+	Harness          ingest.Harness             `yaml:"harness"`
+	Configured       string                     `yaml:"configured_harness"`
+	Projects         []config.ProjectSelection  `yaml:"projects"`
+	ExplicitSessions []string                   `yaml:"explicit_sessions"`
+	Exclusions       config.SelectionExclusions `yaml:"exclusions"`
+	AutoNewBranches  bool                       `yaml:"auto_new_branches"`
+	ProjectName      string                     `yaml:"project_name"`
+	SessionID        string                     `yaml:"session_id"`
+	SecondSessionID  string                     `yaml:"second_session_id"`
+	OriginalRoot     string                     `yaml:"original_root"`
+	GitPolicy        selectionGitPolicy         `yaml:"git_policy"`
+	ExpectedMatch    testutil.SelectionOutcome  `yaml:"expected_match"`
+	ExpectedExcluded bool                       `yaml:"expected_exact_exclusion"`
+	ExpectedGitCalls int                        `yaml:"expected_git_calls"`
 }
 
-// derivedGitExit computes which exit this row's configuration reaches, from the
-// configuration alone. It is compared against the declared git_exit so the
-// declaration cannot drift onto a row that takes a different exit.
-func (f selectionFilterFixture) derivedGitExit() selectionGitExit {
+// derivedGitPolicy computes the cohort preparation policy from configuration.
+func (f selectionFilterFixture) derivedGitPolicy() selectionGitPolicy {
 	switch {
 	case f.Harness.String() != f.Configured:
-		return gitExitHarnessAbsent
-	case len(f.Projects) == 0:
-		return gitExitNoProjects
-	case slices.Contains(f.ExplicitSessions, f.SessionID):
-		return gitExitExplicitSession
+		return gitPolicyHarnessAbsent
+	case len(f.Projects) == 0 && len(f.Exclusions.Branches) == 0:
+		return gitPolicyNoProjects
 	default:
-		return gitExitResolves
+		return gitPolicyProjectEvidence
 	}
 }
 
@@ -179,19 +177,24 @@ func branchScopeOf(project config.ProjectSelection) entryBranchScope {
 
 // selectionFilterCoverage is the (exit, answer) pair a row asserts.
 type selectionFilterCoverage struct {
-	exit  selectionGitExit
-	match testutil.SelectionOutcome
+	policy selectionGitPolicy
+	match  testutil.SelectionOutcome
 }
 
-// allSelectionFilterCoverage enumerates every pair the corpus must exercise:
-// each exit of the git short-circuit, and each answer the filter can give.
+// allSelectionFilterCoverage enumerates every preparation policy and answer the
+// corpus must exercise.
 var allSelectionFilterCoverage = []selectionFilterCoverage{
-	{gitExitHarnessAbsent, testutil.SelectionRejected},
-	{gitExitNoProjects, testutil.SelectionSelected},
-	{gitExitNoProjects, testutil.SelectionRejected},
-	{gitExitExplicitSession, testutil.SelectionSelected},
-	{gitExitResolves, testutil.SelectionSelected},
-	{gitExitResolves, testutil.SelectionWithheld},
+	{gitPolicyHarnessAbsent, testutil.SelectionRejected},
+	{gitPolicyNoProjects, testutil.SelectionSelected},
+	{gitPolicyNoProjects, testutil.SelectionRejected},
+	{gitPolicyProjectEvidence, testutil.SelectionSelected},
+	{gitPolicyProjectEvidence, testutil.SelectionRejected},
+	{gitPolicyProjectEvidence, testutil.SelectionWithheld},
+}
+
+var requiredExactExclusionFilterCases = []string{
+	"auto-new-branches-keeps-an-exact-branch-denied",
+	"exact-session-denial-skips-git",
 }
 
 func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
@@ -209,8 +212,8 @@ func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
 	// Floor EQUALS the row count: deleting a row and decrementing the
 	// declaration still trips it, so the corpus only ratchets up. The pair
 	// coverage below is the second layer, for a swap at the same count.
-	if fixtures.DeclaredRows != len(fixtures.Cases) || fixtures.DeclaredRows < 8 {
-		t.Fatalf("selection filter fixture row guard failed: declared=%d actual=%d minimum=8", fixtures.DeclaredRows, len(fixtures.Cases))
+	if fixtures.DeclaredRows != expectedSelectionFilterRows || len(fixtures.Cases) != expectedSelectionFilterRows {
+		t.Fatalf("selection filter fixture row guard failed: declared=%d actual=%d expected=%d", fixtures.DeclaredRows, len(fixtures.Cases), expectedSelectionFilterRows)
 	}
 	seen := make(map[string]struct{}, len(fixtures.Cases))
 	observed := make([]selectionFilterCoverage, 0, len(fixtures.Cases))
@@ -220,26 +223,31 @@ func loadSelectionFilterFixtures(t *testing.T) selectionFilterFixtures {
 			{Key: "harness", Value: fixture.Harness.String()},
 			{Key: "configured_harness", Value: fixture.Configured},
 			{Key: "session_id", Value: fixture.SessionID},
-			{Key: "git_exit", Value: string(fixture.GitExit)},
+			{Key: "git_policy", Value: string(fixture.GitPolicy)},
 			{Key: "expected_match", Value: string(fixture.ExpectedMatch)},
 		})
 		fixture.ExpectedMatch.BranchMatch(t, "selection filter", fixture.Name)
-		if derived := fixture.derivedGitExit(); derived != fixture.GitExit {
-			t.Fatalf("selection filter fixture %q declares git_exit %q but its configuration reaches %q; the row is named for an exit it does not take, so it proves something other than what it claims", fixture.Name, fixture.GitExit, derived)
+		if derived := fixture.derivedGitPolicy(); derived != fixture.GitPolicy {
+			t.Fatalf("selection filter fixture %q declares git_policy %q but its configuration requires %q", fixture.Name, fixture.GitPolicy, derived)
 		}
-		if fixture.GitExit != gitExitResolves && fixture.ExpectedGitCalls != 0 {
-			t.Fatalf("selection filter fixture %q short-circuits at %q but expects %d git call(s); a short-circuit that still resolves git is not a short-circuit", fixture.Name, fixture.GitExit, fixture.ExpectedGitCalls)
+		if fixture.GitPolicy != gitPolicyProjectEvidence && fixture.ExpectedGitCalls != 0 {
+			t.Fatalf("selection filter fixture %q skips project evidence under %q but expects %d git call(s)", fixture.Name, fixture.GitPolicy, fixture.ExpectedGitCalls)
 		}
-		observed = append(observed, selectionFilterCoverage{fixture.GitExit, fixture.ExpectedMatch})
+		observed = append(observed, selectionFilterCoverage{fixture.GitPolicy, fixture.ExpectedMatch})
 		if _, exists := seen[fixture.Name]; exists {
 			t.Fatalf("selection filter fixture name %q is duplicated; every case must name exactly one scenario", fixture.Name)
 		}
 		seen[fixture.Name] = struct{}{}
 	}
+	for _, required := range requiredExactExclusionFilterCases {
+		if _, ok := seen[required]; !ok {
+			t.Fatalf("selection filter fixture is missing required exact-exclusion case %q", required)
+		}
+	}
 	// Derived coverage instead of a row-count floor: a floor is decremented by
 	// the same edit that removes the row it protected, while an uncovered
 	// (exit, answer) pair is reported by name.
-	testutil.RequireClosedSetCoverage(t, "selection filter", "git_exit/expected_match pair", allSelectionFilterCoverage, observed)
+	testutil.RequireClosedSetCoverage(t, "selection filter", "git_policy/expected_match pair", allSelectionFilterCoverage, observed)
 
 	// Coverage over the shapes of entries that are actually RENDERED. Scoped to
 	// withheld rows and the mounted block on purpose: an entry on a row that
@@ -352,6 +360,15 @@ type countingGitResolver struct {
 	branchCalls int
 }
 
+type fixturePathIdentityResolver struct{}
+
+func (fixturePathIdentityResolver) Resolve(raw string) (ingest.ClonePath, error) {
+	if !filepath.IsAbs(raw) {
+		return "", fmt.Errorf("fixture path %q is not absolute", raw)
+	}
+	return ingest.ClonePath(filepath.Clean(raw)), nil
+}
+
 func (r *countingGitResolver) RemoteURL(ctx context.Context, dir string) (string, error) {
 	r.remoteCalls++
 	return r.StubGitResolver.RemoteURL(ctx, dir)
@@ -367,32 +384,43 @@ func TestBuildSelectionFilter_Fixtures(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.Name, func(t *testing.T) {
 			cfg := config.BaseConfig()
-			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
-				fixture.Configured: {Projects: fixture.Projects, Sessions: fixture.ExplicitSessions},
+			cfg.Selection = config.SelectionConfig{Mode: config.SelectionModeSelected, AutoIngestNewBranches: fixture.AutoNewBranches, Harnesses: map[string]config.SelectionHarnessConfig{
+				fixture.Configured: {Projects: fixture.Projects, Sessions: fixture.ExplicitSessions, Exclusions: fixture.Exclusions},
 			}}
 			git := &countingGitResolver{StubGitResolver: &testutil.StubGitResolver{Remote: "https://github.com/acme/tool.git", BranchName: "main"}}
-			filter, recorder := buildSelectionFilterWithRecorder(cfg, git)
+			filter, recorder := buildSelectionFilterWithResolver(cfg, git, fixturePathIdentityResolver{})
 			sessionID, err := ingest.NewSessionID(fixture.SessionID)
 			if err != nil {
 				t.Fatalf("fixture session ID: %v", err)
 			}
-			session := ingest.DiscoveredSession{Harness: fixture.Harness, SessionID: sessionID, ProjectName: fixture.ProjectName, OriginalRoot: ingest.ResolvedPath(fixture.OriginalRoot)}
-			wantSelected := fixture.ExpectedMatch == testutil.SelectionSelected
-			if got := filter(session); got != wantSelected {
-				t.Fatalf("selection result = %v, want %v (expected_match %q)", got, wantSelected, fixture.ExpectedMatch)
-			}
+			session := ingest.DiscoveredSession{Harness: fixture.Harness, SessionID: sessionID, ProjectName: fixture.ProjectName, OriginalRoot: ingest.ResolvedPath(fixture.OriginalRoot), CWD: fixture.OriginalRoot}
+			cohort := []ingest.DiscoveredSession{session}
 			if fixture.SecondSessionID != "" {
 				secondID, idErr := ingest.NewSessionID(fixture.SecondSessionID)
 				if idErr != nil {
 					t.Fatalf("fixture second session ID: %v", idErr)
 				}
-				session.SessionID = secondID
-				if got := filter(session); got != wantSelected {
+				second := session
+				second.SessionID = secondID
+				cohort = append(cohort, second)
+			}
+			if err := filter.Prepare(context.Background(), cohort); err != nil {
+				t.Fatalf("prepare complete selection cohort: %v", err)
+			}
+			wantSelected := fixture.ExpectedMatch == testutil.SelectionSelected
+			if got := filter.Match(session); got != wantSelected {
+				t.Fatalf("selection result = %v, want %v (expected_match %q)", got, wantSelected, fixture.ExpectedMatch)
+			}
+			if got := filter.Excludes(session); got != fixture.ExpectedExcluded {
+				t.Fatalf("exact exclusion result = %v, want %v", got, fixture.ExpectedExcluded)
+			}
+			if fixture.SecondSessionID != "" {
+				if got := filter.Match(cohort[1]); got != wantSelected {
 					t.Fatalf("second selection result = %v, want %v", got, wantSelected)
 				}
 			}
 			if got := git.remoteCalls + git.branchCalls; got != fixture.ExpectedGitCalls {
-				t.Fatalf("git calls = %d, want %d (this row reaches the %q exit)", got, fixture.ExpectedGitCalls, fixture.GitExit)
+				t.Fatalf("git calls = %d, want %d under policy %q", got, fixture.ExpectedGitCalls, fixture.GitPolicy)
 			}
 			var notice bytes.Buffer
 			recorder.notice(&notice, "/config/chosen.yaml")
@@ -488,18 +516,26 @@ func TestSelectionConflictNotice_CapsTheListAndSaysHowManyItHeldBack(t *testing.
 		}},
 	}}
 	git := &countingGitResolver{StubGitResolver: &testutil.StubGitResolver{Remote: "https://github.com/acme/tool.git", BranchName: "main"}}
-	filter, recorder := buildSelectionFilterWithRecorder(cfg, git)
+	filter, recorder := buildSelectionFilterWithResolver(cfg, git, fixturePathIdentityResolver{})
+	sessions := make([]ingest.DiscoveredSession, 0, overflow.DeclaredConflicts)
 	for i := 0; i < overflow.DeclaredConflicts; i++ {
 		sessionID, err := ingest.NewSessionID(fmt.Sprintf("%08d-1111-4111-8111-111111111111", i))
 		if err != nil {
 			t.Fatalf("build conflicting session %d: %v", i, err)
 		}
-		if filter(ingest.DiscoveredSession{
+		sessions = append(sessions, ingest.DiscoveredSession{
 			Harness:      defaults.HarnessClaudeCode,
 			SessionID:    sessionID,
 			ProjectName:  "satchel",
 			OriginalRoot: ingest.ResolvedPath("/workspace/tool"),
-		}) {
+			CWD:          "/workspace/tool",
+		})
+	}
+	if err := filter.Prepare(context.Background(), sessions); err != nil {
+		t.Fatalf("prepare conflicting cohort: %v", err)
+	}
+	for i, session := range sessions {
+		if filter.Match(session) {
 			t.Fatalf("session %d was selected; the fixture must configure a conflict for every one of them", i)
 		}
 	}
@@ -642,8 +678,8 @@ func initConflictedSourceRepo(t *testing.T, fixture mountedConflictFixture) stri
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o755); err != nil {
 		t.Fatalf("create claude project slug directory: %v", err)
 	}
-	line := fmt.Sprintf(`{"type":"user","message":{"role":"user","content":"hi"},"uuid":%q,"sessionId":%q,"timestamp":"2026-05-30T04:29:24.992Z","cwd":"/tmp/conflicted","gitBranch":%q,"version":"1.0","userType":"external"}`,
-		fixture.SessionID, fixture.SessionID, fixture.AdmittedBranch)
+	line := fmt.Sprintf(`{"type":"user","message":{"role":"user","content":"hi"},"uuid":%q,"sessionId":%q,"timestamp":"2026-05-30T04:29:24.992Z","cwd":%q,"gitBranch":%q,"version":"1.0","userType":"external"}`,
+		fixture.SessionID, fixture.SessionID, sourceDir, fixture.AdmittedBranch)
 	if err := os.WriteFile(sessionFile, []byte(line+"\n"), 0o644); err != nil {
 		t.Fatalf("write claude session fixture: %v", err)
 	}

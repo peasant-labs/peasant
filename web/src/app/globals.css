@@ -659,3 +659,94 @@ textarea::placeholder {
   background: hsl(var(--diff-del));
   color: hsl(var(--diff-del-text));
 }
+/* Native indeterminate state needs a visible shape because aria alone does not
+   communicate partial project selection. The dash remains visible without colour. */
+.check .check-box:indeterminate,
+.check .check-box[data-indeterminate='true'] {
+  background: var(--amber);
+  border-color: var(--amber-dim);
+}
+.check .check-box:indeterminate::after,
+.check .check-box[data-indeterminate='true']::after {
+  width: 10px;
+  height: 2px;
+  border: 0;
+  background: var(--on-amber);
+  transform: none;
+  opacity: 1;
+}
+.share-hierarchy-check {
+  position: relative;
+}
+.share-hierarchy-check__mixed {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 10px;
+  height: 2px;
+  background: var(--on-amber);
+  pointer-events: none;
+}
+
+/* Railway-style single-line connector for the Share hierarchy.
+
+   The whole ordered hierarchy is traced by ONE continuous connector — a single
+   SVG <path> rendered behind the rows, whose geometry is measured from the
+   mounted checkbox anchors (so wrapped mobile rows are handled by construction).
+   At any y there is exactly one vertical segment: the path stays vertical at the
+   current depth column, takes ONE square step in (deeper) or out (shallower) at
+   the deeper of two adjacent rows, and carries a single start/end cap at the
+   first/last row. No parallel rails, no tees, no per-parent subtree spines.
+
+   The connector layer only paints; the rows sit above it so each control sits on
+   the rail. Depth columns come from one constant indent step per nested list. */
+.share-rail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.share-rail__path {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 1px;
+}
+.share-rail-rows {
+  position: relative;
+  z-index: 1;
+}
+/* The hierarchy members are <section>s (each an accessible region). Drop the
+   global `section { padding: 0 var(--gutter) }` content gutter on them, and
+   indent each nested list by one constant step, so the depth columns the single
+   rail traces stay uniform and fit a narrow viewport. */
+.share-node {
+  padding-left: 0;
+  padding-right: 0;
+}
+.share-subtree {
+  padding-left: var(--sp-5);
+}
+
+/* Share wizard scroll ownership. The fairtrade `.swz-foot` is `position: sticky;
+   bottom: 0`; over a document-flow body taller than the viewport it would overlay
+   the tail of the Choose list (rows + the hierarchy rail passing under it). Bound
+   the wizard to the viewport under the app chrome (header + the breadcrumb/title
+   block above it ≈ 120px + the page bottom padding) and give the step body its
+   own scroll, so the body clips its own overflow and the action footer always
+   sits BELOW the content — never intersecting a row or the rail — in the live
+   page. Mirrors the bounded sticky-scroll pattern used elsewhere (map RailShell).
+   The flex column distributes head/body/foot without hard-coding their heights. */
+.share-wizard {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--app-header-height, 4rem) - 176px);
+  max-height: calc(100dvh - var(--app-header-height, 4rem) - 176px);
+}
+.share-wizard .swz-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}

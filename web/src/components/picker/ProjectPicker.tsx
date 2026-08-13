@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, SearchIcon } from "lucide-react";
 import { displayProject } from "@/lib/quality/utils";
 import { Explainer, type ExplainerState } from "@/components/Explainer";
 import { Term } from "@/components/Term";
 import { Skeleton } from "@/lib/skeleton";
+import { Input, Tooltip } from "@/lib/ft-ui";
 import type { DecodedProjectSummariesPayload } from '@/lib/api/map';
 import type { SessionSummary } from "@/types/messages";
 import { formatRelative } from "@/app/review/[[...segments]]/format";
@@ -114,11 +115,12 @@ export function PickerExplainer({
     <Explainer explainer={explainer} title="what am I looking at?">
       <p>
         Each row is a project this tool found recorded AI conversations for. The
-        columns: how many of its files were{" "}
-        <Term k="coverage">last edited with AI on record</Term>, when it was last
-        worked on, and how many <Term k="change">lines of work</Term> (branches)
-        haven&rsquo;t been merged back into the main version yet.
+        columns show <Term k="coverage">recorded files</Term> out of total project
+        files, when it was last worked on, and how many{" "}
+        <Term k="change">lines of work</Term> (branches) haven&rsquo;t been merged
+        back into the main version yet.
       </p>
+      <p>A recorded file has an edit captured during a saved AI conversation.</p>
       <p>Click a project to see its {destination === "map" ? "map" : "changes"}.</p>
     </Explainer>
   );
@@ -152,12 +154,26 @@ function CoverageCell({ row, pending }: { row: PickerRow; pending: boolean }) {
         <span
           className="block h-1 w-16 border border-rule bg-surface-hover overflow-hidden"
           aria-hidden
-          title={`${pct}% of this project's files were last edited with AI on record`}
+          title={`${pct}% of measured files have an edit captured in a saved AI conversation`}
         >
           <span className="block h-full bg-ink" style={{ width: `${pct}%` }} />
         </span>
       )}
     </span>
+  );
+}
+
+function CoverageHeader() {
+  return (
+    <Tooltip content="recorded files have an edit captured in a saved AI conversation. total files are all files measured in this project.">
+      <button
+        type="button"
+        aria-label="recorded files out of total project files"
+        className="v2-eyebrow flex min-h-6 w-full cursor-help items-center justify-end border-b border-dotted border-ink-4 bg-transparent p-0 text-right focus-mono"
+      >
+        recorded files / total files
+      </button>
+    </Tooltip>
   );
 }
 
@@ -171,6 +187,12 @@ const DEST = {
     aria: (label: string) => `Open the map of ${label}`,
   },
 } as const;
+
+function coverageAccessibleName(row: PickerRow): string {
+  return row.recordedFiles !== null && row.totalFiles !== null && row.totalFiles > 0
+    ? `${row.recordedFiles} recorded files out of ${row.totalFiles} total files`
+    : "recorded and total file counts unavailable";
+}
 
 export function ProjectPicker({
   rows,
@@ -205,13 +227,13 @@ export function ProjectPicker({
   return (
     <div className="flex flex-col gap-2" data-tour="project-picker">
       {rows.length > filterThreshold && (
-        <input
+        <Input
           type="search"
+          iconLeft={SearchIcon}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          aria-label="Filter projects"
-          placeholder={`Filter ${rows.length} projects… (e.g. "peasant")`}
-          className="w-full border border-rule bg-surface px-3 py-2 text-[13px] text-ink placeholder:text-ink-4 focus-mono"
+          aria-label="search projects"
+          placeholder="search projects…"
         />
       )}
 
@@ -223,12 +245,7 @@ export function ProjectPicker({
         <div className="border border-rule bg-surface">
           <div className={`${PICKER_GRID} py-2 border-b border-rule`}>
             <span className="v2-eyebrow">project</span>
-            <span
-              className="v2-eyebrow text-right"
-              title="How many of this project's files were last edited during a recorded AI conversation (the rest predate recording, or were edited by hand)."
-            >
-              Files with AI
-            </span>
+            <CoverageHeader />
             <span
               className="v2-eyebrow text-right"
               title="When this project was last worked on in a recorded AI conversation."
@@ -259,8 +276,12 @@ export function ProjectPicker({
                   key={row.hash ?? row.name}
                   href={dest.href(projectHash)}
                   aria-label={dest.aria(primary)}
+                  aria-describedby={`coverage-${row.hash ?? row.name.replace(/[^a-z0-9]+/gi, '-')}`}
                   className={`${PICKER_GRID} py-3 hover:bg-surface-hover transition-colors focus-mono cursor-pointer`}
                 >
+                  <span id={`coverage-${row.hash ?? row.name.replace(/[^a-z0-9]+/gi, '-')}`} className="sr-only">
+                    {coverageAccessibleName(row)}
+                  </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-medium text-ink truncate">{primary}</span>
                     {showPath && (
@@ -269,7 +290,11 @@ export function ProjectPicker({
                       </span>
                     )}
                   </span>
-                  <CoverageCell row={row} pending={statsPending} />
+                  <span
+                    aria-label={coverageAccessibleName(row)}
+                  >
+                    <CoverageCell row={row} pending={statsPending} />
+                  </span>
                   <span className="text-xs font-mono text-ink-3 tabular-nums text-right">
                     {row.lastWorkMs !== null ? formatRelative(row.lastWorkMs) : "—"}
                   </span>
@@ -295,7 +320,11 @@ export function ProjectPicker({
                     <span className="block text-[13px] font-medium text-ink truncate">{primary}</span>
                     <span className="block font-mono text-[11px] text-ink-4 truncate">project identity unavailable</span>
                   </span>
-                  <CoverageCell row={row} pending={statsPending} />
+                  <span
+                    aria-label={coverageAccessibleName(row)}
+                  >
+                    <CoverageCell row={row} pending={statsPending} />
+                  </span>
                   <span className="text-xs font-mono text-ink-3 tabular-nums text-right">
                     {row.lastWorkMs !== null ? formatRelative(row.lastWorkMs) : "—"}
                   </span>

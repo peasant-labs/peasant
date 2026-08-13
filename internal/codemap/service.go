@@ -23,7 +23,6 @@ import (
 	"unicode"
 
 	"github.com/peasant-labs/peasant/internal/codegraph"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
@@ -91,6 +90,11 @@ type Service struct {
 	store   *store.Store
 	repoFor func(path string) gitops.Repository
 	builder codegraph.Builder
+	// pathIdentityResolver turns stored worktree/canonical-cwd spellings into
+	// physical clone identity for cohort-aware project discovery. Production
+	// uses the real filesystem resolver; focused store tests inject deterministic
+	// pre-resolved fixture paths.
+	pathIdentityResolver ingest.PathIdentityResolver
 
 	// nowMs stamps MapGraphPayload.GeneratedAtMs; injectable for tests.
 	nowMs func() int64
@@ -112,18 +116,38 @@ type Service struct {
 	visibility sessionvisibility.Policy
 }
 
+// ServiceOption customizes an internal codemap service dependency.
+type ServiceOption func(*Service)
+
+// WithPathIdentityResolver injects the clone-identity boundary used by
+// ProjectSummaries. A nil resolver leaves the production resolver in place.
+func WithPathIdentityResolver(resolver ingest.PathIdentityResolver) ServiceOption {
+	return func(service *Service) {
+		if resolver != nil {
+			service.pathIdentityResolver = resolver
+		}
+	}
+}
+
 // NewService wires the service. repoFor turns a project's canonical_cwd into
 // a gitops.Repository (production: gitops.NewExecGitRepository; tests:
 // testutil.StubGitRepository).
-func NewService(s *store.Store, repoFor func(path string) gitops.Repository, builder codegraph.Builder, visibility sessionvisibility.Policy) *Service {
-	return &Service{
-		store:      s,
-		repoFor:    repoFor,
-		builder:    builder,
-		nowMs:      func() int64 { return time.Now().UnixMilli() },
-		graphCache: make(map[string]*codegraph.Graph),
-		visibility: visibility,
+func NewService(s *store.Store, repoFor func(path string) gitops.Repository, builder codegraph.Builder, visibility sessionvisibility.Policy, options ...ServiceOption) *Service {
+	service := &Service{
+		store:                s,
+		repoFor:              repoFor,
+		builder:              builder,
+		pathIdentityResolver: ingest.NewPhysicalPathResolver(),
+		nowMs:                func() int64 { return time.Now().UnixMilli() },
+		graphCache:           make(map[string]*codegraph.Graph),
+		visibility:           visibility,
 	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
 }
 
 // MapGraph builds the full map graph for a project. commit is the optional
@@ -239,65 +263,22 @@ func (s *Service) Search(ctx context.Context, query string, limit int) (*schema.
 		limit = searchMaxLimit
 	}
 
-	// The caller's limit is semantic: it caps visible results, not raw FTS
-	// rows. Page by the same bounded size, advance strictly by raw rows, and
-	// keep scanning hidden prefixes until the visible limit is filled or the
-	// ranked source is exhausted.
-	pageSize := limit
-	rawOffset := 0
-	for len(payload.Results) < limit {
-		rows, err := s.querySearch(ctx, match, pageSize, rawOffset)
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) == 0 {
-			break
-		}
-
-		for _, r := range rows {
-			visible, visibilityErr := s.visibility.Visible(sessionvisibility.Candidate{
-				SessionID:   ingest.SessionID(r.sessionID),
-				Harness:     defaults.Harness(r.harness),
-				GitRemote:   r.gitRemote,
-				ProjectName: r.projectName,
-				GitBranch:   r.gitBranch,
-			})
-			if visibilityErr != nil {
-				return nil, fmt.Errorf(
-					"codemap: search visibility failed for session %q at raw offset %d while filling the visible result limit; no partial search payload was returned because the persisted kickstart selection could not be evaluated safely; repair the selection with `peasant kickstart` and retry: %w",
-					r.sessionID, rawOffset, visibilityErr,
-				)
-			}
-			if !visible {
-				continue
-			}
-			payload.Results = append(payload.Results, schema.SearchResult{
-				SessionID:   r.sessionID,
-				Project:     r.project,
-				ProjectHash: r.hash,
-				EntryIndex:  r.entryIndex,
-				Role:        r.role,
-				Snippet:     r.snippet,
-				// bm25 is negative (more negative = better); negate so higher =
-				// more relevant. Result order is authoritative regardless.
-				Score: -r.bm25,
-			})
-			if len(payload.Results) == limit {
-				break
-			}
-		}
-
-		nextOffset := rawOffset + len(rows)
-		if nextOffset <= rawOffset {
-			return nil, fmt.Errorf(
-				"codemap: search paging did not advance beyond raw offset %d after receiving %d rows while filling the visible result limit; no partial payload was returned because continuing could loop forever; update peasant and retry",
-				rawOffset, len(rows),
-			)
-		}
-		rawOffset = nextOffset
-		if len(rows) < pageSize {
-			break
-		}
+	rows, err := s.querySearch(ctx, match, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		payload.Results = append(payload.Results, schema.SearchResult{
+			SessionID:   r.sessionID,
+			Project:     r.project,
+			ProjectHash: r.hash,
+			EntryIndex:  r.entryIndex,
+			Role:        r.role,
+			Snippet:     r.snippet,
+			// bm25 is negative (more negative = better); negate so higher =
+			// more relevant. Result order is authoritative regardless.
+			Score: -r.bm25,
+		})
 	}
 	return payload, nil
 }
