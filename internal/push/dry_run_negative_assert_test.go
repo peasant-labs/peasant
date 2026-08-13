@@ -4,15 +4,15 @@ package push_test
 
 import "testing"
 
-func TestDryRunCapabilityNegativeDesignatesEnrichedDryRun(t *testing.T) {
+func TestDryRunCapabilityNegativeExactMountedFailureSet(t *testing.T) {
 	fixture := loadObservedModelCapabilityFixture(t)
-	affected := []string{}
-	for _, fixtureCase := range fixture.Cases {
-		if fixtureCase.DryRun {
-			affected = append(affected, fixtureCase.Name)
+	actual := []string{}
+	for _, row := range fixture.Cases {
+		if row.DryRun {
+			actual = append(actual, row.Name)
 		}
 	}
-	if len(affected) != 1 || affected[0] != "enriched_dry_run_remains_local_without_refusal" {
-		t.Fatalf("negative affected cases=%v, want exactly enriched_dry_run_remains_local_without_refusal", affected)
+	if len(actual) != 1 || actual[0] != "enriched_dry_run_remains_local_without_refusal" {
+		t.Fatalf("mutated production decision affected mounted cases=%v, want exactly enriched_dry_run_remains_local_without_refusal", actual)
 	}
 }

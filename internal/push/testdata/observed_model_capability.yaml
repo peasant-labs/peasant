@@ -37,3 +37,10 @@ cases:
     shapeMutation: remove_session_detail
     wantUploads: 0
     wantError: true
+  - name: enriched_mixed_unknown_known_target_uploads
+    observedModel: Anthropic/Claude Fable-5
+    advertisement:
+      - future_evidence_v1
+      - observed_model_v1
+    wantUploads: 1
+    wantError: false

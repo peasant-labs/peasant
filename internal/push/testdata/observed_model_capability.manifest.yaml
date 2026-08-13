@@ -1,4 +1,4 @@
-expectedCaseCount: 6
+expectedCaseCount: 7
 requiredNames:
   - enriched_capable_target_uploads_exact_evidence
   - enriched_unknown_target_refuses_before_upload
@@ -6,3 +6,4 @@ requiredNames:
   - enriched_dry_run_remains_local_without_refusal
   - schema_evidence_bypasses_aggressive_content_redaction
   - redaction_cannot_remove_evidence_bearing_structure
+  - enriched_mixed_unknown_known_target_uploads

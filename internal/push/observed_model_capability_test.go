@@ -113,12 +113,13 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			if got := len(publisher.Calls); got != fixtureCase.WantUploads {
+			wantUploads, wantError := fixtureCase.WantUploads, fixtureCase.WantError
+			if got := len(publisher.Calls); got != wantUploads {
 				t.Fatalf("uploads=%d, want %d; result=%+v", got, fixtureCase.WantUploads, result)
 			}
 			gotError := result.Errors > 0
-			if gotError != fixtureCase.WantError {
-				t.Fatalf("error=%t, want %t; result=%+v", gotError, fixtureCase.WantError, result)
+			if gotError != wantError {
+				t.Fatalf("error=%t, want %t; result=%+v", gotError, wantError, result)
 			}
 			if fixtureCase.DryRun {
 				if publisher.SchemaVersionCalls != 0 || len(store.SavedPublicationIDs) != 0 || len(store.PushLogs) != 0 || len(store.PublicationAttempts) != 0 {
@@ -128,7 +129,7 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 					t.Fatalf("dry run forecast=%+v, want one new session without capability refusal", result)
 				}
 			}
-			if fixtureCase.WantError {
+			if wantError {
 				message := result.Sessions[0].Error.Error()
 				if fixtureCase.ShapeMutation != "" {
 					for _, fragment := range []string{"what:", "why:", "where:", "when:", "meaning:", "fix:", "nothing was uploaded", "evidence-bearing structure"} {

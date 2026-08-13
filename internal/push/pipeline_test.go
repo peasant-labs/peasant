@@ -951,6 +951,9 @@ func TestPipeline_License(t *testing.T) {
 }
 
 func TestPipeline_DryRun_NoHTTPNoStoreWrites(t *testing.T) {
+	if push.DryRunCapabilityMutation {
+		t.Skip("the mounted capability fixture owns the dry-run decision mutation")
+	}
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -2041,6 +2044,28 @@ func TestPipeline_EntriesError_FailsBeforeUpload(t *testing.T) {
 		if !strings.Contains(message, fragment) {
 			t.Errorf("actionable entry-read error missing %q: %s", fragment, message)
 		}
+	}
+}
+
+func TestPipeline_EntriesRereadErrorReportsPostNegotiationStage(t *testing.T) {
+	fs := testutil.NewMemFS()
+	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+	store := &testutil.StubPushStore{
+		Sessions:       []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, string(defaults.HarnessClaudeCode), nil)},
+		ListEntriesErr: fmt.Errorf("database changed after preflight"), ListEntriesFailOnCall: 2,
+	}
+	pub := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion}}
+	var stderr bytes.Buffer
+	result, err := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Errors != 1 || pub.SchemaVersionCalls != 1 || len(pub.Calls) != 0 || len(pub.AuthoritativeCalls) != 0 || len(store.SavedPublicationIDs) != 0 || len(store.PushLogs) != 1 || len(store.PublicationAttempts) != 0 {
+		t.Fatalf("reread result=%+v schema=%d uploads=%d authoritative=%d persistence=%d audit=%d attempts=%d", result, pub.SchemaVersionCalls, len(pub.Calls), len(pub.AuthoritativeCalls), len(store.SavedPublicationIDs), len(store.PushLogs), len(store.PublicationAttempts))
+	}
+	message := result.Sessions[0].Error.Error()
+	if !strings.Contains(message, "after run-level capability negotiation and before redaction, content construction, or upload") {
+		t.Fatalf("post-negotiation stage missing: %s", message)
 	}
 }
 

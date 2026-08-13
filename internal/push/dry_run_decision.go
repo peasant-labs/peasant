@@ -3,3 +3,5 @@
 package push
 
 func stopBeforeRemoteNegotiation(dryRun bool) bool { return dryRun }
+
+const DryRunCapabilityMutation = false

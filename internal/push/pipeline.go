@@ -196,7 +196,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	for _, sess := range sessions {
 		sessionID, _ := ingest.NewSessionID(sess.SessionID)
 		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
-			sr := entryReadFailure(sess, readErr)
+			sr := entryReadFailure(sess, readErr, entryReadPreflight)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 			return result, nil
@@ -831,7 +831,7 @@ func (p *Pipeline) pushSession(
 	// evidence are indivisible publication input, so an unreadable entry set fails closed.
 	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
 	if entriesErr != nil {
-		return entryReadFailure(sess, entriesErr)
+		return entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
 	}
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
@@ -976,7 +976,7 @@ func (p *Pipeline) pushSession(
 			Status:    status,
 		}
 	}
-	missingCapabilities := schema.MissingContentCapabilities(contentCapabilities, requiredCapabilities)
+	missingCapabilities := missingContentCapabilities(contentCapabilities, requiredCapabilities)
 	if len(missingCapabilities) > 0 {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
@@ -1163,9 +1163,20 @@ func (p *Pipeline) pushSession(
 	}
 }
 
-func entryReadFailure(sess ingest.PushSessionRow, err error) SessionPushResult {
+type entryReadStage uint8
+
+const (
+	entryReadPreflight entryReadStage = iota
+	entryReadPostNegotiation
+)
+
+func entryReadFailure(sess ingest.PushSessionRow, err error, stage entryReadStage) SessionPushResult {
+	when := "before remote capability negotiation, redaction, content construction, or upload"
+	if stage == entryReadPostNegotiation {
+		when = "after run-level capability negotiation and before redaction, content construction, or upload"
+	}
 	return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf(
-		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript preflight\n  when: before remote capability negotiation, redaction, content construction, or upload\n  meaning: no transcript bytes, metadata, receipt, audit record, or publication attempt were sent or written\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err)}
+		"transcript entry read failed\n  what: session %s entries could not be read\n  why: the local store returned: %v\n  where: push.Pipeline transcript read\n  when: %s\n  meaning: no transcript bytes, metadata, receipt, audit record, or publication attempt were sent or written\n  fix: verify the local database is readable, re-index the session if needed, and retry the push", sess.SessionID, err, when)}
 }
 
 func promoteAuthoritativePublishFields(document map[string]json.RawMessage) error {

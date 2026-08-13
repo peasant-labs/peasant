@@ -1,9 +1,12 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,24 +34,35 @@ type observedModelWebSocketTurn struct {
 }
 
 type observedModelWebSocketFixture struct {
-	SessionID              string                       `yaml:"sessionId"`
-	StoredModel            string                       `yaml:"storedModel"`
-	Turns                  []observedModelWebSocketTurn `yaml:"turns"`
-	ExpectedSeed           string                       `yaml:"expectedSeed"`
-	InvalidRole            string                       `yaml:"invalidRole"`
-	InvalidObservedModel   string                       `yaml:"invalidObservedModel"`
-	ExpectedObservedModels []string                     `yaml:"expectedObservedModels"`
-	ExpectedCaseCount      int                          `yaml:"expectedCaseCount"`
-	RequiredNames          []string                     `yaml:"requiredNames"`
+	SessionID              string                            `yaml:"sessionId"`
+	StoredModel            string                            `yaml:"storedModel"`
+	Turns                  []observedModelWebSocketTurn      `yaml:"turns"`
+	ExpectedSeed           string                            `yaml:"expectedSeed"`
+	Rejections             []observedModelWebSocketRejection `yaml:"rejections"`
+	ExpectedObservedModels []string                          `yaml:"expectedObservedModels"`
+	ExpectedCaseCount      int                               `yaml:"expectedCaseCount"`
+	RequiredNames          []string                          `yaml:"requiredNames"`
+}
+
+type observedModelWebSocketRejection struct {
+	Name          string `yaml:"name"`
+	Role          string `yaml:"role"`
+	ObservedModel string `yaml:"observedModel"`
 }
 
 func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixture {
 	t.Helper()
 	var fixture observedModelWebSocketFixture
-	if err := yaml.Unmarshal(observedModelWebSocketFixtureYAML, &fixture); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(observedModelWebSocketFixtureYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatalf("decode observed model websocket fixture: %v", err)
 	}
-	if fixture.SessionID == "" || fixture.StoredModel == "" || fixture.ExpectedSeed == "" || fixture.InvalidRole == "" || fixture.InvalidObservedModel == "" || fixture.ExpectedCaseCount != 2 || len(fixture.Turns) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		t.Fatalf("observed model websocket fixture must contain exactly one document: %v", err)
+	}
+	if fixture.SessionID == "" || fixture.StoredModel == "" || fixture.ExpectedSeed == "" || fixture.ExpectedCaseCount != 3 || len(fixture.Turns)+len(fixture.Rejections) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
 		t.Fatalf("observed model websocket fixture inventory is incomplete: %+v", fixture)
 	}
 	seen := map[string]bool{}
@@ -57,6 +71,12 @@ func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixtu
 			t.Fatalf("observed model websocket fixture has empty or duplicate name %q", turn.Name)
 		}
 		seen[turn.Name] = true
+	}
+	for _, rejection := range fixture.Rejections {
+		if rejection.Name == "" || rejection.Role == "" || rejection.ObservedModel == "" || seen[rejection.Name] {
+			t.Fatalf("observed model websocket rejection fixture is incomplete or duplicate: %+v", rejection)
+		}
+		seen[rejection.Name] = true
 	}
 	for _, required := range fixture.RequiredNames {
 		if !seen[required] {
@@ -68,14 +88,15 @@ func loadObservedModelWebSocketFixture(t *testing.T) observedModelWebSocketFixtu
 
 func TestHubSessionDetailRejectsPersistedNonAssistantEvidence(t *testing.T) {
 	fixture := loadObservedModelWebSocketFixture(t)
+	rejection := fixture.Rejections[0]
 	db := openTestStore(t)
 	stored := makeStoreEntry(t, fixture.SessionID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fixture-host", defaults.HarnessClaudeCode, 1700000000000, 1, 1, "fixture-project", 1, 0, 1000)
 	if err := db.InsertSessions(context.Background(), []ingest.StoreEntry{stored}); err != nil {
 		t.Fatal(err)
 	}
-	extraBytes, _ := json.Marshal(map[string]string{"model_id": fixture.InvalidObservedModel})
+	extraBytes, _ := json.Marshal(map[string]string{"model_id": rejection.ObservedModel})
 	extra, content := string(extraBytes), "invalid attribution"
-	entry := schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: 1, Role: schema.Role(fixture.InvalidRole), Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &content, Extra: &extra}
+	entry := schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: 1, Role: schema.Role(rejection.Role), Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, ContentPreview: &content, Extra: &extra}
 	if err := db.IndexSessionEntries(context.Background(), ingest.SessionID(fixture.SessionID), []schema.SessionEntry{entry}); err != nil {
 		t.Fatal(err)
 	}

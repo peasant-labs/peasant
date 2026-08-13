@@ -14,12 +14,15 @@ turns:
     content: later answer
     observedModel: anthropic/claude-opus-4-8
 expectedSeed: Anthropic/Claude Fable-5
-invalidRole: user
-invalidObservedModel: Anthropic/Claude Fable-5
+rejections:
+  - name: non_assistant_persisted_evidence_rejected
+    role: user
+    observedModel: Anthropic/Claude Fable-5
 expectedObservedModels:
   - Anthropic/Claude Fable-5
   - anthropic/claude-opus-4-8
-expectedCaseCount: 2
+expectedCaseCount: 3
 requiredNames:
   - first_root_observation
   - later_root_observation
+  - non_assistant_persisted_evidence_rejected
