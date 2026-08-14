@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"sort"
 
@@ -123,6 +125,14 @@ type preparedWebDiscoveryIdentity struct {
 	locationID, label string
 }
 
+func unavailableWebDiscoveryIdentity(sessionID string) preparedWebDiscoveryIdentity {
+	digest := sha256.Sum256([]byte("unresolved\x00" + sessionID))
+	return preparedWebDiscoveryIdentity{
+		locationID: fmt.Sprintf("rl_%x", digest[:16]),
+		label:      "repository unavailable",
+	}
+}
+
 func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow, selection config.SelectionConfig, resolver ingest.RepositoryIdentityResolver) ([]preparedWebDiscoveryIdentity, []ingest.DiscoveryIdentityMultiplicity, []ingest.DiscoveryIdentityMultiplicity, error) {
 	if resolver == nil {
 		return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity because no topology resolver was configured in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restart Peasant, then retry")
@@ -157,12 +167,17 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 	for i := range rows {
 		raw := rows[i].GitWorktree
 		if raw == "" {
-			return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is missing in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Re-ingest the session from an available repository, then retry", rows[i].SessionID)
+			prepared[i] = unavailableWebDiscoveryIdentity(rows[i].SessionID)
+			continue
 		}
 		p, ok := byPath[raw]
 		if !ok {
 			clone, err := pathResolver.Resolve(raw)
 			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					prepared[i] = unavailableWebDiscoveryIdentity(rows[i].SessionID)
+					continue
+				}
 				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is unavailable in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restore the repository or re-ingest the session, then retry: %w", rows[i].SessionID, err)
 			}
 			identity, err := resolver.ResolveRepositoryIdentity(ctx, clone)
@@ -196,7 +211,9 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 	}
 	labels := selectionprojection.DistinctLocationLabels(labelEvidence)
 	for i := range prepared {
-		prepared[i].label = labels[i]
+		if prepared[i].label == "" {
+			prepared[i].label = labels[i]
+		}
 	}
 	return prepared, selectionprojection.CohortMultiplicities(remoteEvidence), selectionprojection.CohortMultiplicities(nameEvidence), nil
 }
