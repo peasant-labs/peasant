@@ -52,7 +52,7 @@ describe('PushStep transparency panel', () => {
     // fairtrade WhereDoesThisGo composite — chrome is lowercased.
     expect(screen.getByText('where does this go?')).toBeInTheDocument();
     // Destination is the commons URL.
-    expect(screen.getByText('https://commons.peasant.dev')).toBeInTheDocument();
+    expect(screen.getByText('https://village.peasantlabs.org')).toBeInTheDocument();
     // What gets sent / stays private headings.
     expect(screen.getByText('what gets sent')).toBeInTheDocument();
     expect(screen.getByText('what stays private')).toBeInTheDocument();

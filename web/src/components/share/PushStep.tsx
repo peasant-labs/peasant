@@ -16,11 +16,10 @@ import {
   ExternalLinkIcon,
   ShieldCheckIcon,
 } from 'lucide-react';
+import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
 
-// TODO(commons-url): the public commons location is not yet exposed via
-// env/config. Hardcoded fallback until `NEXT_PUBLIC_COMMONS_URL` is wired.
 const COMMONS_URL =
-  process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://commons.peasant.dev';
+  process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
 
 // Where the local copy stays after a push under the default XDG data directory.
 const LOCAL_SYNC_PATH = '~/.local/share/peasant/peasant-sync/';
@@ -203,6 +202,7 @@ interface PushStepProps {
   redactionLevel?: SelectableRedactionLevel;
   /** When true, the push is not run (mock mode has no village). */
   useMock?: boolean;
+  onFooterActionsChange?: SetWizardFooterActions;
 }
 
 export function PushStep({
@@ -211,6 +211,7 @@ export function PushStep({
   labels,
   redactionLevel = DEFAULT_REDACTION_LEVEL,
   useMock = false,
+  onFooterActionsChange,
 }: PushStepProps) {
   const selectedSessions = useMemo(
     () => sessions.filter((s) => selectedIds.has(s.id)),
@@ -278,6 +279,16 @@ export function PushStep({
 
   const { states, phase, topError, start, summary } = usePush(sessionIds, redactionLevel, useMock);
 
+  useEffect(() => {
+    if (!onFooterActionsChange) return;
+    onFooterActionsChange(
+      phase === 'idle' || phase === 'error'
+        ? { primary: { label: phase === 'error' ? 'Try again' : 'Submit', onClick: start } }
+        : null,
+    );
+    return () => onFooterActionsChange(null);
+  }, [onFooterActionsChange, phase, start]);
+
   return (
     <div className="flex flex-col gap-5">
       {/* Transparency panel — "where does this go?" Shown before push begins so
@@ -316,8 +327,7 @@ export function PushStep({
         </div>
       )}
 
-      {/* Sticky control bar */}
-      <div className="sticky top-16 z-30 px-5 py-3 bg-surface border border-rule-strong">
+      <div className="px-5 py-3 bg-surface border border-rule-strong">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {phase === 'pushing' && (
@@ -334,7 +344,7 @@ export function PushStep({
             )}
           </div>
           <div className="flex items-center gap-3">
-            {(phase === 'idle' || phase === 'error') && (
+            {!onFooterActionsChange && (phase === 'idle' || phase === 'error') && (
               <Button variant="primary" size="sm" onClick={start}>
                 {phase === 'error' ? 'Try again' : 'Submit'}
               </Button>

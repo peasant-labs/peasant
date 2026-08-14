@@ -109,6 +109,21 @@ async function fetchRealSessions(): Promise<ShareDiscoveryResult<ShareHierarchyS
 // Local step-id union — the four visible wizard steps.
 type WizardStep = 'select' | 'labels' | 'redact' | 'submit';
 
+export interface WizardFooterAction {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  variant?: 'primary' | 'secondary';
+}
+
+export interface WizardFooterActions {
+  primary: WizardFooterAction;
+  secondary?: WizardFooterAction;
+}
+
+export type SetWizardFooterActions = (actions: WizardFooterActions | null) => void;
+
 // Step descriptors for the fairtrade StepIndicator rail.
 // Title-case labels render lowercase in the browser via CSS (swz-label text-transform).
 const WIZARD_STEPS: FtWizardStep[] = [
@@ -168,6 +183,7 @@ export function ShareWizardClient() {
 
   // Wizard navigation — visible steps: Choose → Labels → Redact → Submit.
   const [step, setStep] = useState<WizardStep>('select');
+  const [footerActions, setFooterActions] = useState<WizardFooterActions | null>(null);
 
   // Track explicitly completed steps for the rail's olive+check markers.
   // A step enters this set when the user clicks Continue in its body (goNext).
@@ -372,7 +388,7 @@ export function ShareWizardClient() {
   const chooseSessions = evidenceSessions ?? disc.sessions;
 
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
+    <div className="share-page max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
       <Breadcrumbs items={[{ label: 'contribute' }]} />
 
       {/* Page title block. */}
@@ -449,6 +465,7 @@ export function ShareWizardClient() {
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
               onNext={goNext}
+              onFooterActionsChange={setFooterActions}
             />
           )}
 
@@ -459,6 +476,7 @@ export function ShareWizardClient() {
               selectedIds={selectedIds}
               onLabelsChange={setLabels}
               onNext={goNext}
+              onFooterActionsChange={setFooterActions}
               useMock={useMock}
             />
           )}
@@ -472,6 +490,7 @@ export function ShareWizardClient() {
               redactionLevel={redactionLevel}
               onLevelChange={setRedactionLevel}
               onNext={goNext}
+              onFooterActionsChange={setFooterActions}
               cache={redactionCache}
               onCacheChange={setRedactionCache}
               useMock={useMock}
@@ -487,14 +506,12 @@ export function ShareWizardClient() {
               labels={labels}
               redactionLevel={redactionLevel}
               useMock={useMock}
+              onFooterActionsChange={setFooterActions}
             />
           )}
         </div>
 
-        {/* Sticky footer: back on the left, step counter centred.
-            The right slot is empty — each step body's own Continue/Submit button
-            handles forward navigation so users see contextual labels ("Skip",
-            "Continue", "Contribute") rather than a generic "continue" here. */}
+        {/* Persistent normal-flow tools: back, progress, and step-owned actions. */}
         <div className="swz-foot">
           <Button
             variant="ghost"
@@ -508,8 +525,28 @@ export function ShareWizardClient() {
             /{' '}
             <span className="tnum">{STEP_ORDER.length}</span>
           </span>
-          {/* right slot: intentionally empty — forward nav is per-step */}
-          <span aria-hidden="true" />
+          <div className="flex items-center justify-end gap-2">
+            {footerActions?.secondary && (
+              <Button
+                variant={footerActions.secondary.variant ?? 'secondary'}
+                onClick={footerActions.secondary.onClick}
+                disabled={footerActions.secondary.disabled}
+                title={footerActions.secondary.title}
+              >
+                {footerActions.secondary.label}
+              </Button>
+            )}
+            {footerActions?.primary && (
+              <Button
+                variant={footerActions.primary.variant ?? 'primary'}
+                onClick={footerActions.primary.onClick}
+                disabled={footerActions.primary.disabled}
+                title={footerActions.primary.title}
+              >
+                {footerActions.primary.label}
+              </Button>
+            )}
+          </div>
         </div>
 
       </section>
