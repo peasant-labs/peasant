@@ -28,7 +28,6 @@ import { getApiBaseUrl } from '@/lib/api/base';
  * generated file stays an implementation detail of this module.
  */
 import {
-  ALL_REDACTION_LEVELS,
   SELECTABLE_REDACTION_LEVELS,
   DEFAULT_REDACTION_LEVEL,
 } from '@/lib/share/redaction-policy.generated';
@@ -38,7 +37,6 @@ import type {
 } from '@/lib/share/redaction-policy.generated';
 
 export {
-  ALL_REDACTION_LEVELS,
   SELECTABLE_REDACTION_LEVELS,
   DEFAULT_REDACTION_LEVEL,
 };
