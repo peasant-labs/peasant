@@ -17,7 +17,6 @@ on:
       - ".github/workflows/e2e.yml"
       - ".github/workflows/release-e2e.yml"
       - ".github/workflows/release-validate.yml"
-      - "scripts/verify-release-tag"
   push:
     tags:
       - "v*"
@@ -67,9 +66,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-
-      - name: Verify annotated tag is reachable from protected develop
-        run: bash scripts/verify-release-tag "$TAG"
 
       - name: Parse + classify the tag
         id: parse

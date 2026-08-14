@@ -44,7 +44,6 @@ on:
       - "scripts/install-goreleaser"
       - "scripts/goreleaser-v2.17.1-homebrew.patch"
       - "scripts/update-nix-vendor-hash.sh"
-      - "scripts/verify-release-tag"
       - "scripts/release-e2e/**"
   push:
     branches: [develop, main]
@@ -72,7 +71,6 @@ on:
       - "scripts/install-goreleaser"
       - "scripts/goreleaser-v2.17.1-homebrew.patch"
       - "scripts/update-nix-vendor-hash.sh"
-      - "scripts/verify-release-tag"
       - "scripts/release-e2e/**"
   # Reusable entry point: release-pr.yml calls this on a release(...) PR so the
   # quality gate runs even when the release marker commit touches none of the
