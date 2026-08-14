@@ -204,7 +204,13 @@ func TestMountedDiscoveryKeepsLegacySessionWithoutStoredWorktree(t *testing.T) {
 	db := storetest.Open(t)
 	paths, resolver := seedDiscoveryHTTPStore(t, db, fixture)
 	root := filepath.Dir(filepath.Dir(paths[fixture.Sessions[0].Worktree]))
-	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: config.SelectionConfig{Mode: config.SelectionModeAll}}, RepositoryIdentityResolver: resolver})
+	selection := config.SelectionConfig{Mode: config.SelectionModeSelected, Harnesses: map[string]config.SelectionHarnessConfig{
+		defaults.HarnessClaudeCode.String(): {Projects: []config.ProjectSelection{
+			{GitRemote: fixture.LegacySessions[0].Remote, Branches: []string{fixture.LegacySessions[1].Branch}},
+			{GitRemote: fixture.LegacySessions[2].Remote, Branches: []string{fixture.LegacySessions[2].Branch}},
+		}},
+	}}
+	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: selection}, RepositoryIdentityResolver: resolver})
 	baselineItems := objectSlice(t, getMountedJSON(t, base+"/api/v1/web/discovery", http.StatusOK)["items"])
 	baselineLabels := make(map[string]string, len(baselineItems))
 	for _, item := range baselineItems {
@@ -236,7 +242,7 @@ func TestMountedDiscoveryKeepsLegacySessionWithoutStoredWorktree(t *testing.T) {
 			t.Fatalf("legacy session %q missing from discovery response", legacy.ID)
 		}
 		locationID := stringField(t, item, "repositoryLocationId")
-		if stringField(t, item, "locationLabel") != legacy.Label || !strings.HasPrefix(locationID, "rl_") || stringField(t, item, "selectionStatus") != legacy.Status {
+		if stringField(t, item, "locationLabel") != legacy.Label || !strings.HasPrefix(locationID, "rl_") || stringField(t, item, "branch") != "" || stringField(t, item, "selectionStatus") != legacy.Status {
 			t.Fatalf("legacy discovery item = %+v, want opaque unavailable repository location with status %q", item, legacy.Status)
 		}
 		if existing := legacyLocationIDsByProject[legacy.ProjectHash]; existing != "" && existing != locationID {

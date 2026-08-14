@@ -34,10 +34,10 @@ sessions:
     projectHash: hash-beta
     locationLabel: repository unavailable
     repositoryLocationId: rl-unresolved-beta
-    branch: main
+    branch: ""
   - id: unresolved-beta-release
     projectName: beta
     projectHash: hash-beta
     locationLabel: repository unavailable
     repositoryLocationId: rl-unresolved-beta
-    branch: release
+    branch: ""

@@ -115,7 +115,11 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 		if selected {
 			status = WebDiscoverySelected
 		}
-		items[i] = WebDiscoveryItem{SessionID: row.SessionID, LocationLabel: prepared[i].label, RepositoryLocationID: prepared[i].locationID, Branch: branch, SelectionStatus: status}
+		presentationBranch := branch
+		if prepared[i].unavailable {
+			presentationBranch = ""
+		}
+		items[i] = WebDiscoveryItem{SessionID: row.SessionID, LocationLabel: prepared[i].label, RepositoryLocationID: prepared[i].locationID, Branch: presentationBranch, SelectionStatus: status}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].SessionID < items[j].SessionID })
 	return items, nil
@@ -124,6 +128,7 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 type preparedWebDiscoveryIdentity struct {
 	clonePath         ingest.ClonePath
 	locationID, label string
+	unavailable       bool
 }
 
 func unavailableWebDiscoveryIdentity(row store.SessionRow) preparedWebDiscoveryIdentity {
@@ -136,8 +141,9 @@ func unavailableWebDiscoveryIdentity(row store.SessionRow) preparedWebDiscoveryI
 	}
 	digest := sha256.Sum256([]byte("unresolved\x00" + basis))
 	return preparedWebDiscoveryIdentity{
-		locationID: fmt.Sprintf("rl_%x", digest[:16]),
-		label:      "repository unavailable",
+		locationID:  fmt.Sprintf("rl_%x", digest[:16]),
+		label:       "repository unavailable",
+		unavailable: true,
 	}
 }
 

@@ -29,7 +29,11 @@ describe('Share hierarchy fixture', () => {
     ]);
     expect(hierarchy[1].locations).toHaveLength(1);
     expect(hierarchy[1].locations[0].locationLabel).toBe('repository unavailable');
-    expect(hierarchy[1].locations[0].branches.map((branch) => branch.branch)).toEqual(['main', 'release']);
+    expect(hierarchy[1].locations[0].branches).toHaveLength(1);
+    expect(hierarchy[1].locations[0].branches[0].branch).toBe('');
+    expect(hierarchy[1].locations[0].branches[0].sessions.map((session) => session.id)).toEqual([
+      'unresolved-beta-main', 'unresolved-beta-release',
+    ]);
     expect(hierarchy.flatMap((project) => project.locations.flatMap((location) => location.branches.flatMap((branch) => branch.sessions)))).toHaveLength(fixture.sessions.length);
   });
 });
