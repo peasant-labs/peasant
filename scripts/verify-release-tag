@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+tag="${1:-}"
+if [ -z "$tag" ]; then
+  echo "::error::release tag verification requires a tag name argument. Pass the pushed v* tag as the first argument."
+  exit 1
+fi
+
+remote="origin"
+tag_ref="refs/tags/${tag}"
+peeled_ref="${tag_ref}^{}"
+verification_ref="refs/release-verification/tags/${tag}"
+develop_ref="refs/remotes/origin/develop"
+
+if ! git check-ref-format "$tag_ref" >/dev/null || ! git check-ref-format "$verification_ref" >/dev/null; then
+  echo "::error::release tag '${tag}' cannot be verified because it does not form a valid Git ref. Use the release ceremony to create a valid v* tag."
+  exit 1
+fi
+
+if ! remote_records="$(git ls-remote --tags "$remote" "$tag_ref" "$peeled_ref")"; then
+  echo "::error::release tag ${tag} could not be read from remote ${remote} during verification. Confirm repository read access and retry the release workflow."
+  exit 1
+fi
+
+tag_oid=""
+peeled_oid=""
+while IFS=$'\t' read -r oid ref; do
+  [ -n "$oid" ] || continue
+  case "$ref" in
+    "$tag_ref")
+      if [ -n "$tag_oid" ]; then
+        echo "::error::remote ${remote} advertised ${tag_ref} more than once. Refusing publication because the release tag identity is ambiguous."
+        exit 1
+      fi
+      tag_oid="$oid"
+      ;;
+    "$peeled_ref")
+      if [ -n "$peeled_oid" ]; then
+        echo "::error::remote ${remote} advertised ${peeled_ref} more than once. Refusing publication because the peeled release target is ambiguous."
+        exit 1
+      fi
+      peeled_oid="$oid"
+      ;;
+    *)
+      echo "::error::remote ${remote} returned unexpected ref '${ref}' while verifying ${tag_ref}. Refusing publication rather than trusting an ambiguous response."
+      exit 1
+      ;;
+  esac
+done <<<"$remote_records"
+
+if [ -z "$tag_oid" ]; then
+  echo "::error::remote ${remote} does not advertise ${tag_ref}. Publication requires the immutable tag created by the release ceremony; do not create or move a replacement tag."
+  exit 1
+fi
+
+git fetch --no-tags "$remote" \
+  "+${tag_ref}:${verification_ref}" \
+  "+refs/heads/develop:${develop_ref}"
+
+fetched_oid="$(git rev-parse --verify "$verification_ref")"
+if [ "$fetched_oid" != "$tag_oid" ]; then
+  echo "::error::remote ${tag_ref} changed from ${tag_oid} to ${fetched_oid} while it was being verified. Release tags are immutable; investigate the remote before retrying."
+  exit 1
+fi
+
+object_type="$(git cat-file -t "$verification_ref" 2>/dev/null || true)"
+if [ "$object_type" != "tag" ]; then
+  echo "::error::release tag ${tag} is not an annotated tag (remote object type '${object_type:-missing}'). Publication requires an annotated v* tag created by the release ceremony; recreate the release through a merged release PR."
+  exit 1
+fi
+
+if [ -z "$peeled_oid" ]; then
+  echo "::error::remote ${remote} does not advertise peeled record ${peeled_ref} for annotated tag ${tag}. Refusing publication because the remote tag target cannot be verified; investigate the remote without moving the tag."
+  exit 1
+fi
+
+tag_commit="$(git rev-parse --verify "${verification_ref}^{commit}")"
+if [ "$tag_commit" != "$peeled_oid" ]; then
+  echo "::error::remote peeled record ${peeled_oid} for ${tag} does not match fetched tag target ${tag_commit}. Refusing publication because the remote tag changed during verification."
+  exit 1
+fi
+
+if ! git merge-base --is-ancestor "$tag_commit" "$develop_ref"; then
+  echo "::error::release tag ${tag} peels to ${tag_commit}, which is not reachable from protected branch origin/develop. Move no existing tag; create a new release through a release PR merged into develop."
+  exit 1
+fi
+
+echo "::notice::remote annotated release tag ${tag} peels to protected develop commit ${tag_commit}"

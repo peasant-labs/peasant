@@ -58,6 +58,8 @@ type e2eWorkflowContractFixture struct {
 		ActorEnv               []workflowEnvExpectation `yaml:"actor_env"`
 		ActorRun               string                   `yaml:"actor_run"`
 		CheckoutStep           string                   `yaml:"checkout_step"`
+		TagVerificationStep    string                   `yaml:"tag_verification_step"`
+		TagVerificationRun     string                   `yaml:"tag_verification_run"`
 		ParseStep              string                   `yaml:"parse_step"`
 		CheckoutFetchDepth     string                   `yaml:"checkout_fetch_depth"`
 		CheckoutFetchTags      string                   `yaml:"checkout_fetch_tags"`
@@ -157,14 +159,14 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
 		len(fixture.Release.DriverContains) != 4 || len(fixture.Release.OutputGuards) != 3 ||
-		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 4 || fixture.ReleaseGuard.Step == "" || fixture.ReleaseGuard.IfCondition == "" ||
+		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 5 || fixture.ReleaseGuard.Step == "" || fixture.ReleaseGuard.IfCondition == "" ||
 		!regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(fixture.ReleaseGuard.InitialFinal) ||
 		fixture.ReleaseGuard.ExpectedRun == "" || strings.Count(fixture.ReleaseGuard.ExpectedRun, "--initial-final "+fixture.ReleaseGuard.InitialFinal) != 1 ||
 		len(fixture.ReleaseGuard.RequiredJobPermissions) != 2 || len(fixture.ReleaseGuard.RequiredJobEnv) != 2 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
-		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
+		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.TagVerificationStep == "" || fixture.ReleaseGuard.TagVerificationRun == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
 		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredPaths) != 15 ||
-		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
+		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 3 {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
 	}
 	seenCallers := make(map[string]struct{}, len(fixture.ReusableCallers))
@@ -253,6 +255,12 @@ func TestReleaseWorkflowInitialFinalBootstrap(t *testing.T) {
 		t.Fatalf("release: initial-final guard requires full tag history; fetch-depth=%v fetch-tags=%v", depth, tags)
 	}
 	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.ActorStep, fixture.ReleaseGuard.CheckoutStep)
+	tagVerification := workflowStepRun(t, steps.Content, fixture.ReleaseGuard.TagVerificationStep)
+	if strings.TrimSpace(tagVerification) != fixture.ReleaseGuard.TagVerificationRun {
+		t.Fatalf("release: remote tag verification run = %q, want exact production helper command %q", tagVerification, fixture.ReleaseGuard.TagVerificationRun)
+	}
+	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.CheckoutStep, fixture.ReleaseGuard.TagVerificationStep)
+	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.TagVerificationStep, fixture.ReleaseGuard.ParseStep)
 	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.CheckoutStep, fixture.ReleaseGuard.ParseStep)
 	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.ParseStep, fixture.ReleaseGuard.Step)
 }

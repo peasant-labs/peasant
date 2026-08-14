@@ -74,6 +74,7 @@ release_guard:
     - .github/workflows/e2e.yml
     - .github/workflows/release-e2e.yml
     - .github/workflows/release-validate.yml
+    - scripts/verify-release-tag
   step: Final-release guard (initial final or green same-version rc)
   if_condition: steps.parse.outputs.kind == 'final'
   initial_final: v0.1.0
@@ -104,6 +105,8 @@ release_guard:
       exit 1
     fi
   checkout_step: Checkout repository (full history + tags)
+  tag_verification_step: Verify annotated tag is reachable from protected develop
+  tag_verification_run: 'bash scripts/verify-release-tag "$TAG"'
   parse_step: Parse + classify the tag
   checkout_fetch_depth: "0"
   checkout_fetch_tags: "true"
@@ -161,3 +164,4 @@ tests_workflow:
   required_paths:
     - .github/workflows/**
     - .github/release-guard.policy.yml
+    - scripts/verify-release-tag
