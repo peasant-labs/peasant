@@ -9,7 +9,6 @@ import type { MockRedaction } from '@/lib/session-detail/mock-redactions';
 import {
   fetchRedactionPreview,
   isSelectableRedactionLevel,
-  unselectableRedactionLevelReason,
   SELECTABLE_REDACTION_LEVELS,
   type RedactionLevel,
   type SelectableRedactionLevel,
@@ -217,11 +216,7 @@ interface RedactionStepProps {
   sessions: ShareSession[];
   selectedIds: Set<string>;
   redactionLevel: SelectableRedactionLevel;
-  /**
-   * Called ONLY with a level this version offers. The design system's selector
-   * still renders the other two; this step filters them out and explains the
-   * refusal rather than forwarding a level the local API answers 400 for.
-   */
+  /** Called only with a level exposed by the constrained design-system review. */
   onLevelChange: (level: SelectableRedactionLevel) => void;
   onNext: () => void;
   onFooterActionsChange: SetShareFooterActions;
@@ -251,26 +246,12 @@ export function RedactionStep({
     [sessions, selectedIds],
   );
 
-  // The design system's RedactionReview renders its own three-button level
-  // selector from a list it holds internally, so this step cannot remove the two
-  // levels the local API refuses. Narrowing it there is a design-system change and
-  // a published bump; until that lands, pressing one of them must not reach the
-  // scan endpoint, where it produces a 400 the wizard has no room to explain.
-  //
-  // So the level is filtered here and the refusal is stated in the user's own
-  // terms. Failing closed with a reason is not as good as not offering the
-  // control, and it is much better than an opaque failure or - worse - silently
-  // scanning at a different level than the button the user just pressed shows as
-  // active.
-  const [refusedLevel, setRefusedLevel] = useState<string | null>(null);
+  // Fairtrade renders only the levels the local API offers. Keep the callback
+  // boundary narrowed even though RedactionReview already validates the set and
+  // guarantees that it emits one of those available levels.
   const handleLevelChange = useCallback(
     (level: string) => {
-      if (!isSelectableRedactionLevel(level)) {
-        setRefusedLevel(level);
-        return;
-      }
-      setRefusedLevel(null);
-      onLevelChange(level);
+      if (isSelectableRedactionLevel(level)) onLevelChange(level);
     },
     [onLevelChange],
   );
@@ -357,19 +338,6 @@ export function RedactionStep({
 
   return (
     <div className="flex flex-col gap-5">
-      {refusedLevel != null && (
-        <div
-          className="flex flex-col gap-1 border border-rule-strong bg-surface-raised p-4"
-          role="alert"
-        >
-          <p className="text-sm font-medium text-ink">
-            redaction level unchanged
-          </p>
-          <p className="whitespace-pre-line text-sm text-ink-2">
-            {unselectableRedactionLevelReason(refusedLevel)}
-          </p>
-        </div>
-      )}
       {isScanning ? (
         // Scanning state — kept as step chrome so the review surface never shows
         // its "no sensitive content — safe to share" empty message mid-scan.
@@ -438,7 +406,9 @@ export function RedactionStep({
         </section>
       ) : (
         <RedactionReview
+          className="w-full"
           level={redactionLevel}
+          availableLevels={SELECTABLE_REDACTION_LEVELS}
           onLevel={handleLevelChange}
           matches={matches}
           onToggle={handleToggle}

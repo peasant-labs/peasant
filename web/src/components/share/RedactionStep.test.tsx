@@ -7,13 +7,7 @@ import {
   type RedactionCache,
 } from '@/components/share/RedactionStep';
 import {
-  ALL_REDACTION_LEVELS,
   DEFAULT_REDACTION_LEVEL,
-  SELECTABLE_REDACTION_LEVELS,
-  UNSELECTABLE_REDACTION_LEVEL_REASONS,
-  isSelectableRedactionLevel,
-  unselectableRedactionLevelReason,
-  type RedactionLevel,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
 import * as redactionsApi from '@/lib/share/redactions';
@@ -95,6 +89,9 @@ describe('RedactionStep → RedactionReview', () => {
       within(review).getAllByRole('group', { name: 'before and after redaction' }).length,
     ).toBeGreaterThan(0);
     expect(within(review).getByText('all redacted')).toBeInTheDocument();
+    expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+    expect(screen.queryByText('minimal', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('maximum', { exact: true })).not.toBeInTheDocument();
   });
 
   it('reviews at the one offered level, applying each rule minimum rather than a display category', async () => {
@@ -119,73 +116,6 @@ describe('RedactionStep → RedactionReview', () => {
     expect(
       within(review).queryByText(REDACTION_STEP_MOCK_EXPECTATIONS.maximum.includedRemote),
     ).not.toBeInTheDocument();
-  });
-
-  it('refuses a level this version does not offer instead of scanning at it', async () => {
-    // The design system's selector still renders all three levels from a list it
-    // holds internally, so this step cannot remove the two the local API answers
-    // 400 for. Pressing one must therefore stop here with a reason, and must not
-    // change the level the review is showing - silently scanning at a different
-    // level than the pressed button displays as active would be worse than the
-    // 400 it avoids.
-    const onLevelChange = vi.fn();
-    render(<Harness useMock onLevelChange={onLevelChange} />);
-    await screen.findByRole('region', { name: 'redaction review' });
-
-    const offered = await screen.findByRole('button', { name: DEFAULT_REDACTION_LEVEL });
-    expect(offered).toHaveAttribute('aria-pressed', 'true');
-
-    await userEvent.click(screen.getByRole('button', { name: 'minimal' }));
-
-    expect(onLevelChange).not.toHaveBeenCalled();
-    const refusal = await screen.findByRole('alert');
-    // The refusal has to be actionable, and it must not claim completeness the
-    // engine cannot deliver.
-    for (const phrase of [
-      'not one this version offers',
-      DEFAULT_REDACTION_LEVEL,
-      'KNOWN PATTERNS',
-      'not a guarantee',
-    ]) {
-      expect(refusal.textContent).toContain(phrase);
-    }
-    // The active level is unchanged, so the review below still describes the run
-    // that would actually happen.
-    expect(
-      await screen.findByRole('button', { name: DEFAULT_REDACTION_LEVEL }),
-    ).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('offers exactly the levels this version can run, and explains every one it does not', () => {
-    // The requirement is that the share flow does not present a level the product
-    // refuses. This asserts the set the app derives its own buttons from; the
-    // design-system selector is covered by the refusal test above, because
-    // narrowing it is a design-system change.
-    //
-    // The unselectable levels are DERIVED here rather than listed. They used to be
-    // written out as ['minimal', 'maximum'], which is a third hand-written
-    // statement of the same set and only guarded one direction of drift: it caught
-    // the app NARROWING its menu and actively asserted that a newly-offered level
-    // stay hidden, so making `maximum` selectable in Go turned three Go packages
-    // red and left this file green and wrong. Both sets now come from the module
-    // generated out of internal/config, so this reads as: whatever is offered is
-    // offered, whatever is not is explained.
-    expect(SELECTABLE_REDACTION_LEVELS.length).toBeGreaterThan(0);
-    expect(SELECTABLE_REDACTION_LEVELS as readonly string[]).toContain(
-      DEFAULT_REDACTION_LEVEL,
-    );
-    const unselectable = ALL_REDACTION_LEVELS.filter(
-      (level) => !(SELECTABLE_REDACTION_LEVELS as readonly string[]).includes(level),
-    );
-    // Without this the loop below could run over nothing and report a pass.
-    expect(unselectable.length).toBeGreaterThan(0);
-    for (const level of unselectable satisfies RedactionLevel[]) {
-      expect(isSelectableRedactionLevel(level)).toBe(false);
-      // A level the wizard hides must come with the reason it is hidden, or the
-      // step refuses without saying why - the one thing a refusal has to do.
-      expect(unselectableRedactionLevelReason(level)).toContain(level);
-      expect(UNSELECTABLE_REDACTION_LEVEL_REASONS[level]).toBeTruthy();
-    }
   });
 
   it('marks an explicitly kept match as content that will be sent', async () => {

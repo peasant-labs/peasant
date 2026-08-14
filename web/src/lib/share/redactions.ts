@@ -55,35 +55,6 @@ export function isSelectableRedactionLevel(
   return (SELECTABLE_REDACTION_LEVELS as readonly string[]).includes(level);
 }
 
-/**
- * Why a level cannot be chosen, in the project's what/why/where/means/fix shape.
- *
- * The `why` line is the GENERATED sentence, which is the same one the CLI and the
- * local API give for that level - it used to be a third phrasing of the same
- * fact, pinned by its own tests, so all three could be improved separately and
- * nothing compared them. What stays here is the wizard-specific frame: where the
- * refusal happened, what it means for the review below, and what to do, phrased
- * for a user rather than an operator because this text is rendered in the step.
- *
- * The redaction-scope hedge in the `fix:` line is generated for the same reason,
- * and it had already drifted before it was: it read "shared as recorded" here
- * against "published as recorded" in Go, while config.RedactionScopeSentence
- * claimed the hedge lived in exactly one place and named this file as a consumer.
- */
-export function unselectableRedactionLevelReason(level: string): string {
-  const why =
-    UNSELECTABLE_REDACTION_LEVEL_REASONS[level] ??
-    `the ${level} redaction level is not one this version has any defined behaviour for`;
-  return [
-    `what: the ${level} redaction level is not one this version offers`,
-    `why: ${why}`,
-    'where: the redaction level selector on this step',
-    'when: before any scan was started, so nothing was classified and nothing was shared',
-    `means: the level stayed at ${DEFAULT_REDACTION_LEVEL}; your review below is the one this version will actually apply`,
-    `fix: continue at ${SELECTABLE_REDACTION_LEVELS.join(', ')}. ${REDACTION_SCOPE_SENTENCE}`,
-  ].join('\n');
-}
-
 interface WireItem {
   category: unknown;
   ruleId: string;
