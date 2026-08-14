@@ -73,6 +73,7 @@ describe('LabelsStep', () => {
         selectedIds={new Set(['sess-x'])}
         onLabelsChange={onLabelsChange}
         onNext={vi.fn()}
+        onFooterActionsChange={vi.fn()}
       />,
     );
 
@@ -97,6 +98,7 @@ describe('LabelsStep', () => {
         selectedIds={new Set(['sess-x'])}
         onLabelsChange={onLabelsChange}
         onNext={vi.fn()}
+        onFooterActionsChange={vi.fn()}
       />,
     );
 
@@ -123,6 +125,7 @@ describe('LabelsStep', () => {
         selectedIds={new Set(['sess-x'])}
         onLabelsChange={onLabelsChange}
         onNext={vi.fn()}
+        onFooterActionsChange={vi.fn()}
       />,
     );
 
@@ -148,6 +151,7 @@ describe('LabelsStep', () => {
         selectedIds={new Set(['sess-mock-1'])}
         onLabelsChange={onLabelsChange}
         onNext={vi.fn()}
+        onFooterActionsChange={vi.fn()}
         useMock
       />,
     );
@@ -160,17 +164,19 @@ describe('LabelsStep', () => {
   it('shows the empty state and a Skip action when there are no labels', async () => {
     fetchAnnotationsSpy.mockResolvedValue([]);
 
+    const setFooterActions = vi.fn();
     render(
       <LabelsStep
         sessions={[makeSession('sess-empty')]}
         selectedIds={new Set(['sess-empty'])}
         onLabelsChange={vi.fn()}
         onNext={vi.fn()}
+        onFooterActionsChange={setFooterActions}
       />,
     );
 
     expect(await screen.findByText(/No labels on the selected sessions/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Skip' })).toBeInTheDocument();
+    await waitFor(() => expect(setFooterActions.mock.calls.at(-1)?.[0]?.primary.label).toBe('Skip'));
   });
 
   it('surfaces a load error in the toolbar instead of crashing', async () => {
@@ -182,6 +188,7 @@ describe('LabelsStep', () => {
         selectedIds={new Set(['sess-err'])}
         onLabelsChange={vi.fn()}
         onNext={vi.fn()}
+        onFooterActionsChange={vi.fn()}
       />,
     );
 

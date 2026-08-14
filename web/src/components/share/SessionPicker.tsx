@@ -6,7 +6,7 @@ import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
 import { summarizePrompt } from '@peasant-labs/transcript-browser';
-import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,7 +42,7 @@ interface SessionPickerProps {
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
   onNext: () => void;
-  onFooterActionsChange?: SetWizardFooterActions;
+  onFooterActionsChange: SetShareFooterActions;
 }
 
 interface DescendantSelectionState {
@@ -251,7 +251,6 @@ export function SessionPicker({
   const selectedTokensLabel = selectedTokens >= 1000 ? `${Math.round(selectedTokens / 1000)}k` : String(selectedTokens);
 
   useEffect(() => {
-    if (!onFooterActionsChange) return;
     onFooterActionsChange({
       primary: { label: 'Continue', onClick: onNext, disabled: selectedCount === 0 },
     });
@@ -260,17 +259,6 @@ export function SessionPicker({
 
   return (
     <div className="flex flex-col gap-4">
-      {!onFooterActionsChange && <div className="flex items-center justify-end px-5 py-3 bg-surface border border-rule">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onNext}
-          disabled={selectedCount === 0}
-        >
-          Continue
-        </Button>
-      </div>}
-
       <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
         <div className="px-4 py-3 border-b border-rule flex items-center justify-between gap-3">
           <div className="gms-tally font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>

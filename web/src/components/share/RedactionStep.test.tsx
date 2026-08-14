@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -50,6 +50,8 @@ function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessPr
   const [cache, setCache] = useState<RedactionCache>(() => new Map());
   const [level, setLevel] = useState<SelectableRedactionLevel>(DEFAULT_REDACTION_LEVEL);
   const [mounted, setMounted] = useState(true);
+  const [footerActions, setFooterActions] = useState<import('@/components/share/footer-actions').ShareFooterActions | null>(null);
+  const onNext = useCallback(() => {}, []);
 
   const handleLevelChange = (next: SelectableRedactionLevel) => {
     setLevel(next);
@@ -67,12 +69,15 @@ function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessPr
           selectedIds={multiple ? MULTI_SELECTED : SELECTED}
           redactionLevel={level}
           onLevelChange={handleLevelChange}
-          onNext={vi.fn()}
+          onNext={onNext}
+          onFooterActionsChange={setFooterActions}
           cache={cache}
           onCacheChange={setCache}
           useMock={useMock}
         />
       )}
+      {footerActions?.secondary && <button type="button" onClick={footerActions.secondary.onClick}>{footerActions.secondary.label}</button>}
+      {footerActions?.primary && <button type="button" onClick={footerActions.primary.onClick} disabled={footerActions.primary.disabled} title={footerActions.primary.title}>{footerActions.primary.label}</button>}
     </>
   );
 }

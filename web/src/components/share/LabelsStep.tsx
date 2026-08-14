@@ -13,7 +13,7 @@ import { emptyLabelSelection, originForAnnotatorKind } from '@/lib/share/types';
 import { displayProject } from '@/lib/quality/utils';
 import { fetchSessionAnnotations, type AnnotationSummary } from '@/lib/api/annotations';
 import { getMockAnnotations } from '@/lib/share/mock-data';
-import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // Re-export so existing importers keep resolving even though the canonical
 // definition lives in lib/share/types.
@@ -39,7 +39,7 @@ interface LabelsStepProps {
   /** Reports the SELECTED labels (the subset the user keeps) upward. */
   onLabelsChange: (next: LabelSelection) => void;
   onNext: () => void;
-  onFooterActionsChange?: SetWizardFooterActions;
+  onFooterActionsChange: SetShareFooterActions;
   /**
    * When true, the step reads deterministic mock annotations instead of calling
    * GET /api/v1/annotations. Wired from the wizard's mock config so mock and
@@ -176,7 +176,6 @@ export function LabelsStep({
   const includedCount = included.size;
 
   useEffect(() => {
-    if (!onFooterActionsChange) return;
     onFooterActionsChange({
       primary: {
         label: loading || hasLabels ? 'Continue' : 'Skip',
@@ -235,9 +234,6 @@ export function LabelsStep({
             </span>
           )}
         </div>
-        {!onFooterActionsChange && <Button variant="primary" size="sm" onClick={onNext}>
-          {hasLabels ? 'Continue' : 'Skip'}
-        </Button>}
       </div>
 
       {/* One card per session — Automatic and Manual label groups. */}

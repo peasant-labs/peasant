@@ -15,7 +15,7 @@ import {
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
 import type { Redaction } from '@/types/messages';
-import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
 // Redaction pipeline — REAL local scan per session (GET /sync/redactions), or
@@ -224,7 +224,7 @@ interface RedactionStepProps {
    */
   onLevelChange: (level: SelectableRedactionLevel) => void;
   onNext: () => void;
-  onFooterActionsChange?: SetWizardFooterActions;
+  onFooterActionsChange: SetShareFooterActions;
   /**
    * Redaction-result cache, lifted to the wizard so it survives this step's
    * mount/unmount. Keyed by `${level}:${sessionId}`.
@@ -337,7 +337,6 @@ export function RedactionStep({
   const continueDisabled = isScanning || hasScanFailure;
 
   useEffect(() => {
-    if (!onFooterActionsChange) return;
     onFooterActionsChange({
       primary: {
         label: 'Continue',
@@ -371,40 +370,6 @@ export function RedactionStep({
           </p>
         </div>
       )}
-      {/* The Fairtrade review owns the normal level selector; the bounded failure
-          bridge mirrors it with Fairtrade buttons so users can recover. Cache
-          reuse keeps revisits instant; Re-scan explicitly refreshes this level. */}
-      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-surface border border-rule">
-        <span className="v2-eyebrow">redact</span>
-        {!onFooterActionsChange && <div className="flex items-center gap-2">
-          {isReady && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => runScan(true)}
-              title="Re-run the scan at this level"
-            >
-              Re-scan
-            </Button>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onNext}
-            disabled={continueDisabled}
-            title={
-              isScanning
-                ? 'Scanning in progress…'
-                : hasScanFailure
-                  ? 'Re-scan the failed sessions before continuing'
-                  : undefined
-            }
-          >
-            Continue
-          </Button>
-        </div>}
-      </div>
-
       {isScanning ? (
         // Scanning state — kept as step chrome so the review surface never shows
         // its "no sensitive content — safe to share" empty message mid-scan.

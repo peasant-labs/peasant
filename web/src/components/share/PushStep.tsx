@@ -16,10 +16,11 @@ import {
   ExternalLinkIcon,
   ShieldCheckIcon,
 } from 'lucide-react';
-import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
-const COMMONS_URL =
-  process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
+function commonsUrl(): string {
+  return process.env.NEXT_PUBLIC_COMMONS_URL ?? 'https://village.peasantlabs.org';
+}
 
 // Where the local copy stays after a push under the default XDG data directory.
 const LOCAL_SYNC_PATH = '~/.local/share/peasant/peasant-sync/';
@@ -202,7 +203,7 @@ interface PushStepProps {
   redactionLevel?: SelectableRedactionLevel;
   /** When true, the push is not run (mock mode has no village). */
   useMock?: boolean;
-  onFooterActionsChange?: SetWizardFooterActions;
+  onFooterActionsChange: SetShareFooterActions;
 }
 
 export function PushStep({
@@ -278,9 +279,9 @@ export function PushStep({
   );
 
   const { states, phase, topError, start, summary } = usePush(sessionIds, redactionLevel, useMock);
+  const destination = commonsUrl();
 
   useEffect(() => {
-    if (!onFooterActionsChange) return;
     onFooterActionsChange(
       phase === 'idle' || phase === 'error'
         ? { primary: { label: phase === 'error' ? 'Try again' : 'Submit', onClick: start } }
@@ -298,7 +299,7 @@ export function PushStep({
       {phase === 'idle' && (
         <div className="flex flex-col gap-3">
           <WhereDoesThisGo
-            destination={COMMONS_URL}
+             destination={destination}
             sent={sentItems}
             private={privateItems}
           />
@@ -327,7 +328,7 @@ export function PushStep({
         </div>
       )}
 
-      <div className="px-5 py-3 bg-surface border border-rule-strong">
+      {(phase === 'pushing' || phase === 'done') && <div className="px-5 py-3 bg-surface border border-rule-strong">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {phase === 'pushing' && (
@@ -344,14 +345,9 @@ export function PushStep({
             )}
           </div>
           <div className="flex items-center gap-3">
-            {!onFooterActionsChange && (phase === 'idle' || phase === 'error') && (
-              <Button variant="primary" size="sm" onClick={start}>
-                {phase === 'error' ? 'Try again' : 'Submit'}
-              </Button>
-            )}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Honest failure — the push didn't run (e.g. not signed in). The server's
           message is shown verbatim; for the common "log in first" case it tells
@@ -377,7 +373,7 @@ export function PushStep({
               size="sm"
               variant="secondary"
               className="mt-4"
-              href={COMMONS_URL}
+              href={destination}
               target="_blank"
               rel="noopener noreferrer"
               iconRight={ExternalLinkIcon}
