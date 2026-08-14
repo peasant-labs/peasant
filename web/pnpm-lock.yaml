@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@peasant-labs/fairtrade':
-        specifier: 0.0.11
-        version: 0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
+        specifier: 0.0.12
+        version: 0.0.12(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema':
         specifier: 0.1.1
         version: 0.1.1
       '@peasant-labs/transcript-browser':
         specifier: 0.0.7
-        version: 0.0.7(@peasant-labs/fairtrade@0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1))(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 0.0.7(@peasant-labs/fairtrade@0.0.12(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1))(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -746,19 +746,19 @@ packages:
   '@oxc-project/types@0.137.0':
     resolution: {integrity: sha512-WT+Gb24i8hmvo85AIv2oEYouEXkRlKAlT9WaCa3TfLgNCN+GhrJOGZuIlMouAh38Qe4QOx26eUOVsq70qXrywA==}
 
-  '@peasant-labs/fairtrade@0.0.11':
-    resolution: {integrity: sha512-oPg3UKmT4e0aLQPFGzjnGEr7rBG5hq+KwP11oiTsxH1fmc3E5vpHSojBsxEl6OjIy1LdARQ7MmtRbMbHO3ENPw==}
+  '@peasant-labs/fairtrade@0.0.12':
+    resolution: {integrity: sha512-0wwH2dkThhj9CDuUin4tG7PcozoZ7xMW6zx8p/ywzWjFfvNTlZKaAwNY680LZNE1Nxsp/XLZ8wINTC4wn5Ojvw==}
     engines: {node: '>=24'}
     peerDependencies:
       react: '>=19.0.0 <20'
       react-dom: '>=19.0.0 <20'
 
-  '@peasant-labs/schema@0.1.0':
-    resolution: {integrity: sha512-TEQEmab+Fn6DCvq6CxTF8zrrSygDW2zHZ56fj9shMp2ySWNUSrf3RkrhcKTnaf1kRCRAHt4AyDJY+VTHrd1rFQ==}
-    engines: {node: '>=24'}
-
   '@peasant-labs/schema@0.1.1':
     resolution: {integrity: sha512-xhdZz3oJe7+ugyeZKmTBJq/AkD1nJb1g563/KT5LZhlaycrlO3Hh1ewvIWoYR/ejwFajdtBofzMCobd9E5dboA==}
+    engines: {node: '>=24'}
+
+  '@peasant-labs/schema@0.1.1-rc1':
+    resolution: {integrity: sha512-55IxFVSPXzbNG2ym+GrYHXCm/wyaQNDhTlI7nSuasiUlFF7qHhY8/DyDpVhuuiwLh1N/O3iX2V2Pw81BLLcrOQ==}
     engines: {node: '>=24'}
 
   '@peasant-labs/transcript-browser@0.0.7':
@@ -1894,6 +1894,9 @@ packages:
   mdast-util-mdxjs-esm@2.0.1:
     resolution: {integrity: sha512-EcmOpxsZ96CvlP03NghtH1EsLtr0n9Tm4lPUJUBccV9RwUOneqSycg19n5HGzCf+10LozMRSObtVr3ee1WoHtg==}
 
+  mdast-util-newline-to-break@2.0.0:
+    resolution: {integrity: sha512-MbgeFca0hLYIEx/2zGsszCSEJJ1JSCdiY5xQxRcLDDGa8EPvlLPupJ4DSajbMPAnC0je8jfb9TiUATnxxrHUog==}
+
   mdast-util-phrasing@4.1.0:
     resolution: {integrity: sha512-TqICwyvJJpBwvGAMZjj4J2n0X8QWp21b9l0o7eXyVJ25YNWYbJDVIyD1bZXE6WtV6RmKJVYmQAKWa0zWOABz2w==}
 
@@ -2166,6 +2169,9 @@ packages:
 
   regex@6.1.0:
     resolution: {integrity: sha512-6VwtthbV4o/7+OaAF9I5L5V3llLEsoPyq9P1JVXkedTP33c7MfCG0/5NOPcSJn0TzXcG9YUrR0gQSWioew3LDg==}
+
+  remark-breaks@4.0.0:
+    resolution: {integrity: sha512-IjEjJOkH4FuJvHZVIW0QCDWxcG96kCq7An/KVH2NfJe6rKZU2AsHeB3OEjPNRxi4QC34Xdx7I2KGYn6IpT7gxQ==}
 
   remark-gfm@4.0.1:
     resolution: {integrity: sha512-1quofZ2RQ9EWdeN34S79+KExV1764+wCUGop5CPL1WGdD0ocPpu91lzPGbwWMECpEpd42kJGQwzRfyov9j4yNg==}
@@ -3053,33 +3059,37 @@ snapshots:
 
   '@oxc-project/types@0.137.0': {}
 
-  '@peasant-labs/fairtrade@0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)':
+  '@peasant-labs/fairtrade@0.0.12(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)':
     dependencies:
-      '@peasant-labs/schema': 0.1.0
+      '@peasant-labs/schema': 0.1.1-rc1
       '@tanstack/react-table': 8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       lucide: 1.21.0
       lucide-react: 1.21.0(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
+      react-markdown: 10.1.0(@types/react@19.2.17)(react@19.2.7)
       recharts: 3.8.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
+      remark-breaks: 4.0.0
+      remark-gfm: 4.0.1
     transitivePeerDependencies:
       - '@types/react'
       - react-is
       - redux
-
-  '@peasant-labs/schema@0.1.0':
-    dependencies:
-      yaml: 2.9.0
-      zod: 4.4.3
+      - supports-color
 
   '@peasant-labs/schema@0.1.1':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3
 
-  '@peasant-labs/transcript-browser@0.0.7(@peasant-labs/fairtrade@0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1))(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@peasant-labs/schema@0.1.1-rc1':
     dependencies:
-      '@peasant-labs/fairtrade': 0.0.11(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
+      yaml: 2.9.0
+      zod: 4.4.3
+
+  '@peasant-labs/transcript-browser@0.0.7(@peasant-labs/fairtrade@0.0.12(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1))(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      '@peasant-labs/fairtrade': 0.0.12(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema': 0.1.1
       clsx: 2.1.1
       diff: 7.0.0
@@ -4226,6 +4236,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  mdast-util-newline-to-break@2.0.0:
+    dependencies:
+      '@types/mdast': 4.0.4
+      mdast-util-find-and-replace: 3.0.2
+
   mdast-util-phrasing@4.1.0:
     dependencies:
       '@types/mdast': 4.0.4
@@ -4665,6 +4680,12 @@ snapshots:
   regex@6.1.0:
     dependencies:
       regex-utilities: 2.3.0
+
+  remark-breaks@4.0.0:
+    dependencies:
+      '@types/mdast': 4.0.4
+      mdast-util-newline-to-break: 2.0.0
+      unified: 11.0.5
 
   remark-gfm@4.0.1:
     dependencies:
