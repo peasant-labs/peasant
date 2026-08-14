@@ -329,24 +329,17 @@ export function PushStep({
       )}
 
       {(phase === 'pushing' || phase === 'done') && <div className="px-5 py-3 bg-surface border border-rule-strong">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {phase === 'pushing' && (
-              <span className="inline-flex items-center gap-2 text-sm text-ink-3">
-                <LoaderIcon className="size-4 animate-spin" /> Contributing…
-              </span>
-            )}
-            {phase === 'done' && (
-              <span className="text-sm text-ink-3 tabular-nums">
-                {summary.done} shared
-                {summary.skipped > 0 ? `, ${summary.skipped} skipped` : ''}
-                {summary.errors > 0 ? `, ${summary.errors} failed` : ''}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-          </div>
-        </div>
+        {phase === 'pushing' ? (
+          <span className="inline-flex items-center gap-2 text-sm text-ink-3">
+            <LoaderIcon className="size-4 animate-spin" /> Contributing…
+          </span>
+        ) : (
+          <span className="text-sm text-ink-3 tabular-nums">
+            {summary.done} shared
+            {summary.skipped > 0 ? `, ${summary.skipped} skipped` : ''}
+            {summary.errors > 0 ? `, ${summary.errors} failed` : ''}
+          </span>
+        )}
       </div>}
 
       {/* Honest failure — the push didn't run (e.g. not signed in). The server's
