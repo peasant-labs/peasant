@@ -743,6 +743,16 @@ textarea::placeholder {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding-left: 0;
+  padding-right: 0;
+}
+.share-wizard .swz-head,
+.share-wizard .swz-body,
+.share-wizard .swz-foot {
+  min-width: 0;
 }
 .share-wizard .swz-body {
   flex: 1 1 auto;
@@ -752,4 +762,18 @@ textarea::placeholder {
 .share-wizard .swz-foot {
   position: static;
   flex: 0 0 auto;
+}
+@media (max-width: 40rem) {
+  .share-wizard .swz-foot {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .share-footer-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .share-footer-actions > * {
+    flex: 1 1 auto;
+  }
 }

@@ -27,6 +27,7 @@ import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
+import type { ShareFooterActions } from '@/components/share/footer-actions';
 
 // Prior-version Contribute wizard: superseded by the fairtrade graph shell lift,
 // a deprecation candidate retained for evidence exits until its replacement lands.
@@ -109,21 +110,6 @@ async function fetchRealSessions(): Promise<ShareDiscoveryResult<ShareHierarchyS
 // Local step-id union — the four visible wizard steps.
 type WizardStep = 'select' | 'labels' | 'redact' | 'submit';
 
-export interface WizardFooterAction {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  variant?: 'primary' | 'secondary';
-}
-
-export interface WizardFooterActions {
-  primary: WizardFooterAction;
-  secondary?: WizardFooterAction;
-}
-
-export type SetWizardFooterActions = (actions: WizardFooterActions | null) => void;
-
 // Step descriptors for the fairtrade StepIndicator rail.
 // Title-case labels render lowercase in the browser via CSS (swz-label text-transform).
 const WIZARD_STEPS: FtWizardStep[] = [
@@ -183,10 +169,10 @@ export function ShareWizardClient() {
 
   // Wizard navigation — visible steps: Choose → Labels → Redact → Submit.
   const [step, setStep] = useState<WizardStep>('select');
-  const [footerActions, setFooterActions] = useState<WizardFooterActions | null>(null);
+  const [footerActions, setFooterActions] = useState<ShareFooterActions | null>(null);
 
   // Track explicitly completed steps for the rail's olive+check markers.
-  // A step enters this set when the user clicks Continue in its body (goNext).
+  // A step enters this set when its registered footer action advances (goNext).
   // Deep-linking into a mid-flow step does not retroactively mark earlier
   // steps complete — the user hasn't reviewed them.
   const [completed, setCompleted] = useState<Set<WizardStep>>(new Set());
@@ -298,7 +284,7 @@ export function ShareWizardClient() {
   );
 
   // Advance to the next step and mark the current step as complete in the
-  // rail (olive + check). Each step body calls this via its own Continue button.
+  // rail (olive + check). Each step's registered footer action calls this.
   const goNext = useCallback(() => {
     setCompleted((prev) => {
       const next = new Set(prev);
@@ -398,10 +384,8 @@ export function ShareWizardClient() {
         </h1>
       </div>
 
-      {/* Wizard shell: step rail + body + back/counter footer.
-          Uses the fairtrade swz layout classes (via @peasant-labs/fairtrade/components.css
-          already imported in layout.tsx). Forward navigation lives inside each step
-          body's own Continue/Submit button; the footer owns back + step count. */}
+      {/* Wizard shell: steps register their actions; the shell renders those tools
+          with back and progress in the persistent footer. */}
         <section className="swz share-wizard" aria-label="contribute to the commons" data-tour="share-nav">
 
         {/* Step rail — completed = olive+check, current = amber, locked = dim/disabled. */}
@@ -525,10 +509,10 @@ export function ShareWizardClient() {
             /{' '}
             <span className="tnum">{STEP_ORDER.length}</span>
           </span>
-          <div className="flex items-center justify-end gap-2">
+          <div className="share-footer-actions flex items-center justify-end gap-2">
             {footerActions?.secondary && (
               <Button
-                variant={footerActions.secondary.variant ?? 'secondary'}
+                variant="secondary"
                 onClick={footerActions.secondary.onClick}
                 disabled={footerActions.secondary.disabled}
                 title={footerActions.secondary.title}
@@ -538,7 +522,7 @@ export function ShareWizardClient() {
             )}
             {footerActions?.primary && (
               <Button
-                variant={footerActions.primary.variant ?? 'primary'}
+                variant="primary"
                 onClick={footerActions.primary.onClick}
                 disabled={footerActions.primary.disabled}
                 title={footerActions.primary.title}
