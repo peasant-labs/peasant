@@ -105,6 +105,10 @@ describe('mounted Share production boundary', () => {
     await user.click(skip);
     await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
     releaseRedactions();
+    const review = await screen.findByRole('region', { name: 'redaction review' });
+    expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+    expect(screen.queryByText('minimal', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('maximum', { exact: true })).not.toBeInTheDocument();
     const continueRedaction = await waitFor(() => {
       const action = within(footer).getByRole('button', { name: 'Continue' });
       expect(action).toBeEnabled();

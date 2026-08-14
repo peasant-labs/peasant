@@ -106,6 +106,9 @@ describe('ShareWizardClient redaction flow', () => {
       settleScan([REDACTION_STEP_MATCH]);
 
       let review = await screen.findByRole('region', { name: 'redaction review' });
+      expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+      expect(screen.queryByText('minimal', { exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByText('maximum', { exact: true })).not.toBeInTheDocument();
       expect(within(review).getByText(REDACTION_STEP_MATCH.originalText)).toBeInTheDocument();
       expect(
         within(review).getByText(REDACTION_STEP_MATCH.redactedReplacement),
