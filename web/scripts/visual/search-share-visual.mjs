@@ -378,7 +378,7 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
     assertSingleRail(probe, `${theme}/${viewport.id}/share`)
 
     // Live-DOM footer containment: the wizard body owns the Choose-list scroll,
-    // so the sticky action footer must sit BELOW that scroll region and the last
+    // so the normal-flow action footer must sit BELOW that scroll region and the last
     // row must be reachable, fully visible, above the footer — no row, checkbox,
     // text, or rail segment ever renders under the footer in the mounted page.
     const footing = await page.evaluate(() => {
@@ -411,36 +411,33 @@ async function runSurface(page, fixture, theme, viewport, kind, gate) {
       const top = measureAt(0)
       const bottom = measureAt(body.scrollHeight)
       const lr = rect(lastRow), b = rect(body), f = rect(foot)
+      const sessionRows = [...chooser.querySelectorAll('[aria-label^="select session "]')].map((input) => input.closest('.px-4') || input.parentElement)
+      const intersectsFooter = (element) => {
+        const row = rect(element)
+        return row.bottom > f.top + 0.5 && row.top < f.bottom
+      }
       return {
         ok: true, top, bottom,
         lastRowVisibleAboveFoot: lr.top >= b.top - 1 && lr.bottom <= b.bottom + 1 && lr.bottom <= f.top + 1,
+        sessionRowsIntersectingFooter: sessionRows.filter(intersectsFooter).length,
         bodyScrolls: body.scrollHeight > body.clientHeight + 1,
       }
     })
     if (!footing.ok) fail(`${theme}/${viewport.id}/share: footer containment probe ${JSON.stringify(footing)}`)
     for (const [where, m] of [['top', footing.top], ['bottom', footing.bottom]]) {
-      if (!m.scrollRegionAboveFoot) fail(`${theme}/${viewport.id}/share: scroll region bottom ${m.bodyBottom} overlaps the sticky footer top ${m.footTop} (scroll=${where})`)
+      if (!m.scrollRegionAboveFoot) fail(`${theme}/${viewport.id}/share: scroll region bottom ${m.bodyBottom} overlaps the normal-flow footer top ${m.footTop} (scroll=${where})`)
       if (m.rowsUnderFoot !== 0) fail(`${theme}/${viewport.id}/share: ${m.rowsUnderFoot} hierarchy row(s) render under the footer (scroll=${where})`)
       if (m.svgUnderFoot) fail(`${theme}/${viewport.id}/share: the rail svg renders under the footer (scroll=${where})`)
     }
     if (!footing.lastRowVisibleAboveFoot) fail(`${theme}/${viewport.id}/share: the last row is not fully visible above the footer when scrolled to the bottom`)
+    if (footing.sessionRowsIntersectingFooter !== 0) fail(`${theme}/${viewport.id}/share: ${footing.sessionRowsIntersectingFooter} session row(s) intersect the footer bounding box`)
 
-    // Full-hierarchy evidence: expand the bounded scroll for the shot (sticky
-    // resolved to its true end position) so every row + the single rail render
-    // with the footer below them, unclipped — the honest full list a user reaches
-    // by scrolling. This mutates only the capture, never shipped behaviour.
-    const captureStyle = await page.addStyleTag({ content: `
-      .share-wizard { max-height: none !important; }
-      .share-wizard .swz-body { overflow: visible !important; max-height: none !important; }
-      .share-wizard .sticky, .swz-foot { position: static !important; }
-    ` })
+    // Capture the unmodified bounded production view at the verified bottom
+    // position. Evidence must show the same scroll and footer geometry users see.
     await pause(120)
     await capture(page, gate, join(OUT, theme, viewport.id, 'share.png'), 'main', `${theme}/${viewport.id}/share`)
-    await page.evaluate((el) => el.remove(), captureStyle)
-    await captureStyle.dispose().catch(() => {})
 
-    // Live bounded view: body scrolled to its end so the last row sits just above
-    // the sticky footer — the real mounted layout, footer never overlapping.
+    // Preserve a second explicit bounded-list artifact for reviewers.
     await pause(120)
     await page.evaluate(() => { const b = document.querySelector('.swz-body'); if (b) b.scrollTop = b.scrollHeight })
     await pause(150)

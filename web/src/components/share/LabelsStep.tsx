@@ -72,9 +72,11 @@ interface SessionGroup {
  * Labels step. Labels are real annotations (GET /api/v1/annotations), grouped
  * per session into Automatic (rule/agent at ingest) vs Manual (human) — the
  * project's `annotatorKind` distinction. Every label is included by default;
- * the user opts individual labels out, or uses the bulk actions. Only the
- * included annotation ids flow into the push (see PushStep / `peasant push
- * --annotation-id`). Sessions with no annotations are not listed.
+ * the user opts individual labels out, or uses the bulk actions. This selection
+ * feeds the Submit transparency summary only: web publishing sends the chosen
+ * redaction level and does not filter annotations. Label filtering remains a
+ * CLI-only `peasant push --annotation-id` feature. Sessions with no annotations
+ * are not listed.
  */
 export function LabelsStep({
   sessions,
