@@ -717,6 +717,13 @@ textarea::placeholder {
 .share-rail-rows {
   position: relative;
   z-index: 1;
+  min-width: 0;
+}
+.share-rail-rows h2,
+.share-rail-rows h3,
+.share-rail-rows h4 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* The hierarchy members are <section>s (each an accessible region). Drop the
    global `section { padding: 0 var(--gutter) }` content gutter on them, and
@@ -728,6 +735,7 @@ textarea::placeholder {
 }
 .share-subtree {
   padding-left: var(--sp-5);
+  min-width: 0;
 }
 
 /* Share owns the viewport below the responsive app header. The page and wizard
