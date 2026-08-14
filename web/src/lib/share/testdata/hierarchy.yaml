@@ -17,3 +17,27 @@ sessions:
     locationLabel: workspace renamed
     repositoryLocationId: rl-a
     branch: feature
+  - id: unresolved-alpha-unknown-a
+    projectName: alpha
+    projectHash: hash-alpha
+    locationLabel: repository unavailable
+    repositoryLocationId: rl-unresolved-alpha
+    branch: ""
+  - id: unresolved-alpha-unknown-b
+    projectName: alpha
+    projectHash: hash-alpha
+    locationLabel: repository unavailable
+    repositoryLocationId: rl-unresolved-alpha
+    branch: ""
+  - id: unresolved-beta-main
+    projectName: beta
+    projectHash: hash-beta
+    locationLabel: repository unavailable
+    repositoryLocationId: rl-unresolved-beta
+    branch: main
+  - id: unresolved-beta-release
+    projectName: beta
+    projectHash: hash-beta
+    locationLabel: repository unavailable
+    repositoryLocationId: rl-unresolved-beta
+    branch: release

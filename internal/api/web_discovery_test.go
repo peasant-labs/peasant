@@ -74,8 +74,8 @@ func loadDiscoveryHTTPFixture(t *testing.T) discoveryHTTPFixture {
 	if len(fixture.Failures) < 3 || len(fixture.Forbidden) < 4 {
 		t.Fatal("mounted API fixture must cover topology failures and hostile evidence")
 	}
-	if len(fixture.LegacySessions) != 2 || fixture.LegacySessions[0].ID == "" || fixture.LegacySessions[0].Worktree != "" || !fixture.LegacySessions[1].RemovedWorktree {
-		t.Fatal("mounted API fixture must cover legacy sessions with missing and removed stored worktrees")
+	if len(fixture.LegacySessions) != 4 || fixture.LegacySessions[0].ID == "" || fixture.LegacySessions[0].Worktree != "" || !fixture.LegacySessions[2].RemovedWorktree {
+		t.Fatal("mounted API fixture must cover multiple unresolved sessions in each of two projects, including missing and removed stored worktrees")
 	}
 	return fixture
 }
@@ -229,7 +229,7 @@ func TestMountedDiscoveryKeepsLegacySessionWithoutStoredWorktree(t *testing.T) {
 			t.Fatalf("resolved discovery item %q = %+v, want preserved baseline label %q", resolved.ID, item, baselineLabels[resolved.ID])
 		}
 	}
-	legacyLocationIDs := make(map[string]struct{}, len(fixture.LegacySessions))
+	legacyLocationIDsByProject := make(map[string]string, 2)
 	for _, legacy := range fixture.LegacySessions {
 		item := byID[legacy.ID]
 		if item == nil {
@@ -239,10 +239,26 @@ func TestMountedDiscoveryKeepsLegacySessionWithoutStoredWorktree(t *testing.T) {
 		if stringField(t, item, "locationLabel") != legacy.Label || !strings.HasPrefix(locationID, "rl_") || stringField(t, item, "selectionStatus") != legacy.Status {
 			t.Fatalf("legacy discovery item = %+v, want opaque unavailable repository location with status %q", item, legacy.Status)
 		}
-		legacyLocationIDs[locationID] = struct{}{}
+		if existing := legacyLocationIDsByProject[legacy.ProjectHash]; existing != "" && existing != locationID {
+			t.Fatalf("unresolved project %q location IDs differ: %q and %q; sessions in one project must share its unavailable repository group", legacy.ProjectHash, existing, locationID)
+		}
+		legacyLocationIDsByProject[legacy.ProjectHash] = locationID
 	}
-	if len(legacyLocationIDs) != len(fixture.LegacySessions) {
-		t.Fatalf("legacy repository location IDs = %v, want one distinct opaque identity per session", legacyLocationIDs)
+	// Unresolved location identity is project-scoped rather than session-scoped:
+	// this keeps every row while presenting one unavailable location per project.
+	if len(legacyLocationIDsByProject) != 2 {
+		t.Fatalf("unresolved repository locations = %v, want two project-scoped identities", legacyLocationIDsByProject)
+	}
+	if legacyLocationIDsByProject[fixture.LegacySessions[0].ProjectHash] == legacyLocationIDsByProject[fixture.LegacySessions[2].ProjectHash] {
+		t.Fatalf("different unresolved projects shared repository location ID %q", legacyLocationIDsByProject[fixture.LegacySessions[0].ProjectHash])
+	}
+}
+
+func TestUnavailableWebDiscoveryIdentityFallsBackToSessionIdentity(t *testing.T) {
+	first := unavailableWebDiscoveryIdentity(store.SessionRow{SessionID: "legacy-session-a"})
+	second := unavailableWebDiscoveryIdentity(store.SessionRow{SessionID: "legacy-session-b"})
+	if first.locationID == second.locationID {
+		t.Fatalf("unresolved rows without project hashes shared location ID %q; per-session fallback must prevent conflation", first.locationID)
 	}
 }
 
