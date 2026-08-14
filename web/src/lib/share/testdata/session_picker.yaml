@@ -1,0 +1,18 @@
+largeHistory:
+  projects: 3
+  locationsPerProject: 3
+  branchesPerLocation: 2
+  sessionsPerBranch: 15
+  unavailableEvery: 10
+  expectedSessions: 270
+  expectedInitialRailMeasurements: 301
+interactions:
+  leaf:
+    sessionId: session-0-0-0-1
+    expectedBranchSelectable: 13
+    expectedBranchTokens: 108
+    projectLabel: select project project-0
+    locationLabel: select repository location workspace-0-0
+    branchLabel: select branch branch-0
+  disabled:
+    sessionId: session-0-0-0-0

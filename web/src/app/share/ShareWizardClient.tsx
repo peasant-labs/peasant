@@ -27,6 +27,7 @@ import { fetchMockSessions } from '@/lib/share/mock-data';
 import { useMockConfig } from '@/hooks/useMockConfig';
 import { getApiBaseUrl } from '@/lib/api/base';
 import { fetchDiscovery, requireDiscoveryItem } from '@/lib/api/discovery';
+import type { ShareFooterActions } from '@/components/share/footer-actions';
 
 // Prior-version Contribute wizard: superseded by the fairtrade graph shell lift,
 // a deprecation candidate retained for evidence exits until its replacement lands.
@@ -168,9 +169,10 @@ export function ShareWizardClient() {
 
   // Wizard navigation — visible steps: Choose → Labels → Redact → Submit.
   const [step, setStep] = useState<WizardStep>('select');
+  const [footerActions, setFooterActions] = useState<ShareFooterActions | null>(null);
 
   // Track explicitly completed steps for the rail's olive+check markers.
-  // A step enters this set when the user clicks Continue in its body (goNext).
+  // A step enters this set when its registered footer action advances (goNext).
   // Deep-linking into a mid-flow step does not retroactively mark earlier
   // steps complete — the user hasn't reviewed them.
   const [completed, setCompleted] = useState<Set<WizardStep>>(new Set());
@@ -282,7 +284,7 @@ export function ShareWizardClient() {
   );
 
   // Advance to the next step and mark the current step as complete in the
-  // rail (olive + check). Each step body calls this via its own Continue button.
+  // rail (olive + check). Each step's registered footer action calls this.
   const goNext = useCallback(() => {
     setCompleted((prev) => {
       const next = new Set(prev);
@@ -372,7 +374,7 @@ export function ShareWizardClient() {
   const chooseSessions = evidenceSessions ?? disc.sessions;
 
   return (
-    <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
+    <div className="share-page max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
       <Breadcrumbs items={[{ label: 'contribute' }]} />
 
       {/* Page title block. */}
@@ -382,10 +384,8 @@ export function ShareWizardClient() {
         </h1>
       </div>
 
-      {/* Wizard shell: step rail + body + back/counter footer.
-          Uses the fairtrade swz layout classes (via @peasant-labs/fairtrade/components.css
-          already imported in layout.tsx). Forward navigation lives inside each step
-          body's own Continue/Submit button; the footer owns back + step count. */}
+      {/* Wizard shell: steps register their actions; the shell renders those tools
+          with back and progress in the persistent footer. */}
         <section className="swz share-wizard" aria-label="contribute to the commons" data-tour="share-nav">
 
         {/* Step rail — completed = olive+check, current = amber, locked = dim/disabled. */}
@@ -449,6 +449,7 @@ export function ShareWizardClient() {
               selectedIds={selectedIds}
               onSelectionChange={setSelectedIds}
               onNext={goNext}
+              onFooterActionsChange={setFooterActions}
             />
           )}
 
@@ -459,6 +460,7 @@ export function ShareWizardClient() {
               selectedIds={selectedIds}
               onLabelsChange={setLabels}
               onNext={goNext}
+              onFooterActionsChange={setFooterActions}
               useMock={useMock}
             />
           )}
@@ -472,6 +474,7 @@ export function ShareWizardClient() {
               redactionLevel={redactionLevel}
               onLevelChange={setRedactionLevel}
               onNext={goNext}
+              onFooterActionsChange={setFooterActions}
               cache={redactionCache}
               onCacheChange={setRedactionCache}
               useMock={useMock}
@@ -487,14 +490,12 @@ export function ShareWizardClient() {
               labels={labels}
               redactionLevel={redactionLevel}
               useMock={useMock}
+              onFooterActionsChange={setFooterActions}
             />
           )}
         </div>
 
-        {/* Sticky footer: back on the left, step counter centred.
-            The right slot is empty — each step body's own Continue/Submit button
-            handles forward navigation so users see contextual labels ("Skip",
-            "Continue", "Contribute") rather than a generic "continue" here. */}
+        {/* Persistent normal-flow tools: back, progress, and step-owned actions. */}
         <div className="swz-foot">
           <Button
             variant="ghost"
@@ -508,8 +509,28 @@ export function ShareWizardClient() {
             /{' '}
             <span className="tnum">{STEP_ORDER.length}</span>
           </span>
-          {/* right slot: intentionally empty — forward nav is per-step */}
-          <span aria-hidden="true" />
+          <div className="share-footer-actions flex items-center justify-end gap-2">
+            {footerActions?.secondary && (
+              <Button
+                variant="secondary"
+                onClick={footerActions.secondary.onClick}
+                disabled={footerActions.secondary.disabled}
+                title={footerActions.secondary.title}
+              >
+                {footerActions.secondary.label}
+              </Button>
+            )}
+            {footerActions?.primary && (
+              <Button
+                variant="primary"
+                onClick={footerActions.primary.onClick}
+                disabled={footerActions.primary.disabled}
+                title={footerActions.primary.title}
+              >
+                {footerActions.primary.label}
+              </Button>
+            )}
+          </div>
         </div>
 
       </section>

@@ -19,6 +19,7 @@
     "probe:selection-recovery": "node scripts/visual/selection-recovery-probe.mjs",
     "visual:search-share:self-test": "node scripts/visual/search-share-visual.mjs --self-test",
     "visual:search-share": "node scripts/visual/search-share-visual.mjs",
+    "visual:share-geometry": "node scripts/visual/share-geometry.mjs",
     "shoot:peasant": "node scripts/visual/peasant-shoot.mjs",
     "shoot:changes": "node scripts/visual/changes-shoot.mjs",
     "boot:peasant": "node scripts/visual/boot-peasant.mjs",
@@ -30,7 +31,7 @@
     "shell:gate": "pnpm boot:shell && pnpm sxs:shell"
   },
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.12",
+    "@peasant-labs/fairtrade": "0.0.13",
     "@peasant-labs/schema": "0.1.1",
     "@peasant-labs/transcript-browser": "0.0.7",
     "@xyflow/react": "^12.10.1",

@@ -26,6 +26,10 @@ interface RedactionCategoryFixtureFile {
   cases?: RedactionCategoryFixture[];
 }
 
+interface RedactionLevelFixtureFile {
+  unknownValues?: string[];
+}
+
 const REDACTION_CATEGORY_FIXTURE_PATH = resolve(
   process.cwd(),
   'src/test/testdata/redaction_categories.yaml',
@@ -36,6 +40,21 @@ export const REDACTION_CATEGORY_FIXTURES = loadRedactionCategoryFixtures();
 export const REDACTION_PREVIEW_UNKNOWN_ITEM_ERROR = requiredFailureFixture(
   RedactionCategoryFixtureKind.UnknownItem,
 ).expectedError as string;
+
+export const UNKNOWN_REDACTION_LEVEL_FIXTURES = loadUnknownRedactionLevelFixtures();
+
+function loadUnknownRedactionLevelFixtures(): string[] {
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/test/testdata/redaction_levels.yaml'),
+    'utf8',
+  );
+  const parsed = parse(source) as RedactionLevelFixtureFile;
+  const values = parsed.unknownValues ?? [];
+  if (values.length !== 2 || values.some((value) => !value || value.trim() !== value)) {
+    throw new Error('redaction level fixture must contain exactly two non-empty, trimmed unknown values');
+  }
+  return values;
+}
 
 function loadRedactionCategoryFixtures(): RedactionCategoryFixture[] {
   const source = readFileSync(REDACTION_CATEGORY_FIXTURE_PATH, 'utf8');

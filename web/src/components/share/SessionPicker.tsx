@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/lib/ft-ui';
 import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
 import { summarizePrompt } from '@peasant-labs/transcript-browser';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,6 +42,7 @@ interface SessionPickerProps {
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
   onNext: () => void;
+  onFooterActionsChange: SetShareFooterActions;
 }
 
 interface DescendantSelectionState {
@@ -50,9 +52,7 @@ interface DescendantSelectionState {
   disabled: boolean;
 }
 
-function descendantSelectionState(ids: string[], selectableIds: Set<string>, selectedIds: Set<string>): DescendantSelectionState {
-  const eligibleIds = ids.filter((id) => selectableIds.has(id));
-  const selectedCount = eligibleIds.filter((id) => selectedIds.has(id)).length;
+function descendantSelectionState(eligibleIds: string[], selectedCount: number): DescendantSelectionState {
   return {
     eligibleIds,
     checked: eligibleIds.length > 0 && selectedCount === eligibleIds.length,
@@ -60,6 +60,29 @@ function descendantSelectionState(ids: string[], selectableIds: Set<string>, sel
     disabled: eligibleIds.length === 0,
   };
 }
+
+interface SelectionIndex {
+  eligibleIds: Map<string, string[]>;
+  selectedCounts: Map<string, number>;
+}
+
+const projectNodeKey = (projectKey: string) => `p:${projectKey}`;
+const locationNodeKey = (projectKey: string, locationId: string) => `l:${projectKey}:${locationId}`;
+const branchNodeKey = (projectKey: string, locationId: string, branch: string) => `b:${projectKey}:${locationId}:${branch}`;
+
+const SessionRow = memo(function SessionRow({ session, checked, disabled, setRowElement, onToggle }: {
+  session: ShareHierarchySession;
+  checked: boolean;
+  disabled: boolean;
+  setRowElement: (key: string, element: HTMLElement | null) => void;
+  onToggle: (id: string, checked: boolean) => void;
+}) {
+  const rowRef = useCallback((element: HTMLDivElement | null) => setRowElement(`s:${session.id}`, element), [session.id, setRowElement]);
+  return <div ref={rowRef} className="flex items-center gap-3 px-4 py-3">
+    <Checkbox checked={checked} disabled={disabled} onChange={(nextChecked) => onToggle(session.id, nextChecked)} aria-label={`select session ${session.id}`} />
+    <div className="min-w-0"><div>{summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`}</div><div className="font-mono text-xs text-ink-3">{sessionMeta(session)} · {session.totalTokens.toLocaleString()} tokens</div></div>
+  </div>;
+});
 
 function TriStateCheckbox({ checked, mixed, disabled, onChange, label }: {
   checked: boolean;
@@ -138,6 +161,7 @@ export function SessionPicker({
   selectedIds,
   onSelectionChange,
   onNext,
+  onFooterActionsChange,
 }: SessionPickerProps) {
   const groups = useMemo(() => groupShareHierarchy(sessions), [sessions]);
 
@@ -161,10 +185,11 @@ export function SessionPicker({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef(new Map<string, HTMLElement>());
-  const setRowRef = useCallback((key: string) => (el: HTMLElement | null) => {
+  const setRowElement = useCallback((key: string, el: HTMLElement | null) => {
     if (el) rowRefs.current.set(key, el);
     else rowRefs.current.delete(key);
   }, []);
+  const setRowRef = useCallback((key: string) => (el: HTMLElement | null) => setRowElement(key, el), [setRowElement]);
   const [railPath, setRailPath] = useState('');
 
   useEffect(() => {
@@ -218,7 +243,7 @@ export function SessionPicker({
       observer?.disconnect();
       window.removeEventListener('resize', schedule);
     };
-  }, [orderedRows, selectedIds]);
+  }, [orderedRows]);
 
   // The hierarchy shows every session so its counts stay honest. Every row,
   // project, evidence, and select-all action is intersected with this set.
@@ -226,6 +251,53 @@ export function SessionPicker({
     () => new Set(sessions.filter(isSelectable).map((s) => s.id)),
     [sessions],
   );
+
+  // Descendant membership changes only with hierarchy/selectability. Selection
+  // counts are then accumulated once per session instead of filtering every
+  // ancestor's descendants during render.
+  const descendantIds = useMemo(() => {
+    const ids = new Map<string, string[]>();
+    for (const project of groups) {
+      const projectIds: string[] = [];
+      for (const location of project.locations) {
+        const locationIds: string[] = [];
+        for (const branch of location.branches) {
+          const branchIds = branch.sessions.filter((session) => selectableIds.has(session.id)).map((session) => session.id);
+          ids.set(branchNodeKey(project.key, location.repositoryLocationId, branch.branch), branchIds);
+          locationIds.push(...branchIds);
+        }
+        ids.set(locationNodeKey(project.key, location.repositoryLocationId), locationIds);
+        projectIds.push(...locationIds);
+      }
+      ids.set(projectNodeKey(project.key), projectIds);
+    }
+    return ids;
+  }, [groups, selectableIds]);
+
+  const selectionIndex = useMemo<SelectionIndex>(() => {
+    const selectedCounts = new Map<string, number>();
+    for (const project of groups) {
+      for (const location of project.locations) {
+        for (const branch of location.branches) {
+          const keys = [
+            projectNodeKey(project.key),
+            locationNodeKey(project.key, location.repositoryLocationId),
+            branchNodeKey(project.key, location.repositoryLocationId, branch.branch),
+          ];
+          for (const session of branch.sessions) {
+            if (!selectableIds.has(session.id) || !selectedIds.has(session.id)) continue;
+            for (const key of keys) selectedCounts.set(key, (selectedCounts.get(key) ?? 0) + 1);
+          }
+        }
+      }
+    }
+    return { eligibleIds: descendantIds, selectedCounts };
+  }, [descendantIds, groups, selectableIds, selectedIds]);
+
+  const selectionState = useCallback((key: string) => {
+    const eligibleIds = selectionIndex.eligibleIds.get(key) ?? [];
+    return descendantSelectionState(eligibleIds, selectionIndex.selectedCounts.get(key) ?? 0);
+  }, [selectionIndex]);
 
   const handleChange = useCallback(
     (next: Set<string>) => {
@@ -235,38 +307,39 @@ export function SessionPicker({
     },
     [selectableIds, onSelectionChange],
   );
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const toggleSession = useCallback((id: string, checked: boolean) => {
+    const next = new Set(selectedIdsRef.current);
+    if (checked) next.add(id); else next.delete(id);
+    handleChange(next);
+  }, [handleChange]);
 
   const toggleDescendants = useCallback((ids: string[]) => {
-    const state = descendantSelectionState(ids, selectableIds, selectedIds);
+    let selectedCount = 0;
+    for (const id of ids) if (selectedIds.has(id)) selectedCount++;
+    const state = descendantSelectionState(ids, selectedCount);
     const next = new Set(selectedIds);
     for (const id of state.eligibleIds) state.checked ? next.delete(id) : next.add(id);
     handleChange(next);
-  }, [handleChange, selectableIds, selectedIds]);
+  }, [handleChange, selectedIds]);
 
   const selectedCount = selectedIds.size;
-  const selectedTokens = sessions.reduce((total, session) => selectedIds.has(session.id) ? total + session.totalTokens : total, 0);
+  const selectedTokens = useMemo(() => sessions.reduce((total, session) => selectedIds.has(session.id) ? total + session.totalTokens : total, 0), [sessions, selectedIds]);
   const selectedTokensLabel = selectedTokens >= 1000 ? `${Math.round(selectedTokens / 1000)}k` : String(selectedTokens);
+
+  useEffect(() => {
+    onFooterActionsChange({
+      primary: { label: 'Continue', onClick: onNext, disabled: selectedCount === 0 },
+    });
+    return () => onFooterActionsChange(null);
+  }, [onFooterActionsChange, onNext, selectedCount]);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Step chrome — the forward control. Stays here (the wizard owns
-          next/back); the select-all + running tally live inside the picker
-          body's own toolbar. Sticks to the top of the wizard body's own scroll
-          area (top-0), which owns the Choose-list scroll under the bounded shell. */}
-      <div className="sticky top-0 z-30 flex items-center justify-end px-5 py-3 bg-surface border border-rule">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={onNext}
-          disabled={selectedCount === 0}
-        >
-          Continue
-        </Button>
-      </div>
-
       <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
-        <div className="px-4 py-3 border-b border-rule flex items-center justify-between gap-3">
-          <div className="gms-tally font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>
+        <div className="share-choose-toolbar px-4 py-3 border-b border-rule flex flex-wrap items-center justify-between gap-3">
+          <div className="gms-tally min-w-0 font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>
           <Button size="sm" variant="ghost" pressed={selectedCount === selectableIds.size && selectableIds.size > 0} onClick={() => handleChange(selectedCount === selectableIds.size ? new Set() : new Set(selectableIds))}>
             {selectedCount === selectableIds.size && selectableIds.size > 0 ? 'deselect all' : 'select all'}
           </Button>
@@ -279,8 +352,9 @@ export function SessionPicker({
         {groups.map((project) => {
           const cleanName = displayProject(project.projectName);
           const fullPath = decodeProjectPath(project.projectName);
-          const projectIds = project.locations.flatMap((location) => location.branches.flatMap((branch) => branch.sessions.map((session) => session.id)));
-           const projectState = descendantSelectionState(projectIds, selectableIds, selectedIds);
+           const projectKey = projectNodeKey(project.key);
+           const projectIds = selectionIndex.eligibleIds.get(projectKey) ?? [];
+            const projectState = selectionState(projectKey);
           return <section key={project.key} className="border-b border-rule last:border-b-0" aria-label={`project ${cleanName}`}>
             <h2 ref={setRowRef(`p:${project.key}`)} className="px-4 py-3 font-mono font-semibold flex items-center gap-3" title={fullPath !== cleanName ? fullPath : undefined}>
                <TriStateCheckbox {...projectState} onChange={() => toggleDescendants(projectIds)} label={`select project ${cleanName}`} />
@@ -288,23 +362,18 @@ export function SessionPicker({
             </h2>
             <div className="share-subtree">
             {project.locations.map((location) => {
-              const locationIds = location.branches.flatMap((branch) => branch.sessions.map((session) => session.id));
+               const locationKey = locationNodeKey(project.key, location.repositoryLocationId);
+               const locationIds = selectionIndex.eligibleIds.get(locationKey) ?? [];
               return <section key={location.repositoryLocationId} className="share-node" aria-label={`repository location ${location.locationLabel}`}>
-              <h3 ref={setRowRef(`l:${project.key}:${location.repositoryLocationId}`)} className="px-4 py-2 font-mono text-sm text-ink-2 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(locationIds, selectableIds, selectedIds)} onChange={() => toggleDescendants(locationIds)} label={`select repository location ${location.locationLabel}`} />repository location · {location.locationLabel}</h3>
+               <h3 ref={setRowRef(locationKey)} className="px-4 py-2 font-mono text-sm text-ink-2 flex items-center gap-3"><TriStateCheckbox {...selectionState(locationKey)} onChange={() => toggleDescendants(locationIds)} label={`select repository location ${location.locationLabel}`} />repository location · {location.locationLabel}</h3>
               <div className="share-subtree">
               {location.branches.map((branch) => {
-                const branchIds = branch.sessions.map((session) => session.id);
+                 const branchKey = branchNodeKey(project.key, location.repositoryLocationId, branch.branch);
+                 const branchIds = selectionIndex.eligibleIds.get(branchKey) ?? [];
                 return <section key={branch.branch} className="share-node" aria-label={`branch ${branch.branch || 'unknown'}`}>
-                <h4 ref={setRowRef(`b:${project.key}:${location.repositoryLocationId}:${branch.branch}`)} className="px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...descendantSelectionState(branchIds, selectableIds, selectedIds)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
+                 <h4 ref={setRowRef(branchKey)} className="px-4 py-2 font-mono text-sm text-ink-3 flex items-center gap-3"><TriStateCheckbox {...selectionState(branchKey)} onChange={() => toggleDescendants(branchIds)} label={`select branch ${branch.branch || 'unknown'}`} />branch · {branch.branch || 'unknown'}</h4>
                 <div className="share-subtree">
-                  {branch.sessions.map((session) => <div key={session.id} ref={setRowRef(`s:${session.id}`)} className="flex items-center gap-3 px-4 py-3">
-                    <Checkbox checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} onChange={(checked) => {
-                      const next = new Set(selectedIds);
-                      if (checked) next.add(session.id); else next.delete(session.id);
-                      handleChange(next);
-                    }} aria-label={`select session ${session.id}`} />
-                    <div className="min-w-0"><div>{summarizePrompt(session.preview) || `${session.id.slice(5, 13)}…`}</div><div className="font-mono text-xs text-ink-3">{sessionMeta(session)} · {session.totalTokens.toLocaleString()} tokens</div></div>
-                  </div>)}
+                  {branch.sessions.map((session) => <SessionRow key={session.id} session={session} checked={selectedIds.has(session.id)} disabled={!selectableIds.has(session.id)} setRowElement={setRowElement} onToggle={toggleSession} />)}
                 </div>
               </section>;})}
               </div>

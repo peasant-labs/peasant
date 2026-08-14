@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -7,13 +7,7 @@ import {
   type RedactionCache,
 } from '@/components/share/RedactionStep';
 import {
-  ALL_REDACTION_LEVELS,
   DEFAULT_REDACTION_LEVEL,
-  SELECTABLE_REDACTION_LEVELS,
-  UNSELECTABLE_REDACTION_LEVEL_REASONS,
-  isSelectableRedactionLevel,
-  unselectableRedactionLevelReason,
-  type RedactionLevel,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
 import * as redactionsApi from '@/lib/share/redactions';
@@ -50,6 +44,8 @@ function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessPr
   const [cache, setCache] = useState<RedactionCache>(() => new Map());
   const [level, setLevel] = useState<SelectableRedactionLevel>(DEFAULT_REDACTION_LEVEL);
   const [mounted, setMounted] = useState(true);
+  const [footerActions, setFooterActions] = useState<import('@/components/share/footer-actions').ShareFooterActions | null>(null);
+  const onNext = useCallback(() => {}, []);
 
   const handleLevelChange = (next: SelectableRedactionLevel) => {
     setLevel(next);
@@ -67,12 +63,15 @@ function Harness({ multiple = false, useMock = false, onLevelChange }: HarnessPr
           selectedIds={multiple ? MULTI_SELECTED : SELECTED}
           redactionLevel={level}
           onLevelChange={handleLevelChange}
-          onNext={vi.fn()}
+          onNext={onNext}
+          onFooterActionsChange={setFooterActions}
           cache={cache}
           onCacheChange={setCache}
           useMock={useMock}
         />
       )}
+      {footerActions?.secondary && <button type="button" onClick={footerActions.secondary.onClick}>{footerActions.secondary.label}</button>}
+      {footerActions?.primary && <button type="button" onClick={footerActions.primary.onClick} disabled={footerActions.primary.disabled} title={footerActions.primary.title}>{footerActions.primary.label}</button>}
     </>
   );
 }
@@ -90,6 +89,9 @@ describe('RedactionStep → RedactionReview', () => {
       within(review).getAllByRole('group', { name: 'before and after redaction' }).length,
     ).toBeGreaterThan(0);
     expect(within(review).getByText('all redacted')).toBeInTheDocument();
+    expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+    expect(screen.queryByText('minimal', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('maximum', { exact: true })).not.toBeInTheDocument();
   });
 
   it('reviews at the one offered level, applying each rule minimum rather than a display category', async () => {
@@ -114,73 +116,6 @@ describe('RedactionStep → RedactionReview', () => {
     expect(
       within(review).queryByText(REDACTION_STEP_MOCK_EXPECTATIONS.maximum.includedRemote),
     ).not.toBeInTheDocument();
-  });
-
-  it('refuses a level this version does not offer instead of scanning at it', async () => {
-    // The design system's selector still renders all three levels from a list it
-    // holds internally, so this step cannot remove the two the local API answers
-    // 400 for. Pressing one must therefore stop here with a reason, and must not
-    // change the level the review is showing - silently scanning at a different
-    // level than the pressed button displays as active would be worse than the
-    // 400 it avoids.
-    const onLevelChange = vi.fn();
-    render(<Harness useMock onLevelChange={onLevelChange} />);
-    await screen.findByRole('region', { name: 'redaction review' });
-
-    const offered = await screen.findByRole('button', { name: DEFAULT_REDACTION_LEVEL });
-    expect(offered).toHaveAttribute('aria-pressed', 'true');
-
-    await userEvent.click(screen.getByRole('button', { name: 'minimal' }));
-
-    expect(onLevelChange).not.toHaveBeenCalled();
-    const refusal = await screen.findByRole('alert');
-    // The refusal has to be actionable, and it must not claim completeness the
-    // engine cannot deliver.
-    for (const phrase of [
-      'not one this version offers',
-      DEFAULT_REDACTION_LEVEL,
-      'KNOWN PATTERNS',
-      'not a guarantee',
-    ]) {
-      expect(refusal.textContent).toContain(phrase);
-    }
-    // The active level is unchanged, so the review below still describes the run
-    // that would actually happen.
-    expect(
-      await screen.findByRole('button', { name: DEFAULT_REDACTION_LEVEL }),
-    ).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('offers exactly the levels this version can run, and explains every one it does not', () => {
-    // The requirement is that the share flow does not present a level the product
-    // refuses. This asserts the set the app derives its own buttons from; the
-    // design-system selector is covered by the refusal test above, because
-    // narrowing it is a design-system change.
-    //
-    // The unselectable levels are DERIVED here rather than listed. They used to be
-    // written out as ['minimal', 'maximum'], which is a third hand-written
-    // statement of the same set and only guarded one direction of drift: it caught
-    // the app NARROWING its menu and actively asserted that a newly-offered level
-    // stay hidden, so making `maximum` selectable in Go turned three Go packages
-    // red and left this file green and wrong. Both sets now come from the module
-    // generated out of internal/config, so this reads as: whatever is offered is
-    // offered, whatever is not is explained.
-    expect(SELECTABLE_REDACTION_LEVELS.length).toBeGreaterThan(0);
-    expect(SELECTABLE_REDACTION_LEVELS as readonly string[]).toContain(
-      DEFAULT_REDACTION_LEVEL,
-    );
-    const unselectable = ALL_REDACTION_LEVELS.filter(
-      (level) => !(SELECTABLE_REDACTION_LEVELS as readonly string[]).includes(level),
-    );
-    // Without this the loop below could run over nothing and report a pass.
-    expect(unselectable.length).toBeGreaterThan(0);
-    for (const level of unselectable satisfies RedactionLevel[]) {
-      expect(isSelectableRedactionLevel(level)).toBe(false);
-      // A level the wizard hides must come with the reason it is hidden, or the
-      // step refuses without saying why - the one thing a refusal has to do.
-      expect(unselectableRedactionLevelReason(level)).toContain(level);
-      expect(UNSELECTABLE_REDACTION_LEVEL_REASONS[level]).toBeTruthy();
-    }
   });
 
   it('marks an explicitly kept match as content that will be sent', async () => {
@@ -281,7 +216,7 @@ describe('RedactionStep → RedactionReview', () => {
     await screen.findByRole('region', { name: 'redaction review' });
 
     fetchPreview.mockImplementationOnce(() => new Promise(() => {}));
-    await userEvent.click(screen.getByRole('button', { name: 'Re-scan' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Re-scan' }));
 
     await waitFor(() =>
       expect(
@@ -304,7 +239,7 @@ describe('RedactionStep → RedactionReview', () => {
     expect(within(review).getByText(REDACTION_STEP_MATCH.originalText)).toBeInTheDocument();
     expect(fetchPreview).toHaveBeenCalledTimes(1);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Re-scan' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Re-scan' }));
     expect(
       await screen.findByText(REDACTION_STEP_REFRESHED_MATCH.originalText),
     ).toBeInTheDocument();
@@ -386,23 +321,23 @@ describe('RedactionStep → RedactionReview', () => {
   });
 
   it('recovers from a failed scan by re-scanning rather than by weakening the level', async () => {
-    // Recovery used to mean switching down a level, which is why the failure
-    // bridge rendered a level picker at all. That is no longer a recovery path:
-    // the weaker levels are refused, and "recover by protecting less" was never a
-    // good answer to a transient scan failure. Re-scan at the offered level is,
-    // and the honest failure must persist until it succeeds.
+    // The failure bridge offers no level selector. Recovery keeps the configured
+    // policy and re-scans, rather than weakening protection after a transient
+    // failure; the honest failure persists until that scan succeeds.
     const { recovery } = REDACTION_STEP_FAILURE_EXPECTATIONS;
     fetchPreview.mockRejectedValueOnce(new Error(REDACTION_STEP_SCAN_FAILURE));
     render(<Harness />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(REDACTION_STEP_SCAN_FAILURE);
+    expect(screen.queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+    expect(screen.queryByText('standard', { exact: true })).not.toBeInTheDocument();
     expect(
       screen.queryByText(REDACTION_STEP_FAILURE_EXPECTATIONS.forbiddenSafeCopy),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
 
     fetchPreview.mockResolvedValueOnce([REDACTION_STEP_STANDARD_MATCH]);
-    await userEvent.click(screen.getByRole('button', { name: recovery.recoveryLevel }));
+    await userEvent.click(await screen.findByRole('button', { name: recovery.recoveryLevel }));
 
     const review = await screen.findByRole('region', { name: 'redaction review' });
     expect(

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -114,7 +115,11 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 		if selected {
 			status = WebDiscoverySelected
 		}
-		items[i] = WebDiscoveryItem{SessionID: row.SessionID, LocationLabel: prepared[i].label, RepositoryLocationID: prepared[i].locationID, Branch: branch, SelectionStatus: status}
+		presentationBranch := branch
+		if prepared[i].unavailable {
+			presentationBranch = ""
+		}
+		items[i] = WebDiscoveryItem{SessionID: row.SessionID, LocationLabel: prepared[i].label, RepositoryLocationID: prepared[i].locationID, Branch: presentationBranch, SelectionStatus: status}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].SessionID < items[j].SessionID })
 	return items, nil
@@ -123,13 +128,22 @@ func buildWebDiscovery(ctx context.Context, db *store.Store, cfg *config.Config,
 type preparedWebDiscoveryIdentity struct {
 	clonePath         ingest.ClonePath
 	locationID, label string
+	unavailable       bool
 }
 
-func unavailableWebDiscoveryIdentity(sessionID string) preparedWebDiscoveryIdentity {
-	digest := sha256.Sum256([]byte("unresolved\x00" + sessionID))
+func unavailableWebDiscoveryIdentity(row store.SessionRow) preparedWebDiscoveryIdentity {
+	// ProjectHash is the canonical project identity used by the mounted Share
+	// hierarchy. Fall back to SessionID when an old row has no stable project
+	// identity so unrelated sessions can never be conflated.
+	basis := strings.TrimSpace(row.ProjectHash)
+	if basis == "" {
+		basis = row.SessionID
+	}
+	digest := sha256.Sum256([]byte("unresolved\x00" + basis))
 	return preparedWebDiscoveryIdentity{
-		locationID: fmt.Sprintf("rl_%x", digest[:16]),
-		label:      "repository unavailable",
+		locationID:  fmt.Sprintf("rl_%x", digest[:16]),
+		label:       "repository unavailable",
+		unavailable: true,
 	}
 }
 
@@ -167,7 +181,7 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 	for i := range rows {
 		raw := rows[i].GitWorktree
 		if raw == "" {
-			prepared[i] = unavailableWebDiscoveryIdentity(rows[i].SessionID)
+			prepared[i] = unavailableWebDiscoveryIdentity(rows[i])
 			continue
 		}
 		p, ok := byPath[raw]
@@ -175,7 +189,7 @@ func prepareWebDiscoveryIdentities(ctx context.Context, rows []store.SessionRow,
 			clone, err := pathResolver.Resolve(raw)
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
-					prepared[i] = unavailableWebDiscoveryIdentity(rows[i].SessionID)
+					prepared[i] = unavailableWebDiscoveryIdentity(rows[i])
 					continue
 				}
 				return nil, nil, nil, fmt.Errorf("Web discovery could not resolve repository identity for session %q because its stored worktree is unavailable in internal/api.prepareWebDiscoveryIdentities. No partial metadata was returned. Restore the repository or re-ingest the session, then retry: %w", rows[i].SessionID, err)

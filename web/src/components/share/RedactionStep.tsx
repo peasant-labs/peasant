@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RedactionReview, Button } from '@/lib/ft-ui';
+import { RedactionReview } from '@/lib/ft-ui';
 import { LoaderIcon } from 'lucide-react';
 import type { ShareSession } from '@/lib/share/types';
 import { fetchMockRedactionPreview } from '@/lib/share/mock-data';
@@ -9,12 +9,12 @@ import type { MockRedaction } from '@/lib/session-detail/mock-redactions';
 import {
   fetchRedactionPreview,
   isSelectableRedactionLevel,
-  unselectableRedactionLevelReason,
   SELECTABLE_REDACTION_LEVELS,
   type RedactionLevel,
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
 import type { Redaction } from '@/types/messages';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------
 // Redaction pipeline — REAL local scan per session (GET /sync/redactions), or
@@ -31,12 +31,6 @@ const REDACTION_LEVEL_ORDER = {
   standard: 1,
   maximum: 2,
 } as const satisfies Record<RedactionLevel, number>;
-
-// The buttons this component renders. Derived from the offered set rather than
-// from the order table above, which is why it is now one button: the local API
-// answers 400 for the other two levels, so rendering them here handed the user a
-// control that produced an opaque failure after they had committed to sharing.
-const REDACTION_LEVELS: readonly RedactionLevel[] = SELECTABLE_REDACTION_LEVELS;
 
 /** Apply the fixture's rule-level minimum (the real endpoint filters server-side). */
 function filterMockByLevel(items: MockRedaction[], level: RedactionLevel): Redaction[] {
@@ -216,13 +210,10 @@ interface RedactionStepProps {
   sessions: ShareSession[];
   selectedIds: Set<string>;
   redactionLevel: SelectableRedactionLevel;
-  /**
-   * Called ONLY with a level this version offers. The design system's selector
-   * still renders the other two; this step filters them out and explains the
-   * refusal rather than forwarding a level the local API answers 400 for.
-   */
+  /** Called only with a level exposed by the constrained design-system review. */
   onLevelChange: (level: SelectableRedactionLevel) => void;
   onNext: () => void;
+  onFooterActionsChange: SetShareFooterActions;
   /**
    * Redaction-result cache, lifted to the wizard so it survives this step's
    * mount/unmount. Keyed by `${level}:${sessionId}`.
@@ -239,6 +230,7 @@ export function RedactionStep({
   redactionLevel,
   onLevelChange,
   onNext,
+  onFooterActionsChange,
   cache,
   onCacheChange,
   useMock = false,
@@ -248,26 +240,12 @@ export function RedactionStep({
     [sessions, selectedIds],
   );
 
-  // The design system's RedactionReview renders its own three-button level
-  // selector from a list it holds internally, so this step cannot remove the two
-  // levels the local API refuses. Narrowing it there is a design-system change and
-  // a published bump; until that lands, pressing one of them must not reach the
-  // scan endpoint, where it produces a 400 the wizard has no room to explain.
-  //
-  // So the level is filtered here and the refusal is stated in the user's own
-  // terms. Failing closed with a reason is not as good as not offering the
-  // control, and it is much better than an opaque failure or - worse - silently
-  // scanning at a different level than the button the user just pressed shows as
-  // active.
-  const [refusedLevel, setRefusedLevel] = useState<string | null>(null);
+  // Fairtrade renders only the levels the local API offers. Keep the callback
+  // boundary narrowed even though RedactionReview already validates the set and
+  // guarantees that it emits one of those available levels.
   const handleLevelChange = useCallback(
     (level: string) => {
-      if (!isSelectableRedactionLevel(level)) {
-        setRefusedLevel(level);
-        return;
-      }
-      setRefusedLevel(null);
-      onLevelChange(level);
+      if (isSelectableRedactionLevel(level)) onLevelChange(level);
     },
     [onLevelChange],
   );
@@ -333,55 +311,27 @@ export function RedactionStep({
   const hasOnlyFailedEmptyResults = isReady && hasScanFailure && matches.length === 0;
   const continueDisabled = isScanning || hasScanFailure;
 
+  useEffect(() => {
+    onFooterActionsChange({
+      primary: {
+        label: 'Continue',
+        onClick: onNext,
+        disabled: continueDisabled,
+        title: isScanning
+          ? 'Scanning in progress…'
+          : hasScanFailure
+            ? 'Re-scan the failed sessions before continuing'
+            : undefined,
+      },
+      secondary: isReady
+        ? { label: 'Re-scan', onClick: () => runScan(true), title: 'Re-run the scan at this level' }
+        : undefined,
+    });
+    return () => onFooterActionsChange(null);
+  }, [continueDisabled, hasScanFailure, isReady, isScanning, onFooterActionsChange, onNext, runScan]);
+
   return (
     <div className="flex flex-col gap-5">
-      {refusedLevel != null && (
-        <div
-          className="flex flex-col gap-1 border border-rule-strong bg-surface-raised p-4"
-          role="alert"
-        >
-          <p className="text-sm font-medium text-ink">
-            redaction level unchanged
-          </p>
-          <p className="whitespace-pre-line text-sm text-ink-2">
-            {unselectableRedactionLevelReason(refusedLevel)}
-          </p>
-        </div>
-      )}
-      {/* The Fairtrade review owns the normal level selector; the bounded failure
-          bridge mirrors it with Fairtrade buttons so users can recover. Cache
-          reuse keeps revisits instant; Re-scan explicitly refreshes this level. */}
-      <div className="sticky top-16 z-30 flex items-center justify-between gap-3 px-5 py-3 bg-surface border border-rule">
-        <span className="v2-eyebrow">redact</span>
-        <div className="flex items-center gap-2">
-          {isReady && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => runScan(true)}
-              title="Re-run the scan at this level"
-            >
-              Re-scan
-            </Button>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onNext}
-            disabled={continueDisabled}
-            title={
-              isScanning
-                ? 'Scanning in progress…'
-                : hasScanFailure
-                  ? 'Re-scan the failed sessions before continuing'
-                  : undefined
-            }
-          >
-            Continue
-          </Button>
-        </div>
-      </div>
-
       {isScanning ? (
         // Scanning state — kept as step chrome so the review surface never shows
         // its "no sensitive content — safe to share" empty message mid-scan.
@@ -410,23 +360,6 @@ export function RedactionStep({
             </div>
           </div>
           <div>
-            <div
-              className="mb-4 flex flex-wrap items-center gap-2"
-              role="group"
-              aria-label="redaction level"
-            >
-              {REDACTION_LEVELS.map((level) => (
-                <Button
-                  key={level}
-                  variant={level === redactionLevel ? 'primary' : 'secondary'}
-                  size="sm"
-                  pressed={level === redactionLevel}
-                  onClick={() => handleLevelChange(level)}
-                >
-                  {level}
-                </Button>
-              ))}
-            </div>
             <p className="text-xs text-ink-3 tabular-nums">
               {scannedCount} / {sessionCount} sessions scanned successfully
             </p>
@@ -450,7 +383,9 @@ export function RedactionStep({
         </section>
       ) : (
         <RedactionReview
+          className="w-full"
           level={redactionLevel}
+          availableLevels={SELECTABLE_REDACTION_LEVELS}
           onLevel={handleLevelChange}
           matches={matches}
           onToggle={handleToggle}

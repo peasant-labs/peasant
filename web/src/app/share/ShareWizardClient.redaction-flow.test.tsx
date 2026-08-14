@@ -106,6 +106,9 @@ describe('ShareWizardClient redaction flow', () => {
       settleScan([REDACTION_STEP_MATCH]);
 
       let review = await screen.findByRole('region', { name: 'redaction review' });
+      expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+      expect(screen.queryByText('minimal', { exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByText('maximum', { exact: true })).not.toBeInTheDocument();
       expect(within(review).getByText(REDACTION_STEP_MATCH.originalText)).toBeInTheDocument();
       expect(
         within(review).getByText(REDACTION_STEP_MATCH.redactedReplacement),
@@ -142,6 +145,9 @@ describe('ShareWizardClient redaction flow', () => {
     ).not.toBeInTheDocument();
     expect(fetchPreview).toHaveBeenCalledTimes(1);
     expect(fetchPreview).toHaveBeenCalledWith(REDACTION_STEP_SESSION.id, DEFAULT_REDACTION_LEVEL);
+    const footer = document.querySelector('.swz-foot') as HTMLElement;
+    expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
 
     const rail = screen.getByRole('navigation', { name: 'Contribute progress' });
     await user.click(within(rail).getByRole('button', { name: /submit/i }));

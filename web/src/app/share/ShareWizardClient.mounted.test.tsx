@@ -8,8 +8,6 @@ import * as useMockConfig from '@/hooks/useMockConfig';
 
 vi.mock('@/hooks/useMockConfig');
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
-vi.mock('@/components/share/LabelsStep', () => ({ LabelsStep: ({ onNext }: { onNext: () => void }) => <button onClick={onNext}>continue labels</button> }));
-vi.mock('@/components/share/RedactionStep', () => ({ RedactionStep: ({ onNext }: { onNext: () => void }) => <button onClick={onNext}>continue redaction</button> }));
 
 type SessionRow = Record<'id' | 'harness' | 'project' | 'projectHash' | 'startTime' | 'preview' | 'shareStatus', string> & Record<'durationMins' | 'totalTokens' | 'turnCount' | 'toolCallCount', number>;
 type DiscoveryRow = Record<'sessionId' | 'locationLabel' | 'repositoryLocationId' | 'branch' | 'selectionStatus', string>;
@@ -27,11 +25,19 @@ function loadFixture(): Fixture {
 const fixture = loadFixture();
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 
-function installFetch(items: unknown = fixture.items) {
+function installFetch(items: unknown = fixture.items, annotationsGate: Promise<void> = Promise.resolve(), redactionsGate: Promise<void> = Promise.resolve()) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/api/v1/sessions')) return response({ sessions: fixture.sessions });
     if (url.includes('/api/v1/web/discovery')) return response({ items });
+    if (url.includes('/api/v1/annotations')) {
+      await annotationsGate;
+      return response({ annotations: [] });
+    }
+    if (url.includes('/api/v1/sync/redactions')) {
+      await redactionsGate;
+      return response({ categories: [] });
+    }
     if (url.includes('/api/v1/sync/push')) return response({ new: 4, updated: 0, skipped: 0, errors: 0, sessions: [] });
     throw new Error(`unexpected mounted Share fetch: ${url} ${init?.method ?? 'GET'}`);
   });
@@ -46,7 +52,11 @@ describe('mounted Share production boundary', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
   it('decodes, joins, groups, tri-state selects eligible IDs, and submits them through PushStep', async () => {
-    const fetchMock = installFetch();
+    let releaseAnnotations!: () => void;
+    let releaseRedactions!: () => void;
+    const annotationsGate = new Promise<void>((resolve) => { releaseAnnotations = resolve; });
+    const redactionsGate = new Promise<void>((resolve) => { releaseRedactions = resolve; });
+    const fetchMock = installFetch(fixture.items, annotationsGate, redactionsGate);
     const user = userEvent.setup();
     render(<ShareWizardClient />);
     const projects = await screen.findAllByRole('region', { name: 'project alpha' });
@@ -84,12 +94,35 @@ describe('mounted Share production boundary', () => {
     expect(otherProjectBox).not.toBeChecked();
     for (const id of ['sess-held']) expect(within(otherProject).getByRole('checkbox', { name: `select session ${id}` })).toBeDisabled();
     await user.click(otherProjectBox);
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await user.click(screen.getByRole('button', { name: 'continue labels' }));
-    await user.click(screen.getByRole('button', { name: 'continue redaction' }));
+    const footer = document.querySelector('.swz-foot') as HTMLElement;
+    expect(within(footer).getByRole('button', { name: 'Continue' })).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
+    await user.click(within(footer).getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
+    releaseAnnotations();
+    const skip = await within(footer).findByRole('button', { name: 'Skip' });
+    expect(screen.getAllByRole('button', { name: 'Skip' })).toHaveLength(1);
+    await user.click(skip);
+    await waitFor(() => expect(within(footer).getByRole('button', { name: 'Continue' })).toBeDisabled());
+    releaseRedactions();
+    const review = await screen.findByRole('region', { name: 'redaction review' });
+    expect(within(review).queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+    expect(screen.queryByText('minimal', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('maximum', { exact: true })).not.toBeInTheDocument();
+    const continueRedaction = await waitFor(() => {
+      const action = within(footer).getByRole('button', { name: 'Continue' });
+      expect(action).toBeEnabled();
+      return action;
+    });
+    expect(screen.getAllByRole('button', { name: 'Continue' })).toHaveLength(1);
+    await user.click(continueRedaction);
     expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded.') === true)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Submit' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/sync/push'), expect.objectContaining({ body: JSON.stringify({ sessionIds: ['sess-new', 'sess-updated', 'sess-repo-main', 'sess-repo-feature'], redactionLevel: 'standard', visibility: 'public' }) })));
+    expect(await screen.findByRole('link', { name: /View in the commons/i })).toHaveAttribute(
+      'href',
+      'https://village.peasantlabs.org',
+    );
   });
 
   it.each(fixture.invalidCases)('fails closed for $name discovery metadata', async ({ operation, sessionId }) => {

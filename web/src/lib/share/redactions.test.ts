@@ -1,6 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchRedactionPreview } from '@/lib/share/redactions';
-import { REDACTION_CATEGORY_FIXTURES } from '@/test/fixtures/redaction-preview';
+import {
+  SELECTABLE_REDACTION_LEVELS,
+  fetchRedactionPreview,
+  isSelectableRedactionLevel,
+} from '@/lib/share/redactions';
+import { ALL_REDACTION_LEVELS } from '@/lib/share/redaction-policy.generated';
+import {
+  REDACTION_CATEGORY_FIXTURES,
+  UNKNOWN_REDACTION_LEVEL_FIXTURES,
+} from '@/test/fixtures/redaction-preview';
+
+describe('redaction level policy contract', () => {
+  it('accepts exactly the generated selectable subset', () => {
+    expect(SELECTABLE_REDACTION_LEVELS.length).toBeGreaterThan(0);
+    for (const level of SELECTABLE_REDACTION_LEVELS) {
+      expect(isSelectableRedactionLevel(level)).toBe(true);
+    }
+
+    const unselectable = ALL_REDACTION_LEVELS.filter(
+      (level) => !(SELECTABLE_REDACTION_LEVELS as readonly string[]).includes(level),
+    );
+    expect(unselectable.length).toBeGreaterThan(0);
+    for (const level of unselectable) {
+      expect(isSelectableRedactionLevel(level)).toBe(false);
+    }
+
+    for (const level of UNKNOWN_REDACTION_LEVEL_FIXTURES) {
+      expect(ALL_REDACTION_LEVELS as readonly string[]).not.toContain(level);
+      expect(isSelectableRedactionLevel(level)).toBe(false);
+    }
+  });
+});
 
 describe('fetchRedactionPreview category contract', () => {
   afterEach(() => {

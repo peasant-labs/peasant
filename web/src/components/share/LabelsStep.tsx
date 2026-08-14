@@ -13,6 +13,7 @@ import { emptyLabelSelection, originForAnnotatorKind } from '@/lib/share/types';
 import { displayProject } from '@/lib/quality/utils';
 import { fetchSessionAnnotations, type AnnotationSummary } from '@/lib/api/annotations';
 import { getMockAnnotations } from '@/lib/share/mock-data';
+import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // Re-export so existing importers keep resolving even though the canonical
 // definition lives in lib/share/types.
@@ -38,6 +39,7 @@ interface LabelsStepProps {
   /** Reports the SELECTED labels (the subset the user keeps) upward. */
   onLabelsChange: (next: LabelSelection) => void;
   onNext: () => void;
+  onFooterActionsChange: SetShareFooterActions;
   /**
    * When true, the step reads deterministic mock annotations instead of calling
    * GET /api/v1/annotations. Wired from the wizard's mock config so mock and
@@ -70,15 +72,18 @@ interface SessionGroup {
  * Labels step. Labels are real annotations (GET /api/v1/annotations), grouped
  * per session into Automatic (rule/agent at ingest) vs Manual (human) — the
  * project's `annotatorKind` distinction. Every label is included by default;
- * the user opts individual labels out, or uses the bulk actions. Only the
- * included annotation ids flow into the push (see PushStep / `peasant push
- * --annotation-id`). Sessions with no annotations are not listed.
+ * the user opts individual labels out, or uses the bulk actions. This selection
+ * feeds the Submit transparency summary only: web publishing sends the chosen
+ * redaction level and does not filter annotations. Label filtering remains a
+ * CLI-only `peasant push --annotation-id` feature. Sessions with no annotations
+ * are not listed.
  */
 export function LabelsStep({
   sessions,
   selectedIds,
   onLabelsChange,
   onNext,
+  onFooterActionsChange,
   useMock = false,
 }: LabelsStepProps) {
   const selectedSessions = useMemo(
@@ -172,6 +177,18 @@ export function LabelsStep({
   const hasLabels = groups.length > 0;
   const includedCount = included.size;
 
+  useEffect(() => {
+    onFooterActionsChange({
+      primary: {
+        label: loading || hasLabels ? 'Continue' : 'Skip',
+        onClick: onNext,
+        disabled: loading,
+        title: loading ? 'Labels are still loading' : undefined,
+      },
+    });
+    return () => onFooterActionsChange(null);
+  }, [hasLabels, loading, onFooterActionsChange, onNext]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -183,7 +200,7 @@ export function LabelsStep({
   return (
     <div className="flex flex-col gap-4">
       {/* Toolbar — bulk select across every session + included counter. */}
-      <div className="sticky top-16 z-30 flex items-center justify-between gap-3 border border-rule bg-surface px-5 py-3">
+      <div className="flex items-center justify-between gap-3 border border-rule bg-surface px-5 py-3">
         <div className="flex items-center gap-3 text-xs">
           {hasLabels ? (
             <>
@@ -219,9 +236,6 @@ export function LabelsStep({
             </span>
           )}
         </div>
-        <Button variant="primary" size="sm" onClick={onNext}>
-          {hasLabels ? 'Continue' : 'Skip'}
-        </Button>
       </div>
 
       {/* One card per session — Automatic and Manual label groups. */}
