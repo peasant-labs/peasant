@@ -34,12 +34,14 @@ type discoveryHTTPFixture struct {
 	ExpectedRowCount int                    `yaml:"expectedRowCount"`
 	SearchQuery      string                 `yaml:"searchQuery"`
 	Sessions         []discoveryHTTPSession `yaml:"sessions"`
+	LegacySessions   []discoveryHTTPSession `yaml:"legacySessions"`
 	Failures         []discoveryHTTPFailure `yaml:"failures"`
 	Forbidden        []string               `yaml:"forbidden"`
 }
 
 type discoveryHTTPSession struct {
 	ID, Project, ProjectHash, Worktree, Remote, Branch, Cohort, SearchText, Status, Label string
+	RemovedWorktree                                                                       bool
 }
 
 type discoveryHTTPFailure struct {
@@ -71,6 +73,9 @@ func loadDiscoveryHTTPFixture(t *testing.T) discoveryHTTPFixture {
 	}
 	if len(fixture.Failures) < 3 || len(fixture.Forbidden) < 4 {
 		t.Fatal("mounted API fixture must cover topology failures and hostile evidence")
+	}
+	if len(fixture.LegacySessions) != 2 || fixture.LegacySessions[0].ID == "" || fixture.LegacySessions[0].Worktree != "" || !fixture.LegacySessions[1].RemovedWorktree {
+		t.Fatal("mounted API fixture must cover legacy sessions with missing and removed stored worktrees")
 	}
 	return fixture
 }
@@ -194,39 +199,80 @@ func TestMountedDiscoveryFailsClosed(t *testing.T) {
 	}
 }
 
+func TestMountedDiscoveryKeepsLegacySessionWithoutStoredWorktree(t *testing.T) {
+	fixture := loadDiscoveryHTTPFixture(t)
+	db := storetest.Open(t)
+	paths, resolver := seedDiscoveryHTTPStore(t, db, fixture)
+	root := filepath.Dir(filepath.Dir(paths[fixture.Sessions[0].Worktree]))
+	seedDiscoveryHTTPSessions(t, db, fixture.LegacySessions, root, paths, resolver, len(fixture.Sessions))
+	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: config.SelectionConfig{Mode: config.SelectionModeAll}}, RepositoryIdentityResolver: resolver})
+
+	body := getMountedJSON(t, base+"/api/v1/web/discovery", http.StatusOK)
+	items := objectSlice(t, body["items"])
+	for _, legacy := range fixture.LegacySessions {
+		found := false
+		for _, item := range items {
+			if stringField(t, item, "sessionId") != legacy.ID {
+				continue
+			}
+			if stringField(t, item, "locationLabel") != legacy.Label || !strings.HasPrefix(stringField(t, item, "repositoryLocationId"), "rl_") {
+				t.Fatalf("legacy discovery item = %+v, want opaque unavailable repository location", item)
+			}
+			found = true
+			break
+		}
+		if !found {
+			t.Fatalf("legacy session %q missing from discovery response", legacy.ID)
+		}
+	}
+}
+
 func seedDiscoveryHTTPStore(t *testing.T, db *store.Store, fixture discoveryHTTPFixture) (map[string]string, fixtureRepositoryResolver) {
 	t.Helper()
 	root := t.TempDir()
 	paths := map[string]string{}
 	resolver := fixtureRepositoryResolver{identities: map[ingest.ClonePath]ingest.RepositoryIdentity{}}
-	entries := make([]ingest.StoreEntry, 0, len(fixture.Sessions))
-	for i, row := range fixture.Sessions {
-		path := filepath.Join(root, "repositories", row.Worktree)
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			t.Fatalf("create fixture worktree: %v", err)
+	seedDiscoveryHTTPSessions(t, db, fixture.Sessions, root, paths, resolver, 0)
+	return paths, resolver
+}
+
+func seedDiscoveryHTTPSessions(t *testing.T, db *store.Store, sessions []discoveryHTTPSession, root string, paths map[string]string, resolver fixtureRepositoryResolver, offset int) {
+	t.Helper()
+	entries := make([]ingest.StoreEntry, 0, len(sessions))
+	for i, row := range sessions {
+		worktree := ""
+		if row.Worktree != "" {
+			path := filepath.Join(root, "repositories", row.Worktree)
+			if row.RemovedWorktree {
+				worktree = path
+			} else {
+				if err := os.MkdirAll(path, 0o755); err != nil {
+					t.Fatalf("create fixture worktree: %v", err)
+				}
+				physical, err := ingest.NewPhysicalPathResolver().Resolve(path)
+				if err != nil {
+					t.Fatalf("resolve fixture worktree: %v", err)
+				}
+				paths[row.Worktree] = physical.String()
+				resolver.identities[physical] = ingest.RepositoryIdentity{CohortKey: ingest.RepositoryCohortKey(row.Cohort), GitDirectory: ingest.RepositoryPath(filepath.Join(root, ".git-"+row.Cohort))}
+				worktree = physical.String()
+			}
 		}
-		physical, err := ingest.NewPhysicalPathResolver().Resolve(path)
-		if err != nil {
-			t.Fatalf("resolve fixture worktree: %v", err)
-		}
-		paths[row.Worktree] = physical.String()
-		resolver.identities[physical] = ingest.RepositoryIdentity{CohortKey: ingest.RepositoryCohortKey(row.Cohort), GitDirectory: ingest.RepositoryPath(filepath.Join(root, ".git-"+row.Cohort))}
-		remote, branch, worktree := row.Remote, row.Branch, physical.String()
-		start := int64(1700000000000 + i*1000)
+		remote, branch := row.Remote, row.Branch
+		start := int64(1700000000000 + (offset+i)*1000)
 		ingested := start + 501
 		entries = append(entries, ingest.StoreEntry{Metadata: &schema.UnifiedMetadata{SchemaVersion: ingest.CurrentSchemaVersion, SessionID: schema.SessionID(row.ID), ModelHarness: defaults.HarnessClaudeCode, Model: "claude-opus-4-6", HostSlug: "fixture-host", Project: schema.ProjectContext{Hash: schema.ProjectHash(row.ProjectHash), Name: row.Project, FilePath: worktree}, Git: schema.GitContext{Remote: &remote, Branch: &branch, Worktree: &worktree}, Timestamp: schema.TimestampInfo{Start: start, End: start + 500, Ingested: &ingested}, Source: schema.SourceInfo{FilePath: "/safe/session.jsonl", Format: schema.SourceFormatJSONL}, Stats: schema.SessionStats{TurnCount: 1, TokensIn: 2, TokensOut: 3}}})
 	}
 	if err := db.InsertSessions(t.Context(), entries); err != nil {
 		t.Fatalf("seed mounted API sessions: %v", err)
 	}
-	for i, row := range fixture.Sessions {
-		ms := int64(1700000000000 + i*1000)
+	for i, row := range sessions {
+		ms := int64(1700000000000 + (offset+i)*1000)
 		preview := row.SearchText
 		if err := db.IndexSessionEntries(t.Context(), schema.SessionID(row.ID), []schema.SessionEntry{{SessionID: schema.SessionID(row.ID), EntryIndex: 0, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleUser, TimestampMs: &ms, ContentPreview: &preview}}); err != nil {
 			t.Fatalf("index mounted search row %s: %v", row.ID, err)
 		}
 	}
-	return paths, resolver
 }
 
 func startDiscoveryHTTPServer(t *testing.T, cfg ServerConfig) string {
