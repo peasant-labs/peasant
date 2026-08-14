@@ -53,7 +53,7 @@ function loadLargeHistory(): ShareHierarchySession[] {
 
 function MountedPicker({ sessions }: { sessions: ShareHierarchySession[] }) {
   const [selectedIds, setSelectedIds] = useState(new Set<string>());
-  return <SessionPicker sessions={sessions} selectedIds={selectedIds} onSelectionChange={setSelectedIds} onNext={() => undefined} />;
+  return <SessionPicker sessions={sessions} selectedIds={selectedIds} onSelectionChange={setSelectedIds} onNext={() => undefined} onFooterActionsChange={() => undefined} />;
 }
 
 describe('SessionPicker large-history interactions', () => {
