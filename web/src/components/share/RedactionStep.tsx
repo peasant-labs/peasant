@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RedactionReview, Button } from '@/lib/ft-ui';
+import { RedactionReview } from '@/lib/ft-ui';
 import { LoaderIcon } from 'lucide-react';
 import type { ShareSession } from '@/lib/share/types';
 import { fetchMockRedactionPreview } from '@/lib/share/mock-data';
@@ -31,12 +31,6 @@ const REDACTION_LEVEL_ORDER = {
   standard: 1,
   maximum: 2,
 } as const satisfies Record<RedactionLevel, number>;
-
-// The buttons this component renders. Derived from the offered set rather than
-// from the order table above, which is why it is now one button: the local API
-// answers 400 for the other two levels, so rendering them here handed the user a
-// control that produced an opaque failure after they had committed to sharing.
-const REDACTION_LEVELS: readonly RedactionLevel[] = SELECTABLE_REDACTION_LEVELS;
 
 /** Apply the fixture's rule-level minimum (the real endpoint filters server-side). */
 function filterMockByLevel(items: MockRedaction[], level: RedactionLevel): Redaction[] {
@@ -366,23 +360,6 @@ export function RedactionStep({
             </div>
           </div>
           <div>
-            <div
-              className="mb-4 flex flex-wrap items-center gap-2"
-              role="group"
-              aria-label="redaction level"
-            >
-              {REDACTION_LEVELS.map((level) => (
-                <Button
-                  key={level}
-                  variant={level === redactionLevel ? 'primary' : 'secondary'}
-                  size="sm"
-                  pressed={level === redactionLevel}
-                  onClick={() => handleLevelChange(level)}
-                >
-                  {level}
-                </Button>
-              ))}
-            </div>
             <p className="text-xs text-ink-3 tabular-nums">
               {scannedCount} / {sessionCount} sessions scanned successfully
             </p>

@@ -17,7 +17,7 @@ import { getApiBaseUrl } from '@/lib/api/base';
  * The redaction policy, re-exported from the module generated out of
  * internal/config.
  *
- * Nothing here is written by hand any more. These four values used to be typed
+ * Nothing here is written by hand any more. These policy values used to be typed
  * out on this side under a comment saying they mirrored the Go ones, and the
  * mirror was one-way: widening the offered set turned three Go packages red and
  * left every web test green, with the wizard still presenting the old menu and a
@@ -31,8 +31,6 @@ import {
   ALL_REDACTION_LEVELS,
   SELECTABLE_REDACTION_LEVELS,
   DEFAULT_REDACTION_LEVEL,
-  UNSELECTABLE_REDACTION_LEVEL_REASONS,
-  REDACTION_SCOPE_SENTENCE,
 } from '@/lib/share/redaction-policy.generated';
 import type {
   RedactionLevel,
@@ -43,8 +41,6 @@ export {
   ALL_REDACTION_LEVELS,
   SELECTABLE_REDACTION_LEVELS,
   DEFAULT_REDACTION_LEVEL,
-  UNSELECTABLE_REDACTION_LEVEL_REASONS,
-  REDACTION_SCOPE_SENTENCE,
 };
 export type { RedactionLevel, SelectableRedactionLevel };
 
