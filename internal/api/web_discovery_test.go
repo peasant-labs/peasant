@@ -204,26 +204,45 @@ func TestMountedDiscoveryKeepsLegacySessionWithoutStoredWorktree(t *testing.T) {
 	db := storetest.Open(t)
 	paths, resolver := seedDiscoveryHTTPStore(t, db, fixture)
 	root := filepath.Dir(filepath.Dir(paths[fixture.Sessions[0].Worktree]))
-	seedDiscoveryHTTPSessions(t, db, fixture.LegacySessions, root, paths, resolver, len(fixture.Sessions))
 	base := startDiscoveryHTTPServer(t, ServerConfig{Port: 0, Store: db, Config: &config.Config{Selection: config.SelectionConfig{Mode: config.SelectionModeAll}}, RepositoryIdentityResolver: resolver})
+	baselineItems := objectSlice(t, getMountedJSON(t, base+"/api/v1/web/discovery", http.StatusOK)["items"])
+	baselineLabels := make(map[string]string, len(baselineItems))
+	for _, item := range baselineItems {
+		baselineLabels[stringField(t, item, "sessionId")] = stringField(t, item, "locationLabel")
+	}
+	seedDiscoveryHTTPSessions(t, db, fixture.LegacySessions, root, paths, resolver, len(fixture.Sessions))
 
 	body := getMountedJSON(t, base+"/api/v1/web/discovery", http.StatusOK)
 	items := objectSlice(t, body["items"])
-	for _, legacy := range fixture.LegacySessions {
-		found := false
-		for _, item := range items {
-			if stringField(t, item, "sessionId") != legacy.ID {
-				continue
-			}
-			if stringField(t, item, "locationLabel") != legacy.Label || !strings.HasPrefix(stringField(t, item, "repositoryLocationId"), "rl_") {
-				t.Fatalf("legacy discovery item = %+v, want opaque unavailable repository location", item)
-			}
-			found = true
-			break
+	wantRows := len(fixture.Sessions) + len(fixture.LegacySessions)
+	if len(items) != wantRows {
+		t.Fatalf("discovery rows = %d, want all %d resolved and legacy rows", len(items), wantRows)
+	}
+	byID := make(map[string]map[string]any, len(items))
+	for _, item := range items {
+		assertExactKeys(t, item, "branch", "locationLabel", "repositoryLocationId", "selectionStatus", "sessionId")
+		byID[stringField(t, item, "sessionId")] = item
+	}
+	for _, resolved := range fixture.Sessions {
+		item := byID[resolved.ID]
+		if item == nil || stringField(t, item, "locationLabel") != baselineLabels[resolved.ID] {
+			t.Fatalf("resolved discovery item %q = %+v, want preserved baseline label %q", resolved.ID, item, baselineLabels[resolved.ID])
 		}
-		if !found {
+	}
+	legacyLocationIDs := make(map[string]struct{}, len(fixture.LegacySessions))
+	for _, legacy := range fixture.LegacySessions {
+		item := byID[legacy.ID]
+		if item == nil {
 			t.Fatalf("legacy session %q missing from discovery response", legacy.ID)
 		}
+		locationID := stringField(t, item, "repositoryLocationId")
+		if stringField(t, item, "locationLabel") != legacy.Label || !strings.HasPrefix(locationID, "rl_") || stringField(t, item, "selectionStatus") != legacy.Status {
+			t.Fatalf("legacy discovery item = %+v, want opaque unavailable repository location with status %q", item, legacy.Status)
+		}
+		legacyLocationIDs[locationID] = struct{}{}
+	}
+	if len(legacyLocationIDs) != len(fixture.LegacySessions) {
+		t.Fatalf("legacy repository location IDs = %v, want one distinct opaque identity per session", legacyLocationIDs)
 	}
 }
 
