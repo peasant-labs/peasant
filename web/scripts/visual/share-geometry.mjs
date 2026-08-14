@@ -61,12 +61,22 @@ async function probeChoose(page, label) {
     const chooser = document.querySelector('[aria-label="choose sessions to contribute"]')
     const rows = [...chooser.querySelectorAll('[aria-label^="select session "]')].map((input) => input.closest('.px-4') || input.parentElement)
     const toolbar = chooser.firstElementChild
+    const chooserBox = chooser.getBoundingClientRect()
+    const overflowers = [...chooser.querySelectorAll('*')].filter((element) => {
+      const box = element.getBoundingClientRect()
+      return box.right > chooserBox.right + 0.5 || element.scrollWidth > element.clientWidth + 1
+    }).slice(0, 8).map((element) => {
+      const box = element.getBoundingClientRect()
+      return { tag: element.tagName, className: element.className?.baseVal ?? element.className, text: element.textContent?.trim().slice(0, 80), right: box.right, chooserRight: chooserBox.right, scroll: element.scrollWidth, client: element.clientWidth }
+    })
     const scrolling = [...document.querySelectorAll('.share-page *')].filter((element) => {
       const style = getComputedStyle(element)
       return ['auto', 'scroll'].includes(style.overflowY)
     })
     return {
       pageWidth: { scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth },
+      chooserWidth: { scroll: chooser.scrollWidth, client: chooser.clientWidth },
+      overflowers,
       body: rect(body),
       foot: rect(foot),
       footPosition: getComputedStyle(foot).position,
@@ -80,6 +90,7 @@ async function probeChoose(page, label) {
   })
   if (!top.rowCount || !top.firstRow.width || !top.lastRow.width) fail(`${label}: first/last session rows are missing or blank: ${JSON.stringify(top)}`)
   if (top.pageWidth.scroll !== top.pageWidth.client) fail(`${label}: page-level horizontal overflow at Choose: ${JSON.stringify(top.pageWidth)}`)
+  if (top.chooserWidth.scroll !== top.chooserWidth.client) fail(`${label}: Choose hierarchy has horizontal overflow: ${JSON.stringify({ chooserWidth: top.chooserWidth, overflowers: top.overflowers })}`)
   if (top.footPosition !== 'static' || top.body.bottom > top.foot.top + 1) fail(`${label}: footer is not normal-flow below the scroll body: ${JSON.stringify(top)}`)
   if (top.toolbar.bottom > top.firstRow.top + 1) fail(`${label}: Choose toolbar overlaps the first session row: ${JSON.stringify(top)}`)
   if (top.scrollOwners.length !== 1 || !String(top.scrollOwners[0]).includes('swz-body') || top.bodyOverflowY !== 'auto') fail(`${label}: .swz-body is not the sole vertical scroll owner: ${JSON.stringify(top.scrollOwners)}`)

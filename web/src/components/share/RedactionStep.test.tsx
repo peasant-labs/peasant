@@ -286,7 +286,7 @@ describe('RedactionStep → RedactionReview', () => {
     await screen.findByRole('region', { name: 'redaction review' });
 
     fetchPreview.mockImplementationOnce(() => new Promise(() => {}));
-    await userEvent.click(screen.getByRole('button', { name: 'Re-scan' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Re-scan' }));
 
     await waitFor(() =>
       expect(
@@ -309,7 +309,7 @@ describe('RedactionStep → RedactionReview', () => {
     expect(within(review).getByText(REDACTION_STEP_MATCH.originalText)).toBeInTheDocument();
     expect(fetchPreview).toHaveBeenCalledTimes(1);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Re-scan' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Re-scan' }));
     expect(
       await screen.findByText(REDACTION_STEP_REFRESHED_MATCH.originalText),
     ).toBeInTheDocument();
@@ -407,7 +407,7 @@ describe('RedactionStep → RedactionReview', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
 
     fetchPreview.mockResolvedValueOnce([REDACTION_STEP_STANDARD_MATCH]);
-    await userEvent.click(screen.getByRole('button', { name: recovery.recoveryLevel }));
+    await userEvent.click(await screen.findByRole('button', { name: recovery.recoveryLevel }));
 
     const review = await screen.findByRole('region', { name: 'redaction review' });
     expect(

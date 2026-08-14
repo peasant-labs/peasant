@@ -338,8 +338,8 @@ export function SessionPicker({
   return (
     <div className="flex flex-col gap-4">
       <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
-        <div className="px-4 py-3 border-b border-rule flex items-center justify-between gap-3">
-          <div className="gms-tally font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>
+        <div className="share-choose-toolbar px-4 py-3 border-b border-rule flex flex-wrap items-center justify-between gap-3">
+          <div className="gms-tally min-w-0 font-mono text-sm tabular-nums">{selectedCount} selected · {selectedTokensLabel} tokens</div>
           <Button size="sm" variant="ghost" pressed={selectedCount === selectableIds.size && selectableIds.size > 0} onClick={() => handleChange(selectedCount === selectableIds.size ? new Set() : new Set(selectableIds))}>
             {selectedCount === selectableIds.size && selectableIds.size > 0 ? 'deselect all' : 'select all'}
           </Button>
