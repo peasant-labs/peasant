@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ALL_REDACTION_LEVELS,
   SELECTABLE_REDACTION_LEVELS,
   fetchRedactionPreview,
   isSelectableRedactionLevel,
 } from '@/lib/share/redactions';
+import { ALL_REDACTION_LEVELS } from '@/lib/share/redaction-policy.generated';
 import {
   REDACTION_CATEGORY_FIXTURES,
   UNKNOWN_REDACTION_LEVEL_FIXTURES,

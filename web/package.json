@@ -4,7 +4,6 @@
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "pnpm@10.28.0",
-  "// peer compatibility": "pnpm.peerDependencyRules.allowedVersions permits transcript-browser 0.0.7 with Fairtrade 0.0.13; pnpm 10 reads the declared rule from pnpm-workspace.yaml while the upstream peer range is widened separately.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
