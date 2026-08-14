@@ -321,16 +321,16 @@ describe('RedactionStep → RedactionReview', () => {
   });
 
   it('recovers from a failed scan by re-scanning rather than by weakening the level', async () => {
-    // Recovery used to mean switching down a level, which is why the failure
-    // bridge rendered a level picker at all. That is no longer a recovery path:
-    // the weaker levels are refused, and "recover by protecting less" was never a
-    // good answer to a transient scan failure. Re-scan at the offered level is,
-    // and the honest failure must persist until it succeeds.
+    // The failure bridge offers no level selector. Recovery keeps the configured
+    // policy and re-scans, rather than weakening protection after a transient
+    // failure; the honest failure persists until that scan succeeds.
     const { recovery } = REDACTION_STEP_FAILURE_EXPECTATIONS;
     fetchPreview.mockRejectedValueOnce(new Error(REDACTION_STEP_SCAN_FAILURE));
     render(<Harness />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(REDACTION_STEP_SCAN_FAILURE);
+    expect(screen.queryByRole('group', { name: 'redaction level' })).not.toBeInTheDocument();
+    expect(screen.queryByText('standard', { exact: true })).not.toBeInTheDocument();
     expect(
       screen.queryByText(REDACTION_STEP_FAILURE_EXPECTATIONS.forbiddenSafeCopy),
     ).not.toBeInTheDocument();

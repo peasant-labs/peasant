@@ -3,3 +3,9 @@
 # `pnpm install --frozen-lockfile` works without sibling repositories.
 packages:
   - '.'
+
+# transcript-browser 0.0.7 pins the prior Fairtrade peer. This combination is
+# covered by Peasant's mounted gates while the upstream peer range is widened.
+peerDependencyRules:
+  allowedVersions:
+    '@peasant-labs/transcript-browser@0.0.7>@peasant-labs/fairtrade': 0.0.13
