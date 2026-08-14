@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import YAML from 'yaml';
 import fixtureSource from './testdata/mounted-share.yaml?raw';
 import { ShareWizardClient } from './ShareWizardClient';
@@ -8,8 +9,20 @@ import * as useMockConfig from '@/hooks/useMockConfig';
 
 vi.mock('@/hooks/useMockConfig');
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
-vi.mock('@/components/share/LabelsStep', () => ({ LabelsStep: ({ onNext }: { onNext: () => void }) => <button onClick={onNext}>continue labels</button> }));
-vi.mock('@/components/share/RedactionStep', () => ({ RedactionStep: ({ onNext }: { onNext: () => void }) => <button onClick={onNext}>continue redaction</button> }));
+vi.mock('@/components/share/LabelsStep', () => ({ LabelsStep: ({ onNext, onFooterActionsChange }: { onNext: () => void; onFooterActionsChange: (actions: unknown) => void }) => {
+  useEffect(() => {
+    onFooterActionsChange({ primary: { label: 'continue labels', onClick: onNext } });
+    return () => onFooterActionsChange(null);
+  }, [onFooterActionsChange, onNext]);
+  return <div>labels step</div>;
+} }));
+vi.mock('@/components/share/RedactionStep', () => ({ RedactionStep: ({ onNext, onFooterActionsChange }: { onNext: () => void; onFooterActionsChange: (actions: unknown) => void }) => {
+  useEffect(() => {
+    onFooterActionsChange({ primary: { label: 'continue redaction', onClick: onNext } });
+    return () => onFooterActionsChange(null);
+  }, [onFooterActionsChange, onNext]);
+  return <div>redaction step</div>;
+} }));
 
 type SessionRow = Record<'id' | 'harness' | 'project' | 'projectHash' | 'startTime' | 'preview' | 'shareStatus', string> & Record<'durationMins' | 'totalTokens' | 'turnCount' | 'toolCallCount', number>;
 type DiscoveryRow = Record<'sessionId' | 'locationLabel' | 'repositoryLocationId' | 'branch' | 'selectionStatus', string>;
@@ -90,6 +103,10 @@ describe('mounted Share production boundary', () => {
     expect(await screen.findByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('4 sessions will be uploaded.') === true)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Submit' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/v1/sync/push'), expect.objectContaining({ body: JSON.stringify({ sessionIds: ['sess-new', 'sess-updated', 'sess-repo-main', 'sess-repo-feature'], redactionLevel: 'standard', visibility: 'public' }) })));
+    expect(await screen.findByRole('link', { name: /View in the commons/i })).toHaveAttribute(
+      'href',
+      'https://village.peasantlabs.org',
+    );
   });
 
   it.each(fixture.invalidCases)('fails closed for $name discovery metadata', async ({ operation, sessionId }) => {

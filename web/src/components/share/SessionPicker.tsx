@@ -6,6 +6,7 @@ import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
 import { summarizePrompt } from '@peasant-labs/transcript-browser';
+import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,6 +42,7 @@ interface SessionPickerProps {
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
   onNext: () => void;
+  onFooterActionsChange?: SetWizardFooterActions;
 }
 
 interface DescendantSelectionState {
@@ -138,6 +140,7 @@ export function SessionPicker({
   selectedIds,
   onSelectionChange,
   onNext,
+  onFooterActionsChange,
 }: SessionPickerProps) {
   const groups = useMemo(() => groupShareHierarchy(sessions), [sessions]);
 
@@ -247,13 +250,17 @@ export function SessionPicker({
   const selectedTokens = sessions.reduce((total, session) => selectedIds.has(session.id) ? total + session.totalTokens : total, 0);
   const selectedTokensLabel = selectedTokens >= 1000 ? `${Math.round(selectedTokens / 1000)}k` : String(selectedTokens);
 
+  useEffect(() => {
+    if (!onFooterActionsChange) return;
+    onFooterActionsChange({
+      primary: { label: 'Continue', onClick: onNext, disabled: selectedCount === 0 },
+    });
+    return () => onFooterActionsChange(null);
+  }, [onFooterActionsChange, onNext, selectedCount]);
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Step chrome — the forward control. Stays here (the wizard owns
-          next/back); the select-all + running tally live inside the picker
-          body's own toolbar. Sticks to the top of the wizard body's own scroll
-          area (top-0), which owns the Choose-list scroll under the bounded shell. */}
-      <div className="sticky top-0 z-30 flex items-center justify-end px-5 py-3 bg-surface border border-rule">
+      {!onFooterActionsChange && <div className="flex items-center justify-end px-5 py-3 bg-surface border border-rule">
         <Button
           variant="primary"
           size="sm"
@@ -262,7 +269,7 @@ export function SessionPicker({
         >
           Continue
         </Button>
-      </div>
+      </div>}
 
       <div className="border border-rule bg-surface" aria-label="choose sessions to contribute">
         <div className="px-4 py-3 border-b border-rule flex items-center justify-between gap-3">

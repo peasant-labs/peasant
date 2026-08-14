@@ -15,6 +15,7 @@ import {
   type SelectableRedactionLevel,
 } from '@/lib/share/redactions';
 import type { Redaction } from '@/types/messages';
+import type { SetWizardFooterActions } from '@/app/share/ShareWizardClient';
 
 // ---------------------------------------------------------------------------
 // Redaction pipeline — REAL local scan per session (GET /sync/redactions), or
@@ -223,6 +224,7 @@ interface RedactionStepProps {
    */
   onLevelChange: (level: SelectableRedactionLevel) => void;
   onNext: () => void;
+  onFooterActionsChange?: SetWizardFooterActions;
   /**
    * Redaction-result cache, lifted to the wizard so it survives this step's
    * mount/unmount. Keyed by `${level}:${sessionId}`.
@@ -239,6 +241,7 @@ export function RedactionStep({
   redactionLevel,
   onLevelChange,
   onNext,
+  onFooterActionsChange,
   cache,
   onCacheChange,
   useMock = false,
@@ -333,6 +336,26 @@ export function RedactionStep({
   const hasOnlyFailedEmptyResults = isReady && hasScanFailure && matches.length === 0;
   const continueDisabled = isScanning || hasScanFailure;
 
+  useEffect(() => {
+    if (!onFooterActionsChange) return;
+    onFooterActionsChange({
+      primary: {
+        label: 'Continue',
+        onClick: onNext,
+        disabled: continueDisabled,
+        title: isScanning
+          ? 'Scanning in progress…'
+          : hasScanFailure
+            ? 'Re-scan the failed sessions before continuing'
+            : undefined,
+      },
+      secondary: isReady
+        ? { label: 'Re-scan', onClick: () => runScan(true), title: 'Re-run the scan at this level' }
+        : undefined,
+    });
+    return () => onFooterActionsChange(null);
+  }, [continueDisabled, hasScanFailure, isReady, isScanning, onFooterActionsChange, onNext, runScan]);
+
   return (
     <div className="flex flex-col gap-5">
       {refusedLevel != null && (
@@ -351,9 +374,9 @@ export function RedactionStep({
       {/* The Fairtrade review owns the normal level selector; the bounded failure
           bridge mirrors it with Fairtrade buttons so users can recover. Cache
           reuse keeps revisits instant; Re-scan explicitly refreshes this level. */}
-      <div className="sticky top-16 z-30 flex items-center justify-between gap-3 px-5 py-3 bg-surface border border-rule">
+      <div className="flex items-center justify-between gap-3 px-5 py-3 bg-surface border border-rule">
         <span className="v2-eyebrow">redact</span>
-        <div className="flex items-center gap-2">
+        {!onFooterActionsChange && <div className="flex items-center gap-2">
           {isReady && (
             <Button
               variant="secondary"
@@ -379,7 +402,7 @@ export function RedactionStep({
           >
             Continue
           </Button>
-        </div>
+        </div>}
       </div>
 
       {isScanning ? (
