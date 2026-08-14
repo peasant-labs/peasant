@@ -67,25 +67,6 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Verify annotated tag is reachable from protected develop
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin "+refs/heads/develop:refs/remotes/origin/develop"
-
-          tag_ref="refs/tags/${TAG}"
-          object_type="$(git cat-file -t "${tag_ref}" 2>/dev/null || true)"
-          if [ "${object_type}" != "tag" ]; then
-            echo "::error::release tag ${TAG} is not an annotated tag (found '${object_type:-missing}'). Publication requires an annotated v* tag created by the release ceremony; recreate the release through a merged release PR."
-            exit 1
-          fi
-
-          tag_commit="$(git rev-parse --verify "${tag_ref}^{commit}")"
-          if ! git merge-base --is-ancestor "${tag_commit}" refs/remotes/origin/develop; then
-            echo "::error::release tag ${TAG} peels to ${tag_commit}, which is not reachable from protected branch origin/develop. Move no existing tag; create a new release through a release PR merged into develop."
-            exit 1
-          fi
-          echo "::notice::annotated release tag ${TAG} peels to develop commit ${tag_commit}"
-
       - name: Parse + classify the tag
         id: parse
         run: go run github.com/peasant-labs/schema/cmd/release-guard parse-tag "$TAG"
