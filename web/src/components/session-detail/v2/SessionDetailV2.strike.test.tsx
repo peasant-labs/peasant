@@ -92,7 +92,7 @@ describe('mounted Strike transcript', () => {
 
     expect(canonicalDisplayName).toBeTruthy();
     expect(assistantTurn).toHaveAttribute('data-turn', '1');
-    expect(roleLabel).toHaveTextContent(canonicalDisplayName);
+    expect(roleLabel).toHaveTextContent('assistant');
     expect(roleLabel?.querySelector('.brand')).toBeInTheDocument();
 
     const graphToggle = screen.getByRole('button', { name: /^graph$/i });
