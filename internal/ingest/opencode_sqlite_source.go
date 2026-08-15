@@ -104,52 +104,10 @@ func (systemOpenCodeSQLiteDeadlineClock) WithTimeout(parent context.Context, tim
 	return context.WithTimeout(parent, timeout)
 }
 
-// OpenCodeSQLiteValueKind identifies a copied SQLite result value.
-type OpenCodeSQLiteValueKind uint8
-
-const (
-	OpenCodeSQLiteValueNull OpenCodeSQLiteValueKind = iota
-	OpenCodeSQLiteValueInteger
-	OpenCodeSQLiteValueFloat
-	OpenCodeSQLiteValueText
-	OpenCodeSQLiteValueBlob
-)
-
-// OpenCodeSQLiteValue is a detached result value. Exactly one value field is
-// meaningful according to Kind.
-type OpenCodeSQLiteValue struct {
-	Kind    OpenCodeSQLiteValueKind
-	Integer int64
-	Float   float64
-	Text    string
-	Blob    []byte
-}
-
-// OpenCodeSQLiteColumn is a named, detached result column.
-type OpenCodeSQLiteColumn struct {
-	Name  string
-	Value OpenCodeSQLiteValue
-}
-
-// OpenCodeSQLiteRow is a detached query result row. It does not expose the
-// underlying SQLite statement or connection.
-type OpenCodeSQLiteRow struct {
-	columns []OpenCodeSQLiteColumn
-}
-
-// Columns returns an independent copy of the row's columns.
-func (r OpenCodeSQLiteRow) Columns() []OpenCodeSQLiteColumn {
-	columns := make([]OpenCodeSQLiteColumn, len(r.columns))
-	copy(columns, r.columns)
-	for i := range columns {
-		columns[i].Value.Blob = append([]byte(nil), columns[i].Value.Blob...)
-	}
-	return columns
-}
-
-// OpenCodeSQLiteSource exposes only bounded reads and resource cleanup. It
-// deliberately provides no raw connection, transaction, or prepare method.
+// OpenCodeSQLiteSource exposes only the bounded catalog evidence required by
+// M0 candidate probing and bounded cleanup. It deliberately provides no raw
+// connection, SQL, arguments, transactions, transcript rows, or callbacks.
 type OpenCodeSQLiteSource interface {
-	Read(context.Context, string, []any, func(OpenCodeSQLiteRow) error) error
-	Close() error
+	Catalog(context.Context) (OpenCodeSchemaEvidence, error)
+	Close(context.Context) error
 }

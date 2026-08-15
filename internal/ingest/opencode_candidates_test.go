@@ -139,14 +139,14 @@ func TestResolveOpenCodeCandidatesMatchesUpstreamPrecedence(t *testing.T) {
 
 type recordingOpenCodeSource struct {
 	ingest.OpenCodeSQLiteSource
-	statements *[]string
+	catalogCalls *int
 }
 
 var _ ingest.OpenCodeSQLiteSource = recordingOpenCodeSource{}
 
-func (source recordingOpenCodeSource) Read(ctx context.Context, statement string, args []any, visit func(ingest.OpenCodeSQLiteRow) error) error {
-	*source.statements = append(*source.statements, statement)
-	return source.OpenCodeSQLiteSource.Read(ctx, statement, args, visit)
+func (source recordingOpenCodeSource) Catalog(ctx context.Context) (ingest.OpenCodeSchemaEvidence, error) {
+	*source.catalogCalls++
+	return source.OpenCodeSQLiteSource.Catalog(ctx)
 }
 
 func TestOpenCodeCandidateProbeClassifiesOnlyBoundedCatalogEvidence(t *testing.T) {
@@ -158,13 +158,13 @@ func TestOpenCodeCandidateProbeClassifiesOnlyBoundedCatalogEvidence(t *testing.T
 			t.Parallel()
 			materialized := testfixture.Materialize(t, testfixture.CaseByName(t, fixtureCase.Fixture))
 			before := testfixture.SnapshotSource(t, materialized)
-			var statements []string
+			catalogCalls := 0
 			opener := func(ctx context.Context, path ingest.OpenCodeSQLiteSourcePath, options ingest.OpenCodeSQLiteSourceOptions) (ingest.OpenCodeSQLiteSource, error) {
 				source, err := ingest.OpenOpenCodeSQLiteSource(ctx, path, options)
 				if err != nil {
 					return nil, err
 				}
-				return recordingOpenCodeSource{OpenCodeSQLiteSource: source, statements: &statements}, nil
+				return recordingOpenCodeSource{OpenCodeSQLiteSource: source, catalogCalls: &catalogCalls}, nil
 			}
 			prober, err := ingest.NewOpenCodeCandidateProber(&ingest.OSFileSystem{}, opener, ingest.DefaultOpenCodeSQLiteSourceOptions())
 			if err != nil {
@@ -183,7 +183,13 @@ func TestOpenCodeCandidateProbeClassifiesOnlyBoundedCatalogEvidence(t *testing.T
 				t.Errorf("probe classification = capability %q support %q, want %q/%q; diagnostics=%+v", result.Capability, result.Support, fixtureCase.Capability, fixtureCase.Support, result.Diagnostics)
 			}
 			assertOpenCodeDiagnosticsActionable(t, result.Diagnostics)
-			assertOpenCodeProbeStatementsAreCatalogOnly(t, statements, fixture.ForbiddenQueryTokens)
+			wantCatalogCalls := 1
+			if fixtureCase.Fixture == "corrupt-non-sqlite" {
+				wantCatalogCalls = 0
+			}
+			if catalogCalls != wantCatalogCalls {
+				t.Errorf("probe catalog calls = %d, want %d typed bounded operations", catalogCalls, wantCatalogCalls)
+			}
 			if fixtureCase.Fixture != "wal-capable" {
 				testfixture.AssertUnchanged(t, materialized, before)
 			}
@@ -224,21 +230,6 @@ func assertOpenCodeDiagnosticsActionable(t testing.TB, diagnostics []ingest.Open
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code == "" || diagnostic.Stage == "" || diagnostic.What == "" || diagnostic.Why == "" || diagnostic.Where == "" || diagnostic.When == "" || diagnostic.Meaning == "" || diagnostic.Remediation == "" {
 			t.Errorf("candidate diagnostic is not actionable across what/why/where/when/meaning/fix: %+v", diagnostic)
-		}
-	}
-}
-
-func assertOpenCodeProbeStatementsAreCatalogOnly(t testing.TB, statements, forbidden []string) {
-	t.Helper()
-	for _, statement := range statements {
-		lower := strings.ToLower(" " + strings.Join(strings.Fields(statement), " ") + " ")
-		if !strings.Contains(lower, " limit ") {
-			t.Errorf("probe statement is not explicitly bounded: %s", statement)
-		}
-		for _, token := range forbidden {
-			if strings.Contains(lower, token) {
-				t.Errorf("probe statement reads forbidden payload/history shape %q: %s", token, statement)
-			}
 		}
 	}
 }

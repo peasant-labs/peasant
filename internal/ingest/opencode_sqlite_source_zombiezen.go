@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -16,15 +18,19 @@ type zombiezenOpenCodeSQLiteSource struct {
 	options OpenCodeSQLiteSourceOptions
 	conn    *sqlite.Conn
 	permit  chan struct{}
-	closed  bool
-	denied  string
+
+	stateMu      sync.Mutex
+	closing      bool
+	connClosed   bool
+	activeCancel context.CancelFunc
+	denied       string
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
 
 // OpenOpenCodeSQLiteSource opens one private zombiezen SQLite connection in
 // read-only URI mode, enables query_only, installs a deny-by-default statement
-// authorizer, and returns only the restrictive read interface.
+// authorizer, and returns only the restrictive catalog interface.
 func OpenOpenCodeSQLiteSource(
 	ctx context.Context,
 	path OpenCodeSQLiteSourcePath,
@@ -109,9 +115,6 @@ func (s *zombiezenOpenCodeSQLiteSource) authorizeRead(action sqlite.Action) sqli
 		}
 		switch strings.ToLower(action.Pragma()) {
 		case "table_info", "index_list", "index_info":
-			// SQLite's table-valued catalog functions invoke their corresponding
-			// read-only PRAGMA authorizer actions. Permit only the three bounded
-			// structural probes used by candidate inspection.
 			return sqlite.AuthResultOK
 		}
 	}
@@ -120,68 +123,151 @@ func (s *zombiezenOpenCodeSQLiteSource) authorizeRead(action sqlite.Action) sqli
 	return sqlite.AuthResultDeny
 }
 
-func (s *zombiezenOpenCodeSQLiteSource) Read(
-	ctx context.Context,
-	statement string,
-	args []any,
-	visit func(OpenCodeSQLiteRow) error,
-) error {
+// Catalog returns a detached, bounded structural snapshot. All SQL, row
+// collection, and SQLite callbacks complete before the one connection permit
+// is released and before the caller can process the result.
+func (s *zombiezenOpenCodeSQLiteSource) Catalog(ctx context.Context) (OpenCodeSchemaEvidence, error) {
 	if ctx == nil {
-		return fmt.Errorf("read OpenCode SQLite source %q failed before preparing the bounded query: context is nil, so cancellation and deadlines cannot be enforced; no statement was prepared; pass a non-nil context", s.path.String())
-	}
-	if strings.TrimSpace(statement) == "" {
-		return fmt.Errorf("read OpenCode SQLite source %q failed before preparing the bounded query: statement is empty, so there is no read operation to authorize; no statement was prepared; supply one SELECT statement or PRAGMA query_only", s.path.String())
+		return OpenCodeSchemaEvidence{}, fmt.Errorf("inspect OpenCode SQLite catalog for %q failed before waiting for the single connection: context is nil, so cancellation and deadlines cannot be enforced; no schema was read; pass a non-nil context", s.path.String())
 	}
 	queryCtx, cancel := s.options.clock.WithTimeout(ctx, s.options.queryTimeout)
 	defer cancel()
 
 	select {
 	case <-queryCtx.Done():
-		return fmt.Errorf("read OpenCode SQLite source %q stopped while waiting for its single connection because the caller context or %s deadline ended: %w; no statement was prepared and the source remains untouched; retry with a live bounded context or increase the validated query timeout when a longer bounded wait is intentional", s.path.String(), s.options.queryTimeout, context.Cause(queryCtx))
+		return OpenCodeSchemaEvidence{}, fmt.Errorf("inspect OpenCode SQLite catalog for %q stopped while waiting for the single connection because the caller context or %s deadline ended: %w; no schema was read and the source remains untouched; retry with a live bounded context", s.path.String(), s.options.queryTimeout, context.Cause(queryCtx))
 	case <-s.permit:
 	}
 	defer func() { s.permit <- struct{}{} }()
 
-	if s.closed {
-		return fmt.Errorf("read OpenCode SQLite source %q failed before preparing the bounded query because the source is closed; no statement was prepared; open a new source for further reads", s.path.String())
+	activeCtx, activeCancel := context.WithCancel(queryCtx)
+	s.stateMu.Lock()
+	if s.closing || s.connClosed {
+		s.stateMu.Unlock()
+		activeCancel()
+		return OpenCodeSchemaEvidence{}, fmt.Errorf("inspect OpenCode SQLite catalog for %q failed before schema access because the source is closing or closed; no schema was read; open a new source for further catalog inspection", s.path.String())
 	}
+	s.activeCancel = activeCancel
+	s.stateMu.Unlock()
+	defer func() {
+		s.stateMu.Lock()
+		s.activeCancel = nil
+		s.stateMu.Unlock()
+		activeCancel()
+	}()
 
-	oldInterrupt := s.conn.SetInterrupt(queryCtx.Done())
+	oldInterrupt := s.conn.SetInterrupt(activeCtx.Done())
 	defer s.conn.SetInterrupt(oldInterrupt)
 
+	evidence, err := s.catalogLocked(activeCtx)
+	if err != nil {
+		if activeCtx.Err() != nil {
+			return evidence, fmt.Errorf("inspect OpenCode SQLite catalog for %q stopped during bounded schema collection because its context or %s deadline ended: %w; no caller code ran while the connection was held and no source write was attempted; retry with a healthy source and live bounded context", s.path.String(), s.options.queryTimeout, context.Cause(activeCtx))
+		}
+		return evidence, fmt.Errorf("inspect OpenCode SQLite catalog for %q failed during bounded explicit-column schema collection: %w; no transcript rows were exposed and no source write was attempted; verify the OpenCode schema and source health before retrying", s.path.String(), err)
+	}
+	return evidence, nil
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (OpenCodeSchemaEvidence, error) {
+	var evidence OpenCodeSchemaEvidence
+	tables := make(map[string]bool)
+	catalogSQL := fmt.Sprintf("SELECT name, type FROM sqlite_schema WHERE type IN ('table','index') ORDER BY type, name LIMIT %d", openCodeCatalogRowLimit)
+	if err := s.executeRowsLocked(ctx, catalogSQL, nil, func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnText(1) == "table" {
+			name := stmt.ColumnText(0)
+			tables[name] = true
+			evidence.Tables = append(evidence.Tables, name)
+		}
+		return nil
+	}); err != nil {
+		return evidence, fmt.Errorf("read sqlite_schema name/type projection with %d-row limit: %w", openCodeCatalogRowLimit, err)
+	}
+	sort.Strings(evidence.Tables)
+
+	var err error
+	if tables["message"] {
+		evidence.LegacyMessageColumns, err = s.columnsLocked(ctx, "message")
+		if err != nil {
+			return evidence, err
+		}
+	}
+	if tables["part"] {
+		evidence.LegacyPartColumns, err = s.columnsLocked(ctx, "part")
+		if err != nil {
+			return evidence, err
+		}
+	}
+	if tables["session_message"] {
+		evidence.CurrentMessageColumns, err = s.columnsLocked(ctx, "session_message")
+		if err != nil {
+			return evidence, err
+		}
+		evidence.CurrentIndexes, err = s.indexesLocked(ctx, "session_message")
+		if err != nil {
+			return evidence, err
+		}
+	}
+	return evidence, nil
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table string) ([]OpenCodeColumnEvidence, error) {
+	query := fmt.Sprintf("SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT %d", openCodeColumnRowLimit)
+	columns := make([]OpenCodeColumnEvidence, 0)
+	err := s.executeRowsLocked(ctx, query, []any{table}, func(stmt *sqlite.Stmt) error {
+		columns = append(columns, OpenCodeColumnEvidence{
+			Name:    stmt.ColumnText(0),
+			NotNull: stmt.ColumnInt64(1) != 0,
+			Primary: stmt.ColumnInt64(2) != 0,
+		})
+		return nil
+	})
+	if err != nil {
+		return columns, fmt.Errorf("read pragma_table_info explicit columns for %q with %d-row limit: %w", table, openCodeColumnRowLimit, err)
+	}
+	return columns, nil
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) indexesLocked(ctx context.Context, table string) ([]OpenCodeIndexEvidence, error) {
+	query := fmt.Sprintf("SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT %d", openCodeIndexRowLimit)
+	indexes := make([]OpenCodeIndexEvidence, 0)
+	byName := make(map[string]int)
+	err := s.executeRowsLocked(ctx, query, []any{table}, func(stmt *sqlite.Stmt) error {
+		name := stmt.ColumnText(0)
+		index, ok := byName[name]
+		if !ok {
+			index = len(indexes)
+			byName[name] = index
+			indexes = append(indexes, OpenCodeIndexEvidence{Name: name, Unique: stmt.ColumnInt64(1) != 0})
+		}
+		indexes[index].Columns = append(indexes[index].Columns, stmt.ColumnText(3))
+		return nil
+	})
+	if err != nil {
+		return indexes, fmt.Errorf("read index-list/index-info explicit columns for %q with %d-row limit: %w", table, openCodeIndexRowLimit, err)
+	}
+	return indexes, nil
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, statement string, args []any, result func(*sqlite.Stmt) error) error {
 	s.denied = ""
 	prepared, trailingBytes, err := s.conn.PrepareTransient(statement)
 	if err != nil {
-		return s.prepareError(queryCtx, err)
+		return s.prepareError(ctx, err)
 	}
-	finalizeErr := prepared.Finalize()
-	if finalizeErr != nil {
-		return fmt.Errorf("read OpenCode SQLite source %q failed while finalizing the read-only statement preflight: %w; query execution did not start and no source write was attempted; retry after resolving the SQLite statement error", s.path.String(), finalizeErr)
+	if err := prepared.Finalize(); err != nil {
+		return fmt.Errorf("finalize read-only catalog statement preflight: %w", err)
 	}
 	if trailingBytes != 0 && strings.TrimSpace(statement[len(statement)-trailingBytes:]) != "" {
-		return fmt.Errorf("read OpenCode SQLite source %q rejected a statement during bounded read preflight because it contains trailing SQL; query execution did not start, which prevents hidden follow-up operations; submit exactly one SELECT statement or PRAGMA query_only", s.path.String())
+		return fmt.Errorf("reject catalog statement with trailing SQL before execution")
 	}
 
 	s.denied = ""
-	err = sqlitex.ExecuteTransient(s.conn, statement, &sqlitex.ExecOptions{
-		Args: args,
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			if visit == nil {
-				return nil
-			}
-			return visit(copyOpenCodeSQLiteRow(stmt))
-		},
-	})
-	if err != nil {
-		if s.denied != "" {
-			return s.deniedStatementError(err)
-		}
-		if queryCtx.Err() != nil {
-			return fmt.Errorf("read OpenCode SQLite source %q stopped during bounded query execution because its context or %s deadline ended: %w; SQLite interrupted the statement and no source write was attempted; retry if the source is healthy, or increase the validated query timeout when a longer bounded read is intentional", s.path.String(), s.options.queryTimeout, context.Cause(queryCtx))
-		}
-		return fmt.Errorf("read OpenCode SQLite source %q failed during bounded query execution: %w; the requested rows were not fully delivered and no source write was attempted; verify the expected OpenCode schema and statement arguments before retrying", s.path.String(), err)
+	err = sqlitex.ExecuteTransient(s.conn, statement, &sqlitex.ExecOptions{Args: args, ResultFunc: result})
+	if err != nil && s.denied != "" {
+		return s.deniedStatementError(err)
 	}
-	return nil
+	return err
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) prepareError(ctx context.Context, err error) error {
@@ -189,53 +275,54 @@ func (s *zombiezenOpenCodeSQLiteSource) prepareError(ctx context.Context, err er
 		return s.deniedStatementError(err)
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("read OpenCode SQLite source %q stopped during statement preparation because its context or %s deadline ended: %w; query execution did not start and no source write was attempted; retry with a live bounded context", s.path.String(), s.options.queryTimeout, context.Cause(ctx))
+		return fmt.Errorf("prepare bounded read-only catalog statement stopped because its context ended: %w", context.Cause(ctx))
 	}
-	return fmt.Errorf("read OpenCode SQLite source %q failed while preparing the bounded read statement: %w; query execution did not start and no source write was attempted; verify the expected OpenCode schema and submit exactly one read-only statement", s.path.String(), err)
+	return fmt.Errorf("prepare bounded read-only catalog statement: %w", err)
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) deniedStatementError(err error) error {
-	return fmt.Errorf("read OpenCode SQLite source %q rejected a non-read-only statement during preparation because it requested forbidden SQLite action %q: %w; query execution did not start and query_only remains enabled; use exactly one SELECT statement or the read-only PRAGMA query_only check, never writes, schema changes, ATTACH, checkpoints, maintenance, transactions, or write-effecting pragmas", s.path.String(), s.denied, err)
+	return fmt.Errorf("read OpenCode SQLite source %q rejected a forbidden statement during private catalog preparation because it requested forbidden SQLite action %q: %w; execution did not start and query_only remains enabled; keep source operations catalog-only and never write, migrate, checkpoint, repair, maintain, copy, truncate, or alter OpenCode-owned files", s.path.String(), s.denied, err)
 }
 
-func copyOpenCodeSQLiteRow(stmt *sqlite.Stmt) OpenCodeSQLiteRow {
-	columns := make([]OpenCodeSQLiteColumn, stmt.ColumnCount())
-	for i := range columns {
-		columns[i] = OpenCodeSQLiteColumn{
-			Name:  stmt.ColumnName(i),
-			Value: copyOpenCodeSQLiteValue(stmt, i),
-		}
+// Close prevents new catalog work, cancels an active SQLite operation, and
+// waits for the one private connection only within the injected deadline.
+func (s *zombiezenOpenCodeSQLiteSource) Close(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("close OpenCode SQLite source %q failed before shutdown: context is nil, so cleanup cannot be bounded; pass a non-nil context and retry", s.path.String())
 	}
-	return OpenCodeSQLiteRow{columns: columns}
-}
+	closeCtx, cancel := s.options.clock.WithTimeout(ctx, s.options.queryTimeout)
+	defer cancel()
 
-func copyOpenCodeSQLiteValue(stmt *sqlite.Stmt, column int) OpenCodeSQLiteValue {
-	switch stmt.ColumnType(column) {
-	case sqlite.TypeInteger:
-		return OpenCodeSQLiteValue{Kind: OpenCodeSQLiteValueInteger, Integer: stmt.ColumnInt64(column)}
-	case sqlite.TypeFloat:
-		return OpenCodeSQLiteValue{Kind: OpenCodeSQLiteValueFloat, Float: stmt.ColumnFloat(column)}
-	case sqlite.TypeText:
-		return OpenCodeSQLiteValue{Kind: OpenCodeSQLiteValueText, Text: stmt.ColumnText(column)}
-	case sqlite.TypeBlob:
-		value := make([]byte, stmt.ColumnLen(column))
-		stmt.ColumnBytes(column, value)
-		return OpenCodeSQLiteValue{Kind: OpenCodeSQLiteValueBlob, Blob: value}
-	default:
-		return OpenCodeSQLiteValue{Kind: OpenCodeSQLiteValueNull}
-	}
-}
-
-func (s *zombiezenOpenCodeSQLiteSource) Close() error {
-	<-s.permit
-	defer func() { s.permit <- struct{}{} }()
-
-	if s.closed {
+	s.stateMu.Lock()
+	s.closing = true
+	activeCancel := s.activeCancel
+	alreadyClosed := s.connClosed
+	s.stateMu.Unlock()
+	if alreadyClosed {
 		return nil
 	}
-	s.closed = true
-	if err := s.conn.Close(); err != nil {
-		return fmt.Errorf("close OpenCode SQLite source %q failed while releasing its single read-only connection: %w; no further reads are allowed from this source; retry process cleanup and inspect SQLite resource diagnostics", s.path.String(), err)
+	if activeCancel != nil {
+		activeCancel()
 	}
+
+	select {
+	case <-closeCtx.Done():
+		return fmt.Errorf("close OpenCode SQLite source %q stopped while waiting for the active bounded catalog operation because the caller context or %s cleanup deadline ended: %w; new reads remain disabled but the connection may still require a retry to release; retry Close with a live context after investigating source responsiveness", s.path.String(), s.options.queryTimeout, context.Cause(closeCtx))
+	case <-s.permit:
+	}
+	defer func() { s.permit <- struct{}{} }()
+
+	s.stateMu.Lock()
+	if s.connClosed {
+		s.stateMu.Unlock()
+		return nil
+	}
+	s.stateMu.Unlock()
+	if err := s.conn.Close(); err != nil {
+		return fmt.Errorf("close OpenCode SQLite source %q failed while releasing its single read-only connection: %w; no further reads are allowed; retry bounded cleanup and inspect SQLite resource diagnostics", s.path.String(), err)
+	}
+	s.stateMu.Lock()
+	s.connClosed = true
+	s.stateMu.Unlock()
 	return nil
 }

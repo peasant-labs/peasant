@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -297,8 +296,8 @@ func (p *OpenCodeCandidateProber) probeCandidate(ctx context.Context, candidate 
 	if err != nil {
 		return failedOpenCodeProbe(result, OpenCodeSupportUnreadable, OpenCodeProbeOpen, "restrictive SQLite source open failed", err.Error(), candidate.Path, "after header validation and before catalog inspection", "the file may be SQLite but no schema support claim can be made", "verify read permission and source health, then retry while OpenCode owns all repair or migration")
 	}
-	evidence, inspectErr := inspectOpenCodeCatalog(ctx, source)
-	closeErr := source.Close()
+	evidence, inspectErr := source.Catalog(ctx)
+	closeErr := source.Close(context.Background())
 	if inspectErr != nil || closeErr != nil {
 		joined := errors.Join(inspectErr, closeErr)
 		result.Evidence = evidence
@@ -350,143 +349,6 @@ func actionableOpenCodeDiagnostic(stage OpenCodeProbeStage, what, why, where, wh
 		code = OpenCodeDiagnosticCatalogReadFailed
 	}
 	return OpenCodeProbeDiagnostic{Code: code, Stage: stage, What: what, Why: why, Where: where, When: when, Meaning: meaning, Remediation: fix}
-}
-
-func inspectOpenCodeCatalog(ctx context.Context, source OpenCodeSQLiteSource) (OpenCodeSchemaEvidence, error) {
-	var evidence OpenCodeSchemaEvidence
-	tables := make(map[string]bool)
-	query := fmt.Sprintf("SELECT name, type FROM sqlite_schema WHERE type IN ('table','index') ORDER BY type, name LIMIT %d", openCodeCatalogRowLimit)
-	rows := 0
-	if err := source.Read(ctx, query, nil, func(row OpenCodeSQLiteRow) error {
-		rows++
-		name, err := openCodeTextColumn(row, "name")
-		if err != nil {
-			return err
-		}
-		objectType, err := openCodeTextColumn(row, "type")
-		if err != nil {
-			return err
-		}
-		if objectType == "table" {
-			tables[name] = true
-			evidence.Tables = append(evidence.Tables, name)
-		}
-		return nil
-	}); err != nil {
-		return evidence, fmt.Errorf("inspect explicit sqlite_schema name/type columns with a %d-row bound: %w", openCodeCatalogRowLimit, err)
-	}
-	if rows > openCodeCatalogRowLimit {
-		return evidence, fmt.Errorf("inspect sqlite_schema exceeded the declared %d-row bound", openCodeCatalogRowLimit)
-	}
-	sort.Strings(evidence.Tables)
-
-	var err error
-	if tables["message"] {
-		evidence.LegacyMessageColumns, err = inspectOpenCodeColumns(ctx, source, "message")
-		if err != nil {
-			return evidence, err
-		}
-	}
-	if tables["part"] {
-		evidence.LegacyPartColumns, err = inspectOpenCodeColumns(ctx, source, "part")
-		if err != nil {
-			return evidence, err
-		}
-	}
-	if tables["session_message"] {
-		evidence.CurrentMessageColumns, err = inspectOpenCodeColumns(ctx, source, "session_message")
-		if err != nil {
-			return evidence, err
-		}
-		evidence.CurrentIndexes, err = inspectOpenCodeIndexes(ctx, source, "session_message")
-		if err != nil {
-			return evidence, err
-		}
-	}
-	return evidence, nil
-}
-
-func inspectOpenCodeColumns(ctx context.Context, source OpenCodeSQLiteSource, table string) ([]OpenCodeColumnEvidence, error) {
-	query := fmt.Sprintf("SELECT name, \"notnull\", pk FROM pragma_table_info(?) ORDER BY cid LIMIT %d", openCodeColumnRowLimit)
-	columns := make([]OpenCodeColumnEvidence, 0)
-	if err := source.Read(ctx, query, []any{table}, func(row OpenCodeSQLiteRow) error {
-		name, err := openCodeTextColumn(row, "name")
-		if err != nil {
-			return err
-		}
-		notNull, err := openCodeIntegerColumn(row, "notnull")
-		if err != nil {
-			return err
-		}
-		primary, err := openCodeIntegerColumn(row, "pk")
-		if err != nil {
-			return err
-		}
-		columns = append(columns, OpenCodeColumnEvidence{Name: name, NotNull: notNull != 0, Primary: primary != 0})
-		return nil
-	}); err != nil {
-		return columns, fmt.Errorf("inspect explicit pragma_table_info columns for %q with a %d-row bound: %w", table, openCodeColumnRowLimit, err)
-	}
-	if len(columns) > openCodeColumnRowLimit {
-		return columns, fmt.Errorf("inspect columns for %q exceeded the declared %d-row bound", table, openCodeColumnRowLimit)
-	}
-	return columns, nil
-}
-
-func inspectOpenCodeIndexes(ctx context.Context, source OpenCodeSQLiteSource, table string) ([]OpenCodeIndexEvidence, error) {
-	query := fmt.Sprintf("SELECT il.name AS index_name, il.\"unique\" AS is_unique, ii.seqno AS seqno, ii.name AS column_name FROM pragma_index_list(?) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT %d", openCodeIndexRowLimit)
-	indexes := make([]OpenCodeIndexEvidence, 0)
-	byName := make(map[string]int)
-	if err := source.Read(ctx, query, []any{table}, func(row OpenCodeSQLiteRow) error {
-		name, err := openCodeTextColumn(row, "index_name")
-		if err != nil {
-			return err
-		}
-		unique, err := openCodeIntegerColumn(row, "is_unique")
-		if err != nil {
-			return err
-		}
-		column, err := openCodeTextColumn(row, "column_name")
-		if err != nil {
-			return err
-		}
-		index, ok := byName[name]
-		if !ok {
-			index = len(indexes)
-			byName[name] = index
-			indexes = append(indexes, OpenCodeIndexEvidence{Name: name, Unique: unique != 0})
-		}
-		indexes[index].Columns = append(indexes[index].Columns, column)
-		return nil
-	}); err != nil {
-		return indexes, fmt.Errorf("inspect explicit index-list/index-info columns for %q with a %d-row bound: %w", table, openCodeIndexRowLimit, err)
-	}
-	rows := 0
-	for _, index := range indexes {
-		rows += len(index.Columns)
-	}
-	if rows > openCodeIndexRowLimit {
-		return indexes, fmt.Errorf("inspect indexes for %q exceeded the declared %d-row bound", table, openCodeIndexRowLimit)
-	}
-	return indexes, nil
-}
-
-func openCodeTextColumn(row OpenCodeSQLiteRow, name string) (string, error) {
-	for _, column := range row.Columns() {
-		if column.Name == name && column.Value.Kind == OpenCodeSQLiteValueText {
-			return column.Value.Text, nil
-		}
-	}
-	return "", fmt.Errorf("catalog result omitted required text column %q", name)
-}
-
-func openCodeIntegerColumn(row OpenCodeSQLiteRow, name string) (int64, error) {
-	for _, column := range row.Columns() {
-		if column.Name == name && column.Value.Kind == OpenCodeSQLiteValueInteger {
-			return column.Value.Integer, nil
-		}
-	}
-	return 0, fmt.Errorf("catalog result omitted required integer column %q", name)
 }
 
 func classifyOpenCodeEvidence(evidence OpenCodeSchemaEvidence) (OpenCodeSchemaCapability, OpenCodeSchemaSupport) {
