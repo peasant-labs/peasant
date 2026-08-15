@@ -21,11 +21,14 @@ type OpenCodeAdapter struct {
 	candidateChannel     string
 	candidateEnvironment OpenCodeEnvironmentLookup
 	candidateProber      *OpenCodeCandidateProber
+	candidateOpener      OpenCodeSQLiteSourceOpener
+	candidateOptions     OpenCodeSQLiteSourceOptions
 	candidateMu          sync.Mutex
 	candidateEvidence    []OpenCodeProbeResult
 }
 
 var _ SourceAdapter = (*OpenCodeAdapter)(nil)
+var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
 
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
 func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {
@@ -85,6 +88,8 @@ func NewOpenCodeAdapterWithCandidateProbe(
 		candidateChannel:     channel,
 		candidateEnvironment: environment,
 		candidateProber:      prober,
+		candidateOpener:      opener,
+		candidateOptions:     options,
 	}, nil
 }
 
@@ -102,8 +107,21 @@ func (a *OpenCodeAdapter) Harness() Harness {
 //
 // Sessions with a non-empty parentID are linked via ParentUUID.
 func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
-	a.inspectCandidates(ctx, cfg.Paths)
+	evidence := a.inspectCandidates(ctx, cfg.Paths)
 	var discovered []DiscoveredSession
+	for _, result := range evidence {
+		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Capability != OpenCodeCapabilityLegacy || result.Support != OpenCodeSupportSupported {
+			continue
+		}
+		sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		discovered = append(discovered, sessions...)
+	}
+	if len(discovered) > 0 {
+		return discovered, nil
+	}
 
 	for _, root := range cfg.Paths {
 		rootStr := root.String()
@@ -198,9 +216,9 @@ func (a *OpenCodeAdapter) CandidateEvidence() []OpenCodeProbeResult {
 	return cloneOpenCodeProbeResults(a.candidateEvidence)
 }
 
-func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) {
+func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) []OpenCodeProbeResult {
 	if a.candidateProber == nil {
-		return
+		return nil
 	}
 	candidates := make([]OpenCodeCandidate, 0, len(roots)*3)
 	seen := make(map[string]struct{}, len(roots)*3)
@@ -225,6 +243,7 @@ func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []Resolve
 	a.candidateMu.Lock()
 	a.candidateEvidence = cloneOpenCodeProbeResults(evidence)
 	a.candidateMu.Unlock()
+	return cloneOpenCodeProbeResults(evidence)
 }
 
 func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeResult {
@@ -253,6 +272,10 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 //  3. The corresponding project JSON for the worktree path.
 //  4. Git metadata from the session's working directory.
 func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+		metadata, _, err := a.MaterializeTranscript(ctx, session)
+		return metadata, err
+	}
 	// ── 1. Read session JSON ──────────────────────────────────────────────────
 	sesData, err := a.fs.ReadFile(session.SourcePath.String())
 	if err != nil {

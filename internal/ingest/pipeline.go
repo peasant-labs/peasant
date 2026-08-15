@@ -1193,10 +1193,23 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	adapter := factory(p.fs, p.git, p.salt)
 
-	// Extract metadata.
-	meta, err := adapter.ExtractMetadata(ctx, session)
+	if err := session.TranscriptOrigin.Validate(); err != nil {
+		return fail(fmt.Errorf("prepare transcript for session %s failed before source access: %w; the session was not written or stored; update the discovering adapter to return a supported typed origin", session.SessionID, err))
+	}
+	var rawData []byte
+	var meta *UnifiedMetadata
+	var err error
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+		materializer, ok := adapter.(TranscriptMaterializer)
+		if !ok {
+			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: origin is legacy OpenCode SQLite but adapter %T has no materializer; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, adapter))
+		}
+		meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
+	} else {
+		meta, err = adapter.ExtractMetadata(ctx, session)
+	}
 	if err != nil {
-		return fail(fmt.Errorf("extract metadata for %s: %w", session.SessionID, err))
+		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
 	}
 
 	// Set ingested timestamp.
@@ -1252,13 +1265,15 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	tmpTranscriptPath := fmt.Sprintf("%s/%s", tmpDir, transcriptFilename)
 	var transcriptData []byte
 
-	rawData, err := p.fs.ReadFile(string(session.SourcePath))
-	if err != nil {
-		result.Error = errors.Join(
-			fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
-			p.fs.RemoveAll(tmpDir),
-		)
-		return workerResult{result: result}
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		rawData, err = p.fs.ReadFile(string(session.SourcePath))
+		if err != nil {
+			result.Error = errors.Join(
+				fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
+				p.fs.RemoveAll(tmpDir),
+			)
+			return workerResult{result: result}
+		}
 	}
 	if session.Harness == HarnessStrike && session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
@@ -1469,10 +1484,11 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		// The index step's session is rebuilt from this result and its source path
 		// is replaced with the written copy's, so a directory-based harness has no
 		// way to recover its provider root once this is dropped.
-		originalRoot: session.OriginalRoot,
-		startMs:      startMs,
-		metaFilename: metaFilename,
-		sessionDir:   sessionDir,
+		originalRoot:     session.OriginalRoot,
+		transcriptOrigin: session.TranscriptOrigin,
+		startMs:          startMs,
+		metaFilename:     metaFilename,
+		sessionDir:       sessionDir,
 	}
 }
 
@@ -1508,6 +1524,12 @@ func indexWithSourceKind(
 	session DiscoveredSession,
 	transcriptData []byte,
 ) ([]schema.SessionEntry, error) {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+		if len(transcriptData) > 0 {
+			return indexer.IndexTranscriptBytes(ctx, session, transcriptData)
+		}
+		return indexer.IndexTranscript(ctx, session)
+	}
 	switch indexer.SourceKind() {
 	case TranscriptSourceDirectory:
 		// No single file holds this harness's entries, so there is nothing to pass
@@ -1586,7 +1608,8 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		// then recovers the session later in the same run, so the cost is a wasted
 		// pass and a misleading skipped row rather than an empty session - measured,
 		// after an earlier comment here claimed otherwise.
-		OriginalRoot: wr.originalRoot,
+		OriginalRoot:     wr.originalRoot,
+		TranscriptOrigin: wr.transcriptOrigin,
 	}
 }
 
@@ -2001,6 +2024,11 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 		SourcePath:   ResolvedPath(transcriptPath),
 		SourceFormat: sourceFormat,
 		OriginalRoot: originalRoot,
+	}
+	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON {
+		if transcriptData, readErr := p.fs.ReadFile(transcriptPath); readErr == nil && isOpenCodeLegacyProjection(transcriptData, sid) {
+			ds.TranscriptOrigin = TranscriptOriginOpenCodeLegacySQLite
+		}
 	}
 	if meta.ParentUUID != nil {
 		ds.ParentUUID = meta.ParentUUID

@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -50,16 +51,205 @@ func NewOpenCodeIndexer(fs FileSystem, opts ...OpenCodeIndexerOption) *OpenCodeI
 	return idx
 }
 
-// IndexTranscriptBytes for OpenCode falls back to IndexTranscript because
-// OpenCode transcripts are directory-based (msg_*.json files) — there are no
-// single-file bytes to pass in-memory. The data argument is unused.
-func (idx *OpenCodeIndexer) IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, _ []byte) ([]schema.SessionEntry, error) {
-	return idx.IndexTranscript(ctx, session)
+// IndexTranscriptBytes indexes Peasant's managed legacy SQLite projection.
+// Legacy JSON sessions retain the directory-based path because their entries
+// remain spread across provider-owned message and part files.
+func (idx *OpenCodeIndexer) IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
+	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
+		return idx.IndexTranscript(ctx, session)
+	}
+	return idx.indexLegacyProjection(session, data)
+}
+
+func (idx *OpenCodeIndexer) indexLegacyProjection(session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
+	var projection openCodeLegacyProjection
+	if err := json.Unmarshal(data, &projection); err != nil {
+		return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q failed while decoding Peasant-owned JSON: %w; no entry rows were stored; re-run harvest to regenerate the projection", session.SessionID, err)
+	}
+	if projection.Format != openCodeLegacyProjectionFormat || projection.Version != openCodeLegacyProjectionVersion || projection.SessionID != string(session.SessionID) {
+		return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q rejected identity format=%q version=%d session_id=%q; expected format=%q version=%d and the selected session ID; no entry rows were stored; re-run harvest with a compatible Peasant version", session.SessionID, projection.Format, projection.Version, projection.SessionID, openCodeLegacyProjectionFormat, openCodeLegacyProjectionVersion)
+	}
+	entries := make([]schema.SessionEntry, 0, len(projection.Messages))
+	entryIndex := 0
+	for _, message := range projection.Messages {
+		entry, ok := parseOpenCodeMessage(session.SessionID, entryIndex, message.Data, idx.fullContent)
+		if !ok {
+			return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q failed while decoding message row %q; no partial entry set was stored; fix malformed row JSON in the selected database and re-run harvest", session.SessionID, message.ID)
+		}
+		entryID := message.ID
+		entry.EntryID = &entryID
+		if entry.TimestampMs == nil && message.TimeCreated > 0 {
+			timestamp := message.TimeCreated
+			entry.TimestampMs = &timestamp
+		}
+		rawLength := len(message.Data)
+		entry.RawByteLength = &rawLength
+		inspection, err := inspectProjectedOpenCodeParts(message.Parts)
+		if err != nil {
+			return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q message %q failed while classifying selected parts: %w; no partial entry set was stored; fix malformed part JSON and re-run harvest", session.SessionID, message.ID, err)
+		}
+		if inspection.isSystemEntry {
+			entry.Role = RoleSystem
+			entry.EntryType = EntryTypeSystem
+		} else if inspection.skillName != "" {
+			extra := `{"command_name":"` + jsonEscapeString(inspection.skillName) + `"}`
+			entry.Extra = &extra
+		} else if inspection.toolPartCount > 0 && entry.Role == RoleAssistant {
+			entry.HasToolUse = true
+			entry.EntryType = EntryTypeToolUse
+		}
+		if entry.Role != RoleAssistant {
+			entry.Extra = removeModelObservation(entry.Extra)
+		}
+		if entry.ContentPreview == nil {
+			if preview := extractPreviewFromProjectedParts(message.Parts); preview != "" {
+				if !idx.fullContent {
+					preview = truncateString(preview, defaults.ContentPreviewLimit)
+				}
+				entry.ContentPreview = &preview
+			}
+		}
+		parentIndex := entryIndex
+		entries = append(entries, entry)
+		entryIndex++
+		if idx.fullDepth {
+			for _, part := range message.Parts {
+				partEntry, include, err := idx.indexProjectedPart(session.SessionID, part, parentIndex, entryIndex, entry.Role, entry.ContentPreview)
+				if err != nil {
+					return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q part %q failed: %w; no partial entry set was stored; fix malformed part JSON and re-run harvest", session.SessionID, part.ID, err)
+				}
+				if !include {
+					continue
+				}
+				entries = append(entries, partEntry)
+				entryIndex++
+			}
+		}
+	}
+	return entries, nil
+}
+
+func inspectProjectedOpenCodeParts(parts []openCodeLegacyProjectionPart) (partInspection, error) {
+	var result partInspection
+	for _, projected := range parts {
+		var part openCodePartMinimal
+		if err := json.Unmarshal(projected.Data, &part); err != nil {
+			return partInspection{}, err
+		}
+		switch part.Type {
+		case "compaction", "subtask", "agent":
+			result.isSystemEntry = true
+		case "tool":
+			if part.Tool == "skill" {
+				name := ""
+				if part.State != nil {
+					name = part.State.Input.Name
+				}
+				if name == "" {
+					name = "unknown-skill"
+				}
+				if !strings.HasPrefix(name, "/") {
+					name = "/" + name
+				}
+				if result.skillName == "" {
+					result.skillName = name
+				}
+			} else {
+				result.toolPartCount++
+			}
+		default:
+			result.toolPartCount++
+		}
+	}
+	return result, nil
+}
+
+func extractPreviewFromProjectedParts(parts []openCodeLegacyProjectionPart) string {
+	for _, projected := range parts {
+		var part struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(projected.Data, &part) == nil && part.Type == "text" && part.Text != "" {
+			return part.Text
+		}
+	}
+	return ""
+}
+
+func (idx *OpenCodeIndexer) indexProjectedPart(sessionID SessionID, projected openCodeLegacyProjectionPart, parentIndex, entryIndex int, parentRole schema.Role, parentContent *string) (schema.SessionEntry, bool, error) {
+	var partMap map[string]any
+	if err := json.Unmarshal(projected.Data, &partMap); err != nil {
+		return schema.SessionEntry{}, false, err
+	}
+	entry := schema.SessionEntry{SessionID: sessionID, EntryIndex: entryIndex, Harness: HarnessOpenCode, Depth: 1, ParentIndex: &parentIndex}
+	rawLength := len(projected.Data)
+	entry.RawByteLength = &rawLength
+	partType, _ := partMap["type"].(string)
+	partTypeCopy := partType
+	entry.PartType = &partTypeCopy
+	switch partType {
+	case "tool_use":
+		entry.EntryType, entry.Role, entry.HasToolUse = EntryTypeToolUse, RoleAssistant, true
+		if value := marshalPartInput(partMap); value != "" {
+			entry.ToolInput = &value
+		}
+	case "tool_result":
+		entry.EntryType, entry.Role = EntryTypeToolResult, RoleTool
+		if value := marshalPartOutput(partMap); value != "" {
+			entry.ToolOutput = &value
+		}
+	case "text":
+		entry.EntryType, entry.Role = EntryTypeText, parentRole
+		text, _ := partMap["text"].(string)
+		if parentRole == RoleUser && parentContent != nil && *parentContent != "" && text == *parentContent {
+			return schema.SessionEntry{}, false, nil
+		}
+		if text != "" {
+			if !idx.fullContent {
+				text = truncateString(text, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &text
+		}
+	default:
+		entry.EntryType, entry.Role = EntryTypeText, parentRole
+		if partType == "reasoning" {
+			entry.EntryType, entry.HasThinking = EntryTypeThinking, true
+		}
+		text, _ := partMap["text"].(string)
+		if text != "" {
+			if !idx.fullContent {
+				text = truncateString(text, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &text
+		}
+	}
+	entryID := projected.ID
+	entry.EntryID = &entryID
+	if partType == "tool_use" || partType == "tool_result" {
+		entry.ToolCallID = &entryID
+	}
+	if partType == "tool_use" {
+		if toolName, ok := partMap["name"].(string); ok && toolName != "" {
+			entry.ToolNamesCSV = &toolName
+			if kind := classifyToolKind(toolName); kind != "" {
+				entry.ToolKind = &kind
+			}
+		}
+	}
+	return entry, true, nil
 }
 
 // IndexTranscript reads all msg_*.json files under the message directory for a session
 // and returns SessionEntry rows ordered by filename (alphabetical ≈ chronological).
 func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+		data, err := idx.fs.ReadFile(session.SourcePath.String())
+		if err != nil {
+			return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q failed while reading %q: %w; no entry rows were stored; re-run harvest to restore the managed artifact", session.SessionID, session.SourcePath, err)
+		}
+		return idx.indexLegacyProjection(session, data)
+	}
 	storageRoot := resolveStorageRoot(session)
 	msgDir := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), string(session.SessionID))
 

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -16,6 +17,34 @@ type SourceAdapter interface {
 	Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error)
 	// ExtractMetadata extracts UnifiedMetadata from a discovered session.
 	ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error)
+}
+
+// TranscriptMaterializer converts a typed provider source into the managed
+// transcript bytes Peasant stores. Most adapters ingest a transcript file
+// directly and do not implement this interface. It exists for sources such as
+// legacy OpenCode SQLite, where copying database bytes would not produce a
+// transcript.
+type TranscriptMaterializer interface {
+	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
+}
+
+// TranscriptOrigin identifies how a discovered session's managed transcript
+// must be obtained. The zero value preserves the existing file-copy behavior.
+type TranscriptOrigin uint8
+
+const (
+	TranscriptOriginFile TranscriptOrigin = iota
+	TranscriptOriginOpenCodeLegacySQLite
+)
+
+// Validate rejects unknown origins at the pipeline trust boundary.
+func (o TranscriptOrigin) Validate() error {
+	switch o {
+	case TranscriptOriginFile, TranscriptOriginOpenCodeLegacySQLite:
+		return nil
+	default:
+		return fmt.Errorf("transcript origin %d is outside the supported closed set", o)
+	}
 }
 
 // SourceConfig holds per-provider discovery configuration.
@@ -41,6 +70,7 @@ type DiscoveredSession struct {
 	CWD               string            // Working directory when session ran (optional, for git resolution fallback)
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction
+	TranscriptOrigin  TranscriptOrigin  // Typed materialization contract; zero means copy SourcePath as a transcript file.
 }
 
 // AdapterFactory creates a SourceAdapter with injected dependencies.
