@@ -205,7 +205,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				mutateLegacySQLiteMessageJSON(t, materialized.Path)
 				assertMalformedLegacyMaterializationIsActionable(t, materialized.Path, testCase.TargetSession)
 			}
-			setSyntheticSourceModTime(t, materialized.Path, time.Unix(1_700_001_000, 0))
+			setSyntheticSQLiteContentModTime(t, materialized.Path, time.Unix(1_700_001_000, 0))
 			before := mustReadFile(t, materialized.Path)
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
@@ -309,7 +309,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			}
 
 			mutateLegacySQLiteMessageVersion(t, materialized.Path)
-			setSyntheticSourceModTime(t, materialized.Path, time.Unix(1_700_002_000, 0))
+			setSyntheticSQLiteContentModTime(t, materialized.Path, time.Unix(1_700_002_000, 0))
 			setLocalIngestedTimestamp(t, databasePath, 1_700_001_500_000)
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil {

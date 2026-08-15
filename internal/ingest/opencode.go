@@ -13,7 +13,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 )
 
-// OpenCodeAdapter discovers and extracts metadata from OpenCode JSON sessions.
+// OpenCodeAdapter discovers OpenCode's legacy JSON sessions first. When JSON
+// yields no sessions, it may ingest the first eligible legacy SQLite candidate.
+// Mixed-representation precedence and session deduplication are deferred.
 type OpenCodeAdapter struct {
 	fs                   FileSystem
 	git                  GitResolver
@@ -58,9 +60,10 @@ func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAd
 	return configured
 }
 
-// NewOpenCodeAdapterWithCandidateProbe constructs the production JSON adapter
-// with explicit candidate-resolution dependencies. SQLite observations remain
-// evidence only and are never converted into discovered sessions.
+// NewOpenCodeAdapterWithCandidateProbe constructs the production adapter with
+// explicit candidate-resolution dependencies. Legacy JSON remains the first
+// discovery path; only a JSON-empty result activates the first eligible legacy
+// SQLite candidate in deterministic resolver order.
 func NewOpenCodeAdapterWithCandidateProbe(
 	fs FileSystem,
 	git GitResolver,
@@ -98,7 +101,11 @@ func (a *OpenCodeAdapter) Harness() Harness {
 	return HarnessOpenCode
 }
 
-// Discover reads project and session JSON files to find all sessions.
+// Discover reads legacy project/session JSON first. If that produces no
+// sessions, it searches candidate evidence in deterministic order and discovers
+// sessions from exactly the first eligible legacy SQLite source. It does not
+// union or deduplicate representations; broader mixed-source selection remains
+// deferred until a canonical cross-representation policy is implemented.
 //
 // For each path in cfg.Paths it expects an OpenCode storage layout:
 //
@@ -191,9 +198,8 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 			}
 		}
 	}
-	// Mixed-source precedence and deduplication are not defined here. Preserve
-	// the established JSON result unchanged whenever a valid JSON layout exists;
-	// legacy SQLite is eligible only for a SQLite-only root.
+	// Preserve the established JSON result unchanged whenever a valid JSON layout
+	// exists. Only a JSON-empty result activates the narrow legacy SQLite fallback.
 	if len(discovered) > 0 {
 		return discovered, nil
 	}
@@ -205,7 +211,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 		if err != nil {
 			return nil, err
 		}
-		discovered = append(discovered, sessions...)
+		return sessions, nil
 	}
 
 	return discovered, nil

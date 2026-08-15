@@ -1,11 +1,15 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -104,9 +108,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 				OriginalRoot:     ResolvedPath(filepath.Dir(candidate.Path)),
 				TranscriptOrigin: TranscriptOriginOpenCodeLegacySQLite,
 			}
-			if info, statErr := a.fs.Stat(candidate.Path); statErr == nil {
-				session.ModTime = info.ModTime()
-			}
 			discovered = append(discovered, session)
 		}
 		if page.Next == nil {
@@ -114,10 +115,48 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 		}
 		cursor = page.Next
 	}
+	if len(discovered) > 0 {
+		contentModTime, statErr := legacySQLiteContentModTime(a.fs, candidate.Path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		for index := range discovered {
+			discovered[index].ModTime = contentModTime
+		}
+	}
 	if closeErr := source.Close(ctx); closeErr != nil {
 		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while closing its bounded read connection: %w; no partial discovery result is eligible; retry after the source lock clears", candidate.Path, closeErr)
 	}
 	return discovered, nil
+}
+
+// legacySQLiteContentModTime returns the newest content-bearing source time.
+// SQLite's shared-memory sidecar contains reader coordination state rather than
+// committed transcript content and is deliberately never inspected here.
+func legacySQLiteContentModTime(filesystem FileSystem, databasePath string) (time.Time, error) {
+	databaseInfo, err := filesystem.Stat(databasePath)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("determine legacy OpenCode SQLite freshness for %q failed while inspecting the main database: %w; discovery cannot classify sessions safely without content evidence; verify the database still exists and is readable, then retry", databasePath, err)
+	}
+	modified := databaseInfo.ModTime()
+	walPath := databasePath + "-wal"
+	walInfo, err := filesystem.Stat(walPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return modified, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("determine legacy OpenCode SQLite freshness for %q failed while inspecting committed WAL freshness evidence at %q: %w; discovery cannot distinguish a current source from stale managed output; fix sidecar permissions or source accessibility and retry", databasePath, walPath, err)
+	}
+	// A zero-length or header-only WAL can be benign reader-created residue. It
+	// has no transaction frame and therefore is not content freshness evidence.
+	const sqliteWALHeaderBytes = 32
+	if walInfo.Size() <= sqliteWALHeaderBytes {
+		return modified, nil
+	}
+	if walInfo.ModTime().After(modified) {
+		modified = walInfo.ModTime()
+	}
+	return modified, nil
 }
 
 // MaterializeTranscript reads only the selected detached legacy rows and builds
@@ -354,11 +393,69 @@ func legacyEvidenceModel(evidence openCodeLegacyMessageEvidence) string {
 	return evidence.Model.ID
 }
 
+const openCodeLegacyProjectionEnvelopeLimit = 4096
+
+type openCodeManagedProjectionOpener interface {
+	Open(string) (io.ReadCloser, error)
+}
+
 func isOpenCodeLegacyProjection(data []byte, sessionID SessionID) bool {
-	var identity struct {
-		Format    string `json:"format"`
-		Version   int    `json:"version"`
-		SessionID string `json:"session_id"`
+	return readOpenCodeLegacyProjectionEnvelope(bytes.NewReader(data), sessionID)
+}
+
+func isManagedOpenCodeLegacyProjection(filesystem FileSystem, path string, sessionID SessionID) bool {
+	opener, ok := filesystem.(openCodeManagedProjectionOpener)
+	if !ok {
+		return false
 	}
-	return json.Unmarshal(data, &identity) == nil && identity.Format == openCodeLegacyProjectionFormat && identity.Version == openCodeLegacyProjectionVersion && identity.SessionID == string(sessionID)
+	reader, err := opener.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = reader.Close() }()
+	return readOpenCodeLegacyProjectionEnvelope(io.LimitReader(reader, openCodeLegacyProjectionEnvelopeLimit), sessionID)
+}
+
+func readOpenCodeLegacyProjectionEnvelope(reader io.Reader, sessionID SessionID) bool {
+	decoder := json.NewDecoder(reader)
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return false
+	}
+	var format, projectedSessionID string
+	var version int
+	seenFormat, seenVersion, seenSessionID := false, false, false
+	for decoder.More() {
+		keyToken, tokenErr := decoder.Token()
+		key, ok := keyToken.(string)
+		if tokenErr != nil || !ok {
+			return false
+		}
+		switch key {
+		case "format":
+			if decoder.Decode(&format) != nil {
+				return false
+			}
+			seenFormat = true
+		case "version":
+			if decoder.Decode(&version) != nil {
+				return false
+			}
+			seenVersion = true
+		case "session_id":
+			if decoder.Decode(&projectedSessionID) != nil {
+				return false
+			}
+			seenSessionID = true
+		case "messages":
+			messagesToken, messagesErr := decoder.Token()
+			return messagesErr == nil && messagesToken == json.Delim('[') && seenFormat && seenVersion && seenSessionID && format == openCodeLegacyProjectionFormat && version == openCodeLegacyProjectionVersion && projectedSessionID == string(sessionID)
+		default:
+			var discarded json.RawMessage
+			if decoder.Decode(&discarded) != nil {
+				return false
+			}
+		}
+	}
+	return false
 }

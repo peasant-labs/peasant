@@ -2173,12 +2173,17 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 		outputTranscriptPath = fmt.Sprintf("%s/%s/%s/%s--transcript.%s",
 			outputDir, hostSlug, sid, sid, string(sourceFormat))
 	}
+	transcriptOrigin := TranscriptOriginFile
+	if provider == HarnessOpenCode && sourceFormat == SourceFormatJSON && isManagedOpenCodeLegacyProjection(p.fs, outputTranscriptPath, sid) {
+		transcriptOrigin = TranscriptOriginOpenCodeLegacySQLite
+	}
 
 	return &DiscoveredSession{
-		SessionID:    sid,
-		SourcePath:   resolvedSrc,
-		SourceFormat: sourceFormat,
-		Harness:      provider,
+		SessionID:        sid,
+		SourcePath:       resolvedSrc,
+		SourceFormat:     sourceFormat,
+		Harness:          provider,
+		TranscriptOrigin: transcriptOrigin,
 	}, 0, outputTranscriptPath
 }
 
