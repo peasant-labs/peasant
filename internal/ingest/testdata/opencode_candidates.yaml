@@ -1,0 +1,177 @@
+declared_resolution_cases: 8
+resolution_cases:
+  - name: production-channel
+    channel: prod
+    environment: {}
+    paths: [opencode.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: local-channel
+    channel: local
+    environment: {}
+    paths: [opencode-local.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: sanitized-channel
+    channel: dev/feature@
+    environment: {}
+    paths: [opencode-dev-feature-.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: disabled-channel
+    channel: nightly
+    environment:
+      OPENCODE_DISABLE_CHANNEL_DB: "true"
+    paths: [opencode.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: disable-flag-is-upstream-case-sensitive
+    channel: nightly
+    environment:
+      OPENCODE_DISABLE_CHANNEL_DB: "TRUE"
+    paths: [opencode-nightly.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: relative-override-deduplicates-default
+    channel: latest
+    environment:
+      OPENCODE_DB: opencode.db
+    paths: [opencode.db, .]
+    provenance: [environment_override, legacy_json_root]
+  - name: absolute-override-precedes-default
+    channel: beta
+    environment:
+      OPENCODE_DB: /synthetic/../override.db
+    paths: [/synthetic/../override.db, opencode.db, .]
+    provenance: [environment_override, channel_database, legacy_json_root]
+  - name: memory-override-is-preserved-as-evidence-only
+    channel: latest
+    environment:
+      OPENCODE_DB: ":memory:"
+    paths: [":memory:", opencode.db, .]
+    provenance: [environment_override, channel_database, legacy_json_root]
+
+declared_probe_cases: 12
+forbidden_query_tokens:
+  - "select *"
+  - " offset "
+  - " from message"
+  - " from part"
+  - " from session_message"
+  - " from session "
+  - event
+  - delta
+  - input
+  - context
+  - migration
+  - attach
+  - "data "
+  - payload
+declared_allowed_query_statements: 5
+allowed_query_statements:
+  - name: enable-query-only
+    statement: "pragma query_only=on"
+  - name: read-query-only
+    statement: "pragma query_only"
+  - name: catalog-tables
+    statement: "select name from sqlite_schema where type = 'table' order by name limit 257"
+  - name: catalog-columns
+    statement: 'select name, "notnull", pk from pragma_table_info(?1) order by cid limit 33'
+  - name: catalog-indexes
+    statement: 'select il.name, il."unique", ii.seqno, ii.name from pragma_index_list(?1) as il join pragma_index_info(il.name) as ii order by il.name, ii.seqno limit 65'
+query_guard_mutation:
+  replace_statement: "select name from sqlite_schema where type = 'table' order by name limit 257"
+  replacement_statement: "select data from session_message limit 257"
+probe_cases:
+  - fixture: empty-valid
+    capability: none
+    support: unsupported
+  - fixture: legacy-message-part
+    capability: legacy_message_part
+    support: supported
+  - fixture: current-session-message
+    capability: current_session_message
+    support: supported
+  - fixture: hybrid-catalog
+    capability: hybrid
+    support: supported
+  - fixture: current-missing-seq
+    capability: none
+    support: partial
+  - fixture: current-nullable-seq
+    capability: none
+    support: partial
+  - fixture: unsupported-schema
+    capability: none
+    support: unsupported
+  - fixture: corrupt-non-sqlite
+    capability: none
+    support: corrupt
+  - fixture: wal-capable
+    capability: current_session_message
+    support: supported
+  - fixture: catalog-table-overflow
+    capability: none
+    support: partial
+    diagnostic: catalog_truncated
+    overflow_scope: tables
+    retained_rows: 256
+  - fixture: catalog-column-overflow
+    capability: none
+    support: partial
+    diagnostic: catalog_truncated
+    overflow_scope: columns
+    retained_rows: 32
+  - fixture: catalog-index-overflow
+    capability: none
+    support: partial
+    diagnostic: catalog_truncated
+    overflow_scope: indexes
+    retained_rows: 64
+
+declared_continuation_candidates: 4
+continuation_candidates:
+  - name: memory-is-not-file-evidence
+    path_template: memory
+    kind: sqlite
+    provenance: environment_override
+    expected_support: unsupported
+    expected_capability: none
+  - name: missing-candidate-remains-local
+    path_template: missing
+    kind: sqlite
+    provenance: channel_database
+    expected_support: unreadable
+    expected_capability: none
+  - name: valid-candidate-after-failures
+    path_template: fixture
+    fixture: legacy-message-part
+    kind: sqlite
+    provenance: channel_database
+    expected_support: supported
+    expected_capability: legacy_message_part
+  - name: legacy-root-after-failures
+    path_template: legacy_root
+    kind: legacy_json
+    provenance: legacy_json_root
+    expected_support: supported
+    expected_capability: none
+
+declared_closed_set_cases: 7
+closed_set_cases:
+  - name: empty-kind
+    field: kind
+    value: ""
+  - name: unknown-kind
+    field: kind
+    value: future_source
+  - name: empty-path
+    field: path
+    value: ""
+  - name: empty-provenance
+    field: provenance
+    value: ""
+  - name: unknown-provenance
+    field: provenance
+    value: ambient_guess
+  - name: empty-support
+    field: support
+    value: ""
+  - name: unknown-support
+    field: support
+    value: maybe_supported

@@ -1,0 +1,79 @@
+declared_denied_statements: 20
+denied_statements:
+  - name: insert-row
+    statement: "INSERT INTO session (id) VALUES ('forbidden')"
+    error_contains: forbidden SQLite action
+  - name: update-row
+    statement: "UPDATE session_message SET type = 'forbidden' WHERE id = 'sm_current_1'"
+    error_contains: forbidden SQLite action
+  - name: delete-row
+    statement: "DELETE FROM session_message WHERE id = 'sm_current_1'"
+    error_contains: forbidden SQLite action
+  - name: disable-query-only
+    statement: "PRAGMA query_only=OFF"
+    error_contains: forbidden SQLite action
+  - name: create-table
+    statement: "CREATE TABLE forbidden (id INTEGER)"
+    error_contains: forbidden SQLite action
+  - name: drop-table
+    statement: "DROP TABLE session_message"
+    error_contains: forbidden SQLite action
+  - name: create-index
+    statement: "CREATE INDEX forbidden_idx ON session_message(type)"
+    error_contains: forbidden SQLite action
+  - name: drop-index
+    statement: "DROP INDEX session_message_seq_idx"
+    error_contains: forbidden SQLite action
+  - name: migration-version
+    statement: "PRAGMA user_version=999"
+    error_contains: forbidden SQLite action
+  - name: begin-transaction
+    statement: "BEGIN IMMEDIATE"
+    error_contains: forbidden SQLite action
+  - name: savepoint
+    statement: "SAVEPOINT forbidden"
+    error_contains: forbidden SQLite action
+  - name: vacuum
+    statement: "VACUUM"
+    error_contains: forbidden SQLite action
+  - name: reindex
+    statement: "REINDEX"
+    error_contains: forbidden SQLite action
+  - name: analyze
+    statement: "ANALYZE"
+    error_contains: forbidden SQLite action
+  - name: integrity-maintenance
+    statement: "PRAGMA integrity_check"
+    error_contains: forbidden SQLite action
+  - name: quick-repair-check
+    statement: "PRAGMA quick_check"
+    error_contains: forbidden SQLite action
+  - name: writable-schema
+    statement: "PRAGMA writable_schema=ON"
+    error_contains: forbidden SQLite action
+  - name: checkpoint
+    statement: "PRAGMA wal_checkpoint(TRUNCATE)"
+    error_contains: forbidden SQLite action
+  - name: change-journal-mode
+    statement: "PRAGMA journal_mode=DELETE"
+    error_contains: forbidden SQLite action
+  - name: attach-database
+    statement: "ATTACH DATABASE ':memory:' AS forbidden"
+    error_contains: forbidden SQLite action
+forbidden_source_tokens:
+  - "os.WriteFile("
+  - "os.Create("
+  - "os.CreateTemp("
+  - "os.OpenFile("
+  - "os.Truncate("
+  - "os.Remove("
+  - "os.Rename("
+  - "os.Chmod("
+  - "os.Chtimes("
+  - "io.Copy("
+  - "sqlite.NewBackup("
+  - "sqlite.OpenReadWrite"
+  - "sqlite.OpenCreate"
+  - "sqlite.OpenWAL"
+  - "immutable=1"
+  - "nolock=1"

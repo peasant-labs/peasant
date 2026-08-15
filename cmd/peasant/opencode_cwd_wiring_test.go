@@ -1,17 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -249,6 +255,7 @@ func TestKickstartReuseFallsBackToRecordedOpenCodeDirectories(t *testing.T) {
 
 func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 	world := newMountedOpenCodeWorld(t)
+	sourceBefore := snapshotMountedOpenCodeJSON(t, world.root)
 	git := newMountedOpenCodeGitResolver(world.cloneA, world.cloneB)
 	cfg := mountedOpenCodeConfig(t, world.root)
 	cfg.Selection = config.SelectionConfig{
@@ -310,8 +317,136 @@ func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 	if selected.Error != nil || selected.OutputPath == "" || selected.Status != ingest.DiffNew {
 		t.Errorf("selected clone result = status %v output %q error %v, want ingested new session", selected.Status, selected.OutputPath, selected.Error)
 	}
+	sourceTranscript := filepath.Join(world.root, defaults.OpenCodeDirStorage.String(), defaults.OpenCodeDirSession.String(), world.projectA, world.sessionA+defaults.ExtJSON.String())
+	managedTranscript := filepath.Join(selected.OutputPath, world.sessionA+"--transcript."+string(ingest.SourceFormatJSON))
+	sourceBytes, err := os.ReadFile(sourceTranscript)
+	if err != nil {
+		t.Fatalf("read mounted legacy OpenCode source transcript: %v", err)
+	}
+	managedBytes, err := os.ReadFile(managedTranscript)
+	if err != nil {
+		t.Fatalf("read mounted legacy OpenCode managed transcript: %v", err)
+	}
+	if !bytes.Equal(managedBytes, sourceBytes) {
+		t.Errorf("managed legacy OpenCode transcript bytes differ from source: source=%q managed=%q", sourceBytes, managedBytes)
+	}
 	excluded := byID[ingest.SessionID(world.sessionB)]
 	if excluded.Error != nil || excluded.OutputPath != "" || excluded.Status != ingest.DiffUnchanged {
 		t.Errorf("unselected sibling result = status %v output %q error %v, want filtered unchanged result", excluded.Status, excluded.OutputPath, excluded.Error)
 	}
+	if sourceAfter := snapshotMountedOpenCodeJSON(t, world.root); !reflect.DeepEqual(sourceAfter, sourceBefore) {
+		t.Errorf("mounted legacy OpenCode JSON source bytes changed during harvest: before=%v after=%v", sourceBefore, sourceAfter)
+	}
+}
+
+func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) {
+	t.Parallel()
+	materialized := testfixture.MaterializeByName(t, "current-session-message")
+	sourceRoot := filepath.Dir(materialized.Path)
+
+	git := testutil.NoGitResolver()
+	filesystem := &observingOpenCodeFileSystem{OSFileSystem: &ingest.OSFileSystem{}}
+	inventory, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, sourceRoot), filesystem, git, nil, nil)
+	if !filesystem.Opened(materialized.Path) {
+		t.Fatalf("mounted kickstart production discovery did not resolve and header-probe configured OpenCode candidate %q; opened=%v", materialized.Path, filesystem.Paths())
+	}
+	if got := inventory[defaults.HarnessOpenCode].SessionCount; got != 0 || len(listings) != 0 {
+		t.Fatalf("kickstart exposed SQLite-only evidence: inventory=%d listings=%d", got, len(listings))
+	}
+
+	commandRoot := t.TempDir()
+	outputRoot := filepath.Join(commandRoot, "managed")
+	output, err := executeHarvestCmd(t, commandRoot, []string{
+		"--source-provider=" + defaults.HarnessOpenCode.String(),
+		"--source-path=" + sourceRoot,
+		"--output=" + outputRoot,
+		"--force",
+	})
+	if err != nil {
+		t.Fatalf("run mounted harvest CLI against SQLite-only evidence: %v\n%s", err, output)
+	}
+	managedEntries, err := os.ReadDir(outputRoot)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("inspect mounted harvest output: %v", err)
+	}
+	if len(managedEntries) != 0 {
+		t.Fatalf("SQLite-only evidence created %d managed output artifacts", len(managedEntries))
+	}
+
+	databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
+	localStore, err := store.Open(databasePath, store.WithPoolSize(1))
+	if err != nil {
+		t.Fatalf("open mounted harvest store: %v", err)
+	}
+	defer func() {
+		if err := localStore.Close(); err != nil {
+			t.Errorf("close mounted harvest store: %v", err)
+		}
+	}()
+	rows, err := localStore.ListSessionsFiltered(t.Context(), store.SessionListFilter{})
+	if err != nil {
+		t.Fatalf("list mounted harvest store rows: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("SQLite-only evidence created %d local session rows", len(rows))
+	}
+}
+
+type observingOpenCodeFileSystem struct {
+	*ingest.OSFileSystem
+	mu     sync.Mutex
+	opened []string
+}
+
+var _ ingest.FileSystem = (*observingOpenCodeFileSystem)(nil)
+var _ ingest.OpenCodeCandidateFileSystem = (*observingOpenCodeFileSystem)(nil)
+
+func (filesystem *observingOpenCodeFileSystem) Open(path string) (io.ReadCloser, error) {
+	filesystem.mu.Lock()
+	filesystem.opened = append(filesystem.opened, filepath.Clean(path))
+	filesystem.mu.Unlock()
+	return os.Open(path)
+}
+
+func (filesystem *observingOpenCodeFileSystem) Opened(path string) bool {
+	want := filepath.Clean(path)
+	for _, opened := range filesystem.Paths() {
+		if opened == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (filesystem *observingOpenCodeFileSystem) Paths() []string {
+	filesystem.mu.Lock()
+	defer filesystem.mu.Unlock()
+	return append([]string(nil), filesystem.opened...)
+}
+
+func snapshotMountedOpenCodeJSON(t testing.TB, root string) map[string]string {
+	t.Helper()
+	snapshot := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != defaults.ExtJSON.String() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		snapshot[relative] = string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot mounted OpenCode JSON source: %v", err)
+	}
+	return snapshot
 }

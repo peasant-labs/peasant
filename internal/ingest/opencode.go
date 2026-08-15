@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -14,16 +15,77 @@ import (
 
 // OpenCodeAdapter discovers and extracts metadata from OpenCode JSON sessions.
 type OpenCodeAdapter struct {
-	fs   FileSystem
-	git  GitResolver
-	salt salt.Salt
+	fs                   FileSystem
+	git                  GitResolver
+	salt                 salt.Salt
+	candidateChannel     string
+	candidateEnvironment OpenCodeEnvironmentLookup
+	candidateProber      *OpenCodeCandidateProber
+	candidateMu          sync.Mutex
+	candidateEvidence    []OpenCodeProbeResult
 }
 
 var _ SourceAdapter = (*OpenCodeAdapter)(nil)
 
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
 func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {
-	return &OpenCodeAdapter{fs: fs, git: git, salt: s}
+	adapter := &OpenCodeAdapter{fs: fs, git: git, salt: s}
+	candidateFS, ok := fs.(OpenCodeCandidateFileSystem)
+	if !ok {
+		return adapter
+	}
+	environment := SystemOpenCodeEnvironment()
+	channel := "latest"
+	if configuredChannel, exists := environment.LookupEnv(openCodeInstallationChannelEnv); exists && strings.TrimSpace(configuredChannel) != "" {
+		channel = configuredChannel
+	}
+	configured, err := NewOpenCodeAdapterWithCandidateProbe(
+		fs,
+		git,
+		s,
+		channel,
+		environment,
+		candidateFS,
+		OpenOpenCodeSQLiteSource,
+		DefaultOpenCodeSQLiteSourceOptions(),
+	)
+	if err != nil {
+		return adapter
+	}
+	return configured
+}
+
+// NewOpenCodeAdapterWithCandidateProbe constructs the production JSON adapter
+// with explicit candidate-resolution dependencies. SQLite observations remain
+// evidence only and are never converted into discovered sessions.
+func NewOpenCodeAdapterWithCandidateProbe(
+	fs FileSystem,
+	git GitResolver,
+	s salt.Salt,
+	channel string,
+	environment OpenCodeEnvironmentLookup,
+	candidateFS OpenCodeCandidateFileSystem,
+	opener OpenCodeSQLiteSourceOpener,
+	options OpenCodeSQLiteSourceOptions,
+) (*OpenCodeAdapter, error) {
+	if strings.TrimSpace(channel) == "" {
+		return nil, fmt.Errorf("construct OpenCode adapter candidate probe failed before discovery: installation channel is empty, so database naming cannot match upstream; no source was accessed; inject the compiled OpenCode channel")
+	}
+	if environment == nil {
+		return nil, fmt.Errorf("construct OpenCode adapter candidate probe failed before discovery: environment lookup is nil, so override and channel-disable behavior cannot be resolved; no source was accessed; inject an environment lookup")
+	}
+	prober, err := NewOpenCodeCandidateProber(candidateFS, opener, options)
+	if err != nil {
+		return nil, err
+	}
+	return &OpenCodeAdapter{
+		fs:                   fs,
+		git:                  git,
+		salt:                 s,
+		candidateChannel:     channel,
+		candidateEnvironment: environment,
+		candidateProber:      prober,
+	}, nil
 }
 
 // Harness returns HarnessOpenCode.
@@ -40,6 +102,7 @@ func (a *OpenCodeAdapter) Harness() Harness {
 //
 // Sessions with a non-empty parentID are linked via ParentUUID.
 func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
+	a.inspectCandidates(ctx, cfg.Paths)
 	var discovered []DiscoveredSession
 
 	for _, root := range cfg.Paths {
@@ -125,6 +188,61 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 	}
 
 	return discovered, nil
+}
+
+// CandidateEvidence returns a detached snapshot from the most recent discovery.
+// The evidence is diagnostic only and carries no ingestion eligibility.
+func (a *OpenCodeAdapter) CandidateEvidence() []OpenCodeProbeResult {
+	a.candidateMu.Lock()
+	defer a.candidateMu.Unlock()
+	return cloneOpenCodeProbeResults(a.candidateEvidence)
+}
+
+func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) {
+	if a.candidateProber == nil {
+		return
+	}
+	candidates := make([]OpenCodeCandidate, 0, len(roots)*3)
+	seen := make(map[string]struct{}, len(roots)*3)
+	for _, root := range roots {
+		resolved, err := ResolveOpenCodeCandidates(root.String(), a.candidateChannel, a.candidateEnvironment)
+		if err != nil {
+			continue
+		}
+		for _, candidate := range resolved {
+			key := string(candidate.Kind) + "\x00" + filepath.Clean(candidate.Path)
+			if candidate.Path == ":memory:" {
+				key = string(candidate.Kind) + "\x00:memory:"
+			}
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			candidates = append(candidates, candidate)
+		}
+	}
+	evidence := a.candidateProber.Probe(ctx, candidates)
+	a.candidateMu.Lock()
+	a.candidateEvidence = cloneOpenCodeProbeResults(evidence)
+	a.candidateMu.Unlock()
+}
+
+func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeResult {
+	cloned := make([]OpenCodeProbeResult, len(results))
+	for index, result := range results {
+		cloned[index] = result
+		cloned[index].Diagnostics = append([]OpenCodeProbeDiagnostic(nil), result.Diagnostics...)
+		cloned[index].Evidence.Tables = append([]string(nil), result.Evidence.Tables...)
+		cloned[index].Evidence.LegacyMessageColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.LegacyMessageColumns...)
+		cloned[index].Evidence.LegacyPartColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.LegacyPartColumns...)
+		cloned[index].Evidence.CurrentMessageColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.CurrentMessageColumns...)
+		cloned[index].Evidence.CurrentIndexes = make([]OpenCodeIndexEvidence, len(result.Evidence.CurrentIndexes))
+		for evidenceIndex, indexEvidence := range result.Evidence.CurrentIndexes {
+			cloned[index].Evidence.CurrentIndexes[evidenceIndex] = indexEvidence
+			cloned[index].Evidence.CurrentIndexes[evidenceIndex].Columns = append([]string(nil), indexEvidence.Columns...)
+		}
+	}
+	return cloned
 }
 
 // ExtractMetadata builds UnifiedMetadata from session + message files.

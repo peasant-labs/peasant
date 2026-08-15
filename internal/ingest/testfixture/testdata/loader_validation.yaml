@@ -1,0 +1,38 @@
+declared_cases: 12
+cases:
+  - name: unknown-field
+    mutation: unknown_field
+    error_contains: field unexpected not found
+  - name: trailing-document
+    mutation: trailing_document
+    error_contains: expected exactly one YAML document
+  - name: declared-count-drift
+    mutation: declared_count
+    error_contains: fixture row guard
+  - name: duplicate-case-name
+    mutation: duplicate_name
+    error_contains: duplicate case name
+  - name: missing-case-name
+    mutation: missing_name
+    error_contains: case name is required
+  - name: absolute-logical-path
+    mutation: absolute_path
+    error_contains: clean relative slash-separated path
+  - name: traversing-logical-path
+    mutation: traversing_path
+    error_contains: contains an unsafe component
+  - name: declared-row-drift
+    mutation: declared_rows
+    error_contains: row guard
+  - name: missing-required-row-field
+    mutation: missing_row_field
+    error_contains: session_id is required
+  - name: declared-history-row-drift
+    mutation: history_rows
+    error_contains: row guard
+  - name: duplicate-history-row
+    mutation: duplicate_history
+    error_contains: duplicate ignored history id
+  - name: unknown-history-kind
+    mutation: unknown_history
+    error_contains: unknown ignored history kind
