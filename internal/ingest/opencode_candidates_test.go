@@ -6,10 +6,15 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +31,7 @@ const (
 	expectedOpenCodeResolutionCases = 8
 	expectedOpenCodeProbeCases      = 12
 	expectedContinuationCandidates  = 4
-	expectedClosedSetCases          = 6
+	expectedClosedSetCases          = 7
 )
 
 //go:embed testdata/opencode_candidates.yaml
@@ -84,6 +89,7 @@ type openCodeClosedSetField string
 
 const (
 	openCodeClosedSetKind       openCodeClosedSetField = "kind"
+	openCodeClosedSetPath       openCodeClosedSetField = "path"
 	openCodeClosedSetProvenance openCodeClosedSetField = "provenance"
 	openCodeClosedSetSupport    openCodeClosedSetField = "support"
 )
@@ -131,8 +137,10 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		t.Fatal("OpenCode probe fixture must declare forbidden query-shape tokens")
 	}
 	seenTokens := make(map[string]bool, len(fixture.ForbiddenQueryTokens))
-	for _, token := range fixture.ForbiddenQueryTokens {
-		if token == "" || seenTokens[token] {
+	for index, token := range fixture.ForbiddenQueryTokens {
+		token = strings.ToLower(token)
+		fixture.ForbiddenQueryTokens[index] = token
+		if strings.TrimSpace(token) == "" || seenTokens[token] {
 			t.Fatalf("OpenCode probe fixture has an empty or duplicate forbidden query token %q", token)
 		}
 		seenTokens[token] = true
@@ -188,13 +196,80 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode closed-set fixture case is incomplete or duplicated: %+v", closedCase)
 		}
 		switch closedCase.Field {
-		case openCodeClosedSetKind, openCodeClosedSetProvenance, openCodeClosedSetSupport:
+		case openCodeClosedSetKind, openCodeClosedSetPath, openCodeClosedSetProvenance, openCodeClosedSetSupport:
 		default:
 			t.Fatalf("OpenCode closed-set fixture %q has unknown field %q", closedCase.Name, closedCase.Field)
 		}
 		seenClosed[closedCase.Name] = true
 	}
 	return fixture
+}
+
+func TestOpenCodeProductionQueriesExcludeFixtureForbiddenTokens(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve OpenCode candidate query guard location")
+	}
+	directory := filepath.Dir(currentFile)
+	production := []string{
+		filepath.Join(directory, "opencode_candidates.go"),
+		filepath.Join(directory, "opencode_sqlite_source_zombiezen.go"),
+	}
+	var statements []string
+	for _, filename := range production {
+		statements = append(statements, extractOpenCodeProductionQueryLiterals(t, filename)...)
+	}
+	if len(statements) == 0 {
+		t.Fatal("OpenCode production query guard extracted no SQL or PRAGMA statements")
+	}
+	if violations := findOpenCodeForbiddenQueryTokens(statements, fixture.ForbiddenQueryTokens); len(violations) != 0 {
+		t.Errorf("OpenCode production query literals contain fixture-forbidden tokens: %v", violations)
+	}
+
+	control := strings.Join(fixture.ForbiddenQueryTokens, "\n")
+	if violations := findOpenCodeForbiddenQueryTokens([]string{control}, fixture.ForbiddenQueryTokens); len(violations) != len(fixture.ForbiddenQueryTokens) {
+		t.Fatalf("OpenCode query-shape guard is vacuous: controlled bad source triggered %d of %d fixture tokens", len(violations), len(fixture.ForbiddenQueryTokens))
+	}
+}
+
+func extractOpenCodeProductionQueryLiterals(t testing.TB, filename string) []string {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
+	if err != nil {
+		t.Fatalf("parse OpenCode production source %q for query literals: %v", filename, err)
+	}
+	var statements []string
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, unquoteErr := strconv.Unquote(literal.Value)
+		if unquoteErr != nil {
+			t.Fatalf("unquote OpenCode production string literal in %q: %v", filename, unquoteErr)
+		}
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if strings.HasPrefix(normalized, "select ") || strings.HasPrefix(normalized, "pragma ") {
+			statements = append(statements, normalized)
+		}
+		return true
+	})
+	return statements
+}
+
+func findOpenCodeForbiddenQueryTokens(statements, forbidden []string) []string {
+	var violations []string
+	for _, statement := range statements {
+		normalized := strings.ToLower(statement)
+		for _, token := range forbidden {
+			if strings.Contains(normalized, strings.ToLower(token)) {
+				violations = append(violations, token)
+			}
+		}
+	}
+	return violations
 }
 
 func TestResolveOpenCodeCandidatesMatchesUpstreamPrecedence(t *testing.T) {
@@ -393,15 +468,18 @@ func TestOpenCodeProductionAdapterMountsTypedCandidateEvidenceWithoutSessions(t 
 func TestOpenCodeClosedSetsRejectFixtureBackedInvalidValues(t *testing.T) {
 	t.Parallel()
 	fixture := loadOpenCodeCandidateFixture(t)
-	prober, err := ingest.NewOpenCodeCandidateProber(&boundedHeaderFileSystem{info: syntheticRegularFileInfo{}, reader: io.NopCloser(strings.NewReader("unused"))}, func(context.Context, ingest.OpenCodeSQLiteSourcePath, ingest.OpenCodeSQLiteSourceOptions) (ingest.OpenCodeSQLiteSource, error) {
-		return nil, fmt.Errorf("closed-set validation unexpectedly reached source open")
-	}, ingest.DefaultOpenCodeSQLiteSourceOptions())
-	if err != nil {
-		t.Fatalf("construct closed-set boundary prober: %v", err)
-	}
 	for _, fixtureCase := range fixture.ClosedSetCases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
+			filesystem := &boundedHeaderFileSystem{info: syntheticRegularFileInfo{}, reader: io.NopCloser(strings.NewReader("unused"))}
+			sourceOpenCalls := 0
+			prober, err := ingest.NewOpenCodeCandidateProber(filesystem, func(context.Context, ingest.OpenCodeSQLiteSourcePath, ingest.OpenCodeSQLiteSourceOptions) (ingest.OpenCodeSQLiteSource, error) {
+				sourceOpenCalls++
+				return nil, fmt.Errorf("closed-set validation unexpectedly reached source open")
+			}, ingest.DefaultOpenCodeSQLiteSourceOptions())
+			if err != nil {
+				t.Fatalf("construct closed-set boundary prober: %v", err)
+			}
 			switch fixtureCase.Field {
 			case openCodeClosedSetKind:
 				candidate := ingest.OpenCodeCandidate{Path: "/synthetic/opencode.db", Kind: ingest.OpenCodeSourceKind(fixtureCase.Value), Provenance: ingest.OpenCodeCandidateChannel}
@@ -410,6 +488,19 @@ func TestOpenCodeClosedSetsRejectFixtureBackedInvalidValues(t *testing.T) {
 					t.Fatalf("invalid kind probe result = %+v, want typed invalid-candidate diagnostic", result)
 				}
 				assertOpenCodeDiagnosticsActionable(t, result.Diagnostics)
+			case openCodeClosedSetPath:
+				candidate := ingest.OpenCodeCandidate{Path: fixtureCase.Value, Kind: ingest.OpenCodeSourceSQLite, Provenance: ingest.OpenCodeCandidateChannel}
+				result := prober.Probe(t.Context(), []ingest.OpenCodeCandidate{candidate})[0]
+				if result.Support != ingest.OpenCodeSupportUnsupported || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != ingest.OpenCodeDiagnosticInvalidCandidate {
+					t.Fatalf("invalid path probe result = %+v, want one typed invalid-candidate diagnostic", result)
+				}
+				assertOpenCodeDiagnosticsActionable(t, result.Diagnostics)
+				if result.Diagnostics[0].Where != "OpenCode candidate with empty path" {
+					t.Errorf("empty-path diagnostic location = %q, want explicit candidate boundary", result.Diagnostics[0].Where)
+				}
+				if filesystem.statCalls != 0 || filesystem.openCalls != 0 || sourceOpenCalls != 0 {
+					t.Fatalf("empty-path validation accessed dependencies: stat=%d file-open=%d source-open=%d", filesystem.statCalls, filesystem.openCalls, sourceOpenCalls)
+				}
 			case openCodeClosedSetProvenance:
 				candidate := ingest.OpenCodeCandidate{Path: "/synthetic/opencode.db", Kind: ingest.OpenCodeSourceSQLite, Provenance: ingest.OpenCodeCandidateProvenance(fixtureCase.Value)}
 				result := prober.Probe(t.Context(), []ingest.OpenCodeCandidate{candidate})[0]
@@ -483,12 +574,16 @@ type boundedHeaderFileSystem struct {
 	info      os.FileInfo
 	reader    io.ReadCloser
 	bytesRead int
+	statCalls int
+	openCalls int
 }
 
 func (filesystem *boundedHeaderFileSystem) Stat(string) (os.FileInfo, error) {
+	filesystem.statCalls++
 	return filesystem.info, nil
 }
 func (filesystem *boundedHeaderFileSystem) Open(string) (io.ReadCloser, error) {
+	filesystem.openCalls++
 	return &countingReadCloser{ReadCloser: filesystem.reader, count: &filesystem.bytesRead}, nil
 }
 

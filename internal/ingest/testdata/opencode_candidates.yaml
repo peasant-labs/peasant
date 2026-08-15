@@ -137,7 +137,7 @@ continuation_candidates:
     expected_support: supported
     expected_capability: none
 
-declared_closed_set_cases: 6
+declared_closed_set_cases: 7
 closed_set_cases:
   - name: empty-kind
     field: kind
@@ -145,6 +145,9 @@ closed_set_cases:
   - name: unknown-kind
     field: kind
     value: future_source
+  - name: empty-path
+    field: path
+    value: ""
   - name: empty-provenance
     field: provenance
     value: ""

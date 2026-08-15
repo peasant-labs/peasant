@@ -339,11 +339,15 @@ func (p *OpenCodeCandidateProber) Probe(ctx context.Context, candidates []OpenCo
 
 func (p *OpenCodeCandidateProber) probeCandidate(ctx context.Context, candidate OpenCodeCandidate) OpenCodeProbeResult {
 	result := OpenCodeProbeResult{Candidate: candidate, Capability: OpenCodeCapabilityNone}
+	diagnosticLocation := candidate.Path
+	if diagnosticLocation == "" {
+		diagnosticLocation = "OpenCode candidate with empty path"
+	}
 	if err := candidate.Validate(); err != nil {
-		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate typed contract is invalid", err.Error(), candidate.Path, "before filesystem inspection", "the candidate cannot provide attributable source evidence", "construct candidates through ResolveOpenCodeCandidates or NewOpenCodeCandidate")
+		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate typed contract is invalid", err.Error(), diagnosticLocation, "before filesystem inspection", "the candidate cannot provide attributable source evidence", "construct candidates through ResolveOpenCodeCandidates or NewOpenCodeCandidate")
 	}
 	if candidate.Path == "" || candidate.Path == ":memory:" || !filepath.IsAbs(candidate.Path) {
-		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate path is not production filesystem evidence", fmt.Sprintf("path %q is empty, relative, or in-memory", candidate.Path), candidate.Path, "before filesystem inspection", "the candidate cannot identify a durable OpenCode-owned file or directory", "use an absolute filesystem path; reserve :memory: only for upstream tests")
+		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate path is not production filesystem evidence", fmt.Sprintf("path %q is empty, relative, or in-memory", candidate.Path), diagnosticLocation, "before filesystem inspection", "the candidate cannot identify a durable OpenCode-owned file or directory", "use an absolute filesystem path; reserve :memory: only for upstream tests")
 	}
 
 	info, err := p.fs.Stat(candidate.Path)
