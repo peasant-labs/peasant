@@ -172,16 +172,22 @@ func (s *zombiezenOpenCodeSQLiteSource) Catalog(ctx context.Context) (OpenCodeSc
 func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (OpenCodeSchemaEvidence, error) {
 	var evidence OpenCodeSchemaEvidence
 	tables := make(map[string]bool)
-	catalogSQL := fmt.Sprintf("SELECT name, type FROM sqlite_schema WHERE type IN ('table','index') ORDER BY type, name LIMIT %d", openCodeCatalogRowLimit)
+	catalogSQL := fmt.Sprintf("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT %d", openCodeCatalogRowLimit+1)
+	tableOverflow := false
 	if err := s.executeRowsLocked(ctx, catalogSQL, nil, func(stmt *sqlite.Stmt) error {
-		if stmt.ColumnText(1) == "table" {
-			name := stmt.ColumnText(0)
-			tables[name] = true
-			evidence.Tables = append(evidence.Tables, name)
+		if len(evidence.Tables) == openCodeCatalogRowLimit {
+			tableOverflow = true
+			return nil
 		}
+		name := stmt.ColumnText(0)
+		tables[name] = true
+		evidence.Tables = append(evidence.Tables, name)
 		return nil
 	}); err != nil {
-		return evidence, fmt.Errorf("read sqlite_schema name/type projection with %d-row limit: %w", openCodeCatalogRowLimit, err)
+		return evidence, fmt.Errorf("read sqlite_schema table-name projection with %d-row retained limit: %w", openCodeCatalogRowLimit, err)
+	}
+	if tableOverflow {
+		return evidence, &OpenCodeCatalogOverflowError{Scope: OpenCodeCatalogTables, Limit: openCodeCatalogRowLimit}
 	}
 	sort.Strings(evidence.Tables)
 
@@ -212,9 +218,14 @@ func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (Open
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table string) ([]OpenCodeColumnEvidence, error) {
-	query := fmt.Sprintf("SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT %d", openCodeColumnRowLimit)
+	query := fmt.Sprintf("SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT %d", openCodeColumnRowLimit+1)
 	columns := make([]OpenCodeColumnEvidence, 0)
+	overflow := false
 	err := s.executeRowsLocked(ctx, query, []any{table}, func(stmt *sqlite.Stmt) error {
+		if len(columns) == openCodeColumnRowLimit {
+			overflow = true
+			return nil
+		}
 		columns = append(columns, OpenCodeColumnEvidence{
 			Name:    stmt.ColumnText(0),
 			NotNull: stmt.ColumnInt64(1) != 0,
@@ -223,16 +234,26 @@ func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table
 		return nil
 	})
 	if err != nil {
-		return columns, fmt.Errorf("read pragma_table_info explicit columns for %q with %d-row limit: %w", table, openCodeColumnRowLimit, err)
+		return columns, fmt.Errorf("read pragma_table_info explicit columns for %q with %d-row retained limit: %w", table, openCodeColumnRowLimit, err)
+	}
+	if overflow {
+		return columns, &OpenCodeCatalogOverflowError{Scope: OpenCodeCatalogColumns, Table: table, Limit: openCodeColumnRowLimit}
 	}
 	return columns, nil
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) indexesLocked(ctx context.Context, table string) ([]OpenCodeIndexEvidence, error) {
-	query := fmt.Sprintf("SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT %d", openCodeIndexRowLimit)
+	query := fmt.Sprintf("SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT %d", openCodeIndexRowLimit+1)
 	indexes := make([]OpenCodeIndexEvidence, 0)
 	byName := make(map[string]int)
+	rowCount := 0
+	overflow := false
 	err := s.executeRowsLocked(ctx, query, []any{table}, func(stmt *sqlite.Stmt) error {
+		if rowCount == openCodeIndexRowLimit {
+			overflow = true
+			return nil
+		}
+		rowCount++
 		name := stmt.ColumnText(0)
 		index, ok := byName[name]
 		if !ok {
@@ -244,7 +265,10 @@ func (s *zombiezenOpenCodeSQLiteSource) indexesLocked(ctx context.Context, table
 		return nil
 	})
 	if err != nil {
-		return indexes, fmt.Errorf("read index-list/index-info explicit columns for %q with %d-row limit: %w", table, openCodeIndexRowLimit, err)
+		return indexes, fmt.Errorf("read index-list/index-info explicit columns for %q with %d-row retained limit: %w", table, openCodeIndexRowLimit, err)
+	}
+	if overflow {
+		return indexes, &OpenCodeCatalogOverflowError{Scope: OpenCodeCatalogIndexes, Table: table, Limit: openCodeIndexRowLimit}
 	}
 	return indexes, nil
 }

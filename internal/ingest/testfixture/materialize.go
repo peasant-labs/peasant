@@ -70,6 +70,12 @@ func materialize(t testing.TB, fixtureCase caseSpec) MaterializedSource {
 		indexes: append([]string(nil), fixtureCase.ExpectedCatalog.Indexes...),
 		seq:     fixtureCase.ExpectedCatalog.Seq,
 	}
+	for index := 0; index < fixtureCase.CatalogPadding.Tables; index++ {
+		expected.tables = append(expected.tables, fmt.Sprintf("padding_table_%03d", index))
+	}
+	for index := 0; index < fixtureCase.CatalogPadding.Indexes; index++ {
+		expected.indexes = append(expected.indexes, fmt.Sprintf("padding_index_%03d", index))
+	}
 	if fixtureCase.Format == sourceFormatCorrupt {
 		if err := os.WriteFile(destination, corruptBytes(fixtureCase.Corruption), 0o600); err != nil {
 			t.Fatalf("materialize synthetic OpenCode source %q: write corrupt synthetic file: %v", fixtureCase.Name, err)
@@ -239,8 +245,33 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	if err := createHistoryTables(conn, fixtureCase.IgnoredHistory); err != nil {
 		return err
 	}
+	if err := applyCatalogPadding(conn, fixtureCase.CatalogPadding); err != nil {
+		return err
+	}
 	if err := insertHistoryRows(conn, fixtureCase.IgnoredHistory); err != nil {
 		return err
+	}
+	return nil
+}
+
+func applyCatalogPadding(conn *sqlite.Conn, padding catalogPaddingSpec) error {
+	for index := 0; index < padding.Tables; index++ {
+		statement := fmt.Sprintf("CREATE TABLE padding_table_%03d (id INTEGER)", index)
+		if err := sqlitex.ExecuteTransient(conn, statement, nil); err != nil {
+			return fmt.Errorf("create synthetic catalog padding table %d: %w", index, err)
+		}
+	}
+	for index := 0; index < padding.Columns; index++ {
+		statement := fmt.Sprintf("ALTER TABLE session_message ADD COLUMN padding_column_%03d TEXT", index)
+		if err := sqlitex.ExecuteTransient(conn, statement, nil); err != nil {
+			return fmt.Errorf("create synthetic catalog padding column %d: %w", index, err)
+		}
+	}
+	for index := 0; index < padding.Indexes; index++ {
+		statement := fmt.Sprintf("CREATE INDEX padding_index_%03d ON session_message(type)", index)
+		if err := sqlitex.ExecuteTransient(conn, statement, nil); err != nil {
+			return fmt.Errorf("create synthetic catalog padding index %d: %w", index, err)
+		}
 	}
 	return nil
 }

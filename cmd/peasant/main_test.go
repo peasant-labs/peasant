@@ -40,6 +40,9 @@ func TestMain(m *testing.M) {
 	os.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	os.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	os.Setenv("OPENCODE_DB", "")
+	os.Setenv("OPENCODE_DISABLE_CHANNEL_DB", "")
+	os.Setenv("OPENCODE_CHANNEL", "latest")
 	os.Setenv(store.EnvPoolSize, "1")
 	// Small staging arena: harvest/ingest commands otherwise allocate the 2 GiB
 	// production slab per run, which is the dominant race-test memory cost.

@@ -8,6 +8,31 @@ import (
 	"time"
 )
 
+// OpenCodeCatalogScope identifies one bounded catalog projection.
+type OpenCodeCatalogScope string
+
+const (
+	OpenCodeCatalogTables  OpenCodeCatalogScope = "tables"
+	OpenCodeCatalogColumns OpenCodeCatalogScope = "columns"
+	OpenCodeCatalogIndexes OpenCodeCatalogScope = "indexes"
+)
+
+// OpenCodeCatalogOverflowError reports that a bounded catalog projection
+// contained a sentinel row beyond the retained evidence limit.
+type OpenCodeCatalogOverflowError struct {
+	Scope OpenCodeCatalogScope
+	Table string
+	Limit int
+}
+
+func (e *OpenCodeCatalogOverflowError) Error() string {
+	location := string(e.Scope)
+	if e.Table != "" {
+		location += " for table " + e.Table
+	}
+	return fmt.Sprintf("bounded OpenCode catalog %s contained more than %d rows; retained evidence is incomplete", location, e.Limit)
+}
+
 const (
 	defaultOpenCodeSQLiteBusyTimeout  = 250 * time.Millisecond
 	defaultOpenCodeSQLiteQueryTimeout = 5 * time.Second
@@ -104,8 +129,8 @@ func (systemOpenCodeSQLiteDeadlineClock) WithTimeout(parent context.Context, tim
 	return context.WithTimeout(parent, timeout)
 }
 
-// OpenCodeSQLiteSource exposes only the bounded catalog evidence required by
-// M0 candidate probing and bounded cleanup. It deliberately provides no raw
+// OpenCodeSQLiteSource exposes only bounded candidate catalog evidence and
+// bounded cleanup. It deliberately provides no raw
 // connection, SQL, arguments, transactions, transcript rows, or callbacks.
 type OpenCodeSQLiteSource interface {
 	Catalog(context.Context) (OpenCodeSchemaEvidence, error)

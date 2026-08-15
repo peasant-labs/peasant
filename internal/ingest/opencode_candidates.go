@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	openCodeDatabaseOverrideEnv = "OPENCODE_DB"
-	openCodeDisableChannelEnv   = "OPENCODE_DISABLE_CHANNEL_DB"
-	openCodeSQLiteHeader        = "SQLite format 3\x00"
-	openCodeCatalogRowLimit     = 256
-	openCodeColumnRowLimit      = 32
-	openCodeIndexRowLimit       = 64
+	openCodeDatabaseOverrideEnv    = "OPENCODE_DB"
+	openCodeDisableChannelEnv      = "OPENCODE_DISABLE_CHANNEL_DB"
+	openCodeInstallationChannelEnv = "OPENCODE_CHANNEL"
+	openCodeSQLiteHeader           = "SQLite format 3\x00"
+	openCodeCatalogRowLimit        = 256
+	openCodeColumnRowLimit         = 32
+	openCodeIndexRowLimit          = 64
 )
 
 // OpenCodeSourceKind identifies the physical source without implying whether
@@ -80,6 +81,7 @@ const (
 	OpenCodeDiagnosticInvalidHeader     OpenCodeProbeDiagnosticCode = "invalid_sqlite_header"
 	OpenCodeDiagnosticSourceOpenFailed  OpenCodeProbeDiagnosticCode = "source_open_failed"
 	OpenCodeDiagnosticCatalogReadFailed OpenCodeProbeDiagnosticCode = "catalog_read_failed"
+	OpenCodeDiagnosticCatalogTruncated  OpenCodeProbeDiagnosticCode = "catalog_truncated"
 	OpenCodeDiagnosticSchemaIncomplete  OpenCodeProbeDiagnosticCode = "schema_incomplete"
 )
 
@@ -89,6 +91,75 @@ type OpenCodeCandidate struct {
 	Path       string
 	Kind       OpenCodeSourceKind
 	Provenance OpenCodeCandidateProvenance
+}
+
+// NewOpenCodeCandidate validates a typed candidate without inspecting it.
+func NewOpenCodeCandidate(path string, kind OpenCodeSourceKind, provenance OpenCodeCandidateProvenance) (OpenCodeCandidate, error) {
+	candidate := OpenCodeCandidate{Path: path, Kind: kind, Provenance: provenance}
+	if err := candidate.Validate(); err != nil {
+		return OpenCodeCandidate{}, err
+	}
+	return candidate, nil
+}
+
+// Validate rejects unknown or inconsistent closed-set candidate values.
+func (c OpenCodeCandidate) Validate() error {
+	if err := c.Kind.Validate(); err != nil {
+		return fmt.Errorf("validate OpenCode candidate %q failed before filesystem inspection: %w; no source was accessed; construct the candidate with a supported source kind", c.Path, err)
+	}
+	if err := c.Provenance.Validate(); err != nil {
+		return fmt.Errorf("validate OpenCode candidate %q failed before filesystem inspection: %w; no source was accessed; construct the candidate with resolver-owned provenance", c.Path, err)
+	}
+	if c.Path == "" {
+		return fmt.Errorf("validate OpenCode candidate failed before filesystem inspection: path is empty, so the source cannot be attributed or inspected; no source was accessed; provide the resolved candidate path")
+	}
+	if c.Kind == OpenCodeSourceLegacyJSON && c.Provenance != OpenCodeCandidateLegacyJSONRoot {
+		return fmt.Errorf("validate OpenCode candidate %q failed before filesystem inspection: legacy JSON kind has incompatible provenance %q; no source was accessed; use legacy_json_root provenance for legacy discovery", c.Path, c.Provenance)
+	}
+	if c.Kind == OpenCodeSourceSQLite && c.Provenance == OpenCodeCandidateLegacyJSONRoot {
+		return fmt.Errorf("validate OpenCode candidate %q failed before filesystem inspection: SQLite kind has incompatible legacy-root provenance; no source was accessed; use environment_override or channel_database provenance", c.Path)
+	}
+	return nil
+}
+
+// Validate rejects unknown physical source kinds.
+func (k OpenCodeSourceKind) Validate() error {
+	switch k {
+	case OpenCodeSourceSQLite, OpenCodeSourceLegacyJSON:
+		return nil
+	default:
+		return fmt.Errorf("source kind %q is outside the supported closed set", k)
+	}
+}
+
+// Validate rejects unknown candidate provenance values.
+func (p OpenCodeCandidateProvenance) Validate() error {
+	switch p {
+	case OpenCodeCandidateOverride, OpenCodeCandidateChannel, OpenCodeCandidateLegacyJSONRoot:
+		return nil
+	default:
+		return fmt.Errorf("candidate provenance %q is outside the supported closed set", p)
+	}
+}
+
+// Validate rejects unknown schema support states at trust boundaries.
+func (s OpenCodeSchemaSupport) Validate() error {
+	switch s {
+	case OpenCodeSupportSupported, OpenCodeSupportPartial, OpenCodeSupportUnsupported, OpenCodeSupportCorrupt, OpenCodeSupportUnreadable:
+		return nil
+	default:
+		return fmt.Errorf("schema support %q is outside the supported closed set", s)
+	}
+}
+
+// Validate rejects unknown structural capabilities.
+func (c OpenCodeSchemaCapability) Validate() error {
+	switch c {
+	case OpenCodeCapabilityNone, OpenCodeCapabilityLegacy, OpenCodeCapabilityCurrent, OpenCodeCapabilityHybrid:
+		return nil
+	default:
+		return fmt.Errorf("schema capability %q is outside the supported closed set", c)
+	}
 }
 
 // OpenCodeProbeDiagnostic is an actionable failure local to one candidate.
@@ -172,7 +243,11 @@ func ResolveOpenCodeCandidates(dataRoot, channel string, environment OpenCodeEnv
 		if override != ":memory:" && !filepath.IsAbs(override) {
 			resolved = filepath.Join(root, override)
 		}
-		candidates = append(candidates, OpenCodeCandidate{Path: resolved, Kind: OpenCodeSourceSQLite, Provenance: OpenCodeCandidateOverride})
+		candidate, err := NewOpenCodeCandidate(resolved, OpenCodeSourceSQLite, OpenCodeCandidateOverride)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
 	}
 
 	disableValue, _ := environment.LookupEnv(openCodeDisableChannelEnv)
@@ -180,10 +255,15 @@ func ResolveOpenCodeCandidates(dataRoot, channel string, environment OpenCodeEnv
 	if channel != "latest" && channel != "beta" && channel != "prod" && disableValue != "1" && disableValue != "true" {
 		databaseName = "opencode-" + sanitizeOpenCodeChannel(channel) + ".db"
 	}
-	candidates = append(candidates,
-		OpenCodeCandidate{Path: filepath.Join(root, databaseName), Kind: OpenCodeSourceSQLite, Provenance: OpenCodeCandidateChannel},
-		OpenCodeCandidate{Path: root, Kind: OpenCodeSourceLegacyJSON, Provenance: OpenCodeCandidateLegacyJSONRoot},
-	)
+	channelCandidate, err := NewOpenCodeCandidate(filepath.Join(root, databaseName), OpenCodeSourceSQLite, OpenCodeCandidateChannel)
+	if err != nil {
+		return nil, err
+	}
+	legacyCandidate, err := NewOpenCodeCandidate(root, OpenCodeSourceLegacyJSON, OpenCodeCandidateLegacyJSONRoot)
+	if err != nil {
+		return nil, err
+	}
+	candidates = append(candidates, channelCandidate, legacyCandidate)
 
 	seen := make(map[string]struct{}, len(candidates))
 	deduplicated := candidates[:0]
@@ -259,8 +339,8 @@ func (p *OpenCodeCandidateProber) Probe(ctx context.Context, candidates []OpenCo
 
 func (p *OpenCodeCandidateProber) probeCandidate(ctx context.Context, candidate OpenCodeCandidate) OpenCodeProbeResult {
 	result := OpenCodeProbeResult{Candidate: candidate, Capability: OpenCodeCapabilityNone}
-	if candidate.Kind != OpenCodeSourceSQLite && candidate.Kind != OpenCodeSourceLegacyJSON {
-		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate source kind is unsupported", fmt.Sprintf("kind %q is not a recognized OpenCode source kind", candidate.Kind), "candidate resolution", "before filesystem inspection", "the candidate cannot provide source evidence", "construct candidates through ResolveOpenCodeCandidates")
+	if err := candidate.Validate(); err != nil {
+		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate typed contract is invalid", err.Error(), candidate.Path, "before filesystem inspection", "the candidate cannot provide attributable source evidence", "construct candidates through ResolveOpenCodeCandidates or NewOpenCodeCandidate")
 	}
 	if candidate.Path == "" || candidate.Path == ":memory:" || !filepath.IsAbs(candidate.Path) {
 		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeValidate, "candidate path is not production filesystem evidence", fmt.Sprintf("path %q is empty, relative, or in-memory", candidate.Path), candidate.Path, "before filesystem inspection", "the candidate cannot identify a durable OpenCode-owned file or directory", "use an absolute filesystem path; reserve :memory: only for upstream tests")
@@ -301,10 +381,28 @@ func (p *OpenCodeCandidateProber) probeCandidate(ctx context.Context, candidate 
 	if inspectErr != nil || closeErr != nil {
 		joined := errors.Join(inspectErr, closeErr)
 		result.Evidence = evidence
+		var overflow *OpenCodeCatalogOverflowError
+		if errors.As(joined, &overflow) {
+			result.Support = OpenCodeSupportPartial
+			result.Diagnostics = append(result.Diagnostics, OpenCodeProbeDiagnostic{
+				Code:        OpenCodeDiagnosticCatalogTruncated,
+				Stage:       OpenCodeProbeCatalog,
+				What:        "bounded SQLite catalog evidence is incomplete",
+				Why:         overflow.Error(),
+				Where:       candidate.Path,
+				When:        "while retaining explicit structural catalog rows",
+				Meaning:     "the candidate cannot be classified as supported and remains ineligible for ingestion",
+				Remediation: "reduce unrelated upstream schema objects or use a supported OpenCode database; do not modify, copy, checkpoint, migrate, or repair it through Peasant",
+			})
+			return result
+		}
 		return failedOpenCodeProbe(result, OpenCodeSupportUnreadable, OpenCodeProbeCatalog, "bounded SQLite catalog inspection failed", joined.Error(), candidate.Path, "while reading explicit schema catalog columns", "schema capability is incomplete and the candidate is not ingestible", "verify source readability and retry; do not migrate, checkpoint, or repair it through Peasant")
 	}
 	result.Evidence = evidence
 	result.Capability, result.Support = classifyOpenCodeEvidence(evidence)
+	if err := result.Support.Validate(); err != nil {
+		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeCatalog, "schema support classification is invalid", err.Error(), candidate.Path, "after bounded catalog inspection", "the candidate cannot be trusted or ingested", "report the unsupported classification and update the typed implementation")
+	}
 	if result.Support != OpenCodeSupportSupported {
 		diagnostic := actionableOpenCodeDiagnostic(OpenCodeProbeCatalog, "OpenCode SQLite schema is not fully supported", "required legacy message/part columns or current session_message ordering evidence are incomplete", candidate.Path, "after bounded catalog inspection", "SQLite presence remains evidence only and cannot enter ingestion", "upgrade OpenCode to a supported schema or retain the legacy JSON layout; do not modify the source through Peasant")
 		diagnostic.Code = OpenCodeDiagnosticSchemaIncomplete

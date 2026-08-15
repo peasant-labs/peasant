@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 12
+const expectedCaseCount = 15
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -78,10 +78,17 @@ type caseSpec struct {
 	Corruption      corruptionKind      `yaml:"corruption"`
 	DeclaredRows    declaredRowCounts   `yaml:"declared_rows"`
 	ExpectedCatalog expectedCatalogSpec `yaml:"expected_catalog"`
+	CatalogPadding  catalogPaddingSpec  `yaml:"catalog_padding"`
 	LegacyMessages  []legacyMessage     `yaml:"legacy_messages"`
 	LegacyParts     []legacyPart        `yaml:"legacy_parts"`
 	CurrentMessages []currentMessage    `yaml:"current_messages"`
 	IgnoredHistory  []historyRow        `yaml:"ignored_history"`
+}
+
+type catalogPaddingSpec struct {
+	Tables  int `yaml:"tables"`
+	Columns int `yaml:"columns"`
+	Indexes int `yaml:"indexes"`
 }
 
 type declaredRowCounts struct {
@@ -225,6 +232,9 @@ func (c caseSpec) validate() error {
 		if c.Corruption == corruptionNone {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt source requires a corruption kind so tests know which fixed malformed bytes to materialize", c.Name)
 		}
+		if c.CatalogPadding != (catalogPaddingSpec{}) {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources cannot declare catalog padding", c.Name)
+		}
 	} else {
 		if err := c.Schema.validate(); err != nil {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
@@ -236,6 +246,9 @@ func (c caseSpec) validate() error {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: SQLite sources must not declare corruption %q", c.Name, c.Corruption)
 		}
 	}
+	if err := c.CatalogPadding.validate(c.Schema); err != nil {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q catalog padding: %w", c.Name, err)
+	}
 	if err := c.validateRowCounts(); err != nil {
 		return err
 	}
@@ -246,6 +259,16 @@ func (c caseSpec) validate() error {
 		return err
 	}
 	return c.validateSchemaRows()
+}
+
+func (p catalogPaddingSpec) validate(schema schemaKind) error {
+	if p.Tables < 0 || p.Columns < 0 || p.Indexes < 0 || p.Tables > 300 || p.Columns > 300 || p.Indexes > 300 {
+		return fmt.Errorf("table/column/index counts must each be between 0 and 300, got %d/%d/%d", p.Tables, p.Columns, p.Indexes)
+	}
+	if (p.Columns != 0 || p.Indexes != 0) && schema != schemaCurrent && schema != schemaHybrid {
+		return fmt.Errorf("column/index padding requires current or hybrid session_message schema, got %q", schema)
+	}
+	return nil
 }
 
 func (c expectedCatalogSpec) validate() error {

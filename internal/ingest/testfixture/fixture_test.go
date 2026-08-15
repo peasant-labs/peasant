@@ -120,7 +120,7 @@ func TestMaterializeExpectedCatalogs(t *testing.T) {
 			}
 
 			catalog := readCatalog(t, source.Path)
-			assertCatalog(t, fixtureCase.ExpectedCatalog, catalog)
+			assertCatalog(t, source.ExpectedCatalog(), catalog)
 			assertRows(t, fixtureCase, source.Path)
 		})
 	}
@@ -380,7 +380,7 @@ func readCatalog(t testing.TB, databasePath string) catalogSnapshot {
 	return result
 }
 
-func assertCatalog(t testing.TB, expected expectedCatalogSpec, catalog catalogSnapshot) {
+func assertCatalog(t testing.TB, expected CatalogExpectation, catalog catalogSnapshot) {
 	t.Helper()
 	gotTables := make([]string, 0, len(catalog.Entries))
 	gotIndexes := make([]string, 0, len(catalog.Entries))
@@ -394,8 +394,8 @@ func assertCatalog(t testing.TB, expected expectedCatalogSpec, catalog catalogSn
 			t.Errorf("catalog contains unexpected object type %q for %q", entry.Type, entry.Name)
 		}
 	}
-	wantTables := append([]string(nil), expected.Tables...)
-	wantIndexes := append([]string(nil), expected.Indexes...)
+	wantTables := append([]string(nil), expected.tables...)
+	wantIndexes := append([]string(nil), expected.indexes...)
 	sort.Strings(gotTables)
 	sort.Strings(gotIndexes)
 	sort.Strings(wantTables)
@@ -407,7 +407,7 @@ func assertCatalog(t testing.TB, expected expectedCatalogSpec, catalog catalogSn
 		t.Errorf("catalog indexes = %v, want %v", gotIndexes, wantIndexes)
 	}
 	notNull, exists := catalog.SessionMessageCols["seq"]
-	switch expected.Seq {
+	switch expected.seq {
 	case seqAbsent:
 		if exists {
 			t.Errorf("session_message seq metadata = exists %t not-null %t, want absent", exists, notNull)
@@ -567,7 +567,7 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 	case mutationTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_cases: 0\ncases: []\n")...), nil
 	case mutationDeclaredCount:
-		return replaceOnce("declared_cases: 12", "declared_cases: 11")
+		return replaceOnce("declared_cases: 15", "declared_cases: 14")
 	case mutationDuplicateName:
 		return replaceOnce("name: legacy-message-part", "name: empty-valid")
 	case mutationMissingName:

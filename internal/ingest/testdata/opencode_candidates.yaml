@@ -46,7 +46,7 @@ resolution_cases:
     paths: [":memory:", opencode.db, .]
     provenance: [environment_override, channel_database, legacy_json_root]
 
-declared_probe_cases: 9
+declared_probe_cases: 12
 forbidden_query_tokens:
   - "select *"
   - " offset "
@@ -90,3 +90,70 @@ probe_cases:
   - fixture: wal-capable
     capability: current_session_message
     support: supported
+  - fixture: catalog-table-overflow
+    capability: none
+    support: partial
+    diagnostic: catalog_truncated
+    overflow_scope: tables
+    retained_rows: 256
+  - fixture: catalog-column-overflow
+    capability: none
+    support: partial
+    diagnostic: catalog_truncated
+    overflow_scope: columns
+    retained_rows: 32
+  - fixture: catalog-index-overflow
+    capability: none
+    support: partial
+    diagnostic: catalog_truncated
+    overflow_scope: indexes
+    retained_rows: 64
+
+declared_continuation_candidates: 4
+continuation_candidates:
+  - name: memory-is-not-file-evidence
+    path_template: memory
+    kind: sqlite
+    provenance: environment_override
+    expected_support: unsupported
+    expected_capability: none
+  - name: missing-candidate-remains-local
+    path_template: missing
+    kind: sqlite
+    provenance: channel_database
+    expected_support: unreadable
+    expected_capability: none
+  - name: valid-candidate-after-failures
+    path_template: fixture
+    fixture: legacy-message-part
+    kind: sqlite
+    provenance: channel_database
+    expected_support: supported
+    expected_capability: legacy_message_part
+  - name: legacy-root-after-failures
+    path_template: legacy_root
+    kind: legacy_json
+    provenance: legacy_json_root
+    expected_support: supported
+    expected_capability: none
+
+declared_closed_set_cases: 6
+closed_set_cases:
+  - name: empty-kind
+    field: kind
+    value: ""
+  - name: unknown-kind
+    field: kind
+    value: future_source
+  - name: empty-provenance
+    field: provenance
+    value: ""
+  - name: unknown-provenance
+    field: provenance
+    value: ambient_guess
+  - name: empty-support
+    field: support
+    value: ""
+  - name: unknown-support
+    field: support
+    value: maybe_supported

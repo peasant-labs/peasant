@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -314,6 +317,19 @@ func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 	if selected.Error != nil || selected.OutputPath == "" || selected.Status != ingest.DiffNew {
 		t.Errorf("selected clone result = status %v output %q error %v, want ingested new session", selected.Status, selected.OutputPath, selected.Error)
 	}
+	sourceTranscript := filepath.Join(world.root, defaults.OpenCodeDirStorage.String(), defaults.OpenCodeDirSession.String(), world.projectA, world.sessionA+defaults.ExtJSON.String())
+	managedTranscript := filepath.Join(selected.OutputPath, world.sessionA+"--transcript."+string(ingest.SourceFormatJSON))
+	sourceBytes, err := os.ReadFile(sourceTranscript)
+	if err != nil {
+		t.Fatalf("read mounted legacy OpenCode source transcript: %v", err)
+	}
+	managedBytes, err := os.ReadFile(managedTranscript)
+	if err != nil {
+		t.Fatalf("read mounted legacy OpenCode managed transcript: %v", err)
+	}
+	if !bytes.Equal(managedBytes, sourceBytes) {
+		t.Errorf("managed legacy OpenCode transcript bytes differ from source: source=%q managed=%q", sourceBytes, managedBytes)
+	}
 	excluded := byID[ingest.SessionID(world.sessionB)]
 	if excluded.Error != nil || excluded.OutputPath != "" || excluded.Status != ingest.DiffUnchanged {
 		t.Errorf("unselected sibling result = status %v output %q error %v, want filtered unchanged result", excluded.Status, excluded.OutputPath, excluded.Error)
@@ -327,21 +343,13 @@ func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) 
 	t.Parallel()
 	materialized := testfixture.MaterializeByName(t, "current-session-message")
 	sourceRoot := filepath.Dir(materialized.Path)
-	prober, err := ingest.NewOpenCodeCandidateProber(&ingest.OSFileSystem{}, ingest.OpenOpenCodeSQLiteSource, ingest.DefaultOpenCodeSQLiteSourceOptions())
-	if err != nil {
-		t.Fatalf("construct mounted OpenCode candidate prober: %v", err)
-	}
-	probes := prober.Probe(t.Context(), []ingest.OpenCodeCandidate{{
-		Path:       materialized.Path,
-		Kind:       ingest.OpenCodeSourceSQLite,
-		Provenance: ingest.OpenCodeCandidateChannel,
-	}})
-	if len(probes) != 1 || probes[0].Capability != ingest.OpenCodeCapabilityCurrent || probes[0].Support != ingest.OpenCodeSupportSupported {
-		t.Fatalf("mounted SQLite precondition did not produce supported current evidence: %+v", probes)
-	}
 
 	git := testutil.NoGitResolver()
-	inventory, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, sourceRoot), &ingest.OSFileSystem{}, git, nil, nil)
+	filesystem := &observingOpenCodeFileSystem{OSFileSystem: &ingest.OSFileSystem{}}
+	inventory, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, sourceRoot), filesystem, git, nil, nil)
+	if !filesystem.Opened(materialized.Path) {
+		t.Fatalf("mounted kickstart production discovery did not resolve and header-probe configured OpenCode candidate %q; opened=%v", materialized.Path, filesystem.Paths())
+	}
 	if got := inventory[defaults.HarnessOpenCode].SessionCount; got != 0 || len(listings) != 0 {
 		t.Fatalf("kickstart exposed SQLite-only evidence: inventory=%d listings=%d", got, len(listings))
 	}
@@ -382,6 +390,38 @@ func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) 
 	if len(rows) != 0 {
 		t.Fatalf("SQLite-only evidence created %d local session rows", len(rows))
 	}
+}
+
+type observingOpenCodeFileSystem struct {
+	*ingest.OSFileSystem
+	mu     sync.Mutex
+	opened []string
+}
+
+var _ ingest.FileSystem = (*observingOpenCodeFileSystem)(nil)
+var _ ingest.OpenCodeCandidateFileSystem = (*observingOpenCodeFileSystem)(nil)
+
+func (filesystem *observingOpenCodeFileSystem) Open(path string) (io.ReadCloser, error) {
+	filesystem.mu.Lock()
+	filesystem.opened = append(filesystem.opened, filepath.Clean(path))
+	filesystem.mu.Unlock()
+	return os.Open(path)
+}
+
+func (filesystem *observingOpenCodeFileSystem) Opened(path string) bool {
+	want := filepath.Clean(path)
+	for _, opened := range filesystem.Paths() {
+		if opened == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (filesystem *observingOpenCodeFileSystem) Paths() []string {
+	filesystem.mu.Lock()
+	defer filesystem.mu.Unlock()
+	return append([]string(nil), filesystem.opened...)
 }
 
 func snapshotMountedOpenCodeJSON(t testing.TB, root string) map[string]string {
