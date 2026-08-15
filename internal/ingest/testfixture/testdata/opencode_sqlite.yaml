@@ -543,30 +543,30 @@ cases:
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
         time_created: 1700000000001
         time_updated: 1700000000001
-        data: '{"type":"text","text":"synthetic question"}'
+        data: '{"type":"text","text":"synthetic question","time":{"created":1700000000001}}'
       - id: part_reasoning
         message_id: msg_equal_b
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
         time_created: 1700000000020
         time_updated: 1700000000020
-        data: '{"type":"reasoning","text":"synthetic reasoning"}'
+        data: '{"type":"reasoning","text":"synthetic reasoning","time":{"created":1700000000020}}'
       - id: part_tool_use
         message_id: msg_equal_b
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
         time_created: 1700000000030
         time_updated: 1700000000030
-        data: '{"type":"tool_use","id":"call_synthetic","name":"read","input":{"path":"/synthetic/MUST_NOT_OPEN/full-output.txt"}}'
+        data: '{"type":"tool_use","id":"call_synthetic","name":"read","input":{"path":"/synthetic/MUST_NOT_OPEN/full-output.txt"},"time":{"created":1700000000030}}'
       - id: part_tool_result
         message_id: msg_equal_b
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
         time_created: 1700000000040
         time_updated: 1700000000040
-        data: '{"type":"tool_result","id":"call_synthetic","output":"INLINE_OUTPUT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
+        data: '{"type":"tool_result","id":"call_synthetic","output":"INLINE_OUTPUT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","time":{"created":1700000000040}}'
       - id: part_second_text
         message_id: msg_second
         session_id: ses_4cd91f52effeXd3QAJ54jOyzv6
         time_created: 1700000000201
         time_updated: 1700000000201
-        data: '{"type":"text","text":"second synthetic session"}'
+        data: '{"type":"text","text":"second synthetic session","time":{"created":1700000000201}}'
     current_messages: []
     ignored_history: []

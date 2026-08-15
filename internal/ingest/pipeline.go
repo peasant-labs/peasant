@@ -196,13 +196,14 @@ type Pipeline struct {
 	locationCache map[SessionID]SessionLocation
 
 	// v2 analytics stages (all optional; nil = skip stage).
-	redactor     TextRedactor                  // REDACT stage: applied before writing metadata to disk
-	indexers     map[Harness]TranscriptIndexer // INDEX stage: parses transcripts into session_entries
-	metricsStore MetricsStore                  // INDEX stage: persists session_entries
-	analyzer     SessionAnalyzer               // COMPUTE stage: computes metrics + insights
-	logger       IngestLogger                  // AUDIT stage: records ingest run to ingest_log
-	indexLogger  IndexLogger                   // INDEX stage: records per-session indexing outcomes to index_log
-	gitAnalyzer  GitDiffAnalyzer               // EXTRACT+WRITE stage: commit detection (optional)
+	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
+	indexers               map[Harness]TranscriptIndexer // INDEX stage: parses transcripts into session_entries
+	metricsStore           MetricsStore                  // INDEX stage: persists session_entries
+	analyzer               SessionAnalyzer               // COMPUTE stage: computes metrics + insights
+	logger                 IngestLogger                  // AUDIT stage: records ingest run to ingest_log
+	indexLogger            IndexLogger                   // INDEX stage: records per-session indexing outcomes to index_log
+	gitAnalyzer            GitDiffAnalyzer               // EXTRACT+WRITE stage: commit detection (optional)
+	commitTranscriptReader CommitTranscriptReader
 
 	classifier SessionClassifier // ANNOTATE stage: runs classifiers + persists results (optional; nil = skip).
 }
@@ -278,6 +279,12 @@ func WithIndexLogger(l IndexLogger) PipelineOption {
 // Detection errors are non-fatal: warnings are appended to metadata.Diagnostics.Warnings.
 func WithGitDiffAnalyzer(a GitDiffAnalyzer) PipelineOption {
 	return func(p *Pipeline) { p.gitAnalyzer = a }
+}
+
+// WithCommitTranscriptReader injects the bounded reader used by commit command
+// validation. Database origins never call it.
+func WithCommitTranscriptReader(reader CommitTranscriptReader) PipelineOption {
+	return func(p *Pipeline) { p.commitTranscriptReader = reader }
 }
 
 // WithClassifier injects a SessionClassifier for the ANNOTATE stage.
@@ -1367,13 +1374,17 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 			emailCtx, emailCancel := context.WithTimeout(ctx, 2*time.Second)
 			userEmail, _ := p.git.UserEmail(emailCtx)
 			emailCancel()
-			detector := NewCommitDetector(p.gitAnalyzer, userEmail)
+			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader)
 			sessionStart := time.UnixMilli(meta.Timestamp.Start)
 			sessionEnd := time.UnixMilli(meta.Timestamp.End)
-			// Pass the original source transcript path for command-based validation.
-			// LayeredDetection falls back to timestamp-only if the path is empty or
-			// unreadable (e.g. directory-based OpenCode transcripts).
-			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, string(session.SourcePath))
+			// Only a real transcript file may reach command parsing. Typed database
+			// origins use bounded timestamp correlation; their DB/WAL/SHM paths are
+			// source containers, never transcript content.
+			transcriptPath := ""
+			if session.TranscriptOrigin == TranscriptOriginFile {
+				transcriptPath = session.SourcePath.String()
+			}
+			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, transcriptPath)
 			meta.Git.Commits = commits
 			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, diags...)
 		}
@@ -1524,13 +1535,11 @@ func indexWithSourceKind(
 	session DiscoveredSession,
 	transcriptData []byte,
 ) ([]schema.SessionEntry, error) {
-	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
-		if len(transcriptData) > 0 {
-			return indexer.IndexTranscriptBytes(ctx, session, transcriptData)
-		}
-		return indexer.IndexTranscript(ctx, session)
+	sourceKind := indexer.SourceKind()
+	if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
+		sourceKind = resolver.TranscriptSourceKindFor(session)
 	}
-	switch indexer.SourceKind() {
+	switch sourceKind {
 	case TranscriptSourceDirectory:
 		// No single file holds this harness's entries, so there is nothing to pass
 		// in memory and nothing to save by trying.
@@ -1576,7 +1585,7 @@ func indexWithSourceKind(
 			"When: at the INDEX stage.\n"+
 			"Means: no entries were indexed for this session; the run fails loudly rather than storing an empty transcript.\n"+
 			"Fix: add a case for the new kind in indexWithSourceKind.",
-		session.SessionID, indexer.SourceKind(), session.Harness)
+		session.SessionID, sourceKind, session.Harness)
 }
 
 // sessionFromWorkerResult reconstructs the DiscoveredSession carried by a workerResult.

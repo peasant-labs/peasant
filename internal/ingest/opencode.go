@@ -109,19 +109,6 @@ func (a *OpenCodeAdapter) Harness() Harness {
 func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	evidence := a.inspectCandidates(ctx, cfg.Paths)
 	var discovered []DiscoveredSession
-	for _, result := range evidence {
-		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Capability != OpenCodeCapabilityLegacy || result.Support != OpenCodeSupportSupported {
-			continue
-		}
-		sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
-		if err != nil {
-			return nil, err
-		}
-		discovered = append(discovered, sessions...)
-	}
-	if len(discovered) > 0 {
-		return discovered, nil
-	}
 
 	for _, root := range cfg.Paths {
 		rootStr := root.String()
@@ -203,6 +190,22 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 				discovered = append(discovered, ds)
 			}
 		}
+	}
+	// Mixed-source precedence and deduplication are not defined here. Preserve
+	// the established JSON result unchanged whenever a valid JSON layout exists;
+	// legacy SQLite is eligible only for a SQLite-only root.
+	if len(discovered) > 0 {
+		return discovered, nil
+	}
+	for _, result := range evidence {
+		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Capability != OpenCodeCapabilityLegacy || result.Support != OpenCodeSupportSupported {
+			continue
+		}
+		sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		discovered = append(discovered, sessions...)
 	}
 
 	return discovered, nil

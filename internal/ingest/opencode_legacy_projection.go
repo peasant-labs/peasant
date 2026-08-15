@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"time"
 )
 
 const (
@@ -108,9 +107,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 			if info, statErr := a.fs.Stat(candidate.Path); statErr == nil {
 				session.ModTime = info.ModTime()
 			}
-			if projection, projectionErr := readOpenCodeLegacyProjection(ctx, source, legacyID, pageSize); projectionErr == nil {
-				applyLegacyDiscoveryEvidence(&session, projection)
-			}
 			discovered = append(discovered, session)
 		}
 		if page.Next == nil {
@@ -122,35 +118,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while closing its bounded read connection: %w; no partial discovery result is eligible; retry after the source lock clears", candidate.Path, closeErr)
 	}
 	return discovered, nil
-}
-
-func applyLegacyDiscoveryEvidence(session *DiscoveredSession, projection openCodeLegacyProjection) {
-	for _, message := range projection.Messages {
-		var evidence openCodeLegacyMessageEvidence
-		if json.Unmarshal(message.Data, &evidence) != nil {
-			continue
-		}
-		cwd := legacyEvidenceCWD(evidence)
-		if session.CWD == "" && cwd != "" {
-			session.CWD = cwd
-			session.ProjectName = filepath.Base(cwd)
-		}
-		if session.Title == "" {
-			session.Title = evidence.Title
-		}
-		created := message.TimeCreated
-		if evidence.Time.Created > 0 {
-			created = evidence.Time.Created
-		}
-		if created > 0 && (session.CreatedAt.IsZero() || created < session.CreatedAt.UnixMilli()) {
-			session.CreatedAt = time.UnixMilli(created)
-		}
-		if session.ParentUUID == nil && evidence.ParentID != "" {
-			if parent, err := NewSessionID(evidence.ParentID); err == nil {
-				session.ParentUUID = &parent
-			}
-		}
-	}
 }
 
 // MaterializeTranscript reads only the selected detached legacy rows and builds

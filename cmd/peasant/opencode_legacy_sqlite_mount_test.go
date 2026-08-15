@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,13 +22,14 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	transcriptmodel "github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const expectedLegacySQLiteMountCases = 8
+const expectedLegacySQLiteMountCases = 9
 
 type legacySQLiteHarvestExpectation string
 
@@ -42,6 +44,7 @@ type legacySQLiteMutation string
 const (
 	legacySQLiteMutationNone             legacySQLiteMutation = "none"
 	legacySQLiteMutationMalformedMessage legacySQLiteMutation = "malformed_message_json"
+	legacySQLiteMutationMixedJSON        legacySQLiteMutation = "mixed_json_layout"
 )
 
 type legacySQLiteMountCase struct {
@@ -55,6 +58,7 @@ type legacySQLiteMountCase struct {
 	ExpectedEntries           int                            `yaml:"expected_entries"`
 	Mutation                  legacySQLiteMutation           `yaml:"mutation"`
 	Entries                   []legacySQLiteEntryExpectation `yaml:"entries"`
+	ExpectedToolCall          *legacySQLiteToolExpectation   `yaml:"expected_tool_call"`
 }
 
 type legacySQLiteEntryExpectation struct {
@@ -65,6 +69,14 @@ type legacySQLiteEntryExpectation struct {
 	ParentIndex     int    `yaml:"parent_index"`
 	ContentContains string `yaml:"content_contains"`
 	ToolCallID      string `yaml:"tool_call_id"`
+	TimestampMs     int64  `yaml:"timestamp_ms"`
+}
+
+type legacySQLiteToolExpectation struct {
+	ID             string `yaml:"id"`
+	InputContains  string `yaml:"input_contains"`
+	OutputContains string `yaml:"output_contains"`
+	DurationMs     int    `yaml:"duration_ms"`
 }
 
 type legacySQLiteMountDocument struct {
@@ -108,7 +120,7 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 			t.Fatalf("legacy SQLite mounted expectation %q has unknown harvest result %q", testCase.Name, testCase.Harvest)
 		}
 		switch testCase.Mutation {
-		case legacySQLiteMutationNone, legacySQLiteMutationMalformedMessage:
+		case legacySQLiteMutationNone, legacySQLiteMutationMalformedMessage, legacySQLiteMutationMixedJSON:
 		default:
 			t.Fatalf("legacy SQLite mounted expectation %q has unknown mutation %q", testCase.Name, testCase.Mutation)
 		}
@@ -121,6 +133,7 @@ func TestLegacyOpenCodeSQLiteKickstartEligibilityUsesTypedSessions(t *testing.T)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
+			applyLegacySQLiteMountedMutation(t, materialized.Path, testCase)
 			before := mustReadFile(t, materialized.Path)
 			cfg := mountedOpenCodeConfig(t, filepath.Dir(materialized.Path))
 			if testCase.ExpectedKickstartSessions > 0 {
@@ -144,6 +157,40 @@ func TestLegacyOpenCodeSQLiteKickstartEligibilityUsesTypedSessions(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestLegacyOpenCodeMixedRootPreservesJSONBytes(t *testing.T) {
+	document := loadLegacySQLiteMountDocument(t)
+	for _, testCase := range document.Cases {
+		if testCase.Mutation != legacySQLiteMutationMixedJSON {
+			continue
+		}
+		materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
+		applyLegacySQLiteMountedMutation(t, materialized.Path, testCase)
+		root := filepath.Dir(materialized.Path)
+		sourcePath := filepath.Join(root, defaults.OpenCodeDirStorage.String(), defaults.OpenCodeDirSession.String(), "mixed-project", testCase.TargetSession+defaults.ExtJSON.String())
+		sourceBytes := mustReadFile(t, sourcePath)
+		commandRoot := t.TempDir()
+		outputRoot := filepath.Join(commandRoot, "managed")
+		output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
+		if err != nil {
+			t.Fatalf("harvest mixed OpenCode root: %v\n%s", err, output)
+		}
+		managedBytes := mustReadFile(t, findManagedTranscript(t, outputRoot, testCase.TargetSession))
+		if !bytes.Equal(managedBytes, sourceBytes) {
+			t.Fatalf("mixed root changed legacy JSON transcript bytes: source=%q managed=%q", sourceBytes, managedBytes)
+		}
+		return
+	}
+	t.Fatal("mounted expectation corpus has no mixed-root case")
+}
+
+func applyLegacySQLiteMountedMutation(t *testing.T, databasePath string, testCase legacySQLiteMountCase) {
+	t.Helper()
+	if testCase.Mutation != legacySQLiteMutationMixedJSON {
+		return
+	}
+	writeMountedOpenCodeSession(t, filepath.Dir(databasePath), "mixed-project", testCase.TargetSession, "/synthetic/work/mixed-json", "mixed JSON session")
 }
 
 func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t *testing.T) {
@@ -216,6 +263,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				}
 			}
 			assertLegacySQLiteEntries(t, entries, testCase.Entries)
+			assertLegacySQLiteToolFold(t, entries, testCase.ExpectedToolCall)
 			metrics, err := localStore.GetMetrics(t.Context(), sessionID)
 			if err != nil || metrics == nil {
 				t.Fatalf("mounted legacy analytics evidence missing: metrics=%+v error=%v", metrics, err)
@@ -235,6 +283,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 					t.Fatalf("managed projection SHA-256=%s, want %s; bytes=%s", got, testCase.ExpectedProjectionSHA256, managedBytes)
 				}
 			}
+			assertOpenCodeSemanticIndexParity(t, managedBytes, sessionID)
 			assertManagedMetadata(t, managedPath, sessionID)
 
 			firstBytes := append([]byte(nil), managedBytes...)
@@ -300,6 +349,63 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				t.Fatalf("managed projection reconstruction entries=%d want=%d error=%v", len(reindexedEntries), testCase.ExpectedEntries, errors.Join(listErr, closeErr))
 			}
 		})
+	}
+}
+
+type mountedProjectionDocument struct {
+	Messages []mountedProjectionMessage `json:"messages"`
+}
+
+type mountedProjectionMessage struct {
+	ID    string                  `json:"id"`
+	Data  json.RawMessage         `json:"data"`
+	Parts []mountedProjectionPart `json:"parts"`
+}
+
+type mountedProjectionPart struct {
+	ID   string          `json:"id"`
+	Data json.RawMessage `json:"data"`
+}
+
+func assertOpenCodeSemanticIndexParity(t testing.TB, managedBytes []byte, sessionID ingest.SessionID) {
+	t.Helper()
+	var projection mountedProjectionDocument
+	if err := json.Unmarshal(managedBytes, &projection); err != nil {
+		t.Fatalf("decode managed projection for semantic parity: %v", err)
+	}
+	root := t.TempDir()
+	storageRoot := filepath.Join(root, defaults.OpenCodeDirStorage.String())
+	messageRoot := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), string(sessionID))
+	if err := os.MkdirAll(messageRoot, 0o700); err != nil {
+		t.Fatalf("create semantic parity message root: %v", err)
+	}
+	for _, message := range projection.Messages {
+		if err := os.WriteFile(filepath.Join(messageRoot, message.ID+defaults.ExtJSON.String()), message.Data, 0o600); err != nil {
+			t.Fatalf("write semantic parity message %s: %v", message.ID, err)
+		}
+		partRoot := filepath.Join(storageRoot, defaults.OpenCodeDirPart.String(), message.ID)
+		if err := os.MkdirAll(partRoot, 0o700); err != nil {
+			t.Fatalf("create semantic parity part root: %v", err)
+		}
+		for _, part := range message.Parts {
+			if err := os.WriteFile(filepath.Join(partRoot, part.ID+defaults.ExtJSON.String()), part.Data, 0o600); err != nil {
+				t.Fatalf("write semantic parity part %s: %v", part.ID, err)
+			}
+		}
+	}
+	indexer := ingest.NewOpenCodeIndexer(&ingest.OSFileSystem{}, ingest.WithOpenCodeFullDepth(true))
+	managedSession := ingest.DiscoveredSession{SessionID: sessionID, Harness: ingest.HarnessOpenCode, TranscriptOrigin: ingest.TranscriptOriginOpenCodeLegacySQLite}
+	managedEntries, err := indexer.IndexTranscriptBytes(context.Background(), managedSession, managedBytes)
+	if err != nil {
+		t.Fatalf("index managed semantic parity source: %v", err)
+	}
+	jsonSession := ingest.DiscoveredSession{SessionID: sessionID, Harness: ingest.HarnessOpenCode, OriginalRoot: ingest.ResolvedPath(root), TranscriptOrigin: ingest.TranscriptOriginFile}
+	jsonEntries, err := indexer.IndexTranscript(context.Background(), jsonSession)
+	if err != nil {
+		t.Fatalf("index filesystem semantic parity source: %v", err)
+	}
+	if !reflect.DeepEqual(managedEntries, jsonEntries) {
+		t.Fatalf("OpenCode semantic index differs by source representation:\nmanaged=%+v\njson=%+v", managedEntries, jsonEntries)
 	}
 }
 
@@ -428,9 +534,36 @@ func assertLegacySQLiteEntries(t testing.TB, entries []schema.SessionEntry, expe
 		if got.ParentIndex != nil {
 			parentIndex = *got.ParentIndex
 		}
-		if got.EntryIndex != want.Index || got.Role.String() != want.Role || got.EntryType.String() != want.EntryType || partType != want.PartType || parentIndex != want.ParentIndex || toolCallID != want.ToolCallID || !strings.Contains(content, want.ContentContains) {
+		timestamp := int64(0)
+		if got.TimestampMs != nil {
+			timestamp = *got.TimestampMs
+		}
+		if got.EntryIndex != want.Index || got.Role.String() != want.Role || got.EntryType.String() != want.EntryType || partType != want.PartType || parentIndex != want.ParentIndex || toolCallID != want.ToolCallID || timestamp != want.TimestampMs || !strings.Contains(content, want.ContentContains) {
 			t.Errorf("entry %d=%+v, want %+v (part=%q parent=%d tool=%q content=%q)", index, got, want, partType, parentIndex, toolCallID, content)
 		}
+	}
+}
+
+func assertLegacySQLiteToolFold(t testing.TB, entries []schema.SessionEntry, expected *legacySQLiteToolExpectation) {
+	t.Helper()
+	if expected == nil {
+		return
+	}
+	turns := transcriptmodel.EntriesToTurns(entries)
+	var calls []ingest.ToolCall
+	for _, turn := range turns {
+		calls = append(calls, turn.ToolCalls...)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("mounted entry fold produced %d tool calls, want one joined invocation/result: %+v", len(calls), calls)
+	}
+	call := calls[0]
+	if call.DurationMs == nil || call.ID != expected.ID || !strings.Contains(call.Arguments, expected.InputContains) || !strings.Contains(call.Result, expected.OutputContains) || *call.DurationMs != expected.DurationMs {
+		t.Fatalf("mounted joined tool call=%+v, want %+v", call, *expected)
+	}
+	detail := transcriptmodel.SessionToDetail(&ingest.Session{ID: entries[0].SessionID, Harness: ingest.HarnessOpenCode, Turns: turns})
+	if detail == nil || len(detail.Turns) != len(turns) {
+		t.Fatalf("mounted session-detail projection lost folded turns: detail=%+v turns=%d", detail, len(turns))
 	}
 }
 

@@ -184,6 +184,14 @@ type TranscriptIndexer interface {
 	IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error)
 }
 
+// SessionTranscriptSourceResolver lets an indexer select its typed source per
+// discovered session when one harness has more than one physical
+// representation. The generic pipeline owns dispatch; provider indexers own the
+// representation decision.
+type SessionTranscriptSourceResolver interface {
+	TranscriptSourceKindFor(DiscoveredSession) TranscriptSourceKind
+}
+
 // MetricsComputer computes metrics for sessions. Returns the count of sessions
 // that were actually (re)computed.
 type MetricsComputer interface {
