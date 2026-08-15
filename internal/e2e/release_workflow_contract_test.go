@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"gopkg.in/yaml.v3"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 //go:embed testdata/workflows/e2e_contract.yaml
@@ -23,13 +24,14 @@ var e2eWorkflowContractFixtureBytes []byte
 var releaseValidateRPMFixtureBytes []byte
 
 type releaseValidateRPMFixture struct {
+	PrepareExit   int                              `yaml:"prepare_exit"`
 	MutationCases []releaseValidateRPMMutationCase `yaml:"mutation_cases"`
 }
 
 type releaseValidateRPMMutationCase struct {
-	Name         string `yaml:"name"`
-	PrepareExit  int    `yaml:"prepare_exit"`
-	ExpectedExit int    `yaml:"expected_exit"`
+	Name string `yaml:"name"`
+	Old  string `yaml:"old"`
+	New  string `yaml:"new"`
 }
 
 type e2eWorkflowContractFixture struct {
@@ -316,14 +318,6 @@ func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
 		t.Fatalf("release: rpm job must define a steps sequence")
 	}
 	installRun := workflowStepRun(t, steps.Content, "Install + smoke the .rpm in a clean container")
-	prepareIndex := strings.Index(installRun, "${{ matrix.prepare }}")
-	installIndex := strings.Index(installRun, "${{ matrix.install }}")
-	if prepareIndex < 0 || installIndex < 0 || prepareIndex >= installIndex {
-		t.Fatalf("release: mounted RPM smoke must run matrix.prepare as a distinct command before matrix.install: %q", installRun)
-	}
-	if strings.Contains(installRun, "${{ matrix.prepare }} &&") {
-		t.Fatalf("release: mounted RPM smoke must not combine preparation with installation: %q", installRun)
-	}
 	matrix := yamlMappingValue(yamlMappingValue(yamlMappingValue(job, "strategy"), "matrix"), "include")
 	if matrix == nil || matrix.Kind != yaml.SequenceNode || len(matrix.Content) != 2 {
 		t.Fatalf("release: rpm matrix must contain Fedora and openSUSE entries, got %v", matrix)
@@ -357,8 +351,24 @@ func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
 		t.Fatalf("release: openSUSE install command = %v, want standalone local install", install)
 	}
 
+	body, err := extractReleaseValidateRPMBody(installRun)
+	if err != nil {
+		t.Fatalf("release: mounted RPM smoke is not structurally fail closed: %v", err)
+	}
+	t.Run("mounted preparation failure", func(t *testing.T) {
+		runReleaseValidateRPMPreparationFailure(t, body, prepare.Value, install.Value, fixture.PrepareExit)
+	})
+
 	for _, mutation := range fixture.MutationCases {
-		runReleaseValidateRPMMutation(t, prepare.Value, install.Value, mutation)
+		t.Run("reject mutant "+mutation.Name, func(t *testing.T) {
+			mutated := strings.Replace(installRun, mutation.Old, mutation.New, 1)
+			if mutated == installRun || strings.Count(installRun, mutation.Old) != 1 {
+				t.Fatalf("release: mutation must replace exactly one mounted workflow fragment")
+			}
+			if _, mutationErr := extractReleaseValidateRPMBody(mutated); mutationErr == nil {
+				t.Fatalf("release: mutation escaped the mounted RPM shell contract")
+			}
+		})
 	}
 }
 
@@ -376,62 +386,163 @@ func loadReleaseValidateRPMFixture(t *testing.T) releaseValidateRPMFixture {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("release: RPM workflow fixture must have exact EOF: %v", err)
 	}
-	if len(fixture.MutationCases) != 1 {
-		t.Fatalf("release: RPM workflow fixture must contain one mutation case, got %d", len(fixture.MutationCases))
+	if fixture.PrepareExit != 106 || len(fixture.MutationCases) != 2 {
+		t.Fatalf("release: RPM workflow fixture must contain exit 106 and two mutation cases: %+v", fixture)
 	}
+	wantNames := map[string]bool{"masked preparation failure": false, "lost errexit": false}
 	for _, mutation := range fixture.MutationCases {
-		if strings.TrimSpace(mutation.Name) == "" || mutation.PrepareExit == 0 || mutation.ExpectedExit == 0 {
+		if _, exists := wantNames[mutation.Name]; !exists || wantNames[mutation.Name] || strings.TrimSpace(mutation.Old) == "" || strings.TrimSpace(mutation.New) == "" || mutation.Old == mutation.New {
 			t.Fatalf("release: invalid RPM workflow mutation case: %+v", mutation)
 		}
+		wantNames[mutation.Name] = true
 	}
 	return fixture
 }
 
-func runReleaseValidateRPMMutation(t *testing.T, prepare, install string, mutation releaseValidateRPMMutationCase) {
+func extractReleaseValidateRPMBody(run string) (string, error) {
+	const imagePlaceholder = "${{ matrix.image }}"
+	if strings.Count(run, imagePlaceholder) != 1 {
+		return "", fmt.Errorf("docker command must contain exactly one matrix.image placeholder")
+	}
+	outer := strings.Replace(run, imagePlaceholder, "rpm-image", 1)
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(outer), "release-validate-rpm")
+	if err != nil {
+		return "", fmt.Errorf("parse mounted shell: %w", err)
+	}
+
+	var dockerCall *syntax.CallExpr
+	for _, stmt := range file.Stmts {
+		call, ok := stmt.Cmd.(*syntax.CallExpr)
+		if !ok || len(call.Args) == 0 || call.Args[0].Lit() != "docker" {
+			continue
+		}
+		if dockerCall != nil {
+			return "", fmt.Errorf("mounted shell contains multiple docker commands")
+		}
+		dockerCall = call
+	}
+	if dockerCall == nil {
+		return "", fmt.Errorf("mounted shell has no top-level docker command")
+	}
+
+	bashIndex := -1
+	for index, word := range dockerCall.Args {
+		if word.Lit() == "bash" {
+			bashIndex = index
+			break
+		}
+	}
+	if bashIndex < 0 || bashIndex+3 != len(dockerCall.Args) {
+		return "", fmt.Errorf("docker command must invoke bash with an option and body")
+	}
+	if dockerCall.Args[bashIndex+1].Lit() != "-euxc" {
+		return "", fmt.Errorf("inner bash must retain -euxc so errexit is active")
+	}
+	bodyWord := dockerCall.Args[bashIndex+2]
+	if len(bodyWord.Parts) != 1 {
+		return "", fmt.Errorf("inner bash body must be one single-quoted shell word")
+	}
+	quoted, ok := bodyWord.Parts[0].(*syntax.SglQuoted)
+	if !ok || quoted.Dollar {
+		return "", fmt.Errorf("inner bash body must use ordinary single quotes")
+	}
+	body := quoted.Value
+	if err := validateReleaseValidateRPMBody(body); err != nil {
+		return "", err
+	}
+	return body, nil
+}
+
+func validateReleaseValidateRPMBody(body string) error {
+	const (
+		preparePlaceholder = "${{ matrix.prepare }}"
+		installPlaceholder = "${{ matrix.install }}"
+	)
+	if strings.Count(body, preparePlaceholder) != 1 || strings.Count(body, installPlaceholder) != 1 {
+		return fmt.Errorf("inner body must contain each matrix command placeholder exactly once")
+	}
+	parseable := strings.NewReplacer(preparePlaceholder, "rpm_prepare", installPlaceholder, "rpm_install").Replace(body)
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(parseable), "release-validate-rpm-body")
+	if err != nil {
+		return fmt.Errorf("parse inner bash body: %w", err)
+	}
+	want := [][]string{
+		{"rpm_prepare"},
+		{"rpm_install", "/dist/peasant_*_linux_amd64.rpm"},
+		{"peasant", "version"},
+		{"rpm", "-q", "peasant"},
+	}
+	if len(file.Stmts) != len(want) {
+		return fmt.Errorf("inner body has %d top-level commands, want %d", len(file.Stmts), len(want))
+	}
+	for index, stmt := range file.Stmts {
+		call, ok := stmt.Cmd.(*syntax.CallExpr)
+		if !ok || stmt.Negated || stmt.Background || len(stmt.Redirs) != 0 {
+			return fmt.Errorf("inner body command %d must be a standalone simple command", index)
+		}
+		if len(call.Args) != len(want[index]) {
+			return fmt.Errorf("inner body command %d has %d arguments, want %d", index, len(call.Args), len(want[index]))
+		}
+		for argIndex, word := range call.Args {
+			if word.Lit() != want[index][argIndex] {
+				return fmt.Errorf("inner body command %d argument %d = %q, want %q", index, argIndex, word.Lit(), want[index][argIndex])
+			}
+		}
+	}
+	return nil
+}
+
+func runReleaseValidateRPMPreparationFailure(t *testing.T, body, prepare, install string, prepareExit int) {
 	t.Helper()
 	tmp := t.TempDir()
 	prepareMarker := filepath.Join(tmp, "prepare-ran")
 	installMarker := filepath.Join(tmp, "install-ran")
 	versionMarker := filepath.Join(tmp, "version-ran")
 	rpmMarker := filepath.Join(tmp, "rpm-ran")
-	script := fmt.Sprintf(`
-zypper() {
-  if [[ "$*" == *modifyrepo* ]]; then
-    touch "$PREPARE_MARKER"
-    return "$PREPARE_EXIT"
-  fi
-  touch "$INSTALL_MARKER"
-}
-peasant() { touch "$VERSION_MARKER"; }
-rpm() { touch "$RPM_MARKER"; }
-set -euo pipefail
-%s /dist/peasant_0.0.0_linux_amd64.rpm
-%s /dist/peasant_0.0.0_linux_amd64.rpm
-peasant version
-rpm -q peasant
-`, prepare, install)
-	cmd := exec.Command("bash", "-c", script)
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatalf("release: locate bash for mounted RPM body: %v", err)
+	}
+	writeExecutable(t, filepath.Join(tmp, "zypper"), "#!"+bashPath+`
+if [[ "$*" == *modifyrepo* ]]; then
+  touch "$PREPARE_MARKER"
+  exit "$PREPARE_EXIT"
+fi
+touch "$INSTALL_MARKER"
+`)
+	writeExecutable(t, filepath.Join(tmp, "peasant"), "#!"+bashPath+"\ntouch \"$VERSION_MARKER\"\n")
+	writeExecutable(t, filepath.Join(tmp, "rpm"), "#!"+bashPath+"\ntouch \"$RPM_MARKER\"\n")
+	executableBody := strings.NewReplacer("${{ matrix.prepare }}", prepare, "${{ matrix.install }}", install).Replace(body)
+	cmd := exec.Command(bashPath, "-euxc", executableBody)
 	cmd.Env = append(os.Environ(),
-		"PREPARE_EXIT="+fmt.Sprint(mutation.PrepareExit),
+		"PATH="+tmp+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PREPARE_EXIT="+fmt.Sprint(prepareExit),
 		"PREPARE_MARKER="+prepareMarker,
 		"INSTALL_MARKER="+installMarker,
 		"VERSION_MARKER="+versionMarker,
 		"RPM_MARKER="+rpmMarker,
 	)
-	err := cmd.Run()
+	output, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("release: mutation %q unexpectedly succeeded", mutation.Name)
+		t.Fatalf("release: mounted RPM body unexpectedly succeeded after preparation failure")
 	}
-	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mutation.ExpectedExit {
-		t.Fatalf("release: mutation %q exit = %v, want %d", mutation.Name, err, mutation.ExpectedExit)
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != prepareExit {
+		t.Fatalf("release: mounted RPM body exit = %v, want %d\n%s", err, prepareExit, output)
 	}
 	for _, marker := range []string{installMarker, versionMarker, rpmMarker} {
 		if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
-			t.Fatalf("release: mutation %q reached forbidden later stage %s: %v", mutation.Name, marker, statErr)
+			t.Fatalf("release: preparation failure reached forbidden later stage %s: %v", marker, statErr)
 		}
 	}
 	if _, statErr := os.Stat(prepareMarker); statErr != nil {
-		t.Fatalf("release: mutation %q did not execute preparation: %v", mutation.Name, statErr)
+		t.Fatalf("release: mounted RPM body did not execute preparation: %v", statErr)
+	}
+}
+
+func writeExecutable(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
+		t.Fatalf("release: write command stub %s: %v", path, err)
 	}
 }
 
