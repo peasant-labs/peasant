@@ -1,4 +1,4 @@
-declared_cases: 15
+declared_cases: 17
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -89,6 +89,106 @@ cases:
         time_updated: 2001
         data: '{"role":"assistant","parts":[{"type":"text","text":"synthetic answer"}]}'
         seq: 1
+    ignored_history: []
+
+  - name: legacy-reader-pages
+    logical_path: legacy/reader-pages.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 5
+      legacy_parts: 4
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_tie_b
+        session_id: ses_reader_a
+        time_created: 7000
+        time_updated: 7002
+        data: '{"role":"assistant","marker":"tie-b"}'
+      - id: msg_tie_a
+        session_id: ses_reader_a
+        time_created: 7000
+        time_updated: 7001
+        data: '{"role":"user","marker":"tie-a"}'
+      - id: msg_next
+        session_id: ses_reader_a
+        time_created: 7001
+        time_updated: 7003
+        data: '{"role":"assistant","marker":"next-page"}'
+      - id: msg_large
+        session_id: ses_reader_a
+        time_created: 7002
+        time_updated: 7004
+        data: '{"role":"assistant","marker":"LARGE_INLINE_PAYLOAD_MARKER","text":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
+      - id: msg_other
+        session_id: ses_reader_z
+        time_created: 6000
+        time_updated: 6000
+        data: '{"role":"assistant","marker":"other-session"}'
+    legacy_parts:
+      - id: part_z
+        message_id: msg_tie_a
+        session_id: ses_reader_a
+        time_created: 6990
+        time_updated: 6990
+        data: '{"type":"text","text":"part-z"}'
+      - id: part_a
+        message_id: msg_tie_a
+        session_id: ses_reader_a
+        time_created: 7990
+        time_updated: 7990
+        data: '{"type":"text","text":"part-a"}'
+      - id: part_m
+        message_id: msg_tie_a
+        session_id: ses_reader_a
+        time_created: 5990
+        time_updated: 5990
+        data: '{"type":"text","text":"part-m"}'
+      - id: part_other
+        message_id: msg_other
+        session_id: ses_reader_z
+        time_created: 6001
+        time_updated: 6001
+        data: '{"type":"text","text":"other-session-part"}'
+    current_messages: []
+    ignored_history: []
+
+  - name: legacy-reader-wal
+    logical_path: legacy/reader-wal.db
+    format: sqlite
+    schema: legacy
+    journal_mode: wal
+    corruption: ""
+    declared_rows:
+      legacy_messages: 1
+      legacy_parts: 1
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_wal_base
+        session_id: ses_wal_legacy
+        time_created: 8000
+        time_updated: 8000
+        data: '{"role":"user","marker":"wal-base"}'
+    legacy_parts:
+      - id: part_wal_base
+        message_id: msg_wal_base
+        session_id: ses_wal_legacy
+        time_created: 8001
+        time_updated: 8001
+        data: '{"type":"text","text":"wal-base"}'
+    current_messages: []
     ignored_history: []
 
   - name: hybrid-catalog

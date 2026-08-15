@@ -32,7 +32,8 @@ const (
 	expectedOpenCodeProbeCases      = 12
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 5
+	expectedAllowedQueryStatements  = 11
+	expectedQueryGuardMutations     = 6
 )
 
 //go:embed testdata/opencode_candidates.yaml
@@ -45,7 +46,8 @@ type openCodeCandidateFixture struct {
 	ForbiddenQueryTokens    []string                          `yaml:"forbidden_query_tokens"`
 	DeclaredAllowedQueries  int                               `yaml:"declared_allowed_query_statements"`
 	AllowedQueryStatements  []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
-	QueryGuardMutation      openCodeQueryGuardMutation        `yaml:"query_guard_mutation"`
+	DeclaredQueryMutations  int                               `yaml:"declared_query_guard_mutations"`
+	QueryGuardMutations     []openCodeQueryGuardMutation      `yaml:"query_guard_mutations"`
 	ProbeCases              []openCodeProbeCase               `yaml:"probe_cases"`
 	DeclaredContinuation    int                               `yaml:"declared_continuation_candidates"`
 	ContinuationCandidates  []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
@@ -59,6 +61,7 @@ type openCodeAllowedQueryStatement struct {
 }
 
 type openCodeQueryGuardMutation struct {
+	Name                 string `yaml:"name"`
 	ReplaceStatement     string `yaml:"replace_statement"`
 	ReplacementStatement string `yaml:"replacement_statement"`
 }
@@ -176,13 +179,18 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		seenQueryNames[allowed.Name] = true
 		seenQueryStatements[allowed.Statement] = true
 	}
-	fixture.QueryGuardMutation.ReplaceStatement = normalizeOpenCodeQuery(fixture.QueryGuardMutation.ReplaceStatement)
-	fixture.QueryGuardMutation.ReplacementStatement = normalizeOpenCodeQuery(fixture.QueryGuardMutation.ReplacementStatement)
-	if !seenQueryStatements[fixture.QueryGuardMutation.ReplaceStatement] || fixture.QueryGuardMutation.ReplacementStatement == "" || seenQueryStatements[fixture.QueryGuardMutation.ReplacementStatement] {
-		t.Fatalf("OpenCode query-guard mutation must replace one allowed statement with one disallowed statement: %+v", fixture.QueryGuardMutation)
+	if fixture.DeclaredQueryMutations != expectedQueryGuardMutations || len(fixture.QueryGuardMutations) != expectedQueryGuardMutations {
+		t.Fatalf("OpenCode query-guard mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredQueryMutations, len(fixture.QueryGuardMutations), expectedQueryGuardMutations)
 	}
-	if violations := findOpenCodeForbiddenQueryTokens([]string{fixture.QueryGuardMutation.ReplacementStatement}, fixture.ForbiddenQueryTokens); len(violations) == 0 {
-		t.Fatalf("OpenCode query-guard mutation replacement must exercise the forbidden-token boundary: %+v", fixture.QueryGuardMutation)
+	seenMutationNames := make(map[string]bool, len(fixture.QueryGuardMutations))
+	for index, mutation := range fixture.QueryGuardMutations {
+		mutation.ReplaceStatement = normalizeOpenCodeQuery(mutation.ReplaceStatement)
+		mutation.ReplacementStatement = normalizeOpenCodeQuery(mutation.ReplacementStatement)
+		fixture.QueryGuardMutations[index] = mutation
+		if mutation.Name == "" || seenMutationNames[mutation.Name] || !seenQueryStatements[mutation.ReplaceStatement] || mutation.ReplacementStatement == "" || seenQueryStatements[mutation.ReplacementStatement] {
+			t.Fatalf("OpenCode query-guard mutation must be uniquely named and replace one allowed statement with one disallowed statement: %+v", mutation)
+		}
+		seenMutationNames[mutation.Name] = true
 	}
 	seenResolution := make(map[string]bool, len(fixture.ResolutionCases))
 	for _, fixtureCase := range fixture.ResolutionCases {
@@ -264,19 +272,37 @@ func TestOpenCodePrivateExecutionStatementsMatchFixtureAllowlist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mutated := append([]string(nil), statements...)
-	replaced := 0
-	for index, statement := range mutated {
-		if statement == fixture.QueryGuardMutation.ReplaceStatement {
-			mutated[index] = fixture.QueryGuardMutation.ReplacementStatement
-			replaced++
+	for _, mutation := range fixture.QueryGuardMutations {
+		mutated := append([]string(nil), statements...)
+		replaced := 0
+		for index, statement := range mutated {
+			if statement == mutation.ReplaceStatement {
+				mutated[index] = mutation.ReplacementStatement
+				replaced++
+			}
+		}
+		if replaced != 1 {
+			t.Fatalf("OpenCode query-guard mutation %q replaced %d actual execution statements, want exactly one", mutation.Name, replaced)
+		}
+		if err := validateOpenCodePrivateExecutionStatements(mutated, fixture); err == nil {
+			t.Fatalf("OpenCode private execution guard accepted fixture-owned mutation %q", mutation.Name)
 		}
 	}
-	if replaced != 1 {
-		t.Fatalf("OpenCode query-guard mutation replaced %d actual execution statements, want exactly one", replaced)
+}
+
+func TestOpenCodePrivateExecutionGuardRejectsUnresolvedSQL(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "dynamic_sql.go")
+	source := []byte(`package ingest
+func forbiddenDynamicSQL(s *zombiezenOpenCodeSQLiteSource, ctx context.Context, statement string) error {
+	return s.executeRowsLocked(ctx, statement, nil, nil)
+}
+`)
+	if err := os.WriteFile(filename, source, 0o600); err != nil {
+		t.Fatalf("write synthetic dynamic-SQL source: %v", err)
 	}
-	if err := validateOpenCodePrivateExecutionStatements(mutated, fixture); err == nil {
-		t.Fatal("OpenCode private execution guard accepted a fixture-owned payload-query mutation")
+	_, err := extractOpenCodePrivateExecutionStatements([]string{filename})
+	if err == nil || !strings.Contains(err.Error(), "dynamic, formatted, concatenated, or unresolved SQL expression") {
+		t.Fatalf("private execution guard dynamic-SQL error = %v, want unresolved-expression rejection", err)
 	}
 }
 

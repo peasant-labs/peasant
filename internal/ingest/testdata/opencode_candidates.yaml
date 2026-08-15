@@ -50,8 +50,6 @@ declared_probe_cases: 12
 forbidden_query_tokens:
   - "select *"
   - " offset "
-  - " from message"
-  - " from part"
   - " from session_message"
   - " from session "
   - event
@@ -60,9 +58,9 @@ forbidden_query_tokens:
   - context
   - migration
   - attach
-  - "data "
   - payload
-declared_allowed_query_statements: 5
+  - " union "
+declared_allowed_query_statements: 11
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -74,9 +72,38 @@ allowed_query_statements:
     statement: 'select name, "notnull", pk from pragma_table_info(?1) order by cid limit 33'
   - name: catalog-indexes
     statement: 'select il.name, il."unique", ii.seqno, ii.name from pragma_index_list(?1) as il join pragma_index_info(il.name) as ii order by il.name, ii.seqno limit 65'
-query_guard_mutation:
-  replace_statement: "select name from sqlite_schema where type = 'table' order by name limit 257"
-  replacement_statement: "select data from session_message limit 257"
+  - name: legacy-sessions-first
+    statement: 'select distinct session_id from message order by session_id limit ?1'
+  - name: legacy-sessions-after
+    statement: 'select distinct session_id from message where session_id > ?1 order by session_id limit ?2'
+  - name: legacy-messages-first
+    statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?2'
+  - name: legacy-messages-after
+    statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 and (time_created > ?2 or (time_created = ?2 and id > ?3)) order by time_created, id limit ?4'
+  - name: legacy-parts-first
+    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by id limit ?3'
+  - name: legacy-parts-after
+    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 and id > ?3 order by id limit ?4'
+declared_query_guard_mutations: 6
+query_guard_mutations:
+  - name: payload-table-scope
+    replace_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?2'
+    replacement_statement: 'select id, session_id, time_created, time_updated, data from session_message where session_id = ?1 order by time_created, id limit ?2'
+  - name: keyset-predicate
+    replace_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 and (time_created > ?2 or (time_created = ?2 and id > ?3)) order by time_created, id limit ?4'
+    replacement_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?4'
+  - name: canonical-order
+    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by id limit ?3'
+    replacement_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by time_created limit ?3'
+  - name: bound-parameter
+    replace_statement: 'select distinct session_id from message order by session_id limit ?1'
+    replacement_statement: 'select distinct session_id from message order by session_id limit 129'
+  - name: forbidden-history
+    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 and id > ?3 order by id limit ?4'
+    replacement_statement: 'select id, stable_id, session_id, time_created, time_created, data from event where session_id = ?1 and stable_id = ?2 and id > ?3 order by id limit ?4'
+  - name: generic-offset-escape
+    replace_statement: 'select distinct session_id from message where session_id > ?1 order by session_id limit ?2'
+    replacement_statement: 'select distinct session_id from message order by session_id limit ?2 offset ?1'
 probe_cases:
   - fixture: empty-valid
     capability: none

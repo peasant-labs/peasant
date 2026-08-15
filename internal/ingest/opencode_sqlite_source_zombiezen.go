@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,11 +15,17 @@ import (
 )
 
 const (
-	openCodeEnableQueryOnlyStatement = "PRAGMA query_only=ON"
-	openCodeReadQueryOnlyStatement   = "PRAGMA query_only"
-	openCodeCatalogTablesStatement   = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
-	openCodeCatalogColumnsStatement  = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
-	openCodeCatalogIndexesStatement  = "SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT 65"
+	openCodeEnableQueryOnlyStatement     = "PRAGMA query_only=ON"
+	openCodeReadQueryOnlyStatement       = "PRAGMA query_only"
+	openCodeCatalogTablesStatement       = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
+	openCodeCatalogColumnsStatement      = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
+	openCodeCatalogIndexesStatement      = "SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT 65"
+	openCodeLegacySessionsFirstStatement = "SELECT DISTINCT session_id FROM message ORDER BY session_id LIMIT ?1"
+	openCodeLegacySessionsAfterStatement = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
+	openCodeLegacyMessagesFirstStatement = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created, id LIMIT ?2"
+	openCodeLegacyMessagesAfterStatement = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 AND (time_created > ?2 OR (time_created = ?2 AND id > ?3)) ORDER BY time_created, id LIMIT ?4"
+	openCodeLegacyPartsFirstStatement    = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 ORDER BY id LIMIT ?3"
+	openCodeLegacyPartsAfterStatement    = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 AND id > ?3 ORDER BY id LIMIT ?4"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -38,7 +45,7 @@ var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
 
 // OpenOpenCodeSQLiteSource opens one private zombiezen SQLite connection in
 // read-only URI mode, enables query_only, installs a deny-by-default statement
-// authorizer, and returns only the restrictive catalog interface.
+// authorizer, and returns only the restrictive typed source interface.
 func OpenOpenCodeSQLiteSource(
 	ctx context.Context,
 	path OpenCodeSQLiteSourcePath,
@@ -177,6 +184,280 @@ func (s *zombiezenOpenCodeSQLiteSource) Catalog(ctx context.Context) (OpenCodeSc
 	return evidence, nil
 }
 
+// LegacySessionIDs returns distinct session identifiers from the materialized
+// legacy message table in stable identifier order.
+func (s *zombiezenOpenCodeSQLiteSource) LegacySessionIDs(ctx context.Context, request OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error) {
+	if err := validateLegacySessionPageRequest(request); err != nil {
+		return OpenCodeLegacySessionPage{}, err
+	}
+	lease, err := s.beginLegacyRead(ctx, "enumerate bounded legacy session identifiers")
+	if err != nil {
+		return OpenCodeLegacySessionPage{}, err
+	}
+	defer lease.release()
+
+	identifiers := make([]OpenCodeLegacySessionID, 0, request.PageSize.value+1)
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeText {
+			return fmt.Errorf("decode legacy session identifier row: session_id has SQLite type %s instead of text", stmt.ColumnType(0))
+		}
+		identifier, decodeErr := NewOpenCodeLegacySessionID(stmt.ColumnText(0))
+		if decodeErr != nil {
+			return fmt.Errorf("decode legacy session identifier row: %w", decodeErr)
+		}
+		identifiers = append(identifiers, identifier)
+		return nil
+	}
+	if request.After == nil {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacySessionsFirstStatement, []any{request.PageSize.value + 1}, decode)
+	} else {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacySessionsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeLegacySessionPage{}, s.legacyReadError(lease.ctx, "enumerate bounded legacy session identifiers", err, "message(session_id)")
+	}
+	page := OpenCodeLegacySessionPage{SessionIDs: identifiers}
+	if len(page.SessionIDs) > request.PageSize.value {
+		page.SessionIDs = page.SessionIDs[:request.PageSize.value]
+		cursor := OpenCodeLegacySessionCursor{sessionID: page.SessionIDs[len(page.SessionIDs)-1]}
+		page.Next = &cursor
+	}
+	return page, nil
+}
+
+// LegacyMessages returns one session's current materialized legacy messages in
+// canonical (time_created, id) order.
+func (s *zombiezenOpenCodeSQLiteSource) LegacyMessages(ctx context.Context, request OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error) {
+	if err := validateLegacyMessagePageRequest(request); err != nil {
+		return OpenCodeLegacyMessagePage{}, err
+	}
+	lease, err := s.beginLegacyRead(ctx, "read bounded legacy message page")
+	if err != nil {
+		return OpenCodeLegacyMessagePage{}, err
+	}
+	defer lease.release()
+
+	rows := make([]OpenCodeLegacyMessageRow, 0, request.PageSize.value+1)
+	decode := func(stmt *sqlite.Stmt) error {
+		row, decodeErr := decodeLegacyMessageRow(stmt)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if row.SessionID != request.SessionID {
+			return fmt.Errorf("decode legacy message row %q: projected session %q differs from requested session %q", row.ID.String(), row.SessionID.String(), request.SessionID.String())
+		}
+		rows = append(rows, row)
+		return nil
+	}
+	if request.After == nil {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyMessagesFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, decode)
+	} else {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyMessagesAfterStatement, []any{request.SessionID.value, request.After.timeCreated, request.After.messageID.value, request.PageSize.value + 1}, decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeLegacyMessagePage{}, s.legacyReadError(lease.ctx, "read bounded legacy message page", err, "message(id, session_id, time_created, time_updated, data)")
+	}
+	page := OpenCodeLegacyMessagePage{Messages: rows}
+	if len(page.Messages) > request.PageSize.value {
+		page.Messages = page.Messages[:request.PageSize.value]
+		last := page.Messages[len(page.Messages)-1]
+		cursor := OpenCodeLegacyMessageCursor{timeCreated: last.TimeCreated, messageID: last.ID}
+		page.Next = &cursor
+	}
+	return page, nil
+}
+
+// LegacyParts returns one message's current materialized legacy parts in part
+// identifier order while retaining both session and message scope.
+func (s *zombiezenOpenCodeSQLiteSource) LegacyParts(ctx context.Context, request OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error) {
+	if err := validateLegacyPartPageRequest(request); err != nil {
+		return OpenCodeLegacyPartPage{}, err
+	}
+	lease, err := s.beginLegacyRead(ctx, "read bounded legacy part page")
+	if err != nil {
+		return OpenCodeLegacyPartPage{}, err
+	}
+	defer lease.release()
+
+	rows := make([]OpenCodeLegacyPartRow, 0, request.PageSize.value+1)
+	decode := func(stmt *sqlite.Stmt) error {
+		row, decodeErr := decodeLegacyPartRow(stmt)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if row.SessionID != request.SessionID || row.MessageID != request.MessageID {
+			return fmt.Errorf("decode legacy part row %q: projected session/message %q/%q differs from requested scope %q/%q", row.ID, row.SessionID.String(), row.MessageID.String(), request.SessionID.String(), request.MessageID.String())
+		}
+		rows = append(rows, row)
+		return nil
+	}
+	if request.After == nil {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsFirstStatement, []any{request.SessionID.value, request.MessageID.value, request.PageSize.value + 1}, decode)
+	} else {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsAfterStatement, []any{request.SessionID.value, request.MessageID.value, request.After.partID, request.PageSize.value + 1}, decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeLegacyPartPage{}, s.legacyReadError(lease.ctx, "read bounded legacy part page", err, "part(id, message_id, session_id, time_created, time_updated, data)")
+	}
+	page := OpenCodeLegacyPartPage{Parts: rows}
+	if len(page.Parts) > request.PageSize.value {
+		page.Parts = page.Parts[:request.PageSize.value]
+		cursor := OpenCodeLegacyPartCursor{partID: page.Parts[len(page.Parts)-1].ID}
+		page.Next = &cursor
+	}
+	return page, nil
+}
+
+type openCodeLegacyReadLease struct {
+	source       *zombiezenOpenCodeSQLiteSource
+	ctx          context.Context
+	cancel       context.CancelFunc
+	oldInterrupt <-chan struct{}
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) beginLegacyRead(parent context.Context, operation string) (*openCodeLegacyReadLease, error) {
+	if parent == nil {
+		return nil, fmt.Errorf("%s from OpenCode SQLite source %q failed before waiting for the single connection: context is nil, so cancellation and deadlines cannot be enforced; no transcript row was read; pass a non-nil context", operation, s.path.String())
+	}
+	queryCtx, queryCancel := s.options.clock.WithTimeout(parent, s.options.queryTimeout)
+	select {
+	case <-queryCtx.Done():
+		queryCancel()
+		return nil, fmt.Errorf("%s from OpenCode SQLite source %q stopped while waiting for the single connection because the caller context or %s deadline ended: %w; no transcript row was read and no source write was attempted; retry with a live bounded context", operation, s.path.String(), s.options.queryTimeout, context.Cause(queryCtx))
+	case <-s.permit:
+	}
+
+	activeCtx, activeCancel := context.WithCancel(queryCtx)
+	s.stateMu.Lock()
+	if s.closing || s.connClosed {
+		s.stateMu.Unlock()
+		activeCancel()
+		queryCancel()
+		s.permit <- struct{}{}
+		return nil, fmt.Errorf("%s from OpenCode SQLite source %q failed before transcript access because the source is closing or closed; no row was read; open a new source for further bounded reads", operation, s.path.String())
+	}
+	s.activeCancel = activeCancel
+	s.stateMu.Unlock()
+	return &openCodeLegacyReadLease{
+		source:       s,
+		ctx:          activeCtx,
+		cancel:       func() { activeCancel(); queryCancel() },
+		oldInterrupt: s.conn.SetInterrupt(activeCtx.Done()),
+	}, nil
+}
+
+func (l *openCodeLegacyReadLease) release() {
+	l.source.conn.SetInterrupt(l.oldInterrupt)
+	l.source.stateMu.Lock()
+	l.source.activeCancel = nil
+	l.source.stateMu.Unlock()
+	l.cancel()
+	l.source.permit <- struct{}{}
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) legacyReadError(ctx context.Context, operation string, err error, projection string) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s from OpenCode SQLite source %q stopped during explicit-column keyset collection because its caller context or %s deadline ended: %w; no partial page or continuation cursor was returned and no source write was attempted; retry the same request and cursor with a live bounded context", operation, s.path.String(), s.options.queryTimeout, context.Cause(ctx))
+	}
+	return fmt.Errorf("%s from OpenCode SQLite source %q failed while decoding the scoped %s projection: %w; no partial page or continuation cursor was returned and no history or external-output source was consulted; verify that this is a supported legacy message/part schema and repair the source with OpenCode before retrying", operation, s.path.String(), projection, err)
+}
+
+func validateLegacySessionPageRequest(request OpenCodeLegacySessionPageRequest) error {
+	if request.PageSize.value <= 0 || request.PageSize.value > MaxOpenCodeLegacyPageSize {
+		return fmt.Errorf("validate OpenCode legacy session page request failed before source access: page size %d was not created by NewOpenCodeLegacyPageSize, so the enumeration cannot be proven bounded; construct the page size with the validator", request.PageSize.value)
+	}
+	if request.After != nil {
+		if err := validateOpenCodeLegacyIdentifier("session cursor", request.After.sessionID.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLegacyMessagePageRequest(request OpenCodeLegacyMessagePageRequest) error {
+	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
+		return fmt.Errorf("validate OpenCode legacy message page request: %w", err)
+	}
+	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
+		return err
+	}
+	if request.After != nil {
+		if err := validateOpenCodeLegacyIdentifier("message cursor", request.After.messageID.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLegacyPartPageRequest(request OpenCodeLegacyPartPageRequest) error {
+	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
+		return fmt.Errorf("validate OpenCode legacy part page request: %w", err)
+	}
+	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
+		return err
+	}
+	if err := validateOpenCodeLegacyIdentifier("message", request.MessageID.value); err != nil {
+		return err
+	}
+	if request.After != nil {
+		if err := validateOpenCodeLegacyIdentifier("part cursor", request.After.partID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeLegacyMessageRow(stmt *sqlite.Stmt) (OpenCodeLegacyMessageRow, error) {
+	if err := requireLegacyColumnTypes(stmt, []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger, sqlite.TypeText}); err != nil {
+		return OpenCodeLegacyMessageRow{}, fmt.Errorf("decode legacy message row: %w", err)
+	}
+	messageID, err := NewOpenCodeLegacyMessageID(stmt.ColumnText(0))
+	if err != nil {
+		return OpenCodeLegacyMessageRow{}, fmt.Errorf("decode legacy message row identifier: %w", err)
+	}
+	sessionID, err := NewOpenCodeLegacySessionID(stmt.ColumnText(1))
+	if err != nil {
+		return OpenCodeLegacyMessageRow{}, fmt.Errorf("decode legacy message row session: %w", err)
+	}
+	data := stmt.ColumnText(4)
+	if !json.Valid([]byte(data)) {
+		return OpenCodeLegacyMessageRow{}, fmt.Errorf("decode legacy message row %q: data is not valid JSON", messageID.String())
+	}
+	return OpenCodeLegacyMessageRow{ID: messageID, SessionID: sessionID, TimeCreated: stmt.ColumnInt64(2), TimeUpdated: stmt.ColumnInt64(3), Data: data}, nil
+}
+
+func decodeLegacyPartRow(stmt *sqlite.Stmt) (OpenCodeLegacyPartRow, error) {
+	if err := requireLegacyColumnTypes(stmt, []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger, sqlite.TypeText}); err != nil {
+		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row: %w", err)
+	}
+	partID := stmt.ColumnText(0)
+	if err := validateOpenCodeLegacyIdentifier("part", partID); err != nil {
+		return OpenCodeLegacyPartRow{}, err
+	}
+	messageID, err := NewOpenCodeLegacyMessageID(stmt.ColumnText(1))
+	if err != nil {
+		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row message: %w", err)
+	}
+	sessionID, err := NewOpenCodeLegacySessionID(stmt.ColumnText(2))
+	if err != nil {
+		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row session: %w", err)
+	}
+	data := stmt.ColumnText(5)
+	if !json.Valid([]byte(data)) {
+		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row %q: data is not valid JSON", partID)
+	}
+	return OpenCodeLegacyPartRow{ID: partID, MessageID: messageID, SessionID: sessionID, TimeCreated: stmt.ColumnInt64(3), TimeUpdated: stmt.ColumnInt64(4), Data: data}, nil
+}
+
+func requireLegacyColumnTypes(stmt *sqlite.Stmt, expected []sqlite.ColumnType) error {
+	for index, expectedType := range expected {
+		if actual := stmt.ColumnType(index); actual != expectedType {
+			return fmt.Errorf("column %d has SQLite type %s instead of %s", index, actual, expectedType)
+		}
+	}
+	return nil
+}
+
 func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (OpenCodeSchemaEvidence, error) {
 	var evidence OpenCodeSchemaEvidence
 	tables := make(map[string]bool)
@@ -285,10 +566,10 @@ func (s *zombiezenOpenCodeSQLiteSource) executeRowsLocked(ctx context.Context, s
 		return s.prepareError(ctx, err)
 	}
 	if err := prepared.Finalize(); err != nil {
-		return fmt.Errorf("finalize read-only catalog statement preflight: %w", err)
+		return fmt.Errorf("finalize read-only source statement preflight: %w", err)
 	}
 	if trailingBytes != 0 && strings.TrimSpace(statement[len(statement)-trailingBytes:]) != "" {
-		return fmt.Errorf("reject catalog statement with trailing SQL before execution")
+		return fmt.Errorf("reject source statement with trailing SQL before execution")
 	}
 
 	s.denied = ""
@@ -304,16 +585,16 @@ func (s *zombiezenOpenCodeSQLiteSource) prepareError(ctx context.Context, err er
 		return s.deniedStatementError(err)
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("prepare bounded read-only catalog statement stopped because its context ended: %w", context.Cause(ctx))
+		return fmt.Errorf("prepare bounded read-only source statement stopped because its context ended: %w", context.Cause(ctx))
 	}
-	return fmt.Errorf("prepare bounded read-only catalog statement: %w", err)
+	return fmt.Errorf("prepare bounded read-only source statement: %w", err)
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) deniedStatementError(err error) error {
-	return fmt.Errorf("read OpenCode SQLite source %q rejected a forbidden statement during private catalog preparation because it requested forbidden SQLite action %q: %w; execution did not start and query_only remains enabled; keep source operations catalog-only and never write, migrate, checkpoint, repair, maintain, copy, truncate, or alter OpenCode-owned files", s.path.String(), s.denied, err)
+	return fmt.Errorf("read OpenCode SQLite source %q rejected a forbidden statement during private bounded-read preparation because it requested forbidden SQLite action %q: %w; execution did not start and query_only remains enabled; keep source operations on the fixed catalog/message/part projections and never write, migrate, checkpoint, repair, maintain, copy, truncate, or alter OpenCode-owned files", s.path.String(), s.denied, err)
 }
 
-// Close prevents new catalog work, cancels an active SQLite operation, and
+// Close prevents new source reads, cancels an active SQLite operation, and
 // waits for the one private connection only within the injected deadline.
 func (s *zombiezenOpenCodeSQLiteSource) Close(ctx context.Context) error {
 	if ctx == nil {
@@ -336,7 +617,7 @@ func (s *zombiezenOpenCodeSQLiteSource) Close(ctx context.Context) error {
 
 	select {
 	case <-closeCtx.Done():
-		return fmt.Errorf("close OpenCode SQLite source %q stopped while waiting for the active bounded catalog operation because the caller context or %s cleanup deadline ended: %w; new reads remain disabled but the connection may still require a retry to release; retry Close with a live context after investigating source responsiveness", s.path.String(), s.options.queryTimeout, context.Cause(closeCtx))
+		return fmt.Errorf("close OpenCode SQLite source %q stopped while waiting for the active bounded source operation because the caller context or %s cleanup deadline ended: %w; new reads remain disabled but the connection may still require a retry to release; retry Close with a live context after investigating source responsiveness", s.path.String(), s.options.queryTimeout, context.Cause(closeCtx))
 	case <-s.permit:
 	}
 	defer func() { s.permit <- struct{}{} }()

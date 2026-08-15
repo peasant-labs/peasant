@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -90,10 +91,10 @@ func TestDeniedStatementFixtureIsNonVacuous(t *testing.T) {
 	}
 }
 
-func TestPublicSQLiteSourceSurfaceIsCatalogOnly(t *testing.T) {
+func TestPublicSQLiteSourceSurfaceIsBoundedAndTyped(t *testing.T) {
 	interfaceType := reflect.TypeOf((*OpenCodeSQLiteSource)(nil)).Elem()
-	if interfaceType.NumMethod() != 2 {
-		t.Fatalf("public SQLite source method count = %d, want only Catalog and Close", interfaceType.NumMethod())
+	if interfaceType.NumMethod() != 5 {
+		t.Fatalf("public SQLite source method count = %d, want Catalog, three typed legacy reads, and Close", interfaceType.NumMethod())
 	}
 	catalog, ok := interfaceType.MethodByName("Catalog")
 	if !ok || catalog.Type.NumIn() != 1 || catalog.Type.NumOut() != 2 || catalog.Type.Out(0) != reflect.TypeOf(OpenCodeSchemaEvidence{}) {
@@ -105,7 +106,7 @@ func TestPublicSQLiteSourceSurfaceIsCatalogOnly(t *testing.T) {
 	}
 	for index := 0; index < interfaceType.NumMethod(); index++ {
 		methodText := interfaceType.Method(index).Type.String()
-		if strings.Contains(methodText, "sqlite.Conn") || strings.Contains(methodText, "[]interface {}") || strings.Contains(methodText, "func(") && strings.Count(methodText, "func(") > 1 {
+		if strings.Contains(methodText, "sqlite.Conn") || strings.Contains(methodText, "[]interface {}") || strings.Contains(methodText, "[]any") || strings.Contains(methodText, "func(") && strings.Count(methodText, "func(") > 1 {
 			t.Errorf("public SQLite source method exposes raw connection, arbitrary arguments, or callback: %s", methodText)
 		}
 	}
@@ -180,6 +181,105 @@ func TestCloseCancelsActiveLockedCatalogWithinInjectedBound(t *testing.T) {
 	closeErr := writer.Close()
 	if rollbackErr != nil || closeErr != nil {
 		t.Fatalf("release synthetic exclusive writer: %v", errors.Join(rollbackErr, closeErr))
+	}
+}
+
+func TestLegacyMessageCancellationWhileLockedReturnsNoPartialPage(t *testing.T) {
+	materialized := testfixture.MaterializeByName(t, "legacy-reader-pages")
+	source := openConcreteSyntheticSource(t, materialized)
+	writer, err := sqlite.OpenConn(materialized.Path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("open synthetic exclusive legacy writer: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(writer, "BEGIN EXCLUSIVE", nil); err != nil {
+		_ = writer.Close()
+		t.Fatalf("begin synthetic exclusive legacy transaction: %v", err)
+	}
+	sessionID, err := NewOpenCodeLegacySessionID("ses_reader_a")
+	if err != nil {
+		t.Fatalf("construct locked legacy session identifier: %v", err)
+	}
+	pageSize, err := NewOpenCodeLegacyPageSize(2)
+	if err != nil {
+		t.Fatalf("construct locked legacy page size: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	readDone := make(chan struct {
+		page OpenCodeLegacyMessagePage
+		err  error
+	}, 1)
+	go func() {
+		page, readErr := source.LegacyMessages(ctx, OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize})
+		readDone <- struct {
+			page OpenCodeLegacyMessagePage
+			err  error
+		}{page: page, err: readErr}
+	}()
+	waitForActiveCatalog(t, source)
+	cancel()
+	result := <-readDone
+	if !errors.Is(result.err, context.Canceled) || len(result.page.Messages) != 0 || result.page.Next != nil {
+		t.Errorf("locked canceled legacy page = %+v error=%v, want zero page and cancellation cause", result.page, result.err)
+	}
+	rollbackErr := sqlitex.ExecuteTransient(writer, "ROLLBACK", nil)
+	closeWriterErr := writer.Close()
+	if rollbackErr != nil || closeWriterErr != nil {
+		t.Fatalf("release synthetic exclusive legacy writer: %v", errors.Join(rollbackErr, closeWriterErr))
+	}
+	if err := source.Close(t.Context()); err != nil {
+		t.Fatalf("close source after locked cancellation: %v", err)
+	}
+}
+
+func TestCloseCancelsActiveLockedLegacyMessageReadWithinInjectedBound(t *testing.T) {
+	materialized := testfixture.MaterializeByName(t, "legacy-reader-pages")
+	path, err := NewOpenCodeSQLiteSourcePath(materialized.Path)
+	if err != nil {
+		t.Fatalf("validate synthetic locked legacy source path: %v", err)
+	}
+	options, err := NewOpenCodeSQLiteSourceOptions(500*time.Millisecond, time.Second, systemOpenCodeSQLiteDeadlineClock{})
+	if err != nil {
+		t.Fatalf("create bounded locked legacy options: %v", err)
+	}
+	opened, err := OpenOpenCodeSQLiteSource(t.Context(), path, options)
+	if err != nil {
+		t.Fatalf("open synthetic locked legacy source: %v", err)
+	}
+	source := opened.(*zombiezenOpenCodeSQLiteSource)
+	writer, err := sqlite.OpenConn(materialized.Path, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("open synthetic exclusive legacy writer: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(writer, "BEGIN EXCLUSIVE", nil); err != nil {
+		_ = writer.Close()
+		t.Fatalf("begin synthetic exclusive legacy transaction: %v", err)
+	}
+	sessionID, _ := NewOpenCodeLegacySessionID("ses_reader_a")
+	pageSize, _ := NewOpenCodeLegacyPageSize(2)
+	readDone := make(chan error, 1)
+	go func() {
+		page, readErr := source.LegacyMessages(context.Background(), OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize})
+		if len(page.Messages) != 0 || page.Next != nil {
+			readDone <- fmt.Errorf("close-canceled legacy read returned partial page: %+v", page)
+			return
+		}
+		readDone <- readErr
+	}()
+	waitForActiveCatalog(t, source)
+	started := time.Now()
+	if err := source.Close(context.Background()); err != nil {
+		t.Fatalf("close source with active locked legacy read: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= options.queryTimeout {
+		t.Errorf("active legacy cleanup elapsed %s, want less than injected %s bound", elapsed, options.queryTimeout)
+	}
+	if err := <-readDone; !errors.Is(err, context.Canceled) {
+		t.Errorf("close-canceled active legacy read error = %v, want context.Canceled", err)
+	}
+	rollbackErr := sqlitex.ExecuteTransient(writer, "ROLLBACK", nil)
+	closeWriterErr := writer.Close()
+	if rollbackErr != nil || closeWriterErr != nil {
+		t.Fatalf("release synthetic exclusive legacy writer: %v", errors.Join(rollbackErr, closeWriterErr))
 	}
 }
 
