@@ -1,4 +1,4 @@
-declared_cases: 6
+declared_cases: 8
 cases:
   - name: legacy-rich
     source_fixture: legacy-mounted-projection
@@ -57,6 +57,26 @@ cases:
     entries: []
   - name: catalog-overflow-ineligible
     source_fixture: catalog-table-overflow
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: empty-ineligible
+    source_fixture: empty-valid
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: corrupt-ineligible
+    source_fixture: corrupt-non-sqlite
     expected_kickstart_sessions: 0
     expected_stored_sessions: 0
     harvest: skip

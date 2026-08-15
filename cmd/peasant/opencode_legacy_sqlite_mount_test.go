@@ -27,7 +27,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const expectedLegacySQLiteMountCases = 6
+const expectedLegacySQLiteMountCases = 8
 
 type legacySQLiteHarvestExpectation string
 
