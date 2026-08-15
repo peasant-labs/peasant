@@ -83,6 +83,20 @@ func NewOpenCodeLegacyMessageID(value string) (OpenCodeLegacyMessageID, error) {
 // String returns the validated message identifier.
 func (id OpenCodeLegacyMessageID) String() string { return id.value }
 
+// OpenCodeLegacyPartID is a validated legacy part identifier.
+type OpenCodeLegacyPartID struct{ value string }
+
+// NewOpenCodeLegacyPartID validates a legacy part identifier.
+func NewOpenCodeLegacyPartID(value string) (OpenCodeLegacyPartID, error) {
+	if err := validateOpenCodeLegacyIdentifier("part", value); err != nil {
+		return OpenCodeLegacyPartID{}, err
+	}
+	return OpenCodeLegacyPartID{value: value}, nil
+}
+
+// String returns the validated part identifier.
+func (id OpenCodeLegacyPartID) String() string { return id.value }
+
 func validateOpenCodeLegacyIdentifier(kind, value string) error {
 	if value == "" || strings.TrimSpace(value) != value || strings.IndexByte(value, 0) >= 0 {
 		return fmt.Errorf("validate OpenCode legacy %s identifier %q failed before source access: the identifier is empty, has surrounding whitespace, or contains a NUL byte and cannot safely scope a bounded read; use the exact non-empty identifier returned by the source", kind, value)
@@ -125,18 +139,18 @@ func (c OpenCodeLegacyMessageCursor) TimeCreated() int64 { return c.timeCreated 
 func (c OpenCodeLegacyMessageCursor) MessageID() OpenCodeLegacyMessageID { return c.messageID }
 
 // OpenCodeLegacyPartCursor resumes part ordering by part identifier.
-type OpenCodeLegacyPartCursor struct{ partID string }
+type OpenCodeLegacyPartCursor struct{ partID OpenCodeLegacyPartID }
 
 // NewOpenCodeLegacyPartCursor validates an explicit part cursor.
-func NewOpenCodeLegacyPartCursor(partID string) (OpenCodeLegacyPartCursor, error) {
-	if err := validateOpenCodeLegacyIdentifier("part cursor", partID); err != nil {
+func NewOpenCodeLegacyPartCursor(partID OpenCodeLegacyPartID) (OpenCodeLegacyPartCursor, error) {
+	if err := validateOpenCodeLegacyIdentifier("part cursor", partID.value); err != nil {
 		return OpenCodeLegacyPartCursor{}, err
 	}
 	return OpenCodeLegacyPartCursor{partID: partID}, nil
 }
 
 // PartID returns the last part identifier represented by the cursor.
-func (c OpenCodeLegacyPartCursor) PartID() string { return c.partID }
+func (c OpenCodeLegacyPartCursor) PartID() OpenCodeLegacyPartID { return c.partID }
 
 // OpenCodeLegacySessionPageRequest requests one bounded session-ID page.
 type OpenCodeLegacySessionPageRequest struct {
@@ -170,7 +184,7 @@ type OpenCodeLegacyMessageRow struct {
 
 // OpenCodeLegacyPartRow is one detached current row from legacy part.
 type OpenCodeLegacyPartRow struct {
-	ID          string
+	ID          OpenCodeLegacyPartID
 	MessageID   OpenCodeLegacyMessageID
 	SessionID   OpenCodeLegacySessionID
 	TimeCreated int64

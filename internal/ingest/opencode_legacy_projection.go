@@ -217,7 +217,7 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 					return openCodeLegacyProjection{}, partErr
 				}
 				for _, part := range parts.Parts {
-					message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: part.ID, MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)})
+					message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)})
 				}
 				if parts.Next == nil {
 					break

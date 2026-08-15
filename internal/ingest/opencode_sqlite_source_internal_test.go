@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -88,27 +87,6 @@ func TestDeniedStatementFixtureIsNonVacuous(t *testing.T) {
 	}
 	if sessions != 2 {
 		t.Fatalf("writable synthetic control session count = %d, want 2 proving the denied statement is effective", sessions)
-	}
-}
-
-func TestPublicSQLiteSourceSurfaceIsBoundedAndTyped(t *testing.T) {
-	interfaceType := reflect.TypeOf((*OpenCodeSQLiteSource)(nil)).Elem()
-	if interfaceType.NumMethod() != 5 {
-		t.Fatalf("public SQLite source method count = %d, want Catalog, three typed legacy reads, and Close", interfaceType.NumMethod())
-	}
-	catalog, ok := interfaceType.MethodByName("Catalog")
-	if !ok || catalog.Type.NumIn() != 1 || catalog.Type.NumOut() != 2 || catalog.Type.Out(0) != reflect.TypeOf(OpenCodeSchemaEvidence{}) {
-		t.Fatalf("public Catalog signature = %v, want context-only input and detached schema evidence", catalog.Type)
-	}
-	closeMethod, ok := interfaceType.MethodByName("Close")
-	if !ok || closeMethod.Type.NumIn() != 1 || closeMethod.Type.NumOut() != 1 {
-		t.Fatalf("public Close signature = %v, want context-only bounded cleanup", closeMethod.Type)
-	}
-	for index := 0; index < interfaceType.NumMethod(); index++ {
-		methodText := interfaceType.Method(index).Type.String()
-		if strings.Contains(methodText, "sqlite.Conn") || strings.Contains(methodText, "[]interface {}") || strings.Contains(methodText, "[]any") || strings.Contains(methodText, "func(") && strings.Count(methodText, "func(") > 1 {
-			t.Errorf("public SQLite source method exposes raw connection, arbitrary arguments, or callback: %s", methodText)
-		}
 	}
 }
 

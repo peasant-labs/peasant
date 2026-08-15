@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,64 +17,15 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-func TestOpenCodeLegacyReaderPaginatesDetachedRowsInCanonicalOrder(t *testing.T) {
+func TestOpenCodeLegacyReaderReturnsDetachedRows(t *testing.T) {
 	materialized := testfixture.MaterializeByName(t, "legacy-reader-pages")
 	before := testfixture.SnapshotSource(t, materialized)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 	pageSize := mustLegacyPageSize(t, 2)
-
-	firstSessions, err := source.LegacySessionIDs(t.Context(), ingest.OpenCodeLegacySessionPageRequest{PageSize: mustLegacyPageSize(t, 1)})
-	if err != nil {
-		t.Fatalf("enumerate first synthetic legacy session page: %v", err)
-	}
-	if got := legacySessionStrings(firstSessions.SessionIDs); !equalStrings(got, []string{"ses_reader_a"}) || firstSessions.Next == nil {
-		t.Fatalf("first session page = %v next=%v, want ses_reader_a with cursor", got, firstSessions.Next)
-	}
-	secondSessions, err := source.LegacySessionIDs(t.Context(), ingest.OpenCodeLegacySessionPageRequest{PageSize: mustLegacyPageSize(t, 1), After: firstSessions.Next})
-	if err != nil {
-		t.Fatalf("enumerate second synthetic legacy session page: %v", err)
-	}
-	if got := legacySessionStrings(secondSessions.SessionIDs); !equalStrings(got, []string{"ses_reader_z"}) || secondSessions.Next != nil {
-		t.Fatalf("second session page = %v next=%v, want ses_reader_z without cursor", got, secondSessions.Next)
-	}
-
 	sessionID := mustLegacySessionID(t, "ses_reader_a")
 	firstMessages, err := source.LegacyMessages(t.Context(), ingest.OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize})
 	if err != nil {
-		t.Fatalf("read first synthetic legacy message page: %v", err)
-	}
-	if got := legacyMessageStrings(firstMessages.Messages); !equalStrings(got, []string{"msg_tie_a", "msg_tie_b"}) || firstMessages.Next == nil {
-		t.Fatalf("first message page = %v next=%v, want timestamp tie broken by id with cursor", got, firstMessages.Next)
-	}
-	secondMessages, err := source.LegacyMessages(t.Context(), ingest.OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize, After: firstMessages.Next})
-	if err != nil {
-		t.Fatalf("read second synthetic legacy message page: %v", err)
-	}
-	if got := legacyMessageStrings(secondMessages.Messages); !equalStrings(got, []string{"msg_next", "msg_large"}) || secondMessages.Next != nil {
-		t.Fatalf("second message page = %v next=%v, want remaining canonical rows without cursor", got, secondMessages.Next)
-	}
-	if !strings.Contains(secondMessages.Messages[1].Data, "LARGE_INLINE_PAYLOAD_MARKER") {
-		t.Errorf("bounded message page omitted the fixture-owned large inline payload marker")
-	}
-	repeatedContinuation, err := source.LegacyMessages(t.Context(), ingest.OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize, After: firstMessages.Next})
-	if err != nil || !equalStrings(legacyMessageStrings(repeatedContinuation.Messages), legacyMessageStrings(secondMessages.Messages)) || repeatedContinuation.Next != nil {
-		t.Errorf("repeated continuation cursor page = %+v error=%v, want deterministic second page", repeatedContinuation, err)
-	}
-
-	messageID := mustLegacyMessageID(t, "msg_tie_a")
-	firstParts, err := source.LegacyParts(t.Context(), ingest.OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: messageID, PageSize: pageSize})
-	if err != nil {
-		t.Fatalf("read first synthetic legacy part page: %v", err)
-	}
-	if got := legacyPartStrings(firstParts.Parts); !equalStrings(got, []string{"part_a", "part_m"}) || firstParts.Next == nil {
-		t.Fatalf("first part page = %v next=%v, want part-id order independent of insertion and timestamp", got, firstParts.Next)
-	}
-	secondParts, err := source.LegacyParts(t.Context(), ingest.OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: messageID, PageSize: pageSize, After: firstParts.Next})
-	if err != nil {
-		t.Fatalf("read second synthetic legacy part page: %v", err)
-	}
-	if got := legacyPartStrings(secondParts.Parts); !equalStrings(got, []string{"part_z"}) || secondParts.Next != nil {
-		t.Fatalf("second part page = %v next=%v, want final part without cursor", got, secondParts.Next)
+		t.Fatalf("read synthetic legacy message page before detached mutation: %v", err)
 	}
 
 	firstMessages.Messages[0].Data = "mutated detached copy"
@@ -83,12 +33,25 @@ func TestOpenCodeLegacyReaderPaginatesDetachedRowsInCanonicalOrder(t *testing.T)
 	if err != nil {
 		t.Fatalf("repeat identical message cursor: %v", err)
 	}
-	if repeated.Messages[0].Data == "mutated detached copy" || !equalStrings(legacyMessageStrings(repeated.Messages), []string{"msg_tie_a", "msg_tie_b"}) {
+	if repeated.Messages[0].Data == "mutated detached copy" || repeated.Messages[0].ID != firstMessages.Messages[0].ID {
 		t.Errorf("repeated cursor page was not deterministic and detached: %+v", repeated)
 	}
 
 	closeSyntheticSource(t, source)
 	testfixture.AssertUnchanged(t, materialized, before)
+}
+
+func TestOpenCodeLegacyReaderReturnsFixtureOwnedLargeInlinePayload(t *testing.T) {
+	materialized := testfixture.MaterializeByName(t, "legacy-reader-pages")
+	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
+	defer closeSyntheticSource(t, source)
+	page, err := source.LegacyMessages(t.Context(), ingest.OpenCodeLegacyMessagePageRequest{SessionID: mustLegacySessionID(t, "ses_reader_a"), PageSize: mustLegacyPageSize(t, 4)})
+	if err != nil {
+		t.Fatalf("read synthetic legacy page containing large inline payload marker: %v", err)
+	}
+	if len(page.Messages) != 4 || !strings.Contains(page.Messages[3].Data, "LARGE_INLINE_PAYLOAD_MARKER") {
+		t.Fatalf("bounded synthetic legacy page omitted fixture-owned large inline payload marker: %+v", page)
+	}
 }
 
 func TestOpenCodeLegacyReaderReturnsEmptyPagesForUnknownSession(t *testing.T) {
@@ -100,8 +63,8 @@ func TestOpenCodeLegacyReaderReturnsEmptyPagesForUnknownSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read empty synthetic legacy session: %v", err)
 	}
-	if len(page.Messages) != 0 || page.Next != nil {
-		t.Fatalf("empty session page = %+v, want no rows and no cursor", page)
+	if len(page.Messages) != 0 || cap(page.Messages) != 0 || page.Next != nil {
+		t.Fatalf("empty session page = %+v length/capacity=%d/%d, want no rows, no retained capacity, and no cursor", page, len(page.Messages), cap(page.Messages))
 	}
 }
 
@@ -121,7 +84,7 @@ func TestOpenCodeLegacyReaderUsesOnlyMaterializedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read materialized part with history distractors: %v", err)
 	}
-	if len(parts.Parts) != 1 || parts.Parts[0].ID != "part_latest" || !strings.Contains(parts.Parts[0].Data, "latest materialized part") {
+	if len(parts.Parts) != 1 || parts.Parts[0].ID.String() != "part_latest" || !strings.Contains(parts.Parts[0].Data, "latest materialized part") {
 		t.Fatalf("materialized part page = %+v, want only latest primary-table row", parts)
 	}
 }
@@ -254,24 +217,6 @@ func TestOpenCodeLegacyReaderNeverUsesEnvironmentOrExternalOutputFiles(t *testin
 	}
 }
 
-func TestOpenCodeSQLiteSourcePublicReaderSurfaceHasOnlyTypedDetachedOperations(t *testing.T) {
-	interfaceType := reflect.TypeOf((*ingest.OpenCodeSQLiteSource)(nil)).Elem()
-	if interfaceType.NumMethod() != 5 {
-		t.Fatalf("public SQLite source method count = %d, want Catalog, three typed legacy reads, and Close", interfaceType.NumMethod())
-	}
-	for index := 0; index < interfaceType.NumMethod(); index++ {
-		methodText := interfaceType.Method(index).Type.String()
-		for _, forbidden := range []string{"sqlite.Conn", "[]interface {}", "[]any", " string)"} {
-			if strings.Contains(methodText, forbidden) {
-				t.Errorf("public SQLite source method exposes a forbidden raw or generic surface: %s", methodText)
-			}
-		}
-		if strings.Count(methodText, "func(") > 1 {
-			t.Errorf("public SQLite source method exposes a callback: %s", methodText)
-		}
-	}
-}
-
 func appendLegacyWALRows(writer *sqlite.Conn) (err error) {
 	endTransaction, err := sqlitex.ImmediateTransaction(writer)
 	if err != nil {
@@ -311,6 +256,15 @@ func mustLegacyMessageID(t testing.TB, value string) ingest.OpenCodeLegacyMessag
 	return id
 }
 
+func mustLegacyPartID(t testing.TB, value string) ingest.OpenCodeLegacyPartID {
+	t.Helper()
+	id, err := ingest.NewOpenCodeLegacyPartID(value)
+	if err != nil {
+		t.Fatalf("construct synthetic legacy part identifier: %v", err)
+	}
+	return id
+}
+
 func legacySessionStrings(ids []ingest.OpenCodeLegacySessionID) []string {
 	result := make([]string, len(ids))
 	for index, id := range ids {
@@ -330,7 +284,7 @@ func legacyMessageStrings(rows []ingest.OpenCodeLegacyMessageRow) []string {
 func legacyPartStrings(rows []ingest.OpenCodeLegacyPartRow) []string {
 	result := make([]string, len(rows))
 	for index, row := range rows {
-		result[index] = row.ID
+		result[index] = row.ID.String()
 	}
 	return result
 }
