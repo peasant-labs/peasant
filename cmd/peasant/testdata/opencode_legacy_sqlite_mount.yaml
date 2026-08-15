@@ -1,0 +1,67 @@
+declared_cases: 6
+cases:
+  - name: legacy-rich
+    source_fixture: legacy-mounted-projection
+    expected_kickstart_sessions: 2
+    expected_stored_sessions: 2
+    harvest: success
+    target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expected_projection_sha256: c02aa0f5b91c7a6969569ac1a95500290df2422f9dfd3b606ae6e709a0c1cef0
+    expected_entries: 5
+    mutation: none
+    entries:
+      - {index: 0, role: user, entry_type: text, part_type: "", parent_index: -1, content_contains: synthetic question, tool_call_id: ""}
+      - {index: 1, role: assistant, entry_type: tool_use, part_type: "", parent_index: -1, content_contains: "", tool_call_id: ""}
+      - {index: 2, role: assistant, entry_type: thinking, part_type: reasoning, parent_index: 1, content_contains: synthetic reasoning, tool_call_id: ""}
+      - {index: 3, role: tool, entry_type: tool_result, part_type: tool_result, parent_index: 1, content_contains: "", tool_call_id: part_tool_result}
+      - {index: 4, role: assistant, entry_type: tool_use, part_type: tool_use, parent_index: 1, content_contains: "", tool_call_id: part_tool_use}
+  - name: malformed-required-json
+    source_fixture: legacy-mounted-projection
+    expected_kickstart_sessions: 2
+    expected_stored_sessions: 1
+    harvest: session_error
+    target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: malformed_message_json
+    entries: []
+  - name: current-ineligible
+    source_fixture: current-session-message
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: hybrid-ineligible
+    source_fixture: hybrid-catalog
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: unsupported-ineligible
+    source_fixture: unsupported-schema
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: catalog-overflow-ineligible
+    source_fixture: catalog-table-overflow
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []

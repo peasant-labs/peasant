@@ -1,4 +1,4 @@
-declared_cases: 17
+declared_cases: 18
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -507,5 +507,66 @@ cases:
       seq: not_null
     legacy_messages: []
     legacy_parts: []
+    current_messages: []
+    ignored_history: []
+
+  - name: legacy-mounted-projection
+    logical_path: mounted/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: wal
+    corruption: ""
+    declared_rows: {legacy_messages: 3, legacy_parts: 5, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_equal_a
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+        time_created: 1700000000000
+        time_updated: 1700000000010
+        data: '{"role":"user","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700000000010}}'
+      - id: msg_equal_b
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+        time_created: 1700000000000
+        time_updated: 1700000000100
+        data: '{"role":"assistant","modelID":"synthetic-model","tokens":{"input":7,"output":11},"path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700000000100}}'
+      - id: msg_second
+        session_id: ses_4cd91f52effeXd3QAJ54jOyzv6
+        time_created: 1700000000200
+        time_updated: 1700000000210
+        data: '{"role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/work/second"}}'
+    legacy_parts:
+      - id: part_user_text
+        message_id: msg_equal_a
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+        time_created: 1700000000001
+        time_updated: 1700000000001
+        data: '{"type":"text","text":"synthetic question"}'
+      - id: part_reasoning
+        message_id: msg_equal_b
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+        time_created: 1700000000020
+        time_updated: 1700000000020
+        data: '{"type":"reasoning","text":"synthetic reasoning"}'
+      - id: part_tool_use
+        message_id: msg_equal_b
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+        time_created: 1700000000030
+        time_updated: 1700000000030
+        data: '{"type":"tool_use","id":"call_synthetic","name":"read","input":{"path":"/synthetic/MUST_NOT_OPEN/full-output.txt"}}'
+      - id: part_tool_result
+        message_id: msg_equal_b
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+        time_created: 1700000000040
+        time_updated: 1700000000040
+        data: '{"type":"tool_result","id":"call_synthetic","output":"INLINE_OUTPUT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
+      - id: part_second_text
+        message_id: msg_second
+        session_id: ses_4cd91f52effeXd3QAJ54jOyzv6
+        time_created: 1700000000201
+        time_updated: 1700000000201
+        data: '{"type":"text","text":"second synthetic session"}'
     current_messages: []
     ignored_history: []
