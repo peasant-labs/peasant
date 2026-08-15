@@ -107,6 +107,13 @@ func (s *zombiezenOpenCodeSQLiteSource) authorizeRead(action sqlite.Action) sqli
 		if strings.EqualFold(action.Pragma(), "query_only") && action.PragmaArg() == "" {
 			return sqlite.AuthResultOK
 		}
+		switch strings.ToLower(action.Pragma()) {
+		case "table_info", "index_list", "index_info":
+			// SQLite's table-valued catalog functions invoke their corresponding
+			// read-only PRAGMA authorizer actions. Permit only the three bounded
+			// structural probes used by candidate inspection.
+			return sqlite.AuthResultOK
+		}
 	}
 
 	s.denied = action.String()

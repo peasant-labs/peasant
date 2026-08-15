@@ -70,6 +70,7 @@ func TestEmbeddedCorpusIsStrictAndNonVacuous(t *testing.T) {
 	assertSchemaCovered(t, seenSchemas, SchemaCurrent)
 	assertSchemaCovered(t, seenSchemas, SchemaHybrid)
 	assertSchemaCovered(t, seenSchemas, SchemaCurrentMissingSeq)
+	assertSchemaCovered(t, seenSchemas, SchemaCurrentNullableSeq)
 	assertSchemaCovered(t, seenSchemas, SchemaUnsupported)
 	if !seenFormats[SourceFormatSQLite] || !seenFormats[SourceFormatCorrupt] || !seenWAL {
 		t.Errorf("embedded fixture corpus coverage = formats %v WAL %t; want SQLite, corrupt, and WAL", seenFormats, seenWAL)
@@ -302,6 +303,10 @@ func assertCatalog(t testing.TB, expected ExpectedCatalog, catalog catalogSnapsh
 		if !exists || !notNull {
 			t.Errorf("session_message seq metadata = exists %t not-null %t, want both true", exists, notNull)
 		}
+	case SeqNullable:
+		if !exists || notNull {
+			t.Errorf("session_message seq metadata = exists %t not-null %t, want present and nullable", exists, notNull)
+		}
 	}
 }
 
@@ -360,7 +365,7 @@ func schemaHasTable(schema SchemaKind, table string) bool {
 	case "message", "part":
 		return schema == SchemaLegacy || schema == SchemaHybrid
 	case "session_message":
-		return schema == SchemaCurrent || schema == SchemaHybrid || schema == SchemaCurrentMissingSeq
+		return schema == SchemaCurrent || schema == SchemaHybrid || schema == SchemaCurrentMissingSeq || schema == SchemaCurrentNullableSeq
 	default:
 		return false
 	}
@@ -419,7 +424,7 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 	case mutationTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_cases: 0\ncases: []\n")...), nil
 	case mutationDeclaredCount:
-		return replaceOnce("declared_cases: 8", "declared_cases: 7")
+		return replaceOnce("declared_cases: 9", "declared_cases: 8")
 	case mutationDuplicateName:
 		return replaceOnce("name: legacy-message-part", "name: empty-valid")
 	case mutationMissingName:

@@ -1,0 +1,92 @@
+declared_resolution_cases: 8
+resolution_cases:
+  - name: production-channel
+    channel: prod
+    environment: {}
+    paths: [opencode.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: local-channel
+    channel: local
+    environment: {}
+    paths: [opencode-local.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: sanitized-channel
+    channel: dev/feature@
+    environment: {}
+    paths: [opencode-dev-feature-.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: disabled-channel
+    channel: nightly
+    environment:
+      OPENCODE_DISABLE_CHANNEL_DB: "true"
+    paths: [opencode.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: disable-flag-is-upstream-case-sensitive
+    channel: nightly
+    environment:
+      OPENCODE_DISABLE_CHANNEL_DB: "TRUE"
+    paths: [opencode-nightly.db, .]
+    provenance: [channel_database, legacy_json_root]
+  - name: relative-override-deduplicates-default
+    channel: latest
+    environment:
+      OPENCODE_DB: opencode.db
+    paths: [opencode.db, .]
+    provenance: [environment_override, legacy_json_root]
+  - name: absolute-override-precedes-default
+    channel: beta
+    environment:
+      OPENCODE_DB: /synthetic/../override.db
+    paths: [/synthetic/../override.db, opencode.db, .]
+    provenance: [environment_override, channel_database, legacy_json_root]
+  - name: memory-override-is-preserved-as-evidence-only
+    channel: latest
+    environment:
+      OPENCODE_DB: ":memory:"
+    paths: [":memory:", opencode.db, .]
+    provenance: [environment_override, channel_database, legacy_json_root]
+
+declared_probe_cases: 9
+forbidden_query_tokens:
+  - "select *"
+  - " offset "
+  - " from message"
+  - " from part"
+  - " from session_message"
+  - " from session "
+  - event
+  - delta
+  - input
+  - context
+  - migration
+  - attach
+  - "data "
+  - payload
+probe_cases:
+  - fixture: empty-valid
+    capability: none
+    support: unsupported
+  - fixture: legacy-message-part
+    capability: legacy_message_part
+    support: supported
+  - fixture: current-session-message
+    capability: current_session_message
+    support: supported
+  - fixture: hybrid-catalog
+    capability: hybrid
+    support: supported
+  - fixture: current-missing-seq
+    capability: none
+    support: partial
+  - fixture: current-nullable-seq
+    capability: none
+    support: partial
+  - fixture: unsupported-schema
+    capability: none
+    support: unsupported
+  - fixture: corrupt-non-sqlite
+    capability: none
+    support: corrupt
+  - fixture: wal-capable
+    capability: current_session_message
+    support: supported

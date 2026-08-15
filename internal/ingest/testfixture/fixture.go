@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 8
+const expectedCaseCount = 9
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -33,12 +33,13 @@ const (
 type SchemaKind string
 
 const (
-	SchemaEmpty             SchemaKind = "empty"
-	SchemaLegacy            SchemaKind = "legacy"
-	SchemaCurrent           SchemaKind = "current"
-	SchemaHybrid            SchemaKind = "hybrid"
-	SchemaCurrentMissingSeq SchemaKind = "current_missing_seq"
-	SchemaUnsupported       SchemaKind = "unsupported"
+	SchemaEmpty              SchemaKind = "empty"
+	SchemaLegacy             SchemaKind = "legacy"
+	SchemaCurrent            SchemaKind = "current"
+	SchemaHybrid             SchemaKind = "hybrid"
+	SchemaCurrentMissingSeq  SchemaKind = "current_missing_seq"
+	SchemaCurrentNullableSeq SchemaKind = "current_nullable_seq"
+	SchemaUnsupported        SchemaKind = "unsupported"
 )
 
 // JournalMode controls the journal mode used during SQLite setup.
@@ -81,8 +82,9 @@ type DeclaredRowCounts struct {
 type SeqExpectation string
 
 const (
-	SeqAbsent  SeqExpectation = "absent"
-	SeqNotNull SeqExpectation = "not_null"
+	SeqAbsent   SeqExpectation = "absent"
+	SeqNullable SeqExpectation = "nullable"
+	SeqNotNull  SeqExpectation = "not_null"
 )
 
 // ExpectedCatalog pins the structural catalog exposed by a case.
@@ -214,7 +216,7 @@ func (c Case) validate() error {
 }
 
 func (c ExpectedCatalog) validate() error {
-	if c.Seq != SeqAbsent && c.Seq != SeqNotNull {
+	if c.Seq != SeqAbsent && c.Seq != SeqNullable && c.Seq != SeqNotNull {
 		return fmt.Errorf("unknown seq expectation %q", c.Seq)
 	}
 	seen := make(map[string]struct{}, len(c.Tables)+len(c.Indexes))
@@ -304,7 +306,7 @@ func (c Case) validateSchemaRows() error {
 		}
 	case SchemaHybrid:
 		// Both table families are available; either may intentionally be empty.
-	case SchemaEmpty, SchemaCurrentMissingSeq, SchemaUnsupported, "":
+	case SchemaEmpty, SchemaCurrentMissingSeq, SchemaCurrentNullableSeq, SchemaUnsupported, "":
 		if hasLegacy || hasCurrent {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: schema %q cannot contain transcript rows", c.Name, c.Schema)
 		}
@@ -407,7 +409,7 @@ func (f SourceFormat) validate() error {
 
 func (s SchemaKind) validate() error {
 	switch s {
-	case SchemaEmpty, SchemaLegacy, SchemaCurrent, SchemaHybrid, SchemaCurrentMissingSeq, SchemaUnsupported:
+	case SchemaEmpty, SchemaLegacy, SchemaCurrent, SchemaHybrid, SchemaCurrentMissingSeq, SchemaCurrentNullableSeq, SchemaUnsupported:
 		return nil
 	default:
 		return fmt.Errorf("unknown schema kind %q", s)

@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -249,6 +252,7 @@ func TestKickstartReuseFallsBackToRecordedOpenCodeDirectories(t *testing.T) {
 
 func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 	world := newMountedOpenCodeWorld(t)
+	sourceBefore := snapshotMountedOpenCodeJSON(t, world.root)
 	git := newMountedOpenCodeGitResolver(world.cloneA, world.cloneB)
 	cfg := mountedOpenCodeConfig(t, world.root)
 	cfg.Selection = config.SelectionConfig{
@@ -314,4 +318,95 @@ func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 	if excluded.Error != nil || excluded.OutputPath != "" || excluded.Status != ingest.DiffUnchanged {
 		t.Errorf("unselected sibling result = status %v output %q error %v, want filtered unchanged result", excluded.Status, excluded.OutputPath, excluded.Error)
 	}
+	if sourceAfter := snapshotMountedOpenCodeJSON(t, world.root); !reflect.DeepEqual(sourceAfter, sourceBefore) {
+		t.Errorf("mounted legacy OpenCode JSON source bytes changed during harvest: before=%v after=%v", sourceBefore, sourceAfter)
+	}
+}
+
+func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) {
+	t.Parallel()
+	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "current-session-message"))
+	sourceRoot := filepath.Dir(materialized.Path)
+	prober, err := ingest.NewOpenCodeCandidateProber(&ingest.OSFileSystem{}, ingest.OpenOpenCodeSQLiteSource, ingest.DefaultOpenCodeSQLiteSourceOptions())
+	if err != nil {
+		t.Fatalf("construct mounted OpenCode candidate prober: %v", err)
+	}
+	probes := prober.Probe(t.Context(), []ingest.OpenCodeCandidate{{
+		Path:       materialized.Path,
+		Kind:       ingest.OpenCodeSourceSQLite,
+		Provenance: ingest.OpenCodeCandidateChannel,
+	}})
+	if len(probes) != 1 || probes[0].Capability != ingest.OpenCodeCapabilityCurrent || probes[0].Support != ingest.OpenCodeSupportSupported {
+		t.Fatalf("mounted SQLite precondition did not produce supported current evidence: %+v", probes)
+	}
+
+	git := testutil.NoGitResolver()
+	inventory, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, sourceRoot), &ingest.OSFileSystem{}, git, nil, nil)
+	if got := inventory[defaults.HarnessOpenCode].SessionCount; got != 0 || len(listings) != 0 {
+		t.Fatalf("kickstart exposed SQLite-only evidence: inventory=%d listings=%d", got, len(listings))
+	}
+
+	commandRoot := t.TempDir()
+	outputRoot := filepath.Join(commandRoot, "managed")
+	output, err := executeHarvestCmd(t, commandRoot, []string{
+		"--source-provider=" + defaults.HarnessOpenCode.String(),
+		"--source-path=" + sourceRoot,
+		"--output=" + outputRoot,
+		"--force",
+	})
+	if err != nil {
+		t.Fatalf("run mounted harvest CLI against SQLite-only evidence: %v\n%s", err, output)
+	}
+	managedEntries, err := os.ReadDir(outputRoot)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("inspect mounted harvest output: %v", err)
+	}
+	if len(managedEntries) != 0 {
+		t.Fatalf("SQLite-only evidence created %d managed output artifacts", len(managedEntries))
+	}
+
+	databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
+	localStore, err := store.Open(databasePath, store.WithPoolSize(1))
+	if err != nil {
+		t.Fatalf("open mounted harvest store: %v", err)
+	}
+	defer func() {
+		if err := localStore.Close(); err != nil {
+			t.Errorf("close mounted harvest store: %v", err)
+		}
+	}()
+	rows, err := localStore.ListSessionsFiltered(t.Context(), store.SessionListFilter{})
+	if err != nil {
+		t.Fatalf("list mounted harvest store rows: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("SQLite-only evidence created %d local session rows", len(rows))
+	}
+}
+
+func snapshotMountedOpenCodeJSON(t testing.TB, root string) map[string]string {
+	t.Helper()
+	snapshot := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != defaults.ExtJSON.String() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		snapshot[relative] = string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot mounted OpenCode JSON source: %v", err)
+	}
+	return snapshot
 }

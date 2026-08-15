@@ -1,4 +1,4 @@
-declared_cases: 8
+declared_cases: 9
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -152,6 +152,24 @@ cases:
       tables: [future_projection]
       indexes: []
       seq: absent
+    legacy_messages: []
+    legacy_parts: []
+    current_messages: []
+    corrupt_content: ""
+
+  - name: current-nullable-seq
+    logical_path: partial/opencode-nullable-seq.db
+    format: sqlite
+    schema: current_nullable_seq
+    journal_mode: delete
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_session_seq_idx]
+      seq: nullable
     legacy_messages: []
     legacy_parts: []
     current_messages: []
