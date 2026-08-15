@@ -211,9 +211,8 @@ func installFedoraRPM(t *testing.T, container, artifact string) {
 
 func installOpenSUSERPM(t *testing.T, container, artifact string) {
 	t.Helper()
-	runPodman(t, "exec", "-i", container, "bash", "-euxc",
-		`zypper --non-interactive modifyrepo --disable --all && zypper --non-interactive --no-refresh install --allow-unsigned-rpm "$1"`,
-		"bash", artifact)
+	runPodman(t, "exec", "-i", container, "zypper", "--non-interactive", "modifyrepo", "--disable", "--all")
+	runPodman(t, "exec", "-i", container, "zypper", "--non-interactive", "--no-refresh", "install", "--allow-unsigned-rpm", artifact)
 }
 
 func installTarBinary(t *testing.T, container, artifact string) {

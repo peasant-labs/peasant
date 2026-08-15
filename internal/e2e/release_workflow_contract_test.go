@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +18,19 @@ import (
 
 //go:embed testdata/workflows/e2e_contract.yaml
 var e2eWorkflowContractFixtureBytes []byte
+
+//go:embed testdata/workflows/release_validate_rpm.yaml
+var releaseValidateRPMFixtureBytes []byte
+
+type releaseValidateRPMFixture struct {
+	MutationCases []releaseValidateRPMMutationCase `yaml:"mutation_cases"`
+}
+
+type releaseValidateRPMMutationCase struct {
+	Name         string `yaml:"name"`
+	PrepareExit  int    `yaml:"prepare_exit"`
+	ExpectedExit int    `yaml:"expected_exit"`
+}
 
 type e2eWorkflowContractFixture struct {
 	ExpectedVillageRef string `yaml:"expected_village_ref"`
@@ -291,6 +305,134 @@ func TestReleaseValidateTracksPackagingInputs(t *testing.T) {
 	doc := readWorkflowDoc(t, path)
 	paths := yamlMappingValue(yamlMappingValue(yamlMappingValue(doc, "on"), "pull_request"), "paths")
 	assertYAMLSequenceExact(t, paths, fixture.ReleaseValidate.RequiredPaths, "release-validate pull_request paths")
+}
+
+func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {
+	fixture := loadReleaseValidateRPMFixture(t)
+	doc := readWorkflowDoc(t, filepath.Join(releaseWorkflowRepoRoot(t), fixtureWorkflowReleaseValidate))
+	job := yamlMappingValue(yamlMappingValue(doc, "jobs"), "rpm")
+	steps := yamlMappingValue(job, "steps")
+	if steps == nil || steps.Kind != yaml.SequenceNode {
+		t.Fatalf("release: rpm job must define a steps sequence")
+	}
+	installRun := workflowStepRun(t, steps.Content, "Install + smoke the .rpm in a clean container")
+	prepareIndex := strings.Index(installRun, "${{ matrix.prepare }}")
+	installIndex := strings.Index(installRun, "${{ matrix.install }}")
+	if prepareIndex < 0 || installIndex < 0 || prepareIndex >= installIndex {
+		t.Fatalf("release: mounted RPM smoke must run matrix.prepare as a distinct command before matrix.install: %q", installRun)
+	}
+	if strings.Contains(installRun, "${{ matrix.prepare }} &&") {
+		t.Fatalf("release: mounted RPM smoke must not combine preparation with installation: %q", installRun)
+	}
+	matrix := yamlMappingValue(yamlMappingValue(yamlMappingValue(job, "strategy"), "matrix"), "include")
+	if matrix == nil || matrix.Kind != yaml.SequenceNode || len(matrix.Content) != 2 {
+		t.Fatalf("release: rpm matrix must contain Fedora and openSUSE entries, got %v", matrix)
+	}
+
+	var fedora, openSUSE *yaml.Node
+	for _, entry := range matrix.Content {
+		image := yamlMappingValue(entry, "image")
+		switch {
+		case image != nil && strings.HasPrefix(image.Value, "fedora@"):
+			fedora = entry
+		case image != nil && strings.HasPrefix(image.Value, "opensuse/leap@"):
+			openSUSE = entry
+		}
+	}
+	if fedora == nil || openSUSE == nil {
+		t.Fatalf("release: rpm matrix must identify Fedora and openSUSE entries")
+	}
+	if got := yamlMappingValue(fedora, "prepare"); got == nil || got.Value != "true" {
+		t.Fatalf("release: Fedora prepare command = %v, want explicit true", got)
+	}
+	if got := yamlMappingValue(fedora, "install"); got == nil || got.Value != "dnf install -y" {
+		t.Fatalf("release: Fedora install command = %v, want unchanged dnf install -y", got)
+	}
+	prepare := yamlMappingValue(openSUSE, "prepare")
+	install := yamlMappingValue(openSUSE, "install")
+	if prepare == nil || prepare.Value != "zypper --non-interactive modifyrepo --disable --all" {
+		t.Fatalf("release: openSUSE prepare command = %v, want standalone repository disable", prepare)
+	}
+	if install == nil || install.Value != "zypper --non-interactive --no-refresh install --allow-unsigned-rpm" {
+		t.Fatalf("release: openSUSE install command = %v, want standalone local install", install)
+	}
+
+	for _, mutation := range fixture.MutationCases {
+		runReleaseValidateRPMMutation(t, prepare.Value, install.Value, mutation)
+	}
+}
+
+const fixtureWorkflowReleaseValidate = ".github/workflows/release-validate.yml"
+
+func loadReleaseValidateRPMFixture(t *testing.T) releaseValidateRPMFixture {
+	t.Helper()
+	var fixture releaseValidateRPMFixture
+	decoder := yaml.NewDecoder(bytes.NewReader(releaseValidateRPMFixtureBytes))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("release: parse RPM workflow fixture: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("release: RPM workflow fixture must have exact EOF: %v", err)
+	}
+	if len(fixture.MutationCases) != 1 {
+		t.Fatalf("release: RPM workflow fixture must contain one mutation case, got %d", len(fixture.MutationCases))
+	}
+	for _, mutation := range fixture.MutationCases {
+		if strings.TrimSpace(mutation.Name) == "" || mutation.PrepareExit == 0 || mutation.ExpectedExit == 0 {
+			t.Fatalf("release: invalid RPM workflow mutation case: %+v", mutation)
+		}
+	}
+	return fixture
+}
+
+func runReleaseValidateRPMMutation(t *testing.T, prepare, install string, mutation releaseValidateRPMMutationCase) {
+	t.Helper()
+	tmp := t.TempDir()
+	prepareMarker := filepath.Join(tmp, "prepare-ran")
+	installMarker := filepath.Join(tmp, "install-ran")
+	versionMarker := filepath.Join(tmp, "version-ran")
+	rpmMarker := filepath.Join(tmp, "rpm-ran")
+	script := fmt.Sprintf(`
+zypper() {
+  if [[ "$*" == *modifyrepo* ]]; then
+    touch "$PREPARE_MARKER"
+    return "$PREPARE_EXIT"
+  fi
+  touch "$INSTALL_MARKER"
+}
+peasant() { touch "$VERSION_MARKER"; }
+rpm() { touch "$RPM_MARKER"; }
+set -euo pipefail
+%s /dist/peasant_0.0.0_linux_amd64.rpm
+%s /dist/peasant_0.0.0_linux_amd64.rpm
+peasant version
+rpm -q peasant
+`, prepare, install)
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(),
+		"PREPARE_EXIT="+fmt.Sprint(mutation.PrepareExit),
+		"PREPARE_MARKER="+prepareMarker,
+		"INSTALL_MARKER="+installMarker,
+		"VERSION_MARKER="+versionMarker,
+		"RPM_MARKER="+rpmMarker,
+	)
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("release: mutation %q unexpectedly succeeded", mutation.Name)
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != mutation.ExpectedExit {
+		t.Fatalf("release: mutation %q exit = %v, want %d", mutation.Name, err, mutation.ExpectedExit)
+	}
+	for _, marker := range []string{installMarker, versionMarker, rpmMarker} {
+		if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+			t.Fatalf("release: mutation %q reached forbidden later stage %s: %v", mutation.Name, marker, statErr)
+		}
+	}
+	if _, statErr := os.Stat(prepareMarker); statErr != nil {
+		t.Fatalf("release: mutation %q did not execute preparation: %v", mutation.Name, statErr)
+	}
 }
 
 func assertReleaseWorkflowBuildsRealDashboard(t *testing.T, relativePath, jobName, artifactStep string) {
