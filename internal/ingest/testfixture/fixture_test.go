@@ -18,7 +18,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const expectedLoaderValidationCases = 9
+const expectedLoaderValidationCases = 12
 
 //go:embed testdata/loader_validation.yaml
 var loaderValidationYAML []byte
@@ -37,15 +37,18 @@ type loaderValidationCase struct {
 type loaderMutation string
 
 const (
-	mutationUnknownField    loaderMutation = "unknown_field"
-	mutationTrailingDoc     loaderMutation = "trailing_document"
-	mutationDeclaredCount   loaderMutation = "declared_count"
-	mutationDuplicateName   loaderMutation = "duplicate_name"
-	mutationMissingName     loaderMutation = "missing_name"
-	mutationAbsolutePath    loaderMutation = "absolute_path"
-	mutationTraversingPath  loaderMutation = "traversing_path"
-	mutationDeclaredRows    loaderMutation = "declared_rows"
-	mutationMissingRowField loaderMutation = "missing_row_field"
+	mutationUnknownField     loaderMutation = "unknown_field"
+	mutationTrailingDoc      loaderMutation = "trailing_document"
+	mutationDeclaredCount    loaderMutation = "declared_count"
+	mutationDuplicateName    loaderMutation = "duplicate_name"
+	mutationMissingName      loaderMutation = "missing_name"
+	mutationAbsolutePath     loaderMutation = "absolute_path"
+	mutationTraversingPath   loaderMutation = "traversing_path"
+	mutationDeclaredRows     loaderMutation = "declared_rows"
+	mutationMissingRowField  loaderMutation = "missing_row_field"
+	mutationHistoryRows      loaderMutation = "history_rows"
+	mutationDuplicateHistory loaderMutation = "duplicate_history"
+	mutationUnknownHistory   loaderMutation = "unknown_history"
 )
 
 func TestEmbeddedCorpusIsStrictAndNonVacuous(t *testing.T) {
@@ -57,22 +60,22 @@ func TestEmbeddedCorpusIsStrictAndNonVacuous(t *testing.T) {
 		t.Fatalf("embedded fixture count = declared %d actual %d, want %d", fixtures.DeclaredCases, len(fixtures.Cases), expectedCaseCount)
 	}
 
-	seenSchemas := make(map[SchemaKind]bool)
-	seenFormats := make(map[SourceFormat]bool, 2)
+	seenSchemas := make(map[schemaKind]bool)
+	seenFormats := make(map[sourceFormat]bool, 2)
 	seenWAL := false
 	for _, fixtureCase := range fixtures.Cases {
 		seenSchemas[fixtureCase.Schema] = true
 		seenFormats[fixtureCase.Format] = true
-		seenWAL = seenWAL || fixtureCase.JournalMode == JournalWAL
+		seenWAL = seenWAL || fixtureCase.JournalMode == journalWAL
 	}
-	assertSchemaCovered(t, seenSchemas, SchemaEmpty)
-	assertSchemaCovered(t, seenSchemas, SchemaLegacy)
-	assertSchemaCovered(t, seenSchemas, SchemaCurrent)
-	assertSchemaCovered(t, seenSchemas, SchemaHybrid)
-	assertSchemaCovered(t, seenSchemas, SchemaCurrentMissingSeq)
-	assertSchemaCovered(t, seenSchemas, SchemaCurrentNullableSeq)
-	assertSchemaCovered(t, seenSchemas, SchemaUnsupported)
-	if !seenFormats[SourceFormatSQLite] || !seenFormats[SourceFormatCorrupt] || !seenWAL {
+	assertSchemaCovered(t, seenSchemas, schemaEmpty)
+	assertSchemaCovered(t, seenSchemas, schemaLegacy)
+	assertSchemaCovered(t, seenSchemas, schemaCurrent)
+	assertSchemaCovered(t, seenSchemas, schemaHybrid)
+	assertSchemaCovered(t, seenSchemas, schemaCurrentMissingSeq)
+	assertSchemaCovered(t, seenSchemas, schemaCurrentNullableSeq)
+	assertSchemaCovered(t, seenSchemas, schemaUnsupported)
+	if !seenFormats[sourceFormatSQLite] || !seenFormats[sourceFormatCorrupt] || !seenWAL {
 		t.Errorf("embedded fixture corpus coverage = formats %v WAL %t; want SQLite, corrupt, and WAL", seenFormats, seenWAL)
 	}
 }
@@ -104,14 +107,14 @@ func TestMaterializeExpectedCatalogs(t *testing.T) {
 	for _, fixtureCase := range fixtures.Cases {
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Name, func(t *testing.T) {
-			source := Materialize(t, fixtureCase)
-			if fixtureCase.Format == SourceFormatCorrupt {
+			source := materialize(t, fixtureCase)
+			if fixtureCase.Format == sourceFormatCorrupt {
 				data, readErr := os.ReadFile(source.Path)
 				if readErr != nil {
 					t.Fatalf("read corrupt fixture: %v", readErr)
 				}
-				if string(data) != fixtureCase.CorruptContent {
-					t.Fatalf("corrupt fixture bytes = %q, want %q", data, fixtureCase.CorruptContent)
+				if !bytes.Equal(data, corruptBytes(fixtureCase.Corruption)) {
+					t.Fatalf("corrupt fixture bytes = %q, want fixed %q evidence", data, fixtureCase.Corruption)
 				}
 				return
 			}
@@ -134,7 +137,7 @@ func TestMaterializeIsConfinedAndIgnoresEnvironmentDefaults(t *testing.T) {
 	t.Setenv(defaults.EnvXDGDataHome.String(), externalRoot)
 	t.Setenv("OPENCODE_DB", externalPath)
 
-	source := Materialize(t, CaseByName(t, "empty-valid"))
+	source := MaterializeByName(t, "empty-valid")
 	if source.Path == externalPath || !pathIsWithin(source.root, source.Path) {
 		t.Fatalf("materialized path %q is not confined to helper root %q", source.Path, source.root)
 	}
@@ -161,7 +164,7 @@ func TestMaterializeIsConfinedAndIgnoresEnvironmentDefaults(t *testing.T) {
 }
 
 func TestSnapshotCoversDatabaseAndSidecars(t *testing.T) {
-	source := Materialize(t, CaseByName(t, "empty-valid"))
+	source := MaterializeByName(t, "empty-valid")
 	if err := os.WriteFile(source.Path+"-wal", []byte("synthetic WAL snapshot sentinel"), 0o600); err != nil {
 		t.Fatalf("write synthetic WAL sidecar sentinel: %v", err)
 	}
@@ -193,7 +196,7 @@ func TestSnapshotCoversDatabaseAndSidecars(t *testing.T) {
 }
 
 func TestWALCapableSourcePersistsJournalMode(t *testing.T) {
-	source := Materialize(t, CaseByName(t, "wal-capable"))
+	source := MaterializeByName(t, "wal-capable")
 
 	conn, err := sqlite.OpenConn(source.Path, sqlite.OpenReadOnly)
 	if err != nil {
@@ -213,12 +216,122 @@ func TestWALCapableSourcePersistsJournalMode(t *testing.T) {
 	if closeErr != nil {
 		t.Fatalf("close WAL-capable source reader: %v", closeErr)
 	}
-	if journalMode != string(JournalWAL) {
-		t.Fatalf("journal mode = %q, want %q", journalMode, JournalWAL)
+	if journalMode != string(journalWAL) {
+		t.Fatalf("journal mode = %q, want %q", journalMode, journalWAL)
 	}
 }
 
-func assertSchemaCovered(t testing.TB, seen map[SchemaKind]bool, schema SchemaKind) {
+func TestHistoryFixtureSeparatesLatestMaterializedRowsFromIgnoredHistory(t *testing.T) {
+	source := MaterializeByName(t, "repeated-history-distractors")
+	conn, err := sqlite.OpenConn(source.Path, sqlite.OpenReadOnly)
+	if err != nil {
+		t.Fatalf("open repeated-history synthetic source: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close repeated-history synthetic source: %v", err)
+		}
+	}()
+
+	messageData := querySingleText(t, conn, `SELECT data FROM message WHERE id = 'msg_latest';`)
+	if messageData != `{"role":"assistant","version":"latest"}` {
+		t.Errorf("latest materialized message data = %q", messageData)
+	}
+	partData := querySingleText(t, conn, `SELECT data FROM part WHERE id = 'part_latest';`)
+	if partData != `{"type":"text","text":"latest materialized part"}` {
+		t.Errorf("latest materialized part data = %q", partData)
+	}
+	assertRepeatedStableIdentity(t, conn, historyEvent, "msg_latest", 2)
+	assertRepeatedStableIdentity(t, conn, historyDelta, "part_latest", 2)
+}
+
+func TestMissingParentFixtureMaterializesOrphanWithoutInventingParent(t *testing.T) {
+	source := MaterializeByName(t, "missing-parent")
+	conn, err := sqlite.OpenConn(source.Path, sqlite.OpenReadOnly)
+	if err != nil {
+		t.Fatalf("open missing-parent synthetic source: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close missing-parent synthetic source: %v", err)
+		}
+	}()
+
+	var orphanCount int
+	if err := sqlitex.Execute(conn, `SELECT count(*) FROM part LEFT JOIN message ON message.id = part.message_id WHERE message.id IS NULL;`, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			orphanCount = stmt.ColumnInt(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("inspect synthetic orphan relationship: %v", err)
+	}
+	if orphanCount != 1 {
+		t.Errorf("synthetic orphan count = %d, want 1", orphanCount)
+	}
+}
+
+func TestTruncatedSQLiteHeaderFixtureIsHeaderLikeButMalformed(t *testing.T) {
+	source := MaterializeByName(t, "truncated-sqlite-header")
+	data, err := os.ReadFile(source.Path)
+	if err != nil {
+		t.Fatalf("read truncated SQLite-header fixture: %v", err)
+	}
+	if !bytes.HasPrefix(data, []byte("SQLite format 3\x00")) || len(data) >= 100 {
+		t.Fatalf("truncated SQLite-header bytes = %q, want a valid header prefix shorter than one SQLite header", data)
+	}
+	conn, err := sqlite.OpenConn(source.Path, sqlite.OpenReadOnly)
+	if err == nil {
+		queryErr := sqlitex.Execute(conn, `SELECT name FROM sqlite_master;`, nil)
+		closeErr := conn.Close()
+		if queryErr == nil {
+			t.Fatal("truncated SQLite-header fixture unexpectedly allowed a catalog read")
+		}
+		if closeErr != nil {
+			t.Fatalf("close truncated SQLite-header fixture after rejected read: %v", closeErr)
+		}
+	}
+}
+
+func querySingleText(t testing.TB, conn *sqlite.Conn, query string) string {
+	t.Helper()
+	var value string
+	rows := 0
+	if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			rows++
+			value = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("query fixed synthetic fixture content: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("fixed synthetic fixture query returned %d rows, want 1", rows)
+	}
+	return value
+}
+
+func assertRepeatedStableIdentity(t testing.TB, conn *sqlite.Conn, kind historyKind, stableID string, want int) {
+	t.Helper()
+	var count int
+	table := historyTableName(kind)
+	query := fmt.Sprintf("SELECT count(*) FROM %s WHERE stable_id = ?1;", table)
+	if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
+		Args: []any{stableID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			count = stmt.ColumnInt(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("count repeated stable identity %q in synthetic %s history: %v", stableID, table, err)
+	}
+	if count != want {
+		t.Errorf("synthetic %s history count for stable identity %q = %d, want %d", table, stableID, count, want)
+	}
+}
+
+func assertSchemaCovered(t testing.TB, seen map[schemaKind]bool, schema schemaKind) {
 	t.Helper()
 	if !seen[schema] {
 		t.Errorf("embedded fixture corpus does not cover schema %q", schema)
@@ -267,7 +380,7 @@ func readCatalog(t testing.TB, databasePath string) catalogSnapshot {
 	return result
 }
 
-func assertCatalog(t testing.TB, expected ExpectedCatalog, catalog catalogSnapshot) {
+func assertCatalog(t testing.TB, expected expectedCatalogSpec, catalog catalogSnapshot) {
 	t.Helper()
 	gotTables := make([]string, 0, len(catalog.Entries))
 	gotIndexes := make([]string, 0, len(catalog.Entries))
@@ -295,22 +408,22 @@ func assertCatalog(t testing.TB, expected ExpectedCatalog, catalog catalogSnapsh
 	}
 	notNull, exists := catalog.SessionMessageCols["seq"]
 	switch expected.Seq {
-	case SeqAbsent:
+	case seqAbsent:
 		if exists {
 			t.Errorf("session_message seq metadata = exists %t not-null %t, want absent", exists, notNull)
 		}
-	case SeqNotNull:
+	case seqNotNull:
 		if !exists || !notNull {
 			t.Errorf("session_message seq metadata = exists %t not-null %t, want both true", exists, notNull)
 		}
-	case SeqNullable:
+	case seqNullable:
 		if !exists || notNull {
 			t.Errorf("session_message seq metadata = exists %t not-null %t, want present and nullable", exists, notNull)
 		}
 	}
 }
 
-func assertRows(t testing.TB, fixtureCase Case, databasePath string) {
+func assertRows(t testing.TB, fixtureCase caseSpec, databasePath string) {
 	t.Helper()
 	conn, err := sqlite.OpenConn(databasePath, sqlite.OpenReadOnly)
 	if err != nil {
@@ -331,6 +444,36 @@ func assertRows(t testing.TB, fixtureCase Case, databasePath string) {
 	if schemaHasTable(fixtureCase.Schema, "session_message") {
 		assertTableRowCount(t, conn, "session_message", len(fixtureCase.CurrentMessages))
 	}
+	assertHistoryRows(t, conn, fixtureCase)
+}
+
+func assertHistoryRows(t testing.TB, conn *sqlite.Conn, fixtureCase caseSpec) {
+	t.Helper()
+	if hasHistoryKind(fixtureCase.IgnoredHistory, historyEvent) {
+		assertTableRowCount(t, conn, "event", countHistoryKind(fixtureCase.IgnoredHistory, historyEvent))
+	}
+	if hasHistoryKind(fixtureCase.IgnoredHistory, historyDelta) {
+		assertTableRowCount(t, conn, "delta", countHistoryKind(fixtureCase.IgnoredHistory, historyDelta))
+	}
+	if hasHistoryKind(fixtureCase.IgnoredHistory, historyInput) {
+		assertTableRowCount(t, conn, "input", countHistoryKind(fixtureCase.IgnoredHistory, historyInput))
+	}
+	if hasHistoryKind(fixtureCase.IgnoredHistory, historyContext) {
+		assertTableRowCount(t, conn, "context", countHistoryKind(fixtureCase.IgnoredHistory, historyContext))
+	}
+	if hasHistoryKind(fixtureCase.IgnoredHistory, historyMigration) {
+		assertTableRowCount(t, conn, "migration", countHistoryKind(fixtureCase.IgnoredHistory, historyMigration))
+	}
+}
+
+func countHistoryKind(rows []historyRow, kind historyKind) int {
+	count := 0
+	for _, row := range rows {
+		if row.Kind == kind {
+			count++
+		}
+	}
+	return count
 }
 
 func assertTableRowCount(t testing.TB, conn *sqlite.Conn, table string, want int) {
@@ -360,12 +503,12 @@ func equalStrings(left, right []string) bool {
 	return true
 }
 
-func schemaHasTable(schema SchemaKind, table string) bool {
+func schemaHasTable(schema schemaKind, table string) bool {
 	switch table {
 	case "message", "part":
-		return schema == SchemaLegacy || schema == SchemaHybrid
+		return schema == schemaLegacy || schema == schemaHybrid
 	case "session_message":
-		return schema == SchemaCurrent || schema == SchemaHybrid || schema == SchemaCurrentMissingSeq || schema == SchemaCurrentNullableSeq
+		return schema == schemaCurrent || schema == schemaHybrid || schema == schemaCurrentMissingSeq || schema == schemaCurrentNullableSeq
 	default:
 		return false
 	}
@@ -404,7 +547,7 @@ func loadValidationCases(t testing.TB) []loaderValidationCase {
 
 func knownMutation(mutation loaderMutation) bool {
 	switch mutation {
-	case mutationUnknownField, mutationTrailingDoc, mutationDeclaredCount, mutationDuplicateName, mutationMissingName, mutationAbsolutePath, mutationTraversingPath, mutationDeclaredRows, mutationMissingRowField:
+	case mutationUnknownField, mutationTrailingDoc, mutationDeclaredCount, mutationDuplicateName, mutationMissingName, mutationAbsolutePath, mutationTraversingPath, mutationDeclaredRows, mutationMissingRowField, mutationHistoryRows, mutationDuplicateHistory, mutationUnknownHistory:
 		return true
 	default:
 		return false
@@ -424,7 +567,7 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 	case mutationTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_cases: 0\ncases: []\n")...), nil
 	case mutationDeclaredCount:
-		return replaceOnce("declared_cases: 9", "declared_cases: 8")
+		return replaceOnce("declared_cases: 12", "declared_cases: 11")
 	case mutationDuplicateName:
 		return replaceOnce("name: legacy-message-part", "name: empty-valid")
 	case mutationMissingName:
@@ -437,6 +580,12 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 		return replaceOnce("legacy_messages: 1\n      legacy_parts: 2", "legacy_messages: 2\n      legacy_parts: 2")
 	case mutationMissingRowField:
 		return replaceOnce("session_id: ses_legacy_1", "session_id: ''")
+	case mutationHistoryRows:
+		return replaceOnce("ignored_history: 7", "ignored_history: 6")
+	case mutationDuplicateHistory:
+		return replaceOnce("id: event_2", "id: event_1")
+	case mutationUnknownHistory:
+		return replaceOnce("kind: migration", "kind: replay")
 	default:
 		return nil, fmt.Errorf("unknown fixture mutation %q", mutation)
 	}

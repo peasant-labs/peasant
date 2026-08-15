@@ -156,7 +156,7 @@ func TestOpenCodeCandidateProbeClassifiesOnlyBoundedCatalogEvidence(t *testing.T
 		fixtureCase := fixtureCase
 		t.Run(fixtureCase.Fixture, func(t *testing.T) {
 			t.Parallel()
-			materialized := testfixture.Materialize(t, testfixture.CaseByName(t, fixtureCase.Fixture))
+			materialized := testfixture.MaterializeByName(t, fixtureCase.Fixture)
 			before := testfixture.SnapshotSource(t, materialized)
 			catalogCalls := 0
 			opener := func(ctx context.Context, path ingest.OpenCodeSQLiteSourcePath, options ingest.OpenCodeSQLiteSourceOptions) (ingest.OpenCodeSQLiteSource, error) {
@@ -199,7 +199,7 @@ func TestOpenCodeCandidateProbeClassifiesOnlyBoundedCatalogEvidence(t *testing.T
 
 func TestOpenCodeCandidateFailuresRemainLocalAndRejectMemoryEvidence(t *testing.T) {
 	t.Parallel()
-	valid := testfixture.Materialize(t, testfixture.CaseByName(t, "legacy-message-part"))
+	valid := testfixture.MaterializeByName(t, "legacy-message-part")
 	root := t.TempDir()
 	prober, err := ingest.NewOpenCodeCandidateProber(&ingest.OSFileSystem{}, ingest.OpenOpenCodeSQLiteSource, ingest.DefaultOpenCodeSQLiteSourceOptions())
 	if err != nil {

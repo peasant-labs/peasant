@@ -21,8 +21,7 @@ import (
 )
 
 func TestOpenCodeSQLiteSourceReturnsBoundedDetachedCatalog(t *testing.T) {
-	fixtureCase := testfixture.CaseByName(t, "hybrid-catalog")
-	materialized := testfixture.Materialize(t, fixtureCase)
+	materialized := testfixture.MaterializeByName(t, "hybrid-catalog")
 	before := testfixture.SnapshotSource(t, materialized)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 
@@ -30,7 +29,7 @@ func TestOpenCodeSQLiteSourceReturnsBoundedDetachedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect synthetic catalog through typed production boundary: %v", err)
 	}
-	wantTables := append([]string(nil), fixtureCase.ExpectedCatalog.Tables...)
+	wantTables := materialized.ExpectedCatalog().Tables()
 	sort.Strings(wantTables)
 	if !equalStrings(evidence.Tables, wantTables) {
 		t.Errorf("catalog tables = %v, want %v", evidence.Tables, wantTables)
@@ -44,7 +43,7 @@ func TestOpenCodeSQLiteSourceReturnsBoundedDetachedCatalog(t *testing.T) {
 }
 
 func TestOpenCodeSQLiteSourceHonorsCancellationBeforeCatalog(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "empty-valid"))
+	materialized := testfixture.MaterializeByName(t, "empty-valid")
 	before := testfixture.SnapshotSource(t, materialized)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 
@@ -63,7 +62,7 @@ func TestOpenCodeSQLiteSourceHonorsCancellationBeforeCatalog(t *testing.T) {
 }
 
 func TestOpenCodeSQLiteSourceReportsCorruptCatalogActionably(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "corrupt-non-sqlite"))
+	materialized := testfixture.MaterializeByName(t, "corrupt-non-sqlite")
 	before := testfixture.SnapshotSource(t, materialized)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 
@@ -83,7 +82,7 @@ func TestOpenCodeSQLiteSourceReportsCorruptCatalogActionably(t *testing.T) {
 }
 
 func TestOpenCodeSQLiteSourceHonorsInjectedCatalogDeadline(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "empty-valid"))
+	materialized := testfixture.MaterializeByName(t, "empty-valid")
 	before := testfixture.SnapshotSource(t, materialized)
 	clock := &cancelCatalogClock{}
 	options, err := ingest.NewOpenCodeSQLiteSourceOptions(time.Millisecond, time.Second, clock)
@@ -105,7 +104,7 @@ func TestOpenCodeSQLiteSourceHonorsInjectedCatalogDeadline(t *testing.T) {
 }
 
 func TestOpenCodeSQLiteSourceBlockedConsumerCannotHoldConnectionOrClose(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "current-session-message"))
+	materialized := testfixture.MaterializeByName(t, "current-session-message")
 	before := testfixture.SnapshotSource(t, materialized)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 	evidence, err := source.Catalog(t.Context())
@@ -140,7 +139,7 @@ func TestOpenCodeSQLiteSourceBlockedConsumerCannotHoldConnectionOrClose(t *testi
 }
 
 func TestOpenCodeSQLiteSourceCloseUsesInjectedDeadlinePolicy(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "empty-valid"))
+	materialized := testfixture.MaterializeByName(t, "empty-valid")
 	clock := &deadlineRecordingClock{}
 	const queryTimeout = 75 * time.Millisecond
 	options, err := ingest.NewOpenCodeSQLiteSourceOptions(5*time.Millisecond, queryTimeout, clock)
@@ -159,7 +158,7 @@ func TestOpenCodeSQLiteSourceCloseUsesInjectedDeadlinePolicy(t *testing.T) {
 }
 
 func TestOpenCodeSQLiteSourceReadsWALOnlyCatalogWithoutChangingContent(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "wal-capable"))
+	materialized := testfixture.MaterializeByName(t, "wal-capable")
 	writer := openWALWriter(t, materialized.Path)
 	defer closeSQLiteConnection(t, writer, "synthetic WAL writer")
 	appendWALCatalogIndex(t, writer, "wal_pending_catalog_idx")
@@ -180,7 +179,7 @@ func TestOpenCodeSQLiteSourceReadsWALOnlyCatalogWithoutChangingContent(t *testin
 }
 
 func TestOpenCodeSQLiteSourceRepeatedWALCatalogDoesNotCheckpointOrTruncate(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "wal-capable"))
+	materialized := testfixture.MaterializeByName(t, "wal-capable")
 	writer := openWALWriter(t, materialized.Path)
 	defer closeSQLiteConnection(t, writer, "synthetic WAL writer")
 	appendWALCatalogIndex(t, writer, "wal_repeat_catalog_idx")
@@ -203,7 +202,7 @@ func TestOpenCodeSQLiteSourceRepeatedWALCatalogDoesNotCheckpointOrTruncate(t *te
 }
 
 func TestOpenCodeSQLiteSourceConcurrentWALWriterRemainsHealthy(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "wal-capable"))
+	materialized := testfixture.MaterializeByName(t, "wal-capable")
 	writer := openWALWriter(t, materialized.Path)
 	defer closeSQLiteConnection(t, writer, "synthetic WAL writer")
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
@@ -244,7 +243,7 @@ func TestOpenCodeSQLiteSourceConcurrentWALWriterRemainsHealthy(t *testing.T) {
 }
 
 func TestOpenCodeSQLiteSourceLeavesOnlyBenignWALCoordinationResidue(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "wal-capable"))
+	materialized := testfixture.MaterializeByName(t, "wal-capable")
 	databaseBefore := readSyntheticFile(t, materialized.Path)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 	if _, err := source.Catalog(t.Context()); err != nil {
@@ -276,7 +275,7 @@ func TestOpenCodeSQLiteSourceLeavesOnlyBenignWALCoordinationResidue(t *testing.T
 }
 
 func TestOpenCodeSQLiteSourceClosePreventsReuse(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "empty-valid"))
+	materialized := testfixture.MaterializeByName(t, "empty-valid")
 	before := testfixture.SnapshotSource(t, materialized)
 	source := openSyntheticSource(t, materialized, ingest.DefaultOpenCodeSQLiteSourceOptions())
 

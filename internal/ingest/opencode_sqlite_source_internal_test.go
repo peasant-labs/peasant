@@ -42,7 +42,7 @@ func TestPrivateCatalogExecutorDeniesEveryForbiddenOperationClass(t *testing.T) 
 	for _, denied := range fixture.DeniedStatements {
 		denied := denied
 		t.Run(denied.Name, func(t *testing.T) {
-			materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "current-session-message"))
+			materialized := testfixture.MaterializeByName(t, "current-session-message")
 			before := testfixture.SnapshotSource(t, materialized)
 			source := openConcreteSyntheticSource(t, materialized)
 
@@ -67,7 +67,7 @@ func TestDeniedStatementFixtureIsNonVacuous(t *testing.T) {
 	if insert.Name != "insert-row" {
 		t.Fatalf("first denial fixture = %q, want insert-row control", insert.Name)
 	}
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "current-session-message"))
+	materialized := testfixture.MaterializeByName(t, "current-session-message")
 	writer, err := sqlite.OpenConn(materialized.Path, sqlite.OpenReadWrite)
 	if err != nil {
 		t.Fatalf("open writable synthetic control: %v", err)
@@ -136,7 +136,7 @@ func TestSQLiteSourceFilesContainNoDirectMutationEscape(t *testing.T) {
 }
 
 func TestCloseCancelsActiveLockedCatalogWithinInjectedBound(t *testing.T) {
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "legacy-message-part"))
+	materialized := testfixture.MaterializeByName(t, "legacy-message-part")
 	path, err := NewOpenCodeSQLiteSourcePath(materialized.Path)
 	if err != nil {
 		t.Fatalf("validate synthetic locked source path: %v", err)

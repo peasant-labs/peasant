@@ -325,7 +325,7 @@ func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 
 func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) {
 	t.Parallel()
-	materialized := testfixture.Materialize(t, testfixture.CaseByName(t, "current-session-message"))
+	materialized := testfixture.MaterializeByName(t, "current-session-message")
 	sourceRoot := filepath.Dir(materialized.Path)
 	prober, err := ingest.NewOpenCodeCandidateProber(&ingest.OSFileSystem{}, ingest.OpenOpenCodeSQLiteSource, ingest.DefaultOpenCodeSQLiteSourceOptions())
 	if err != nil {

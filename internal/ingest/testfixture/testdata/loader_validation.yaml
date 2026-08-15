@@ -1,4 +1,4 @@
-declared_cases: 9
+declared_cases: 12
 cases:
   - name: unknown-field
     mutation: unknown_field
@@ -27,3 +27,12 @@ cases:
   - name: missing-required-row-field
     mutation: missing_row_field
     error_contains: session_id is required
+  - name: declared-history-row-drift
+    mutation: history_rows
+    error_contains: row guard
+  - name: duplicate-history-row
+    mutation: duplicate_history
+    error_contains: duplicate ignored history id
+  - name: unknown-history-kind
+    mutation: unknown_history
+    error_contains: unknown ignored history kind

@@ -11,91 +11,115 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 9
+const expectedCaseCount = 12
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
 
-// SourceFormat describes the physical form materialized for a case.
-type SourceFormat string
+type sourceFormat string
 
 const (
-	SourceFormatSQLite  SourceFormat = "sqlite"
-	SourceFormatCorrupt SourceFormat = "corrupt"
+	sourceFormatSQLite  sourceFormat = "sqlite"
+	sourceFormatCorrupt sourceFormat = "corrupt"
 )
 
-// SchemaKind selects one fixed, safe schema constructor.
-type SchemaKind string
+type schemaKind string
 
 const (
-	SchemaEmpty              SchemaKind = "empty"
-	SchemaLegacy             SchemaKind = "legacy"
-	SchemaCurrent            SchemaKind = "current"
-	SchemaHybrid             SchemaKind = "hybrid"
-	SchemaCurrentMissingSeq  SchemaKind = "current_missing_seq"
-	SchemaCurrentNullableSeq SchemaKind = "current_nullable_seq"
-	SchemaUnsupported        SchemaKind = "unsupported"
+	schemaEmpty              schemaKind = "empty"
+	schemaLegacy             schemaKind = "legacy"
+	schemaCurrent            schemaKind = "current"
+	schemaHybrid             schemaKind = "hybrid"
+	schemaCurrentMissingSeq  schemaKind = "current_missing_seq"
+	schemaCurrentNullableSeq schemaKind = "current_nullable_seq"
+	schemaUnsupported        schemaKind = "unsupported"
 )
 
-// JournalMode controls the journal mode used during SQLite setup.
-type JournalMode string
+type journalMode string
 
 const (
-	JournalDelete JournalMode = "delete"
-	JournalWAL    JournalMode = "wal"
+	journalDelete journalMode = "delete"
+	journalWAL    journalMode = "wal"
+)
+
+type corruptionKind string
+
+const (
+	corruptionNone            corruptionKind = ""
+	corruptionNonSQLite       corruptionKind = "non_sqlite"
+	corruptionTruncatedSQLite corruptionKind = "truncated_sqlite"
+)
+
+type historyKind string
+
+const (
+	historyEvent     historyKind = "event"
+	historyDelta     historyKind = "delta"
+	historyInput     historyKind = "input"
+	historyContext   historyKind = "context"
+	historyMigration historyKind = "migration"
 )
 
 type corpus struct {
-	DeclaredCases int    `yaml:"declared_cases"`
-	Cases         []Case `yaml:"cases"`
+	DeclaredCases int        `yaml:"declared_cases"`
+	Cases         []caseSpec `yaml:"cases"`
 }
 
-// Case is one declarative synthetic source. Callers should obtain cases through
-// CaseByName rather than constructing them directly.
-type Case struct {
-	Name            string            `yaml:"name"`
-	LogicalPath     string            `yaml:"logical_path"`
-	Format          SourceFormat      `yaml:"format"`
-	Schema          SchemaKind        `yaml:"schema"`
-	JournalMode     JournalMode       `yaml:"journal_mode"`
-	DeclaredRows    DeclaredRowCounts `yaml:"declared_rows"`
-	ExpectedCatalog ExpectedCatalog   `yaml:"expected_catalog"`
-	LegacyMessages  []LegacyMessage   `yaml:"legacy_messages"`
-	LegacyParts     []LegacyPart      `yaml:"legacy_parts"`
-	CurrentMessages []CurrentMessage  `yaml:"current_messages"`
-	CorruptContent  string            `yaml:"corrupt_content"`
+type caseSpec struct {
+	Name            string              `yaml:"name"`
+	LogicalPath     string              `yaml:"logical_path"`
+	Format          sourceFormat        `yaml:"format"`
+	Schema          schemaKind          `yaml:"schema"`
+	JournalMode     journalMode         `yaml:"journal_mode"`
+	Corruption      corruptionKind      `yaml:"corruption"`
+	DeclaredRows    declaredRowCounts   `yaml:"declared_rows"`
+	ExpectedCatalog expectedCatalogSpec `yaml:"expected_catalog"`
+	LegacyMessages  []legacyMessage     `yaml:"legacy_messages"`
+	LegacyParts     []legacyPart        `yaml:"legacy_parts"`
+	CurrentMessages []currentMessage    `yaml:"current_messages"`
+	IgnoredHistory  []historyRow        `yaml:"ignored_history"`
 }
 
-// DeclaredRowCounts makes every fixture family update explicit and guarded.
-type DeclaredRowCounts struct {
+type declaredRowCounts struct {
 	LegacyMessages  int `yaml:"legacy_messages"`
 	LegacyParts     int `yaml:"legacy_parts"`
 	CurrentMessages int `yaml:"current_messages"`
+	IgnoredHistory  int `yaml:"ignored_history"`
 }
 
-// SeqExpectation describes how catalog probing should observe session_message.seq.
-type SeqExpectation string
+// seqExpectation describes how catalog probing should observe session_message.seq.
+type seqExpectation string
 
 const (
-	SeqAbsent   SeqExpectation = "absent"
-	SeqNullable SeqExpectation = "nullable"
-	SeqNotNull  SeqExpectation = "not_null"
+	seqAbsent   seqExpectation = "absent"
+	seqNullable seqExpectation = "nullable"
+	seqNotNull  seqExpectation = "not_null"
 )
 
-// ExpectedCatalog pins the structural catalog exposed by a case.
-type ExpectedCatalog struct {
+type expectedCatalogSpec struct {
 	Tables  []string       `yaml:"tables"`
 	Indexes []string       `yaml:"indexes"`
-	Seq     SeqExpectation `yaml:"seq"`
+	Seq     seqExpectation `yaml:"seq"`
 }
 
-// LegacyMessage is one row in the legacy message table.
-type LegacyMessage struct {
+// CatalogExpectation is immutable expected evidence attached to a named fixture.
+type CatalogExpectation struct {
+	tables  []string
+	indexes []string
+	seq     seqExpectation
+}
+
+// Tables returns a detached copy of expected user-table names.
+func (c CatalogExpectation) Tables() []string { return append([]string(nil), c.tables...) }
+
+// Indexes returns a detached copy of expected explicit index names.
+func (c CatalogExpectation) Indexes() []string { return append([]string(nil), c.indexes...) }
+
+type legacyMessage struct {
 	ID          string `yaml:"id"`
 	SessionID   string `yaml:"session_id"`
 	TimeCreated int64  `yaml:"time_created"`
@@ -103,8 +127,8 @@ type LegacyMessage struct {
 	Data        string `yaml:"data"`
 }
 
-// LegacyPart is one row in the legacy part table.
-type LegacyPart struct {
+// legacyPart is one row in the legacy part table.
+type legacyPart struct {
 	ID          string `yaml:"id"`
 	MessageID   string `yaml:"message_id"`
 	SessionID   string `yaml:"session_id"`
@@ -113,8 +137,8 @@ type LegacyPart struct {
 	Data        string `yaml:"data"`
 }
 
-// CurrentMessage is one ordered row in the current session_message projection.
-type CurrentMessage struct {
+// currentMessage is one ordered row in the current session_message projection.
+type currentMessage struct {
 	ID          string `yaml:"id"`
 	SessionID   string `yaml:"session_id"`
 	Type        string `yaml:"type"`
@@ -124,20 +148,26 @@ type CurrentMessage struct {
 	Seq         int64  `yaml:"seq"`
 }
 
-// CaseByName returns a named, strictly validated case from the embedded corpus.
-func CaseByName(t testing.TB, name string) Case {
-	t.Helper()
+type historyRow struct {
+	Kind        historyKind `yaml:"kind"`
+	ID          string      `yaml:"id"`
+	SessionID   string      `yaml:"session_id"`
+	StableID    string      `yaml:"stable_id"`
+	TimeCreated int64       `yaml:"time_created"`
+	Data        string      `yaml:"data"`
+}
+
+func caseByName(name string) (caseSpec, error) {
 	fixtures, err := loadCorpus(fixtureYAML)
 	if err != nil {
-		t.Fatalf("load synthetic OpenCode source fixtures: %v", err)
+		return caseSpec{}, err
 	}
 	for _, fixtureCase := range fixtures.Cases {
 		if fixtureCase.Name == name {
-			return fixtureCase
+			return fixtureCase, nil
 		}
 	}
-	t.Fatalf("load synthetic OpenCode source fixture %q: no such case; choose a name declared in testdata/opencode_sqlite.yaml", name)
-	return Case{}
+	return caseSpec{}, fmt.Errorf("load synthetic OpenCode source fixture %q: no such case; choose a name declared in testdata/opencode_sqlite.yaml", name)
 }
 
 func loadCorpus(data []byte) (corpus, error) {
@@ -175,7 +205,7 @@ func loadCorpus(data []byte) (corpus, error) {
 	return fixtures, nil
 }
 
-func (c Case) validate() error {
+func (c caseSpec) validate() error {
 	if err := requiredToken("case name", c.Name); err != nil {
 		return fmt.Errorf("validate synthetic OpenCode source fixture: %w", err)
 	}
@@ -185,12 +215,15 @@ func (c Case) validate() error {
 	if err := c.Format.validate(); err != nil {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
 	}
-	if c.Format == SourceFormatCorrupt {
+	if c.Format == sourceFormatCorrupt {
 		if c.Schema != "" || c.JournalMode != "" {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources must not declare a SQLite schema or journal mode", c.Name)
 		}
-		if c.CorruptContent == "" {
-			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt_content is required for a corrupt source", c.Name)
+		if err := c.Corruption.validate(); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt source has invalid evidence: %w", c.Name, err)
+		}
+		if c.Corruption == corruptionNone {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt source requires a corruption kind so tests know which fixed malformed bytes to materialize", c.Name)
 		}
 	} else {
 		if err := c.Schema.validate(); err != nil {
@@ -199,8 +232,8 @@ func (c Case) validate() error {
 		if err := c.JournalMode.validate(); err != nil {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
 		}
-		if c.CorruptContent != "" {
-			return fmt.Errorf("validate synthetic OpenCode source fixture %q: SQLite sources must not declare corrupt_content", c.Name)
+		if c.Corruption != corruptionNone {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: SQLite sources must not declare corruption %q", c.Name, c.Corruption)
 		}
 	}
 	if err := c.validateRowCounts(); err != nil {
@@ -215,8 +248,8 @@ func (c Case) validate() error {
 	return c.validateSchemaRows()
 }
 
-func (c ExpectedCatalog) validate() error {
-	if c.Seq != SeqAbsent && c.Seq != SeqNullable && c.Seq != SeqNotNull {
+func (c expectedCatalogSpec) validate() error {
+	if c.Seq != seqAbsent && c.Seq != seqNullable && c.Seq != seqNotNull {
 		return fmt.Errorf("unknown seq expectation %q", c.Seq)
 	}
 	seen := make(map[string]struct{}, len(c.Tables)+len(c.Indexes))
@@ -232,27 +265,29 @@ func (c ExpectedCatalog) validate() error {
 	return nil
 }
 
-func (c Case) validateRowCounts() error {
+func (c caseSpec) validateRowCounts() error {
 	counts := c.DeclaredRows
-	if counts.LegacyMessages < 0 || counts.LegacyParts < 0 || counts.CurrentMessages < 0 {
+	if counts.LegacyMessages < 0 || counts.LegacyParts < 0 || counts.CurrentMessages < 0 || counts.IgnoredHistory < 0 {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: declared row counts cannot be negative", c.Name)
 	}
-	if counts.LegacyMessages != len(c.LegacyMessages) || counts.LegacyParts != len(c.LegacyParts) || counts.CurrentMessages != len(c.CurrentMessages) {
+	if counts.LegacyMessages != len(c.LegacyMessages) || counts.LegacyParts != len(c.LegacyParts) || counts.CurrentMessages != len(c.CurrentMessages) || counts.IgnoredHistory != len(c.IgnoredHistory) {
 		return fmt.Errorf(
-			"validate synthetic OpenCode source fixture %q row guard: declared legacy_messages=%d legacy_parts=%d current_messages=%d; actual=%d/%d/%d",
+			"validate synthetic OpenCode source fixture %q row guard: declared legacy_messages=%d legacy_parts=%d current_messages=%d ignored_history=%d; actual=%d/%d/%d/%d",
 			c.Name,
 			counts.LegacyMessages,
 			counts.LegacyParts,
 			counts.CurrentMessages,
+			counts.IgnoredHistory,
 			len(c.LegacyMessages),
 			len(c.LegacyParts),
 			len(c.CurrentMessages),
+			len(c.IgnoredHistory),
 		)
 	}
 	return nil
 }
 
-func (c Case) validateRows() error {
+func (c caseSpec) validateRows() error {
 	messageIDs := make(map[string]struct{}, len(c.LegacyMessages))
 	for index, row := range c.LegacyMessages {
 		if err := validateLegacyMessage(row); err != nil {
@@ -289,24 +324,34 @@ func (c Case) validateRows() error {
 		}
 		currentSeqs[seqKey] = struct{}{}
 	}
+	historyIDs := make(map[string]struct{}, len(c.IgnoredHistory))
+	for index, row := range c.IgnoredHistory {
+		if err := validateHistoryRow(row); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q ignored history %d: %w", c.Name, index, err)
+		}
+		if _, duplicate := historyIDs[row.ID]; duplicate {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: duplicate ignored history id %q", c.Name, row.ID)
+		}
+		historyIDs[row.ID] = struct{}{}
+	}
 	return nil
 }
 
-func (c Case) validateSchemaRows() error {
+func (c caseSpec) validateSchemaRows() error {
 	hasLegacy := len(c.LegacyMessages) != 0 || len(c.LegacyParts) != 0
 	hasCurrent := len(c.CurrentMessages) != 0
 	switch c.Schema {
-	case SchemaLegacy:
+	case schemaLegacy:
 		if hasCurrent {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: legacy schema cannot contain current rows", c.Name)
 		}
-	case SchemaCurrent:
+	case schemaCurrent:
 		if hasLegacy {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: current schema cannot contain legacy rows", c.Name)
 		}
-	case SchemaHybrid:
+	case schemaHybrid:
 		// Both table families are available; either may intentionally be empty.
-	case SchemaEmpty, SchemaCurrentMissingSeq, SchemaCurrentNullableSeq, SchemaUnsupported, "":
+	case schemaEmpty, schemaCurrentMissingSeq, schemaCurrentNullableSeq, schemaUnsupported, "":
 		if hasLegacy || hasCurrent {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: schema %q cannot contain transcript rows", c.Name, c.Schema)
 		}
@@ -314,7 +359,7 @@ func (c Case) validateSchemaRows() error {
 	return nil
 }
 
-func validateLegacyMessage(row LegacyMessage) error {
+func validateLegacyMessage(row legacyMessage) error {
 	if err := requiredToken("id", row.ID); err != nil {
 		return err
 	}
@@ -327,7 +372,7 @@ func validateLegacyMessage(row LegacyMessage) error {
 	return validateJSON(row.Data)
 }
 
-func validateLegacyPart(row LegacyPart) error {
+func validateLegacyPart(row legacyPart) error {
 	if err := requiredToken("id", row.ID); err != nil {
 		return err
 	}
@@ -343,7 +388,7 @@ func validateLegacyPart(row LegacyPart) error {
 	return validateJSON(row.Data)
 }
 
-func validateCurrentMessage(row CurrentMessage) error {
+func validateCurrentMessage(row currentMessage) error {
 	if err := requiredToken("id", row.ID); err != nil {
 		return err
 	}
@@ -358,6 +403,25 @@ func validateCurrentMessage(row CurrentMessage) error {
 	}
 	if row.Seq < 0 {
 		return errors.New("seq cannot be negative")
+	}
+	return validateJSON(row.Data)
+}
+
+func validateHistoryRow(row historyRow) error {
+	if err := row.Kind.validate(); err != nil {
+		return err
+	}
+	if err := requiredToken("id", row.ID); err != nil {
+		return err
+	}
+	if err := requiredToken("session_id", row.SessionID); err != nil {
+		return err
+	}
+	if err := requiredToken("stable_id", row.StableID); err != nil {
+		return err
+	}
+	if err := requiredToken("data", row.Data); err != nil {
+		return err
 	}
 	return validateJSON(row.Data)
 }
@@ -398,29 +462,47 @@ func validateLogicalPath(logicalPath string) error {
 	return nil
 }
 
-func (f SourceFormat) validate() error {
+func (f sourceFormat) validate() error {
 	switch f {
-	case SourceFormatSQLite, SourceFormatCorrupt:
+	case sourceFormatSQLite, sourceFormatCorrupt:
 		return nil
 	default:
 		return fmt.Errorf("unknown source format %q", f)
 	}
 }
 
-func (s SchemaKind) validate() error {
+func (s schemaKind) validate() error {
 	switch s {
-	case SchemaEmpty, SchemaLegacy, SchemaCurrent, SchemaHybrid, SchemaCurrentMissingSeq, SchemaCurrentNullableSeq, SchemaUnsupported:
+	case schemaEmpty, schemaLegacy, schemaCurrent, schemaHybrid, schemaCurrentMissingSeq, schemaCurrentNullableSeq, schemaUnsupported:
 		return nil
 	default:
 		return fmt.Errorf("unknown schema kind %q", s)
 	}
 }
 
-func (m JournalMode) validate() error {
+func (m journalMode) validate() error {
 	switch m {
-	case JournalDelete, JournalWAL:
+	case journalDelete, journalWAL:
 		return nil
 	default:
 		return fmt.Errorf("unknown journal mode %q", m)
+	}
+}
+
+func (c corruptionKind) validate() error {
+	switch c {
+	case corruptionNone, corruptionNonSQLite, corruptionTruncatedSQLite:
+		return nil
+	default:
+		return fmt.Errorf("unknown corruption kind %q", c)
+	}
+}
+
+func (h historyKind) validate() error {
+	switch h {
+	case historyEvent, historyDelta, historyInput, historyContext, historyMigration:
+		return nil
+	default:
+		return fmt.Errorf("unknown ignored history kind %q", h)
 	}
 }
