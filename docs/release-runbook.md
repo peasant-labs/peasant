@@ -200,7 +200,8 @@ success, so this incident record is not an executable redispatch procedure.
      `.goreleaser.yml`, flake/`go.mod`/`go.sum`/web manifests, `Makefile`; a real
      release PR always matches) runs the per-distro install matrix against a goreleaser
      **`--snapshot`** build (synthetic version): deb 2×2 (ubuntu 22.04/24.04 ×
-     amd64/arm64), rpm (fedora `dnf` + leap `zypper --allow-unsigned-rpm`), Arch
+      amd64/arm64), rpm (fedora `dnf` + leap `zypper modifyrepo --disable --all`
+      followed by `zypper --no-refresh --allow-unsigned-rpm`), Arch
      `makepkg` (x86_64), `brew style`, the **rc-only** macOS cask install, and
      `nix build .#peasant`.
 3. **Merge** (the approval assertion is deferred during the single-maintainer

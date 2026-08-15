@@ -212,10 +212,9 @@ jobs:
           - image: "fedora@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814" # fedora:42
             install: "dnf install -y"
           - image: "opensuse/leap@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421" # opensuse/leap:15.6
-            # --no-refresh: the rpm is local with empty Depends, so repo metadata
-            # is never needed — and the SLE update-repo fetch has hung this job
-            # until the timeout killed it in CI.
-            install: "zypper --non-interactive --no-refresh install --allow-unsigned-rpm"
+            # Disable configured repositories before installing the local RPM:
+            # --no-refresh still builds missing caches, which requires network access.
+            install: "zypper --non-interactive modifyrepo --disable --all && zypper --non-interactive --no-refresh install --allow-unsigned-rpm"
     steps:
       - name: Download dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
