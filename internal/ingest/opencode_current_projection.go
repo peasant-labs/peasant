@@ -1,0 +1,667 @@
+package ingest
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"path/filepath"
+)
+
+const (
+	openCodeCurrentProjectionFormat  = "peasant.opencode.current-sqlite"
+	openCodeCurrentProjectionVersion = 1
+	openCodeCurrentMaterializePage   = 128
+)
+
+type openCodeCurrentProjection struct {
+	Format    string                            `json:"format"`
+	Version   int                               `json:"version"`
+	SessionID string                            `json:"session_id"`
+	Messages  []openCodeLegacyProjectionMessage `json:"messages"`
+}
+
+// These shapes mirror @opencode-ai/schema/session-message at upstream commit
+// 4643e65ad6334de3e4e68dedc201d5fbb828c9fe. The projector stores type and id
+// in columns and encodes the remaining complete SessionMessage into data.
+type openCodeCurrentBase struct {
+	ID       string                     `json:"id"`
+	Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
+	Time     openCodeCurrentTime        `json:"time"`
+}
+
+type openCodeCurrentTime struct {
+	Created   int64 `json:"created"`
+	Completed int64 `json:"completed,omitempty"`
+}
+
+type openCodeCurrentModel struct {
+	ID         string `json:"id"`
+	ProviderID string `json:"providerID"`
+	Variant    string `json:"variant,omitempty"`
+}
+
+type openCodeCurrentTokens struct {
+	Input     int `json:"input"`
+	Output    int `json:"output"`
+	Reasoning int `json:"reasoning"`
+	Cache     struct {
+		Read  int `json:"read"`
+		Write int `json:"write"`
+	} `json:"cache"`
+}
+
+type openCodeCurrentSource struct {
+	Start int    `json:"start"`
+	End   int    `json:"end"`
+	Text  string `json:"text"`
+}
+
+type openCodeCurrentFile struct {
+	URI         string                 `json:"uri"`
+	MIME        string                 `json:"mime"`
+	Name        string                 `json:"name,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Source      *openCodeCurrentSource `json:"source,omitempty"`
+}
+
+type openCodeCurrentAgent struct {
+	Name   string                 `json:"name"`
+	Source *openCodeCurrentSource `json:"source,omitempty"`
+}
+
+type openCodeCurrentUser struct {
+	openCodeCurrentBase
+	Text   string                 `json:"text"`
+	Files  []openCodeCurrentFile  `json:"files,omitempty"`
+	Agents []openCodeCurrentAgent `json:"agents,omitempty"`
+}
+
+type openCodeCurrentAssistant struct {
+	openCodeCurrentBase
+	Agent    string                       `json:"agent"`
+	Model    openCodeCurrentModel         `json:"model"`
+	Content  []json.RawMessage            `json:"content"`
+	Snapshot *openCodeCurrentSnapshot     `json:"snapshot,omitempty"`
+	Finish   string                       `json:"finish,omitempty"`
+	Cost     *float64                     `json:"cost,omitempty"`
+	Tokens   *openCodeCurrentTokens       `json:"tokens,omitempty"`
+	Error    *openCodeCurrentUnknownError `json:"error,omitempty"`
+}
+
+type openCodeCurrentSnapshot struct {
+	Start string   `json:"start,omitempty"`
+	End   string   `json:"end,omitempty"`
+	Files []string `json:"files,omitempty"`
+}
+
+type openCodeCurrentUnknownError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+type openCodeCurrentAssistantText struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+type openCodeCurrentAssistantReasoning struct {
+	Type             string                                `json:"type"`
+	ID               string                                `json:"id"`
+	Text             string                                `json:"text"`
+	ProviderMetadata map[string]map[string]json.RawMessage `json:"providerMetadata,omitempty"`
+	Time             *openCodeCurrentTime                  `json:"time,omitempty"`
+}
+
+type openCodeCurrentAssistantTool struct {
+	Type     string                       `json:"type"`
+	ID       string                       `json:"id"`
+	Name     string                       `json:"name"`
+	Provider *openCodeCurrentToolProvider `json:"provider,omitempty"`
+	State    json.RawMessage              `json:"state"`
+	Time     openCodeCurrentToolTime      `json:"time"`
+}
+
+type openCodeCurrentToolProvider struct {
+	Executed       bool                                  `json:"executed"`
+	Metadata       map[string]map[string]json.RawMessage `json:"metadata,omitempty"`
+	ResultMetadata map[string]map[string]json.RawMessage `json:"resultMetadata,omitempty"`
+}
+
+type openCodeCurrentToolTime struct {
+	Created   int64 `json:"created"`
+	Ran       int64 `json:"ran,omitempty"`
+	Completed int64 `json:"completed,omitempty"`
+	Pruned    int64 `json:"pruned,omitempty"`
+}
+
+type openCodeCurrentToolState struct {
+	Status      string                       `json:"status"`
+	Input       json.RawMessage              `json:"input"`
+	Structured  map[string]json.RawMessage   `json:"structured"`
+	Content     []openCodeCurrentToolContent `json:"content"`
+	Attachments []openCodeCurrentFile        `json:"attachments,omitempty"`
+	OutputPaths []string                     `json:"outputPaths,omitempty"`
+	Result      json.RawMessage              `json:"result,omitempty"`
+	Error       *openCodeCurrentUnknownError `json:"error,omitempty"`
+}
+
+type openCodeCurrentToolContent struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	URI  string `json:"uri,omitempty"`
+	MIME string `json:"mime,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type openCodeCurrentTextMessage struct {
+	openCodeCurrentBase
+	Text string `json:"text"`
+}
+
+type openCodeCurrentSynthetic struct {
+	openCodeCurrentBase
+	SessionID string `json:"sessionID"`
+	Text      string `json:"text"`
+}
+
+type openCodeCurrentShell struct {
+	openCodeCurrentBase
+	CallID  string `json:"callID"`
+	Command string `json:"command"`
+	Output  string `json:"output"`
+}
+
+type openCodeCurrentCompaction struct {
+	openCodeCurrentBase
+	Reason  string `json:"reason"`
+	Summary string `json:"summary"`
+	Recent  string `json:"recent"`
+}
+
+type openCodeCurrentAgentSwitched struct {
+	openCodeCurrentBase
+	Agent string `json:"agent"`
+}
+
+type openCodeCurrentModelSwitched struct {
+	openCodeCurrentBase
+	Model openCodeCurrentModel `json:"model"`
+}
+
+type openCodeCurrentIdentityRegistry struct {
+	kinds map[string]string
+}
+
+func (registry *openCodeCurrentIdentityRegistry) add(id, kind string) error {
+	if id == "" {
+		return fmt.Errorf("%s identity is empty", kind)
+	}
+	if previous, exists := registry.kinds[id]; exists {
+		return fmt.Errorf("identity %q is already registered as %s and cannot also identify %s", id, previous, kind)
+	}
+	registry.kinds[id] = kind
+	return nil
+}
+
+func (base openCodeCurrentBase) validateIdentity(rowID string) error {
+	if base.ID == "" {
+		return errors.New("upstream message id is required")
+	}
+	if base.ID != rowID {
+		return fmt.Errorf("upstream message id %q conflicts with SQLite row id %q", base.ID, rowID)
+	}
+	return nil
+}
+
+func decodeOpenCodeCurrentJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("expected exactly one JSON value: %w", err)
+	}
+	return nil
+}
+
+func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, candidate OpenCodeCandidate) (discovered []DiscoveredSession, err error) {
+	if a.candidateOpener == nil {
+		return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed before row enumeration: source opener is nil, so typed reads cannot run; no session was exposed; construct the adapter with OpenOpenCodeSQLiteSource", candidate.Path)
+	}
+	path, err := NewOpenCodeSQLiteSourcePath(candidate.Path)
+	if err != nil {
+		return nil, err
+	}
+	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
+	if err != nil {
+		return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed while opening the restrictive source: %w; no session was exposed; verify source readability and retry without modifying the database", candidate.Path, err)
+	}
+	defer func() {
+		if closeErr := source.Close(ctx); err == nil && closeErr != nil {
+			err = fmt.Errorf("discover current OpenCode SQLite candidate %q failed while closing its bounded read connection: %w; no partial discovery result is eligible; retry after the source lock clears", candidate.Path, closeErr)
+		}
+	}()
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, err
+	}
+	var cursor *OpenCodeCurrentSessionCursor
+	for {
+		page, readErr := source.CurrentSessionIDs(ctx, OpenCodeCurrentSessionPageRequest{PageSize: pageSize, After: cursor})
+		if readErr != nil {
+			return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed while enumerating a bounded session page: %w; no partial discovery result is eligible; verify the database remains a supported current session_message store and retry", candidate.Path, readErr)
+		}
+		for _, currentID := range page.SessionIDs {
+			sessionID, idErr := NewSessionID(currentID.String())
+			if idErr != nil {
+				return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, currentID.String(), idErr)
+			}
+			discovered = append(discovered, DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: ResolvedPath(candidate.Path), SourceFormat: SourceFormatJSON, OriginalRoot: ResolvedPath(filepath.Dir(candidate.Path)), TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite})
+		}
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+	}
+	if len(discovered) > 0 {
+		contentModTime, statErr := legacySQLiteContentModTime(a.fs, candidate.Path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		for index := range discovered {
+			discovered[index].ModTime = contentModTime
+		}
+	}
+	return discovered, nil
+}
+
+func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
+	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, err
+	}
+	path, err := NewOpenCodeSQLiteSourcePath(session.SourcePath.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	if a.candidateOpener == nil {
+		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed before source access: source opener is nil; raw database bytes were not read and no managed state was written; construct the production adapter with OpenOpenCodeSQLiteSource", session.SessionID)
+	}
+	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
+	if err != nil {
+		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while opening %q read-only: %w; no managed artifact or store row was written; verify the selected database remains readable and retry", session.SessionID, session.SourcePath, err)
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		_ = source.Close(context.Background())
+		return nil, nil, err
+	}
+	projection, readErr := readOpenCodeCurrentProjection(ctx, source, currentID, pageSize)
+	closeErr := source.Close(ctx)
+	if readErr != nil || closeErr != nil {
+		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, errors.Join(readErr, closeErr))
+	}
+	if len(projection.Messages) == 0 {
+		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q from %q produced no semantic messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
+	}
+	data, err := json.Marshal(projection)
+	if err != nil {
+		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while encoding the deterministic managed JSON projection: %w; detached source rows remain unchanged and no managed state was written; report the unsupported row shape", session.SessionID, err)
+	}
+	data = append(data, '\n')
+	managed := openCodeLegacyProjection{Format: projection.Format, Version: projection.Version, SessionID: projection.SessionID, Messages: projection.Messages}
+	metadata, err := a.metadataFromManagedProjection(ctx, session, managed)
+	if err != nil {
+		return nil, nil, err
+	}
+	return metadata, data, nil
+}
+
+func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, error) {
+	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
+	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
+	var cursor *OpenCodeCurrentCursor
+	for {
+		page, err := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
+		if err != nil {
+			return openCodeCurrentProjection{}, err
+		}
+		for _, row := range page.Messages {
+			if err := registry.add(row.ID.String(), "message row"); err != nil {
+				return openCodeCurrentProjection{}, currentNormalizationError(row, "registering stable identities", err)
+			}
+			message, err := normalizeOpenCodeCurrentRow(row, &registry)
+			if err != nil {
+				return openCodeCurrentProjection{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+			}
+			projection.Messages = append(projection.Messages, message)
+		}
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+	}
+	return projection, nil
+}
+
+func currentNormalizationError(row OpenCodeCurrentMessageRow, operation string, cause error) error {
+	return fmt.Errorf("normalize current OpenCode session_message row %q type %q failed while %s: %w; the row does not satisfy the pinned upstream SessionMessage materialized schema, so no projection or caller-visible partial state was emitted; repair the upstream row or upgrade Peasant for a newly supported schema and retry", row.ID.String(), row.Type.String(), operation, cause)
+}
+
+func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCodeCurrentIdentityRegistry) (openCodeLegacyProjectionMessage, error) {
+	message := openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Parts: []openCodeLegacyProjectionPart{}}
+	appendPart := func(id string, created int64, data any) error {
+		if id != "" {
+			if err := registry.add(id, "nested message content"); err != nil {
+				return err
+			}
+		}
+		raw, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: id, MessageID: message.ID, SessionID: message.SessionID, TimeCreated: created, TimeUpdated: created, Data: raw})
+		return nil
+	}
+	messageData := func(role, text, model, agent string, metadata map[string]json.RawMessage, time openCodeCurrentTime, tokens *openCodeCurrentTokens) error {
+		cwd, err := currentMetadataString(metadata, "cwd")
+		if err != nil {
+			return err
+		}
+		value := map[string]any{"id": message.ID, "sessionID": message.SessionID, "role": role, "time": time}
+		if text != "" {
+			value["content"] = text
+		}
+		if model != "" {
+			value["modelID"] = model
+		}
+		if agent != "" {
+			value["agent"] = agent
+		}
+		if cwd != "" {
+			value["cwd"] = cwd
+		}
+		if tokens != nil {
+			value["tokens"] = map[string]any{"input": tokens.Input, "output": tokens.Output, "reasoning": tokens.Reasoning, "cache": tokens.Cache}
+		}
+		raw, err := json.Marshal(value)
+		message.Data = raw
+		return err
+	}
+	data := []byte(row.Data)
+	switch row.Type.String() {
+	case "user":
+		var value openCodeCurrentUser
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "text", "files", "agents", "time"); err != nil {
+			return message, err
+		}
+		if err := messageData(RoleUser.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+		for _, agent := range value.Agents {
+			if agent.Name == "" {
+				return message, errors.New("user agent attachment requires name")
+			}
+			if err := appendPart("", value.Time.Created, map[string]any{"type": "agent", "name": agent.Name, "text": agent.Name}); err != nil {
+				return message, err
+			}
+		}
+	case "assistant":
+		var value openCodeCurrentAssistant
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "agent", "model", "content", "time"); err != nil {
+			return message, err
+		}
+		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.Metadata, value.Time, value.Tokens); err != nil {
+			return message, err
+		}
+		for _, content := range value.Content {
+			if err := appendOpenCodeCurrentAssistantContent(&message, content, registry, appendPart); err != nil {
+				return message, err
+			}
+		}
+	case "shell":
+		var value openCodeCurrentShell
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "callID", "command", "output", "time"); err != nil {
+			return message, err
+		}
+		if err := registry.add(value.CallID, "shell tool call"); err != nil {
+			return message, err
+		}
+		if err := messageData(RoleAssistant.String(), "", "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+		if err := appendPart("", value.Time.Created, map[string]any{"id": value.CallID, "type": "tool_use", "name": "shell", "input": map[string]any{"command": value.Command}, "time": map[string]any{"created": value.Time.Created}}); err != nil {
+			return message, err
+		}
+		if value.Time.Completed > 0 || value.Output != "" {
+			if err := appendPart("", value.Time.Completed, map[string]any{"id": value.CallID, "type": "tool_result", "output": value.Output, "time": map[string]any{"created": value.Time.Completed}}); err != nil {
+				return message, err
+			}
+		}
+	case "synthetic":
+		var value openCodeCurrentSynthetic
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "sessionID", "text", "time"); err != nil {
+			return message, err
+		}
+		if value.SessionID != message.SessionID {
+			return message, errors.New("synthetic sessionID must match SQLite row session")
+		}
+		if err := messageData(RoleSystem.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+	case "system":
+		var value openCodeCurrentTextMessage
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "text", "time"); err != nil {
+			return message, err
+		}
+		if err := messageData(RoleSystem.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+	case "compaction":
+		var value openCodeCurrentCompaction
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "reason", "summary", "recent", "time"); err != nil {
+			return message, err
+		}
+		if value.Reason != "auto" && value.Reason != "manual" {
+			return message, errors.New("compaction reason must be auto or manual")
+		}
+		if err := messageData(RoleSystem.String(), value.Summary, "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+		if err := appendPart("", value.Time.Created, map[string]any{"type": "compaction", "text": value.Summary, "content": value.Recent, "time": map[string]any{"created": value.Time.Created}}); err != nil {
+			return message, err
+		}
+	case "agent-switched":
+		var value openCodeCurrentAgentSwitched
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "agent", "time"); err != nil {
+			return message, err
+		}
+		if err := messageData(RoleSystem.String(), value.Agent, "", value.Agent, value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+		if err := appendPart("", value.Time.Created, map[string]any{"type": "agent", "name": value.Agent, "text": value.Agent}); err != nil {
+			return message, err
+		}
+	case "model-switched":
+		var value openCodeCurrentModelSwitched
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := value.validateIdentity(message.ID); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "id", "model", "time"); err != nil {
+			return message, err
+		}
+		if err := messageData(RoleSystem.String(), value.Model.ID, value.Model.ID, "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+		if err := appendPart("", value.Time.Created, map[string]any{"type": "subtask", "name": value.Model.ID, "text": value.Model.ID}); err != nil {
+			return message, err
+		}
+	default:
+		return message, fmt.Errorf("type %q is outside the supported pinned SessionMessage closed set", row.Type.String())
+	}
+	return message, nil
+}
+
+func currentMetadataString(metadata map[string]json.RawMessage, key string) (string, error) {
+	var value string
+	if raw := metadata[key]; len(raw) != 0 {
+		if !json.Valid(raw) {
+			return "", fmt.Errorf("current metadata %q contains malformed JSON; correct the metadata value in OpenCode and retry", key)
+		}
+		// Metadata is an upstream open record. A valid non-string value is not a
+		// CWD, but must remain harmlessly optional as it was before normalization.
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return "", nil
+		}
+	}
+	return value, nil
+}
+
+func requireOpenCodeCurrentFields(raw []byte, fields ...string) error {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return err
+	}
+	for _, field := range fields {
+		if _, ok := object[field]; !ok {
+			return fmt.Errorf("required upstream field %q is absent", field)
+		}
+	}
+	return nil
+}
+
+func appendOpenCodeCurrentAssistantContent(message *openCodeLegacyProjectionMessage, raw json.RawMessage, registry *openCodeCurrentIdentityRegistry, appendPart func(string, int64, any) error) error {
+	var discriminator struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &discriminator); err != nil {
+		return err
+	}
+	switch discriminator.Type {
+	case "text":
+		var value openCodeCurrentAssistantText
+		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
+			return err
+		}
+		if value.ID == "" {
+			return errors.New("assistant text requires id")
+		}
+		return appendPart(value.ID, 0, value)
+	case "reasoning":
+		var value openCodeCurrentAssistantReasoning
+		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
+			return err
+		}
+		if value.ID == "" {
+			return errors.New("assistant reasoning requires id")
+		}
+		created := int64(0)
+		if value.Time != nil {
+			created = value.Time.Created
+		}
+		return appendPart(value.ID, created, value)
+	case "tool":
+		var value openCodeCurrentAssistantTool
+		if err := decodeOpenCodeCurrentJSON(raw, &value); err != nil {
+			return err
+		}
+		if err := requireOpenCodeCurrentFields(raw, "type", "id", "name", "state", "time"); err != nil {
+			return err
+		}
+		var state openCodeCurrentToolState
+		if err := decodeOpenCodeCurrentJSON(value.State, &state); err != nil {
+			return fmt.Errorf("decode tool %q state: %w", value.ID, err)
+		}
+		if state.Status != "pending" && state.Status != "running" && state.Status != "completed" && state.Status != "error" {
+			return fmt.Errorf("tool %q state status %q is unsupported", value.ID, state.Status)
+		}
+		if len(state.Input) == 0 {
+			return fmt.Errorf("tool %q state requires input", value.ID)
+		}
+		if state.Status == "pending" {
+			var pending string
+			if err := json.Unmarshal(state.Input, &pending); err != nil || state.Structured != nil || state.Content != nil || len(state.Result) != 0 || state.Error != nil {
+				return fmt.Errorf("tool %q pending state requires string input", value.ID)
+			}
+		} else {
+			var input map[string]json.RawMessage
+			if err := json.Unmarshal(state.Input, &input); err != nil || state.Structured == nil || state.Content == nil {
+				return fmt.Errorf("tool %q %s state requires object input", value.ID, state.Status)
+			}
+			for _, content := range state.Content {
+				if content.Type == "text" && content.Text == "" {
+					return fmt.Errorf("tool %q text content requires text", value.ID)
+				}
+				if content.Type == "file" && (content.URI == "" || content.MIME == "") {
+					return fmt.Errorf("tool %q file content requires uri and mime", value.ID)
+				}
+				if content.Type != "text" && content.Type != "file" {
+					return fmt.Errorf("tool %q content type %q is unsupported", value.ID, content.Type)
+				}
+			}
+			if state.Status == "running" && (len(state.Result) != 0 || state.Error != nil || len(state.Attachments) != 0 || len(state.OutputPaths) != 0) {
+				return fmt.Errorf("tool %q running state contains completed/error-only fields", value.ID)
+			}
+			if state.Status == "completed" && state.Error != nil {
+				return fmt.Errorf("tool %q completed state contains error-only fields", value.ID)
+			}
+			if state.Status == "error" && (state.Error == nil || state.Error.Type != "unknown" || state.Error.Message == "") {
+				return fmt.Errorf("tool %q error state requires an unknown error with message", value.ID)
+			}
+		}
+		return appendPart(value.ID, value.Time.Created, map[string]any{"id": value.ID, "type": "tool", "name": value.Name, "state": state, "time": value.Time})
+	default:
+		return fmt.Errorf("assistant content type %q is outside the supported text/reasoning/tool closed set", discriminator.Type)
+	}
+}

@@ -18,7 +18,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const expectedLoaderValidationCases = 12
+const expectedLoaderValidationCases = 13
 
 //go:embed testdata/loader_validation.yaml
 var loaderValidationYAML []byte
@@ -49,6 +49,7 @@ const (
 	mutationHistoryRows      loaderMutation = "history_rows"
 	mutationDuplicateHistory loaderMutation = "duplicate_history"
 	mutationUnknownHistory   loaderMutation = "unknown_history"
+	mutationPartialDuplicate loaderMutation = "partial_duplicate"
 )
 
 func TestEmbeddedCorpusIsStrictAndNonVacuous(t *testing.T) {
@@ -74,6 +75,7 @@ func TestEmbeddedCorpusIsStrictAndNonVacuous(t *testing.T) {
 	assertSchemaCovered(t, seenSchemas, schemaHybrid)
 	assertSchemaCovered(t, seenSchemas, schemaCurrentMissingSeq)
 	assertSchemaCovered(t, seenSchemas, schemaCurrentNullableSeq)
+	assertSchemaCovered(t, seenSchemas, schemaCurrentPartialSeq)
 	assertSchemaCovered(t, seenSchemas, schemaUnsupported)
 	if !seenFormats[sourceFormatSQLite] || !seenFormats[sourceFormatCorrupt] || !seenWAL {
 		t.Errorf("embedded fixture corpus coverage = formats %v WAL %t; want SQLite, corrupt, and WAL", seenFormats, seenWAL)
@@ -508,7 +510,7 @@ func schemaHasTable(schema schemaKind, table string) bool {
 	case "message", "part":
 		return schema == schemaLegacy || schema == schemaHybrid
 	case "session_message":
-		return schema == schemaCurrent || schema == schemaHybrid || schema == schemaCurrentMissingSeq || schema == schemaCurrentNullableSeq
+		return schema == schemaCurrent || schema == schemaHybrid || schema == schemaCurrentMissingSeq || schema == schemaCurrentNullableSeq || schema == schemaCurrentPartialSeq
 	default:
 		return false
 	}
@@ -547,7 +549,7 @@ func loadValidationCases(t testing.TB) []loaderValidationCase {
 
 func knownMutation(mutation loaderMutation) bool {
 	switch mutation {
-	case mutationUnknownField, mutationTrailingDoc, mutationDeclaredCount, mutationDuplicateName, mutationMissingName, mutationAbsolutePath, mutationTraversingPath, mutationDeclaredRows, mutationMissingRowField, mutationHistoryRows, mutationDuplicateHistory, mutationUnknownHistory:
+	case mutationUnknownField, mutationTrailingDoc, mutationDeclaredCount, mutationDuplicateName, mutationMissingName, mutationAbsolutePath, mutationTraversingPath, mutationDeclaredRows, mutationMissingRowField, mutationHistoryRows, mutationDuplicateHistory, mutationUnknownHistory, mutationPartialDuplicate:
 		return true
 	default:
 		return false
@@ -567,7 +569,7 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 	case mutationTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_cases: 0\ncases: []\n")...), nil
 	case mutationDeclaredCount:
-		return replaceOnce("declared_cases: 18", "declared_cases: 17")
+		return replaceOnce("declared_cases: 23", "declared_cases: 22")
 	case mutationDuplicateName:
 		return replaceOnce("name: legacy-message-part", "name: empty-valid")
 	case mutationMissingName:
@@ -586,6 +588,19 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 		return replaceOnce("id: event_2", "id: event_1")
 	case mutationUnknownHistory:
 		return replaceOnce("kind: migration", "kind: replay")
+	case mutationPartialDuplicate:
+		mutated, err := replaceOnce(
+			"name: current-partial-ordering-index\n    logical_path: current/partial-ordering.db\n    format: sqlite\n    schema: current_partial_seq\n    journal_mode: delete\n    corruption: \"\"\n    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 3, ignored_history: 0}",
+			"name: current-partial-ordering-index\n    logical_path: current/partial-ordering.db\n    format: sqlite\n    schema: current_partial_seq\n    journal_mode: delete\n    corruption: \"\"\n    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 2, ignored_history: 0}",
+		)
+		if err != nil {
+			return nil, err
+		}
+		duplicate := "      - {id: sm_partial_b, session_id: ses_partial, type: part, time_created: 9401, time_updated: 9401, data: '{\"marker\":\"duplicate-b\"}', seq: 1}\n"
+		if !bytes.Contains(mutated, []byte(duplicate)) {
+			return nil, fmt.Errorf("mutation anchor for the partial-index duplicate row is absent")
+		}
+		return bytes.Replace(mutated, []byte(duplicate), nil, 1), nil
 	default:
 		return nil, fmt.Errorf("unknown fixture mutation %q", mutation)
 	}

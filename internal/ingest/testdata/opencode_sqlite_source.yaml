@@ -1,8 +1,35 @@
 declared_denied_statements: 20
+declared_denial_mutation_proofs: 1
+declared_cancellation_cases: 1
+declared_source_lifecycle_cases: 1
+denied_fixture: wal-capable
+source_lifecycle_cases:
+  - name: catalog-and-paged-current-reads-share-one-production-connection
+    fixture: wal-capable
+    page_size: 1
+    expected_session_ids: [ses_wal_1]
+    expected_message_ids: [sm_wal_1]
+cancellation_cases:
+  - name: cancel-after-first-current-row-enters-pending-page
+    fixture: current-reader-pages
+    session_id: ses_current_reader_a
+    page_size: 2
+    pending_rows_before_cancel: 1
+    reuse_rows: 2
+    decoded_row:
+      id: sm_current_first
+      session_id: ses_current_reader_a
+      type: message
+      time_created: 9000
+      time_updated: 9000
+      data: '{"role":"user","marker":"seq-2"}'
+      seq: 2
 denied_statements:
   - name: insert-row
     statement: "INSERT INTO session (id) VALUES ('forbidden')"
     error_contains: forbidden SQLite action
+    mutation_proof: true
+    expected_session_count: 2
   - name: update-row
     statement: "UPDATE session_message SET type = 'forbidden' WHERE id = 'sm_current_1'"
     error_contains: forbidden SQLite action
@@ -60,7 +87,7 @@ denied_statements:
   - name: attach-database
     statement: "ATTACH DATABASE ':memory:' AS forbidden"
     error_contains: forbidden SQLite action
-forbidden_source_tokens:
+forbidden_source_boundary_tokens:
   - "os.ReadFile("
   - "os.Open("
   - "os.WriteFile("
@@ -74,7 +101,15 @@ forbidden_source_tokens:
   - "os.Chtimes("
   - "io.Copy("
   - "io.ReadAll("
+forbidden_ingest_sqlite_tokens:
   - "sqlite.NewBackup("
+  - ".OpenBlob("
+  - ".Serialize("
+  - ".Deserialize("
+  - ".ApplyChangeset("
+  - ".ApplyInverseChangeset("
+  - ".WriteChangeset("
+  - ".WritePatchset("
   - "sqlite.OpenReadWrite"
   - "sqlite.OpenCreate"
   - "sqlite.OpenWAL"

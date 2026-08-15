@@ -35,12 +35,13 @@ type TranscriptOrigin uint8
 const (
 	TranscriptOriginFile TranscriptOrigin = iota
 	TranscriptOriginOpenCodeLegacySQLite
+	TranscriptOriginOpenCodeCurrentSQLite
 )
 
 // Validate rejects unknown origins at the pipeline trust boundary.
 func (o TranscriptOrigin) Validate() error {
 	switch o {
-	case TranscriptOriginFile, TranscriptOriginOpenCodeLegacySQLite:
+	case TranscriptOriginFile, TranscriptOriginOpenCodeLegacySQLite, TranscriptOriginOpenCodeCurrentSQLite:
 		return nil
 	default:
 		return fmt.Errorf("transcript origin %d is outside the supported closed set", o)

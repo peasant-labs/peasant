@@ -12,10 +12,33 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
+
+func TestKickstartDiscoveryMountsCurrentOnlyOpenCodeSession(t *testing.T) {
+	materialized := testfixture.MaterializeByName(t, "semantic-parity-current")
+	t.Setenv("OPENCODE_DB", materialized.Path)
+	cfg := config.BaseConfig()
+	cfg.Sources.OpenCode.Enabled = true
+	cfg.Sources.OpenCode.Paths = []string{filepath.Dir(materialized.Path)}
+	cfg.Sources.ClaudeCode.Paths = nil
+	cfg.Sources.Codex.Paths = nil
+	cfg.Sources.Cursor.Paths = nil
+	cfg.Sources.Strike.Paths = nil
+
+	inventory, sessions := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil)
+	discovery := inventory[defaults.HarnessOpenCode]
+	if discovery.SessionCount != 1 || discovery.State == ftue.DiscoveryFailed {
+		t.Fatalf("kickstart current-only inventory = %+v, want one available OpenCode session", discovery)
+	}
+	if len(sessions) != 1 || sessions[0].Harness != defaults.HarnessOpenCode.String() || sessions[0].SessionID != testutil.TestOpenCodeSesID {
+		t.Fatalf("kickstart current-only sessions = %+v, want the mounted synthetic OpenCode session", sessions)
+	}
+}
 
 // TestBuildKickstartCommandMountsProjectFirstScope exercises the RETAINED legacy
 // FTUE wizard's project-first scope behavior. The default kickstart command now

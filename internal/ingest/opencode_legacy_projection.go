@@ -43,33 +43,6 @@ type openCodeLegacyProjectionPart struct {
 	Data        json.RawMessage `json:"data"`
 }
 
-type openCodeLegacyMessageEvidence struct {
-	Role       string `json:"role"`
-	ModelID    string `json:"modelID"`
-	ProviderID string `json:"providerID"`
-	Version    string `json:"version"`
-	Directory  string `json:"directory"`
-	CWD        string `json:"cwd"`
-	ParentID   string `json:"parentID"`
-	Title      string `json:"title"`
-	Model      struct {
-		ID      string `json:"id"`
-		ModelID string `json:"modelID"`
-	} `json:"model"`
-	Path struct {
-		CWD  string `json:"cwd"`
-		Root string `json:"root"`
-	} `json:"path"`
-	Time struct {
-		Created   int64 `json:"created"`
-		Completed int64 `json:"completed"`
-	} `json:"time"`
-	Tokens *struct {
-		Input  int `json:"input"`
-		Output int `json:"output"`
-	} `json:"tokens"`
-}
-
 func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
 	if a.candidateOpener == nil {
 		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed before row enumeration: source opener is nil, so typed reads cannot run; no session was exposed; construct the adapter with OpenOpenCodeSQLiteSource", candidate.Path)
@@ -163,8 +136,11 @@ func legacySQLiteContentModTime(filesystem FileSystem, databasePath string) (tim
 // the versioned JSON transcript Peasant owns. Database, WAL, and SHM bytes never
 // enter the returned data.
 func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
+		return a.materializeCurrentTranscript(ctx, session)
+	}
 	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
-		return nil, nil, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not legacy SQLite, so this adapter cannot safely replace file-copy behavior; no managed state was written; use ExtractMetadata for JSON sessions", session.SessionID, session.TranscriptOrigin)
+		return nil, nil, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
 	}
 	legacyID, err := NewOpenCodeLegacySessionID(string(session.SessionID))
 	if err != nil {
@@ -199,7 +175,7 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while encoding the versioned managed JSON projection: %w; detached source rows remain unchanged and no managed state was written; report the unsupported row shape", session.SessionID, err)
 	}
 	data = append(data, '\n')
-	metadata, err := a.metadataFromLegacyProjection(ctx, session, projection)
+	metadata, err := a.metadataFromManagedProjection(ctx, session, projection)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -240,7 +216,7 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 	return projection, nil
 }
 
-func (a *OpenCodeAdapter) metadataFromLegacyProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection) (*UnifiedMetadata, error) {
+func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection) (*UnifiedMetadata, error) {
 	metadata := NewUnifiedMetadata()
 	metadata.SessionID = session.SessionID
 	metadata.ModelHarness = HarnessOpenCode
@@ -251,79 +227,34 @@ func (a *OpenCodeAdapter) metadataFromLegacyProjection(ctx context.Context, sess
 		metadata.ParentUUID = &parent
 	}
 
-	start, end := int64(0), int64(0)
+	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)
+	messages, err := parseManagedOpenCodeSemanticMessages(projection, kind)
+	if err != nil {
+		return nil, fmt.Errorf("extract metadata from %s projection for session %q failed while decoding the shared semantic corpus: %w; no managed artifact or store state was committed, so repair the malformed normalized row and retry harvest", kind, session.SessionID, err)
+	}
+	summary := summarizeOpenCodeSemanticMessages(messages)
+	metadata.Stats = StatsInfo{TurnCount: summary.turnCount, ToolCallCount: summary.toolCallCount, TokensIn: summary.tokensIn, TokensOut: summary.tokensOut, DurationMs: summary.endMS - summary.startMS}
+	metadata.Timestamp = TimestampInfo{Start: summary.startMS, End: summary.endMS}
+	metadata.Version = summary.version
 	workDir := session.CWD
-	modelMissing := true
+	if workDir == "" {
+		workDir = summary.cwd
+		metadata.CWD = workDir
+	}
 	projectMissing := workDir == ""
-	for _, message := range projection.Messages {
-		var evidence openCodeLegacyMessageEvidence
-		if err := json.Unmarshal(message.Data, &evidence); err != nil {
-			return nil, fmt.Errorf("extract metadata for legacy OpenCode SQLite session %q failed while decoding selected message row %q: %w; the managed projection and store state were not committed; fix the malformed required row JSON in OpenCode and retry", session.SessionID, message.ID, err)
-		}
-		created := message.TimeCreated
-		if evidence.Time.Created > 0 {
-			created = evidence.Time.Created
-		}
-		completed := message.TimeUpdated
-		if evidence.Time.Completed > 0 {
-			completed = evidence.Time.Completed
-		}
-		if created > 0 && (start == 0 || created < start) {
-			start = created
-		}
-		if completed > end {
-			end = completed
-		}
-		if evidence.Role == RoleUser.String() || evidence.Role == RoleAssistant.String() {
-			metadata.Stats.TurnCount++
-		}
-		if evidence.Role == RoleAssistant.String() {
-			if evidence.Tokens != nil {
-				metadata.Stats.TokensIn += evidence.Tokens.Input
-				metadata.Stats.TokensOut += evidence.Tokens.Output
-			}
-			if modelMissing {
-				model := legacyEvidenceModel(evidence)
-				if model != "" {
-					if parsed, modelErr := NewModelID(model); modelErr == nil {
-						metadata.Model = parsed
-						modelMissing = false
-					}
-				}
-			}
-		}
-		if metadata.Version == "" {
-			metadata.Version = evidence.Version
-		}
-		if workDir == "" {
-			workDir = legacyEvidenceCWD(evidence)
-			if workDir != "" {
-				projectMissing = false
-				metadata.CWD = workDir
-			}
-		}
-		if metadata.ParentUUID == nil && evidence.ParentID != "" {
-			if parent, parentErr := NewSessionID(evidence.ParentID); parentErr == nil {
-				metadata.ParentUUID = &parent
-			}
-		}
-		for _, part := range message.Parts {
-			var shape struct {
-				Type string `json:"type"`
-			}
-			if err := json.Unmarshal(part.Data, &shape); err != nil {
-				return nil, fmt.Errorf("extract metadata for legacy OpenCode SQLite session %q failed while decoding selected part row %q for message %q: %w; no partial managed or store state was committed; fix the malformed required row JSON and retry", session.SessionID, part.ID, message.ID, err)
-			}
-			if shape.Type == "tool" || shape.Type == "tool_use" {
-				metadata.Stats.ToolCallCount++
-			}
+	modelMissing := summary.modelID == ""
+	if !modelMissing {
+		if parsed, modelErr := NewModelID(summary.modelID); modelErr == nil {
+			metadata.Model = parsed
+		} else {
+			modelMissing = true
 		}
 	}
-	if end < start {
-		end = start
+	if metadata.ParentUUID == nil && summary.parentID != "" {
+		if parent, parentErr := NewSessionID(summary.parentID); parentErr == nil {
+			metadata.ParentUUID = &parent
+		}
 	}
-	metadata.Timestamp = TimestampInfo{Start: start, End: end}
-	metadata.Stats.DurationMs = end - start
 
 	var gitBranch, gitRemote, gitWorktree, gitTracking *string
 	if workDir != "" {
@@ -353,7 +284,7 @@ func (a *OpenCodeAdapter) metadataFromLegacyProjection(ctx context.Context, sess
 	}
 	projectHash, hostSlug, err := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remote, identityPath)
 	if err != nil {
-		return nil, fmt.Errorf("extract metadata for legacy OpenCode SQLite session %q failed while deriving stable source identity from %q: %w; no managed or store state was committed; verify the selected path and installation salt", session.SessionID, identityPath, err)
+		return nil, fmt.Errorf("extract metadata from %s projection for session %q failed while deriving stable source identity from %q: %w; no managed artifact or store state was committed, so verify the selected path and installation salt and retry", kind, session.SessionID, identityPath, err)
 	}
 	metadata.HostSlug = hostSlug
 	metadata.Project.Hash = projectHash
@@ -365,97 +296,268 @@ func (a *OpenCodeAdapter) metadataFromLegacyProjection(ctx context.Context, sess
 		metadata.Git = GitContext{Branch: gitBranch, Remote: gitRemote, Worktree: gitWorktree, Tracking: gitTracking}
 	}
 	if modelMissing {
-		metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, DiagnosticEntry{ErrorType: "missing_model", Location: fmt.Sprintf("legacy SQLite session %s", session.SessionID), Message: "selected assistant rows contain no valid model identifier; Peasant left model empty rather than inventing one", Remediation: "Use an OpenCode export that records modelID or retain the session with an unknown model."})
+		metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, DiagnosticEntry{ErrorType: "missing_model", Location: fmt.Sprintf("%s session %s", kind, session.SessionID), Message: "selected assistant messages contain no valid model identifier; Peasant left model empty rather than inventing one", Remediation: "Use an OpenCode source that records a supported assistant model or retain the session with an unknown model."})
 	}
 	if projectMissing {
-		metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, DiagnosticEntry{ErrorType: "missing_project", Location: fmt.Sprintf("legacy SQLite session %s in %s", session.SessionID, session.SourcePath), Message: "selected message rows contain no working-directory or project evidence; Peasant left project name and path empty and used only the database path for stable local placement", Remediation: "Use an OpenCode export that records path.cwd, cwd, or directory if project attribution is required."})
+		metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, DiagnosticEntry{ErrorType: "missing_project", Location: fmt.Sprintf("%s session %s in %s", kind, session.SessionID, session.SourcePath), Message: "selected messages contain no working-directory or project evidence; Peasant left project name and path empty and used only the source path for stable local placement", Remediation: "Use an OpenCode source that records path.cwd, cwd, or directory if project attribution is required."})
 	}
 	return &metadata, nil
 }
 
-func legacyEvidenceCWD(evidence openCodeLegacyMessageEvidence) string {
-	if evidence.Path.CWD != "" {
-		return evidence.Path.CWD
+// recognizeManagedOpenCodeProjection distinguishes ordinary legacy JSON from a
+// Peasant-owned envelope. A recognizable managed marker with invalid bytes is
+// an error, not a file-origin fallback, so recovery cannot erase an index by
+// treating corruption as an empty legacy directory.
+func recognizeManagedOpenCodeProjection(data []byte, sessionID SessionID) (TranscriptOrigin, error) {
+	formatMarker := managedOpenCodeFormatMarker(data)
+	for _, candidate := range []struct {
+		origin  TranscriptOrigin
+		format  string
+		version int
+	}{
+		{TranscriptOriginOpenCodeLegacySQLite, openCodeLegacyProjectionFormat, openCodeLegacyProjectionVersion},
+		{TranscriptOriginOpenCodeCurrentSQLite, openCodeCurrentProjectionFormat, openCodeCurrentProjectionVersion},
+	} {
+		if formatMarker != candidate.format {
+			continue
+		}
+		if _, err := decodeManagedOpenCodeProjection(data, candidate.format, candidate.version, sessionID); err != nil {
+			return TranscriptOriginFile, fmt.Errorf("recognize managed OpenCode projection for session %q failed: found managed format marker %q but its envelope is corrupt: %w; recovery stopped before legacy fallback, so re-run harvest to regenerate the managed transcript", sessionID, candidate.format, err)
+		}
+		return candidate.origin, nil
 	}
-	if evidence.CWD != "" {
-		return evidence.CWD
-	}
-	return evidence.Directory
+	return TranscriptOriginFile, nil
 }
 
-func legacyEvidenceModel(evidence openCodeLegacyMessageEvidence) string {
-	if evidence.ModelID != "" {
-		return evidence.ModelID
-	}
-	if evidence.Model.ModelID != "" {
-		return evidence.Model.ModelID
-	}
-	return evidence.Model.ID
-}
-
-const openCodeLegacyProjectionEnvelopeLimit = 4096
-
-type openCodeManagedProjectionOpener interface {
-	Open(string) (io.ReadCloser, error)
-}
-
-func isOpenCodeLegacyProjection(data []byte, sessionID SessionID) bool {
-	return readOpenCodeLegacyProjectionEnvelope(bytes.NewReader(data), sessionID)
-}
-
-func isManagedOpenCodeLegacyProjection(filesystem FileSystem, path string, sessionID SessionID) bool {
-	opener, ok := filesystem.(openCodeManagedProjectionOpener)
-	if !ok {
-		return false
-	}
-	reader, err := opener.Open(path)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = reader.Close() }()
-	return readOpenCodeLegacyProjectionEnvelope(io.LimitReader(reader, openCodeLegacyProjectionEnvelopeLimit), sessionID)
-}
-
-func readOpenCodeLegacyProjectionEnvelope(reader io.Reader, sessionID SessionID) bool {
-	decoder := json.NewDecoder(reader)
+func managedOpenCodeFormatMarker(data []byte) string {
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
-		return false
+		return ""
 	}
-	var format, projectedSessionID string
-	var version int
-	seenFormat, seenVersion, seenSessionID := false, false, false
+	for decoder.More() {
+		keyToken, keyErr := decoder.Token()
+		key, ok := keyToken.(string)
+		if keyErr != nil || !ok {
+			return ""
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return ""
+		}
+		if key != "format" {
+			continue
+		}
+		var format string
+		if err := json.Unmarshal(value, &format); err != nil {
+			return ""
+		}
+		return format
+	}
+	return ""
+}
+
+func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expectedVersion int, sessionID SessionID) (openCodeLegacyProjection, error) {
+	fields, err := decodeOpenCodeProjectionObject(data, "managed envelope", []string{"format", "version", "session_id", "messages"})
+	if err != nil {
+		return openCodeLegacyProjection{}, err
+	}
+	var projection openCodeLegacyProjection
+	if err := json.Unmarshal(fields["format"], &projection.Format); err != nil {
+		return projection, fmt.Errorf("decode managed envelope format: %w", err)
+	}
+	if err := json.Unmarshal(fields["version"], &projection.Version); err != nil {
+		return projection, fmt.Errorf("decode managed envelope version: %w", err)
+	}
+	if err := json.Unmarshal(fields["session_id"], &projection.SessionID); err != nil {
+		return projection, fmt.Errorf("decode managed envelope session_id: %w", err)
+	}
+	if projection.Format != expectedFormat || projection.Version != expectedVersion || projection.SessionID != string(sessionID) {
+		return projection, fmt.Errorf("managed envelope identity format=%q version=%d session_id=%q does not match expected format=%q version=%d selected_session_id=%q", projection.Format, projection.Version, projection.SessionID, expectedFormat, expectedVersion, sessionID)
+	}
+	var rows []json.RawMessage
+	if err := json.Unmarshal(fields["messages"], &rows); err != nil {
+		return projection, fmt.Errorf("decode managed envelope messages: %w", err)
+	}
+	if len(rows) == 0 {
+		return projection, errors.New("managed envelope messages must be present and non-empty")
+	}
+	projection.Messages = make([]openCodeLegacyProjectionMessage, 0, len(rows))
+	identities := make(map[string]string, len(rows))
+	for index, raw := range rows {
+		message, messageErr := decodeManagedOpenCodeProjectionMessage(raw, projection.SessionID, identities)
+		if messageErr != nil {
+			return projection, fmt.Errorf("decode managed envelope message %d: %w", index, messageErr)
+		}
+		projection.Messages = append(projection.Messages, message)
+	}
+	if _, err := parseManagedOpenCodeSemanticMessages(projection, "managed OpenCode"); err != nil {
+		return projection, fmt.Errorf("validate managed envelope semantic corpus: %w", err)
+	}
+	return projection, nil
+}
+
+func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID string, identities map[string]string) (openCodeLegacyProjectionMessage, error) {
+	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"})
+	if err != nil {
+		return openCodeLegacyProjectionMessage{}, err
+	}
+	var message openCodeLegacyProjectionMessage
+	if err := json.Unmarshal(fields["id"], &message.ID); err != nil {
+		return message, fmt.Errorf("decode id: %w", err)
+	}
+	if message.ID == "" {
+		return message, errors.New("id must be non-empty")
+	}
+	if err := json.Unmarshal(fields["session_id"], &message.SessionID); err != nil {
+		return message, fmt.Errorf("decode session_id: %w", err)
+	}
+	if message.SessionID != sessionID {
+		return message, fmt.Errorf("session_id %q does not match envelope session_id %q", message.SessionID, sessionID)
+	}
+	if err := json.Unmarshal(fields["time_created"], &message.TimeCreated); err != nil {
+		return message, fmt.Errorf("decode time_created: %w", err)
+	}
+	if err := json.Unmarshal(fields["time_updated"], &message.TimeUpdated); err != nil {
+		return message, fmt.Errorf("decode time_updated: %w", err)
+	}
+	if err := requireJSONObject(fields["data"]); err != nil {
+		return message, fmt.Errorf("decode data: %w", err)
+	}
+	message.Data = append(json.RawMessage(nil), fields["data"]...)
+	if prior, exists := identities[message.ID]; exists {
+		return message, fmt.Errorf("id %q duplicates %s", message.ID, prior)
+	}
+	identities[message.ID] = "a message"
+	var parts []json.RawMessage
+	if err := json.Unmarshal(fields["parts"], &parts); err != nil {
+		return message, fmt.Errorf("decode parts: %w", err)
+	}
+	message.Parts = make([]openCodeLegacyProjectionPart, 0, len(parts))
+	for index, partRaw := range parts {
+		part, partErr := decodeManagedOpenCodeProjectionPart(partRaw, message.ID, sessionID, identities)
+		if partErr != nil {
+			return message, fmt.Errorf("decode part %d: %w", index, partErr)
+		}
+		message.Parts = append(message.Parts, part)
+	}
+	return message, nil
+}
+
+func decodeManagedOpenCodeProjectionPart(raw json.RawMessage, messageID, sessionID string, identities map[string]string) (openCodeLegacyProjectionPart, error) {
+	fields, err := decodeOpenCodeProjectionObject(raw, "managed part", []string{"id", "message_id", "session_id", "time_created", "time_updated", "data"})
+	if err != nil {
+		return openCodeLegacyProjectionPart{}, err
+	}
+	var part openCodeLegacyProjectionPart
+	if err := json.Unmarshal(fields["id"], &part.ID); err != nil {
+		return part, fmt.Errorf("decode id: %w", err)
+	}
+	if part.ID != "" {
+		if prior, exists := identities[part.ID]; exists {
+			return part, fmt.Errorf("id %q duplicates %s", part.ID, prior)
+		}
+	}
+	if err := json.Unmarshal(fields["message_id"], &part.MessageID); err != nil {
+		return part, fmt.Errorf("decode message_id: %w", err)
+	}
+	if part.MessageID != messageID {
+		return part, fmt.Errorf("message_id %q does not match containing message %q", part.MessageID, messageID)
+	}
+	if err := json.Unmarshal(fields["session_id"], &part.SessionID); err != nil {
+		return part, fmt.Errorf("decode session_id: %w", err)
+	}
+	if part.SessionID != sessionID {
+		return part, fmt.Errorf("session_id %q does not match envelope session_id %q", part.SessionID, sessionID)
+	}
+	if err := json.Unmarshal(fields["time_created"], &part.TimeCreated); err != nil {
+		return part, fmt.Errorf("decode time_created: %w", err)
+	}
+	if err := json.Unmarshal(fields["time_updated"], &part.TimeUpdated); err != nil {
+		return part, fmt.Errorf("decode time_updated: %w", err)
+	}
+	if err := requireJSONObject(fields["data"]); err != nil {
+		return part, fmt.Errorf("decode data: %w", err)
+	}
+	part.Data = append(json.RawMessage(nil), fields["data"]...)
+	if part.ID != "" {
+		identities[part.ID] = "a part"
+	}
+	return part, nil
+}
+
+func decodeOpenCodeProjectionObject(data []byte, location string, expected []string) (map[string]json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		if err != nil {
+			return nil, fmt.Errorf("decode %s opening object: %w", location, managedProjectionJSONError(data, err))
+		}
+		return nil, fmt.Errorf("decode %s: expected JSON object", location)
+	}
+	allowed := make(map[string]struct{}, len(expected))
+	for _, key := range expected {
+		allowed[key] = struct{}{}
+	}
+	fields := make(map[string]json.RawMessage, len(expected))
 	for decoder.More() {
 		keyToken, tokenErr := decoder.Token()
 		key, ok := keyToken.(string)
 		if tokenErr != nil || !ok {
-			return false
+			return nil, fmt.Errorf("decode %s field name: %w", location, tokenErr)
 		}
-		switch key {
-		case "format":
-			if decoder.Decode(&format) != nil {
-				return false
-			}
-			seenFormat = true
-		case "version":
-			if decoder.Decode(&version) != nil {
-				return false
-			}
-			seenVersion = true
-		case "session_id":
-			if decoder.Decode(&projectedSessionID) != nil {
-				return false
-			}
-			seenSessionID = true
-		case "messages":
-			messagesToken, messagesErr := decoder.Token()
-			return messagesErr == nil && messagesToken == json.Delim('[') && seenFormat && seenVersion && seenSessionID && format == openCodeLegacyProjectionFormat && version == openCodeLegacyProjectionVersion && projectedSessionID == string(sessionID)
-		default:
-			var discarded json.RawMessage
-			if decoder.Decode(&discarded) != nil {
-				return false
-			}
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("decode %s: unknown field %q", location, key)
+		}
+		if _, duplicate := fields[key]; duplicate {
+			return nil, fmt.Errorf("decode %s: duplicate field %q", location, key)
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, fmt.Errorf("decode %s field %q: %w", location, key, err)
+		}
+		fields[key] = value
+	}
+	if _, err := decoder.Token(); err != nil {
+		return nil, fmt.Errorf("decode %s closing object: %w", location, managedProjectionJSONError(data, err))
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", location, err)
+	}
+	for _, key := range expected {
+		if _, present := fields[key]; !present {
+			return nil, fmt.Errorf("decode %s: required field %q is missing", location, key)
 		}
 	}
-	return false
+	return fields, nil
+}
+
+func managedProjectionJSONError(data []byte, fallback error) error {
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	return fallback
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func requireJSONObject(data json.RawMessage) error {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+	if object == nil {
+		return errors.New("must be a JSON object")
+	}
+	return nil
 }

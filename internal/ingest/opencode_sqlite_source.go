@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"zombiezen.com/go/sqlite"
 )
 
 // OpenCodeCatalogScope identifies one bounded catalog projection.
@@ -39,7 +41,149 @@ const (
 	// MaxOpenCodeLegacyPageSize is the fixed upper bound for every legacy
 	// transcript source page.
 	MaxOpenCodeLegacyPageSize = 128
+	// MaxOpenCodeCurrentPageSize is the fixed upper bound for every current
+	// session message source page.
+	MaxOpenCodeCurrentPageSize = 128
 )
+
+// OpenCodeCurrentPageSize is a validated, positive current source page size.
+type OpenCodeCurrentPageSize struct{ value int }
+
+// NewOpenCodeCurrentPageSize validates a requested current source page size.
+func NewOpenCodeCurrentPageSize(value int) (OpenCodeCurrentPageSize, error) {
+	if value <= 0 || value > MaxOpenCodeCurrentPageSize {
+		return OpenCodeCurrentPageSize{}, fmt.Errorf("validate OpenCode current page size %d failed before source access: the size must be between 1 and the fixed maximum %d, so the read cannot be proven bounded; choose a size within that range", value, MaxOpenCodeCurrentPageSize)
+	}
+	return OpenCodeCurrentPageSize{value: value}, nil
+}
+
+// Value returns the validated integer page size.
+func (s OpenCodeCurrentPageSize) Value() int { return s.value }
+
+// OpenCodeCurrentSessionID is a validated current session identifier.
+type OpenCodeCurrentSessionID struct{ value string }
+
+// NewOpenCodeCurrentSessionID validates a current session identifier.
+func NewOpenCodeCurrentSessionID(value string) (OpenCodeCurrentSessionID, error) {
+	if err := validateOpenCodeCurrentToken("session identifier", value); err != nil {
+		return OpenCodeCurrentSessionID{}, err
+	}
+	return OpenCodeCurrentSessionID{value: value}, nil
+}
+
+// String returns the validated session identifier.
+func (id OpenCodeCurrentSessionID) String() string { return id.value }
+
+// OpenCodeCurrentMessageID is a validated current message identifier.
+type OpenCodeCurrentMessageID struct{ value string }
+
+// NewOpenCodeCurrentMessageID validates a current message identifier.
+func NewOpenCodeCurrentMessageID(value string) (OpenCodeCurrentMessageID, error) {
+	if err := validateOpenCodeCurrentToken("message identifier", value); err != nil {
+		return OpenCodeCurrentMessageID{}, err
+	}
+	return OpenCodeCurrentMessageID{value: value}, nil
+}
+
+// String returns the validated message identifier.
+func (id OpenCodeCurrentMessageID) String() string { return id.value }
+
+// OpenCodeCurrentMessageType is a validated current projection row type.
+type OpenCodeCurrentMessageType struct{ value string }
+
+// NewOpenCodeCurrentMessageType validates a current projection row type.
+func NewOpenCodeCurrentMessageType(value string) (OpenCodeCurrentMessageType, error) {
+	if err := validateOpenCodeCurrentToken("message type", value); err != nil {
+		return OpenCodeCurrentMessageType{}, err
+	}
+	return OpenCodeCurrentMessageType{value: value}, nil
+}
+
+// String returns the validated current projection row type.
+func (messageType OpenCodeCurrentMessageType) String() string { return messageType.value }
+
+func validateOpenCodeCurrentToken(kind, value string) error {
+	if value == "" || strings.TrimSpace(value) != value || strings.IndexByte(value, 0) >= 0 {
+		return fmt.Errorf("validate OpenCode current %s %q failed before source access: the value is empty, has surrounding whitespace, or contains a NUL byte and cannot safely participate in a bounded read; use the exact non-empty value returned by the source", kind, value)
+	}
+	return nil
+}
+
+// OpenCodeCurrentSeq is a validated non-negative sequence value.
+type OpenCodeCurrentSeq struct{ value int64 }
+
+// NewOpenCodeCurrentSeq validates a current message sequence value.
+func NewOpenCodeCurrentSeq(value int64) (OpenCodeCurrentSeq, error) {
+	if value < 0 {
+		return OpenCodeCurrentSeq{}, fmt.Errorf("validate OpenCode current sequence %d failed before source access: seq must be non-negative but may be sparse; use the exact non-negative seq returned by the source", value)
+	}
+	return OpenCodeCurrentSeq{value: value}, nil
+}
+
+// Value returns the validated sequence value.
+func (sequence OpenCodeCurrentSeq) Value() int64 { return sequence.value }
+
+// OpenCodeCurrentCursor resumes current message ordering after one seq value.
+type OpenCodeCurrentCursor struct{ sequence OpenCodeCurrentSeq }
+
+// NewOpenCodeCurrentCursor creates an explicit sequence cursor.
+func NewOpenCodeCurrentCursor(sequence OpenCodeCurrentSeq) OpenCodeCurrentCursor {
+	return OpenCodeCurrentCursor{sequence: sequence}
+}
+
+// Seq returns the last sequence represented by the cursor.
+func (cursor OpenCodeCurrentCursor) Seq() OpenCodeCurrentSeq { return cursor.sequence }
+
+// OpenCodeCurrentSessionCursor resumes current session enumeration after one
+// stable session identifier.
+type OpenCodeCurrentSessionCursor struct{ sessionID OpenCodeCurrentSessionID }
+
+// NewOpenCodeCurrentSessionCursor creates a current session cursor.
+func NewOpenCodeCurrentSessionCursor(sessionID OpenCodeCurrentSessionID) OpenCodeCurrentSessionCursor {
+	return OpenCodeCurrentSessionCursor{sessionID: sessionID}
+}
+
+// SessionID returns the last identifier represented by the cursor.
+func (cursor OpenCodeCurrentSessionCursor) SessionID() OpenCodeCurrentSessionID {
+	return cursor.sessionID
+}
+
+// OpenCodeCurrentSessionPageRequest requests one bounded page of current
+// session identifiers.
+type OpenCodeCurrentSessionPageRequest struct {
+	PageSize OpenCodeCurrentPageSize
+	After    *OpenCodeCurrentSessionCursor
+}
+
+// OpenCodeCurrentSessionPage is a detached bounded session identifier page.
+type OpenCodeCurrentSessionPage struct {
+	SessionIDs []OpenCodeCurrentSessionID
+	Next       *OpenCodeCurrentSessionCursor
+}
+
+// OpenCodeCurrentPageRequest requests one bounded page for one current session.
+type OpenCodeCurrentPageRequest struct {
+	SessionID OpenCodeCurrentSessionID
+	PageSize  OpenCodeCurrentPageSize
+	After     *OpenCodeCurrentCursor
+}
+
+// OpenCodeCurrentMessageRow is one detached row from the materialized current projection.
+type OpenCodeCurrentMessageRow struct {
+	ID          OpenCodeCurrentMessageID
+	SessionID   OpenCodeCurrentSessionID
+	Type        OpenCodeCurrentMessageType
+	TimeCreated int64
+	TimeUpdated int64
+	Data        string
+	Seq         OpenCodeCurrentSeq
+}
+
+// OpenCodeCurrentPage is a detached bounded current message page.
+type OpenCodeCurrentPage struct {
+	Messages []OpenCodeCurrentMessageRow
+	Next     *OpenCodeCurrentCursor
+}
 
 // OpenCodeLegacyPageSize is a validated, positive legacy source page size.
 type OpenCodeLegacyPageSize struct{ value int }
@@ -248,17 +392,42 @@ type OpenCodeSQLiteDeadlineClock interface {
 // Construct options with DefaultOpenCodeSQLiteSourceOptions or
 // NewOpenCodeSQLiteSourceOptions.
 type OpenCodeSQLiteSourceOptions struct {
-	busyTimeout  time.Duration
-	queryTimeout time.Duration
-	clock        OpenCodeSQLiteDeadlineClock
+	busyTimeout            time.Duration
+	queryTimeout           time.Duration
+	clock                  OpenCodeSQLiteDeadlineClock
+	cancellationCheckpoint openCodeSQLiteCancellationCheckpoint
+	openConnection         openCodeSQLiteConnectionOpener
+}
+
+// openCodeSQLiteConnectionOpener remains package-private so production callers
+// cannot replace the restrictive source connection with an arbitrary executor.
+// It exists solely to prove the one-connection lifecycle against the same
+// production opener path used by Catalog and page reads.
+type openCodeSQLiteConnectionOpener func(string, ...sqlite.OpenFlags) (*sqlite.Conn, error)
+
+type openCodeSQLiteCancellationCheckpoint interface {
+	AfterPendingRow(context.Context, openCodeCurrentPendingPageState) error
+}
+
+type openCodeCurrentPendingPageState struct {
+	row   OpenCodeCurrentMessageRow
+	count int
+}
+
+type contextOpenCodeSQLiteCancellationCheckpoint struct{}
+
+func (contextOpenCodeSQLiteCancellationCheckpoint) AfterPendingRow(ctx context.Context, _ openCodeCurrentPendingPageState) error {
+	return ctx.Err()
 }
 
 // DefaultOpenCodeSQLiteSourceOptions returns the bounded production policy.
 func DefaultOpenCodeSQLiteSourceOptions() OpenCodeSQLiteSourceOptions {
 	return OpenCodeSQLiteSourceOptions{
-		busyTimeout:  defaultOpenCodeSQLiteBusyTimeout,
-		queryTimeout: defaultOpenCodeSQLiteQueryTimeout,
-		clock:        systemOpenCodeSQLiteDeadlineClock{},
+		busyTimeout:            defaultOpenCodeSQLiteBusyTimeout,
+		queryTimeout:           defaultOpenCodeSQLiteQueryTimeout,
+		clock:                  systemOpenCodeSQLiteDeadlineClock{},
+		cancellationCheckpoint: contextOpenCodeSQLiteCancellationCheckpoint{},
+		openConnection:         sqlite.OpenConn,
 	}
 }
 
@@ -269,9 +438,11 @@ func NewOpenCodeSQLiteSourceOptions(
 	clock OpenCodeSQLiteDeadlineClock,
 ) (OpenCodeSQLiteSourceOptions, error) {
 	options := OpenCodeSQLiteSourceOptions{
-		busyTimeout:  busyTimeout,
-		queryTimeout: queryTimeout,
-		clock:        clock,
+		busyTimeout:            busyTimeout,
+		queryTimeout:           queryTimeout,
+		clock:                  clock,
+		cancellationCheckpoint: contextOpenCodeSQLiteCancellationCheckpoint{},
+		openConnection:         sqlite.OpenConn,
 	}
 	if err := options.validate(); err != nil {
 		return OpenCodeSQLiteSourceOptions{}, err
@@ -292,6 +463,12 @@ func (o OpenCodeSQLiteSourceOptions) validate() error {
 	if o.clock == nil {
 		return fmt.Errorf("validate OpenCode SQLite source options failed before opening the source: deadline clock is nil, so bounded reads cannot create cancellation contexts; provide a clock or use DefaultOpenCodeSQLiteSourceOptions")
 	}
+	if o.cancellationCheckpoint == nil {
+		return fmt.Errorf("validate OpenCode SQLite source options failed before opening the source: cancellation checkpoint is nil, so a context ending after row decode could escape the atomic-page lifecycle; use a source options constructor with the default context checkpoint")
+	}
+	if o.openConnection == nil {
+		return fmt.Errorf("validate OpenCode SQLite source options failed before opening the source: connection opener is nil, so the single restrictive source lifecycle cannot be created; use DefaultOpenCodeSQLiteSourceOptions or NewOpenCodeSQLiteSourceOptions")
+	}
 	return nil
 }
 
@@ -301,14 +478,16 @@ func (systemOpenCodeSQLiteDeadlineClock) WithTimeout(parent context.Context, tim
 	return context.WithTimeout(parent, timeout)
 }
 
-// OpenCodeSQLiteSource exposes bounded, detached catalog and legacy transcript
+// OpenCodeSQLiteSource exposes bounded, detached catalog and transcript
 // pages plus bounded cleanup. It deliberately provides no raw connection, SQL,
 // arguments, transactions, query kinds, table names, writable surfaces, or
 // callbacks.
 type OpenCodeSQLiteSource interface {
 	Catalog(context.Context) (OpenCodeSchemaEvidence, error)
+	CurrentSessionIDs(context.Context, OpenCodeCurrentSessionPageRequest) (OpenCodeCurrentSessionPage, error)
 	LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error)
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
+	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	Close(context.Context) error
 }

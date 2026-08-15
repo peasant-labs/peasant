@@ -1,0 +1,38 @@
+declared_cases: 1
+cases:
+  - name: current-only-harvest-detail-metrics-repeat-and-source-missing-reindex
+    source_fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    non_stale_session_id: 00000000-0000-4000-8000-000000000126
+    expected_entries: 12
+    expected_minimum_turns: 3
+    expected_metadata_turns: 3
+    expected_metadata_tools: 3
+    expected_tokens_in: 7
+    expected_tokens_out: 11
+    expected_new: 1
+    expected_unchanged: 1
+    managed_format: peasant.opencode.current-sqlite
+    forbidden_markers: [SQLite format 3, HISTORY_MUST_NOT_APPEAR, MUST_NOT_OPEN]
+
+declared_negative_cases: 2
+negative_cases:
+  - {name: malformed-row-leaves-no-managed-state, kind: unknown_row_type, error_contains: outside the supported pinned SessionMessage closed set}
+  - {name: canceled-page-leaves-no-managed-state, kind: canceled_page, error_contains: context canceled}
+
+declared_loader_mutations: 5
+loader_mutations:
+  - {name: reject-unknown-field, kind: unknown_field, error_contains: field unexpected}
+  - {name: reject-trailing-document, kind: trailing_document, error_contains: exactly one YAML document}
+  - {name: reject-count-drift, kind: declared_count, error_contains: row guard}
+  - {name: reject-duplicate-name, kind: duplicate_name, error_contains: duplicate}
+  - {name: reject-unknown-behavior-mutation, kind: unknown_behavior_kind, error_contains: unknown behavior mutation}
+
+declared_behavior_mutations: 6
+behavior_mutations:
+  - {name: reject-nondeterministic-managed-bytes, kind: nondeterministic_managed_bytes, error_contains: managed bytes}
+  - {name: reject-omitted-stale-target, kind: omitted_stale_target, error_contains: stale target}
+  - {name: reject-wrong-managed-origin, kind: wrong_managed_origin, error_contains: managed current origin}
+  - {name: reject-removed-source-access, kind: removed_source_access, error_contains: removed source}
+  - {name: reject-retained-stale-state, kind: retained_stale_state, error_contains: stale state}
+  - {name: reject-poisoned-retry-state, kind: poisoned_retry_state, error_contains: retry state}

@@ -25,6 +25,7 @@ type OpenCodeAdapter struct {
 	candidateProber      *OpenCodeCandidateProber
 	candidateOpener      OpenCodeSQLiteSourceOpener
 	candidateOptions     OpenCodeSQLiteSourceOptions
+	candidateInitErr     error
 	candidateMu          sync.Mutex
 	candidateEvidence    []OpenCodeProbeResult
 }
@@ -34,15 +35,29 @@ var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
 
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
 func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {
-	adapter := &OpenCodeAdapter{fs: fs, git: git, salt: s}
 	candidateFS, ok := fs.(OpenCodeCandidateFileSystem)
-	if !ok {
-		return adapter
-	}
 	environment := SystemOpenCodeEnvironment()
 	channel := "latest"
 	if configuredChannel, exists := environment.LookupEnv(openCodeInstallationChannelEnv); exists && strings.TrimSpace(configuredChannel) != "" {
 		channel = configuredChannel
+	}
+	return newOpenCodeAdapter(fs, git, s, candidateFS, ok, channel, environment, OpenOpenCodeSQLiteSource, DefaultOpenCodeSQLiteSourceOptions())
+}
+
+func newOpenCodeAdapter(
+	fs FileSystem,
+	git GitResolver,
+	s salt.Salt,
+	candidateFS OpenCodeCandidateFileSystem,
+	hasCandidateCapability bool,
+	channel string,
+	environment OpenCodeEnvironmentLookup,
+	opener OpenCodeSQLiteSourceOpener,
+	options OpenCodeSQLiteSourceOptions,
+) *OpenCodeAdapter {
+	adapter := &OpenCodeAdapter{fs: fs, git: git, salt: s}
+	if !hasCandidateCapability {
+		return adapter
 	}
 	configured, err := NewOpenCodeAdapterWithCandidateProbe(
 		fs,
@@ -51,10 +66,11 @@ func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAd
 		channel,
 		environment,
 		candidateFS,
-		OpenOpenCodeSQLiteSource,
-		DefaultOpenCodeSQLiteSourceOptions(),
+		opener,
+		options,
 	)
 	if err != nil {
+		adapter.candidateInitErr = fmt.Errorf("OpenCode discovery cannot initialize SQLite candidate support: candidate-probe construction failed because %w; where: NewOpenCodeAdapter before discovery; impact: legacy JSON and SQLite discovery are stopped rather than silently omitting SQLite sessions; fix: verify the OpenCode adapter dependencies and retry", err)
 		return adapter
 	}
 	return configured
@@ -103,7 +119,9 @@ func (a *OpenCodeAdapter) Harness() Harness {
 
 // Discover reads legacy project/session JSON first. If that produces no
 // sessions, it searches candidate evidence in deterministic order and discovers
-// sessions from exactly the first eligible legacy SQLite source. It does not
+// sessions from exactly the first eligible SQLite source. Hybrid databases prefer
+// their current projection and fall back to legacy only if current discovery is
+// unusable. It does not
 // union or deduplicate representations; broader mixed-source selection remains
 // deferred until a canonical cross-representation policy is implemented.
 //
@@ -114,6 +132,9 @@ func (a *OpenCodeAdapter) Harness() Harness {
 //
 // Sessions with a non-empty parentID are linked via ParentUUID.
 func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
+	if a.candidateInitErr != nil {
+		return nil, a.candidateInitErr
+	}
 	evidence := a.inspectCandidates(ctx, cfg.Paths)
 	var discovered []DiscoveredSession
 
@@ -204,10 +225,21 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 		return discovered, nil
 	}
 	for _, result := range evidence {
-		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Capability != OpenCodeCapabilityLegacy || result.Support != OpenCodeSupportSupported {
+		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Support != OpenCodeSupportSupported {
 			continue
 		}
-		sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
+		var sessions []DiscoveredSession
+		var err error
+		switch result.Capability {
+		case OpenCodeCapabilityLegacy:
+			sessions, err = a.discoverLegacySQLite(ctx, result.Candidate)
+		case OpenCodeCapabilityCurrent:
+			sessions, err = a.discoverCurrentSQLite(ctx, result.Candidate)
+		case OpenCodeCapabilityHybrid:
+			sessions, err = a.discoverHybridSQLite(ctx, result.Candidate)
+		default:
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -267,10 +299,22 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 		cloned[index].Evidence.CurrentIndexes = make([]OpenCodeIndexEvidence, len(result.Evidence.CurrentIndexes))
 		for evidenceIndex, indexEvidence := range result.Evidence.CurrentIndexes {
 			cloned[index].Evidence.CurrentIndexes[evidenceIndex] = indexEvidence
-			cloned[index].Evidence.CurrentIndexes[evidenceIndex].Columns = append([]string(nil), indexEvidence.Columns...)
+			cloned[index].Evidence.CurrentIndexes[evidenceIndex].Keys = append([]OpenCodeIndexKeyEvidence(nil), indexEvidence.Keys...)
 		}
 	}
 	return cloned
+}
+
+func (a *OpenCodeAdapter) discoverHybridSQLite(ctx context.Context, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
+	currentSessions, currentErr := a.discoverCurrentSQLite(ctx, candidate)
+	if currentErr == nil {
+		return currentSessions, nil
+	}
+	legacySessions, legacyErr := a.discoverLegacySQLite(ctx, candidate)
+	if legacyErr == nil {
+		return legacySessions, nil
+	}
+	return nil, fmt.Errorf("discover hybrid OpenCode SQLite candidate %q failed: current projection is unusable (%w) and legacy fallback also failed (%v); no partial discovery result is eligible; verify the supported OpenCode database and retry without modifying it", candidate.Path, currentErr, legacyErr)
 }
 
 // ExtractMetadata builds UnifiedMetadata from session + message files.
@@ -281,7 +325,7 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 //  3. The corresponding project JSON for the worktree path.
 //  4. Git metadata from the session's working directory.
 func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
-	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
 		metadata, _, err := a.MaterializeTranscript(ctx, session)
 		return metadata, err
 	}
@@ -298,7 +342,8 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	// ── 2. Count messages (turns + tool calls) ────────────────────────────────
 	// The message directory lives at {root}/storage/message/ses_{id}/
 	storageRoot := resolveStorageRoot(session)
-	turnCount, toolCallCount, tokensIn, tokensOut := a.countMessages(ctx, storageRoot, ses.ID)
+	semanticMessages := loadOpenCodeJSONSemanticMessages(a.fs, session)
+	semanticSummary := summarizeOpenCodeSemanticMessages(semanticMessages)
 
 	// ── 3. Resolve git info ────────────────────────────────────────────────────
 	workDir := ses.Directory
@@ -370,7 +415,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 
 	// ── 6. Resolve model ID ───────────────────────────────────────────────────
 	// modelID comes from the most recent assistant message; we collect the first one found.
-	modelIDStr := a.findModelID(ctx, storageRoot, ses.ID)
+	modelIDStr := semanticSummary.modelID
 
 	var modelID ModelID
 	modelMissing := false
@@ -432,11 +477,11 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	md.CWD = ses.Directory
 
 	md.Stats = StatsInfo{
-		TurnCount:     turnCount,
-		ToolCallCount: toolCallCount,
+		TurnCount:     semanticSummary.turnCount,
+		ToolCallCount: semanticSummary.toolCallCount,
 		DurationMs:    durationMs,
-		TokensIn:      tokensIn,
-		TokensOut:     tokensOut,
+		TokensIn:      semanticSummary.tokensIn,
+		TokensOut:     semanticSummary.tokensOut,
 	}
 
 	if modelMissing {
@@ -479,27 +524,6 @@ type openCodeSession struct {
 	} `json:"time"`
 }
 
-// openCodeMessage represents the JSON structure of message/ses_{id}/msg_{id}.json.
-type openCodeMessage struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionID"`
-	Role      string `json:"role"`
-	ModelID   string `json:"modelID"`
-	Time      struct {
-		Created   int64 `json:"created"`
-		Completed int64 `json:"completed"`
-	} `json:"time"`
-	Tokens *struct {
-		Input     int `json:"input"`
-		Output    int `json:"output"`
-		Reasoning int `json:"reasoning"`
-		Cache     struct {
-			Read  int `json:"read"`
-			Write int `json:"write"`
-		} `json:"cache"`
-	} `json:"tokens,omitempty"`
-}
-
 // loadProjectWorktrees reads all project JSON files under {root}/project/ and
 // returns a map of projectID → worktree path.
 func (a *OpenCodeAdapter) loadProjectWorktrees(storageRoot string) (map[string]string, error) {
@@ -528,86 +552,6 @@ func (a *OpenCodeAdapter) loadProjectWorktrees(storageRoot string) (map[string]s
 		}
 	}
 	return result, nil
-}
-
-// countMessages reads all msg_*.json files under {root}/message/{sessionID}/
-// and returns (userTurns+assistantTurns, inferredToolCalls).
-//
-// Directory naming contract: the on-disk layout uses the full session ID string
-// as the directory name verbatim — e.g. "ses_3cd91f52effeXd3QAJ54jOyzv5".
-// The "ses_" prefix is already part of the session ID value stored in the JSON
-// ("id" field), so no prefix is added or stripped here. sessionID is used
-// directly as the directory component under {root}/message/.
-func (a *OpenCodeAdapter) countMessages(_ context.Context, storageRoot, sessionID string) (turnCount, toolCallCount, tokensIn, tokensOut int) {
-	msgDir := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), sessionID)
-	entries, err := a.fs.ReadDir(msgDir)
-	if err != nil {
-		return 0, 0, 0, 0
-	}
-
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), defaults.ExtJSON.String()) {
-			continue
-		}
-		data, err := a.fs.ReadFile(filepath.Join(msgDir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var msg openCodeMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			continue
-		}
-		role := Role(msg.Role)
-		if role == RoleUser || role == RoleAssistant {
-			turnCount++
-		}
-		if role == RoleAssistant {
-			// Count tool call parts as a proxy for tool calls.
-			tc := a.countToolCallParts(storageRoot, msg.ID)
-			toolCallCount += tc
-
-			// Accumulate token counts from assistant messages.
-			if msg.Tokens != nil {
-				tokensIn += msg.Tokens.Input
-				tokensOut += msg.Tokens.Output
-			}
-		}
-	}
-	return turnCount, toolCallCount, tokensIn, tokensOut
-}
-
-// countToolCallParts counts JSON files under {root}/part/{msgID}/ as tool call parts.
-// ASSUMPTION: The parts directory contains only tool-call part files. OpenCode's storage
-// layout guarantees this — each part file corresponds to a single tool call or tool result.
-// If the storage format changes, this should add per-file type checking.
-func (a *OpenCodeAdapter) countToolCallParts(storageRoot, msgID string) int {
-	return len(listPartFilenames(a.fs, storageRoot, msgID))
-}
-
-// findModelID returns the modelID from the first assistant message found.
-func (a *OpenCodeAdapter) findModelID(_ context.Context, storageRoot, sessionID string) string {
-	msgDir := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), sessionID)
-	entries, err := a.fs.ReadDir(msgDir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), defaults.ExtJSON.String()) {
-			continue
-		}
-		data, err := a.fs.ReadFile(filepath.Join(msgDir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var msg openCodeMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			continue
-		}
-		if msg.Role == "assistant" && msg.ModelID != "" {
-			return msg.ModelID
-		}
-	}
-	return ""
 }
 
 // resolveStorageRoot returns the OpenCode storage root directory for a session.
