@@ -13,6 +13,14 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
+const (
+	openCodeEnableQueryOnlyStatement = "PRAGMA query_only=ON"
+	openCodeReadQueryOnlyStatement   = "PRAGMA query_only"
+	openCodeCatalogTablesStatement   = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
+	openCodeCatalogColumnsStatement  = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
+	openCodeCatalogIndexesStatement  = "SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT 65"
+)
+
 type zombiezenOpenCodeSQLiteSource struct {
 	path    OpenCodeSQLiteSourcePath
 	options OpenCodeSQLiteSourceOptions
@@ -82,7 +90,7 @@ func (s *zombiezenOpenCodeSQLiteSource) initialize(parent context.Context) error
 	oldInterrupt := s.conn.SetInterrupt(ctx.Done())
 	defer s.conn.SetInterrupt(oldInterrupt)
 
-	if err := sqlitex.ExecuteTransient(s.conn, "PRAGMA query_only=ON", nil); err != nil {
+	if err := sqlitex.ExecuteTransient(s.conn, openCodeEnableQueryOnlyStatement, nil); err != nil {
 		return fmt.Errorf("open OpenCode SQLite source %q failed while enabling PRAGMA query_only=ON before the first schema or data read: %w; the connection will be closed and the source will not be queried; verify that the database is readable and retry without changing the OpenCode-owned files", s.path.String(), err)
 	}
 	if err := s.conn.SetAuthorizer(sqlite.AuthorizeFunc(s.authorizeRead)); err != nil {
@@ -90,7 +98,7 @@ func (s *zombiezenOpenCodeSQLiteSource) initialize(parent context.Context) error
 	}
 
 	var queryOnly int64
-	err := sqlitex.ExecuteTransient(s.conn, "PRAGMA query_only", &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(s.conn, openCodeReadQueryOnlyStatement, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			queryOnly = stmt.ColumnInt64(0)
 			return nil
@@ -172,9 +180,8 @@ func (s *zombiezenOpenCodeSQLiteSource) Catalog(ctx context.Context) (OpenCodeSc
 func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (OpenCodeSchemaEvidence, error) {
 	var evidence OpenCodeSchemaEvidence
 	tables := make(map[string]bool)
-	catalogSQL := fmt.Sprintf("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT %d", openCodeCatalogRowLimit+1)
 	tableOverflow := false
-	if err := s.executeRowsLocked(ctx, catalogSQL, nil, func(stmt *sqlite.Stmt) error {
+	if err := s.executeRowsLocked(ctx, openCodeCatalogTablesStatement, nil, func(stmt *sqlite.Stmt) error {
 		if len(evidence.Tables) == openCodeCatalogRowLimit {
 			tableOverflow = true
 			return nil
@@ -218,10 +225,9 @@ func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (Open
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table string) ([]OpenCodeColumnEvidence, error) {
-	query := fmt.Sprintf("SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT %d", openCodeColumnRowLimit+1)
 	columns := make([]OpenCodeColumnEvidence, 0)
 	overflow := false
-	err := s.executeRowsLocked(ctx, query, []any{table}, func(stmt *sqlite.Stmt) error {
+	err := s.executeRowsLocked(ctx, openCodeCatalogColumnsStatement, []any{table}, func(stmt *sqlite.Stmt) error {
 		if len(columns) == openCodeColumnRowLimit {
 			overflow = true
 			return nil
@@ -243,12 +249,11 @@ func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) indexesLocked(ctx context.Context, table string) ([]OpenCodeIndexEvidence, error) {
-	query := fmt.Sprintf("SELECT il.name, il.\"unique\", ii.seqno, ii.name FROM pragma_index_list(?1) AS il JOIN pragma_index_info(il.name) AS ii ORDER BY il.name, ii.seqno LIMIT %d", openCodeIndexRowLimit+1)
 	indexes := make([]OpenCodeIndexEvidence, 0)
 	byName := make(map[string]int)
 	rowCount := 0
 	overflow := false
-	err := s.executeRowsLocked(ctx, query, []any{table}, func(stmt *sqlite.Stmt) error {
+	err := s.executeRowsLocked(ctx, openCodeCatalogIndexesStatement, []any{table}, func(stmt *sqlite.Stmt) error {
 		if rowCount == openCodeIndexRowLimit {
 			overflow = true
 			return nil

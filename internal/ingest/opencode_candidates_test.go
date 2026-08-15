@@ -32,6 +32,7 @@ const (
 	expectedOpenCodeProbeCases      = 12
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
+	expectedAllowedQueryStatements  = 5
 )
 
 //go:embed testdata/opencode_candidates.yaml
@@ -42,11 +43,24 @@ type openCodeCandidateFixture struct {
 	ResolutionCases         []openCodeCandidateResolutionCase `yaml:"resolution_cases"`
 	DeclaredProbeCases      int                               `yaml:"declared_probe_cases"`
 	ForbiddenQueryTokens    []string                          `yaml:"forbidden_query_tokens"`
+	DeclaredAllowedQueries  int                               `yaml:"declared_allowed_query_statements"`
+	AllowedQueryStatements  []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
+	QueryGuardMutation      openCodeQueryGuardMutation        `yaml:"query_guard_mutation"`
 	ProbeCases              []openCodeProbeCase               `yaml:"probe_cases"`
 	DeclaredContinuation    int                               `yaml:"declared_continuation_candidates"`
 	ContinuationCandidates  []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
 	DeclaredClosedSetCases  int                               `yaml:"declared_closed_set_cases"`
 	ClosedSetCases          []openCodeClosedSetCase           `yaml:"closed_set_cases"`
+}
+
+type openCodeAllowedQueryStatement struct {
+	Name      string `yaml:"name"`
+	Statement string `yaml:"statement"`
+}
+
+type openCodeQueryGuardMutation struct {
+	ReplaceStatement     string `yaml:"replace_statement"`
+	ReplacementStatement string `yaml:"replacement_statement"`
 }
 
 type openCodeCandidateResolutionCase struct {
@@ -145,6 +159,31 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenTokens[token] = true
 	}
+	if fixture.DeclaredAllowedQueries != expectedAllowedQueryStatements || len(fixture.AllowedQueryStatements) != expectedAllowedQueryStatements {
+		t.Fatalf("OpenCode allowed-query fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredAllowedQueries, len(fixture.AllowedQueryStatements), expectedAllowedQueryStatements)
+	}
+	seenQueryNames := make(map[string]bool, len(fixture.AllowedQueryStatements))
+	seenQueryStatements := make(map[string]bool, len(fixture.AllowedQueryStatements))
+	for index, allowed := range fixture.AllowedQueryStatements {
+		allowed.Statement = normalizeOpenCodeQuery(allowed.Statement)
+		fixture.AllowedQueryStatements[index] = allowed
+		if strings.TrimSpace(allowed.Name) == "" || allowed.Statement == "" || seenQueryNames[allowed.Name] || seenQueryStatements[allowed.Statement] {
+			t.Fatalf("OpenCode allowed-query fixture row is empty or duplicated: %+v", allowed)
+		}
+		if violations := findOpenCodeForbiddenQueryTokens([]string{allowed.Statement}, fixture.ForbiddenQueryTokens); len(violations) != 0 {
+			t.Fatalf("OpenCode allowed-query fixture %q contains forbidden tokens %v", allowed.Name, violations)
+		}
+		seenQueryNames[allowed.Name] = true
+		seenQueryStatements[allowed.Statement] = true
+	}
+	fixture.QueryGuardMutation.ReplaceStatement = normalizeOpenCodeQuery(fixture.QueryGuardMutation.ReplaceStatement)
+	fixture.QueryGuardMutation.ReplacementStatement = normalizeOpenCodeQuery(fixture.QueryGuardMutation.ReplacementStatement)
+	if !seenQueryStatements[fixture.QueryGuardMutation.ReplaceStatement] || fixture.QueryGuardMutation.ReplacementStatement == "" || seenQueryStatements[fixture.QueryGuardMutation.ReplacementStatement] {
+		t.Fatalf("OpenCode query-guard mutation must replace one allowed statement with one disallowed statement: %+v", fixture.QueryGuardMutation)
+	}
+	if violations := findOpenCodeForbiddenQueryTokens([]string{fixture.QueryGuardMutation.ReplacementStatement}, fixture.ForbiddenQueryTokens); len(violations) == 0 {
+		t.Fatalf("OpenCode query-guard mutation replacement must exercise the forbidden-token boundary: %+v", fixture.QueryGuardMutation)
+	}
 	seenResolution := make(map[string]bool, len(fixture.ResolutionCases))
 	for _, fixtureCase := range fixture.ResolutionCases {
 		if strings.TrimSpace(fixtureCase.Name) == "" || strings.TrimSpace(fixtureCase.Channel) == "" || len(fixtureCase.Paths) == 0 || len(fixtureCase.Paths) != len(fixtureCase.Provenance) || seenResolution[fixtureCase.Name] {
@@ -205,7 +244,7 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 	return fixture
 }
 
-func TestOpenCodeProductionQueriesExcludeFixtureForbiddenTokens(t *testing.T) {
+func TestOpenCodePrivateExecutionStatementsMatchFixtureAllowlist(t *testing.T) {
 	t.Parallel()
 	fixture := loadOpenCodeCandidateFixture(t)
 	_, currentFile, _, ok := runtime.Caller(0)
@@ -217,46 +256,180 @@ func TestOpenCodeProductionQueriesExcludeFixtureForbiddenTokens(t *testing.T) {
 		filepath.Join(directory, "opencode_candidates.go"),
 		filepath.Join(directory, "opencode_sqlite_source_zombiezen.go"),
 	}
-	var statements []string
-	for _, filename := range production {
-		statements = append(statements, extractOpenCodeProductionQueryLiterals(t, filename)...)
+	statements, err := extractOpenCodePrivateExecutionStatements(production)
+	if err != nil {
+		t.Fatalf("resolve private OpenCode SQLite execution statements: %v", err)
 	}
-	if len(statements) == 0 {
-		t.Fatal("OpenCode production query guard extracted no SQL or PRAGMA statements")
-	}
-	if violations := findOpenCodeForbiddenQueryTokens(statements, fixture.ForbiddenQueryTokens); len(violations) != 0 {
-		t.Errorf("OpenCode production query literals contain fixture-forbidden tokens: %v", violations)
+	if err := validateOpenCodePrivateExecutionStatements(statements, fixture); err != nil {
+		t.Fatal(err)
 	}
 
-	control := strings.Join(fixture.ForbiddenQueryTokens, "\n")
-	if violations := findOpenCodeForbiddenQueryTokens([]string{control}, fixture.ForbiddenQueryTokens); len(violations) != len(fixture.ForbiddenQueryTokens) {
-		t.Fatalf("OpenCode query-shape guard is vacuous: controlled bad source triggered %d of %d fixture tokens", len(violations), len(fixture.ForbiddenQueryTokens))
+	mutated := append([]string(nil), statements...)
+	replaced := 0
+	for index, statement := range mutated {
+		if statement == fixture.QueryGuardMutation.ReplaceStatement {
+			mutated[index] = fixture.QueryGuardMutation.ReplacementStatement
+			replaced++
+		}
+	}
+	if replaced != 1 {
+		t.Fatalf("OpenCode query-guard mutation replaced %d actual execution statements, want exactly one", replaced)
+	}
+	if err := validateOpenCodePrivateExecutionStatements(mutated, fixture); err == nil {
+		t.Fatal("OpenCode private execution guard accepted a fixture-owned payload-query mutation")
 	}
 }
 
-func extractOpenCodeProductionQueryLiterals(t testing.TB, filename string) []string {
-	t.Helper()
-	parsed, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
-	if err != nil {
-		t.Fatalf("parse OpenCode production source %q for query literals: %v", filename, err)
-	}
+func extractOpenCodePrivateExecutionStatements(filenames []string) ([]string, error) {
+	fileSet := token.NewFileSet()
 	var statements []string
-	ast.Inspect(parsed, func(node ast.Node) bool {
-		literal, ok := node.(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING {
-			return true
+	for _, filename := range filenames {
+		parsed, err := parser.ParseFile(fileSet, filename, nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse production source %q: %w", filename, err)
 		}
-		value, unquoteErr := strconv.Unquote(literal.Value)
-		if unquoteErr != nil {
-			t.Fatalf("unquote OpenCode production string literal in %q: %v", filename, unquoteErr)
+		constants, err := staticOpenCodeStringConstants(parsed)
+		if err != nil {
+			return nil, fmt.Errorf("resolve production constants in %q: %w", filename, err)
 		}
-		normalized := strings.ToLower(strings.TrimSpace(value))
-		if strings.HasPrefix(normalized, "select ") || strings.HasPrefix(normalized, "pragma ") {
-			statements = append(statements, normalized)
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				if err != nil {
+					return false
+				}
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				statementExpression, executionCall := openCodePrivateStatementExpression(call, function.Name.Name)
+				if !executionCall {
+					return true
+				}
+				statement, resolveErr := resolveStaticOpenCodeStatement(statementExpression, constants)
+				if resolveErr != nil {
+					position := fileSet.Position(call.Pos())
+					if statementExpression != nil {
+						position = fileSet.Position(statementExpression.Pos())
+					}
+					err = fmt.Errorf("%s uses a dynamic, formatted, concatenated, or unresolved SQL expression: %w", position, resolveErr)
+					return false
+				}
+				statements = append(statements, normalizeOpenCodeQuery(statement))
+				return true
+			})
 		}
-		return true
-	})
-	return statements
+		if err != nil {
+			return nil, err
+		}
+	}
+	return statements, nil
+}
+
+func staticOpenCodeStringConstants(file *ast.File) (map[string]string, error) {
+	constants := make(map[string]string)
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.CONST {
+			continue
+		}
+		for _, specification := range general.Specs {
+			values := specification.(*ast.ValueSpec)
+			if len(values.Names) != len(values.Values) {
+				continue
+			}
+			for index, name := range values.Names {
+				literal, ok := values.Values[index].(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					continue
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err != nil {
+					return nil, fmt.Errorf("unquote constant %s: %w", name.Name, err)
+				}
+				constants[name.Name] = value
+			}
+		}
+	}
+	return constants, nil
+}
+
+func openCodePrivateStatementExpression(call *ast.CallExpr, functionName string) (ast.Expr, bool) {
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	if selector.Sel.Name == "executeRowsLocked" {
+		if len(call.Args) <= 1 {
+			return nil, true
+		}
+		return call.Args[1], true
+	}
+	packageName, packageCall := selector.X.(*ast.Ident)
+	if !packageCall || packageName.Name != "sqlitex" || selector.Sel.Name != "ExecuteTransient" || functionName == "executeRowsLocked" {
+		return nil, false
+	}
+	if len(call.Args) <= 1 {
+		return nil, true
+	}
+	return call.Args[1], true
+}
+
+func resolveStaticOpenCodeStatement(expression ast.Expr, constants map[string]string) (string, error) {
+	switch value := expression.(type) {
+	case *ast.BasicLit:
+		if value.Kind != token.STRING {
+			return "", fmt.Errorf("literal kind is %s, not string", value.Kind)
+		}
+		return strconv.Unquote(value.Value)
+	case *ast.Ident:
+		statement, ok := constants[value.Name]
+		if !ok {
+			return "", fmt.Errorf("identifier %q is not a file-scope static string constant", value.Name)
+		}
+		return statement, nil
+	case *ast.ParenExpr:
+		return resolveStaticOpenCodeStatement(value.X, constants)
+	default:
+		return "", fmt.Errorf("expression type is %T", expression)
+	}
+}
+
+func validateOpenCodePrivateExecutionStatements(statements []string, fixture openCodeCandidateFixture) error {
+	if len(statements) != fixture.DeclaredAllowedQueries {
+		return fmt.Errorf("OpenCode private execution statement count = %d, want fixture-declared %d", len(statements), fixture.DeclaredAllowedQueries)
+	}
+	allowed := make(map[string]bool, len(fixture.AllowedQueryStatements))
+	for _, query := range fixture.AllowedQueryStatements {
+		allowed[query.Statement] = true
+	}
+	seen := make(map[string]bool, len(statements))
+	for _, statement := range statements {
+		statement = normalizeOpenCodeQuery(statement)
+		if seen[statement] {
+			return fmt.Errorf("OpenCode private execution statement %q is duplicated", statement)
+		}
+		if !allowed[statement] {
+			return fmt.Errorf("OpenCode private execution statement %q is not in the strict fixture allowlist", statement)
+		}
+		if violations := findOpenCodeForbiddenQueryTokens([]string{statement}, fixture.ForbiddenQueryTokens); len(violations) != 0 {
+			return fmt.Errorf("OpenCode private execution statement %q contains forbidden tokens %v", statement, violations)
+		}
+		seen[statement] = true
+	}
+	for statement := range allowed {
+		if !seen[statement] {
+			return fmt.Errorf("fixture-allowed OpenCode private execution statement %q is not wired to an execution call", statement)
+		}
+	}
+	return nil
+}
+
+func normalizeOpenCodeQuery(statement string) string {
+	return strings.ToLower(strings.TrimSpace(statement))
 }
 
 func findOpenCodeForbiddenQueryTokens(statements, forbidden []string) []string {
