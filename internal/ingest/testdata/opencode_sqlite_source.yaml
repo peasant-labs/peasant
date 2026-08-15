@@ -61,6 +61,8 @@ denied_statements:
     statement: "ATTACH DATABASE ':memory:' AS forbidden"
     error_contains: forbidden SQLite action
 forbidden_source_tokens:
+  - "os.ReadFile("
+  - "os.Open("
   - "os.WriteFile("
   - "os.Create("
   - "os.CreateTemp("
@@ -71,6 +73,7 @@ forbidden_source_tokens:
   - "os.Chmod("
   - "os.Chtimes("
   - "io.Copy("
+  - "io.ReadAll("
   - "sqlite.NewBackup("
   - "sqlite.OpenReadWrite"
   - "sqlite.OpenCreate"

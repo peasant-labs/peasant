@@ -26,6 +26,35 @@ const commitLookahead = 3 * 24 * time.Hour
 type CommitDetector struct {
 	analyzer       GitDiffAnalyzer
 	userEmailLower string // normalized to lowercase at construction time
+	transcripts    CommitTranscriptReader
+}
+
+// CommitTranscriptReader is the bounded content boundary used only for real
+// transcript files during command validation.
+type CommitTranscriptReader interface {
+	ReadTranscript(context.Context, string) ([]byte, error)
+}
+
+type osCommitTranscriptReader struct{}
+
+func (osCommitTranscriptReader) ReadTranscript(ctx context.Context, path string) ([]byte, error) {
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		data, err := os.ReadFile(path)
+		readCh <- readResult{data: data, err: err}
+	}()
+	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	select {
+	case result := <-readCh:
+		return result.data, result.err
+	case <-readCtx.Done():
+		return nil, fmt.Errorf("transcript read timed out after 10s: %s: %w", path, readCtx.Err())
+	}
 }
 
 // NewCommitDetector creates a CommitDetector for the given analyzer and session user email.
@@ -35,7 +64,16 @@ func NewCommitDetector(analyzer GitDiffAnalyzer, userEmail string) *CommitDetect
 	return &CommitDetector{
 		analyzer:       analyzer,
 		userEmailLower: strings.ToLower(userEmail),
+		transcripts:    osCommitTranscriptReader{},
 	}
+}
+
+func newCommitDetectorWithReader(analyzer GitDiffAnalyzer, userEmail string, reader CommitTranscriptReader) *CommitDetector {
+	detector := NewCommitDetector(analyzer, userEmail)
+	if reader != nil {
+		detector.transcripts = reader
+	}
+	return detector
 }
 
 // TimestampDetection returns commits authored within [sessionStart-commitLookback, sessionEnd+commitLookahead]
@@ -98,42 +136,16 @@ func (cd *CommitDetector) LayeredDetection(ctx context.Context, repoPath string,
 		return candidates, diags
 	}
 
-	// os.ReadFile does not accept a context, so run it in a goroutine with a
-	// 10-second timeout. Without this, a slow or network filesystem can block
-	// the worker goroutine forever, hanging the entire pipeline.
-	// The goroutine may outlive the function if the OS stalls, but the buffered
-	// channel lets it exit without blocking when the read eventually returns.
-	type readResult struct {
-		data []byte
-		err  error
-	}
-	readCh := make(chan readResult, 1)
-	go func() {
-		d, e := os.ReadFile(transcriptPath)
-		readCh <- readResult{d, e}
-	}()
-
-	readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer readCancel()
-
-	var data []byte
-	select {
-	case r := <-readCh:
-		if r.err != nil {
-			diags = append(diags, DiagnosticEntry{
-				ErrorType:   "transcript_read_failed",
-				Location:    "commit_detector.LayeredDetection",
-				Message:     fmt.Sprintf("command parsing skipped: %v", r.err),
-				Remediation: "transcript may not exist yet; timestamp-only results returned",
-			})
-			return candidates, diags
+	data, readErr := cd.transcripts.ReadTranscript(ctx, transcriptPath)
+	if readErr != nil {
+		errorType := "transcript_read_failed"
+		if errors.Is(readErr, context.DeadlineExceeded) {
+			errorType = "transcript_read_timeout"
 		}
-		data = r.data
-	case <-readCtx.Done():
 		diags = append(diags, DiagnosticEntry{
-			ErrorType:   "transcript_read_timeout",
+			ErrorType:   errorType,
 			Location:    "commit_detector.LayeredDetection",
-			Message:     fmt.Sprintf("transcript read timed out after 10s: %s", transcriptPath),
+			Message:     fmt.Sprintf("command parsing skipped: %v", readErr),
 			Remediation: "transcript may be on a slow or network filesystem; timestamp-only results returned",
 		})
 		return candidates, diags

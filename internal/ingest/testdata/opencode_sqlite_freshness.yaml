@@ -1,0 +1,46 @@
+declared_cases: 4
+cases:
+  - name: committed-wal-is-newer
+    database_mtime_ms: 1000
+    wal_state: present
+    wal_mtime_ms: 2000
+    wal_size_bytes: 4096
+    shm_mtime_ms: 3000
+    expected_mtime_ms: 2000
+    expected_error_contains: ""
+    expected_stat_suffixes: ["", "-wal"]
+    proves_database_only_mutant: true
+    proves_shm_inclusive_mutant: true
+  - name: missing-wal-uses-database
+    database_mtime_ms: 4000
+    wal_state: missing
+    wal_mtime_ms: 0
+    wal_size_bytes: 0
+    shm_mtime_ms: 5000
+    expected_mtime_ms: 4000
+    expected_error_contains: ""
+    expected_stat_suffixes: ["", "-wal"]
+    proves_database_only_mutant: false
+    proves_shm_inclusive_mutant: true
+  - name: wal-stat-failure-is-actionable
+    database_mtime_ms: 6000
+    wal_state: error
+    wal_mtime_ms: 0
+    wal_size_bytes: 0
+    shm_mtime_ms: 7000
+    expected_mtime_ms: 0
+    expected_error_contains: "inspecting committed WAL freshness evidence"
+    expected_stat_suffixes: ["", "-wal"]
+    proves_database_only_mutant: false
+    proves_shm_inclusive_mutant: false
+  - name: header-only-wal-is-not-content
+    database_mtime_ms: 8000
+    wal_state: present
+    wal_mtime_ms: 9000
+    wal_size_bytes: 32
+    shm_mtime_ms: 10000
+    expected_mtime_ms: 8000
+    expected_error_contains: ""
+    expected_stat_suffixes: ["", "-wal"]
+    proves_database_only_mutant: false
+    proves_shm_inclusive_mutant: true

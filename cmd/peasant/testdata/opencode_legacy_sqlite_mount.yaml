@@ -1,0 +1,98 @@
+declared_cases: 9
+cases:
+  - name: legacy-rich
+    source_fixture: legacy-mounted-projection
+    expected_kickstart_sessions: 2
+    expected_stored_sessions: 2
+    harvest: success
+    target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expected_projection_sha256: f9f29fcbe9d86ca105d3a4c23c5e7512c04af218b2049ecf61ecfe4672368d32
+    expected_entries: 5
+    mutation: none
+    entries:
+      - {index: 0, role: user, entry_type: text, part_type: "", parent_index: -1, content_contains: synthetic question, tool_call_id: "", timestamp_ms: 1700000000000}
+      - {index: 1, role: assistant, entry_type: tool_use, part_type: "", parent_index: -1, content_contains: "", tool_call_id: "", timestamp_ms: 1700000000000}
+      - {index: 2, role: assistant, entry_type: thinking, part_type: reasoning, parent_index: 1, content_contains: synthetic reasoning, tool_call_id: "", timestamp_ms: 1700000000020}
+      - {index: 3, role: tool, entry_type: tool_result, part_type: tool_result, parent_index: 1, content_contains: "", tool_call_id: call_synthetic, timestamp_ms: 1700000000040}
+      - {index: 4, role: assistant, entry_type: tool_use, part_type: tool_use, parent_index: 1, content_contains: "", tool_call_id: call_synthetic, timestamp_ms: 1700000000030}
+    expected_tool_call: {id: call_synthetic, input_contains: MUST_NOT_OPEN, output_contains: INLINE_OUTPUT, duration_ms: 10}
+  - name: malformed-required-json
+    source_fixture: legacy-mounted-projection
+    expected_kickstart_sessions: 2
+    expected_stored_sessions: 1
+    harvest: session_error
+    target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: malformed_message_json
+    entries: []
+  - name: current-ineligible
+    source_fixture: current-session-message
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: hybrid-ineligible
+    source_fixture: hybrid-catalog
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: unsupported-ineligible
+    source_fixture: unsupported-schema
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: catalog-overflow-ineligible
+    source_fixture: catalog-table-overflow
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: empty-ineligible
+    source_fixture: empty-valid
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: corrupt-ineligible
+    source_fixture: corrupt-non-sqlite
+    expected_kickstart_sessions: 0
+    expected_stored_sessions: 0
+    harvest: skip
+    target_session: ""
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: none
+    entries: []
+  - name: mixed-root-preserves-json
+    source_fixture: legacy-mounted-projection
+    expected_kickstart_sessions: 1
+    expected_stored_sessions: 1
+    harvest: skip
+    target_session: ses_5cd91f52effeXd3QAJ54jOyzv7
+    expected_projection_sha256: ""
+    expected_entries: 0
+    mutation: mixed_json_layout
+    entries: []

@@ -196,13 +196,14 @@ type Pipeline struct {
 	locationCache map[SessionID]SessionLocation
 
 	// v2 analytics stages (all optional; nil = skip stage).
-	redactor     TextRedactor                  // REDACT stage: applied before writing metadata to disk
-	indexers     map[Harness]TranscriptIndexer // INDEX stage: parses transcripts into session_entries
-	metricsStore MetricsStore                  // INDEX stage: persists session_entries
-	analyzer     SessionAnalyzer               // COMPUTE stage: computes metrics + insights
-	logger       IngestLogger                  // AUDIT stage: records ingest run to ingest_log
-	indexLogger  IndexLogger                   // INDEX stage: records per-session indexing outcomes to index_log
-	gitAnalyzer  GitDiffAnalyzer               // EXTRACT+WRITE stage: commit detection (optional)
+	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
+	indexers               map[Harness]TranscriptIndexer // INDEX stage: parses transcripts into session_entries
+	metricsStore           MetricsStore                  // INDEX stage: persists session_entries
+	analyzer               SessionAnalyzer               // COMPUTE stage: computes metrics + insights
+	logger                 IngestLogger                  // AUDIT stage: records ingest run to ingest_log
+	indexLogger            IndexLogger                   // INDEX stage: records per-session indexing outcomes to index_log
+	gitAnalyzer            GitDiffAnalyzer               // EXTRACT+WRITE stage: commit detection (optional)
+	commitTranscriptReader CommitTranscriptReader
 
 	classifier SessionClassifier // ANNOTATE stage: runs classifiers + persists results (optional; nil = skip).
 }
@@ -278,6 +279,12 @@ func WithIndexLogger(l IndexLogger) PipelineOption {
 // Detection errors are non-fatal: warnings are appended to metadata.Diagnostics.Warnings.
 func WithGitDiffAnalyzer(a GitDiffAnalyzer) PipelineOption {
 	return func(p *Pipeline) { p.gitAnalyzer = a }
+}
+
+// WithCommitTranscriptReader injects the bounded reader used by commit command
+// validation. Database origins never call it.
+func WithCommitTranscriptReader(reader CommitTranscriptReader) PipelineOption {
+	return func(p *Pipeline) { p.commitTranscriptReader = reader }
 }
 
 // WithClassifier injects a SessionClassifier for the ANNOTATE stage.
@@ -1193,10 +1200,23 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	adapter := factory(p.fs, p.git, p.salt)
 
-	// Extract metadata.
-	meta, err := adapter.ExtractMetadata(ctx, session)
+	if err := session.TranscriptOrigin.Validate(); err != nil {
+		return fail(fmt.Errorf("prepare transcript for session %s failed before source access: %w; the session was not written or stored; update the discovering adapter to return a supported typed origin", session.SessionID, err))
+	}
+	var rawData []byte
+	var meta *UnifiedMetadata
+	var err error
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+		materializer, ok := adapter.(TranscriptMaterializer)
+		if !ok {
+			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: origin is legacy OpenCode SQLite but adapter %T has no materializer; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, adapter))
+		}
+		meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
+	} else {
+		meta, err = adapter.ExtractMetadata(ctx, session)
+	}
 	if err != nil {
-		return fail(fmt.Errorf("extract metadata for %s: %w", session.SessionID, err))
+		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
 	}
 
 	// Set ingested timestamp.
@@ -1252,13 +1272,15 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	tmpTranscriptPath := fmt.Sprintf("%s/%s", tmpDir, transcriptFilename)
 	var transcriptData []byte
 
-	rawData, err := p.fs.ReadFile(string(session.SourcePath))
-	if err != nil {
-		result.Error = errors.Join(
-			fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
-			p.fs.RemoveAll(tmpDir),
-		)
-		return workerResult{result: result}
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		rawData, err = p.fs.ReadFile(string(session.SourcePath))
+		if err != nil {
+			result.Error = errors.Join(
+				fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
+				p.fs.RemoveAll(tmpDir),
+			)
+			return workerResult{result: result}
+		}
 	}
 	if session.Harness == HarnessStrike && session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
@@ -1352,13 +1374,17 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 			emailCtx, emailCancel := context.WithTimeout(ctx, 2*time.Second)
 			userEmail, _ := p.git.UserEmail(emailCtx)
 			emailCancel()
-			detector := NewCommitDetector(p.gitAnalyzer, userEmail)
+			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader)
 			sessionStart := time.UnixMilli(meta.Timestamp.Start)
 			sessionEnd := time.UnixMilli(meta.Timestamp.End)
-			// Pass the original source transcript path for command-based validation.
-			// LayeredDetection falls back to timestamp-only if the path is empty or
-			// unreadable (e.g. directory-based OpenCode transcripts).
-			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, string(session.SourcePath))
+			// Only a real transcript file may reach command parsing. Typed database
+			// origins use bounded timestamp correlation; their DB/WAL/SHM paths are
+			// source containers, never transcript content.
+			transcriptPath := ""
+			if session.TranscriptOrigin == TranscriptOriginFile {
+				transcriptPath = session.SourcePath.String()
+			}
+			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, transcriptPath)
 			meta.Git.Commits = commits
 			meta.Diagnostics.Warnings = append(meta.Diagnostics.Warnings, diags...)
 		}
@@ -1469,10 +1495,11 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		// The index step's session is rebuilt from this result and its source path
 		// is replaced with the written copy's, so a directory-based harness has no
 		// way to recover its provider root once this is dropped.
-		originalRoot: session.OriginalRoot,
-		startMs:      startMs,
-		metaFilename: metaFilename,
-		sessionDir:   sessionDir,
+		originalRoot:     session.OriginalRoot,
+		transcriptOrigin: session.TranscriptOrigin,
+		startMs:          startMs,
+		metaFilename:     metaFilename,
+		sessionDir:       sessionDir,
 	}
 }
 
@@ -1508,7 +1535,11 @@ func indexWithSourceKind(
 	session DiscoveredSession,
 	transcriptData []byte,
 ) ([]schema.SessionEntry, error) {
-	switch indexer.SourceKind() {
+	sourceKind := indexer.SourceKind()
+	if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
+		sourceKind = resolver.TranscriptSourceKindFor(session)
+	}
+	switch sourceKind {
 	case TranscriptSourceDirectory:
 		// No single file holds this harness's entries, so there is nothing to pass
 		// in memory and nothing to save by trying.
@@ -1554,7 +1585,7 @@ func indexWithSourceKind(
 			"When: at the INDEX stage.\n"+
 			"Means: no entries were indexed for this session; the run fails loudly rather than storing an empty transcript.\n"+
 			"Fix: add a case for the new kind in indexWithSourceKind.",
-		session.SessionID, indexer.SourceKind(), session.Harness)
+		session.SessionID, sourceKind, session.Harness)
 }
 
 // sessionFromWorkerResult reconstructs the DiscoveredSession carried by a workerResult.
@@ -1586,7 +1617,8 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		// then recovers the session later in the same run, so the cost is a wasted
 		// pass and a misleading skipped row rather than an empty session - measured,
 		// after an earlier comment here claimed otherwise.
-		OriginalRoot: wr.originalRoot,
+		OriginalRoot:     wr.originalRoot,
+		TranscriptOrigin: wr.transcriptOrigin,
 	}
 }
 
@@ -2002,6 +2034,11 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 		SourceFormat: sourceFormat,
 		OriginalRoot: originalRoot,
 	}
+	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON {
+		if transcriptData, readErr := p.fs.ReadFile(transcriptPath); readErr == nil && isOpenCodeLegacyProjection(transcriptData, sid) {
+			ds.TranscriptOrigin = TranscriptOriginOpenCodeLegacySQLite
+		}
+	}
 	if meta.ParentUUID != nil {
 		ds.ParentUUID = meta.ParentUUID
 	}
@@ -2136,12 +2173,17 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 		outputTranscriptPath = fmt.Sprintf("%s/%s/%s/%s--transcript.%s",
 			outputDir, hostSlug, sid, sid, string(sourceFormat))
 	}
+	transcriptOrigin := TranscriptOriginFile
+	if provider == HarnessOpenCode && sourceFormat == SourceFormatJSON && isManagedOpenCodeLegacyProjection(p.fs, outputTranscriptPath, sid) {
+		transcriptOrigin = TranscriptOriginOpenCodeLegacySQLite
+	}
 
 	return &DiscoveredSession{
-		SessionID:    sid,
-		SourcePath:   resolvedSrc,
-		SourceFormat: sourceFormat,
-		Harness:      provider,
+		SessionID:        sid,
+		SourcePath:       resolvedSrc,
+		SourceFormat:     sourceFormat,
+		Harness:          provider,
+		TranscriptOrigin: transcriptOrigin,
 	}, 0, outputTranscriptPath
 }
 

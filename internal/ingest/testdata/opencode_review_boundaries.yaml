@@ -1,0 +1,11 @@
+declared_cases: 1
+cases:
+  - name: lazy-payload-and-safe-commit-boundaries
+    source_fixture: legacy-mounted-projection
+    expected_sessions: 2
+    expected_discovery_message_reads: 0
+    expected_discovery_part_reads: 0
+    commit_hash: abc123
+    commit_email: test@example.com
+    commit_message: synthetic timestamp candidate
+    expected_commit_associations: 2

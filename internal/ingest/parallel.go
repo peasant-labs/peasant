@@ -159,8 +159,9 @@ type workerResult struct {
 	// said it was. The cost is a wasted indexing pass and an index_log row that
 	// reports a skip nobody can act on, on every ingest of every directory-based
 	// session. Carrying the root removes both.
-	originalRoot ResolvedPath
-	startMs      int64
+	originalRoot     ResolvedPath
+	transcriptOrigin TranscriptOrigin
+	startMs          int64
 	// metaFilename and sessionDir are set by processSession so that drainLoop
 	// can write metadata.json after DB INSERT (DB-as-SOT write order, v8+).
 	// metaFilename is the bare filename (e.g. "{sessionId}--metadata.json").

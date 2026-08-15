@@ -36,7 +36,179 @@ func (e *OpenCodeCatalogOverflowError) Error() string {
 const (
 	defaultOpenCodeSQLiteBusyTimeout  = 250 * time.Millisecond
 	defaultOpenCodeSQLiteQueryTimeout = 5 * time.Second
+	// MaxOpenCodeLegacyPageSize is the fixed upper bound for every legacy
+	// transcript source page.
+	MaxOpenCodeLegacyPageSize = 128
 )
+
+// OpenCodeLegacyPageSize is a validated, positive legacy source page size.
+type OpenCodeLegacyPageSize struct{ value int }
+
+// NewOpenCodeLegacyPageSize validates a requested legacy source page size.
+func NewOpenCodeLegacyPageSize(value int) (OpenCodeLegacyPageSize, error) {
+	if value <= 0 || value > MaxOpenCodeLegacyPageSize {
+		return OpenCodeLegacyPageSize{}, fmt.Errorf("validate OpenCode legacy page size %d failed before source access: the size must be between 1 and the fixed maximum %d, so the read cannot be proven bounded; choose a size within that range", value, MaxOpenCodeLegacyPageSize)
+	}
+	return OpenCodeLegacyPageSize{value: value}, nil
+}
+
+// Value returns the validated integer page size.
+func (s OpenCodeLegacyPageSize) Value() int { return s.value }
+
+// OpenCodeLegacySessionID is a validated legacy session identifier.
+type OpenCodeLegacySessionID struct{ value string }
+
+// NewOpenCodeLegacySessionID validates a legacy session identifier.
+func NewOpenCodeLegacySessionID(value string) (OpenCodeLegacySessionID, error) {
+	if err := validateOpenCodeLegacyIdentifier("session", value); err != nil {
+		return OpenCodeLegacySessionID{}, err
+	}
+	return OpenCodeLegacySessionID{value: value}, nil
+}
+
+// String returns the validated session identifier.
+func (id OpenCodeLegacySessionID) String() string { return id.value }
+
+// OpenCodeLegacyMessageID is a validated legacy message identifier.
+type OpenCodeLegacyMessageID struct{ value string }
+
+// NewOpenCodeLegacyMessageID validates a legacy message identifier.
+func NewOpenCodeLegacyMessageID(value string) (OpenCodeLegacyMessageID, error) {
+	if err := validateOpenCodeLegacyIdentifier("message", value); err != nil {
+		return OpenCodeLegacyMessageID{}, err
+	}
+	return OpenCodeLegacyMessageID{value: value}, nil
+}
+
+// String returns the validated message identifier.
+func (id OpenCodeLegacyMessageID) String() string { return id.value }
+
+// OpenCodeLegacyPartID is a validated legacy part identifier.
+type OpenCodeLegacyPartID struct{ value string }
+
+// NewOpenCodeLegacyPartID validates a legacy part identifier.
+func NewOpenCodeLegacyPartID(value string) (OpenCodeLegacyPartID, error) {
+	if err := validateOpenCodeLegacyIdentifier("part", value); err != nil {
+		return OpenCodeLegacyPartID{}, err
+	}
+	return OpenCodeLegacyPartID{value: value}, nil
+}
+
+// String returns the validated part identifier.
+func (id OpenCodeLegacyPartID) String() string { return id.value }
+
+func validateOpenCodeLegacyIdentifier(kind, value string) error {
+	if value == "" || strings.TrimSpace(value) != value || strings.IndexByte(value, 0) >= 0 {
+		return fmt.Errorf("validate OpenCode legacy %s identifier %q failed before source access: the identifier is empty, has surrounding whitespace, or contains a NUL byte and cannot safely scope a bounded read; use the exact non-empty identifier returned by the source", kind, value)
+	}
+	return nil
+}
+
+// OpenCodeLegacySessionCursor resumes ordered session-ID enumeration.
+type OpenCodeLegacySessionCursor struct{ sessionID OpenCodeLegacySessionID }
+
+// NewOpenCodeLegacySessionCursor validates an explicit session cursor.
+func NewOpenCodeLegacySessionCursor(sessionID OpenCodeLegacySessionID) (OpenCodeLegacySessionCursor, error) {
+	if err := validateOpenCodeLegacyIdentifier("session cursor", sessionID.value); err != nil {
+		return OpenCodeLegacySessionCursor{}, err
+	}
+	return OpenCodeLegacySessionCursor{sessionID: sessionID}, nil
+}
+
+// SessionID returns the last session identifier represented by the cursor.
+func (c OpenCodeLegacySessionCursor) SessionID() OpenCodeLegacySessionID { return c.sessionID }
+
+// OpenCodeLegacyMessageCursor resumes message ordering by (time_created, id).
+type OpenCodeLegacyMessageCursor struct {
+	timeCreated int64
+	messageID   OpenCodeLegacyMessageID
+}
+
+// NewOpenCodeLegacyMessageCursor validates an explicit message cursor.
+func NewOpenCodeLegacyMessageCursor(timeCreated int64, messageID OpenCodeLegacyMessageID) (OpenCodeLegacyMessageCursor, error) {
+	if err := validateOpenCodeLegacyIdentifier("message cursor", messageID.value); err != nil {
+		return OpenCodeLegacyMessageCursor{}, err
+	}
+	return OpenCodeLegacyMessageCursor{timeCreated: timeCreated, messageID: messageID}, nil
+}
+
+// TimeCreated returns the cursor's message creation time.
+func (c OpenCodeLegacyMessageCursor) TimeCreated() int64 { return c.timeCreated }
+
+// MessageID returns the cursor's message identifier tie-breaker.
+func (c OpenCodeLegacyMessageCursor) MessageID() OpenCodeLegacyMessageID { return c.messageID }
+
+// OpenCodeLegacyPartCursor resumes part ordering by part identifier.
+type OpenCodeLegacyPartCursor struct{ partID OpenCodeLegacyPartID }
+
+// NewOpenCodeLegacyPartCursor validates an explicit part cursor.
+func NewOpenCodeLegacyPartCursor(partID OpenCodeLegacyPartID) (OpenCodeLegacyPartCursor, error) {
+	if err := validateOpenCodeLegacyIdentifier("part cursor", partID.value); err != nil {
+		return OpenCodeLegacyPartCursor{}, err
+	}
+	return OpenCodeLegacyPartCursor{partID: partID}, nil
+}
+
+// PartID returns the last part identifier represented by the cursor.
+func (c OpenCodeLegacyPartCursor) PartID() OpenCodeLegacyPartID { return c.partID }
+
+// OpenCodeLegacySessionPageRequest requests one bounded session-ID page.
+type OpenCodeLegacySessionPageRequest struct {
+	PageSize OpenCodeLegacyPageSize
+	After    *OpenCodeLegacySessionCursor
+}
+
+// OpenCodeLegacyMessagePageRequest requests one bounded page for one session.
+type OpenCodeLegacyMessagePageRequest struct {
+	SessionID OpenCodeLegacySessionID
+	PageSize  OpenCodeLegacyPageSize
+	After     *OpenCodeLegacyMessageCursor
+}
+
+// OpenCodeLegacyPartPageRequest requests one bounded page for one message.
+type OpenCodeLegacyPartPageRequest struct {
+	SessionID OpenCodeLegacySessionID
+	MessageID OpenCodeLegacyMessageID
+	PageSize  OpenCodeLegacyPageSize
+	After     *OpenCodeLegacyPartCursor
+}
+
+// OpenCodeLegacyMessageRow is one detached current row from legacy message.
+type OpenCodeLegacyMessageRow struct {
+	ID          OpenCodeLegacyMessageID
+	SessionID   OpenCodeLegacySessionID
+	TimeCreated int64
+	TimeUpdated int64
+	Data        string
+}
+
+// OpenCodeLegacyPartRow is one detached current row from legacy part.
+type OpenCodeLegacyPartRow struct {
+	ID          OpenCodeLegacyPartID
+	MessageID   OpenCodeLegacyMessageID
+	SessionID   OpenCodeLegacySessionID
+	TimeCreated int64
+	TimeUpdated int64
+	Data        string
+}
+
+// OpenCodeLegacySessionPage is a detached bounded session-ID page.
+type OpenCodeLegacySessionPage struct {
+	SessionIDs []OpenCodeLegacySessionID
+	Next       *OpenCodeLegacySessionCursor
+}
+
+// OpenCodeLegacyMessagePage is a detached bounded message page.
+type OpenCodeLegacyMessagePage struct {
+	Messages []OpenCodeLegacyMessageRow
+	Next     *OpenCodeLegacyMessageCursor
+}
+
+// OpenCodeLegacyPartPage is a detached bounded part page.
+type OpenCodeLegacyPartPage struct {
+	Parts []OpenCodeLegacyPartRow
+	Next  *OpenCodeLegacyPartCursor
+}
 
 // OpenCodeSQLiteSourcePath is an absolute path to an OpenCode-owned SQLite
 // database. Construct paths with NewOpenCodeSQLiteSourcePath so the source
@@ -129,10 +301,14 @@ func (systemOpenCodeSQLiteDeadlineClock) WithTimeout(parent context.Context, tim
 	return context.WithTimeout(parent, timeout)
 }
 
-// OpenCodeSQLiteSource exposes only bounded candidate catalog evidence and
-// bounded cleanup. It deliberately provides no raw
-// connection, SQL, arguments, transactions, transcript rows, or callbacks.
+// OpenCodeSQLiteSource exposes bounded, detached catalog and legacy transcript
+// pages plus bounded cleanup. It deliberately provides no raw connection, SQL,
+// arguments, transactions, query kinds, table names, writable surfaces, or
+// callbacks.
 type OpenCodeSQLiteSource interface {
 	Catalog(context.Context) (OpenCodeSchemaEvidence, error)
+	LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error)
+	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
+	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
 	Close(context.Context) error
 }

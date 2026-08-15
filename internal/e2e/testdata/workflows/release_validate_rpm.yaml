@@ -1,0 +1,8 @@
+prepare_exit: 106
+mutation_cases:
+  - name: masked preparation failure
+    old: "${{ matrix.prepare }}"
+    new: "${{ matrix.prepare }} || true"
+  - name: lost errexit
+    old: "bash -euxc"
+    new: "bash -uxc"

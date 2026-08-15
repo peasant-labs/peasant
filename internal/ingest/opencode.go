@@ -13,7 +13,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 )
 
-// OpenCodeAdapter discovers and extracts metadata from OpenCode JSON sessions.
+// OpenCodeAdapter discovers OpenCode's legacy JSON sessions first. When JSON
+// yields no sessions, it may ingest the first eligible legacy SQLite candidate.
+// Mixed-representation precedence and session deduplication are deferred.
 type OpenCodeAdapter struct {
 	fs                   FileSystem
 	git                  GitResolver
@@ -21,11 +23,14 @@ type OpenCodeAdapter struct {
 	candidateChannel     string
 	candidateEnvironment OpenCodeEnvironmentLookup
 	candidateProber      *OpenCodeCandidateProber
+	candidateOpener      OpenCodeSQLiteSourceOpener
+	candidateOptions     OpenCodeSQLiteSourceOptions
 	candidateMu          sync.Mutex
 	candidateEvidence    []OpenCodeProbeResult
 }
 
 var _ SourceAdapter = (*OpenCodeAdapter)(nil)
+var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
 
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
 func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {
@@ -55,9 +60,10 @@ func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAd
 	return configured
 }
 
-// NewOpenCodeAdapterWithCandidateProbe constructs the production JSON adapter
-// with explicit candidate-resolution dependencies. SQLite observations remain
-// evidence only and are never converted into discovered sessions.
+// NewOpenCodeAdapterWithCandidateProbe constructs the production adapter with
+// explicit candidate-resolution dependencies. Legacy JSON remains the first
+// discovery path; only a JSON-empty result activates the first eligible legacy
+// SQLite candidate in deterministic resolver order.
 func NewOpenCodeAdapterWithCandidateProbe(
 	fs FileSystem,
 	git GitResolver,
@@ -85,6 +91,8 @@ func NewOpenCodeAdapterWithCandidateProbe(
 		candidateChannel:     channel,
 		candidateEnvironment: environment,
 		candidateProber:      prober,
+		candidateOpener:      opener,
+		candidateOptions:     options,
 	}, nil
 }
 
@@ -93,7 +101,11 @@ func (a *OpenCodeAdapter) Harness() Harness {
 	return HarnessOpenCode
 }
 
-// Discover reads project and session JSON files to find all sessions.
+// Discover reads legacy project/session JSON first. If that produces no
+// sessions, it searches candidate evidence in deterministic order and discovers
+// sessions from exactly the first eligible legacy SQLite source. It does not
+// union or deduplicate representations; broader mixed-source selection remains
+// deferred until a canonical cross-representation policy is implemented.
 //
 // For each path in cfg.Paths it expects an OpenCode storage layout:
 //
@@ -102,7 +114,7 @@ func (a *OpenCodeAdapter) Harness() Harness {
 //
 // Sessions with a non-empty parentID are linked via ParentUUID.
 func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
-	a.inspectCandidates(ctx, cfg.Paths)
+	evidence := a.inspectCandidates(ctx, cfg.Paths)
 	var discovered []DiscoveredSession
 
 	for _, root := range cfg.Paths {
@@ -186,6 +198,21 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 			}
 		}
 	}
+	// Preserve the established JSON result unchanged whenever a valid JSON layout
+	// exists. Only a JSON-empty result activates the narrow legacy SQLite fallback.
+	if len(discovered) > 0 {
+		return discovered, nil
+	}
+	for _, result := range evidence {
+		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Capability != OpenCodeCapabilityLegacy || result.Support != OpenCodeSupportSupported {
+			continue
+		}
+		sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		return sessions, nil
+	}
 
 	return discovered, nil
 }
@@ -198,9 +225,9 @@ func (a *OpenCodeAdapter) CandidateEvidence() []OpenCodeProbeResult {
 	return cloneOpenCodeProbeResults(a.candidateEvidence)
 }
 
-func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) {
+func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) []OpenCodeProbeResult {
 	if a.candidateProber == nil {
-		return
+		return nil
 	}
 	candidates := make([]OpenCodeCandidate, 0, len(roots)*3)
 	seen := make(map[string]struct{}, len(roots)*3)
@@ -225,6 +252,7 @@ func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []Resolve
 	a.candidateMu.Lock()
 	a.candidateEvidence = cloneOpenCodeProbeResults(evidence)
 	a.candidateMu.Unlock()
+	return cloneOpenCodeProbeResults(evidence)
 }
 
 func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeResult {
@@ -253,6 +281,10 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 //  3. The corresponding project JSON for the worktree path.
 //  4. Git metadata from the session's working directory.
 func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+		metadata, _, err := a.MaterializeTranscript(ctx, session)
+		return metadata, err
+	}
 	// ── 1. Read session JSON ──────────────────────────────────────────────────
 	sesData, err := a.fs.ReadFile(session.SourcePath.String())
 	if err != nil {
