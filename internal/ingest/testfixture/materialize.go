@@ -291,6 +291,8 @@ func createSchema(conn *sqlite.Conn, schema schemaKind) error {
 		script = currentMissingSeqSchemaSQL
 	case schemaCurrentNullableSeq:
 		script = currentNullableSeqSchemaSQL
+	case schemaCurrentPartialSeq:
+		script = currentPartialSeqSchemaSQL
 	case schemaUnsupported:
 		script = `CREATE TABLE future_projection (id TEXT PRIMARY KEY, payload BLOB NOT NULL);`
 	default:
@@ -365,6 +367,21 @@ CREATE TABLE session_message (
   FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message(session_id, seq);
+`
+
+const currentPartialSeqSchemaSQL = `
+CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session_message (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  time_created INTEGER NOT NULL,
+  time_updated INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES session(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX session_message_partial_seq_idx ON session_message(session_id, seq) WHERE type = 'message';
 `
 
 func insertLegacyMessages(conn *sqlite.Conn, rows []legacyMessage) error {

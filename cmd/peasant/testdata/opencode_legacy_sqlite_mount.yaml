@@ -26,9 +26,9 @@ cases:
     expected_entries: 0
     mutation: malformed_message_json
     entries: []
-  - name: current-ineligible
+  - name: current-eligible
     source_fixture: current-session-message
-    expected_kickstart_sessions: 0
+    expected_kickstart_sessions: 1
     expected_stored_sessions: 0
     harvest: skip
     target_session: ""

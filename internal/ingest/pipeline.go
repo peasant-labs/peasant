@@ -1206,10 +1206,10 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	var rawData []byte
 	var meta *UnifiedMetadata
 	var err error
-	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+	if session.TranscriptOrigin != TranscriptOriginFile {
 		materializer, ok := adapter.(TranscriptMaterializer)
 		if !ok {
-			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: origin is legacy OpenCode SQLite but adapter %T has no materializer; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, adapter))
+			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: typed transcript origin %d requires a managed materializer but adapter %T has none; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, session.TranscriptOrigin, adapter))
 		}
 		meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
 	} else {
@@ -1377,12 +1377,15 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader)
 			sessionStart := time.UnixMilli(meta.Timestamp.Start)
 			sessionEnd := time.UnixMilli(meta.Timestamp.End)
-			// Only a real transcript file may reach command parsing. Typed database
-			// origins use bounded timestamp correlation; their DB/WAL/SHM paths are
-			// source containers, never transcript content.
+			// File origins use the provider transcript. Current SQLite uses only
+			// the deterministic managed projection already written in the private
+			// temporary directory. The shipped legacy SQLite path remains
+			// timestamp-only. DB/WAL/SHM paths never reach parsing.
 			transcriptPath := ""
 			if session.TranscriptOrigin == TranscriptOriginFile {
 				transcriptPath = session.SourcePath.String()
+			} else if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
+				transcriptPath = tmpTranscriptPath
 			}
 			commits, diags := detector.LayeredDetection(ctx, repoPath, sessionStart, sessionEnd, transcriptPath)
 			meta.Git.Commits = commits
@@ -2035,8 +2038,13 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 		OriginalRoot: originalRoot,
 	}
 	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON {
-		if transcriptData, readErr := p.fs.ReadFile(transcriptPath); readErr == nil && isOpenCodeLegacyProjection(transcriptData, sid) {
-			ds.TranscriptOrigin = TranscriptOriginOpenCodeLegacySQLite
+		if transcriptData, readErr := p.fs.ReadFile(transcriptPath); readErr == nil {
+			origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
+			if recognitionErr != nil {
+				slog.Warn(logPrefix+": managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", transcriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
+				return nil
+			}
+			ds.TranscriptOrigin = origin
 		}
 	}
 	if meta.ParentUUID != nil {
@@ -2174,8 +2182,15 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 			outputDir, hostSlug, sid, sid, string(sourceFormat))
 	}
 	transcriptOrigin := TranscriptOriginFile
-	if provider == HarnessOpenCode && sourceFormat == SourceFormatJSON && isManagedOpenCodeLegacyProjection(p.fs, outputTranscriptPath, sid) {
-		transcriptOrigin = TranscriptOriginOpenCodeLegacySQLite
+	if provider == HarnessOpenCode && sourceFormat == SourceFormatJSON {
+		if transcriptData, readErr := p.fs.ReadFile(outputTranscriptPath); readErr == nil {
+			origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
+			if recognitionErr != nil {
+				slog.Warn("reconstructFromSourceInfo: managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", outputTranscriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
+				return nil, 0, ""
+			}
+			transcriptOrigin = origin
+		}
 	}
 
 	return &DiscoveredSession{

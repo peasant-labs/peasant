@@ -339,9 +339,9 @@ func TestOpenCodeProjectDirectoriesReachHarvestCohortPreparation(t *testing.T) {
 	}
 }
 
-func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) {
+func TestOpenCodeCurrentSQLiteEntersMountedProductionThroughManagedProjection(t *testing.T) {
 	t.Parallel()
-	materialized := testfixture.MaterializeByName(t, "current-session-message")
+	materialized := testfixture.MaterializeByName(t, "semantic-parity-current")
 	sourceRoot := filepath.Dir(materialized.Path)
 
 	git := testutil.NoGitResolver()
@@ -350,9 +350,10 @@ func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) 
 	if !filesystem.Opened(materialized.Path) {
 		t.Fatalf("mounted kickstart production discovery did not resolve and header-probe configured OpenCode candidate %q; opened=%v", materialized.Path, filesystem.Paths())
 	}
-	if got := inventory[defaults.HarnessOpenCode].SessionCount; got != 0 || len(listings) != 0 {
-		t.Fatalf("kickstart exposed SQLite-only evidence: inventory=%d listings=%d", got, len(listings))
+	if got := inventory[defaults.HarnessOpenCode].SessionCount; got != 1 || len(listings) != 1 || listings[0].SessionID != testutil.TestOpenCodeSesID {
+		t.Fatalf("kickstart current-only discovery: inventory=%d listings=%+v, want one typed session", got, listings)
 	}
+	sourceBefore := mustReadFile(t, materialized.Path)
 
 	commandRoot := t.TempDir()
 	outputRoot := filepath.Join(commandRoot, "managed")
@@ -361,6 +362,7 @@ func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) 
 		"--source-path=" + sourceRoot,
 		"--output=" + outputRoot,
 		"--force",
+		"--include-active",
 	})
 	if err != nil {
 		t.Fatalf("run mounted harvest CLI against SQLite-only evidence: %v\n%s", err, output)
@@ -369,8 +371,15 @@ func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) 
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("inspect mounted harvest output: %v", err)
 	}
-	if len(managedEntries) != 0 {
-		t.Fatalf("SQLite-only evidence created %d managed output artifacts", len(managedEntries))
+	if len(managedEntries) == 0 {
+		t.Fatalf("current-only harvest created no managed output artifact; command output=%s", output)
+	}
+	managedBytes := mustReadFile(t, findManagedTranscript(t, outputRoot, testutil.TestOpenCodeSesID))
+	if bytes.HasPrefix(managedBytes, []byte("SQLite format 3\x00")) || !bytes.Contains(managedBytes, []byte(`"format":"peasant.opencode.current-sqlite"`)) {
+		t.Fatalf("current-only harvest did not create the typed normalized projection: %s", managedBytes)
+	}
+	if sourceAfter := mustReadFile(t, materialized.Path); !bytes.Equal(sourceAfter, sourceBefore) {
+		t.Fatal("current-only harvest changed source database bytes")
 	}
 
 	databasePath := defaults.ResolveDBFilePathWith(commandRoot).String()
@@ -387,8 +396,8 @@ func TestOpenCodeSQLiteEvidenceCannotEnterMountedProductionIngest(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list mounted harvest store rows: %v", err)
 	}
-	if len(rows) != 0 {
-		t.Fatalf("SQLite-only evidence created %d local session rows", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("current-only harvest created %d local session rows, want one", len(rows))
 	}
 }
 

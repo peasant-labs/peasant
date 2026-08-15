@@ -41,12 +41,16 @@ invalid_identifiers:
     value: " bad-part "
     error_contains: before source access
 
-declared_methods: 5
+declared_methods: 7
 methods:
   - name: Catalog
     signature: "func(context.Context) (ingest.OpenCodeSchemaEvidence, error)"
   - name: Close
     signature: "func(context.Context) error"
+  - name: CurrentSessionIDs
+    signature: "func(context.Context, ingest.OpenCodeCurrentSessionPageRequest) (ingest.OpenCodeCurrentSessionPage, error)"
+  - name: CurrentMessages
+    signature: "func(context.Context, ingest.OpenCodeCurrentPageRequest) (ingest.OpenCodeCurrentPage, error)"
   - name: LegacyMessages
     signature: "func(context.Context, ingest.OpenCodeLegacyMessagePageRequest) (ingest.OpenCodeLegacyMessagePage, error)"
   - name: LegacyParts

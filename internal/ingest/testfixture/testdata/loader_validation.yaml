@@ -1,4 +1,4 @@
-declared_cases: 12
+declared_cases: 13
 cases:
   - name: unknown-field
     mutation: unknown_field
@@ -36,3 +36,6 @@ cases:
   - name: unknown-history-kind
     mutation: unknown_history
     error_contains: unknown ignored history kind
+  - name: partial-index-case-without-duplicate-cursor-hazard
+    mutation: partial_duplicate
+    error_contains: must contain a duplicate current sequence

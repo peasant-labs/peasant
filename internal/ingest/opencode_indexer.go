@@ -12,7 +12,7 @@ import (
 	"github.com/peasant-labs/schema"
 )
 
-// OpenCodeIndexer parses OpenCode JSON message directories into SessionEntry slices.
+// OpenCodeIndexer parses legacy JSON trees and Peasant-managed OpenCode projections into SessionEntry slices.
 type OpenCodeIndexer struct {
 	fs          FileSystem
 	fullDepth   bool
@@ -40,14 +40,15 @@ func WithOpenCodeFullContent(enabled bool) OpenCodeIndexerOption {
 var _ TranscriptIndexer = (*OpenCodeIndexer)(nil)
 var _ SessionTranscriptSourceResolver = (*OpenCodeIndexer)(nil)
 
-// SourceKind reports that OpenCode's entries come from a tree of message and part files under the provider storage root, so no single file holds its entries and DiscoveredSession.OriginalRoot must survive to reach here.
+// SourceKind reports the default legacy JSON representation. TranscriptSourceKindFor
+// selects managed projection files for SQLite-backed sessions.
 func (idx *OpenCodeIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceDirectory }
 
 // TranscriptSourceKindFor selects the physical representation for one session.
 // The pipeline remains provider-agnostic while OpenCode owns its two source
 // shapes.
 func (idx *OpenCodeIndexer) TranscriptSourceKindFor(session DiscoveredSession) TranscriptSourceKind {
-	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
 		return TranscriptSourceFile
 	}
 	return TranscriptSourceDirectory
@@ -62,59 +63,117 @@ func NewOpenCodeIndexer(fs FileSystem, opts ...OpenCodeIndexerOption) *OpenCodeI
 	return idx
 }
 
-// IndexTranscriptBytes indexes Peasant's managed legacy SQLite projection.
-// Legacy JSON sessions retain the directory-based path because their entries
-// remain spread across provider-owned message and part files.
+// IndexTranscriptBytes indexes a Peasant-managed OpenCode projection. Legacy
+// JSON sessions retain the directory path because their entries remain spread
+// across provider-owned message and part files.
 func (idx *OpenCodeIndexer) IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
-	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
+	switch session.TranscriptOrigin {
+	case TranscriptOriginFile:
 		return idx.IndexTranscript(ctx, session)
+	case TranscriptOriginOpenCodeLegacySQLite, TranscriptOriginOpenCodeCurrentSQLite:
+		return idx.indexManagedProjection(session, data)
+	default:
+		return nil, fmt.Errorf("index OpenCode session %q failed before parsing transcript bytes: transcript origin %d is outside the supported closed set; no entry rows were stored; return TranscriptOriginFile, TranscriptOriginOpenCodeLegacySQLite, or TranscriptOriginOpenCodeCurrentSQLite from discovery", session.SessionID, session.TranscriptOrigin)
 	}
-	return idx.indexLegacyProjection(session, data)
 }
 
-func (idx *OpenCodeIndexer) indexLegacyProjection(session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
-	var projection openCodeLegacyProjection
-	if err := json.Unmarshal(data, &projection); err != nil {
-		return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q failed while decoding Peasant-owned JSON: %w; no entry rows were stored; re-run harvest to regenerate the projection", session.SessionID, err)
+func (idx *OpenCodeIndexer) indexManagedProjection(session DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
+	expectedFormat, expectedVersion, err := managedOpenCodeProjectionFormat(session.TranscriptOrigin)
+	if err != nil {
+		return nil, err
 	}
-	if projection.Format != openCodeLegacyProjectionFormat || projection.Version != openCodeLegacyProjectionVersion || projection.SessionID != string(session.SessionID) {
-		return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q rejected identity format=%q version=%d session_id=%q; expected format=%q version=%d and the selected session ID; no entry rows were stored; re-run harvest with a compatible Peasant version", session.SessionID, projection.Format, projection.Version, projection.SessionID, openCodeLegacyProjectionFormat, openCodeLegacyProjectionVersion)
+	projection, err := decodeManagedOpenCodeProjection(data, expectedFormat, expectedVersion, session.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while strictly decoding the Peasant-owned envelope: %w; no entry rows were stored; re-run harvest to regenerate the projection", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, err)
 	}
+	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)
+	messages, err := parseManagedOpenCodeSemanticMessages(projection, kind)
+	if err != nil {
+		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while decoding its normalized semantic corpus: %w; no partial entry rows were stored, so regenerate the managed artifact from a supported source and retry", kind, session.SessionID, err)
+	}
+	return idx.indexSemanticMessages(session.SessionID, messages), nil
+}
+
+func managedOpenCodeProjectionKind(origin TranscriptOrigin) string {
+	switch origin {
+	case TranscriptOriginOpenCodeCurrentSQLite:
+		return "managed current SQLite"
+	case TranscriptOriginOpenCodeLegacySQLite:
+		return "managed legacy SQLite"
+	default:
+		return fmt.Sprintf("unsupported transcript origin %d", origin)
+	}
+}
+
+func managedOpenCodeProjectionFormat(origin TranscriptOrigin) (string, int, error) {
+	switch origin {
+	case TranscriptOriginOpenCodeLegacySQLite:
+		return openCodeLegacyProjectionFormat, openCodeLegacyProjectionVersion, nil
+	case TranscriptOriginOpenCodeCurrentSQLite:
+		return openCodeCurrentProjectionFormat, openCodeCurrentProjectionVersion, nil
+	default:
+		return "", 0, fmt.Errorf("index managed OpenCode projection failed before decoding transcript bytes: transcript origin %d is outside the supported managed origin set; no entry rows were stored; return a supported typed SQLite origin from discovery", origin)
+	}
+}
+
+func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, kind string) ([]openCodeSemanticMessage, error) {
 	messages := make([]openCodeSemanticMessage, 0, len(projection.Messages))
 	for _, message := range projection.Messages {
 		semantic, err := parseOpenCodeSemanticMessage(message.ID, message.TimeCreated, message.Data)
 		if err != nil {
-			return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q failed while decoding message row %q; no partial entry set was stored; fix malformed row JSON in the selected database and re-run harvest", session.SessionID, message.ID)
+			return nil, fmt.Errorf("decode %s message row %q: %w", kind, message.ID, err)
+		}
+		if semantic.Data.Time.Completed <= 0 {
+			semantic.TimeCompleted = message.TimeUpdated
+		}
+		if role := Role(semantic.Data.Role); !role.IsValid() {
+			return nil, fmt.Errorf("decode %s message row %q: role %q is outside the supported closed set", kind, message.ID, semantic.Data.Role)
 		}
 		for _, part := range message.Parts {
 			semanticPart, partErr := parseOpenCodeSemanticPart(part.ID, part.TimeCreated, part.Data)
 			if partErr != nil {
-				return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q part %q failed while decoding selected row JSON: %w; no partial entry set was stored; fix malformed part JSON and re-run harvest", session.SessionID, part.ID, partErr)
+				return nil, fmt.Errorf("decode %s part row %q for message %q: %w", kind, part.ID, message.ID, partErr)
+			}
+			if !isSupportedOpenCodeSemanticPartType(semanticPart.Data.Type) {
+				return nil, fmt.Errorf("decode %s part row %q for message %q: type %q is outside the supported closed set", kind, part.ID, message.ID, semanticPart.Data.Type)
 			}
 			semantic.Parts = append(semantic.Parts, semanticPart)
 		}
 		messages = append(messages, semantic)
 	}
-	return idx.indexSemanticMessages(session.SessionID, messages), nil
+	return messages, nil
+}
+
+func isSupportedOpenCodeSemanticPartType(partType string) bool {
+	switch partType {
+	case "text", "reasoning", "tool", "tool_use", "tool_result", "compaction", "subtask", "agent":
+		return true
+	default:
+		return false
+	}
 }
 
 // IndexTranscript reads all msg_*.json files under the message directory for a session
 // and returns SessionEntry rows ordered by filename (alphabetical ≈ chronological).
 func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
-	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite {
+	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
 		data, err := idx.fs.ReadFile(session.SourcePath.String())
 		if err != nil {
-			return nil, fmt.Errorf("index managed legacy OpenCode projection for session %q failed while reading %q: %w; no entry rows were stored; re-run harvest to restore the managed artifact", session.SessionID, session.SourcePath, err)
+			return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while reading %q: %w; no entry rows were stored, so re-run harvest to restore the managed artifact", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, session.SourcePath, err)
 		}
-		return idx.indexLegacyProjection(session, data)
+		return idx.indexManagedProjection(session, data)
 	}
+	messages := loadOpenCodeJSONSemanticMessages(idx.fs, session)
+	return idx.indexSemanticMessages(session.SessionID, messages), nil
+}
+
+func loadOpenCodeJSONSemanticMessages(filesystem FileSystem, session DiscoveredSession) []openCodeSemanticMessage {
 	storageRoot := resolveStorageRoot(session)
 	msgDir := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), string(session.SessionID))
 
-	dirEntries, err := idx.fs.ReadDir(msgDir)
+	dirEntries, err := filesystem.ReadDir(msgDir)
 	if err != nil {
-		// No message directory → no entries (not an error).
-		return nil, nil
+		return nil
 	}
 
 	// Collect and sort message file names for deterministic ordering.
@@ -130,7 +189,7 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 
 	messages := make([]openCodeSemanticMessage, 0, len(msgFiles))
 	for _, name := range msgFiles {
-		data, err := idx.fs.ReadFile(filepath.Join(msgDir, name))
+		data, err := filesystem.ReadFile(filepath.Join(msgDir, name))
 		if err != nil {
 			continue
 		}
@@ -140,8 +199,8 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 			continue
 		}
 		partDir := filepath.Join(storageRoot, defaults.OpenCodeDirPart.String(), messageID)
-		for _, partName := range idx.listPartFiles(storageRoot, messageID) {
-			partData, readErr := idx.fs.ReadFile(filepath.Join(partDir, partName))
+		for _, partName := range listPartFilenames(filesystem, storageRoot, messageID) {
+			partData, readErr := filesystem.ReadFile(filepath.Join(partDir, partName))
 			if readErr != nil {
 				continue
 			}
@@ -154,7 +213,73 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 		}
 		messages = append(messages, semantic)
 	}
-	return idx.indexSemanticMessages(session.SessionID, messages), nil
+	return messages
+}
+
+type openCodeSemanticSummary struct {
+	turnCount     int
+	toolCallCount int
+	tokensIn      int
+	tokensOut     int
+	modelID       string
+	startMS       int64
+	endMS         int64
+	version       string
+	cwd           string
+	parentID      string
+}
+
+func summarizeOpenCodeSemanticMessages(messages []openCodeSemanticMessage) openCodeSemanticSummary {
+	var summary openCodeSemanticSummary
+	for _, message := range messages {
+		created := message.TimeCreated
+		if created <= 0 {
+			created = message.Data.Time.Created
+		}
+		completed := message.Data.Time.Completed
+		if completed <= 0 {
+			completed = message.TimeCompleted
+		}
+		if completed <= 0 {
+			completed = created
+		}
+		if created > 0 && (summary.startMS == 0 || created < summary.startMS) {
+			summary.startMS = created
+		}
+		if completed > summary.endMS {
+			summary.endMS = completed
+		}
+		if summary.version == "" {
+			summary.version = message.Data.Version
+		}
+		if summary.cwd == "" {
+			summary.cwd = message.Data.semanticCWD()
+		}
+		if summary.parentID == "" {
+			summary.parentID = message.Data.ParentID
+		}
+		role := Role(message.Data.Role)
+		if role == RoleUser || role == RoleAssistant {
+			summary.turnCount++
+		}
+		if role != RoleAssistant {
+			continue
+		}
+		if message.Data.Tokens != nil {
+			summary.tokensIn += message.Data.Tokens.Input
+			summary.tokensOut += message.Data.Tokens.Output
+		}
+		if summary.modelID == "" {
+			summary.modelID = message.Data.semanticModelID()
+		}
+		// Preserve the established JSON metadata contract: every assistant part
+		// file is counted. All source representations now use this same policy.
+		summary.toolCallCount += len(message.Parts)
+	}
+	if summary.endMS < summary.startMS {
+		summary.endMS = summary.startMS
+	}
+	return summary
 }
 
 // openCodeIndexMsg is the minimal parsed shape for indexing.
@@ -163,7 +288,19 @@ type openCodeIndexMsg struct {
 	SessionID string `json:"sessionID"`
 	Role      string `json:"role"`
 	ModelID   string `json:"modelID"`
-	Time      struct {
+	Model     struct {
+		ID      string `json:"id"`
+		ModelID string `json:"modelID"`
+	} `json:"model"`
+	Version   string `json:"version"`
+	Directory string `json:"directory"`
+	CWD       string `json:"cwd"`
+	ParentID  string `json:"parentID"`
+	Path      struct {
+		CWD  string `json:"cwd"`
+		Root string `json:"root"`
+	} `json:"path"`
+	Time struct {
 		Created   int64 `json:"created"`
 		Completed int64 `json:"completed"`
 	} `json:"time"`
@@ -179,15 +316,36 @@ type openCodeIndexMsg struct {
 	CacheWrite int             `json:"cache_write"`
 }
 
+func (message openCodeIndexMsg) semanticCWD() string {
+	if message.Path.CWD != "" {
+		return message.Path.CWD
+	}
+	if message.CWD != "" {
+		return message.CWD
+	}
+	return message.Directory
+}
+
+func (message openCodeIndexMsg) semanticModelID() string {
+	if message.ModelID != "" {
+		return message.ModelID
+	}
+	if message.Model.ModelID != "" {
+		return message.Model.ModelID
+	}
+	return message.Model.ID
+}
+
 // openCodeSemanticMessage is the private representation shared by every
 // OpenCode source loader. Outer storage formats supply row identity, ordering,
 // and raw bytes; indexing consumes only this model.
 type openCodeSemanticMessage struct {
-	EntryID     string
-	TimeCreated int64
-	Raw         []byte
-	Data        openCodeIndexMsg
-	Parts       []openCodeSemanticPart
+	EntryID       string
+	TimeCreated   int64
+	TimeCompleted int64
+	Raw           []byte
+	Data          openCodeIndexMsg
+	Parts         []openCodeSemanticPart
 }
 
 type openCodeSemanticPart struct {
@@ -211,9 +369,11 @@ type openCodeIndexPart struct {
 		Start   int64 `json:"start"`
 	} `json:"time"`
 	State *struct {
-		Input struct {
-			Name string `json:"name"`
-		} `json:"input"`
+		Status  string          `json:"status"`
+		Input   json.RawMessage `json:"input"`
+		Content json.RawMessage `json:"content"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
 	} `json:"state"`
 }
 
@@ -337,11 +497,19 @@ func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 		switch part.Data.Type {
 		case "compaction", "subtask", "agent":
 			result.isSystemEntry = true
-		case "tool":
-			if part.Data.Tool == "skill" {
+		case "tool", "tool_use":
+			toolName := part.Data.Tool
+			if toolName == "" {
+				toolName = part.Data.Name
+			}
+			if toolName == "skill" {
 				name := ""
 				if part.Data.State != nil {
-					name = part.Data.State.Input.Name
+					var input struct {
+						Name string `json:"name"`
+					}
+					_ = json.Unmarshal(part.Data.State.Input, &input)
+					name = input.Name
 				}
 				if name == "" {
 					name = "unknown-skill"
@@ -382,6 +550,16 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		entry.TimestampMs = &timestamp
 	}
 	switch partType {
+	case "tool":
+		entry.EntryType, entry.Role, entry.HasToolUse = EntryTypeToolUse, RoleAssistant, true
+		if part.Data.State != nil {
+			if value := rawOpenCodeJSON(part.Data.State.Input); value != "" {
+				entry.ToolInput = &value
+			}
+			if value := firstRawOpenCodeJSON(part.Data.State.Result, part.Data.State.Error, part.Data.State.Content); value != "" {
+				entry.ToolOutput = &value
+			}
+		}
 	case "tool_use":
 		entry.EntryType, entry.Role, entry.HasToolUse = EntryTypeToolUse, RoleAssistant, true
 		if value := rawOpenCodeJSON(part.Data.Input); value != "" {
@@ -421,7 +599,7 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		entryID := part.EntryID
 		entry.EntryID = &entryID
 	}
-	if partType == "tool_use" || partType == "tool_result" {
+	if partType == "tool" || partType == "tool_use" || partType == "tool_result" {
 		callID := part.Data.ID
 		if callID == "" {
 			callID = part.EntryID
@@ -430,7 +608,7 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 			entry.ToolCallID = &callID
 		}
 	}
-	if partType == "tool_use" && part.Data.Name != "" {
+	if (partType == "tool" || partType == "tool_use") && part.Data.Name != "" {
 		toolName := part.Data.Name
 		entry.ToolNamesCSV = &toolName
 		if kind := classifyToolKind(toolName); kind != "" {

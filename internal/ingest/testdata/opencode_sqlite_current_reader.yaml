@@ -1,0 +1,65 @@
+declared_page_cases: 1
+page_cases:
+  - name: sparse-sequence-pages-are-session-scoped
+    fixture: current-reader-pages
+    session_id: ses_current_reader_a
+    page_size: 2
+    pages:
+      - ids: [sm_current_first, sm_current_equal_time]
+        seqs: [2, 7]
+        has_next: true
+      - ids: [sm_current_late, sm_current_last]
+        seqs: [20, 41]
+        has_next: false
+
+declared_malformed_cases: 8
+malformed_cases:
+  - {name: reject-integer-id, mutation: id_type, error_contains: "column 0"}
+  - {name: reject-integer-message-type, mutation: message_type, error_contains: "column 2"}
+  - {name: reject-text-created-time, mutation: created_type, error_contains: "column 3"}
+  - {name: reject-text-updated-time, mutation: updated_type, error_contains: "column 4"}
+  - {name: reject-integer-data, mutation: data_type, error_contains: "column 5"}
+  - {name: reject-text-sequence, mutation: seq_type, error_contains: "column 6"}
+  - {name: reject-negative-sequence, mutation: negative_seq, error_contains: "non-negative"}
+  - {name: reject-invalid-json, mutation: invalid_json, error_contains: "not valid JSON"}
+
+declared_validation_cases: 4
+validation_cases:
+  - {name: reject-zero-page-size, kind: page_size, value: 0, error_contains: "fixed maximum"}
+  - {name: reject-oversized-page, kind: page_size, value: 129, error_contains: "fixed maximum"}
+  - {name: reject-spaced-session, kind: session_id, text: " bad-session ", error_contains: "before source access"}
+  - {name: reject-negative-cursor-sequence, kind: seq, value: -1, error_contains: "non-negative"}
+
+declared_query_plan_cases: 2
+query_plan_cases:
+  - name: supported-current-query-uses-ordering-index
+    fixture: current-reader-pages
+    session_id: ses_current_reader_a
+    page_size: 2
+    statement: 'EXPLAIN QUERY PLAN SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2'
+    required_contains: session_message_session_seq_idx
+    forbidden_contains: [SCAN session_message, USE TEMP B-TREE]
+  - name: supported-current-continuation-uses-ordering-index
+    fixture: current-reader-pages
+    session_id: ses_current_reader_a
+    after_seq: 7
+    page_size: 2
+    statement: 'EXPLAIN QUERY PLAN SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3'
+    required_contains: session_message_session_seq_idx
+    forbidden_contains: [SCAN session_message, USE TEMP B-TREE]
+
+declared_pagination_hazards: 1
+pagination_hazards:
+  - name: partial-index-duplicates-would-cross-a-seq-cursor
+    fixture: current-partial-ordering-index
+    session_id: ses_partial
+    page_size: 1
+    source_rows: 3
+    visible_rows: 2
+
+declared_loader_mutations: 4
+loader_mutations:
+  - {name: reject-unknown-field, kind: unknown_field, error_contains: "field unexpected"}
+  - {name: reject-trailing-document, kind: trailing_document, error_contains: "exactly one YAML document"}
+  - {name: reject-count-drift, kind: declared_count, error_contains: "row guard"}
+  - {name: reject-duplicate-case, kind: duplicate_name, error_contains: "duplicate"}

@@ -579,7 +579,7 @@ func assertManagedMetadata(t testing.TB, transcriptPath string, sessionID ingest
 		t.Fatalf("managed metadata lost SQLite source identity: %+v", metadata)
 	}
 	if sessionID == ingest.SessionID("ses_3cd91f52effeXd3QAJ54jOyzv5") {
-		if metadata.CWD != "/synthetic/work/project" || metadata.Project.Name != "project" || metadata.Model.String() != "synthetic-model" || metadata.Stats.TokensIn != 7 || metadata.Stats.TokensOut != 11 || metadata.Stats.ToolCallCount != 1 {
+		if metadata.CWD != "/synthetic/work/project" || metadata.Project.Name != "project" || metadata.Model.String() != "synthetic-model" || metadata.Stats.TokensIn != 7 || metadata.Stats.TokensOut != 11 || metadata.Stats.ToolCallCount != 3 {
 			t.Fatalf("managed metadata omitted selected row evidence: %+v", metadata)
 		}
 	}

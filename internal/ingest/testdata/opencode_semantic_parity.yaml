@@ -1,0 +1,120 @@
+declared_cases: 1
+cases:
+  - name: roles-tools-reasoning-structure-model-tokens-and-parents
+    legacy_fixture: semantic-parity-legacy
+    current_fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    json_messages:
+      - id: msg_01_user
+        data: '{"id":"msg_01_user","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"user","path":{"cwd":"/synthetic/parity"},"time":{"created":1000,"completed":1010},"content":"synthetic request"}'
+        parts:
+          - {id: part_01_user, data: '{"id":"part_01_user","messageID":"msg_01_user","type":"text","text":"synthetic request","time":{"created":1001}}'}
+      - id: msg_02_assistant
+        data: '{"id":"msg_02_assistant","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1020,"completed":1090},"tokens":{"input":7,"output":11,"reasoning":3,"cache":{"read":2,"write":1}}}'
+        parts:
+          - {id: call_semantic, data: '{"id":"call_semantic","messageID":"msg_02_assistant","type":"tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":"synthetic output"},"time":{"created":1030,"completed":1040}}'}
+          - {id: part_01_reasoning, data: '{"id":"part_01_reasoning","messageID":"msg_02_assistant","type":"reasoning","text":"synthetic reasoning","time":{"created":1021}}'}
+      - id: msg_03_system
+        data: '{"id":"msg_03_system","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1100,"completed":1110},"content":"synthetic compacted context"}'
+        parts:
+          - {id: part_01_compaction, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context","time":{"created":1100}}'}
+      - id: msg_04_skill
+        data: '{"id":"msg_04_skill","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1120,"completed":1125}}'
+        parts:
+          - {id: skill_call, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}'}
+      - id: msg_05_agent
+        data: '{"id":"msg_05_agent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1130,"completed":1130},"content":"reviewer"}'
+        parts:
+          - {id: part_agent, data: '{"id":"part_agent","messageID":"msg_05_agent","type":"agent","name":"reviewer","text":"reviewer","time":{"created":1130}}'}
+      - id: msg_06_model
+        data: '{"id":"msg_06_model","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","modelID":"next-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1140,"completed":1140},"content":"next-model"}'
+        parts:
+          - {id: part_subtask, data: '{"id":"part_subtask","messageID":"msg_06_model","type":"subtask","name":"next-model","text":"next-model","time":{"created":1140}}'}
+    expected_entry_ids: [msg_01_user, msg_02_assistant, call_semantic, part_01_reasoning, msg_03_system, part_01_compaction, msg_04_skill, skill_call, msg_05_agent, part_agent, msg_06_model, part_subtask]
+    expected_roles: [user, assistant, assistant, assistant, system, system, assistant, assistant, system, system, system, system]
+    expected_types: [text, tool_use, tool_use, thinking, system, text, text, tool_use, system, text, system, text]
+    expected_depths: [0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+    expected_parent_indexes: [-1, -1, 1, 1, -1, 4, -1, 6, -1, 8, -1, 10]
+    expected_timestamps: [1000, 1020, 1030, 1021, 1100, 1100, 1120, 1121, 1130, 1130, 1140, 1140]
+    expected_tool_call_id: call_semantic
+    expected_model: synthetic-model
+    expected_tokens_in: 7
+    expected_tokens_out: 11
+    expected_start_ms: 1000
+    expected_end_ms: 1140
+    expected_metadata_turns: 3
+    expected_metadata_tools: 3
+    forbidden_markers: [HISTORY_MUST_NOT_APPEAR, SQLite format 3, MUST_NOT_OPEN]
+
+declared_current_variants: 8
+current_variants:
+  - {id: msg_variant_user, row_type: user, data: '{"id":"msg_variant_user","text":"variant request","files":[{"uri":"file:///synthetic/input.txt","mime":"text/plain","name":"input.txt","source":{"start":0,"end":7,"text":"variant"}}],"agents":[{"name":"researcher","source":{"start":0,"end":7,"text":"variant"}}],"time":{"created":2000}}'}
+  - id: msg_variant_assistant
+    row_type: assistant
+    data: '{"id":"msg_variant_assistant","agent":"builder","model":{"id":"variant-model","providerID":"variant-provider","variant":"stable"},"content":[{"type":"text","id":"text_variant","text":"variant answer"},{"type":"reasoning","id":"reason_variant","text":"variant reasoning","providerMetadata":{"provider":{"trace":"sanitized"}},"time":{"created":2011,"completed":2012}},{"type":"tool","id":"pending_tool","name":"pending","state":{"status":"pending","input":""},"time":{"created":2013}},{"type":"tool","id":"running_tool","name":"running","state":{"status":"running","input":{"value":1},"structured":{},"content":[{"type":"text","text":"running"}]},"time":{"created":2014,"ran":2015}},{"type":"tool","id":"completed_tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"attachments":[{"uri":"file:///synthetic/result.txt","mime":"text/plain"}],"content":[{"type":"text","text":"done"},{"type":"file","uri":"file:///synthetic/result.txt","mime":"text/plain","name":"result.txt"}],"outputPaths":["synthetic/result.txt"],"structured":{},"result":{"ok":true}},"time":{"created":2016,"ran":2017,"completed":2018}},{"type":"tool","id":"error_tool","name":"erroring","state":{"status":"error","input":{"value":2},"content":[{"type":"text","text":"failed"}],"structured":{},"error":{"type":"unknown","message":"synthetic failure"},"result":{"ok":false}},"time":{"created":2019,"completed":2020}}],"snapshot":{"start":"a","end":"b","files":["synthetic/file.go"]},"finish":"stop","cost":0.25,"tokens":{"input":13,"output":17,"reasoning":5,"cache":{"read":3,"write":2}},"time":{"created":2010,"completed":2021}}'
+  - {id: msg_variant_shell, row_type: shell, data: '{"id":"msg_variant_shell","callID":"shell_call","command":"printf synthetic","output":"synthetic","time":{"created":2030,"completed":2031}}'}
+  - {id: msg_variant_synthetic, row_type: synthetic, data: '{"id":"msg_variant_synthetic","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","text":"synthetic context","time":{"created":2040}}'}
+  - {id: msg_variant_system, row_type: system, data: '{"id":"msg_variant_system","text":"system context","time":{"created":2050}}'}
+  - {id: msg_variant_compaction, row_type: compaction, data: '{"id":"msg_variant_compaction","reason":"manual","summary":"summary","recent":"recent","time":{"created":2060}}'}
+  - {id: msg_variant_agent, row_type: agent-switched, data: '{"id":"msg_variant_agent","agent":"reviewer","time":{"created":2070}}'}
+  - {id: msg_variant_model, row_type: model-switched, data: '{"id":"msg_variant_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":2080}}'}
+expected_current_identities: [pending_tool, running_tool, completed_tool, error_tool, shell_call]
+
+declared_negative_cases: 11
+negative_cases:
+  - {name: reject-unknown-row-type, rows: [{id: msg_unknown, row_type: unknown, data: '{}'}], error_contains: outside the supported pinned SessionMessage closed set}
+  - {name: reject-conflicting-pairing-spellings, rows: [{id: msg_pairing, row_type: user, data: '{"messageID":"msg_pairing","message_id":"msg_other","text":"request","time":{"created":3000}}'}], error_contains: messageID}
+  - {name: reject-embedded-row-identity-mismatch, rows: [{id: msg_identity, row_type: user, data: '{"id":"msg_other","text":"request","files":[],"agents":[],"time":{"created":3000}}'}], error_contains: upstream message id}
+  - {name: reject-absent-upstream-row-identity, rows: [{id: msg_missing_identity, row_type: user, data: '{"text":"request","files":[],"agents":[],"time":{"created":3000}}'}], error_contains: upstream message id is required}
+  - {name: reject-duplicate-row-identity, rows: [{id: msg_duplicate, row_type: system, data: '{"id":"msg_duplicate","text":"one","time":{"created":3000}}'}, {id: msg_duplicate, row_type: system, data: '{"id":"msg_duplicate","text":"two","time":{"created":3001}}'}], error_contains: already registered}
+  - {name: reject-duplicate-content-identity, rows: [{id: msg_duplicate_content, row_type: assistant, data: '{"id":"msg_duplicate_content","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","id":"same_part","text":"one"},{"type":"reasoning","id":"same_part","text":"two"}],"time":{"created":3000}}'}], error_contains: already registered}
+  - {name: reject-row-content-cross-kind-collision, rows: [{id: msg_cross_kind, row_type: system, data: '{"id":"msg_cross_kind","text":"one","time":{"created":3000}}'}, {id: msg_cross_owner, row_type: assistant, data: '{"id":"msg_cross_owner","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","id":"msg_cross_kind","text":"collision"}],"time":{"created":3001}}'}], error_contains: cannot also identify nested message content}
+  - {name: reject-tool-content-cross-kind-collision, rows: [{id: msg_tool_collision, row_type: assistant, data: '{"id":"msg_tool_collision","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"reasoning","id":"collision_part","text":"reason"},{"type":"tool","id":"collision_part","name":"read","state":{"status":"pending","input":"value"},"time":{"created":3001}}],"time":{"created":3000}}'}], error_contains: already registered}
+  - {name: reject-unknown-assistant-content, rows: [{id: msg_unknown_content, row_type: assistant, data: '{"id":"msg_unknown_content","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"unknown","id":"unknown_part"}],"time":{"created":3000}}'}], error_contains: content type}
+  - {name: reject-unknown-tool-state, rows: [{id: msg_unknown_state, row_type: assistant, data: '{"id":"msg_unknown_state","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"unknown_state_tool","name":"read","state":{"status":"future","input":{}},"time":{"created":3001}}],"time":{"created":3000}}'}], error_contains: status}
+  - {name: reject-malformed-tool-state-input, rows: [{id: msg_bad_state, row_type: assistant, data: '{"id":"msg_bad_state","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"bad_state_tool","name":"read","state":{"status":"completed","input":"not-object","content":[],"structured":{}},"time":{"created":3001}}],"time":{"created":3000}}'}], error_contains: requires object input}
+
+declared_loader_mutations: 4
+loader_mutations:
+  - {name: reject-unknown-field, kind: unknown_field, error_contains: field unexpected}
+  - {name: reject-trailing-document, kind: trailing_document, error_contains: exactly one YAML document}
+  - {name: reject-count-drift, kind: declared_count, error_contains: row guard}
+  - {name: reject-duplicate-name, kind: duplicate_name, error_contains: duplicate}
+
+declared_semantic_mutants: 15
+semantic_mutants:
+  - {name: kill-timestamp-drift, kind: timestamp, axis: timestamps}
+  - {name: kill-skill-drop, kind: skill, axis: skills}
+  - {name: kill-subtask-drop, kind: subtask, axis: subtask-structure}
+  - {name: kill-agent-drop, kind: agent, axis: agent-structure}
+  - {name: kill-compaction-drop, kind: compaction, axis: compaction-structure}
+  - {name: kill-reasoning-drop, kind: reasoning, axis: reasoning}
+  - {name: kill-stable-id-regeneration, kind: stable_id, axis: stable-identities}
+  - {name: kill-tool-pairing-drift, kind: tool_pairing, axis: tool-pairing}
+  - {name: kill-role-drift, kind: role, axis: roles}
+  - {name: kill-model-drift, kind: model, axis: model}
+  - {name: kill-token-drift, kind: tokens, axis: tokens}
+  - {name: kill-order-drift, kind: order, axis: ordering}
+  - {name: kill-depth-parent-drop, kind: depth_parent, axis: depth-and-parents}
+  - {name: kill-metadata-aggregation-drift, kind: metadata, axis: metadata}
+  - {name: kill-mounted-output-drop, kind: turns_detail_metrics, axis: turns-detail-metrics}
+
+declared_source_mutations: 3
+source_mutations:
+  - {name: current-loader-semantic-mutation, source: current, old: synthetic request, new: altered-synthetic}
+  - {name: legacy-loader-semantic-mutation, source: legacy, old: synthetic request, new: altered-synthetic}
+  - {name: file-loader-semantic-mutation, source: file, old: synthetic request, new: altered-synthetic}
+
+declared_managed_errors: 11
+managed_errors:
+  - {name: current-envelope-malformed-json, data: '{', error_contains: strictly decoding, error_type: syntax}
+  - {name: current-envelope-unknown-version, data: '{"format":"peasant.opencode.current-sqlite","version":2,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[]}', error_contains: strictly decoding, error_type: identity, recognition_error: true}
+  - {name: current-envelope-session-mismatch, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_other","messages":[]}', error_contains: strictly decoding, error_type: identity, recognition_error: true}
+  - {name: current-envelope-malformed-message-shape, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[{"id":"msg_bad","session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","time_created":1,"time_updated":1,"data":"not-an-object","parts":[]}]}', error_contains: managed envelope message, error_type: type, recognition_error: true}
+  - {name: current-envelope-malformed-part-shape, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[{"id":"msg_bad_part","session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","time_created":1,"time_updated":1,"data":{"role":"assistant"},"parts":[{"id":"part_bad","message_id":"msg_bad_part","session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","time_created":1,"time_updated":1,"data":"not-an-object"}]}]}', error_contains: managed envelope message, error_type: type, recognition_error: true}
+  - {name: current-envelope-unknown-field, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[],"unexpected":true}', error_contains: unknown field, error_type: strict, recognition_error: true}
+  - {name: current-envelope-missing-messages, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5"}', error_contains: required field "messages" is missing, error_type: strict, recognition_error: true}
+  - {name: current-envelope-malformed-messages-array, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":{}}', error_contains: decode managed envelope messages, error_type: type, recognition_error: true}
+  - {name: current-envelope-trailing-json, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[]} {}', error_contains: trailing JSON value, error_type: strict, recognition_error: true}
+  - {name: current-envelope-corrupt-managed-marker, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[]}', error_contains: messages must be present and non-empty, error_type: strict, recognition_error: true}
+  - {name: unknown-transcript-origin, origin: unknown, data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","messages":[{"id":"msg_valid","session_id":"ses_3cd91f52effeXd3QAJ54jOyzv5","time_created":1,"time_updated":1,"data":{"role":"user"},"parts":[]}]}', error_contains: outside the supported closed set, error_type: origin}

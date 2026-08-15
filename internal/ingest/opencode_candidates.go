@@ -181,11 +181,22 @@ type OpenCodeColumnEvidence struct {
 	Primary bool
 }
 
+// OpenCodeIndexKeyEvidence records one bounded index_xinfo term.
+type OpenCodeIndexKeyEvidence struct {
+	Sequence   int64
+	ColumnID   int64
+	Name       string
+	Descending bool
+	Collation  string
+	Key        bool
+}
+
 // OpenCodeIndexEvidence is bounded ordering evidence from one SQLite index.
 type OpenCodeIndexEvidence struct {
 	Name    string
 	Unique  bool
-	Columns []string
+	Partial bool
+	Keys    []OpenCodeIndexKeyEvidence
 }
 
 // OpenCodeSchemaEvidence contains catalog shape only. It never contains
@@ -460,7 +471,7 @@ func classifyOpenCodeEvidence(evidence OpenCodeSchemaEvidence) (OpenCodeSchemaCa
 	currentColumns := hasOpenCodeColumns(evidence.CurrentMessageColumns, []string{"id", "session_id", "type", "time_created", "time_updated", "data", "seq"}, "seq")
 	currentOrder := false
 	for _, index := range evidence.CurrentIndexes {
-		if index.Unique && len(index.Columns) == 2 && index.Columns[0] == "session_id" && index.Columns[1] == "seq" {
+		if isOpenCodeCurrentOrderingIndex(index) {
 			currentOrder = true
 			break
 		}
@@ -479,6 +490,38 @@ func classifyOpenCodeEvidence(evidence OpenCodeSchemaEvidence) (OpenCodeSchemaCa
 	default:
 		return OpenCodeCapabilityNone, OpenCodeSupportUnsupported
 	}
+}
+
+func isOpenCodeCurrentOrderingIndex(index OpenCodeIndexEvidence) bool {
+	if !index.Unique || index.Partial || len(index.Keys) < 2 {
+		return false
+	}
+	keyPosition := 0
+	for position, key := range index.Keys {
+		if key.Sequence != int64(position) {
+			return false
+		}
+		if !key.Key {
+			continue
+		}
+		if key.ColumnID < 0 || key.Collation != "BINARY" {
+			return false
+		}
+		switch keyPosition {
+		case 0:
+			if key.Name != "session_id" {
+				return false
+			}
+		case 1:
+			if key.Name != "seq" {
+				return false
+			}
+		default:
+			return false
+		}
+		keyPosition++
+	}
+	return keyPosition == 2
 }
 
 func hasOpenCodeColumns(columns []OpenCodeColumnEvidence, required []string, requiredNotNull string) bool {

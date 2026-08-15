@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 18
+const expectedCaseCount = 23
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -36,6 +36,7 @@ const (
 	schemaHybrid             schemaKind = "hybrid"
 	schemaCurrentMissingSeq  schemaKind = "current_missing_seq"
 	schemaCurrentNullableSeq schemaKind = "current_nullable_seq"
+	schemaCurrentPartialSeq  schemaKind = "current_partial_seq"
 	schemaUnsupported        schemaKind = "unsupported"
 )
 
@@ -333,6 +334,7 @@ func (c caseSpec) validateRows() error {
 	}
 	currentIDs := make(map[string]struct{}, len(c.CurrentMessages))
 	currentSeqs := make(map[string]struct{}, len(c.CurrentMessages))
+	hasDuplicateCurrentSeq := false
 	for index, row := range c.CurrentMessages {
 		if err := validateCurrentMessage(row); err != nil {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q current message %d: %w", c.Name, index, err)
@@ -343,9 +345,15 @@ func (c caseSpec) validateRows() error {
 		currentIDs[row.ID] = struct{}{}
 		seqKey := fmt.Sprintf("%s\x00%d", row.SessionID, row.Seq)
 		if _, duplicate := currentSeqs[seqKey]; duplicate {
-			return fmt.Errorf("validate synthetic OpenCode source fixture %q: duplicate seq %d for current session %q", c.Name, row.Seq, row.SessionID)
+			if c.Schema != schemaCurrentPartialSeq {
+				return fmt.Errorf("validate synthetic OpenCode source fixture %q: duplicate seq %d for current session %q", c.Name, row.Seq, row.SessionID)
+			}
+			hasDuplicateCurrentSeq = true
 		}
 		currentSeqs[seqKey] = struct{}{}
+	}
+	if c.Schema == schemaCurrentPartialSeq && !hasDuplicateCurrentSeq {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: partial current ordering schema must contain a duplicate current sequence that proves the cursor-loss hazard", c.Name)
 	}
 	historyIDs := make(map[string]struct{}, len(c.IgnoredHistory))
 	for index, row := range c.IgnoredHistory {
@@ -368,7 +376,7 @@ func (c caseSpec) validateSchemaRows() error {
 		if hasCurrent {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: legacy schema cannot contain current rows", c.Name)
 		}
-	case schemaCurrent:
+	case schemaCurrent, schemaCurrentPartialSeq:
 		if hasLegacy {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: current schema cannot contain legacy rows", c.Name)
 		}
@@ -496,7 +504,7 @@ func (f sourceFormat) validate() error {
 
 func (s schemaKind) validate() error {
 	switch s {
-	case schemaEmpty, schemaLegacy, schemaCurrent, schemaHybrid, schemaCurrentMissingSeq, schemaCurrentNullableSeq, schemaUnsupported:
+	case schemaEmpty, schemaLegacy, schemaCurrent, schemaHybrid, schemaCurrentMissingSeq, schemaCurrentNullableSeq, schemaCurrentPartialSeq, schemaUnsupported:
 		return nil
 	default:
 		return fmt.Errorf("unknown schema kind %q", s)

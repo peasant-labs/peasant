@@ -1,4 +1,4 @@
-declared_cases: 18
+declared_cases: 23
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -76,14 +76,14 @@ cases:
     legacy_parts: []
     current_messages:
       - id: sm_current_1
-        session_id: ses_current_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
         type: message
         time_created: 2000
         time_updated: 2000
         data: '{"role":"user","parts":[{"type":"text","text":"synthetic question"}]}'
         seq: 0
       - id: sm_current_2
-        session_id: ses_current_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
         type: message
         time_created: 2001
         time_updated: 2001
@@ -570,3 +570,160 @@ cases:
         data: '{"type":"text","text":"second synthetic session","time":{"created":1700000000201}}'
     current_messages: []
     ignored_history: []
+
+  - name: current-reader-pages
+    logical_path: current/reader-pages.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 6, ignored_history: 5}
+    expected_catalog:
+      tables: [context, delta, event, input, migration, session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - id: sm_current_late
+        session_id: ses_current_reader_a
+        type: message
+        time_created: 9100
+        time_updated: 9100
+        data: '{"role":"assistant","marker":"seq-20"}'
+        seq: 20
+      - id: sm_current_other_first
+        session_id: ses_current_reader_b
+        type: message
+        time_created: 9000
+        time_updated: 9000
+        data: '{"role":"assistant","marker":"other-session-1"}'
+        seq: 1
+      - id: sm_current_first
+        session_id: ses_current_reader_a
+        type: message
+        time_created: 9000
+        time_updated: 9000
+        data: '{"role":"user","marker":"seq-2"}'
+        seq: 2
+      - id: sm_current_equal_time
+        session_id: ses_current_reader_a
+        type: message
+        time_created: 9000
+        time_updated: 9001
+        data: '{"role":"assistant","marker":"seq-7"}'
+        seq: 7
+      - id: sm_current_last
+        session_id: ses_current_reader_a
+        type: message
+        time_created: 8000
+        time_updated: 9200
+        data: '{"role":"assistant","marker":"seq-41"}'
+        seq: 41
+      - id: sm_current_other_last
+        session_id: ses_current_reader_b
+        type: message
+        time_created: 9200
+        time_updated: 9200
+        data: '{"role":"assistant","marker":"other-session-99"}'
+        seq: 99
+    ignored_history:
+      - {kind: event, id: current_event, session_id: ses_current_reader_a, stable_id: sm_current_first, time_created: 8990, data: '{"marker":"ignored-event"}'}
+      - {kind: delta, id: current_delta, session_id: ses_current_reader_a, stable_id: sm_current_equal_time, time_created: 8991, data: '{"marker":"ignored-delta"}'}
+      - {kind: input, id: current_input, session_id: ses_current_reader_a, stable_id: sm_current_late, time_created: 8992, data: '{"marker":"ignored-input"}'}
+      - {kind: context, id: current_context, session_id: ses_current_reader_a, stable_id: sm_current_late, time_created: 8993, data: '{"marker":"ignored-context"}'}
+      - {kind: migration, id: current_migration, session_id: ses_current_reader_a, stable_id: sm_current_last, time_created: 8994, data: '{"marker":"ignored-migration"}'}
+
+  - name: current-reader-wal
+    logical_path: current/reader-wal.db
+    format: sqlite
+    schema: current
+    journal_mode: wal
+    corruption: ""
+    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 1, ignored_history: 0}
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - id: sm_current_wal_base
+        session_id: ses_current_wal
+        type: message
+        time_created: 9300
+        time_updated: 9300
+        data: '{"role":"user","marker":"wal-base"}'
+        seq: 3
+    ignored_history: []
+
+  - name: current-partial-ordering-index
+    logical_path: current/partial-ordering.db
+    format: sqlite
+    schema: current_partial_seq
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 3, ignored_history: 0}
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_partial_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: sm_partial_a, session_id: ses_partial, type: part, time_created: 9400, time_updated: 9400, data: '{"marker":"duplicate-a"}', seq: 1}
+      - {id: sm_partial_b, session_id: ses_partial, type: part, time_created: 9401, time_updated: 9401, data: '{"marker":"duplicate-b"}', seq: 1}
+      - {id: sm_partial_c, session_id: ses_partial, type: message, time_created: 9402, time_updated: 9402, data: '{"marker":"indexed-row"}', seq: 2}
+    ignored_history: []
+
+  - name: semantic-parity-legacy
+    logical_path: parity/legacy.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 6, legacy_parts: 7, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_01_user, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1000, time_updated: 1010, data: '{"id":"msg_01_user","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"user","path":{"cwd":"/synthetic/parity"},"time":{"created":1000,"completed":1010},"content":"synthetic request"}'}
+      - {id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1020, time_updated: 1090, data: '{"id":"msg_02_assistant","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1020,"completed":1090},"tokens":{"input":7,"output":11,"reasoning":3,"cache":{"read":2,"write":1}}}'}
+      - {id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1100, time_updated: 1110, data: '{"id":"msg_03_system","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1100,"completed":1110},"content":"synthetic compacted context"}'}
+      - {id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1120, time_updated: 1125, data: '{"id":"msg_04_skill","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1120,"completed":1125}}'}
+      - {id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1130, time_updated: 1130, data: '{"id":"msg_05_agent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1130,"completed":1130},"content":"reviewer"}'}
+      - {id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1140, time_updated: 1140, data: '{"id":"msg_06_model","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1140,"completed":1140},"content":"next-model","modelID":"next-model"}'}
+    legacy_parts:
+      - {id: part_01_user, message_id: msg_01_user, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1001, time_updated: 1001, data: '{"id":"part_01_user","messageID":"msg_01_user","type":"text","text":"synthetic request","time":{"created":1001}}'}
+      - {id: part_01_reasoning, message_id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1021, time_updated: 1021, data: '{"id":"part_01_reasoning","messageID":"msg_02_assistant","type":"reasoning","text":"synthetic reasoning","time":{"created":1021}}'}
+      - {id: call_semantic, message_id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1030, time_updated: 1040, data: '{"id":"call_semantic","messageID":"msg_02_assistant","type":"tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":"synthetic output"},"time":{"created":1030,"completed":1040}}'}
+      - {id: part_01_compaction, message_id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1100, time_updated: 1100, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context","time":{"created":1100}}'}
+      - {id: skill_call, message_id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1121, time_updated: 1122, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}'}
+      - {id: part_agent, message_id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1130, time_updated: 1130, data: '{"id":"part_agent","messageID":"msg_05_agent","type":"agent","name":"reviewer","text":"reviewer","time":{"created":1130}}'}
+      - {id: part_subtask, message_id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1140, time_updated: 1140, data: '{"id":"part_subtask","messageID":"msg_06_model","type":"subtask","name":"next-model","text":"next-model","time":{"created":1140}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: semantic-parity-current
+    logical_path: parity/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 0, legacy_parts: 0, current_messages: 6, ignored_history: 1}
+    expected_catalog:
+      tables: [event, session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_01_user, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: user, time_created: 1000, time_updated: 1010, data: '{"id":"msg_01_user","text":"synthetic request","files":[],"agents":[],"metadata":{"cwd":"/synthetic/parity"},"time":{"created":1000}}', seq: 2}
+      - {id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: assistant, time_created: 1020, time_updated: 1090, data: '{"id":"msg_02_assistant","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_semantic","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":"synthetic output"},"time":{"created":1030,"ran":1031,"completed":1040}},{"type":"reasoning","id":"part_01_reasoning","text":"synthetic reasoning","time":{"created":1021,"completed":1029}}],"tokens":{"input":7,"output":11,"reasoning":3,"cache":{"read":2,"write":1}},"time":{"created":1020,"completed":1090}}', seq: 7}
+      - {id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: compaction, time_created: 1100, time_updated: 1110, data: '{"id":"msg_03_system","reason":"auto","summary":"synthetic compacted context","recent":"synthetic recent context","time":{"created":1100}}', seq: 20}
+      - {id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: assistant, time_created: 1120, time_updated: 1125, data: '{"id":"msg_04_skill","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"skill_call","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}],"time":{"created":1120,"completed":1125}}', seq: 21}
+      - {id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: agent-switched, time_created: 1130, time_updated: 1130, data: '{"id":"msg_05_agent","agent":"reviewer","time":{"created":1130}}', seq: 22}
+      - {id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: model-switched, time_created: 1140, time_updated: 1140, data: '{"id":"msg_06_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":1140}}', seq: 23}
+    ignored_history:
+      - {kind: event, id: ignored_semantic_history, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, stable_id: msg_02_assistant, time_created: 1019, data: '{"marker":"HISTORY_MUST_NOT_APPEAR"}'}
