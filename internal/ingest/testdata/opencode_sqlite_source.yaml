@@ -1,0 +1,26 @@
+declared_denied_statements: 8
+denied_statements:
+  - name: insert-row
+    statement: "INSERT INTO session (id) VALUES ('forbidden')"
+    error_contains: forbidden SQLite action
+  - name: disable-query-only
+    statement: "PRAGMA query_only=OFF"
+    error_contains: forbidden SQLite action
+  - name: create-schema
+    statement: "CREATE TABLE forbidden (id INTEGER)"
+    error_contains: forbidden SQLite action
+  - name: vacuum
+    statement: "VACUUM"
+    error_contains: forbidden SQLite action
+  - name: checkpoint
+    statement: "PRAGMA wal_checkpoint(TRUNCATE)"
+    error_contains: forbidden SQLite action
+  - name: reindex
+    statement: "REINDEX"
+    error_contains: forbidden SQLite action
+  - name: attach-database
+    statement: "ATTACH DATABASE ':memory:' AS forbidden"
+    error_contains: forbidden SQLite action
+  - name: change-journal-mode
+    statement: "PRAGMA journal_mode=DELETE"
+    error_contains: forbidden SQLite action
