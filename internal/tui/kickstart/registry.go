@@ -139,7 +139,7 @@ func BuildRegistry(opts Options) settings.Registry {
 				"preview how standard redaction changes your text before you publish.",
 				privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
 				"personally identifiable information (PII), such as an email address.",
-				"standard hides project identity but keeps git remotes until maximum.",
+				"standard hides project identity but keeps git remote urls.",
 			),
 			Fields: []settings.Field{
 				settings.WithDescription(

@@ -3,13 +3,15 @@
 # read as one short sentence; the guide spells out the PII acronym on first use;
 # and the git-remote guidance must agree with the project-identity example the step
 # renders at the Standard level (a Go import path shown as <GO_IMPORT>) instead of
-# promising a git-remote before/after the Standard preview cannot produce.
+# promising a git-remote before/after the Standard preview cannot produce. Standard
+# is the only offered level, so the copy must not name maximum (a refused level the
+# user cannot choose).
 introMaxSentences: 1
 requiredGuideText:
   - "personally identifiable information (PII)"
   - "project identity"
   - "git remote"
-  - "maximum"
 forbiddenGuideText:
+  - "maximum"
   - "standard keeps git remote urls and branch output; maximum removes them"
   - "examples below use synthetic text and the same redactor as explicit publication"
