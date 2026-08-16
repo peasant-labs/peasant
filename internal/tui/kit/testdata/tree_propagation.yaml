@@ -108,13 +108,11 @@ cases:
       p2: checked
       b: checked
 
-  # Select-all is a toggle: on an already-fully-checked forest the key clears the
-  # whole projection instead of doing nothing, so the key is always a visible
-  # action. Its help label flips to "clear all" so it never reads as a hidden clear.
-  # Skip-no-op: a fully-selected forest makes "select all" (the ring's first
-  # step) a no-op, so a single press advances to the next step, "unselect all",
-  # instead - the fix for select-all never doing anything on a first-run
-  # fully-selected forest.
+  # Select-all is the "toggle all" cycle: select all -> unselect all -> reset to
+  # the previous selection. Skip-no-op: a fully-selected forest makes "select all"
+  # (the ring's first step) a no-op, so a single press advances to the next step,
+  # "unselect all", instead - the fix for the key never doing anything on a
+  # first-run fully-selected forest.
   - name: select-all-skip-no-op-on-fully-selected
     forest:
       - id: p1
