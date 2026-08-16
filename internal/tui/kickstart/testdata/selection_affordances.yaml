@@ -8,6 +8,11 @@ savedSelection:
   harnesses:
     claude-code:
       sessions: [cc-parent]
+    # A tracked session in the cursor project too, so both roots carry prior work
+    # and stay expanded - these cases assert affordances (scope keys, facet,
+    # preview, help), not the sessionless-root collapse default.
+    cursor:
+      sessions: [cur-1]
 cases:
   - name: default-shows-one-search-bar-and-row-local-state
     surface: selection

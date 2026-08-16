@@ -253,8 +253,8 @@ func TestMountedKickstartSelectAllNamesProjectScopeAndCommitsCurrentClones(t *te
 	program = declineOAuth(t, program)
 
 	program = pressAndDrain(program, '?')
-	if view := program.View(); !strings.Contains(view, "select all projects") {
-		t.Fatalf("kickstart selection help does not name project scope:\n%s", view)
+	if view := program.View(); !strings.Contains(view, "toggle all") {
+		t.Fatalf("kickstart selection help does not name the select-all cycle:\n%s", view)
 	}
 	program = pressAndDrain(program, '?')
 	program = pressAndDrain(program, 'a')

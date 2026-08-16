@@ -883,6 +883,34 @@ func (a flowAvailability) AvailableActions() []keymap.ActionID {
 	return effectiveAvailability(dedupeActions(out), f.focusedFieldCapturesPrintableInput())
 }
 
+// footerPruningField is an optional Field refinement: a field that wants its
+// step's footer trimmed to a few primary keys, with the rest still reachable
+// through help. The keys it returns are advisory - FooterView intersects them
+// with what is dispatchable - so a field can name a key that is not currently
+// available without ever producing a footer hint no press could match.
+type footerPruningField interface {
+	primaryFooterActions() []keymap.ActionID
+}
+
+// FooterActions lets the footer hint bar show fewer keys than the help overlay
+// when the focused field opts into a compact footer. The help overlay keeps
+// consuming AvailableActions, so it still lists everything dispatchable.
+func (a flowAvailability) FooterActions() []keymap.ActionID {
+	f := a.flow
+	if f.OnReceipt() || f.focusField < 0 || f.focusField >= len(f.steps[f.cur].Fields) {
+		return a.AvailableActions()
+	}
+	pruner, ok := f.steps[f.cur].Fields[f.focusField].(footerPruningField)
+	if !ok {
+		return a.AvailableActions()
+	}
+	primary := pruner.primaryFooterActions()
+	if len(primary) == 0 {
+		return a.AvailableActions()
+	}
+	return primary
+}
+
 type flowViewportKeyAvailability struct{}
 
 func (flowViewportKeyAvailability) AvailableActions() []keymap.ActionID {

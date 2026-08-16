@@ -309,6 +309,53 @@ type Tree struct {
 	// facet), including an intermediate view that hides that row.
 	projectionAnchor      cursorAnchor
 	projectionViewportRow int
+
+	// selectCyclePhase is the last-applied target of the select-all cycle (see
+	// [Tree.cycleSelectAll]), or selectAllPhaseInactive when no cycle is in
+	// progress - the zero value, so a freshly-constructed Tree starts inactive.
+	selectCyclePhase selectAllPhase
+	// selectBaseline snapshots each selectable leaf's state (keyed by canonical
+	// identity) at the moment the cycle activates, so its third ring step can
+	// restore exactly what the user had before they started pressing the key.
+	// Nil while the cycle is inactive.
+	selectBaseline map[*TreeNode]TriState
+}
+
+// selectAllPhase is the closed set of targets the select-all key cycles
+// through. It is the last-applied ring step, not a UI mode: Inactive means the
+// cycle has not run since the baseline was last invalidated, so the next press
+// captures a fresh baseline and starts the ring.
+type selectAllPhase int
+
+const (
+	// selectAllPhaseInactive means the cycle is not currently engaged: a manual
+	// selection edit (toggle or select-under-project) invalidates it, and the
+	// next select-all press re-captures the baseline before applying the ring's
+	// first live step.
+	selectAllPhaseInactive selectAllPhase = iota
+	// selectAllPhaseSelected is the ring step that selects every selectable leaf
+	// in the whole forest.
+	selectAllPhaseSelected
+	// selectAllPhaseUnselected is the ring step that clears every selectable
+	// leaf in the whole forest.
+	selectAllPhaseUnselected
+	// selectAllPhaseRestored is the ring step that restores every selectable
+	// leaf to the baseline snapshot captured when the cycle activated.
+	selectAllPhaseRestored
+)
+
+// nextSelectAllPhase returns the ring step that follows p: Inactive and
+// Restored both lead back to Selected, so a fresh cycle and a completed lap
+// both begin with "select all".
+func nextSelectAllPhase(p selectAllPhase) selectAllPhase {
+	switch p {
+	case selectAllPhaseSelected:
+		return selectAllPhaseUnselected
+	case selectAllPhaseUnselected:
+		return selectAllPhaseRestored
+	default: // selectAllPhaseInactive, selectAllPhaseRestored
+		return selectAllPhaseSelected
+	}
 }
 
 // NewTree builds a Tree over theme t that loads its forest from src. It starts
@@ -431,6 +478,25 @@ func (t Tree) WithUnprojectedRoots(roots []*TreeNode) Tree {
 	t = t.replaceRootsAt(roots, anchor, viewportRow)
 	t.projectionAnchor = cursorAnchor{depth: -1}
 	t.projectionViewportRow = 0
+	return t
+}
+
+// CollapseInitial records each given interior node as collapsed, so its
+// children start hidden until the user expands it, without changing any other
+// node's expansion. It is how a source seeds a folded-by-default root - a
+// project with no already-imported or tracked sessions, say - while leaving the
+// expand/collapse keys fully in control afterward. Leaves and nil nodes are
+// ignored. Because expansion is keyed by canonical node identity, a node
+// collapsed here stays collapsed under a later facet projection of the same
+// forest.
+func (t Tree) CollapseInitial(nodes []*TreeNode) Tree {
+	for _, node := range nodes {
+		if node == nil || node.isLeaf() {
+			continue
+		}
+		t.expanded[t.canonicalNode(node)] = false
+	}
+	t.clampWindow()
 	return t
 }
 
@@ -694,9 +760,18 @@ func (t Tree) subtreeHasSelectable(node *TreeNode) bool {
 	return selectable
 }
 
+// hasSelectableNode reports whether the visible projection holds any selectable
+// leaf at all, Checked or not. The select/clear-all toggle is offered whenever
+// one exists, so the key is never inert on a forest that starts fully selected.
 func (t Tree) hasSelectableNode() bool {
 	for _, root := range t.renderRoots() {
-		if t.subtreeHasSelectable(root) {
+		found := false
+		walk(root, func(c *TreeNode) {
+			if c.isLeaf() && c.State != Conflict {
+				found = true
+			}
+		})
+		if found {
 			return true
 		}
 	}
@@ -873,7 +948,7 @@ func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 			t.toggle(node)
 		}
 	case keymap.ActionSelectAll:
-		t.toggleAll()
+		t.cycleSelectAll()
 	case keymap.ActionSelectUnderProject:
 		t.selectUnderProject()
 	}
@@ -961,36 +1036,109 @@ func (t *Tree) toggle(node *TreeNode) {
 	}
 	setSubtree(node, target)
 	t.recompute()
+	t.invalidateSelectCycle()
 }
 
-// toggleAll selects every selectable node represented by the current visible
-// projection, or clears that projection when everything selectable in it is
-// already Checked.
-func (t *Tree) toggleAll() {
-	target := Checked
-	if t.allChecked() {
-		target = Unchecked
-	}
-	for _, r := range t.renderRoots() {
-		setSubtree(r, target)
-	}
-	t.recompute()
+// invalidateSelectCycle drops any in-progress select-all cycle so the next
+// press starts a fresh lap over the selection the user just made by hand: it
+// re-captures the baseline instead of restoring one that predates this edit.
+func (t *Tree) invalidateSelectCycle() {
+	t.selectCyclePhase = selectAllPhaseInactive
+	t.selectBaseline = nil
 }
 
-// allChecked reports whether every non-Conflict node represented by the current
-// visible projection is Checked. A projection containing a Conflict is never
-// "all checked", so select-all keeps selecting rather than flipping to clear.
-func (t Tree) allChecked() bool {
-	all := true
-	roots := t.renderRoots()
-	for _, r := range roots {
+// selectableLeaves returns every selectable (non-Conflict) leaf across the
+// WHOLE forest - every root, not the current text-filtered projection - so the
+// select-all cycle and its baseline always operate over the complete tree.
+func (t Tree) selectableLeaves() []*TreeNode {
+	var leaves []*TreeNode
+	for _, r := range t.roots {
 		walk(r, func(n *TreeNode) {
-			if n.State != Checked {
-				all = false
+			if n.isLeaf() && n.State != Conflict {
+				leaves = append(leaves, n)
 			}
 		})
 	}
-	return all && len(roots) > 0
+	return leaves
+}
+
+// captureSelectBaseline snapshots every selectable leaf's current state as the
+// cycle's restore target. Called once when the cycle activates (transitions
+// out of selectAllPhaseInactive).
+func (t *Tree) captureSelectBaseline() {
+	baseline := make(map[*TreeNode]TriState, len(t.roots))
+	for _, leaf := range t.selectableLeaves() {
+		baseline[leaf] = leaf.State
+	}
+	t.selectBaseline = baseline
+}
+
+// targetForSelectAllPhase reports the state phase would set leaf to. A
+// selectAllPhaseRestored leaf absent from the baseline (should not happen -
+// the baseline is captured over the same full forest) falls back to Unchecked
+// rather than panicking.
+func (t Tree) targetForSelectAllPhase(phase selectAllPhase, leaf *TreeNode) TriState {
+	switch phase {
+	case selectAllPhaseSelected:
+		return Checked
+	case selectAllPhaseUnselected:
+		return Unchecked
+	case selectAllPhaseRestored:
+		return t.selectBaseline[leaf]
+	default:
+		return leaf.State
+	}
+}
+
+// applySelectAllPhase sets every selectable leaf to phase's target state, but
+// ONLY when doing so changes at least one leaf - the "skip no-op" rule that
+// keeps every select-all press visible. It reports whether it applied a
+// change.
+func (t *Tree) applySelectAllPhase(phase selectAllPhase) bool {
+	leaves := t.selectableLeaves()
+	changed := false
+	for _, leaf := range leaves {
+		if leaf.State != t.targetForSelectAllPhase(phase, leaf) {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return false
+	}
+	for _, leaf := range leaves {
+		leaf.State = t.targetForSelectAllPhase(phase, leaf)
+	}
+	t.recompute()
+	return true
+}
+
+// cycleSelectAll advances the select-all key through its three-way ring -
+// select all, unselect all, reset to the selection captured when the cycle
+// activated - always producing a VISIBLE change. A ring step that would be a
+// no-op against the current state (for example "select all" on an
+// already-fully-selected forest) is skipped in favor of the next step, up to
+// one full lap; if every step is a no-op the tree is left unchanged.
+//
+// The cycle activates - and captures a fresh baseline - the first time this
+// runs after [Tree.invalidateSelectCycle] (a manual toggle or
+// select-under-project). It operates over the WHOLE forest, not the current
+// text-filtered projection, matching [Tree.selectableLeaves].
+func (t *Tree) cycleSelectAll() {
+	if t.selectCyclePhase == selectAllPhaseInactive {
+		t.captureSelectBaseline()
+	}
+	phase := t.selectCyclePhase
+	for range []selectAllPhase{selectAllPhaseSelected, selectAllPhaseUnselected, selectAllPhaseRestored} {
+		phase = nextSelectAllPhase(phase)
+		if t.applySelectAllPhase(phase) {
+			t.selectCyclePhase = phase
+			return
+		}
+	}
+	// Every ring target already matches the current forest: leave the cycle's
+	// phase and baseline untouched so a subsequent manual edit still
+	// invalidates it normally.
 }
 
 // setAllExpanded expands (or collapses) every controllable interior node
@@ -1036,6 +1184,7 @@ func (t *Tree) selectUnderProject() {
 	root := t.rootAncestor(node)
 	setSubtree(root, Checked)
 	t.recompute()
+	t.invalidateSelectCycle()
 }
 
 // moveToProject moves the cursor to the next (delta>0) or previous (delta<0)

@@ -76,9 +76,19 @@ type treeField struct {
 	// initializeSelection marks the saved baseline as tracked and applies the
 	// working draft whenever a fresh forest loads.
 	initializeSelection bool
-	// selectAllHelp narrows the generic select-all action's user-facing scope.
-	// The key and action ID remain canonical.
+	// selectAllHelp labels the select-all cycle key. It is a single static
+	// label - the cycle's three targets (select all / unselect all / reset to
+	// previous selection) are explained in the help overlay, not swapped in and
+	// out of the footer. The key and action ID remain canonical.
 	selectAllHelp string
+	// compactFooter trims this field's step footer to the primary navigation keys
+	// (help, next, prev) and relabels the advance key so a first-time user can see
+	// how to progress. The full key set stays reachable through help.
+	compactFooter bool
+	// collapseSessionlessRoots folds a freshly-loaded project root to the project
+	// line when none of its sessions are already imported or tracked, so a first
+	// run reads as a short list of projects rather than every session expanded.
+	collapseSessionlessRoots bool
 
 	// full is the whole forest the source last loaded; view is the (possibly
 	// narrowed) forest the tree currently renders, sharing full's leaf pointers.
@@ -155,11 +165,26 @@ func WithSelectionRestoration() TreeOption {
 	return func(f *treeField) { f.restoreSelection = true }
 }
 
-// WithSelectAllHelp gives this tree a scope-specific description for the
-// canonical select-all action. It changes no key binding and leaves unrelated
-// trees on the generic "select all" wording.
-func WithSelectAllHelp(description string) TreeOption {
-	return func(f *treeField) { f.selectAllHelp = description }
+// WithSelectAllHelp gives this tree a scope-specific static label for the
+// canonical select-all cycle key. It changes no key binding.
+func WithSelectAllHelp(label string) TreeOption {
+	return func(f *treeField) { f.selectAllHelp = label }
+}
+
+// WithCompactFooter trims this field's step footer to the primary navigation
+// keys - help, next, and (when it exists) previous - and relabels the advance
+// key so first-time users see how to move on without opening help. The rest of
+// the tree's keys stay dispatchable and remain listed in the help overlay.
+func WithCompactFooter() TreeOption {
+	return func(f *treeField) { f.compactFooter = true }
+}
+
+// WithCollapseSessionlessRoots folds a freshly-loaded project root down to the
+// project line when it has no already-imported or tracked sessions, so a first
+// run opens as a short list of projects instead of every session expanded. A
+// root that does carry imported or tracked work keeps the default expansion.
+func WithCollapseSessionlessRoots() TreeOption {
+	return func(f *treeField) { f.collapseSessionlessRoots = true }
 }
 
 // WithPreviewRatio sets the fraction of the tree/preview region assigned to the
@@ -278,17 +303,47 @@ func (f *treeField) availableActions() []keymap.ActionID {
 
 func (f *treeField) actionKeymap() keymap.Keymap {
 	km := keymap.Default()
-	if f.selectAllHelp == "" {
-		return km
+	if f.selectAllHelp != "" {
+		if binding, ok := km[keymap.ActionSelectAll]; ok {
+			help := binding.Help()
+			binding.SetHelp(help.Key, f.selectAllHelp)
+			km[keymap.ActionSelectAll] = binding
+		}
 	}
-	binding, ok := km[keymap.ActionSelectAll]
-	if !ok {
-		return km
+	if f.compactFooter {
+		if binding, ok := km[keymap.ActionNextField]; ok {
+			help := binding.Help()
+			binding.SetHelp(help.Key, treeAdvanceHelp)
+			km[keymap.ActionNextField] = binding
+		}
 	}
-	help := binding.Help()
-	binding.SetHelp(help.Key, f.selectAllHelp)
-	km[keymap.ActionSelectAll] = binding
 	return km
+}
+
+// treeAdvanceHelp is the compact-footer label for the advance key, chosen so a
+// first-time user reads it as "move on to the next step" rather than the generic
+// "next field".
+const treeAdvanceHelp = "next step"
+
+// primaryFooterActions reports the small set of keys a compact-footer tree wants
+// the step footer to show; the flow intersects it with what is dispatchable, and
+// the help overlay still lists the full set. A tree without the compact footer
+// returns nil, leaving the flow to footer its complete action set.
+func (f *treeField) primaryFooterActions() []keymap.ActionID {
+	if !f.compactFooter {
+		return nil
+	}
+	// While the filter is being typed, or the preview pane holds focus, the
+	// relevant keys are that mode's own (apply/clear the filter, scroll the
+	// preview). Pruning to the step-navigation keys there would hide them, so the
+	// compact footer applies only to ordinary tree navigation.
+	if f.tree.FilterState().Editing() {
+		return nil
+	}
+	if f.hasPreview() && f.split.ActivePane() != kit.PaneLeft {
+		return nil
+	}
+	return []keymap.ActionID{keymap.ActionNextField, keymap.ActionPrevField, keymap.ActionSelectAll, keymap.ActionHelp}
 }
 
 // facetAvailable keeps facet dispatch and its advertised key in lockstep. A
@@ -348,7 +403,18 @@ func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cm
 	treeOwned := f.tree.OwnsAsync(msg)
 	intent := f.captureSelectionIntent(msg)
 	var before selectableState
-	exactAction := (f.restoreSelection || f.initializeSelection) && f.baselineApplied && intent.action != keymap.ActionUnknown && isExactProjectFirstForest(f.tree.Roots())
+	// select-all is a whole-forest action: it can touch every project in one
+	// press, so a single node anywhere in a heterogeneous real forest that
+	// fails the STRICT per-node identity checks inside
+	// snapshotSelectableState (e.g. a session whose harness is not on the
+	// known-harness allowlist) would otherwise revert the entire action,
+	// including sibling projects that were perfectly fine. isExactProjectFirstForest
+	// only gates on harness-nonempty + a resolvable clone path, which is not
+	// as strict as the snapshot it gates, so this mismatch is real, not
+	// theoretical. Route select-all through the same robust, tolerant
+	// full-derive path used for non-exact forests instead of the strict
+	// incremental snapshot/reconcile-with-revert-on-error path.
+	exactAction := (f.restoreSelection || f.initializeSelection) && f.baselineApplied && intent.action != keymap.ActionUnknown && intent.action != keymap.ActionSelectAll && isExactProjectFirstForest(f.tree.Roots())
 	if exactAction {
 		var err error
 		before, err = f.snapshotSelectableState(intent)
@@ -812,33 +878,71 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 		}
 		return scopes, nil
 	case keymap.ActionSelectAll:
-		changedProjects := map[selectableNodeKey]bool{}
+		// The select-all cycle's third ring step restores a baseline that may be
+		// PARTIAL within a project (some sessions were checked, some were not),
+		// so unlike its first two steps a single project's changed sessions do
+		// not necessarily move in one direction together. changedSessionsByProject
+		// groups this action's changed sessions per project; a project whose
+		// changed sessions all moved the same way still collapses to one project
+		// scope (preserving the existing select-all/unselect-all shape), while a
+		// project left in a mixed state falls back to one session scope per
+		// changed session so the reconciler applies each individually.
+		projectKeyOf := func(key selectableNodeKey) selectableNodeKey {
+			return selectableNodeKey{projectIdentity: key.projectIdentity, harness: key.harness, clonePath: key.clonePath}
+		}
+		changedSessionsByProject := map[selectableNodeKey][]selectableNodeKey{}
 		for key := range changed {
 			if key.sessionID == "" {
 				continue
 			}
-			changedProjects[selectableNodeKey{
-				projectIdentity: key.projectIdentity,
-				harness:         key.harness,
-				clonePath:       key.clonePath,
-			}] = true
+			projectKey := projectKeyOf(key)
+			changedSessionsByProject[projectKey] = append(changedSessionsByProject[projectKey], key)
 		}
-		keys := make([]selectableNodeKey, 0, len(changedProjects))
-		for key := range changedProjects {
-			keys = append(keys, key)
+		// allSessionsByProject holds every selectable session under a touched
+		// project - changed or not - because uniformity has to be judged against
+		// the project's WHOLE post-action state, not just the sessions that moved
+		// this press. A restore step can leave some sessions exactly where they
+		// already were while moving others, and only looking at the changed subset
+		// would misread that as "uniform" and collapse it into a whole-project
+		// scope that clobbers the sessions that were never touched.
+		allSessionsByProject := map[selectableNodeKey][]selectableNodeKey{}
+		for key := range after {
+			if key.sessionID == "" {
+				continue
+			}
+			projectKey := projectKeyOf(key)
+			allSessionsByProject[projectKey] = append(allSessionsByProject[projectKey], key)
 		}
-		sortSelectableNodeKeys(keys)
+		projectKeys := make([]selectableNodeKey, 0, len(changedSessionsByProject))
+		for key := range changedSessionsByProject {
+			projectKeys = append(projectKeys, key)
+		}
+		sortSelectableNodeKeys(projectKeys)
 		var scopes []selectionScope
-		for _, projectKey := range keys {
-			selected, err := changedProjectTarget(projectKey, changed, after)
+		for _, projectKey := range projectKeys {
+			allKeys := append([]selectableNodeKey(nil), allSessionsByProject[projectKey]...)
+			sortSelectableNodeKeys(allKeys)
+			selected, uniform, err := uniformSelectAllTarget(allKeys, after)
 			if err != nil {
 				return nil, err
 			}
-			scope, err := makeScope(projectKey, selectionScopeProject, selected)
-			if err != nil {
-				return nil, err
+			if uniform {
+				scope, err := makeScope(projectKey, selectionScopeProject, selected)
+				if err != nil {
+					return nil, err
+				}
+				scopes = append(scopes, scope)
+				continue
 			}
-			scopes = append(scopes, scope)
+			changedKeys := changedSessionsByProject[projectKey]
+			sortSelectableNodeKeys(changedKeys)
+			for _, sessionKey := range changedKeys {
+				scope, err := makeScope(sessionKey, selectionScopeSession, after[sessionKey].state == kit.Checked)
+				if err != nil {
+					return nil, err
+				}
+				scopes = append(scopes, scope)
+			}
 		}
 		return scopes, nil
 	default:
@@ -865,27 +969,31 @@ func sortSelectableNodeKeys(keys []selectableNodeKey) {
 	})
 }
 
-func changedProjectTarget(project selectableNodeKey, changed map[selectableNodeKey]bool, after selectableState) (bool, error) {
-	found := false
-	selected := false
-	for key := range changed {
-		if key.projectIdentity != project.projectIdentity || key.harness != project.harness || key.clonePath != project.clonePath || key.sessionID == "" {
-			continue
-		}
+// uniformSelectAllTarget reports the single Checked/Unchecked direction every
+// key in sessionKeys moved to, and true, when they all agree; otherwise it
+// reports uniform=false so the caller falls back to per-session scopes - the
+// select-all cycle's reset-to-baseline step can legitimately leave a project
+// PARTIAL (some sessions restored checked, others unchecked).
+func uniformSelectAllTarget(sessionKeys []selectableNodeKey, after selectableState) (selected, uniform bool, err error) {
+	if len(sessionKeys) == 0 {
+		return false, false, fmt.Errorf("select-all changed a project without changing a selectable session")
+	}
+	for i, key := range sessionKeys {
 		state := after[key].state
 		if state != kit.Checked && state != kit.Unchecked {
-			return false, fmt.Errorf("changed session %q ended in non-binary state %s", key.sessionID, state)
+			return false, false, fmt.Errorf("changed session %q ended in non-binary state %s", key.sessionID, state)
 		}
 		value := state == kit.Checked
-		if found && value != selected {
-			return false, fmt.Errorf("select-all produced mixed targets under project %q path %q", project.projectIdentity, project.clonePath)
+		if i == 0 {
+			selected = value
+			uniform = true
+			continue
 		}
-		found, selected = true, value
+		if value != selected {
+			uniform = false
+		}
 	}
-	if !found {
-		return false, fmt.Errorf("select-all changed project %q path %q without changing a selectable session", project.projectIdentity, project.clonePath)
-	}
-	return selected, nil
+	return selected, uniform, nil
 }
 
 func (f *treeField) restoreSelectableState(before selectableState) {
@@ -1045,7 +1153,38 @@ func (f *treeField) captureForest(d *Draft) {
 	f.full = roots
 	f.view = roots
 	f.tree = f.tree.WithRoots(roots)
+	if f.collapseSessionlessRoots {
+		f.tree = f.tree.CollapseInitial(sessionlessRoots(roots))
+	}
 	f.applyFacet()
+}
+
+// sessionlessRoots returns the project roots that carry no already-imported or
+// previously-tracked session, so the caller can fold them by default. Both the
+// imported and tracked marks are set before this runs (a session node from the
+// scanner, a tracked node from ApplyTrackedSelection), so the decision reads the
+// rows exactly as the user will see them.
+func sessionlessRoots(roots []*kit.TreeNode) []*kit.TreeNode {
+	var out []*kit.TreeNode
+	for _, root := range roots {
+		if !rootHasImportedOrTrackedSession(root) {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+func rootHasImportedOrTrackedSession(root *kit.TreeNode) bool {
+	found := false
+	walkNodes(root, func(node *kit.TreeNode) {
+		if node.Meta == nil {
+			return
+		}
+		if node.Meta[MetaIngested] == MetaIngestedValue || node.Meta[MetaTracked] == MetaTrackedValue {
+			found = true
+		}
+	})
+	return found
 }
 
 // selectionRoots returns the forest a selection is derived from: always the
