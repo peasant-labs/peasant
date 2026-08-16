@@ -257,16 +257,27 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Project + breadcrumb for the origin-aware trail (Map/Review origin crumb).
   const project = detail?.project ?? projectName;
   const crumb = originCrumb(scope, projectHash);
-  // The trail is {project} / {session}, and the project crumb leads to that
-  // project's SESSION LIST — the surface you came from — not to the map. The
-  // map is capability-gated, so a map-home crumb is a dead end on a default
-  // server; there is no reason to route a reader there from a transcript.
+  // The trail is projects / {project} / {session} — the path you walked to get
+  // here, each crumb being the page it names. The project crumb leads to that
+  // project's SESSION LIST, not to the map: the map is capability-gated, so a
+  // map crumb is a dead end on a default server and there is no reason to route
+  // a reader there from a transcript.
   //
-  // An origin crumb (map · node, changes · branch) still takes the lead slot
+  // The project crumb keeps the project NAME rather than a literal "sessions",
+  // because it is the only part of the trail that says which project you are in.
+  //
+  // The last crumb is the session ID, NOT its title: the hero renders the title
+  // directly beneath the trail, so repeating it there says the same thing twice
+  // and — titles being a sentence long — pushes the crumbs that actually
+  // navigate off to the side. The ID is fixed-width and adds the one
+  // identifying fact the hero does not show.
+  //
+  // An origin crumb (map · node, changes · branch) is inserted after the root
   // when you arrived from one of those surfaces, so the way back to where you
-  // actually were is preserved.
-  const sessionCrumb = sessionTitle ?? (detail?.id ?? sessionId).slice(0, 8);
+  // actually were survives alongside the way back to the top.
+  const sessionCrumb = (detail?.id ?? sessionId).slice(0, 8);
   const breadcrumb: CrumbItem[] = [
+    { label: 'projects', href: '/' },
     ...(crumb ? [crumb] : []),
     { label: displayProject(project), href: sessionsHref(projectHash) },
     { label: sessionCrumb },
