@@ -785,3 +785,37 @@ textarea::placeholder {
     flex: 1 1 auto;
   }
 }
+
+/* ============================================
+   SESSION METRICS DISCLOSURE
+   ============================================
+   The transcript composite's hero always renders its metrics strip
+   (`.txn-meta .metaitem` — duration · turns · tools · tokens · commits · files
+   · churn) and exposes no prop to collapse it. Those are reference figures you
+   consult occasionally, not identity you need on screen the whole time you are
+   reading a transcript, so SessionDetailV2 owns a `details` disclosure in the
+   hero's `headerActions` slot and stamps this class on its wrapper when closed.
+
+   Scoped to `.metaitem` on purpose: the sibling `.chip` elements in the same
+   row are outcome, harness and model — session IDENTITY, which stays visible.
+   Uses `display: none` rather than visibility/height so the row reflows and
+   leaves no gap. */
+.txn-metrics-collapsed .txn-meta .metaitem {
+  display: none;
+}
+
+/* ============================================
+   TRANSCRIPT KEYBOARD-HINT STRIP
+   ============================================
+   The transcript composite renders its shortcut strip (`.txn-hint` — "⌘F
+   search · j/k step turns") on every tab, where it sits under the content for
+   the whole read. Peasant shows it on the `highlights` tab only, so it reads as
+   an orientation aid on the session's landing view rather than persistent
+   furniture under the transcript.
+
+   The composite exposes no prop for it, so SessionDetailV2 lifts the viewer's
+   tab (its supported controlled-tab path) and stamps this class on the wrapper
+   whenever the active tab is not `highlights`. */
+.txn-hints-hidden .txn-hint {
+  display: none;
+}
