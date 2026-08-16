@@ -64,7 +64,13 @@ func (p Phase) String() string {
 // LoginFunc performs the village OAuth login and returns the authenticated
 // username. Production injects the path-aware internal/auth.LoginFrom runner so
 // the program never reaches for auth or the network itself; a test supplies a fake.
-type LoginFunc func(ctx context.Context) (username string, err error)
+//
+// onURL, when the runner calls it, reports the exact login URL BEFORE the
+// runner blocks on the OAuth callback — the "connecting to village" spinner
+// renders it so the user always has a manual fallback even when the browser
+// never opens or opens the wrong profile. The runner may call onURL zero or
+// one times; a nil onURL must never be called.
+type LoginFunc func(ctx context.Context, onURL func(string)) (username string, err error)
 
 // IngestFunc runs local transcript ingest after the config is saved and returns
 // its summary. Production wraps the mounted FTUE local-ingest runner, closed
@@ -130,6 +136,15 @@ type loginDoneMsg struct {
 	epoch    uint64
 }
 
+// loginURLMsg carries the login URL the injected LoginFunc reported via onURL,
+// BEFORE the runner blocks on the OAuth callback. epoch ties it to the attempt
+// that produced it, exactly like loginDoneMsg, so a URL from an interrupted or
+// superseded attempt cannot appear on a later prompt.
+type loginURLMsg struct {
+	url   string
+	epoch uint64
+}
+
 // ingestDoneMsg carries the result of the injected IngestFunc.
 type ingestDoneMsg struct {
 	result *ftue.IngestResult
@@ -192,6 +207,10 @@ type Program struct {
 	authInFlt  bool
 	connection *villageConnectionState
 	loginErr   error
+	// loginURL is the login URL reported by the in-flight attempt's onURL
+	// callback, shown under the connecting spinner. It is cleared whenever an
+	// attempt starts or resolves so a stale URL never survives its attempt.
+	loginURL string
 	// loginCancel cancels the in-flight login attempt. It is set when a login
 	// starts and cleared when the attempt resolves or is interrupted, so a key
 	// press on the spinner can abort a login the runner would otherwise block on.
@@ -347,6 +366,12 @@ func (p Program) Update(msg tea.Msg) (Program, tea.Cmd) {
 // advances to the flow.
 func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
+	case loginURLMsg:
+		if p.staleLoginURL(m) {
+			return p, nil
+		}
+		p.loginURL = m.url
+		return p, nil
 	case loginDoneMsg:
 		if p.staleLogin(m) {
 			return p, nil
@@ -393,21 +418,53 @@ func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 // tick.
 func (p Program) beginLogin() (Program, tea.Cmd) {
 	p.loginErr = nil
+	p.loginURL = ""
 	p.authInFlt = true
 	p.spinner = p.spinner.SetLabel(connectingLabel)
 	ctx, cancel := context.WithCancel(p.deps.Context)
 	p.loginCancel = cancel
 	p.loginEpoch++
-	return p, tea.Batch(p.runLogin(ctx, p.loginEpoch), p.spinner.Tick())
+	urlCh := make(chan string, 1)
+	return p, tea.Batch(p.runLogin(ctx, p.loginEpoch, urlCh), p.waitForLoginURL(urlCh, p.loginEpoch), p.spinner.Tick())
 }
 
 // runLogin issues the injected login runner for one attempt. The attempt's epoch
 // travels with its result so an interrupted attempt's late result is ignored.
-func (p Program) runLogin(ctx context.Context, epoch uint64) tea.Cmd {
+// onURL forwards the runner's pre-callback URL report onto urlCh, non-blocking
+// so a runner that never reports a URL (or a fake with no onURL support) cannot
+// stall the login itself.
+func (p Program) runLogin(ctx context.Context, epoch uint64, urlCh chan<- string) tea.Cmd {
 	login := p.deps.Login
+	onURL := func(url string) {
+		select {
+		case urlCh <- url:
+		default:
+		}
+	}
 	return func() tea.Msg {
-		username, err := login(ctx)
+		// Closing urlCh after the runner returns guarantees waitForLoginURL's
+		// receive unblocks even when the runner never calls onURL (a fake without
+		// URL support, or a real attempt that fails before building one) — without
+		// this, that command's goroutine would block on the channel forever.
+		defer close(urlCh)
+		username, err := login(ctx, onURL)
 		return loginDoneMsg{username: username, err: err, epoch: epoch}
+	}
+}
+
+// waitForLoginURL returns a command that resolves once the in-flight runner
+// reports its login URL on urlCh (see runLogin's onURL), tagging the result
+// with the attempt's epoch so a stale delivery is ignored exactly like
+// loginDoneMsg. runLogin closes urlCh once the attempt returns; if no URL was
+// ever sent, the receive yields the zero value and this command emits no
+// message (bubbletea drops a nil tea.Msg).
+func (p Program) waitForLoginURL(urlCh <-chan string, epoch uint64) tea.Cmd {
+	return func() tea.Msg {
+		url, ok := <-urlCh
+		if !ok {
+			return nil
+		}
+		return loginURLMsg{url: url, epoch: epoch}
 	}
 }
 
@@ -420,12 +477,20 @@ func (p Program) clearLogin() Program {
 		p.loginCancel = nil
 	}
 	p.authInFlt = false
+	p.loginURL = ""
 	return p
 }
 
 // staleLogin reports whether a login result belongs to an attempt that is no
 // longer current: a superseded epoch, or one already cleared by an interrupt.
 func (p Program) staleLogin(m loginDoneMsg) bool {
+	return !p.authInFlt || m.epoch != p.loginEpoch
+}
+
+// staleLoginURL is staleLogin's twin for loginURLMsg: it discards a URL report
+// from an attempt that is no longer the current in-flight one, so a canceled
+// or superseded attempt's URL can never appear under a later prompt.
+func (p Program) staleLoginURL(m loginURLMsg) bool {
 	return !p.authInFlt || m.epoch != p.loginEpoch
 }
 
@@ -602,6 +667,12 @@ func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 // the mounted sharing step.
 func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
+	case loginURLMsg:
+		if p.staleLoginURL(m) {
+			return p, nil
+		}
+		p.loginURL = m.url
+		return p, nil
 	case loginDoneMsg:
 		if p.staleLogin(m) {
 			return p, nil
@@ -1003,12 +1074,15 @@ func dialogLine(b *strings.Builder, style lipgloss.Style, content string, width 
 // returns to the prompt, ctrl+c quits kickstart.
 func (p Program) viewConnecting() string {
 	styles := p.deps.Theme.Styles()
-	body := strings.Join([]string{
-		p.spinner.View(),
-		"",
-		styles.Muted.Render("press esc to cancel, ctrl+c to quit"),
-	}, "\n")
-	return p.centered(body)
+	lines := []string{p.spinner.View(), ""}
+	if p.loginURL != "" {
+		lines = append(lines,
+			styles.Muted.Render("opening your browser. can't see it? open this link:"),
+			styles.Selected.Render(p.loginURL),
+			"")
+	}
+	lines = append(lines, styles.Muted.Render("press esc to cancel, ctrl+c to quit"))
+	return p.centered(strings.Join(lines, "\n"))
 }
 
 // dialogStyles derives the Header/Muted/Danger variants the connect and

@@ -19,23 +19,29 @@ import (
 // When forceReauth is true, the village is asked to force GitHub account
 // selection (useful when switching accounts).
 func Login(ctx context.Context, villageURL string, forceReauth bool) (*Credentials, error) {
-	return LoginFrom(ctx, villageURL, forceReauth, "")
+	return LoginFrom(ctx, villageURL, forceReauth, "", nil)
 }
 
 // LoginFrom performs Login with every credential-store operation pinned to the
 // same XDG config-home override. The pre-check and successful callback save can
 // therefore never collide with a different default profile.
-func LoginFrom(ctx context.Context, villageURL string, forceReauth bool, xdgConfigHomeOverride string) (*Credentials, error) {
-	return loginFromWith(ctx, villageURL, forceReauth, xdgConfigHomeOverride, browserLogin, time.Now)
+//
+// onURL, when non-nil, receives the exact login URL the runner is about to open
+// (or ask the user to open) BEFORE it blocks waiting for the OAuth callback.
+// This is the progress boundary a caller uses to surface the URL somewhere the
+// browser-open failure message on stderr would not reach (e.g. a TUI alt-screen).
+func LoginFrom(ctx context.Context, villageURL string, forceReauth bool, xdgConfigHomeOverride string, onURL func(string)) (*Credentials, error) {
+	return loginFromWith(ctx, villageURL, forceReauth, xdgConfigHomeOverride, onURL, browserLogin, time.Now)
 }
 
-type browserLoginFunc func(context.Context, string) (*Credentials, error)
+type browserLoginFunc func(context.Context, string, func(string)) (*Credentials, error)
 
 func loginFromWith(
 	ctx context.Context,
 	villageURL string,
 	forceReauth bool,
 	xdgConfigHomeOverride string,
+	onURL func(string),
 	login browserLoginFunc,
 	now func() time.Time,
 ) (*Credentials, error) {
@@ -57,7 +63,7 @@ func loginFromWith(
 	if now == nil {
 		return nil, fmt.Errorf("perform browser login: clock boundary is nil")
 	}
-	credentials, err := login(ctx, villageURL)
+	credentials, err := login(ctx, villageURL, onURL)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +81,7 @@ func loginFromWith(
 // browserLogin performs the browser/callback exchange and returns the received
 // credentials without choosing a local store. loginFromWith exclusively owns
 // the path-aware pre-check and save on either side of this network boundary.
-func browserLogin(ctx context.Context, villageURL string) (*Credentials, error) {
+func browserLogin(ctx context.Context, villageURL string, onURL func(string)) (*Credentials, error) {
 	state, err := generateRandomState()
 	if err != nil {
 		return nil, fmt.Errorf("generate state: %w", err)
@@ -97,6 +103,12 @@ func browserLogin(ctx context.Context, villageURL string) (*Credentials, error) 
 	}()
 
 	loginURL := fmt.Sprintf("%s/api/v1/auth/cli/login?port=%d&state=%s", villageURL, port, state)
+	// Report the URL to the caller BEFORE opening the browser or blocking on the
+	// callback below, so a caller that cannot rely on stderr (e.g. a TUI
+	// alt-screen) can still surface it up front.
+	if onURL != nil {
+		onURL(loginURL)
+	}
 	// Opening the browser is best-effort, but a failure MUST be surfaced — the
 	// login blocks on the OAuth callback, so the user has to know to open the
 	// URL themselves if no browser appeared.

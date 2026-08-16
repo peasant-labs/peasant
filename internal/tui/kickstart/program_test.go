@@ -305,7 +305,7 @@ func TestProgram_OAuthLoginFeedsConnected(t *testing.T) {
 	t.Parallel()
 	var loginCalls int
 	deps := kickstart.ProgramDeps{
-		Login: func(_ context.Context) (string, error) {
+		Login: func(_ context.Context, _ func(string)) (string, error) {
 			loginCalls++
 			return "octocat", nil
 		},

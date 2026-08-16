@@ -494,7 +494,7 @@ func villageAlreadyConnected(configDir string) bool {
 // `peasant login` does.
 func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFunc {
 	configDir := configDirOverride(cmd)
-	return func(ctx context.Context) (string, error) {
+	return func(ctx context.Context, onURL func(string)) (string, error) {
 		villageURL := os.Getenv("PEASANT_VILLAGE_URL")
 		if villageURL == "" {
 			if cfg, err := loadConfig(configPath); err == nil && cfg.Village.URL != "" {
@@ -504,7 +504,7 @@ func kickstartLoginFunc(cmd *cobra.Command, configPath string) kickstart.LoginFu
 		if villageURL == "" {
 			villageURL = defaults.DefaultVillageURL.String()
 		}
-		creds, err := auth.LoginFrom(ctx, villageURL, false, configDir)
+		creds, err := auth.LoginFrom(ctx, villageURL, false, configDir, onURL)
 		if err != nil {
 			return "", err
 		}

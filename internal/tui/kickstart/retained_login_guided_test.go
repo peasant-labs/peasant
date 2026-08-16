@@ -277,6 +277,12 @@ func beginRetainedVisibilityLogin(t *testing.T, program kickstart.Program) (kick
 			continue
 		}
 		message := child()
+		if message == nil {
+			// The login-URL delivery command (see waitForLoginURL) resolves to nil
+			// when the fixture's fake login runner never reports a URL — bubbletea's
+			// standard "no message" sentinel, not a real login result.
+			continue
+		}
 		if _, ok := message.(spinner.TickMsg); ok {
 			spinnerTicks++
 			var next tea.Cmd
@@ -393,7 +399,7 @@ func TestVisibilityLoginRetainsMountedSelectionStateAndAsyncDelivery(t *testing.
 				Draft:   draft,
 				Source:  source,
 				Preview: preview,
-				Login: func(context.Context) (string, error) {
+				Login: func(context.Context, func(string)) (string, error) {
 					loginCalls++
 					return "fixture-user", nil
 				},

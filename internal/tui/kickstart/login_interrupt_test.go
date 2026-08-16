@@ -15,8 +15,8 @@ import (
 // started, then blocks until that context is canceled. It models the real
 // failure: an interactive login the runner cannot complete, which must stay
 // interruptible from the spinner.
-func blockingLogin(started chan<- context.Context) func(context.Context) (string, error) {
-	return func(ctx context.Context) (string, error) {
+func blockingLogin(started chan<- context.Context) func(context.Context, func(string)) (string, error) {
+	return func(ctx context.Context, _ func(string)) (string, error) {
 		started <- ctx
 		<-ctx.Done()
 		return "", ctx.Err()
