@@ -33,17 +33,21 @@ import {
   TeachingEmptyState,
   type TileSpec,
 } from "@/lib/ft-ui";
-import { FolderOpen, MessageSquare, Sparkles, GitBranch } from "lucide-react";
+import { FolderOpen, MessageSquare, Sparkles, GitBranch, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
+import { AllSessions } from "@/components/sessions/AllSessions";
+import { useSessionTitles } from "@/hooks/useSessionTitles";
+import { UNASSIGNED_PROJECT } from "@/app/review/[[...segments]]/sessions";
 
 const CHANNELS: ["sessions"] = ["sessions"];
 
 // ---------------------------------------------------------------------------
-// Changes home: `/` is the CHANGES-FIRST PICKER.
+// Projects home: `/` is the PROJECT PICKER, with every ingested session listed
+// beneath it.
 // The ledger line stays on top; one row per project (sessions · recorded
 // coverage · last work · open changes) from GET /api/v1/projects/summary,
 // falling back to sessions-channel grouping (stats unavailable) while the
-// fetch loads or fails. A row click lands on /review/{project} — the
-// project's Changes list (the shared ProjectPicker, destination="changes").
+// fetch loads or fails. A row click lands on /sessions/{projectHash} — that
+// project's session list (the shared ProjectPicker, destination="sessions").
 // Single-project installs skip the picker and embed that project's Changes
 // list directly. The Map lives at /map now.
 // ---------------------------------------------------------------------------
@@ -138,10 +142,75 @@ function SingleProjectChanges({ row }: { row: PickerRow }) {
   }
 
   return (
-    <section className="flex flex-col gap-3" data-tour="changes-list">
+    // Same fairtrade bare-`section` neutralization as AllSessions: without it
+    // this single-project view is capped at --maxw and centred inside its
+    // flex-column parent instead of filling it. See the note in
+    // components/sessions/AllSessions.tsx for the mechanism.
+    <section
+      className="flex flex-col gap-3 w-full max-w-none mx-0 px-0"
+      data-tour="changes-list"
+    >
       <h2 className="text-sm font-medium text-ink">{displayProject(row.name)}</h2>
       {body}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Saved-selection notice — a quiet, expandable disclosure.
+//
+// This is genuinely useful (a sparse picker otherwise reads as broken) but it
+// is NOT urgent: the selection is working as configured. It used to occupy a
+// full-width banner above the stats, which gave a working feature the visual
+// weight of a problem. It now collapses to a single quiet line that expands on
+// click, so the counts and the remedy are one interaction away instead of
+// permanently on screen.
+//
+// Still role="status", never "alert" — and the summary carries the counts, so
+// the fact that something is hidden survives without expanding. It never names
+// which projects or sessions are hidden; counts only.
+// ---------------------------------------------------------------------------
+
+function SelectionNotice({
+  notice,
+}: {
+  notice: { hiddenProjects: number; hiddenSessions: number };
+}) {
+  const [open, setOpen] = useState(false);
+  const parts: string[] = [];
+  if (notice.hiddenProjects > 0) {
+    parts.push(`${notice.hiddenProjects.toLocaleString()} project${notice.hiddenProjects !== 1 ? "s" : ""}`);
+  }
+  if (notice.hiddenSessions > 0) {
+    parts.push(`${notice.hiddenSessions.toLocaleString()} session${notice.hiddenSessions !== 1 ? "s" : ""}`);
+  }
+  const summary = `${parts.join(" and ")} hidden by a saved selection`;
+
+  return (
+    <div role="status" className="flex flex-col items-start gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-2 border border-rule px-3 py-1.5 font-mono text-xs text-ink-3 hover:text-ink hover:bg-surface-hover transition-colors focus-mono cursor-pointer"
+      >
+        <EyeOff size={13} aria-hidden />
+        <span className="tabular-nums">{summary}</span>
+        {open ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+      </button>
+
+      {open && (
+        <div className="flex flex-col gap-1 border border-rule bg-surface-hover px-4 py-3 text-sm text-ink-2">
+          <p>
+            A saved project selection is limiting what&rsquo;s shown here.
+            The data stays ingested and indexed — it is only hidden from this list.
+          </p>
+          <p className="text-xs text-ink-3">
+            Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -152,6 +221,9 @@ function SingleProjectChanges({ row }: { row: PickerRow }) {
 export default function HomePage() {
   const { data: sessionsData, connected, error: sessionsError, errorCode: sessionsErrorCode } = useChannel<SessionsPayload>(CHANNELS);
   const explainer = useExplainer("home");
+  // Titles come from the quality channel (see the hook) — the sessions channel
+  // carries no title field.
+  const sessionTitles = useSessionTitles();
 
   const sessions: SessionSummary[] = useMemo(
     () => sessionsData?.sessions ?? [],
@@ -246,6 +318,23 @@ export default function HomePage() {
     [summaries, sessions, sessionsError, summariesSelectionFailed, selectionRecovery],
   );
 
+  // Sessions the All Sessions table is allowed to render.
+  //
+  // VISIBILITY IS DERIVED FROM `rows`, never from the sessions channel directly.
+  // `rows` already encodes the whole visibility policy — it empties on a
+  // discovery error, on a failed selection, and on selection recovery, and it
+  // carries only the projects a working kickstart selection permits. The
+  // sessions WS payload is NOT filtered by that selection, so listing it raw
+  // would surface projects and session identities the picker is deliberately
+  // withholding (regression covered by page.test.tsx's forbiddenIdentities).
+  // Intersecting with the visible project set means the table can never expose a
+  // project the picker is hiding, in any of those states.
+  const visibleProjectNames = useMemo(() => new Set(rows.map((r) => r.name)), [rows]);
+  const visibleSessions = useMemo(
+    () => sessions.filter((s) => visibleProjectNames.has(s.project ?? UNASSIGNED_PROJECT)),
+    [sessions, visibleProjectNames],
+  );
+
   const totalSessions =
     sessionsError || summariesSelectionFailed || selectionRecovery
       ? 0
@@ -315,7 +404,7 @@ export default function HomePage() {
 
   return (
     <div className="max-w-[1600px] mx-auto px-6 pt-6 pb-12 flex flex-col gap-6 animate-fade-up">
-      <Breadcrumbs items={[{ label: "changes" }]} />
+      <Breadcrumbs items={[{ label: "projects" }]} />
 
       {/* Hero — title + the local-first ledger line. */}
       <div data-tour="home">
@@ -341,41 +430,13 @@ export default function HomePage() {
 
       {/* The "?" help box opens HERE — directly under the toggle that controls
           it, as a full-width row (returns null while collapsed). */}
-      <PickerExplainer explainer={explainer} destination="changes" />
+      <PickerExplainer explainer={explainer} destination="sessions" />
 
       {/* A saved selection is narrowing this list and something is actually
-          hidden right now: say so plainly instead of leaving a sparse or
-          single-row picker looking broken.
-          role="status" (not "alert"): a working selection doing its job is
-          informational, not an error. */}
+          hidden right now. See SelectionNotice above for the presentation
+          rationale. */}
       {activeSelectionNotice && (
-        <div
-          role="status"
-          className="flex flex-col gap-1 border border-rule bg-surface-hover px-4 py-3 text-sm text-ink-2"
-        >
-          <p>
-            A saved project selection is limiting what&rsquo;s shown here:{" "}
-            {activeSelectionNotice.hiddenProjects > 0 && (
-              <span className="font-mono tabular-nums">
-                {activeSelectionNotice.hiddenProjects.toLocaleString()} project
-                {activeSelectionNotice.hiddenProjects !== 1 ? "s" : ""}
-              </span>
-            )}
-            {activeSelectionNotice.hiddenProjects > 0 && activeSelectionNotice.hiddenSessions > 0 && " and "}
-            {activeSelectionNotice.hiddenSessions > 0 && (
-              <span className="font-mono tabular-nums">
-                {activeSelectionNotice.hiddenSessions.toLocaleString()} session
-                {activeSelectionNotice.hiddenSessions !== 1 ? "s" : ""}
-              </span>
-            )}
-            {" "}
-            {activeSelectionNotice.hiddenProjects + activeSelectionNotice.hiddenSessions === 1 ? "is" : "are"} hidden
-            from this list.
-          </p>
-          <p className="text-xs text-ink-3">
-            Run <code className="font-mono">peasant kickstart</code> to review or widen the selection.
-          </p>
-        </div>
+        <SelectionNotice notice={activeSelectionNotice} />
       )}
 
       {sessionsError && <p role="alert" className="text-base leading-relaxed text-danger">{discoveryErrorMessage(sessionsError, sessionsErrorCode)}</p>}
@@ -446,9 +507,18 @@ export default function HomePage() {
         ) : (
           // statsPending until the summary fetch settles → the coverage +
           // unmerged cells shimmer instead of popping empty→value.
-          <ProjectPicker rows={rows} destination="changes" statsPending={!summariesSettled} />
+          <ProjectPicker rows={rows} destination="sessions" statsPending={!summariesSettled} />
         )}
       </DataState>
+
+      {/* Every ingested session, flat and cross-project, beneath the picker —
+          the pre-release archive's Projects page shape. Rows open the session
+          viewer. Rendered outside DataState because it has its own empty rule
+          (it returns null with no sessions) and must not replace the picker's
+          teach/empty state. */}
+      {!loading && !sessionsError && visibleSessions.length > 0 && (
+        <AllSessions sessions={visibleSessions} titles={sessionTitles} />
+      )}
     </div>
   );
 }

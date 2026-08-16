@@ -34,7 +34,7 @@ describe('local review clarity fixture', () => {
 
   it('rejects picker links that drift from their destination or project identity', () => {
     const driftedHref = localReviewClarityFixtureSource.replace(
-      '    expectedHref: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '    expectedHref: /sessions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       '    expectedHref: /map/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     );
     expect(() => loadLocalReviewClarityFixture(driftedHref)).toThrow(/expectedHref must match/);
