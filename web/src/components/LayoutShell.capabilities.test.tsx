@@ -155,19 +155,19 @@ describe('LayoutShell — capability-gated code-map discoverability', () => {
       if (row.expectVisible) {
         // Nav shows the canonical three sections in analytics-first order…
         await screen.findByRole('link', { name: 'code map' });
-        expect(navLabels()).toEqual(['analytics', 'changes', 'code map']);
+        expect(navLabels()).toEqual(['analytics', 'projects', 'code map']);
         // …and, in the SAME render, the palette exposes both the section jump
         // and the per-project map jump (simultaneity).
         expect(within(dialog).getByText('go to code map')).toBeInTheDocument();
         expect(within(dialog).getByText('demo-project · map')).toBeInTheDocument();
       } else {
         // Fail closed: no map tab, and no map commands in the palette.
-        expect(navLabels()).toEqual(['analytics', 'changes']);
+        expect(navLabels()).toEqual(['analytics', 'projects']);
         expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
         expect(within(dialog).queryByText('go to code map')).not.toBeInTheDocument();
         expect(within(dialog).queryByText('demo-project · map')).not.toBeInTheDocument();
-        // The palette still works — the changes jump is present.
-        expect(within(dialog).getByText('go to changes')).toBeInTheDocument();
+        // The palette still works — the projects jump is present.
+        expect(within(dialog).getByText('go to projects')).toBeInTheDocument();
       }
     },
   );

@@ -202,6 +202,16 @@ export function mapHref(projectHash: ProjectHash, state: MapRouteOptions = {}): 
   return `/map/${projectHash}${query ? `?${query}` : ''}`;
 }
 
+/**
+ * `/sessions/{projectHash}` — every recorded session for one project.
+ *
+ * A separate route from `/projects/{hash}`, which deliberately redirects to the
+ * code map (and the map is capability-gated, so it is not always reachable).
+ */
+export function sessionsHref(projectHash: ProjectHash): string {
+  return `/sessions/${projectHash}`;
+}
+
 export function reviewHref(projectHash: ProjectHash, options: { branch?: string; returnLocation?: ReturnLocation } = {}): string {
   const params = new URLSearchParams();
   appendValue(params, 'branch', options.branch);

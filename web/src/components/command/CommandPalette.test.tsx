@@ -118,8 +118,8 @@ describe('CommandPalette', () => {
     expect(screen.queryByText('go to code map')).not.toBeInTheDocument();
     // The non-gated nav commands remain, in canonical analytics-first order.
     const analytics = screen.getByText('go to analytics');
-    const changes = screen.getByText('go to changes');
-    expect(analytics.compareDocumentPosition(changes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const projects = screen.getByText('go to projects');
+    expect(analytics.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('surfaces code-map discoverability when the server advertises the code-map token', async () => {
@@ -128,12 +128,12 @@ describe('CommandPalette', () => {
     // The per-project "· map" jump appears once the shared summary resolves.
     await waitFor(() => expect(screen.getByText('alpha-project · map')).toBeInTheDocument());
     // "go to code map" is present, appended after the non-gated sections in
-    // canonical analytics · changes · code map order.
+    // canonical analytics · projects · code map order.
     const analytics = screen.getByText('go to analytics');
-    const changes = screen.getByText('go to changes');
+    const projects = screen.getByText('go to projects');
     const map = screen.getByText('go to code map');
-    expect(analytics.compareDocumentPosition(changes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(changes.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(analytics.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(projects.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('lists the explicit session parent from the shared summary and jumps to its map', async () => {

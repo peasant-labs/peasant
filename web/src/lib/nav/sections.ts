@@ -60,6 +60,22 @@ const ROUTES: Record<GraphSectionId, Omit<NavSection, 'id' | 'label'>> = {
   },
 };
 
+/**
+ * App-local display labels that replace the ones fairtrade ships.
+ *
+ * The graph shell registry stays the source of truth for WHICH sections exist and
+ * in what ORDER — only the rendered string is overridden here, so the
+ * `assertKnownGraphSection` guard below still catches an unmapped section
+ * arriving in a future fairtrade release.
+ *
+ * `changes` reads as "projects" because the section owns `/`, which is the
+ * project picker: you land on a list of projects and drill into one. Lowercase,
+ * matching fairtrade's chrome convention and the rest of the nav.
+ */
+const LABEL_OVERRIDES: Partial<Record<GraphSectionId, string>> = {
+  changes: 'projects',
+};
+
 function assertKnownGraphSection(section: GraphShellSection): asserts section is GraphShellSection & { id: GraphSectionId } {
   if (!(section.id in ROUTES)) {
     throw new Error(
@@ -72,7 +88,7 @@ function assertKnownGraphSection(section: GraphShellSection): asserts section is
 export const NAV_SECTIONS: NavSection[] = GRAPH_NAV.map((section) => {
   assertKnownGraphSection(section);
   const route = ROUTES[section.id];
-  return { ...route, id: section.id, label: section.label };
+  return { ...route, id: section.id, label: LABEL_OVERRIDES[section.id] ?? section.label };
 });
 
 /**

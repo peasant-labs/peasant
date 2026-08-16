@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import HomePage from './page';
@@ -210,7 +210,7 @@ describe('HomePage — the changes-first picker', () => {
     expect(panel).toHaveTextContent('It is not available for a future push.');
     expect(panel).toHaveTextContent('Peasant did not delete data.');
     expect(screen.queryByText('peasant ingest')).not.toBeInTheDocument();
-    expect(screen.queryByText(/A saved project selection is limiting/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hidden by a saved selection/)).not.toBeInTheDocument();
     for (const identity of fixture.forbiddenIdentities) {
       expect(document.body.textContent).not.toContain(identity);
     }
@@ -224,7 +224,7 @@ describe('HomePage — the changes-first picker', () => {
 
     expect(
       await screen.findByRole('link', {
-        name: `Open the changes of ${fixture.expectedParentLabel}`,
+        name: `Open the sessions of ${fixture.expectedParentLabel}`,
       }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'project selection recovery' })).not.toBeInTheDocument();
@@ -259,16 +259,16 @@ describe('HomePage — the changes-first picker', () => {
       await screen.findByText(/AI conversations, on your machine\. Nothing has left it\./),
     ).toBeInTheDocument();
 
-    // Rows link into /review/{project} — the Changes list, NOT the map.
+    // Rows link into /sessions/{projectHash} — that project's session list.
     const alpha = await screen.findByRole('link', {
-      name: 'Open the changes of alpha-project',
+      name: 'Open the sessions of alpha-project',
     });
-    expect(alpha).toHaveAttribute('href', `/review/${ALPHA_HASH}`);
-    const beta = screen.getByRole('link', { name: 'Open the changes of beta-project' });
-    expect(beta).toHaveAttribute('href', `/review/${BETA_HASH}`);
+    expect(alpha).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
+    const beta = screen.getByRole('link', { name: 'Open the sessions of beta-project' });
+    expect(beta).toHaveAttribute('href', `/sessions/${BETA_HASH}`);
 
     // Most recent work first.
-    const links = screen.getAllByRole('link', { name: /Open the changes of/ });
+    const links = screen.getAllByRole('link', { name: /Open the sessions of/ });
     expect(links[0]).toBe(alpha);
 
     // Per-row stats: AI-built files · last work · in-progress count.
@@ -303,7 +303,9 @@ describe('HomePage — the changes-first picker', () => {
 
     // StatGrid labels are lowercase chrome; values are data (pre-formatted).
     // 2 projects, coverage (34+6)/(37+63)=40%, open 2+1=3.
-    expect(await screen.findByText('projects')).toBeInTheDocument();
+    // "projects" labels BOTH the stat tile and the breadcrumb, so match on
+    // presence rather than uniqueness (same as "unmerged branches" below).
+    expect((await screen.findAllByText('projects')).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('files built with ai')).toBeInTheDocument();
     expect(screen.getByText('40%')).toBeInTheDocument();
     expect(screen.getByText('40 of 100 files')).toBeInTheDocument();
@@ -322,8 +324,8 @@ describe('HomePage — the changes-first picker', () => {
     };
     render(<HomePage />);
 
-    const alpha = screen.getByRole('link', { name: 'Open the changes of alpha-project' });
-    expect(alpha).toHaveAttribute('href', `/review/${ALPHA_HASH}`);
+    const alpha = screen.getByRole('link', { name: 'Open the sessions of alpha-project' });
+    expect(alpha).toHaveAttribute('href', `/sessions/${ALPHA_HASH}`);
     // Coverage + unmerged-branch counts are summary-only: while the fetch is in
     // flight they SHIMMER in place rather than showing "—" then popping to a
     // value. Last-work comes from the sessions channel, so it's real text.
@@ -357,10 +359,10 @@ describe('HomePage — the changes-first picker', () => {
     render(<HomePage />);
 
     expect(
-      await screen.findByRole('link', { name: 'Open the changes of alpha-project' }),
+      await screen.findByRole('link', { name: 'Open the sessions of alpha-project' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: 'Open the changes of beta-project' }),
+      screen.getByRole('link', { name: 'Open the sessions of beta-project' }),
     ).toBeInTheDocument();
   });
 
@@ -375,7 +377,7 @@ describe('HomePage — the changes-first picker', () => {
     render(<HomePage />);
 
     expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open the changes of hidden-project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open the sessions of hidden-project' })).not.toBeInTheDocument();
     expect(screen.queryByText(/AI conversation, on your machine/)).not.toBeInTheDocument();
   });
 
@@ -398,7 +400,7 @@ describe('HomePage — the changes-first picker', () => {
 
       expect(api.fetchProjectSummaries).toHaveBeenCalledTimes(2);
       expect(screen.getByText(/peasant kickstart/)).toBeInTheDocument();
-      expect(screen.queryByRole('link', { name: `Open the changes of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
       expect(screen.queryByText(/AI conversation, on your machine/)).not.toBeInTheDocument();
 
       if (testCase.retryOutcome === 'success') {
@@ -408,14 +410,14 @@ describe('HomePage — the changes-first picker', () => {
           ),
         ));
         for (const project of testCase.replacementProjects) {
-          expect(await screen.findByRole('link', { name: `Open the changes of ${project.project}` })).toBeInTheDocument();
+          expect(await screen.findByRole('link', { name: `Open the sessions of ${project.project}` })).toBeInTheDocument();
         }
-        expect(screen.queryByRole('link', { name: `Open the changes of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
+        expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
       } else {
         retry.reject(new Error('database unavailable'));
         await waitFor(() => expect(screen.getByText(/database unavailable/)).toBeInTheDocument());
         expect(screen.getByRole('button', { name: /retry project discovery/i })).toBeInTheDocument();
-        expect(screen.queryByRole('link', { name: `Open the changes of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
+        expect(screen.queryByRole('link', { name: `Open the sessions of ${testCase.hiddenProject}` })).not.toBeInTheDocument();
         expect(screen.queryByText(/AI conversation, on your machine/)).not.toBeInTheDocument();
       }
     });
@@ -429,7 +431,7 @@ describe('HomePage — the changes-first picker', () => {
     const view = render(<HomePage />);
 
     expect(await screen.findByText(/peasant kickstart/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open the changes of hidden-project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open the sessions of hidden-project' })).not.toBeInTheDocument();
 
     channelError = null;
     channelErrorCode = undefined;
@@ -452,7 +454,7 @@ describe('HomePage — the changes-first picker', () => {
       'href',
       `/review/${ALPHA_HASH}?branch=feat%2Fgraph-cache`,
     );
-    expect(screen.queryByRole('link', { name: /Open the changes of/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open the sessions of/ })).not.toBeInTheDocument();
     expect(api.fetchReviewChanges).toHaveBeenCalledWith(ALPHA_HASH);
 
     // The embedded list is the tour's changes-list anchor.
@@ -484,8 +486,16 @@ describe('HomePage — the changes-first picker', () => {
     // straight into the rendered banner and every assertion still passed.
     // An exact match on the full rendered text fails on ANY extra content,
     // named or not, so there is nowhere for a leaked identity to hide.
+    // Collapsed, the notice is one quiet line carrying the counts only.
+    expect(notice.textContent).toBe('2 projects and 5 sessions hidden by a saved selection');
+
+    // Expanding must not introduce an identity either — same exact-match
+    // discipline applied to the disclosed body.
+    fireEvent.click(within(notice).getByRole('button'));
     expect(notice.textContent).toBe(
-      'A saved project selection is limiting what’s shown here: 2 projects and 5 sessions are hidden from this list.'
+      '2 projects and 5 sessions hidden by a saved selection'
+      + 'A saved project selection is limiting what’s shown here. '
+      + 'The data stays ingested and indexed — it is only hidden from this list.'
       + 'Run peasant kickstart to review or widen the selection.',
     );
   });
@@ -508,10 +518,7 @@ describe('HomePage — the changes-first picker', () => {
     const notice = await screen.findByRole('status');
     // Same exact-match discipline as the single-project case above, with the
     // singular ("1 project"/"1 session", "is hidden") grammar branch.
-    expect(notice.textContent).toBe(
-      'A saved project selection is limiting what’s shown here: 1 project and 1 session are hidden from this list.'
-      + 'Run peasant kickstart to review or widen the selection.',
-    );
+    expect(notice.textContent).toBe('1 project and 1 session hidden by a saved selection');
   });
 
   it('shows no selection notice when the selection is inactive', async () => {
