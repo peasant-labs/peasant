@@ -6,7 +6,7 @@
 #   toggle: <id>    move the cursor to the node and press select (space)
 #   selectAll: true press select-all (a)
 # The row-count guard pins expectedCaseCount to the number of cases.
-expectedCaseCount: 9
+expectedCaseCount: 13
 cases:
   # A parent toggle pushes Checked down to every child.
   - name: parent-toggle-checks-children
@@ -111,7 +111,11 @@ cases:
   # Select-all is a toggle: on an already-fully-checked forest the key clears the
   # whole projection instead of doing nothing, so the key is always a visible
   # action. Its help label flips to "clear all" so it never reads as a hidden clear.
-  - name: select-all-clears-when-all-checked
+  # Skip-no-op: a fully-selected forest makes "select all" (the ring's first
+  # step) a no-op, so a single press advances to the next step, "unselect all",
+  # instead - the fix for select-all never doing anything on a first-run
+  # fully-selected forest.
+  - name: select-all-skip-no-op-on-fully-selected
     forest:
       - id: p1
         children:
@@ -128,6 +132,97 @@ cases:
       a: unchecked
       p2: unchecked
       b: unchecked
+
+  # The 3-way cycle's first press from a PARTIAL forest: "select all" is not a
+  # no-op here (b is unchecked), so it applies as-is.
+  - name: select-all-cycle-press1-selects-from-partial
+    forest:
+      - id: p1
+        children:
+          - id: a
+            state: checked
+      - id: p2
+        children:
+          - id: b
+            state: unchecked
+    actions:
+      - selectAll: true
+    expect:
+      p1: checked
+      a: checked
+      p2: checked
+      b: checked
+
+  # Second press: "unselect all".
+  - name: select-all-cycle-press2-unselects
+    forest:
+      - id: p1
+        children:
+          - id: a
+            state: checked
+      - id: p2
+        children:
+          - id: b
+            state: unchecked
+    actions:
+      - selectAll: true
+      - selectAll: true
+    expect:
+      p1: unchecked
+      a: unchecked
+      p2: unchecked
+      b: unchecked
+
+  # Third press: reset to the baseline captured before the FIRST press of this
+  # cycle - the original partial selection (a checked, b unchecked) - not the
+  # all-checked or all-unchecked state the first two presses produced.
+  - name: select-all-cycle-press3-restores-baseline
+    forest:
+      - id: p1
+        children:
+          - id: a
+            state: checked
+      - id: p2
+        children:
+          - id: b
+            state: unchecked
+    actions:
+      - selectAll: true
+      - selectAll: true
+      - selectAll: true
+    expect:
+      p1: checked
+      a: checked
+      p2: unchecked
+      b: unchecked
+
+  # A manual toggle between select-all presses invalidates the cycle: the next
+  # press re-captures a fresh baseline rather than continuing the old ring or
+  # restoring the pre-invalidation snapshot. Here the cycle runs to "unselect
+  # all" (a,b both unchecked), a manual toggle of b re-selects it (a
+  # unchecked, b checked - a NEW baseline), and the next select-all press
+  # starts a fresh ring from that baseline rather than resuming at "reset to
+  # the original a-checked/b-unchecked partial".
+  - name: select-all-cycle-invalidated-by-manual-toggle
+    forest:
+      - id: p1
+        children:
+          - id: a
+            state: checked
+      - id: p2
+        children:
+          - id: b
+            state: unchecked
+    actions:
+      - selectAll: true # all checked
+      - selectAll: true # all unchecked
+      - toggle: b # manual edit invalidates the cycle: a unchecked, b checked
+      - selectAll: true # fresh ring press 1: "select all" is not a no-op
+    expect:
+      p1: checked
+      a: checked
+      p2: checked
+      b: checked
 
   # A Conflict leaf renders/persists distinctly: it forces its parent to
   # Partial and is NOT flipped by a parent toggle (a deleted worktree cannot be

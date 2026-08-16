@@ -76,11 +76,11 @@ type treeField struct {
 	// initializeSelection marks the saved baseline as tracked and applies the
 	// working draft whenever a fresh forest loads.
 	initializeSelection bool
-	// selectAllHelp and clearAllHelp label the select/clear-all toggle: the first
-	// is shown while something is unselected, the second once the whole projection
-	// is selected. The key and action ID remain canonical.
+	// selectAllHelp labels the select-all cycle key. It is a single static
+	// label - the cycle's three targets (select all / unselect all / reset to
+	// previous selection) are explained in the help overlay, not swapped in and
+	// out of the footer. The key and action ID remain canonical.
 	selectAllHelp string
-	clearAllHelp  string
 	// compactFooter trims this field's step footer to the primary navigation keys
 	// (help, next, prev) and relabels the advance key so a first-time user can see
 	// how to progress. The full key set stays reachable through help.
@@ -165,14 +165,10 @@ func WithSelectionRestoration() TreeOption {
 	return func(f *treeField) { f.restoreSelection = true }
 }
 
-// WithSelectAllHelp gives this tree scope-specific labels for the canonical
-// select/clear-all toggle: selectLabel is shown while something is unselected,
-// clearLabel once the whole projection is selected. It changes no key binding.
-func WithSelectAllHelp(selectLabel, clearLabel string) TreeOption {
-	return func(f *treeField) {
-		f.selectAllHelp = selectLabel
-		f.clearAllHelp = clearLabel
-	}
+// WithSelectAllHelp gives this tree a scope-specific static label for the
+// canonical select-all cycle key. It changes no key binding.
+func WithSelectAllHelp(label string) TreeOption {
+	return func(f *treeField) { f.selectAllHelp = label }
 }
 
 // WithCompactFooter trims this field's step footer to the primary navigation
@@ -310,11 +306,7 @@ func (f *treeField) actionKeymap() keymap.Keymap {
 	if f.selectAllHelp != "" {
 		if binding, ok := km[keymap.ActionSelectAll]; ok {
 			help := binding.Help()
-			label := f.selectAllHelp
-			if f.clearAllHelp != "" && !f.tree.HasUnselected() {
-				label = f.clearAllHelp
-			}
-			binding.SetHelp(help.Key, label)
+			binding.SetHelp(help.Key, f.selectAllHelp)
 			km[keymap.ActionSelectAll] = binding
 		}
 	}
@@ -351,7 +343,7 @@ func (f *treeField) primaryFooterActions() []keymap.ActionID {
 	if f.hasPreview() && f.split.ActivePane() != kit.PaneLeft {
 		return nil
 	}
-	return []keymap.ActionID{keymap.ActionNextField, keymap.ActionPrevField, keymap.ActionHelp}
+	return []keymap.ActionID{keymap.ActionNextField, keymap.ActionPrevField, keymap.ActionSelectAll, keymap.ActionHelp}
 }
 
 // facetAvailable keeps facet dispatch and its advertised key in lockstep. A
@@ -875,33 +867,71 @@ func changedSelectionScopes(intent treeSelectionIntent, before, after selectable
 		}
 		return scopes, nil
 	case keymap.ActionSelectAll:
-		changedProjects := map[selectableNodeKey]bool{}
+		// The select-all cycle's third ring step restores a baseline that may be
+		// PARTIAL within a project (some sessions were checked, some were not),
+		// so unlike its first two steps a single project's changed sessions do
+		// not necessarily move in one direction together. changedSessionsByProject
+		// groups this action's changed sessions per project; a project whose
+		// changed sessions all moved the same way still collapses to one project
+		// scope (preserving the existing select-all/unselect-all shape), while a
+		// project left in a mixed state falls back to one session scope per
+		// changed session so the reconciler applies each individually.
+		projectKeyOf := func(key selectableNodeKey) selectableNodeKey {
+			return selectableNodeKey{projectIdentity: key.projectIdentity, harness: key.harness, clonePath: key.clonePath}
+		}
+		changedSessionsByProject := map[selectableNodeKey][]selectableNodeKey{}
 		for key := range changed {
 			if key.sessionID == "" {
 				continue
 			}
-			changedProjects[selectableNodeKey{
-				projectIdentity: key.projectIdentity,
-				harness:         key.harness,
-				clonePath:       key.clonePath,
-			}] = true
+			projectKey := projectKeyOf(key)
+			changedSessionsByProject[projectKey] = append(changedSessionsByProject[projectKey], key)
 		}
-		keys := make([]selectableNodeKey, 0, len(changedProjects))
-		for key := range changedProjects {
-			keys = append(keys, key)
+		// allSessionsByProject holds every selectable session under a touched
+		// project - changed or not - because uniformity has to be judged against
+		// the project's WHOLE post-action state, not just the sessions that moved
+		// this press. A restore step can leave some sessions exactly where they
+		// already were while moving others, and only looking at the changed subset
+		// would misread that as "uniform" and collapse it into a whole-project
+		// scope that clobbers the sessions that were never touched.
+		allSessionsByProject := map[selectableNodeKey][]selectableNodeKey{}
+		for key := range after {
+			if key.sessionID == "" {
+				continue
+			}
+			projectKey := projectKeyOf(key)
+			allSessionsByProject[projectKey] = append(allSessionsByProject[projectKey], key)
 		}
-		sortSelectableNodeKeys(keys)
+		projectKeys := make([]selectableNodeKey, 0, len(changedSessionsByProject))
+		for key := range changedSessionsByProject {
+			projectKeys = append(projectKeys, key)
+		}
+		sortSelectableNodeKeys(projectKeys)
 		var scopes []selectionScope
-		for _, projectKey := range keys {
-			selected, err := changedProjectTarget(projectKey, changed, after)
+		for _, projectKey := range projectKeys {
+			allKeys := append([]selectableNodeKey(nil), allSessionsByProject[projectKey]...)
+			sortSelectableNodeKeys(allKeys)
+			selected, uniform, err := uniformSelectAllTarget(allKeys, after)
 			if err != nil {
 				return nil, err
 			}
-			scope, err := makeScope(projectKey, selectionScopeProject, selected)
-			if err != nil {
-				return nil, err
+			if uniform {
+				scope, err := makeScope(projectKey, selectionScopeProject, selected)
+				if err != nil {
+					return nil, err
+				}
+				scopes = append(scopes, scope)
+				continue
 			}
-			scopes = append(scopes, scope)
+			changedKeys := changedSessionsByProject[projectKey]
+			sortSelectableNodeKeys(changedKeys)
+			for _, sessionKey := range changedKeys {
+				scope, err := makeScope(sessionKey, selectionScopeSession, after[sessionKey].state == kit.Checked)
+				if err != nil {
+					return nil, err
+				}
+				scopes = append(scopes, scope)
+			}
 		}
 		return scopes, nil
 	default:
@@ -928,27 +958,31 @@ func sortSelectableNodeKeys(keys []selectableNodeKey) {
 	})
 }
 
-func changedProjectTarget(project selectableNodeKey, changed map[selectableNodeKey]bool, after selectableState) (bool, error) {
-	found := false
-	selected := false
-	for key := range changed {
-		if key.projectIdentity != project.projectIdentity || key.harness != project.harness || key.clonePath != project.clonePath || key.sessionID == "" {
-			continue
-		}
+// uniformSelectAllTarget reports the single Checked/Unchecked direction every
+// key in sessionKeys moved to, and true, when they all agree; otherwise it
+// reports uniform=false so the caller falls back to per-session scopes - the
+// select-all cycle's reset-to-baseline step can legitimately leave a project
+// PARTIAL (some sessions restored checked, others unchecked).
+func uniformSelectAllTarget(sessionKeys []selectableNodeKey, after selectableState) (selected, uniform bool, err error) {
+	if len(sessionKeys) == 0 {
+		return false, false, fmt.Errorf("select-all changed a project without changing a selectable session")
+	}
+	for i, key := range sessionKeys {
 		state := after[key].state
 		if state != kit.Checked && state != kit.Unchecked {
-			return false, fmt.Errorf("changed session %q ended in non-binary state %s", key.sessionID, state)
+			return false, false, fmt.Errorf("changed session %q ended in non-binary state %s", key.sessionID, state)
 		}
 		value := state == kit.Checked
-		if found && value != selected {
-			return false, fmt.Errorf("select-all produced mixed targets under project %q path %q", project.projectIdentity, project.clonePath)
+		if i == 0 {
+			selected = value
+			uniform = true
+			continue
 		}
-		found, selected = true, value
+		if value != selected {
+			uniform = false
+		}
 	}
-	if !found {
-		return false, fmt.Errorf("select-all changed project %q path %q without changing a selectable session", project.projectIdentity, project.clonePath)
-	}
-	return selected, nil
+	return selected, uniform, nil
 }
 
 func (f *treeField) restoreSelectableState(before selectableState) {

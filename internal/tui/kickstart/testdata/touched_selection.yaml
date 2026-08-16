@@ -1,4 +1,4 @@
-expectedCaseCount: 12
+expectedCaseCount: 13
 expectedNames:
   - unrelated-project-action-preserves-visible-policies
   - unrelated-project-action-preserves-scanner-absent-policy
@@ -12,6 +12,7 @@ expectedNames:
   - grouped-branch-clear-denies-descendant-worktree-only
   - grouped-session-clear-keeps-linked-sibling
   - grouped-shared-branch-clear-denies-all-descendant-worktrees
+  - select-all-cycle-restore-mixed-baseline-falls-back-to-sessions
 cases:
   - name: unrelated-project-action-preserves-visible-policies
     paths:
@@ -312,3 +313,32 @@ cases:
       branchExclusions:
         - {harness: claude-code, pathKey: repo-a-linked, branches: [topic]}
         - {harness: claude-code, pathKey: repo-a-main, branches: [topic]}
+
+  # The select-all cycle's third ring step ("reset to the baseline captured
+  # when the cycle activated") can leave a single project PARTIAL: main was
+  # selected and topic was not, so three presses (select all, unselect all,
+  # restore) end with only main re-checked - the two branches move in
+  # DIFFERENT directions from where the cycle started. changedSelectionScopes
+  # must not collapse that into one whole-project scope (which would select
+  # every branch); it falls back to a per-session scope for whichever session
+  # actually changed on the restoring press.
+  - name: select-all-cycle-restore-mixed-baseline-falls-back-to-sessions
+    paths:
+      - {key: clone-a, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 55555555-5555-4555-8555-555555555555, title: main session}
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: topic, sessionId: 44444444-4444-4444-8444-444444444444, title: topic session}
+    saved:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+    actions: [select-all, select-all, select-all]
+    refresh: true
+    expectedCheckedSessions: [55555555-5555-4555-8555-555555555555]
+    expectedUncheckedSessions: [44444444-4444-4444-8444-444444444444]
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      sessions:
+        - {harness: claude-code, ids: [55555555-5555-4555-8555-555555555555]}

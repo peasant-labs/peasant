@@ -1,9 +1,11 @@
 # First-run selection-step UX: the pruned advance footer, the sessionless-root
-# collapse default, and the select/clear-all toggle. Every case drives the real
-# kickstart Program against a config that does NOT yet exist (a genuine first
-# run: nothing tracked), so only the `ingested` list marks a session as already
-# imported. Two projects with distinct remotes give two independent roots.
-expectedCaseCount: 7
+# collapse default, and the select-all 3-way cycle (select all / unselect all /
+# reset to the selection captured when the cycle activated). Every case drives
+# the real kickstart Program against a config that does NOT yet exist (a
+# genuine first run: nothing tracked), so only the `ingested` list marks a
+# session as already imported. Two projects with distinct remotes give two
+# independent roots.
+expectedCaseCount: 8
 listings:
   - harness: claude-code
     projectName: acme/alpha
@@ -27,7 +29,7 @@ cases:
     keys: []
     wantContains: ["github:acme/alpha", "github:acme/beta"]
     wantMissing: [alpha session, beta session]
-    footerContains: ["tab: next step", "?: help"]
+    footerContains: ["tab: next step", "a: toggle all", "?: help"]
     footerMissing: ["space: select", "down", "select all"]
 
   # Only the alpha root holds an imported session, so it opens expanded while
@@ -44,19 +46,22 @@ cases:
     ingested: [a-1, b-1]
     keys: []
     wantContains: [alpha session, beta session]
-    footerContains: ["tab: next step", "?: help"]
+    footerContains: ["tab: next step", "a: toggle all", "?: help"]
     footerMissing: ["space: select", "select all", "collapse", "next project"]
 
-  # Select-all on an already fully-selected forest is a toggle: it CLEARS the
-  # whole projection, so the key is never a silent no-op on the first-run forest
-  # (which opens fully selected).
-  - name: select-all-clears-a-full-selection
+  # The select-all cycle's first ring step ("select all") is a no-op on an
+  # already fully-selected forest (the first-run forest opens fully selected),
+  # so skip-no-op advances straight to "unselect all" - the key is never a
+  # silent no-op.
+  - name: select-all-skips-redundant-select-and-unselects
     ingested: [a-1, b-1]
     keys: [a]
     wantSomeUnchecked: true
 
-  # Pressing it again reselects everything: the toggle swings both ways.
-  - name: select-all-toggles-back-to-full
+  # A second press continues the ring to its third step, "reset to the
+  # baseline captured when the cycle activated" - which was the fully-selected
+  # forest, so it reads the same as a full reselect.
+  - name: select-all-second-press-restores-full-baseline
     ingested: [a-1, b-1]
     keys: [a, a]
     wantNoUnchecked: true
@@ -67,8 +72,19 @@ cases:
     keys: [space]
     wantSomeUnchecked: true
 
-  # ...and select-all then visibly reselects everything.
+  # ...and select-all then visibly reselects everything: the manual toggle
+  # invalidated any prior cycle, so this is a fresh ring whose first step
+  # ("select all") is not a no-op against the now-partial forest.
   - name: select-all-reselects-after-a-deselect
     ingested: [a-1, b-1]
     keys: [space, a]
     wantNoUnchecked: true
+
+  # Three presses after a manual deselect completes a fresh cycle's full lap:
+  # select all, unselect all, then reset to the baseline captured right after
+  # the manual deselect (partial - some boxes unchecked) rather than to the
+  # original fully-selected forest.
+  - name: select-all-third-press-restores-post-deselect-baseline
+    ingested: [a-1, b-1]
+    keys: [space, a, a, a]
+    wantSomeUnchecked: true
