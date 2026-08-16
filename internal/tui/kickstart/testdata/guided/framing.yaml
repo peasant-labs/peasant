@@ -63,15 +63,14 @@ rows:
     headingText: redaction level
     controlText: '(•) standard'
     guide:
-      intro: preview standard redaction before a later explicit publication.
+      intro: preview how standard redaction changes your text before you publish.
       hints:
-        - local imports remain original unless you explicitly run `peasant redact`.
-        - examples below use synthetic text and the same redactor as explicit publication.
-        - standard keeps git remote urls and branch output; maximum removes them.
+        - personally identifiable information (PII), such as an email address.
+        - standard hides project identity but keeps git remotes until maximum.
     wantContains:
-      - later explicit publication
-      - local imports remain original
-      - peasant redact
+      - before you publish
+      - personally identifiable information (PII)
+      - git remotes until maximum
     wantMissing:
       - before transcripts enter peasant's local store
       - same redactor as local import

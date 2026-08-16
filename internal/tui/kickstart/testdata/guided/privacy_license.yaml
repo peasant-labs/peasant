@@ -54,12 +54,12 @@ expectedViewportMutationCount: 1
 viewport:
   - name: common-height-starts-before-the-choice-rows
     width: 80
-    height: 24
-    wantContains: [CREDENTIAL, INTERNAL, redaction level, '(•) standard']
-    wantMissing: ['removes secrets, file paths, personal data, and project identity']
+    height: 18
+    wantContains: [CREDENTIAL, PATH, redaction level]
+    wantMissing: ['(•) standard', 'removes secrets, file paths, personal data, and project identity']
   - name: common-height-page-down-reveals-the-current-choice
     width: 80
-    height: 24
+    height: 18
     keys: [page-down]
     wantContains:
       - '(•) standard'

@@ -222,7 +222,7 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 	viewportNames := map[string]bool{}
 	viewportMutations := 0
 	for _, row := range document.Viewport {
-		if strings.TrimSpace(row.Name) == "" || viewportNames[row.Name] || row.Width != 80 || row.Height != 24 ||
+		if strings.TrimSpace(row.Name) == "" || viewportNames[row.Name] || row.Width != 80 || row.Height != 18 ||
 			len(row.WantContains) == 0 || len(row.WantMissing) == 0 {
 			t.Fatalf("privacy viewport row is incomplete or duplicated: %#v", row)
 		}

@@ -136,11 +136,10 @@ func BuildRegistry(opts Options) settings.Registry {
 			Key:   SectionPrivacy,
 			Title: "privacy",
 			Guide: sectionGuideWithExample(
-				"preview standard redaction before a later explicit publication.",
+				"preview how standard redaction changes your text before you publish.",
 				privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
-				"local imports remain original unless you explicitly run `peasant redact`.",
-				"examples below use synthetic text and the same redactor as explicit publication.",
-				"standard keeps git remote urls and branch output; maximum removes them.",
+				"personally identifiable information (PII), such as an email address.",
+				"standard hides project identity but keeps git remotes until maximum.",
 			),
 			Fields: []settings.Field{
 				settings.WithDescription(

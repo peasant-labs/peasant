@@ -14,7 +14,7 @@ sections:
   - key: privacy
     heading: redaction level
     control: '(•) standard'
-    intro: preview standard redaction before a later explicit publication.
+    intro: preview how standard redaction changes your text before you publish.
     markers: ['- before:', '+ after:']
   - key: license
     heading: default license attached to pushed transcripts
