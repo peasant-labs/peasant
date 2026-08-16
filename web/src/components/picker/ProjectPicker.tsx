@@ -15,7 +15,7 @@ import {
   UNASSIGNED_PROJECT,
   resolveProjectHash,
 } from "@/app/review/[[...segments]]/sessions";
-import { mapHref, parseProjectHash, reviewHref } from "@/lib/navigation/projectRoutes";
+import { mapHref, parseProjectHash, reviewHref, sessionsHref } from "@/lib/navigation/projectRoutes";
 
 /**
  * The ONE project picker, shared by Home (`/`) and the Map picker (`/map`).
@@ -109,7 +109,7 @@ export function PickerExplainer({
   destination,
 }: {
   explainer: ExplainerState;
-  destination: "changes" | "map";
+  destination: "changes" | "map" | "sessions";
 }) {
   return (
     <Explainer explainer={explainer} title="what am I looking at?">
@@ -121,7 +121,10 @@ export function PickerExplainer({
         back into the main version yet.
       </p>
       <p>A recorded file has an edit captured during a saved AI conversation.</p>
-      <p>Click a project to see its {destination === "map" ? "map" : "changes"}.</p>
+      {/* Every destination's noun IS its key ("changes" / "map" / "sessions"),
+          so the copy reads straight off it rather than through a ternary chain
+          that has to grow with each new destination. */}
+      <p>Click a project to see its {destination}.</p>
     </Explainer>
   );
 }
@@ -182,6 +185,10 @@ const DEST = {
     href: reviewHref,
     aria: (label: string) => `Open the changes of ${label}`,
   },
+  sessions: {
+    href: sessionsHref,
+    aria: (label: string) => `Open the sessions of ${label}`,
+  },
   map: {
     href: mapHref,
     aria: (label: string) => `Open the map of ${label}`,
@@ -202,7 +209,7 @@ export function ProjectPicker({
 }: {
   rows: PickerRow[];
   /** Where a row click lands. Drives the href + aria only. */
-  destination: "changes" | "map";
+  destination: "changes" | "map" | "sessions";
   /** Show the filter box once the list is at least this long. */
   filterThreshold?: number;
   /** Per-project stats (coverage + unmerged branches) are still loading — show
@@ -250,13 +257,13 @@ export function ProjectPicker({
               className="v2-eyebrow text-right"
               title="When this project was last worked on in a recorded AI conversation."
             >
-              Last worked
+              last worked
             </span>
             <span
               className="v2-eyebrow text-right"
               title="Branches (separate lines of work) that haven't been merged back into the project's main version yet."
             >
-              Unmerged branches
+              unmerged branches
             </span>
             <span aria-hidden />
           </div>

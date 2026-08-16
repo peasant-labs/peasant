@@ -52,8 +52,10 @@ describe('ProjectPicker review clarity', () => {
 
 describe('PickerExplainer fixture copy', () => {
   it('renders the revised copy on the production component path', () => {
-    const explainer = { id: 'changes', open: true, hydrated: true, show: () => {}, hide: () => {} };
-    render(<PickerExplainer explainer={explainer} destination="changes" />);
+    // explainerDestinationHome is the copy the HOME picker shows, and Home now
+    // sends a project click to that project's session list.
+    const explainer = { id: 'home', open: true, hydrated: true, show: () => {}, hide: () => {} };
+    render(<PickerExplainer explainer={explainer} destination="sessions" />);
     const region = screen.getByRole('region');
     expect(region).toHaveTextContent(localReviewClarityFixture.copy.explainerIntro);
     expect(region).toHaveTextContent(localReviewClarityFixture.copy.explainerRecordedFile);

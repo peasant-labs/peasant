@@ -9,12 +9,12 @@ copy:
   outcomeLimit: the current data includes the label, not a reason for an individual result.
   explainerIntro: Each row is a project this tool found recorded AI conversations for. The columns show recorded files out of total project files, when it was last worked on, and how many lines of work (branches) haven’t been merged back into the main version yet.
   explainerRecordedFile: A recorded file has an edit captured during a saved AI conversation.
-  explainerDestinationHome: Click a project to see its changes.
+  explainerDestinationHome: Click a project to see its sessions.
   explainerDestinationMap: Click a project to see its map.
 pickerCases:
   - name: shared Home picker explains coverage and search
     surface: home
-    destination: changes
+    destination: sessions
     projectCount: 9
     targetProject: /work/alpha-project
     targetProjectHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -22,8 +22,8 @@ pickerCases:
     totalFiles: 37
     searchQuery: alpha
     expectedCoverageLabel: 34 recorded files out of 37 total files
-    expectedLinkName: Open the changes of alpha-project
-    expectedHref: /review/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expectedLinkName: Open the sessions of alpha-project
+    expectedHref: /sessions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   - name: shared Map picker explains coverage and search
     surface: map
     destination: map

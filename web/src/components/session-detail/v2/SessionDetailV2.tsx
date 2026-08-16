@@ -3,7 +3,7 @@
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Copy, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
 import {
   TrajectoryGraph,
   annotateTranscript,
@@ -18,6 +18,7 @@ import {
   adaptTranscript,
   computeAnalytics,
   type TranscriptInitialPosition,
+  type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
 import { useTheme } from '@/hooks/useTheme';
 import '@xyflow/react/dist/style.css';
@@ -27,7 +28,7 @@ import { subscribe } from '@/types/messages';
 import type { SessionDetailPayload, QualityPayload } from '@/types/messages';
 import { detectPhases } from '@/lib/insights';
 import { displayProject } from '@/lib/quality/utils';
-import { mapHref, transcriptHref, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
+import { sessionsHref, transcriptHref, TranscriptScope, type ProjectHash, type TranscriptRouteQuery } from '@/lib/navigation/projectRoutes';
 import { useEntryLabels } from './lib/useEntryLabels';
 import {
   clearScopeQuery,
@@ -134,6 +135,26 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     [quality?.sessions],
   );
 
+  // The generated title for THIS session, reused from the quality subscription
+  // already mounted above for the medians. `SessionDetailPayload` carries no
+  // title, and the server only stores one for some sessions, so this stays
+  // optional and the breadcrumb falls back to the short id.
+  const sessionTitle = useMemo(() => {
+    const found = quality?.sessions?.find((s) => s.id === sessionId)?.title?.trim();
+    return found ? found : undefined;
+  }, [quality?.sessions, sessionId]);
+
+  // Session metrics disclosure, collapsed by default: the transcript is what
+  // you came to read, and duration/turns/tools/tokens are reference figures.
+  const [metricsOpen, setMetricsOpen] = useState(false);
+
+  // The viewer's tab, lifted so the host can react to it. The composite
+  // renders its keyboard-hint strip on every tab; peasant shows it only on
+  // `highlights` (see `.txn-hints-hidden` in globals.css), which needs to know
+  // which tab is active. 'trace' is the composite's own default, so lifting the
+  // state does not change which tab you land on.
+  const [activeTab, setActiveTab] = useState<TranscriptTab>('trace');
+
   // Entry-level (per-turn) custom labels — backend annotations + optimistic
   // saves, keyed by entry index. Rendered as chips on each turn + driving the
   // host-owned label popover mounted via `renderTurnActions`.
@@ -208,12 +229,22 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       scorecard: detail.scorecard ?? undefined,
       medians,
     });
-    return adaptTranscript(
+    const adapted = adaptTranscript(
       { ...detail, turns: visibleTurns },
       undefined,
       analytics,
     );
-  }, [detail, displayTurns, medians, turns]);
+    // `SessionVM.title` is documented as "render-when-present; else the consumer
+    // derives one from the first prompt". Nothing was supplying it, so the hero
+    // fell back to deriving one — which on a session that opens with tooling
+    // preamble rendered that preamble as the title (the
+    // "<local-command-caveat>Caveat: …" heading). Title is not a wire field, so
+    // the host has to supply it: the generated title comes off the quality
+    // channel. When there is none the derived fallback still applies.
+    return sessionTitle
+      ? { ...adapted, session: { ...adapted.session, title: sessionTitle } }
+      : adapted;
+  }, [detail, displayTurns, medians, turns, sessionTitle]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.
   const toolVMsByTurn = useMemo(
@@ -226,14 +257,30 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // Project + breadcrumb for the origin-aware trail (Map/Review origin crumb).
   const project = detail?.project ?? projectName;
   const crumb = originCrumb(scope, projectHash);
-  // The viewer lives under Map (nav Map is active here) — the trail
-  // is map / {project} / session, with map at /map (home `/` is Changes now).
-  // An origin crumb (map · node, changes · branch) REPLACES the map-home
-  // crumb rather than stacking in front of it — stacking read "map > map".
+  // The trail is projects / {project} / {session} — the path you walked to get
+  // here, each crumb being the page it names. The project crumb leads to that
+  // project's SESSION LIST, not to the map: the map is capability-gated, so a
+  // map crumb is a dead end on a default server and there is no reason to route
+  // a reader there from a transcript.
+  //
+  // The project crumb keeps the project NAME rather than a literal "sessions",
+  // because it is the only part of the trail that says which project you are in.
+  //
+  // The last crumb is the session ID, NOT its title: the hero renders the title
+  // directly beneath the trail, so repeating it there says the same thing twice
+  // and — titles being a sentence long — pushes the crumbs that actually
+  // navigate off to the side. The ID is fixed-width and adds the one
+  // identifying fact the hero does not show.
+  //
+  // An origin crumb (map · node, changes · branch) is inserted after the root
+  // when you arrived from one of those surfaces, so the way back to where you
+  // actually were survives alongside the way back to the top.
+  const sessionCrumb = (detail?.id ?? sessionId).slice(0, 8);
   const breadcrumb: CrumbItem[] = [
-    crumb ?? { label: 'map', href: '/map' },
-    { label: displayProject(project), href: mapHref(projectHash) },
-    { label: (detail?.id ?? sessionId).slice(0, 8) },
+    { label: 'projects', href: '/' },
+    ...(crumb ? [crumb] : []),
+    { label: displayProject(project), href: sessionsHref(projectHash) },
+    { label: sessionCrumb },
   ];
 
   if (!detail) {
@@ -295,15 +342,36 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   // (via the composite's `headerActions` slot) rather than the removed
   // prelude's toggle bar. Still copies exactly what's shown (scope respected).
   const headerActions = (
-    <button
-      type="button"
-      onClick={copyMarkdown}
-      title="copy the conversation shown above (respecting the active scope) as markdown text"
-      className="btn btn-secondary btn-sm"
-    >
-      <Copy size={14} aria-hidden />
-      {copied ? 'copied' : 'copy as markdown'}
-    </button>
+    <>
+      {/* Session metrics disclosure. The composite's hero always renders the
+          duration/turns/tools/tokens strip; those are reference figures you
+          consult occasionally, not identity you need on screen while reading a
+          transcript. The composite exposes no prop for it, so the toggle lives
+          here and the strip is hidden by a data attribute on the wrapper below
+          (see `.txn-metrics-collapsed` in globals.css).
+
+          Only the `.metaitem` figures collapse — the outcome / harness / model
+          chips in the same row are identity, so they stay put. */}
+      <button
+        type="button"
+        onClick={() => setMetricsOpen((open) => !open)}
+        aria-expanded={metricsOpen}
+        title={metricsOpen ? 'hide the session metrics' : 'show duration, turns, tools and tokens'}
+        className="btn btn-secondary btn-sm"
+      >
+        {metricsOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+        details
+      </button>
+      <button
+        type="button"
+        onClick={copyMarkdown}
+        title="copy the conversation shown above (respecting the active scope) as markdown text"
+        className="btn btn-secondary btn-sm"
+      >
+        <Copy size={14} aria-hidden />
+        {copied ? 'copied' : 'copy as markdown'}
+      </button>
+    </>
   );
 
   return (
@@ -311,12 +379,20 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
     // offset and bounded viewers, including the mobile two-row header.
     <div
       data-tour="transcript-view"
-      className="flex h-[calc(100dvh-var(--app-header-height))] flex-col"
+      className={[
+        'flex h-[calc(100dvh-var(--app-header-height))] flex-col',
+        metricsOpen ? '' : 'txn-metrics-collapsed',
+        activeTab === 'highlights' ? '' : 'txn-hints-hidden',
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
       <div className="flex-1 min-h-0">
         <TranscriptViewer
           viewModel={vm!}
           theme={theme}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
           // Local capabilities: labelling is supported (via renderTurnActions);
           // contribute / visibility / edit / export are village-only or absent.
           capabilities={{

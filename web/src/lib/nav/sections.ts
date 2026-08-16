@@ -8,10 +8,10 @@ import { UI_CAPABILITY, type UICapabilityToken } from '@/lib/capabilities/tokens
  * defined once. This is the only capability-visibility policy point: consumers
  * hold no raw section-visibility logic.
  *
- * Graph shell IA: Analytics · Changes · Code map (nav order — from
- * @peasant-labs/fairtrade/graph's GRAPH_APP_SECTIONS, analytics-first). Home
- * (`/`) is still the changes-first project picker regardless of nav order, so
- * Changes owns `/` and stays active across /review/*. Code map owns /map plus
+ * Graph shell IA: Home · Analytics · Code map. WHICH sections exist comes from
+ * @peasant-labs/fairtrade/graph's GRAPH_APP_SECTIONS; the label and the lead
+ * position are app-local overrides below. Home owns `/` — the project picker —
+ * and stays active across /review/*. Code map owns /map plus
  * /projects/{name}/{id} viewer deep links. Share is a persistent top-nav action
  * outside this graph-section registry and routes to `/share`.
  */
@@ -60,6 +60,28 @@ const ROUTES: Record<GraphSectionId, Omit<NavSection, 'id' | 'label'>> = {
   },
 };
 
+/**
+ * App-local display labels that replace the ones fairtrade ships.
+ *
+ * The graph shell registry stays the source of truth for WHICH sections exist,
+ * so the `assertKnownGraphSection` guard below still catches an unmapped section
+ * arriving in a future fairtrade release. Only the rendered string is replaced.
+ *
+ * `changes` reads as "home" because the section owns `/` — the page the app
+ * opens on. Lowercase, matching fairtrade's chrome convention and the rest of
+ * the nav.
+ */
+const LABEL_OVERRIDES: Partial<Record<GraphSectionId, string>> = {
+  changes: 'home',
+};
+
+/**
+ * The section that leads the nav, ahead of fairtrade's own analytics-first
+ * order. Home is where the app opens, so it reads first; every other section
+ * keeps the design system's relative order behind it.
+ */
+const LEAD_SECTION_ID: GraphSectionId = 'changes';
+
 function assertKnownGraphSection(section: GraphShellSection): asserts section is GraphShellSection & { id: GraphSectionId } {
   if (!(section.id in ROUTES)) {
     throw new Error(
@@ -72,8 +94,10 @@ function assertKnownGraphSection(section: GraphShellSection): asserts section is
 export const NAV_SECTIONS: NavSection[] = GRAPH_NAV.map((section) => {
   assertKnownGraphSection(section);
   const route = ROUTES[section.id];
-  return { ...route, id: section.id, label: section.label };
-});
+  return { ...route, id: section.id, label: LABEL_OVERRIDES[section.id] ?? section.label };
+  // Stable partition, not a full reorder: the lead section moves to the front
+  // and everything else keeps the order fairtrade shipped it in.
+}).sort((a, b) => Number(b.id === LEAD_SECTION_ID) - Number(a.id === LEAD_SECTION_ID));
 
 /**
  * Whether a section's discoverability requirement is met by the advertised

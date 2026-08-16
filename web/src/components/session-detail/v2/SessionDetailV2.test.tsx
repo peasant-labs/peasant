@@ -69,6 +69,14 @@ vi.mock(import('@peasant-labs/fairtrade/ui'), async (importOriginal) => {
         data-initial-turn={props.initialPosition?.kind === 'turn' ? props.initialPosition.turnIndex : -1}
         data-initial-request-key={props.initialPosition?.requestKey ?? 'none'}
       >
+        {/* The trail is host-owned policy (root → project → session), so expose
+            it for assertion; the package would render it in its hero. */}
+        <div
+          data-testid="package-breadcrumb"
+          data-crumbs={JSON.stringify(
+            (props.breadcrumb ?? []).map((c) => [c.label, c.href ?? null]),
+          )}
+        />
         <div data-testid="package-header-actions">
           {props.headerActions as React.ReactNode}
         </div>
@@ -236,6 +244,33 @@ function assertRouterCallToken(expected: string, invariant: string): void {
   const wanted = expected === 'none' ? [] : [expected];
   if (JSON.stringify(calls) !== JSON.stringify(wanted)) throw new Error(`${invariant} invariant failed: expected router call tokens ${JSON.stringify(wanted)}, received ${JSON.stringify(calls)}`);
 }
+
+// -- Breadcrumb trail ---------------------------------------------------------
+
+function crumbs(): [string, string | null][] {
+  return JSON.parse(screen.getByTestId('package-breadcrumb').getAttribute('data-crumbs') ?? '[]');
+}
+
+describe('SessionDetailV2 — breadcrumb trail', () => {
+  it('walks projects → this project\'s sessions → this session', () => {
+    currentSearchParams = new URLSearchParams();
+    renderChangeScope();
+
+    const trail = crumbs();
+    expect(trail.map(([label]) => label)).toEqual([
+      'projects',
+      'alpha-project',
+      'sess-123',
+    ]);
+    // The root returns to the project list; the project crumb returns to THAT
+    // project's session list — never to the capability-gated map.
+    expect(trail[0][1]).toBe('/');
+    expect(trail[1][1]).toBe(`/sessions/${PROJECT_HASH}`);
+    expect(trail.some(([, href]) => href?.startsWith('/map'))).toBe(false);
+    // The session you are on is the end of the trail, so it is not a link.
+    expect(trail[2][1]).toBeNull();
+  });
+});
 
 // -- Change scope (now filters; no longer a dead-end) --------------------------
 

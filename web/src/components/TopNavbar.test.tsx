@@ -32,26 +32,29 @@ describe('TopNavbar — graph shell nav', () => {
     render(<TopNavbar connected />);
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
 
-    const changes = screen.getByRole('link', { name: 'changes' });
+    // The changes section is labelled "home" and leads the nav (LABEL_OVERRIDES
+    // and LEAD_SECTION_ID in lib/nav/sections.ts) — it owns `/`, the page the
+    // app opens on.
+    const home = screen.getByRole('link', { name: 'home' });
     const map = screen.getByRole('link', { name: 'code map' });
     const analytics = screen.getByRole('link', { name: 'analytics' });
 
-    expect(changes).toHaveAttribute('href', '/');
+    expect(home).toHaveAttribute('href', '/');
     expect(map).toHaveAttribute('href', '/map');
     expect(analytics).toHaveAttribute('href', '/analytics');
 
-    // Order: analytics · changes · code map.
+    // Home leads; the remaining sections keep fairtrade's own relative order.
     const labels = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
-    expect(labels).toEqual(['analytics', 'changes', 'code map']);
+    expect(labels).toEqual(['home', 'analytics', 'code map']);
 
     // Shared fairtrade chrome uses lowercase labels, not title-cased app labels.
     expect(screen.queryByText('Analytics')).not.toBeInTheDocument();
     expect(screen.queryByText('Code Map')).not.toBeInTheDocument();
-    expect(screen.queryByText('Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+    expect(screen.queryByText('changes')).not.toBeInTheDocument();
 
-    // The old labels are gone from persistent chrome.
+    // The other retired labels stay gone from persistent chrome.
     expect(screen.queryByText('Overview')).not.toBeInTheDocument();
-    expect(screen.queryByText('Projects')).not.toBeInTheDocument();
     expect(screen.queryByText('Review')).not.toBeInTheDocument();
     expect(screen.queryByText('Share')).not.toBeInTheDocument();
     expect(screen.queryByText('Contribute')).not.toBeInTheDocument();
@@ -63,7 +66,7 @@ describe('TopNavbar — graph shell nav', () => {
 
     expect(screen.queryByRole('link', { name: 'code map' })).not.toBeInTheDocument();
     const labels = Array.from(nav.querySelectorAll('a')).map((a) => a.textContent);
-    expect(labels).toEqual(['analytics', 'changes']);
+    expect(labels).toEqual(['home', 'analytics']);
   });
 
   it('mounts the persistent share action on the production /share route', () => {
@@ -101,7 +104,7 @@ describe('TopNavbar — graph shell nav', () => {
     capabilities = new Set(['code_map_navigation_v1']);
     currentPathname = '/';
     render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'changes' }));
+    expectActivePill(screen.getByRole('link', { name: 'home' }));
     expectInactivePill(screen.getByRole('link', { name: 'code map' }));
   });
 
@@ -109,7 +112,7 @@ describe('TopNavbar — graph shell nav', () => {
     capabilities = new Set(['code_map_navigation_v1']);
     currentPathname = '/review/peasant';
     render(<TopNavbar connected />);
-    expectActivePill(screen.getByRole('link', { name: 'changes' }));
+    expectActivePill(screen.getByRole('link', { name: 'home' }));
     expectInactivePill(screen.getByRole('link', { name: 'code map' }));
   });
 
@@ -118,7 +121,7 @@ describe('TopNavbar — graph shell nav', () => {
     currentPathname = '/map/peasant';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'code map' }));
-    expectInactivePill(screen.getByRole('link', { name: 'changes' }));
+    expectInactivePill(screen.getByRole('link', { name: 'home' }));
   });
 
   it('marks Map active on /projects/{name}/{id} viewer routes', () => {
@@ -126,7 +129,7 @@ describe('TopNavbar — graph shell nav', () => {
     currentPathname = '/projects/peasant/sess-0001';
     render(<TopNavbar connected />);
     expectActivePill(screen.getByRole('link', { name: 'code map' }));
-    expectInactivePill(screen.getByRole('link', { name: 'changes' }));
+    expectInactivePill(screen.getByRole('link', { name: 'home' }));
   });
 
   it('marks Analytics active on /analytics', () => {

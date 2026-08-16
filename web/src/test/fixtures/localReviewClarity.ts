@@ -63,7 +63,7 @@ const NO_OUTCOME_FIELDS = ['name', 'sessionId', 'taskTitle', 'entryIndex'] as co
 export type ClarityPickerCase = {
   name: string;
   surface: 'home' | 'map';
-  destination: 'changes' | 'map';
+  destination: 'changes' | 'map' | 'sessions';
   projectCount: number;
   targetProject: string;
   targetProjectHash: string;
@@ -143,10 +143,10 @@ export function loadLocalReviewClarityFixture(
       PICKER_FIELDS.filter((field) => !['projectCount', 'recordedFiles', 'totalFiles'].includes(field)),
       path,
     );
-    if (!['home', 'map'].includes(String(row.surface)) || !['changes', 'map'].includes(String(row.destination))) {
+    if (!['home', 'map'].includes(String(row.surface)) || !['changes', 'map', 'sessions'].includes(String(row.destination))) {
       throw new Error(`${path} has an invalid surface or destination`);
     }
-    if ((row.surface === 'home') !== (row.destination === 'changes')) {
+    if ((row.surface === 'home') !== (row.destination === 'sessions')) {
       throw new Error(`${path} must keep the mounted surface and destination paired`);
     }
     if (!Number.isSafeInteger(row.projectCount) || Number(row.projectCount) < 9) {
@@ -166,6 +166,8 @@ export function loadLocalReviewClarityFixture(
     }
     const expectedHref = row.destination === 'changes'
       ? `/review/${row.targetProjectHash}`
+      : row.destination === 'sessions'
+      ? `/sessions/${row.targetProjectHash}`
       : `/map/${row.targetProjectHash}`;
     if (row.expectedHref !== expectedHref) {
       throw new Error(`${path}.expectedHref must match destination and targetProjectHash`);
