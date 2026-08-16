@@ -1,4 +1,4 @@
-expectedCaseCount: 13
+expectedCaseCount: 14
 expectedNames:
   - unrelated-project-action-preserves-visible-policies
   - unrelated-project-action-preserves-scanner-absent-policy
@@ -12,7 +12,8 @@ expectedNames:
   - grouped-branch-clear-denies-descendant-worktree-only
   - grouped-session-clear-keeps-linked-sibling
   - grouped-shared-branch-clear-denies-all-descendant-worktrees
-  - select-all-cycle-restore-mixed-baseline-falls-back-to-sessions
+  - select-all-cycle-restore-mixed-baseline-rederives-partial-branches
+  - select-all-selects-unknown-harness-sibling-project
 cases:
   - name: unrelated-project-action-preserves-visible-policies
     paths:
@@ -318,11 +319,15 @@ cases:
   # when the cycle activated") can leave a single project PARTIAL: main was
   # selected and topic was not, so three presses (select all, unselect all,
   # restore) end with only main re-checked - the two branches move in
-  # DIFFERENT directions from where the cycle started. changedSelectionScopes
-  # must not collapse that into one whole-project scope (which would select
-  # every branch); it falls back to a per-session scope for whichever session
-  # actually changed on the restoring press.
-  - name: select-all-cycle-restore-mixed-baseline-falls-back-to-sessions
+  # DIFFERENT directions from where the cycle started. select-all is routed
+  # through the robust full-derive path (FromTreeNodes over the current tree
+  # check state), not the strict incremental snapshot/reconcile path, so the
+  # restored selection is re-derived wholesale from what is actually checked
+  # rather than reconciled as a touched scope. The selected SESSION SET still
+  # matches the pre-cycle baseline exactly (only "main" ends up checked); it
+  # is simply expressed in the derived project+branches form instead of the
+  # reconciler's session-ID fallback form.
+  - name: select-all-cycle-restore-mixed-baseline-rederives-partial-branches
     paths:
       - {key: clone-a, state: directory}
     listings:
@@ -340,5 +345,36 @@ cases:
     expected:
       mode: selected
       autoIngestNewBranches: false
-      sessions:
-        - {harness: claude-code, ids: [55555555-5555-4555-8555-555555555555]}
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
+
+  # A heterogeneous real forest can contain a session whose harness slug is
+  # not on the known-harness list (e.g. an unrecognized or newly-added
+  # coding tool the scanner still reports faithfully). The gate that routes
+  # select-all through the strict incremental snapshot/reconcile path only
+  # checks harness-nonempty + a resolvable clone path, so this forest PASSES
+  # that gate; but the strict snapshot itself additionally requires the
+  # harness be on the known-harness allowlist, and errors otherwise. Before
+  # the fix, that single unknown-harness node anywhere in the forest made
+  # the whole select-all snapshot error, which reverted the ENTIRE action -
+  # including the sibling claude-code project. select-all must instead
+  # succeed and check both projects.
+  - name: select-all-selects-unknown-harness-sibling-project
+    paths:
+      - {key: clone-a, state: directory}
+      - {key: clone-b, state: directory}
+    listings:
+      - {harness: claude-code, projectName: tool, gitRemote: "git@github.com:acme/tool.git", pathKey: clone-a, branch: main, sessionId: 11111111-1111-4111-8111-111111111111, title: clone a}
+      - {harness: acme-agent, projectName: other, gitRemote: "git@github.com:acme/other.git", pathKey: clone-b, branch: main, sessionId: 22222222-2222-4222-8222-222222222222, title: other session}
+    saved: {mode: selected, autoIngestNewBranches: false}
+    actions: [select-all]
+    refresh: true
+    expectedCheckedSessions:
+      - 11111111-1111-4111-8111-111111111111
+      - 22222222-2222-4222-8222-222222222222
+    expected:
+      mode: selected
+      autoIngestNewBranches: false
+      projects:
+        - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a]}
+        - {harness: acme-agent, gitRemote: "git@github.com:acme/other.git", pathKeys: [clone-b]}

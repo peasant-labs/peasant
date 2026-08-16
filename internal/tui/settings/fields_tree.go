@@ -403,7 +403,18 @@ func (f *treeField) handleMessage(d *Draft, msg tea.Msg, allowFacet bool) tea.Cm
 	treeOwned := f.tree.OwnsAsync(msg)
 	intent := f.captureSelectionIntent(msg)
 	var before selectableState
-	exactAction := (f.restoreSelection || f.initializeSelection) && f.baselineApplied && intent.action != keymap.ActionUnknown && isExactProjectFirstForest(f.tree.Roots())
+	// select-all is a whole-forest action: it can touch every project in one
+	// press, so a single node anywhere in a heterogeneous real forest that
+	// fails the STRICT per-node identity checks inside
+	// snapshotSelectableState (e.g. a session whose harness is not on the
+	// known-harness allowlist) would otherwise revert the entire action,
+	// including sibling projects that were perfectly fine. isExactProjectFirstForest
+	// only gates on harness-nonempty + a resolvable clone path, which is not
+	// as strict as the snapshot it gates, so this mismatch is real, not
+	// theoretical. Route select-all through the same robust, tolerant
+	// full-derive path used for non-exact forests instead of the strict
+	// incremental snapshot/reconcile-with-revert-on-error path.
+	exactAction := (f.restoreSelection || f.initializeSelection) && f.baselineApplied && intent.action != keymap.ActionUnknown && intent.action != keymap.ActionSelectAll && isExactProjectFirstForest(f.tree.Roots())
 	if exactAction {
 		var err error
 		before, err = f.snapshotSelectableState(intent)
