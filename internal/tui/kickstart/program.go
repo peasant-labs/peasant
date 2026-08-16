@@ -2,6 +2,7 @@ package kickstart
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -120,10 +121,12 @@ type ProgramDeps struct {
 	Context context.Context
 }
 
-// loginDoneMsg carries the result of the injected LoginFunc.
+// loginDoneMsg carries the result of the injected LoginFunc. epoch identifies the
+// attempt that produced it, so a result from an interrupted attempt is ignored.
 type loginDoneMsg struct {
 	username string
 	err      error
+	epoch    uint64
 }
 
 // ingestDoneMsg carries the result of the injected IngestFunc.
@@ -146,7 +149,13 @@ const progressPollInterval = 100 * time.Millisecond
 const (
 	oauthPrompt      = "connect to a village now?"
 	visibilityPrompt = "log in now to choose a default sharing visibility?"
+	connectingLabel  = "connecting to village"
 )
+
+// errLoginCanceled is the note shown after the user cancels an in-flight login
+// with esc. It is informational, not a failure: local setup can still continue.
+var errLoginCanceled = errors.New(
+	"village connection canceled. you can connect later with `peasant village login`.")
 
 // villageConnectionState is shared by every Program value Bubble Tea produces.
 // Registry visibility closes over this pointer, so authentication can reveal a
@@ -182,6 +191,14 @@ type Program struct {
 	authInFlt  bool
 	connection *villageConnectionState
 	loginErr   error
+	// loginCancel cancels the in-flight login attempt. It is set when a login
+	// starts and cleared when the attempt resolves or is interrupted, so a key
+	// press on the spinner can abort a login the runner would otherwise block on.
+	loginCancel context.CancelFunc
+	// loginEpoch tags each login attempt. An interrupted attempt keeps its epoch,
+	// so its late result is recognized as stale and cannot clobber a resumed
+	// prompt or a newer attempt.
+	loginEpoch uint64
 	// visibilityAsked prevents repeated login interruptions after the user has
 	// explicitly continued locally.
 	visibilityAsked bool
@@ -330,7 +347,10 @@ func (p Program) Update(msg tea.Msg) (Program, tea.Cmd) {
 func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
 	case loginDoneMsg:
-		p.authInFlt = false
+		if p.staleLogin(m) {
+			return p, nil
+		}
+		p = p.clearLogin()
 		if m.err != nil {
 			p.loginErr = loginActionableError(m.err, "the initial village connection step")
 			p.connection.Set(false)
@@ -341,17 +361,14 @@ func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 		return p.enterFlow()
 	case tea.KeyPressMsg:
 		if p.authInFlt {
-			return p, nil
+			return p.interruptLogin(m)
 		}
 		var cmd tea.Cmd
 		p.oauth, cmd = p.oauth.Update(m)
 		if cmd != nil {
 			if res, ok := runOnce(cmd).(kit.ConfirmResultMsg); ok {
 				if res.OK && p.deps.Login != nil {
-					p.loginErr = nil
-					p.authInFlt = true
-					p.spinner = p.spinner.SetLabel("connecting to village")
-					return p, tea.Batch(p.runLogin(), p.spinner.Tick())
+					return p.beginLogin()
 				}
 				// Declined or no login runner: proceed local-only.
 				return p.enterFlow()
@@ -368,13 +385,69 @@ func (p Program) updateOAuth(msg tea.Msg) (Program, tea.Cmd) {
 	}
 }
 
-// runLogin issues the injected login runner as a command.
-func (p Program) runLogin() tea.Cmd {
+// beginLogin starts an interruptible login attempt shared by both the connect
+// step and the sharing-visibility detour. It derives a cancellable context so a
+// key press on the spinner can abort a login the runner would otherwise block on,
+// tags the attempt with a fresh epoch, and returns the runner plus the spinner
+// tick.
+func (p Program) beginLogin() (Program, tea.Cmd) {
+	p.loginErr = nil
+	p.authInFlt = true
+	p.spinner = p.spinner.SetLabel(connectingLabel)
+	ctx, cancel := context.WithCancel(p.deps.Context)
+	p.loginCancel = cancel
+	p.loginEpoch++
+	return p, tea.Batch(p.runLogin(ctx, p.loginEpoch), p.spinner.Tick())
+}
+
+// runLogin issues the injected login runner for one attempt. The attempt's epoch
+// travels with its result so an interrupted attempt's late result is ignored.
+func (p Program) runLogin(ctx context.Context, epoch uint64) tea.Cmd {
 	login := p.deps.Login
-	ctx := p.deps.Context
 	return func() tea.Msg {
 		username, err := login(ctx)
-		return loginDoneMsg{username: username, err: err}
+		return loginDoneMsg{username: username, err: err, epoch: epoch}
+	}
+}
+
+// clearLogin releases the volatile login state once an attempt resolves or is
+// interrupted. It always cancels the attempt's context so it is not leaked, and
+// clears the in-flight flag so the spinner gives way to a usable surface.
+func (p Program) clearLogin() Program {
+	if p.loginCancel != nil {
+		p.loginCancel()
+		p.loginCancel = nil
+	}
+	p.authInFlt = false
+	return p
+}
+
+// staleLogin reports whether a login result belongs to an attempt that is no
+// longer current: a superseded epoch, or one already cleared by an interrupt.
+func (p Program) staleLogin(m loginDoneMsg) bool {
+	return !p.authInFlt || m.epoch != p.loginEpoch
+}
+
+// interruptLogin lets the user escape the "connecting to village" spinner. ctrl+c
+// (or q) cancels the attempt and quits kickstart; esc cancels the attempt and
+// returns to the prompt so the user can continue locally. Any other key is
+// ignored while the login runs.
+func (p Program) interruptLogin(msg tea.KeyPressMsg) (Program, tea.Cmd) {
+	action, ok := keymap.Match(keymap.Default(), msg,
+		programActionAvailability{keymap.ActionQuit, keymap.ActionBack})
+	if !ok {
+		return p, nil
+	}
+	switch action {
+	case keymap.ActionQuit:
+		p = p.clearLogin()
+		return p, tea.Quit
+	case keymap.ActionBack:
+		p = p.clearLogin()
+		p.loginErr = errLoginCanceled
+		return p, nil
+	default:
+		return p, nil
 	}
 }
 
@@ -522,7 +595,10 @@ func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
 	case loginDoneMsg:
-		p.authInFlt = false
+		if p.staleLogin(m) {
+			return p, nil
+		}
+		p = p.clearLogin()
 		if m.err != nil {
 			p.connection.Set(false)
 			p.loginErr = loginActionableError(m.err, "the sharing visibility login step")
@@ -548,7 +624,7 @@ func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 		return p, nil
 	case tea.KeyPressMsg:
 		if p.authInFlt {
-			return p, nil
+			return p.interruptLogin(m)
 		}
 		var cmd tea.Cmd
 		p.visibility, cmd = p.visibility.Update(m)
@@ -572,10 +648,7 @@ func (p Program) updateVisibility(msg tea.Msg) (Program, tea.Cmd) {
 				"the sharing visibility login step")
 			return p, nil
 		}
-		p.loginErr = nil
-		p.authInFlt = true
-		p.spinner = p.spinner.SetLabel("connecting to village")
-		return p, tea.Batch(p.runLogin(), p.spinner.Tick())
+		return p.beginLogin()
 	default:
 		var commands []tea.Cmd
 		if p.flowBuilt {
@@ -809,14 +882,14 @@ func (p Program) View() string {
 	switch p.phase {
 	case PhaseOAuth:
 		if p.authInFlt {
-			return p.centered(p.spinner.View())
+			return p.viewConnecting()
 		}
 		return p.viewOAuth()
 	case PhaseFlow:
 		return p.flow.View()
 	case PhaseVisibility:
 		if p.authInFlt {
-			return p.centered(p.spinner.View())
+			return p.viewConnecting()
 		}
 		return p.viewVisibility()
 	case PhaseIngest:
@@ -836,6 +909,20 @@ const villageContext = "a village is a shared commons for agent transcripts.\n" 
 	"connecting sends nothing until a later explicit publish.\n" +
 	"publishing is separate, explicit, and opt-in. you can connect\n" +
 	"later at any time with `peasant village login`."
+
+// viewConnecting renders the "connecting to village" spinner with the keys that
+// escape it. The login runner can block (an interactive device flow, a slow
+// network), so the surface must always advertise a way out: esc cancels and
+// returns to the prompt, ctrl+c quits kickstart.
+func (p Program) viewConnecting() string {
+	styles := p.deps.Theme.Styles()
+	body := strings.Join([]string{
+		p.spinner.View(),
+		"",
+		styles.Muted.Render("press esc to cancel, ctrl+c to quit"),
+	}, "\n")
+	return p.centered(body)
+}
 
 // viewOAuth renders the connect-now dialog CENTERED in the terminal (the UAT
 // flagged the top-left anchoring as strange), with the explanatory context above
