@@ -653,7 +653,7 @@ func (t Tree) AvailableActions() []keymap.ActionID {
 	if t.anyInteriorCanCollapse() {
 		actions = append(actions, keymap.ActionCollapseAll)
 	}
-	if t.hasUnselectedSelectableNode() {
+	if t.hasSelectableNode() {
 		actions = append(actions, keymap.ActionSelectAll)
 	}
 	return append(actions, keymap.ActionHelp, keymap.ActionBack)
@@ -713,12 +713,34 @@ func (t Tree) subtreeHasSelectable(node *TreeNode) bool {
 	return selectable
 }
 
+// HasUnselected reports whether the visible projection still holds a selectable
+// node that is not Checked. The selection field reads it to label the select/
+// clear-all toggle - "select all" while something is unselected, "clear all"
+// once everything is - so the key's advertised action always matches what it does.
+func (t Tree) HasUnselected() bool { return t.hasUnselectedSelectableNode() }
+
+// hasSelectableNode reports whether the visible projection holds any selectable
+// leaf at all, Checked or not. The select/clear-all toggle is offered whenever
+// one exists, so the key is never inert on a forest that starts fully selected.
+func (t Tree) hasSelectableNode() bool {
+	for _, root := range t.renderRoots() {
+		found := false
+		walk(root, func(c *TreeNode) {
+			if c.isLeaf() && c.State != Conflict {
+				found = true
+			}
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
 // hasUnselectedSelectableNode reports whether the current visible projection
-// holds at least one selectable leaf that is not already Checked. Select-all is
-// advertised (and therefore dispatchable) only then: when everything selectable
-// is already Checked the action has nothing left to do, so it is neither shown
-// nor matched, which is what keeps a "select all" key from reading as a hidden
-// "clear all" on a forest that starts fully selected.
+// holds at least one selectable leaf that is not already Checked. It steers the
+// select/clear-all toggle: while it is true the key selects the projection, and
+// once it is false the key clears it.
 func (t Tree) hasUnselectedSelectableNode() bool {
 	for _, root := range t.renderRoots() {
 		unselected := false
@@ -904,7 +926,7 @@ func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 			t.toggle(node)
 		}
 	case keymap.ActionSelectAll:
-		t.selectAll()
+		t.toggleSelectAll()
 	case keymap.ActionSelectUnderProject:
 		t.selectUnderProject()
 	}
@@ -994,14 +1016,18 @@ func (t *Tree) toggle(node *TreeNode) {
 	t.recompute()
 }
 
-// selectAll checks every selectable node represented by the current visible
-// projection. It is idempotent: pressing "select all" always ends with the
-// projection selected, never toggling a fully-selected forest back to empty.
-// Bulk clearing is a distinct intent a single "select all" key must not
-// silently perform, so it is deliberately not folded in here.
-func (t *Tree) selectAll() {
+// toggleSelectAll makes the select-all key a single, always-meaningful action:
+// when any selectable node in the visible projection is unselected it selects
+// the whole projection; when everything is already selected it clears it. The
+// help label reflects which of the two the key will do (see fields_tree's
+// WithSelectAllHelp), so it never reads as a hidden clear.
+func (t *Tree) toggleSelectAll() {
+	target := Checked
+	if !t.hasUnselectedSelectableNode() {
+		target = Unchecked
+	}
 	for _, r := range t.renderRoots() {
-		setSubtree(r, Checked)
+		setSubtree(r, target)
 	}
 	t.recompute()
 }

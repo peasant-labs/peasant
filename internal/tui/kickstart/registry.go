@@ -211,7 +211,7 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 	out := []settings.TreeOption{
 		settings.WithFacet(settings.MetaHarness, "harness"),
 		settings.WithFacetDisplay(harnessFacetLabel),
-		settings.WithSelectAllHelp("select all projects"),
+		settings.WithSelectAllHelp("select all projects", "clear all projects"),
 		settings.WithDraftSelectionState(),
 		settings.WithCompactFooter(),
 		settings.WithCollapseSessionlessRoots(),

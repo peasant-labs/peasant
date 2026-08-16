@@ -1,9 +1,9 @@
 # First-run selection-step UX: the pruned advance footer, the sessionless-root
-# collapse default, and the idempotent select-all. Every case drives the real
+# collapse default, and the select/clear-all toggle. Every case drives the real
 # kickstart Program against a config that does NOT yet exist (a genuine first
 # run: nothing tracked), so only the `ingested` list marks a session as already
 # imported. Two projects with distinct remotes give two independent roots.
-expectedCaseCount: 6
+expectedCaseCount: 7
 listings:
   - harness: claude-code
     projectName: acme/alpha
@@ -47,11 +47,18 @@ cases:
     footerContains: ["tab: next step", "?: help"]
     footerMissing: ["space: select", "select all", "collapse", "next project"]
 
-  # Select-all on an already fully-selected forest keeps it selected: the key
-  # never doubles as a hidden clear-all.
-  - name: select-all-keeps-a-full-selection
+  # Select-all on an already fully-selected forest is a toggle: it CLEARS the
+  # whole projection, so the key is never a silent no-op on the first-run forest
+  # (which opens fully selected).
+  - name: select-all-clears-a-full-selection
     ingested: [a-1, b-1]
     keys: [a]
+    wantSomeUnchecked: true
+
+  # Pressing it again reselects everything: the toggle swings both ways.
+  - name: select-all-toggles-back-to-full
+    ingested: [a-1, b-1]
+    keys: [a, a]
     wantNoUnchecked: true
 
   # Deselecting a root leaves some boxes empty...

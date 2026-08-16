@@ -76,9 +76,11 @@ type treeField struct {
 	// initializeSelection marks the saved baseline as tracked and applies the
 	// working draft whenever a fresh forest loads.
 	initializeSelection bool
-	// selectAllHelp narrows the generic select-all action's user-facing scope.
-	// The key and action ID remain canonical.
+	// selectAllHelp and clearAllHelp label the select/clear-all toggle: the first
+	// is shown while something is unselected, the second once the whole projection
+	// is selected. The key and action ID remain canonical.
 	selectAllHelp string
+	clearAllHelp  string
 	// compactFooter trims this field's step footer to the primary navigation keys
 	// (help, next, prev) and relabels the advance key so a first-time user can see
 	// how to progress. The full key set stays reachable through help.
@@ -163,11 +165,14 @@ func WithSelectionRestoration() TreeOption {
 	return func(f *treeField) { f.restoreSelection = true }
 }
 
-// WithSelectAllHelp gives this tree a scope-specific description for the
-// canonical select-all action. It changes no key binding and leaves unrelated
-// trees on the generic "select all" wording.
-func WithSelectAllHelp(description string) TreeOption {
-	return func(f *treeField) { f.selectAllHelp = description }
+// WithSelectAllHelp gives this tree scope-specific labels for the canonical
+// select/clear-all toggle: selectLabel is shown while something is unselected,
+// clearLabel once the whole projection is selected. It changes no key binding.
+func WithSelectAllHelp(selectLabel, clearLabel string) TreeOption {
+	return func(f *treeField) {
+		f.selectAllHelp = selectLabel
+		f.clearAllHelp = clearLabel
+	}
 }
 
 // WithCompactFooter trims this field's step footer to the primary navigation
@@ -305,7 +310,11 @@ func (f *treeField) actionKeymap() keymap.Keymap {
 	if f.selectAllHelp != "" {
 		if binding, ok := km[keymap.ActionSelectAll]; ok {
 			help := binding.Help()
-			binding.SetHelp(help.Key, f.selectAllHelp)
+			label := f.selectAllHelp
+			if f.clearAllHelp != "" && !f.tree.HasUnselected() {
+				label = f.clearAllHelp
+			}
+			binding.SetHelp(help.Key, label)
 			km[keymap.ActionSelectAll] = binding
 		}
 	}

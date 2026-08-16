@@ -21,7 +21,7 @@ import (
 //go:embed testdata/selection_ux.yaml
 var selectionUXData []byte
 
-const expectedSelectionUXCaseCount = 6
+const expectedSelectionUXCaseCount = 7
 
 // selectionUXCase is one first-run selection-step scenario: which sessions the
 // local store already holds, the keys pressed, and what the rendered step and
