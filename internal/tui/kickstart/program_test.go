@@ -343,6 +343,10 @@ func TestProgram_OAuthLoginFeedsConnected(t *testing.T) {
 	if p.Phase() != kickstart.PhaseFlow {
 		t.Fatalf("phase after login = %s, want flow", p.Phase())
 	}
+	// Widen before inspecting the section strip: at a narrow width the strip
+	// truncates its right-most tab labels, which is orthogonal to whether login
+	// revealed the sharing section.
+	p.SetSize(120, 40)
 	if !strings.Contains(stripRender(p.View()), "sharing") {
 		t.Fatal("connected flow did not reveal sharing before its first navigation input")
 	}

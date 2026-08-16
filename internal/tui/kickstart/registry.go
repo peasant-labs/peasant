@@ -43,6 +43,7 @@ type Options struct {
 const (
 	SectionSelection   = "selection"
 	SectionAutoIngest  = "auto-ingest"
+	SectionPublication = "publication"
 	SectionPrivacy     = "privacy"
 	SectionLicense     = "license"
 	SectionDestination = "destination"
@@ -51,12 +52,13 @@ const (
 
 // Field keys are stable within their section.
 const (
-	FieldSelection  = "transcripts"
-	FieldAutoIngest = "auto-ingest-new-branches"
-	FieldPrivacy    = "redaction-level"
-	FieldLicense    = "content-license"
-	FieldVisibility = "default-visibility"
-	FieldRetention  = "claude-retention-days"
+	FieldSelection   = "transcripts"
+	FieldAutoIngest  = "auto-ingest-new-branches"
+	FieldPublication = "publication-preference"
+	FieldPrivacy     = "redaction-level"
+	FieldLicense     = "content-license"
+	FieldVisibility  = "default-visibility"
+	FieldRetention   = "claude-retention-days"
 )
 
 // neverExpireDays is the cleanupPeriodDays value that keeps Claude Code
@@ -110,6 +112,24 @@ func BuildRegistry(opts Options) settings.Registry {
 				settings.WithDescription(
 					settings.Toggle(FieldAutoIngest, "auto-ingest new branches in fully-selected projects", autoIngestAccessor()),
 					"turn this on to import new branches of a fully-selected project without asking again."),
+			},
+		},
+		{
+			Key:   SectionPublication,
+			Title: "publication",
+			Guide: sectionGuide(
+				"choose whether to keep transcripts local or plan to publish later.",
+				"this only records a preference; kickstart itself publishes nothing.",
+				"nothing is published now, and nothing is published when kickstart finishes.",
+				"to publish later, run `peasant village push` as a separate, explicit step.",
+			),
+			// Always offered: the keep-local choice is a first-class decision every
+			// first-run user should see, not the side effect of declining a connect
+			// prompt. It stands independent of any village connection.
+			Fields: []settings.Field{
+				settings.WithDescription(
+					settings.Radio(FieldPublication, "publication preference", publicationAccessor(), publicationOptions()...),
+					"keep local means nothing ever leaves this machine until you explicitly publish."),
 			},
 		},
 		{
@@ -338,6 +358,34 @@ func visibilityDescription(v schema.Visibility) string {
 		return "anyone can see the transcript."
 	default:
 		return ""
+	}
+}
+
+// publicationAccessor lenses the config's stored publication preference. It reads
+// and writes the raw stored value so an untouched field never rewrites the config
+// (a legacy file with no stored preference stays byte-for-byte unchanged). A fresh
+// kickstart draft starts from config.BaseConfig, which defaults to keep-local, so
+// the radio still highlights that safe default on a first run. The value it writes
+// is a preference only; nothing in the flow publishes.
+func publicationAccessor() settings.Accessor[config.SharePreference] {
+	return settings.Accessor[config.SharePreference]{
+		Get: func(cfg *config.Config) config.SharePreference { return cfg.Push.SharePreference },
+		Set: func(cfg *config.Config, v config.SharePreference) { cfg.Push.SharePreference = v },
+	}
+}
+
+func publicationOptions() []settings.Option[config.SharePreference] {
+	return []settings.Option[config.SharePreference]{
+		{
+			Label:       "keep local, do not publish",
+			Value:       config.SharePreferenceKeepLocal,
+			Description: "keep every transcript on this machine. nothing is published until you explicitly run `peasant village push`.",
+		},
+		{
+			Label:       "plan to publish later",
+			Value:       config.SharePreferenceShareLater,
+			Description: "record that you intend to publish later. this still publishes nothing now; sharing remains a separate, explicit push.",
+		},
 	}
 }
 
