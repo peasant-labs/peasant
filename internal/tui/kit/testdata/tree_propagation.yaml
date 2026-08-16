@@ -108,8 +108,10 @@ cases:
       p2: checked
       b: checked
 
-  # Select-all on an already-fully-checked forest clears it.
-  - name: select-all-clears-when-all-checked
+  # Select-all is idempotent: on an already-fully-checked forest it has nothing
+  # left to select, so it is not dispatchable and the forest stays checked. A
+  # "select all" key never doubles as a hidden "clear all".
+  - name: select-all-keeps-checked-when-all-checked
     forest:
       - id: p1
         children:
@@ -122,10 +124,10 @@ cases:
     actions:
       - selectAll: true
     expect:
-      p1: unchecked
-      a: unchecked
-      p2: unchecked
-      b: unchecked
+      p1: checked
+      a: checked
+      p2: checked
+      b: checked
 
   # A Conflict leaf renders/persists distinctly: it forces its parent to
   # Partial and is NOT flipped by a parent toggle (a deleted worktree cannot be

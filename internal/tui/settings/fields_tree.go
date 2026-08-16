@@ -79,6 +79,14 @@ type treeField struct {
 	// selectAllHelp narrows the generic select-all action's user-facing scope.
 	// The key and action ID remain canonical.
 	selectAllHelp string
+	// compactFooter trims this field's step footer to the primary navigation keys
+	// (help, next, prev) and relabels the advance key so a first-time user can see
+	// how to progress. The full key set stays reachable through help.
+	compactFooter bool
+	// collapseSessionlessRoots folds a freshly-loaded project root to the project
+	// line when none of its sessions are already imported or tracked, so a first
+	// run reads as a short list of projects rather than every session expanded.
+	collapseSessionlessRoots bool
 
 	// full is the whole forest the source last loaded; view is the (possibly
 	// narrowed) forest the tree currently renders, sharing full's leaf pointers.
@@ -160,6 +168,22 @@ func WithSelectionRestoration() TreeOption {
 // trees on the generic "select all" wording.
 func WithSelectAllHelp(description string) TreeOption {
 	return func(f *treeField) { f.selectAllHelp = description }
+}
+
+// WithCompactFooter trims this field's step footer to the primary navigation
+// keys - help, next, and (when it exists) previous - and relabels the advance
+// key so first-time users see how to move on without opening help. The rest of
+// the tree's keys stay dispatchable and remain listed in the help overlay.
+func WithCompactFooter() TreeOption {
+	return func(f *treeField) { f.compactFooter = true }
+}
+
+// WithCollapseSessionlessRoots folds a freshly-loaded project root down to the
+// project line when it has no already-imported or tracked sessions, so a first
+// run opens as a short list of projects instead of every session expanded. A
+// root that does carry imported or tracked work keeps the default expansion.
+func WithCollapseSessionlessRoots() TreeOption {
+	return func(f *treeField) { f.collapseSessionlessRoots = true }
 }
 
 // WithPreviewRatio sets the fraction of the tree/preview region assigned to the
@@ -278,17 +302,47 @@ func (f *treeField) availableActions() []keymap.ActionID {
 
 func (f *treeField) actionKeymap() keymap.Keymap {
 	km := keymap.Default()
-	if f.selectAllHelp == "" {
-		return km
+	if f.selectAllHelp != "" {
+		if binding, ok := km[keymap.ActionSelectAll]; ok {
+			help := binding.Help()
+			binding.SetHelp(help.Key, f.selectAllHelp)
+			km[keymap.ActionSelectAll] = binding
+		}
 	}
-	binding, ok := km[keymap.ActionSelectAll]
-	if !ok {
-		return km
+	if f.compactFooter {
+		if binding, ok := km[keymap.ActionNextField]; ok {
+			help := binding.Help()
+			binding.SetHelp(help.Key, treeAdvanceHelp)
+			km[keymap.ActionNextField] = binding
+		}
 	}
-	help := binding.Help()
-	binding.SetHelp(help.Key, f.selectAllHelp)
-	km[keymap.ActionSelectAll] = binding
 	return km
+}
+
+// treeAdvanceHelp is the compact-footer label for the advance key, chosen so a
+// first-time user reads it as "move on to the next step" rather than the generic
+// "next field".
+const treeAdvanceHelp = "next step"
+
+// primaryFooterActions reports the small set of keys a compact-footer tree wants
+// the step footer to show; the flow intersects it with what is dispatchable, and
+// the help overlay still lists the full set. A tree without the compact footer
+// returns nil, leaving the flow to footer its complete action set.
+func (f *treeField) primaryFooterActions() []keymap.ActionID {
+	if !f.compactFooter {
+		return nil
+	}
+	// While the filter is being typed, or the preview pane holds focus, the
+	// relevant keys are that mode's own (apply/clear the filter, scroll the
+	// preview). Pruning to the step-navigation keys there would hide them, so the
+	// compact footer applies only to ordinary tree navigation.
+	if f.tree.FilterState().Editing() {
+		return nil
+	}
+	if f.hasPreview() && f.split.ActivePane() != kit.PaneLeft {
+		return nil
+	}
+	return []keymap.ActionID{keymap.ActionNextField, keymap.ActionPrevField, keymap.ActionHelp}
 }
 
 // facetAvailable keeps facet dispatch and its advertised key in lockstep. A
@@ -1045,7 +1099,38 @@ func (f *treeField) captureForest(d *Draft) {
 	f.full = roots
 	f.view = roots
 	f.tree = f.tree.WithRoots(roots)
+	if f.collapseSessionlessRoots {
+		f.tree = f.tree.CollapseInitial(sessionlessRoots(roots))
+	}
 	f.applyFacet()
+}
+
+// sessionlessRoots returns the project roots that carry no already-imported or
+// previously-tracked session, so the caller can fold them by default. Both the
+// imported and tracked marks are set before this runs (a session node from the
+// scanner, a tracked node from ApplyTrackedSelection), so the decision reads the
+// rows exactly as the user will see them.
+func sessionlessRoots(roots []*kit.TreeNode) []*kit.TreeNode {
+	var out []*kit.TreeNode
+	for _, root := range roots {
+		if !rootHasImportedOrTrackedSession(root) {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+func rootHasImportedOrTrackedSession(root *kit.TreeNode) bool {
+	found := false
+	walkNodes(root, func(node *kit.TreeNode) {
+		if node.Meta == nil {
+			return
+		}
+		if node.Meta[MetaIngested] == MetaIngestedValue || node.Meta[MetaTracked] == MetaTrackedValue {
+			found = true
+		}
+	})
+	return found
 }
 
 // selectionRoots returns the forest a selection is derived from: always the

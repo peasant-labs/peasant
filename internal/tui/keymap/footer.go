@@ -19,7 +19,7 @@ import (
 // internal/tui/gates color grep gate treat this file the same as every
 // other kit component.
 func FooterView(t theme.Theme, km Keymap, avail Availability) string {
-	entries := dispatchableEntries(km, avail)
+	entries := dispatchableEntries(km, footerAvailability(avail))
 	if len(entries) == 0 {
 		return ""
 	}
@@ -30,3 +30,45 @@ func FooterView(t theme.Theme, km Keymap, avail Availability) string {
 	}
 	return strings.Join(parts, styles.Muted.Render("  "))
 }
+
+// FooterActionsProvider is an optional refinement an Availability may implement
+// to show FEWER actions in the footer hint bar than the full set it makes
+// dispatchable, while the help overlay (built straight from AvailableActions)
+// still lists them all. A step whose field advertises a large action set can
+// use this to keep the always-visible footer to its few primary keys and move
+// the rest behind help, without ever advertising a footer hint no key could
+// match: FooterView intersects the returned list with AvailableActions, so the
+// footer can only ever be a SUBSET of what is dispatchable.
+type FooterActionsProvider interface {
+	FooterActions() []ActionID
+}
+
+// footerAvailability narrows an Availability to its footer-preferred actions
+// when it implements [FooterActionsProvider], intersected with (and ordered by)
+// what is actually available so the footer never lists an undispatchable hint.
+// An Availability that does not opt in footers exactly the actions it makes
+// available, unchanged.
+func footerAvailability(avail Availability) Availability {
+	provider, ok := avail.(FooterActionsProvider)
+	if !ok {
+		return avail
+	}
+	available := map[ActionID]bool{}
+	for _, action := range avail.AvailableActions() {
+		available[action] = true
+	}
+	seen := map[ActionID]bool{}
+	var out []ActionID
+	for _, action := range provider.FooterActions() {
+		if available[action] && !seen[action] {
+			out = append(out, action)
+			seen[action] = true
+		}
+	}
+	return staticAvailability(out)
+}
+
+// staticAvailability adapts a fixed action list to the Availability interface.
+type staticAvailability []ActionID
+
+func (s staticAvailability) AvailableActions() []ActionID { return []ActionID(s) }

@@ -213,6 +213,8 @@ func selectionTreeOptions(opts Options) []settings.TreeOption {
 		settings.WithFacetDisplay(harnessFacetLabel),
 		settings.WithSelectAllHelp("select all projects"),
 		settings.WithDraftSelectionState(),
+		settings.WithCompactFooter(),
+		settings.WithCollapseSessionlessRoots(),
 	}
 	if opts.Preview != nil {
 		out = append(out,

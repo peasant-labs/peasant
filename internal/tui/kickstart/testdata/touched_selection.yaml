@@ -107,7 +107,10 @@ cases:
         - {harness: claude-code, gitRemote: "git@github.com:acme/tool.git", pathKeys: [clone-a], branches: [main]}
       branchExclusions:
         - {harness: claude-code, pathKey: clone-a, branches: [topic]}
-    actions: [down, toggle]
+    # The only present branch (topic) is excluded and nothing is imported, so the
+    # root has no tracked or imported session and opens collapsed; expand it to
+    # reach the branch row before reselecting it.
+    actions: [expand, down, toggle]
     refresh: true
     expectedCheckedSessions: [44444444-4444-4444-8444-444444444444]
     expected:

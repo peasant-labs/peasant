@@ -72,9 +72,12 @@ cases:
       - 'ingest pipeline refactor'
       - 'commit detector fix'
       - 'share bridge scan'
-      - 'governance audit trigger'
+      # The village root has no tracked or imported session, so it opens
+      # collapsed to its project line and its session folds away.
+      - 'github:peasant-labs/village'
     wantViewMissing:
       - 'scanning projects'
+      - 'governance audit trigger'
 
   - name: pending-tree-result-reaches-selection-during-visibility-prompt
     scenario: pending-tree-result
@@ -100,9 +103,12 @@ cases:
       - 'ingest pipeline refactor'
       - 'commit detector fix'
       - 'share bridge scan'
-      - 'governance audit trigger'
+      # The village root has no tracked or imported session, so it opens
+      # collapsed to its project line and its session folds away.
+      - 'github:peasant-labs/village'
     wantViewMissing:
       - 'scanning projects'
+      - 'governance audit trigger'
 
   - name: pending-tree-result-reaches-selection-during-visibility-auth
     scenario: pending-tree-result
@@ -128,6 +134,9 @@ cases:
       - 'ingest pipeline refactor'
       - 'commit detector fix'
       - 'share bridge scan'
-      - 'governance audit trigger'
+      # The village root has no tracked or imported session, so it opens
+      # collapsed to its project line and its session folds away.
+      - 'github:peasant-labs/village'
     wantViewMissing:
       - 'scanning projects'
+      - 'governance audit trigger'

@@ -27,6 +27,7 @@ type mountedTouchedAction string
 
 const (
 	mountedTouchedDown      mountedTouchedAction = "down"
+	mountedTouchedExpand    mountedTouchedAction = "expand"
 	mountedTouchedToggle    mountedTouchedAction = "toggle"
 	mountedTouchedFilter    mountedTouchedAction = "filter"
 	mountedTouchedSelectAll mountedTouchedAction = "select-all"
@@ -113,7 +114,7 @@ func loadMountedTouchedDocument(t *testing.T) mountedTouchedDocument {
 
 func validMountedTouchedAction(action mountedTouchedAction) bool {
 	switch action {
-	case mountedTouchedDown, mountedTouchedToggle, mountedTouchedFilter, mountedTouchedSelectAll:
+	case mountedTouchedDown, mountedTouchedExpand, mountedTouchedToggle, mountedTouchedFilter, mountedTouchedSelectAll:
 		return true
 	default:
 		return false
@@ -215,6 +216,8 @@ func mountedTouchedRune(action mountedTouchedAction) rune {
 	switch action {
 	case mountedTouchedDown:
 		return 'j'
+	case mountedTouchedExpand:
+		return 'l'
 	case mountedTouchedToggle:
 		return ' '
 	case mountedTouchedFilter:

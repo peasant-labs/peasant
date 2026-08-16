@@ -434,6 +434,25 @@ func (t Tree) WithUnprojectedRoots(roots []*TreeNode) Tree {
 	return t
 }
 
+// CollapseInitial records each given interior node as collapsed, so its
+// children start hidden until the user expands it, without changing any other
+// node's expansion. It is how a source seeds a folded-by-default root - a
+// project with no already-imported or tracked sessions, say - while leaving the
+// expand/collapse keys fully in control afterward. Leaves and nil nodes are
+// ignored. Because expansion is keyed by canonical node identity, a node
+// collapsed here stays collapsed under a later facet projection of the same
+// forest.
+func (t Tree) CollapseInitial(nodes []*TreeNode) Tree {
+	for _, node := range nodes {
+		if node == nil || node.isLeaf() {
+			continue
+		}
+		t.expanded[t.canonicalNode(node)] = false
+	}
+	t.clampWindow()
+	return t
+}
+
 func (t Tree) captureProjectionAnchor() Tree {
 	current := t.currentAnchor()
 	if current.depth < 0 {
@@ -634,7 +653,7 @@ func (t Tree) AvailableActions() []keymap.ActionID {
 	if t.anyInteriorCanCollapse() {
 		actions = append(actions, keymap.ActionCollapseAll)
 	}
-	if t.hasSelectableNode() {
+	if t.hasUnselectedSelectableNode() {
 		actions = append(actions, keymap.ActionSelectAll)
 	}
 	return append(actions, keymap.ActionHelp, keymap.ActionBack)
@@ -694,9 +713,21 @@ func (t Tree) subtreeHasSelectable(node *TreeNode) bool {
 	return selectable
 }
 
-func (t Tree) hasSelectableNode() bool {
+// hasUnselectedSelectableNode reports whether the current visible projection
+// holds at least one selectable leaf that is not already Checked. Select-all is
+// advertised (and therefore dispatchable) only then: when everything selectable
+// is already Checked the action has nothing left to do, so it is neither shown
+// nor matched, which is what keeps a "select all" key from reading as a hidden
+// "clear all" on a forest that starts fully selected.
+func (t Tree) hasUnselectedSelectableNode() bool {
 	for _, root := range t.renderRoots() {
-		if t.subtreeHasSelectable(root) {
+		unselected := false
+		walk(root, func(candidate *TreeNode) {
+			if candidate.isLeaf() && candidate.State != Conflict && candidate.State != Checked {
+				unselected = true
+			}
+		})
+		if unselected {
 			return true
 		}
 	}
@@ -873,7 +904,7 @@ func (t Tree) handleKey(msg tea.KeyPressMsg) (Tree, tea.Cmd) {
 			t.toggle(node)
 		}
 	case keymap.ActionSelectAll:
-		t.toggleAll()
+		t.selectAll()
 	case keymap.ActionSelectUnderProject:
 		t.selectUnderProject()
 	}
@@ -963,34 +994,16 @@ func (t *Tree) toggle(node *TreeNode) {
 	t.recompute()
 }
 
-// toggleAll selects every selectable node represented by the current visible
-// projection, or clears that projection when everything selectable in it is
-// already Checked.
-func (t *Tree) toggleAll() {
-	target := Checked
-	if t.allChecked() {
-		target = Unchecked
-	}
+// selectAll checks every selectable node represented by the current visible
+// projection. It is idempotent: pressing "select all" always ends with the
+// projection selected, never toggling a fully-selected forest back to empty.
+// Bulk clearing is a distinct intent a single "select all" key must not
+// silently perform, so it is deliberately not folded in here.
+func (t *Tree) selectAll() {
 	for _, r := range t.renderRoots() {
-		setSubtree(r, target)
+		setSubtree(r, Checked)
 	}
 	t.recompute()
-}
-
-// allChecked reports whether every non-Conflict node represented by the current
-// visible projection is Checked. A projection containing a Conflict is never
-// "all checked", so select-all keeps selecting rather than flipping to clear.
-func (t Tree) allChecked() bool {
-	all := true
-	roots := t.renderRoots()
-	for _, r := range roots {
-		walk(r, func(n *TreeNode) {
-			if n.State != Checked {
-				all = false
-			}
-		})
-	}
-	return all && len(roots) > 0
 }
 
 // setAllExpanded expands (or collapses) every controllable interior node

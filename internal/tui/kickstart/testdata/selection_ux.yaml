@@ -1,0 +1,67 @@
+# First-run selection-step UX: the pruned advance footer, the sessionless-root
+# collapse default, and the idempotent select-all. Every case drives the real
+# kickstart Program against a config that does NOT yet exist (a genuine first
+# run: nothing tracked), so only the `ingested` list marks a session as already
+# imported. Two projects with distinct remotes give two independent roots.
+expectedCaseCount: 6
+listings:
+  - harness: claude-code
+    projectName: acme/alpha
+    gitRemote: "git@github.com:acme/alpha.git"
+    branch: main
+    workingDir: /fixtures/alpha
+    title: alpha session
+    sessionId: a-1
+  - harness: claude-code
+    projectName: acme/beta
+    gitRemote: "git@github.com:acme/beta.git"
+    branch: main
+    workingDir: /fixtures/beta
+    title: beta session
+    sessionId: b-1
+cases:
+  # No imported or tracked session anywhere: every root folds to its project
+  # line, so a first run reads as a short project list, not every session.
+  - name: first-run-folds-every-sessionless-root
+    ingested: []
+    keys: []
+    wantContains: ["github:acme/alpha", "github:acme/beta"]
+    wantMissing: [alpha session, beta session]
+    footerContains: ["tab: next step", "?: help"]
+    footerMissing: ["space: select", "down", "select all"]
+
+  # Only the alpha root holds an imported session, so it opens expanded while
+  # the untouched beta root stays folded.
+  - name: imported-root-opens-expanded-others-fold
+    ingested: [a-1]
+    keys: []
+    wantContains: [alpha session, "github:acme/beta"]
+    wantMissing: [beta session]
+
+  # With imported sessions in both roots the footer still shows only the
+  # advance and help affordances; the full tree key set moves behind help.
+  - name: footer-shows-only-advance-and-help
+    ingested: [a-1, b-1]
+    keys: []
+    wantContains: [alpha session, beta session]
+    footerContains: ["tab: next step", "?: help"]
+    footerMissing: ["space: select", "select all", "collapse", "next project"]
+
+  # Select-all on an already fully-selected forest keeps it selected: the key
+  # never doubles as a hidden clear-all.
+  - name: select-all-keeps-a-full-selection
+    ingested: [a-1, b-1]
+    keys: [a]
+    wantNoUnchecked: true
+
+  # Deselecting a root leaves some boxes empty...
+  - name: deselect-clears-a-subtree
+    ingested: [a-1, b-1]
+    keys: [space]
+    wantSomeUnchecked: true
+
+  # ...and select-all then visibly reselects everything.
+  - name: select-all-reselects-after-a-deselect
+    ingested: [a-1, b-1]
+    keys: [space, a]
+    wantNoUnchecked: true
