@@ -273,11 +273,15 @@ func TestGuideRenderOrderAndExactSemanticStyles(t *testing.T) {
 				"- before: sk-example",
 				"+ after: <CREDENTIAL>",
 				"derived by the production boundary",
-				clip(document.Description, row.Width),
+			}
+			// The field description wraps to the width instead of truncating, so
+			// every wrapped line must appear in order ahead of the control.
+			ordered = append(ordered, strings.Split(ansi.Wrap(document.Description, row.Width, ""), "\n")...)
+			ordered = append(ordered,
 				"(•) standard",
 				document.SecondHeading,
 				document.SecondControl,
-			}
+			)
 			last := -1
 			for _, text := range ordered {
 				at := strings.Index(plain, text)
@@ -306,7 +310,9 @@ func TestGuideRenderOrderAndExactSemanticStyles(t *testing.T) {
 				kit.FitLine(styles.DiffAdd.Background(surface), "+ after: <CREDENTIAL>", row.Width),
 				kit.FitLine(styles.Surface, "", row.Width),
 				kit.FitLine(styles.Surface, "derived by the production boundary", row.Width),
-				styles.Muted.Render(clip(document.Description, row.Width)),
+			}
+			for _, line := range strings.Split(ansi.Wrap(document.Description, row.Width, ""), "\n") {
+				wantLines = append(wantLines, styles.Muted.Render(line))
 			}
 			for _, want := range wantLines {
 				if !containsExactGuideLine(rawLines, want) {

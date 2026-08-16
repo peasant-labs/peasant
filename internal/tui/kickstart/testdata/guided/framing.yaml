@@ -65,11 +65,10 @@ rows:
     guide:
       intro: preview how standard redaction changes your text before you publish.
       hints:
-        - personally identifiable information (PII), such as an email address.
         - standard hides project identity but keeps git remote urls.
     wantContains:
       - before you publish
-      - personally identifiable information (PII)
+      - Personally Identifiable Information (PII)
       - keeps git remote urls
     wantMissing:
       - before transcripts enter peasant's local store

@@ -581,7 +581,9 @@ func (f Flow) renderBody(width, height int) string {
 			guidePending = false
 		}
 		if d := fld.Description(); d != "" && fld.Kind() != KindInfo {
-			chrome = append(chrome, styles.Muted.Render(clip(d, width)))
+			for _, line := range strings.Split(ansi.Wrap(d, width, ""), "\n") {
+				chrome = append(chrome, styles.Muted.Render(line))
+			}
 		}
 		avail := height - used - len(chrome)
 		if avail < 1 {

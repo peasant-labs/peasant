@@ -1,14 +1,13 @@
 # Assertions about the privacy step's guide copy (intro plus hints). These strings
 # are user-facing guidance text, never synthetic redaction inputs. The intro must
-# read as one short sentence; the guide spells out the PII acronym on first use;
-# and the git-remote guidance must agree with the project-identity example the step
-# renders at the Standard level (a Go import path shown as <GO_IMPORT>) instead of
-# promising a git-remote before/after the Standard preview cannot produce. Standard
-# is the only offered level, so the copy must not name maximum (a refused level the
-# user cannot choose).
+# read as one short sentence; the git-remote guidance must agree with the
+# project-identity example the step renders at the Standard level (a Go import path
+# shown as <GO_IMPORT>) instead of promising a git-remote before/after the Standard
+# preview cannot produce. Standard is the only offered level, so the copy must not
+# name maximum (a refused level the user cannot choose). The PII acronym is spelled
+# out on the example heading, not in these guide hints (see privacyExampleHeading).
 introMaxSentences: 1
 requiredGuideText:
-  - "personally identifiable information (PII)"
   - "project identity"
   - "git remote"
 forbiddenGuideText:

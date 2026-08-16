@@ -321,8 +321,14 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 		}
 		base := sampleIndex * 3
 		labelLine, beforeLine, afterLine := lines[base], lines[base+1], lines[base+2]
-		if labelLine.Kind != settings.GuideExampleLineLabel || labelLine.Text != row.CategoryLabel.String() {
-			t.Errorf("privacy sample %q label line=%#v, want canonical typed label %q", row.Name, labelLine, row.CategoryLabel)
+		// The guide spells out the opaque PII acronym on its heading; other
+		// categories keep their canonical typed label.
+		wantLabel := row.CategoryLabel.String()
+		if row.Category == redact.CategoryPII {
+			wantLabel = "Personally Identifiable Information (PII)"
+		}
+		if labelLine.Kind != settings.GuideExampleLineLabel || labelLine.Text != wantLabel {
+			t.Errorf("privacy sample %q label line=%#v, want display label %q", row.Name, labelLine, wantLabel)
 		}
 		if beforeLine.Kind != settings.GuideExampleLineBefore || beforeLine.Text != row.Before {
 			t.Errorf("privacy sample %q before line=%#v, want typed unredacted input", row.Name, beforeLine)
