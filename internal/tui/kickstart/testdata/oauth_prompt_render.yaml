@@ -1,0 +1,40 @@
+# oauth_prompt_render.yaml drives TestOAuthPromptRender_Structure (peasant#138):
+# the village connect prompt and the visibility login prompt must each read as a
+# styled heading plus a bulleted list of short facts, wrapped to the terminal
+# width, rather than a hard-wrapped prose block.
+expectedCaseCount: 4
+cases:
+  - name: oauth-default-width
+    phase: oauth
+    width: 80
+    height: 24
+    wantHeading: "connect to a village"
+    wantBulletCount: 5
+    # at the default width every fact fits the wrap cap on one physical line.
+    wantSingleLine: "- a village is a shared commons for agent transcripts."
+    wantWrappedFact: ""
+  - name: oauth-narrow-width
+    phase: oauth
+    width: 30
+    height: 24
+    wantHeading: "connect to a village"
+    wantBulletCount: 5
+    wantSingleLine: ""
+    # at 30 columns this fact cannot fit one line, so it must wrap.
+    wantWrappedFact: "- connecting sends nothing until a later explicit publish."
+  - name: visibility-default-width
+    phase: visibility
+    width: 80
+    height: 24
+    wantHeading: "choose sharing visibility"
+    wantBulletCount: 4
+    wantSingleLine: "- login only authenticates."
+    wantWrappedFact: ""
+  - name: visibility-narrow-width
+    phase: visibility
+    width: 30
+    height: 24
+    wantHeading: "choose sharing visibility"
+    wantBulletCount: 4
+    wantSingleLine: ""
+    wantWrappedFact: "- logging in now reveals a default sharing visibility for a later publish."

@@ -908,14 +908,61 @@ func (p Program) View() string {
 	}
 }
 
-// villageContext explains, in plain language, what connecting to a village does
-// and why - the UAT flagged that the connect-now prompt appeared with no
-// context at all. It is shown above the confirm in the centered dialog.
-const villageContext = "a village is a shared commons for agent transcripts.\n" +
-	"local mode keeps all data on this machine.\n" +
-	"connecting sends nothing until a later explicit publish.\n" +
-	"publishing is separate, explicit, and opt-in. you can connect\n" +
-	"later at any time with `peasant village login`."
+// villageContextBullets are the key facts about connecting to a village, one
+// short Simplified Technical English (ASD-STE100) sentence each - the UAT
+// flagged that the connect-now prompt appeared with no context at all. They
+// are shown as a bulleted list above the confirm in the centered dialog, and
+// wrapped to the terminal width rather than hard-wrapped in the source.
+var villageContextBullets = []string{
+	"a village is a shared commons for agent transcripts.",
+	"local mode keeps all data on this machine.",
+	"connecting sends nothing until a later explicit publish.",
+	"publishing is separate. it is explicit and opt-in.",
+	"you can connect later with `peasant village login`.",
+}
+
+// visibilityContextBullets are the key facts shown above the visibility
+// confirm, in the same short-sentence bulleted style as villageContextBullets.
+var visibilityContextBullets = []string{
+	"logging in now reveals a default sharing visibility for a later publish.",
+	"login only authenticates.",
+	"login does not save your draft.",
+	"login does not publish anything.",
+}
+
+// promptContentMaxWidth caps how wide a wrapped prompt paragraph grows in the
+// centered dialog, so bullets stay readable on very wide terminals instead of
+// stretching edge to edge.
+const promptContentMaxWidth = 64
+
+// wrapPromptWidth picks the wrap width for a centered dialog paragraph: the
+// available terminal width, capped at promptContentMaxWidth, or 0 (no
+// wrapping) when the width is not yet known.
+func wrapPromptWidth(available int) int {
+	if available <= 0 {
+		return 0
+	}
+	if available > promptContentMaxWidth {
+		return promptContentMaxWidth
+	}
+	return available
+}
+
+// renderBullets word-wraps each fact to width (0 means unwrapped) and writes
+// it as a muted "- " bulleted line, so the source stays a list of short
+// sentences instead of a hard-wrapped prose block.
+func renderBullets(b *strings.Builder, styles theme.Styles, facts []string, width int) {
+	for _, fact := range facts {
+		bullet := "- " + fact
+		if width > 0 {
+			bullet = ansi.Wrap(bullet, width, "")
+		}
+		for _, ln := range strings.Split(bullet, "\n") {
+			b.WriteString(styles.Muted.Render(ln))
+			b.WriteString("\n")
+		}
+	}
+}
 
 // viewConnecting renders the "connecting to village" spinner with the keys that
 // escape it. The login runner can block (an interactive device flow, a slow
@@ -939,10 +986,7 @@ func (p Program) viewOAuth() string {
 	var b strings.Builder
 	b.WriteString(styles.Header.Render("connect to a village"))
 	b.WriteString("\n\n")
-	for _, ln := range strings.Split(villageContext, "\n") {
-		b.WriteString(styles.Muted.Render(ln))
-		b.WriteString("\n")
-	}
+	renderBullets(&b, styles, villageContextBullets, wrapPromptWidth(p.width))
 	if p.loginErr != nil {
 		b.WriteString("\n")
 		for _, ln := range strings.Split(p.loginErr.Error(), "\n") {
@@ -960,9 +1004,7 @@ func (p Program) viewVisibility() string {
 	var b strings.Builder
 	b.WriteString(styles.Header.Render("choose sharing visibility"))
 	b.WriteString("\n\n")
-	b.WriteString(styles.Muted.Render("logging in now reveals a default visibility choice for a later explicit publish."))
-	b.WriteString("\n")
-	b.WriteString(styles.Muted.Render("login authenticates only; it does not save the draft or publish a transcript."))
+	renderBullets(&b, styles, visibilityContextBullets, wrapPromptWidth(p.width))
 	if p.loginErr != nil {
 		b.WriteString("\n\n")
 		for _, line := range strings.Split(p.loginErr.Error(), "\n") {
