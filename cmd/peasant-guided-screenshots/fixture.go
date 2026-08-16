@@ -17,8 +17,8 @@ import (
 
 const (
 	requiredSheetCount             = 3
-	requiredGuidedSectionCount     = 5
-	requiredGuidedCaptureCount     = 20
+	requiredGuidedSectionCount     = 6
+	requiredGuidedCaptureCount     = 24
 	requiredSelectionStateCount    = 5
 	requiredSelectionCaptureCount  = 16
 	requiredSelectionSessionCount  = 5
@@ -56,6 +56,7 @@ type guidedSection string
 
 const (
 	guidedSectionAutoIngest  guidedSection = kickstart.SectionAutoIngest
+	guidedSectionPublication guidedSection = kickstart.SectionPublication
 	guidedSectionPrivacy     guidedSection = kickstart.SectionPrivacy
 	guidedSectionLicense     guidedSection = kickstart.SectionLicense
 	guidedSectionDestination guidedSection = kickstart.SectionDestination
@@ -64,8 +65,8 @@ const (
 
 func (s guidedSection) valid() bool {
 	switch s {
-	case guidedSectionAutoIngest, guidedSectionPrivacy, guidedSectionLicense,
-		guidedSectionDestination, guidedSectionRetention:
+	case guidedSectionAutoIngest, guidedSectionPublication, guidedSectionPrivacy,
+		guidedSectionLicense, guidedSectionDestination, guidedSectionRetention:
 		return true
 	default:
 		return false

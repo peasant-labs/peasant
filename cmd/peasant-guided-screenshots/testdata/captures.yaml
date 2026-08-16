@@ -1,6 +1,6 @@
 expectedSheetCount: 3
-expectedGuidedSectionCount: 5
-expectedGuidedCaptureCount: 20
+expectedGuidedSectionCount: 6
+expectedGuidedCaptureCount: 24
 expectedSelectionStateCount: 5
 expectedSelectionCaptureCount: 16
 expectedSelectionSessionCount: 5
@@ -27,6 +27,8 @@ sheets:
 guidedSections:
   - key: auto-ingest
     wantContains: [auto-ingest new branches in fully-selected projects, "[on]"]
+  - key: publication
+    wantContains: [publication preference, keep local]
   - key: privacy
     wantContains: [redaction level, "- before:", "+ after:"]
   - key: license
@@ -106,6 +108,10 @@ guidedCaptures:
   - {name: auto-ingest-dark-120x40, section: auto-ingest, theme: dark, width: 120, height: 40}
   - {name: auto-ingest-light-80x24, section: auto-ingest, theme: light, width: 80, height: 24}
   - {name: auto-ingest-light-120x40, section: auto-ingest, theme: light, width: 120, height: 40}
+  - {name: publication-dark-80x24, section: publication, theme: dark, width: 80, height: 24}
+  - {name: publication-dark-120x40, section: publication, theme: dark, width: 120, height: 40}
+  - {name: publication-light-80x24, section: publication, theme: light, width: 80, height: 24}
+  - {name: publication-light-120x40, section: publication, theme: light, width: 120, height: 40}
   - {name: privacy-dark-80x24, section: privacy, theme: dark, width: 80, height: 24}
   - {name: privacy-dark-120x40, section: privacy, theme: dark, width: 120, height: 40}
   - {name: privacy-light-80x24, section: privacy, theme: light, width: 80, height: 24}

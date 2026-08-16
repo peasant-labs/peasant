@@ -1000,6 +1000,10 @@ func (w *configScreenWorld) run(model tea.Model) (tea.Model, error) {
 }
 
 func (w *configScreenWorld) editRetention(model tea.Model) tea.Model {
+	// Move the section cursor from selection down to retention. With an all-mode
+	// selection the visible sections are selection, publication, privacy, license,
+	// retention, so retention is four steps down.
+	model = configScreenUpdate(model, configScreenKey("down"))
 	model = configScreenUpdate(model, configScreenKey("down"))
 	model = configScreenUpdate(model, configScreenKey("down"))
 	model = configScreenUpdate(model, configScreenKey("down"))

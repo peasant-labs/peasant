@@ -528,6 +528,13 @@ func (p Program) consentSummary(ctx settings.ConsentContext) (settings.ConsentSu
 		}
 		values = append(values, "auto-ingest future branches in fully-selected projects: "+state)
 	}
+	if ctx.HasVisibleField(SectionPublication, FieldPublication) {
+		if cfg.Push.SharePreference == config.SharePreferenceShareLater {
+			values = append(values, "publication preference: plan to publish later with an explicit `peasant village push`")
+		} else {
+			values = append(values, "publication preference: keep local; nothing is published now or when kickstart finishes")
+		}
+	}
 	if ctx.HasVisibleField(SectionPrivacy, FieldPrivacy) {
 		values = append(values, "publication privacy: "+strings.ToLower(cfg.Redaction.Level.String())+
 			" redaction; local imports remain original unless you run `peasant redact`")

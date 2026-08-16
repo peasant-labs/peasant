@@ -226,6 +226,37 @@ func (m PushMethod) IsValid() bool {
 	return false
 }
 
+// SharePreference records the user's chosen publication intent. It is a stored
+// preference only: peasant never publishes on its own, and kickstart in
+// particular publishes nothing when it runs or when it finishes. Sharing always
+// happens later as a separate, explicit `peasant village push`.
+type SharePreference string
+
+const (
+	// SharePreferenceKeepLocal records that transcripts should stay on this
+	// machine until the user explicitly publishes. It is the safe default and,
+	// like the "no license" default, is the zero value: an omitted or empty
+	// stored preference means keep-local, so configs written before this
+	// preference existed already read as keep-local and are never rewritten.
+	SharePreferenceKeepLocal SharePreference = ""
+	// SharePreferenceShareLater records that the user intends to publish later
+	// with an explicit push. It still publishes nothing on its own.
+	SharePreferenceShareLater SharePreference = "share-later"
+)
+
+// String implements fmt.Stringer.
+func (p SharePreference) String() string { return string(p) }
+
+// IsValid reports whether the SharePreference is a known value. The empty value
+// is valid and denotes keep-local.
+func (p SharePreference) IsValid() bool {
+	switch p {
+	case SharePreferenceKeepLocal, SharePreferenceShareLater:
+		return true
+	}
+	return false
+}
+
 // Visibility controls the default visibility for pushed transcripts.
 // Type alias for schema.Visibility — single source of truth in the
 // github.com/peasant-labs/schema module.
@@ -313,6 +344,10 @@ type PushConfig struct {
 	Sources []string `yaml:"sources,omitempty"`
 	// Visibility is the default visibility for pushed transcripts.
 	Visibility Visibility `yaml:"visibility"`
+	// SharePreference records whether the user wants to keep transcripts local
+	// or intends to publish later. Chosen during kickstart. Empty is treated as
+	// keep-local. It is a stored preference only and never triggers a publish.
+	SharePreference SharePreference `yaml:"sharePreference,omitempty"`
 	// License is the default content license applied to all pushed transcripts
 	// (chosen during kickstart). Empty ⇒ no license is sent ⇒ the village stores
 	// NULL. Overridable per-run with the --license flag.
@@ -635,9 +670,10 @@ func BaseConfig() *Config {
 			ProjectMode: "opt-in",
 		},
 		Push: PushConfig{
-			Method:     PushMethodAll,
-			Visibility: VisibilityPrivate,
-			Fields:     DefaultPushFieldVisibility(),
+			Method:          PushMethodAll,
+			Visibility:      VisibilityPrivate,
+			SharePreference: SharePreferenceKeepLocal,
+			Fields:          DefaultPushFieldVisibility(),
 		},
 		Selection: SelectionConfig{
 			Mode:                  SelectionModeAll,
@@ -855,6 +891,10 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Push.License != "" && !cfg.Push.License.IsValid() {
 		return fmt.Errorf("config: unknown push.license %q (valid: %s)", cfg.Push.License, schema.LicenseMenu())
+	}
+	if cfg.Push.SharePreference != "" && !cfg.Push.SharePreference.IsValid() {
+		return fmt.Errorf("config: unknown push.sharePreference %q (valid: %q for keep-local, or %q)",
+			cfg.Push.SharePreference, SharePreferenceKeepLocal, SharePreferenceShareLater)
 	}
 	if cfg.Push.Method == PushMethodBySource && len(cfg.Push.Sources) == 0 {
 		return fmt.Errorf("config: push.method is %q but push.sources is empty", PushMethodBySource)
