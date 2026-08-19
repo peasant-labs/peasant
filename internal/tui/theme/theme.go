@@ -81,6 +81,11 @@ type Styles struct {
 	BorderFocus lipgloss.Style
 	// Selected is a selected/highlighted row: AmberFillInk on AmberFill.
 	Selected lipgloss.Style
+	// Accent is a scarce amber highlight for a single piece of inline text
+	// (e.g. a primary-action cue): bold AmberBright foreground with no
+	// background fill, so amber stays a highlight rather than the full-bleed
+	// pill Selected uses for a highlighted row.
+	Accent lipgloss.Style
 	// Success is affirmative status text: Success.
 	Success lipgloss.Style
 	// Warning is cautionary status text: Warning.
@@ -106,6 +111,7 @@ func (t Theme) Styles() Styles {
 		Border:       lipgloss.NewStyle().BorderForeground(p.Rule.For(m)),
 		BorderFocus:  lipgloss.NewStyle().BorderForeground(p.FocusRing.For(m)),
 		Selected:     lipgloss.NewStyle().Foreground(p.AmberFillInk.For(m)).Background(p.AmberFill.For(m)),
+		Accent:       lipgloss.NewStyle().Foreground(p.AmberBright.For(m)).Bold(true),
 		Success:      lipgloss.NewStyle().Foreground(p.Success.For(m)),
 		Warning:      lipgloss.NewStyle().Foreground(p.Warning.For(m)),
 		Danger:       lipgloss.NewStyle().Foreground(p.Danger.For(m)),

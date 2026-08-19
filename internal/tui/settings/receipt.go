@@ -75,10 +75,12 @@ func (c ConsentContext) Config() (config.Config, error) {
 type ConsentSummaryFunc func(ConsentContext) (ConsentSummary, error)
 
 // receiptContinueCue is the bottom-of-review call to action. It is rendered in
-// Styles.Selected (the same amber pill used for a highlighted row) so the
-// single available next step - confirm with enter - stays visually obvious
-// without opening help, matching the always-on ActionConfirm binding.
-const receiptContinueCue = " press enter to continue "
+// Styles.Accent - bold amber foreground text, not a full-width background
+// fill - so the single available next step - confirm with enter - stays
+// visually obvious without opening help, matching the always-on
+// ActionConfirm binding, while keeping amber a scarce accent rather than a
+// full-bleed bar across the line.
+const receiptContinueCue = "▸ press enter to continue"
 
 // renderReceipt draws the final review step: a per-section summary of which
 // fields the draft changed, an explicit "no changes" when nothing is dirty, and
@@ -156,6 +158,6 @@ func (f Flow) renderReceipt(styles theme.Styles, width int) string {
 		lines = append(lines, "")
 	}
 
-	lines = append(lines, styles.Selected.Render(clip(receiptContinueCue, width)))
+	lines = append(lines, styles.Accent.Render(clip(receiptContinueCue, width)))
 	return joinLines(lines)
 }
