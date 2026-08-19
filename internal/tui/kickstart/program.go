@@ -1072,16 +1072,43 @@ func dialogLine(b *strings.Builder, style lipgloss.Style, content string, width 
 // escape it. The login runner can block (an interactive device flow, a slow
 // network), so the surface must always advertise a way out: esc cancels and
 // returns to the prompt, ctrl+c quits kickstart.
+//
+// The login URL is the one thing on this screen the user MUST be able to
+// read in full (it is the manual fallback when no browser opens), so it is
+// deliberately NOT rendered with styles.Selected: that bundle is Ink-on-
+// AmberFill, a full-cell background fill meant for a highlighted row, and on
+// a long URL that fill reads as a full-width amber bar that still clips at
+// the terminal edge. Amber is a scarce accent (see internal/tui/mdrender and
+// internal/tui/transcriptview's own "amber is deliberately NOT used" notes
+// for the same discipline elsewhere), so the URL instead gets the amber
+// token as plain FOREGROUND text - restrained, not a fill - and is wrapped to
+// the terminal width so every character stays on screen instead of clipping.
+//
+// Every line here also paints the Canvas token as an explicit background
+// (the same fix and rationale as kit.Frame's border/footer rows): styles.Muted
+// only sets a foreground, so a line rendered with it alone falls back to the
+// terminal's own default background rather than the theme's, which reads as a
+// subtly different box per line against the overlay's Canvas-filled backdrop.
 func (p Program) viewConnecting() string {
 	styles := p.deps.Theme.Styles()
+	canvas := p.deps.Theme.Color(p.deps.Theme.Palette.Canvas)
+	muted := styles.Muted.Background(canvas)
+	accent := lipgloss.NewStyle().
+		Foreground(p.deps.Theme.Color(p.deps.Theme.Palette.Amber)).
+		Background(canvas)
+
 	lines := []string{p.spinner.View(), ""}
 	if p.loginURL != "" {
+		url := p.loginURL
+		if p.width > 0 {
+			url = ansi.Wrap(url, p.width, "")
+		}
 		lines = append(lines,
-			styles.Muted.Render("opening your browser. can't see it? open this link:"),
-			styles.Selected.Render(p.loginURL),
+			muted.Render("opening your browser. can't see it? open this link:"),
+			accent.Render(url),
 			"")
 	}
-	lines = append(lines, styles.Muted.Render("press esc to cancel, ctrl+c to quit"))
+	lines = append(lines, muted.Render("press esc to cancel, ctrl+c to quit"))
 	return p.centered(strings.Join(lines, "\n"))
 }
 
