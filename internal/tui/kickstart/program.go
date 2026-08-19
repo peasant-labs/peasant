@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -310,8 +311,8 @@ func (p Program) OnReceipt() bool { return p.flowBuilt && p.flow.OnReceipt() }
 // SetSize records the render region and propagates it to the active surface.
 func (p *Program) SetSize(width, height int) {
 	p.width, p.height = width, height
-	p.oauth.SetSize(promptWidth(oauthPrompt, width), kit.ConfirmMinSize.Height)
-	p.visibility.SetSize(promptWidth(visibilityPrompt, width), kit.ConfirmMinSize.Height)
+	p.oauth.SetSize(wrapPromptWidth(width), kit.ConfirmMinSize.Height)
+	p.visibility.SetSize(wrapPromptWidth(width), kit.ConfirmMinSize.Height)
 	p.overlay.SetSize(width, height)
 	p.spinner.SetSize(width, height)
 	if p.flowBuilt {
@@ -576,7 +577,7 @@ func (p Program) updateFlow(msg tea.Msg) (Program, tea.Cmd) {
 			programActionAvailability{keymap.ActionNextField}); matched && action == keymap.ActionNextField {
 			p.phase = PhaseVisibility
 			p.visibility = kit.NewConfirm(p.deps.Theme, visibilityPrompt)
-			p.visibility.SetSize(promptWidth(visibilityPrompt, p.width), kit.ConfirmMinSize.Height)
+			p.visibility.SetSize(wrapPromptWidth(p.width), kit.ConfirmMinSize.Height)
 			return p, p.visibility.Focus()
 		}
 	}
@@ -948,20 +949,52 @@ func wrapPromptWidth(available int) int {
 	return available
 }
 
+// bulletPrefix marks a fact's first line; bulletHangIndent is the same width
+// so a wrapped continuation lines up under the fact text instead of the
+// dash, matching how a bulleted list hangs in prose.
+const (
+	bulletPrefix     = "- "
+	bulletHangIndent = "  "
+)
+
 // renderBullets word-wraps each fact to width (0 means unwrapped) and writes
-// it as a muted "- " bulleted line, so the source stays a list of short
-// sentences instead of a hard-wrapped prose block.
-func renderBullets(b *strings.Builder, styles theme.Styles, facts []string, width int) {
+// it as a "- " bulleted line, so the source stays a list of short sentences
+// instead of a hard-wrapped prose block. A wrapped continuation is
+// hang-indented under the fact text rather than restarting at column 0. Each
+// line is fit (truncated/padded) to the full dialog width and styled as one
+// unit, via [dialogLine], so every row in the dialog - not just the glyphs
+// on it - shares one solid background instead of a ragged per-line box.
+func renderBullets(b *strings.Builder, style lipgloss.Style, facts []string, width int) {
 	for _, fact := range facts {
-		bullet := "- " + fact
+		text := fact
 		if width > 0 {
-			bullet = ansi.Wrap(bullet, width, "")
+			contentWidth := width - len(bulletPrefix)
+			if contentWidth < 1 {
+				contentWidth = 1
+			}
+			text = ansi.Wrap(fact, contentWidth, "")
 		}
-		for _, ln := range strings.Split(bullet, "\n") {
-			b.WriteString(styles.Muted.Render(ln))
-			b.WriteString("\n")
+		for i, ln := range strings.Split(text, "\n") {
+			prefix := bulletPrefix
+			if i > 0 {
+				prefix = bulletHangIndent
+			}
+			dialogLine(b, style, prefix+ln, width)
 		}
 	}
+}
+
+// dialogLine writes one line of a centered dialog, fit (truncated/padded)
+// to width and styled as a single unit so its background fills the whole
+// row. A non-positive width falls back to rendering the bare content, for
+// callers that have not yet learned the terminal size.
+func dialogLine(b *strings.Builder, style lipgloss.Style, content string, width int) {
+	if width > 0 {
+		b.WriteString(kit.FitLine(style, content, width))
+	} else {
+		b.WriteString(style.Render(content))
+	}
+	b.WriteString("\n")
 }
 
 // viewConnecting renders the "connecting to village" spinner with the keys that
@@ -978,41 +1011,69 @@ func (p Program) viewConnecting() string {
 	return p.centered(body)
 }
 
+// dialogStyles derives the Header/Muted/Danger variants the connect and
+// visibility dialogs render text with, each carrying the same page
+// background as styles.Base. Header and Muted are shared, backgroundless
+// styles used all over the TUI (a row on a raised panel, a hover state,
+// ...), so giving them a background globally would be wrong elsewhere; here,
+// inside a single centered dialog, every text run must paint the same
+// background as its padding, or the padded cells around a short line (the
+// heading, a short fact) fall back to the terminal's own default color and
+// read as a stray dark box against the dialog's canvas.
+type dialogStyles struct {
+	header lipgloss.Style
+	muted  lipgloss.Style
+	danger lipgloss.Style
+}
+
+func newDialogStyles(styles theme.Styles) dialogStyles {
+	bg := styles.Base.GetBackground()
+	return dialogStyles{
+		header: styles.Header.Background(bg),
+		muted:  styles.Muted.Background(bg),
+		danger: styles.Danger.Background(bg),
+	}
+}
+
 // viewOAuth renders the connect-now dialog CENTERED in the terminal (the UAT
 // flagged the top-left anchoring as strange), with the explanatory context above
-// the yes/no confirm, over a fully themed background.
+// the yes/no confirm, over a fully themed background. The heading names the
+// topic once ("before you connect"); the confirm below it asks the actual
+// yes/no question ("connect to a village now?"), so the phrase "connect to a
+// village" is not repeated back to back.
 func (p Program) viewOAuth() string {
-	styles := p.deps.Theme.Styles()
+	ds := newDialogStyles(p.deps.Theme.Styles())
+	width := wrapPromptWidth(p.width)
 	var b strings.Builder
-	b.WriteString(styles.Header.Render("connect to a village"))
-	b.WriteString("\n\n")
-	renderBullets(&b, styles, villageContextBullets, wrapPromptWidth(p.width))
+	dialogLine(&b, ds.header, "before you connect", width)
+	dialogLine(&b, ds.muted, "", width)
+	renderBullets(&b, ds.muted, villageContextBullets, width)
 	if p.loginErr != nil {
-		b.WriteString("\n")
+		dialogLine(&b, ds.muted, "", width)
 		for _, ln := range strings.Split(p.loginErr.Error(), "\n") {
-			b.WriteString(styles.Danger.Render(ln))
-			b.WriteString("\n")
+			dialogLine(&b, ds.danger, ln, width)
 		}
 	}
-	b.WriteString("\n")
+	dialogLine(&b, ds.muted, "", width)
 	b.WriteString(p.oauth.View())
 	return p.centered(b.String())
 }
 
 func (p Program) viewVisibility() string {
-	styles := p.deps.Theme.Styles()
+	ds := newDialogStyles(p.deps.Theme.Styles())
+	width := wrapPromptWidth(p.width)
 	var b strings.Builder
-	b.WriteString(styles.Header.Render("choose sharing visibility"))
-	b.WriteString("\n\n")
-	renderBullets(&b, styles, visibilityContextBullets, wrapPromptWidth(p.width))
+	dialogLine(&b, ds.header, "choose sharing visibility", width)
+	dialogLine(&b, ds.muted, "", width)
+	renderBullets(&b, ds.muted, visibilityContextBullets, width)
 	if p.loginErr != nil {
-		b.WriteString("\n\n")
+		dialogLine(&b, ds.muted, "", width)
+		dialogLine(&b, ds.muted, "", width)
 		for _, line := range strings.Split(p.loginErr.Error(), "\n") {
-			b.WriteString(styles.Danger.Render(line))
-			b.WriteString("\n")
+			dialogLine(&b, ds.danger, line, width)
 		}
 	}
-	b.WriteString("\n")
+	dialogLine(&b, ds.muted, "", width)
 	b.WriteString(p.visibility.View())
 	return p.centered(b.String())
 }
@@ -1203,17 +1264,6 @@ func displayDuration(duration time.Duration) string {
 		duration = 0
 	}
 	return duration.Round(time.Second).String()
-}
-
-func promptWidth(prompt string, available int) int {
-	width := len([]rune(prompt))
-	if width < kit.ConfirmMinSize.Width {
-		width = kit.ConfirmMinSize.Width
-	}
-	if available > 0 && width > available {
-		width = available
-	}
-	return width
 }
 
 func loginActionableError(err error, where string) error {

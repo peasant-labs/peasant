@@ -3,17 +3,17 @@
 [38;2;233;229;219;48;2;7;7;6m                              [m
 [38;2;233;229;219;48;2;7;7;6m                              [m
 [38;2;233;229;219;48;2;7;7;6m                              [m
-[1;38;2;248;245;237mchoose sharing visibility[m
-
-[38;2;154;148;136m- logging in now reveals a[m
-[38;2;154;148;136mdefault sharing visibility for[m
-[38;2;154;148;136ma later publish.[m
-[38;2;154;148;136m- login only authenticates.[m
-[38;2;154;148;136m- login does not save your[m
-[38;2;154;148;136mdraft.[m
-[38;2;154;148;136m- login does not publish[m
-[38;2;154;148;136manything.[m
-
+[1;38;2;248;245;237;48;2;7;7;6mchoose sharing visibility     [m
+[38;2;154;148;136;48;2;7;7;6m                              [m
+[38;2;154;148;136;48;2;7;7;6m- logging in now reveals a    [m
+[38;2;154;148;136;48;2;7;7;6m  default sharing visibility  [m
+[38;2;154;148;136;48;2;7;7;6m  for a later publish.        [m
+[38;2;154;148;136;48;2;7;7;6m- login only authenticates.   [m
+[38;2;154;148;136;48;2;7;7;6m- login does not save your    [m
+[38;2;154;148;136;48;2;7;7;6m  draft.                      [m
+[38;2;154;148;136;48;2;7;7;6m- login does not publish      [m
+[38;2;154;148;136;48;2;7;7;6m  anything.                   [m
+[38;2;154;148;136;48;2;7;7;6m                              [m
 [38;2;233;229;219;48;2;7;7;6mlog in now to choose a defaul…[m
 [38;2;154;148;136m  yes  [m[38;2;233;229;219;48;2;7;7;6m  [m[38;2;20;16;3;48;2;203;163;92m[ no ][m
 [38;2;233;229;219;48;2;7;7;6m                              [m

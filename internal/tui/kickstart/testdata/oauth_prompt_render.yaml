@@ -8,7 +8,7 @@ cases:
     phase: oauth
     width: 80
     height: 24
-    wantHeading: "connect to a village"
+    wantHeading: "before you connect"
     wantBulletCount: 5
     # at the default width every fact fits the wrap cap on one physical line.
     wantSingleLine: "- a village is a shared commons for agent transcripts."
@@ -17,7 +17,7 @@ cases:
     phase: oauth
     width: 30
     height: 24
-    wantHeading: "connect to a village"
+    wantHeading: "before you connect"
     wantBulletCount: 5
     wantSingleLine: ""
     # at 30 columns this fact cannot fit one line, so it must wrap.
