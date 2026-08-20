@@ -12,7 +12,7 @@ rows:
       - connect to a village
       - local mode keeps all data on this machine
       - connecting sends nothing until a later explicit publish
-      - publishing is separate, explicit, and opt-in.
+      - publishing is separate. it is explicit and opt-in.
       - peasant village login
 
   - name: simplified-selection

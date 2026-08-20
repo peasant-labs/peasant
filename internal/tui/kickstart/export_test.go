@@ -8,3 +8,17 @@ import tea "charm.land/bubbletea/v2"
 func LoginResultForTest(username string, err error, epoch uint64) tea.Msg {
 	return loginDoneMsg{username: username, err: err, epoch: epoch}
 }
+
+// VillageContextBulletsForTest exposes the connect-prompt facts so external
+// tests can prove none of them carries an embedded hard-wrap newline (the
+// prompt copy must be a list of short sentences, not a wrapped prose block).
+// It exists only in test builds.
+func VillageContextBulletsForTest() []string {
+	return append([]string(nil), villageContextBullets...)
+}
+
+// VisibilityContextBulletsForTest is VillageContextBulletsForTest's twin for
+// the visibility-login prompt's facts. It exists only in test builds.
+func VisibilityContextBulletsForTest() []string {
+	return append([]string(nil), visibilityContextBullets...)
+}
