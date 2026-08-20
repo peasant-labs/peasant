@@ -680,11 +680,26 @@ func (f *Flow) scrollViewport(action keymap.ActionID) {
 	f.viewOffset = offset
 }
 
+// viewportOwningField is the optional refinement a field uses to claim its
+// own PgUp/PgDn/g/Shift+G paging instead of letting the Flow's outer viewport
+// consume it - the tree field's list (always) and a [splitField]'s right
+// pane (only once it holds focus) both scroll bounded content of their own,
+// so the flow must defer to them rather than double-handling paging at two
+// levels.
+type viewportOwningField interface {
+	ownsViewport() bool
+}
+
 func (f Flow) focusedFieldOwnsViewport() bool {
 	if f.OnReceipt() || f.focusField < 0 || f.focusField >= len(f.steps[f.cur].Fields) {
 		return false
 	}
-	return f.steps[f.cur].Fields[f.focusField].Kind() == KindTree
+	fld := f.steps[f.cur].Fields[f.focusField]
+	if fld.Kind() == KindTree {
+		return true
+	}
+	owner, ok := fld.(viewportOwningField)
+	return ok && owner.ownsViewport()
 }
 
 func (f Flow) viewportActions(state *flowViewportState) []keymap.ActionID {
@@ -735,11 +750,11 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 	for _, hint := range guide.Hints {
 		appendLine(hint, "• ", styles.Muted, false)
 	}
-	if guide.Example != nil {
+	if guide.Example != nil && !guide.ExampleInSplitPane {
 		example, err := guide.Example(f.draft)
 		if err != nil {
 			lines = append(lines, f.guideErrorLines(styles, width, err)...)
-		} else if rendered, renderErr := f.renderGuideExampleLines(styles, width, example); renderErr != nil {
+		} else if rendered, renderErr := renderGuideExampleLines(f.th, width, example); renderErr != nil {
 			lines = append(lines, f.guideErrorLines(styles, width, renderErr)...)
 		} else {
 			lines = append(lines, rendered...)
@@ -748,13 +763,41 @@ func (f Flow) guideLines(styles theme.Styles, width int) []string {
 	return lines
 }
 
-func (f Flow) renderGuideExampleLines(styles theme.Styles, width int, example []GuideExampleLine) ([]string, error) {
-	surface := f.th.Color(f.th.Palette.Surface)
-	var lines []string
+// renderGuideExampleLines validates and styles a derived example into
+// concrete terminal rows at width, against th's palette. It is a free
+// function (not a Flow method) so both the guide's default inline rendering
+// and [WithExamplePane]'s split right-pane body - which lays the SAME typed
+// example lines out at its own pane width, on its own draw cycle - style
+// through the one canonical implementation instead of two.
+func renderGuideExampleLines(th theme.Theme, width int, example []GuideExampleLine) ([]string, error) {
+	if err := validateGuideExampleLines(example); err != nil {
+		return nil, err
+	}
+	return styleGuideExampleLines(th, width, example), nil
+}
+
+// validateGuideExampleLines checks every line's semantic contract before any
+// of them is styled, so a single malformed line withholds the whole example
+// rather than rendering a partially-styled result.
+func validateGuideExampleLines(example []GuideExampleLine) error {
 	for index, line := range example {
 		if err := validateGuideExampleLine(index, line); err != nil {
-			return nil, err
+			return err
 		}
+	}
+	return nil
+}
+
+// styleGuideExampleLines lays out already-validated example lines at width.
+// It assumes [validateGuideExampleLines] has already accepted example, so it
+// never returns an error - the seam a [PreviewBody] draw call needs, since it
+// has no way to surface a render-time error once the example has already been
+// verified at load time.
+func styleGuideExampleLines(th theme.Theme, width int, example []GuideExampleLine) []string {
+	styles := th.Styles()
+	surface := th.Color(th.Palette.Surface)
+	var lines []string
+	for _, line := range example {
 		switch line.Kind {
 		case GuideExampleLineText:
 			lines = append(lines, kit.FitLine(styles.Surface, line.Text, width))
@@ -772,7 +815,7 @@ func (f Flow) renderGuideExampleLines(styles theme.Styles, width int, example []
 			lines = append(lines, kit.FitLine(styles.Surface, "", width))
 		}
 	}
-	return lines, nil
+	return lines
 }
 
 func validateGuideExampleLine(index int, line GuideExampleLine) error {

@@ -73,9 +73,20 @@ type privacyLabelMutationFixture struct {
 
 type privacyViewportKey string
 
-const privacyViewportPageDown privacyViewportKey = "page-down"
+const (
+	// privacyViewportFocusRight moves input to the split's right (example)
+	// pane, mirroring the kickstart selection step's own pane-focus key.
+	privacyViewportFocusRight privacyViewportKey = "focus-right"
+	// privacyViewportPageDown pages the currently-focused pane. On the
+	// left (radio) pane it is a no-op; on the right (example) pane it
+	// scrolls the illustrative example - the split's control never needs
+	// paging, since it is sized to stay fully visible.
+	privacyViewportPageDown privacyViewportKey = "page-down"
+)
 
-func (k privacyViewportKey) valid() bool { return k == privacyViewportPageDown }
+func (k privacyViewportKey) valid() bool {
+	return k == privacyViewportFocusRight || k == privacyViewportPageDown
+}
 
 type privacyViewportFixture struct {
 	Name           string               `yaml:"name"`
@@ -387,6 +398,8 @@ func TestPrivacyGuideViewportAtCommonTerminalHeight(t *testing.T) {
 			}
 			for _, viewportKey := range row.Keys {
 				switch viewportKey {
+				case privacyViewportFocusRight:
+					flow, _ = flow.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 				case privacyViewportPageDown:
 					flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 				}
