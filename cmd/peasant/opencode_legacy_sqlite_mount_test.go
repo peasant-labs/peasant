@@ -315,8 +315,8 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if err != nil {
 				t.Fatalf("harvest changed synthetic source: %v\n%s", err, output)
 			}
-			if !strings.Contains(output, "2 updated") {
-				t.Fatalf("shared SQLite source change did not report only its two expected session updates:\n%s", output)
+			if !strings.Contains(output, "1 updated") || !strings.Contains(output, "1 unchanged") {
+				t.Fatalf("selected SQLite session change did not isolate freshness from the unchanged sibling session:\n%s", output)
 			}
 			changedStore, err := store.Open(databasePath, store.WithPoolSize(1))
 			if err != nil {
@@ -428,7 +428,7 @@ func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
 	if err != nil {
 		t.Fatalf("open synthetic source-change control: %v", err)
 	}
-	updateErr := sqlitex.ExecuteTransient(connection, `UPDATE message SET data = '{"role":"user","version":"changed-source","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700000000010}}' WHERE id = 'msg_equal_a'`, nil)
+	updateErr := sqlitex.ExecuteTransient(connection, `UPDATE message SET data = '{"role":"user","version":"changed-source","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700002000010}}', time_updated = 1700002000010 WHERE id = 'msg_equal_a'`, nil)
 	closeErr := connection.Close()
 	if updateErr != nil || closeErr != nil {
 		t.Fatalf("prepare synthetic source change: %v", errors.Join(updateErr, closeErr))

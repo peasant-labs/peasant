@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
@@ -718,10 +719,19 @@ func (source semanticNegativeSource) CurrentSessionIDs(context.Context, OpenCode
 func (source semanticNegativeSource) LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error) {
 	return OpenCodeLegacySessionPage{}, nil
 }
+func (source semanticNegativeSource) CurrentSessionFreshness(context.Context, OpenCodeCurrentSessionID) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (source semanticNegativeSource) LegacySessionFreshness(context.Context, OpenCodeLegacySessionID) (time.Time, error) {
+	return time.Time{}, nil
+}
 func (source semanticNegativeSource) LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error) {
 	return OpenCodeLegacyMessagePage{}, nil
 }
 func (source semanticNegativeSource) LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error) {
+	return OpenCodeLegacyPartPage{}, nil
+}
+func (source semanticNegativeSource) LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error) {
 	return OpenCodeLegacyPartPage{}, nil
 }
 func (source semanticNegativeSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {

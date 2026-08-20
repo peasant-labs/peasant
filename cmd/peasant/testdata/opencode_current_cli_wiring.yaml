@@ -1,5 +1,5 @@
 declared_cases: 1
 cases:
   - name: current-sqlite-is-ingested-through-normal-cli-construction
-    source_fixture: current-session-message
+    source_fixture: semantic-parity-current
     expected_sessions: 1

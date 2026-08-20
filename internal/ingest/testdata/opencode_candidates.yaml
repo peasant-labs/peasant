@@ -59,7 +59,7 @@ forbidden_query_tokens:
   - attach
   - payload
   - " union "
-declared_allowed_query_statements: 15
+declared_allowed_query_statements: 20
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -91,6 +91,16 @@ allowed_query_statements:
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 order by seq limit ?2'
   - name: current-messages-after
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
+  - name: legacy-message-freshness
+    statement: 'select max(max(time_created, time_updated)) from message where session_id = ?1'
+  - name: legacy-part-freshness
+    statement: 'select max(max(time_created, time_updated)) from part where session_id = ?1'
+  - name: current-message-freshness
+    statement: 'select max(max(time_created, time_updated)) from session_message where session_id = ?1'
+  - name: legacy-orphan-parts-first
+    statement: 'select p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data from part as p where p.session_id = ?1 and not exists (select 1 from message as m where m.session_id = p.session_id and m.id = p.message_id) order by p.id limit ?2'
+  - name: legacy-orphan-parts-after
+    statement: 'select p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data from part as p where p.session_id = ?1 and p.id > ?2 and not exists (select 1 from message as m where m.session_id = p.session_id and m.id = p.message_id) order by p.id limit ?3'
 declared_query_guard_mutations: 12
 query_guard_mutations:
   - name: payload-table-scope

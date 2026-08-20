@@ -81,6 +81,7 @@ type openCodeCurrentUser struct {
 
 type openCodeCurrentAssistant struct {
 	openCodeCurrentBase
+	ParentID string                       `json:"parentID,omitempty"`
 	Agent    string                       `json:"agent"`
 	Model    openCodeCurrentModel         `json:"model"`
 	Content  []json.RawMessage            `json:"content"`
@@ -262,21 +263,16 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, candidate O
 			if idErr != nil {
 				return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, currentID.String(), idErr)
 			}
-			discovered = append(discovered, DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: ResolvedPath(candidate.Path), SourceFormat: SourceFormatJSON, OriginalRoot: ResolvedPath(filepath.Dir(candidate.Path)), TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite})
+			modified, freshnessErr := source.CurrentSessionFreshness(ctx, currentID)
+			if freshnessErr != nil {
+				return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed while deriving selected freshness for session %q: %w; no partial discovery result is eligible; verify the selected session_message rows and retry", candidate.Path, currentID.String(), freshnessErr)
+			}
+			discovered = append(discovered, DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: ResolvedPath(candidate.Path), SourceFormat: SourceFormatJSON, OriginalRoot: ResolvedPath(filepath.Dir(candidate.Path)), TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite, ModTime: modified})
 		}
 		if page.Next == nil {
 			break
 		}
 		cursor = page.Next
-	}
-	if len(discovered) > 0 {
-		contentModTime, statErr := legacySQLiteContentModTime(a.fs, candidate.Path)
-		if statErr != nil {
-			return nil, statErr
-		}
-		for index := range discovered {
-			discovered[index].ModTime = contentModTime
-		}
 	}
 	return discovered, nil
 }
@@ -369,7 +365,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: id, MessageID: message.ID, SessionID: message.SessionID, TimeCreated: created, TimeUpdated: created, Data: raw})
 		return nil
 	}
-	messageData := func(role, text, model, agent string, metadata map[string]json.RawMessage, time openCodeCurrentTime, tokens *openCodeCurrentTokens) error {
+	messageData := func(role, text, model, agent, parentID string, metadata map[string]json.RawMessage, time openCodeCurrentTime, tokens *openCodeCurrentTokens) error {
 		cwd, err := currentMetadataString(metadata, "cwd")
 		if err != nil {
 			return err
@@ -383,6 +379,9 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 		if agent != "" {
 			value["agent"] = agent
+		}
+		if parentID != "" {
+			value["parentID"] = parentID
 		}
 		if cwd != "" {
 			value["cwd"] = cwd
@@ -407,7 +406,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "text", "files", "agents", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleUser.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleUser.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		for _, agent := range value.Agents {
@@ -429,7 +428,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "agent", "model", "content", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.Metadata, value.Time, value.Tokens); err != nil {
+		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.ParentID, value.Metadata, value.Time, value.Tokens); err != nil {
 			return message, err
 		}
 		for _, content := range value.Content {
@@ -451,7 +450,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := registry.add(value.CallID, "shell tool call"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleAssistant.String(), "", "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleAssistant.String(), "", "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"id": value.CallID, "type": "tool_use", "name": "shell", "input": map[string]any{"command": value.Command}, "time": map[string]any{"created": value.Time.Created}}); err != nil {
@@ -476,7 +475,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if value.SessionID != message.SessionID {
 			return message, errors.New("synthetic sessionID must match SQLite row session")
 		}
-		if err := messageData(RoleSystem.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 	case "system":
@@ -490,7 +489,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "text", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleSystem.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 	case "compaction":
@@ -507,7 +506,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if value.Reason != "auto" && value.Reason != "manual" {
 			return message, errors.New("compaction reason must be auto or manual")
 		}
-		if err := messageData(RoleSystem.String(), value.Summary, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Summary, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "compaction", "text": value.Summary, "content": value.Recent, "time": map[string]any{"created": value.Time.Created}}); err != nil {
@@ -524,7 +523,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "agent", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleSystem.String(), value.Agent, "", value.Agent, value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Agent, "", value.Agent, "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "agent", "name": value.Agent, "text": value.Agent}); err != nil {
@@ -541,7 +540,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "model", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleSystem.String(), value.Model.ID, value.Model.ID, "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Model.ID, value.Model.ID, "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "subtask", "name": value.Model.ID, "text": value.Model.ID}); err != nil {

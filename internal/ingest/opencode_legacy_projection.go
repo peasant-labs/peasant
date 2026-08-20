@@ -73,6 +73,10 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 			if idErr != nil {
 				return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, legacyID.String(), idErr)
 			}
+			modified, freshnessErr := source.LegacySessionFreshness(ctx, legacyID)
+			if freshnessErr != nil {
+				return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while deriving selected freshness for session %q: %w; no partial discovery result is eligible; verify the selected materialized rows and retry", candidate.Path, legacyID.String(), freshnessErr)
+			}
 			session := DiscoveredSession{
 				SessionID:        sessionID,
 				Harness:          HarnessOpenCode,
@@ -80,6 +84,7 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 				SourceFormat:     SourceFormatJSON,
 				OriginalRoot:     ResolvedPath(filepath.Dir(candidate.Path)),
 				TranscriptOrigin: TranscriptOriginOpenCodeLegacySQLite,
+				ModTime:          modified,
 			}
 			discovered = append(discovered, session)
 		}
@@ -87,15 +92,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 			break
 		}
 		cursor = page.Next
-	}
-	if len(discovered) > 0 {
-		contentModTime, statErr := legacySQLiteContentModTime(a.fs, candidate.Path)
-		if statErr != nil {
-			return nil, statErr
-		}
-		for index := range discovered {
-			discovered[index].ModTime = contentModTime
-		}
 	}
 	if closeErr := source.Close(ctx); closeErr != nil {
 		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while closing its bounded read connection: %w; no partial discovery result is eligible; retry after the source lock clears", candidate.Path, closeErr)
@@ -213,6 +209,34 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 		}
 		messageCursor = page.Next
 	}
+	var orphanCursor *OpenCodeLegacyPartCursor
+	for {
+		page, err := source.LegacyOrphanParts(ctx, OpenCodeLegacyOrphanPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: orphanCursor})
+		if err != nil {
+			return openCodeLegacyProjection{}, err
+		}
+		for _, part := range page.Parts {
+			syntheticMessageID := "orphan-parent-" + part.ID.String()
+			data, marshalErr := json.Marshal(map[string]any{
+				"id":                   syntheticMessageID,
+				"sessionID":            sessionID.String(),
+				"role":                 RoleSystem.String(),
+				"parentID":             part.MessageID.String(),
+				"_peasant_orphan_part": true,
+			})
+			if marshalErr != nil {
+				return openCodeLegacyProjection{}, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
+			}
+			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{
+				ID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: data,
+				Parts: []openCodeLegacyProjectionPart{{ID: part.ID.String(), MessageID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}},
+			})
+		}
+		if page.Next == nil {
+			break
+		}
+		orphanCursor = page.Next
+	}
 	return projection, nil
 }
 
@@ -250,12 +274,6 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 			modelMissing = true
 		}
 	}
-	if metadata.ParentUUID == nil && summary.parentID != "" {
-		if parent, parentErr := NewSessionID(summary.parentID); parentErr == nil {
-			metadata.ParentUUID = &parent
-		}
-	}
-
 	var gitBranch, gitRemote, gitWorktree, gitTracking *string
 	if workDir != "" {
 		if value, gitErr := a.git.Branch(ctx, workDir); gitErr == nil && value != "" {
@@ -301,6 +319,7 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	if projectMissing {
 		metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, DiagnosticEntry{ErrorType: "missing_project", Location: fmt.Sprintf("%s session %s in %s", kind, session.SessionID, session.SourcePath), Message: "selected messages contain no working-directory or project evidence; Peasant left project name and path empty and used only the source path for stable local placement", Remediation: "Use an OpenCode source that records path.cwd, cwd, or directory if project attribution is required."})
 	}
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, missingOpenCodeParentDiagnostics(session, messages)...)
 	return &metadata, nil
 }
 

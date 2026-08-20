@@ -36,7 +36,7 @@ cases:
     expected_entries: 0
     mutation: none
     entries: []
-  - name: hybrid-ineligible
+  - name: hybrid-invalid-identifiers-ineligible
     source_fixture: hybrid-catalog
     expected_kickstart_sessions: 0
     expected_stored_sessions: 0
@@ -88,7 +88,7 @@ cases:
     entries: []
   - name: mixed-root-preserves-json
     source_fixture: legacy-mounted-projection
-    expected_kickstart_sessions: 1
+    expected_kickstart_sessions: 3
     expected_stored_sessions: 1
     harvest: skip
     target_session: ses_5cd91f52effeXd3QAJ54jOyzv7

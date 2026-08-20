@@ -226,7 +226,6 @@ type openCodeSemanticSummary struct {
 	endMS         int64
 	version       string
 	cwd           string
-	parentID      string
 }
 
 func summarizeOpenCodeSemanticMessages(messages []openCodeSemanticMessage) openCodeSemanticSummary {
@@ -254,9 +253,6 @@ func summarizeOpenCodeSemanticMessages(messages []openCodeSemanticMessage) openC
 		}
 		if summary.cwd == "" {
 			summary.cwd = message.Data.semanticCWD()
-		}
-		if summary.parentID == "" {
-			summary.parentID = message.Data.ParentID
 		}
 		role := Role(message.Data.Role)
 		if role == RoleUser || role == RoleAssistant {
@@ -292,11 +288,12 @@ type openCodeIndexMsg struct {
 		ID      string `json:"id"`
 		ModelID string `json:"modelID"`
 	} `json:"model"`
-	Version   string `json:"version"`
-	Directory string `json:"directory"`
-	CWD       string `json:"cwd"`
-	ParentID  string `json:"parentID"`
-	Path      struct {
+	Version    string `json:"version"`
+	Directory  string `json:"directory"`
+	CWD        string `json:"cwd"`
+	ParentID   string `json:"parentID"`
+	OrphanPart bool   `json:"_peasant_orphan_part"`
+	Path       struct {
 		CWD  string `json:"cwd"`
 		Root string `json:"root"`
 	} `json:"path"`
@@ -412,8 +409,21 @@ func parseOpenCodeSemanticPart(entryID string, outerTimeCreated int64, raw []byt
 
 func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages []openCodeSemanticMessage) []schema.SessionEntry {
 	entries := make([]schema.SessionEntry, 0, len(messages))
+	messageIndexes := make(map[string]int, len(messages))
+	messageParents := make(map[int]string, len(messages))
+	messageParts := make(map[int][]int, len(messages))
 	entryIndex := 0
 	for _, message := range messages {
+		if message.Data.OrphanPart && len(message.Parts) == 1 {
+			entry, include := idx.openCodePartEntry(sessionID, message.Parts[0], 0, entryIndex, RoleSystem, nil)
+			if include {
+				entry.ParentIndex = nil
+				entry.Depth = 0
+				entries = append(entries, entry)
+				entryIndex++
+			}
+			continue
+		}
 		entry := openCodeMessageEntry(sessionID, entryIndex, message, idx.fullContent)
 		inspection := inspectOpenCodeSemanticParts(message.Parts)
 		if inspection.isSystemEntry {
@@ -439,6 +449,12 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 		}
 		parentIndex := entryIndex
 		entries = append(entries, entry)
+		if message.EntryID != "" {
+			messageIndexes[message.EntryID] = parentIndex
+		}
+		if message.Data.ParentID != "" {
+			messageParents[parentIndex] = message.Data.ParentID
+		}
 		entryIndex++
 		if !idx.fullDepth {
 			continue
@@ -449,10 +465,77 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 				continue
 			}
 			entries = append(entries, partEntry)
+			messageParts[parentIndex] = append(messageParts[parentIndex], entryIndex)
 			entryIndex++
 		}
 	}
+	normalizeOpenCodeEntryGraph(entries, messageIndexes, messageParents, messageParts)
 	return entries
+}
+
+func normalizeOpenCodeEntryGraph(entries []schema.SessionEntry, messageIndexes map[string]int, messageParents map[int]string, messageParts map[int][]int) {
+	for childIndex, parentID := range messageParents {
+		parentIndex, present := messageIndexes[parentID]
+		if !present || parentIndex == childIndex {
+			continue
+		}
+		parent := parentIndex
+		entries[childIndex].ParentIndex = &parent
+	}
+	resolved := make(map[int]int, len(messageIndexes))
+	var depth func(int, map[int]bool) int
+	depth = func(index int, visiting map[int]bool) int {
+		if value, ok := resolved[index]; ok {
+			return value
+		}
+		if visiting[index] || entries[index].ParentIndex == nil {
+			resolved[index] = 0
+			return 0
+		}
+		visiting[index] = true
+		value := depth(*entries[index].ParentIndex, visiting) + 1
+		delete(visiting, index)
+		resolved[index] = value
+		return value
+	}
+	for _, messageIndex := range messageIndexes {
+		entries[messageIndex].Depth = depth(messageIndex, make(map[int]bool))
+		for _, partIndex := range messageParts[messageIndex] {
+			entries[partIndex].Depth = entries[messageIndex].Depth + 1
+		}
+	}
+}
+
+func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []openCodeSemanticMessage) []DiagnosticEntry {
+	identities := make(map[string]struct{}, len(messages))
+	for _, message := range messages {
+		if message.EntryID != "" {
+			identities[message.EntryID] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{})
+	diagnostics := make([]DiagnosticEntry, 0)
+	for _, message := range messages {
+		parentID := message.Data.ParentID
+		if parentID == "" {
+			continue
+		}
+		if _, present := identities[parentID]; present {
+			continue
+		}
+		key := message.EntryID + "\x00" + parentID
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		diagnostics = append(diagnostics, DiagnosticEntry{
+			ErrorType:   string(OpenCodeGraphMissingParent),
+			Location:    fmt.Sprintf("selected OpenCode session %s message %s from %s", session.SessionID, message.EntryID, session.SourcePath),
+			Message:     fmt.Sprintf("message %s references parent %s, but that parent is absent from the selected canonical representation; while normalizing the selected transcript Peasant retained the message at the root, which means no content was dropped but the upstream relationship is incomplete", message.EntryID, parentID),
+			Remediation: "Allow OpenCode to finish persisting the session, then re-run ingest; if the parent remains absent, keep the root-attached message and repair or export the source through OpenCode rather than modifying its database with Peasant.",
+		})
+	}
+	return diagnostics
 }
 
 func openCodeMessageEntry(sessionID SessionID, index int, message openCodeSemanticMessage, fullContent bool) schema.SessionEntry {

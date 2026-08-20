@@ -13,9 +13,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 )
 
-// OpenCodeAdapter discovers OpenCode's legacy JSON sessions first. When JSON
-// yields no sessions, it may ingest the first eligible legacy SQLite candidate.
-// Mixed-representation precedence and session deduplication are deferred.
+// OpenCodeAdapter discovers every supported materialized representation and
+// selects one canonical source per raw OpenCode session ID.
 type OpenCodeAdapter struct {
 	fs                   FileSystem
 	git                  GitResolver
@@ -77,9 +76,7 @@ func newOpenCodeAdapter(
 }
 
 // NewOpenCodeAdapterWithCandidateProbe constructs the production adapter with
-// explicit candidate-resolution dependencies. Legacy JSON remains the first
-// discovery path; only a JSON-empty result activates the first eligible legacy
-// SQLite candidate in deterministic resolver order.
+// explicit candidate-resolution dependencies.
 func NewOpenCodeAdapterWithCandidateProbe(
 	fs FileSystem,
 	git GitResolver,
@@ -117,13 +114,9 @@ func (a *OpenCodeAdapter) Harness() Harness {
 	return HarnessOpenCode
 }
 
-// Discover reads legacy project/session JSON first. If that produces no
-// sessions, it searches candidate evidence in deterministic order and discovers
-// sessions from exactly the first eligible SQLite source. Hybrid databases prefer
-// their current projection and fall back to legacy only if current discovery is
-// unusable. It does not
-// union or deduplicate representations; broader mixed-source selection remains
-// deferred until a canonical cross-representation policy is implemented.
+// Discover enumerates all supported representations, deduplicates by raw
+// OpenCode session ID, and selects current SQLite, then legacy SQLite, then
+// legacy JSON. Transcript streams are never unioned or interleaved.
 //
 // For each path in cfg.Paths it expects an OpenCode storage layout:
 //
@@ -136,7 +129,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 		return nil, a.candidateInitErr
 	}
 	evidence := a.inspectCandidates(ctx, cfg.Paths)
-	var discovered []DiscoveredSession
+	candidates := make([]openCodeSessionCandidate, 0)
 
 	for _, root := range cfg.Paths {
 		rootStr := root.String()
@@ -215,37 +208,74 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					}
 				}
 
-				discovered = append(discovered, ds)
+				candidates = append(candidates, openCodeSessionCandidate{session: ds, identity: OpenCodeSelectedSourceIdentity{SessionID: sessionID, Representation: OpenCodeRepresentationLegacyJSON, Path: ResolvedPath(sesPath)}})
 			}
 		}
-	}
-	// Preserve the established JSON result unchanged whenever a valid JSON layout
-	// exists. Only a JSON-empty result activates the narrow legacy SQLite fallback.
-	if len(discovered) > 0 {
-		return discovered, nil
 	}
 	for _, result := range evidence {
 		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Support != OpenCodeSupportSupported {
 			continue
 		}
-		var sessions []DiscoveredSession
-		var err error
+		appendRepresentation := func(sessions []DiscoveredSession, representation OpenCodeCanonicalRepresentation) {
+			for _, session := range sessions {
+				candidates = append(candidates, openCodeSessionCandidate{session: session, identity: OpenCodeSelectedSourceIdentity{SessionID: session.SessionID, Representation: representation, Path: session.SourcePath}})
+			}
+		}
 		switch result.Capability {
 		case OpenCodeCapabilityLegacy:
-			sessions, err = a.discoverLegacySQLite(ctx, result.Candidate)
+			sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
+			if err != nil {
+				return nil, err
+			}
+			appendRepresentation(sessions, OpenCodeRepresentationLegacySQLite)
 		case OpenCodeCapabilityCurrent:
-			sessions, err = a.discoverCurrentSQLite(ctx, result.Candidate)
+			sessions, err := a.discoverCurrentSQLite(ctx, result.Candidate)
+			if err != nil {
+				return nil, err
+			}
+			appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite)
 		case OpenCodeCapabilityHybrid:
-			sessions, err = a.discoverHybridSQLite(ctx, result.Candidate)
+			current, currentErr := a.discoverCurrentSQLite(ctx, result.Candidate)
+			legacy, legacyErr := a.discoverLegacySQLite(ctx, result.Candidate)
+			switch {
+			case currentErr != nil && legacyErr != nil:
+				return nil, fmt.Errorf("discover hybrid OpenCode SQLite candidate %q failed: current projection is unusable (%w) and legacy fallback also failed (%v); no partial discovery result is eligible; verify the supported OpenCode database and retry without modifying it", result.Candidate.Path, currentErr, legacyErr)
+			case currentErr != nil:
+				appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite)
+			case legacyErr != nil:
+				appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
+			default:
+				appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
+				appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite)
+			}
 		default:
 			continue
 		}
-		if err != nil {
-			return nil, err
-		}
-		return sessions, nil
 	}
+	return selectCanonicalOpenCodeSessions(candidates)
+}
 
+func selectCanonicalOpenCodeSessions(candidates []openCodeSessionCandidate) ([]DiscoveredSession, error) {
+	selected := make([]openCodeSessionCandidate, 0, len(candidates))
+	positions := make(map[SessionID]int, len(candidates))
+	for _, candidate := range candidates {
+		if err := candidate.identity.Validate(); err != nil {
+			return nil, fmt.Errorf("select canonical OpenCode session failed before freshness diffing: %w; the candidate cannot enter the mounted pipeline; fix candidate construction and retry", err)
+		}
+		position, exists := positions[candidate.identity.SessionID]
+		if !exists {
+			positions[candidate.identity.SessionID] = len(selected)
+			selected = append(selected, candidate)
+			continue
+		}
+		if candidate.identity.Representation.precedence() > selected[position].identity.Representation.precedence() {
+			selected[position] = candidate
+		}
+	}
+	discovered := make([]DiscoveredSession, len(selected))
+	for index, candidate := range selected {
+		discovered[index] = candidate.session
+	}
 	return discovered, nil
 }
 
@@ -303,18 +333,6 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 		}
 	}
 	return cloned
-}
-
-func (a *OpenCodeAdapter) discoverHybridSQLite(ctx context.Context, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
-	currentSessions, currentErr := a.discoverCurrentSQLite(ctx, candidate)
-	if currentErr == nil {
-		return currentSessions, nil
-	}
-	legacySessions, legacyErr := a.discoverLegacySQLite(ctx, candidate)
-	if legacyErr == nil {
-		return legacySessions, nil
-	}
-	return nil, fmt.Errorf("discover hybrid OpenCode SQLite candidate %q failed: current projection is unusable (%w) and legacy fallback also failed (%v); no partial discovery result is eligible; verify the supported OpenCode database and retry without modifying it", candidate.Path, currentErr, legacyErr)
 }
 
 // ExtractMetadata builds UnifiedMetadata from session + message files.
@@ -492,6 +510,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 			Remediation: "Check if the OpenCode session has assistant messages with model information.",
 		})
 	}
+	md.Diagnostics.Warnings = append(md.Diagnostics.Warnings, missingOpenCodeParentDiagnostics(session, semanticMessages)...)
 
 	return &md, nil
 }

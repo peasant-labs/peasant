@@ -65,8 +65,8 @@ func TestCurrentOpenCodeSQLiteNormalCLIAdapterWiring(t *testing.T) {
 				t.Fatalf("normal OpenCode CLI harvest silently disabled current SQLite discovery: %v\n%s", err, output)
 			}
 			wantDiscovery := "peasant harvest: " + strconv.Itoa(testCase.ExpectedSessions) + " sessions"
-			if !strings.Contains(output, wantDiscovery) || !strings.Contains(output, "ACTIVE     opencode") {
-				t.Fatalf("normal OpenCode CLI did not retain current SQLite discovery through its adapter factory; want %q and active OpenCode session in output:\n%s", wantDiscovery, output)
+			if !strings.Contains(output, wantDiscovery) || !strings.Contains(output, "NEW        opencode") {
+				t.Fatalf("normal OpenCode CLI did not retain current SQLite discovery through its adapter factory; want %q and ingested OpenCode session in output:\n%s", wantDiscovery, output)
 			}
 		})
 	}

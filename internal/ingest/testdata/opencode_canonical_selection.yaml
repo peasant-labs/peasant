@@ -1,0 +1,20 @@
+declared_cases: 9
+source_fixture: canonical-selection-mixed
+json_mtime_ms: 3000
+cases:
+  - {name: all-three-prefers-current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, representations: [current_sqlite, legacy_sqlite, legacy_json], expected: current_sqlite, marker: CURRENT_ALL, expected_freshness_ms: 2010}
+  - {name: current-and-legacy-prefers-current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, representations: [current_sqlite, legacy_sqlite], expected: current_sqlite, marker: CURRENT_LEGACY, expected_freshness_ms: 2110}
+  - {name: current-and-json-prefers-current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, representations: [current_sqlite, legacy_json], expected: current_sqlite, marker: CURRENT_JSON, expected_freshness_ms: 2210}
+  - {name: legacy-and-json-prefers-legacy, session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, representations: [legacy_sqlite, legacy_json], expected: legacy_sqlite, marker: LEGACY_JSON, expected_freshness_ms: 1210}
+  - {name: current-only, session_id: ses_3cd91f52effeXd3QAJ54jOyzv9, representations: [current_sqlite], expected: current_sqlite, marker: CURRENT_ONLY, expected_freshness_ms: 2310}
+  - {name: legacy-only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, representations: [legacy_sqlite], expected: legacy_sqlite, marker: LEGACY_ONLY, expected_freshness_ms: 1310}
+  - {name: json-only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, representations: [legacy_json], expected: legacy_json, marker: JSON_ONLY, expected_freshness_ms: 3000}
+  - {name: current-parent-graph-and-missing-parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, representations: [current_sqlite], expected: current_sqlite, marker: CURRENT_PARENT, expected_freshness_ms: 2430, missing_parent: msg_absent, linked_parent: msg_current_root, linked_child: msg_current_child, missing_entry: msg_current_parent, tool_call_id: call_current_parent}
+  - {name: legacy-missing-parent-and-orphan-part, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, representations: [legacy_sqlite], expected: legacy_sqlite, marker: LEGACY_PARENT, expected_freshness_ms: 1410, missing_parent: msg_absent, orphan_entry: part_legacy_orphan, orphan_parent: msg_missing_part_parent, orphan_marker: LEGACY_ORPHAN_PART}
+loader_mutations:
+  - {name: unknown-field, kind: unknown_field}
+  - {name: wrong-count, kind: wrong_count}
+  - {name: duplicate-name, kind: duplicate_name}
+  - {name: unknown-representation, kind: unknown_representation}
+  - {name: trailing-document, kind: trailing_document}
+declared_loader_mutations: 5

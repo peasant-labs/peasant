@@ -1,4 +1,4 @@
-declared_cases: 23
+declared_cases: 24
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -727,3 +727,37 @@ cases:
       - {id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: model-switched, time_created: 1140, time_updated: 1140, data: '{"id":"msg_06_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":1140}}', seq: 23}
     ignored_history:
       - {kind: event, id: ignored_semantic_history, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, stable_id: msg_02_assistant, time_created: 1019, data: '{"marker":"HISTORY_MUST_NOT_APPEAR"}'}
+
+  - name: canonical-selection-mixed
+    logical_path: selection/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 5, legacy_parts: 6, current_messages: 7, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - {id: msg_legacy_all, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1000, time_updated: 1010, data: '{"id":"msg_legacy_all","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1000,"completed":1010},"content":"legacy all"}'}
+      - {id: msg_legacy_current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, time_created: 1100, time_updated: 1110, data: '{"id":"msg_legacy_current","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv6","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1100,"completed":1110},"content":"legacy current"}'}
+      - {id: msg_legacy_json, session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, time_created: 1200, time_updated: 1210, data: '{"id":"msg_legacy_json","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv8","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1200,"completed":1210},"content":"legacy json"}'}
+      - {id: msg_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, time_created: 1300, time_updated: 1310, data: '{"id":"msg_legacy_only","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvA","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1300,"completed":1310},"content":"legacy only"}'}
+      - {id: msg_legacy_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1400, time_updated: 1410, data: '{"id":"msg_legacy_parent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvD","role":"user","parentID":"msg_absent","path":{"cwd":"/synthetic/selection"},"time":{"created":1400,"completed":1410},"content":"legacy parent"}'}
+    legacy_parts:
+      - {id: part_legacy_all, message_id: msg_legacy_all, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1001, time_updated: 1001, data: '{"id":"part_legacy_all","messageID":"msg_legacy_all","type":"text","text":"LEGACY_ALL","time":{"created":1001}}'}
+      - {id: part_legacy_current, message_id: msg_legacy_current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, time_created: 1101, time_updated: 1101, data: '{"id":"part_legacy_current","messageID":"msg_legacy_current","type":"text","text":"LEGACY_CURRENT","time":{"created":1101}}'}
+      - {id: part_legacy_json, message_id: msg_legacy_json, session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, time_created: 1201, time_updated: 1201, data: '{"id":"part_legacy_json","messageID":"msg_legacy_json","type":"text","text":"LEGACY_JSON","time":{"created":1201}}'}
+      - {id: part_legacy_only, message_id: msg_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, time_created: 1301, time_updated: 1301, data: '{"id":"part_legacy_only","messageID":"msg_legacy_only","type":"text","text":"LEGACY_ONLY","time":{"created":1301}}'}
+      - {id: part_legacy_parent, message_id: msg_legacy_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1401, time_updated: 1401, data: '{"id":"part_legacy_parent","messageID":"msg_legacy_parent","type":"text","text":"LEGACY_PARENT","time":{"created":1401}}'}
+      - {id: part_legacy_orphan, message_id: msg_missing_part_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1402, time_updated: 1402, data: '{"id":"part_legacy_orphan","messageID":"msg_missing_part_parent","type":"text","text":"LEGACY_ORPHAN_PART","time":{"created":1402}}'}
+    current_messages:
+      - {id: msg_current_all, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: user, time_created: 2000, time_updated: 2010, data: '{"id":"msg_current_all","text":"CURRENT_ALL","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2000}}', seq: 1}
+      - {id: msg_current_legacy, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, type: user, time_created: 2100, time_updated: 2110, data: '{"id":"msg_current_legacy","text":"CURRENT_LEGACY","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2100}}', seq: 1}
+      - {id: msg_current_json, session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, type: user, time_created: 2200, time_updated: 2210, data: '{"id":"msg_current_json","text":"CURRENT_JSON","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2200}}', seq: 1}
+      - {id: msg_current_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzv9, type: user, time_created: 2300, time_updated: 2310, data: '{"id":"msg_current_only","text":"CURRENT_ONLY","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2300}}', seq: 1}
+      - {id: msg_current_root, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: user, time_created: 2400, time_updated: 2410, data: '{"id":"msg_current_root","text":"CURRENT_ROOT","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2400}}', seq: 1}
+      - {id: msg_current_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2411, time_updated: 2420, data: '{"id":"msg_current_child","parentID":"msg_current_root","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_current_parent","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"CURRENT_TOOL_RESULT"}],"result":"CURRENT_TOOL_RESULT"},"time":{"created":2412,"completed":2419}}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2411,"completed":2420}}', seq: 2}
+      - {id: msg_current_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2421, time_updated: 2430, data: '{"id":"msg_current_parent","parentID":"msg_absent","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"part_current_parent","text":"CURRENT_PARENT"}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2421,"completed":2430}}', seq: 3}
+    ignored_history: []

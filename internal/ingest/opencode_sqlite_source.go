@@ -317,6 +317,14 @@ type OpenCodeLegacyPartPageRequest struct {
 	After     *OpenCodeLegacyPartCursor
 }
 
+// OpenCodeLegacyOrphanPartPageRequest requests selected parts whose message
+// parent is absent from the same session projection.
+type OpenCodeLegacyOrphanPartPageRequest struct {
+	SessionID OpenCodeLegacySessionID
+	PageSize  OpenCodeLegacyPageSize
+	After     *OpenCodeLegacyPartCursor
+}
+
 // OpenCodeLegacyMessageRow is one detached current row from legacy message.
 type OpenCodeLegacyMessageRow struct {
 	ID          OpenCodeLegacyMessageID
@@ -486,8 +494,11 @@ type OpenCodeSQLiteSource interface {
 	Catalog(context.Context) (OpenCodeSchemaEvidence, error)
 	CurrentSessionIDs(context.Context, OpenCodeCurrentSessionPageRequest) (OpenCodeCurrentSessionPage, error)
 	LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error)
+	CurrentSessionFreshness(context.Context, OpenCodeCurrentSessionID) (time.Time, error)
+	LegacySessionFreshness(context.Context, OpenCodeLegacySessionID) (time.Time, error)
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
+	LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	Close(context.Context) error
 }

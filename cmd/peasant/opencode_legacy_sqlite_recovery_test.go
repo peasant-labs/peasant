@@ -318,7 +318,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	}
 }
 
-func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
+func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 	document := mustLegacySQLiteRecoveryDocument(t)
 	for _, testCase := range document.CandidateCases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -346,7 +346,7 @@ func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
 				t.Fatalf("discover deterministic candidate sources: %v", err)
 			}
 			if got := discoveredSessionStrings(discovered); !slices.Equal(got, testCase.ExpectedSessionIDs) {
-				t.Fatalf("discovered candidate sessions=%v, want only first eligible source %v; evidence=%+v", got, testCase.ExpectedSessionIDs, adapter.CandidateEvidence())
+				t.Fatalf("discovered candidate sessions=%v, want canonical sessions %v; evidence=%+v", got, testCase.ExpectedSessionIDs, adapter.CandidateEvidence())
 			}
 
 			cfg := mountedOpenCodeConfig(t, root)
@@ -359,7 +359,7 @@ func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
 			outputRoot := filepath.Join(commandRoot, "managed")
 			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 			if err != nil {
-				t.Fatalf("harvest first eligible candidate: %v\n%s", err, output)
+				t.Fatalf("harvest canonical eligible candidates: %v\n%s", err, output)
 			}
 			managedIDs := managedTranscriptSessionIDs(t, outputRoot)
 			if !slices.Equal(managedIDs, testCase.ExpectedSessionIDs) {
