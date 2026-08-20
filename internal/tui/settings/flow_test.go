@@ -240,6 +240,99 @@ func TestFlow_ReceiptConfirmIsTheCommitPoint(t *testing.T) {
 	}
 }
 
+// TestFlow_ReceiptGroupsChoicesAndEffectsWithAContinueCue is a printed-View
+// golden a human can read: it drives the flow to the receipt with a consent
+// summary attached and asserts the render groups "your choices" and "when you
+// confirm" under their own bold headings (not one flat run of lines) and
+// closes with a styled "press enter to continue" cue - the two acceptance
+// criteria from peasant#142. The guided-screenshots harness
+// (cmd/peasant-guided-screenshots) does not currently mount settings.Flow's
+// receipt step, so this is the render evidence for that surface until it does.
+func TestFlow_ReceiptGroupsChoicesAndEffectsWithAContinueCue(t *testing.T) {
+	path, loaded := writeConfigFile(t)
+	d, err := NewDraft(path, loaded)
+	if err != nil {
+		t.Fatalf("NewDraft: %v", err)
+	}
+	f := NewFlow(theme.New(theme.ModeDark), testRegistry(), d,
+		WithConsentSummary(func(ConsentContext) (ConsentSummary, error) {
+			return ConsentSummary{
+				Values:  []string{"selection: only the buffered projects"},
+				Effects: []string{"save the visible choices to peasant configuration"},
+			}, nil
+		}))
+	f.SetSize(100, 30)
+
+	f = send(f, "space") // connection on (dirty)
+	f = send(f, "tab")   // into advanced
+	f = send(f, "tab")   // to receipt
+	if !f.OnReceipt() {
+		t.Fatalf("did not reach receipt; step=%d", f.Step())
+	}
+
+	view := stripANSIForSettings(f.View())
+	lines := strings.Split(view, "\n")
+	indexOfFrom := func(want string, from int) int {
+		for i := from; i < len(lines); i++ {
+			if strings.Contains(lines[i], want) {
+				return i
+			}
+		}
+		t.Fatalf("view did not contain %q at or after line %d:\n%s", want, from, view)
+		return -1
+	}
+	indexOf := func(want string) int { return indexOfFrom(want, 0) }
+
+	// Grouped under distinct headings, in reading order: choices, then
+	// effects, then the per-section changed-field group - never a flat block.
+	// Each subsequent lookup starts after the prior match so the tab strip's
+	// own "connection" label (rendered above the body) cannot be mistaken for
+	// the changed-fields section heading.
+	yourChoices := indexOf("your choices")
+	choiceValue := indexOfFrom("selection: only the buffered projects", yourChoices)
+	whenYouConfirm := indexOfFrom("when you confirm", choiceValue)
+	effectValue := indexOfFrom("save the visible choices to peasant configuration", whenYouConfirm)
+	changedSection := indexOfFrom("changed: connect to village", effectValue)
+	continueCue := indexOfFrom("press enter to continue", changedSection)
+
+	if !(yourChoices < choiceValue && choiceValue < whenYouConfirm &&
+		whenYouConfirm < effectValue && effectValue < changedSection &&
+		changedSection < continueCue) {
+		t.Fatalf("receipt is not hierarchically grouped in reading order: "+
+			"your choices=%d value=%d when you confirm=%d effect=%d changed=%d cue=%d\n%s",
+			yourChoices, choiceValue, whenYouConfirm, effectValue, changedSection, continueCue, view)
+	}
+
+	// The heading rows must actually be blank-line separated from what follows
+	// them (grouped, scannable sections), not packed line-on-line). The frame
+	// draws its own "│" side borders around every content row, so a genuinely
+	// blank content row still has border characters - strip those before
+	// checking for emptiness.
+	isBlankContentRow := func(ln string) bool {
+		return strings.TrimSpace(strings.Trim(ln, "│ ")) == ""
+	}
+	if !isBlankContentRow(lines[whenYouConfirm-1]) {
+		t.Fatalf("no blank line separating \"your choices\" group from \"when you confirm\":\n%s", view)
+	}
+
+	// The continue cue must be styled distinctly (not a bare Muted/Base line)
+	// so it reads as the primary action, not incidental text.
+	rawLines := strings.Split(f.View(), "\n")
+	var cueRaw string
+	for _, ln := range rawLines {
+		if strings.Contains(stripANSIForSettings(ln), "press enter to continue") {
+			cueRaw = ln
+			break
+		}
+	}
+	if cueRaw == "" {
+		t.Fatalf("raw view lost the continue cue line")
+	}
+	if !strings.Contains(cueRaw, "\x1b[") {
+		t.Fatalf("continue cue is unstyled plain text, not a distinct visual cue: %q", cueRaw)
+	}
+}
+
 func TestFlow_FreeBackNavRetainsState(t *testing.T) {
 	f, d, _ := newTestFlow(t)
 	baseURL := d.Baseline().Village.URL

@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -166,13 +167,96 @@ func fitRenderedLine(style lipgloss.Style, rendered string, width int) string {
 	if prefix == "" || suffix == "" {
 		return clipped + padding
 	}
+	// The content's OWN trailing reset (its last styled segment's close) is
+	// stripped so the wrapping prefix/suffix below owns the true end of the
+	// line - interior resets are converted to "restore" (reset + reopen
+	// parent) instead, so a run of unstyled text between two styled cells
+	// still inherits the parent's background rather than falling back to
+	// the terminal default.
+	trailingOpen := ""
 	for strings.HasSuffix(clipped, suffix) {
-		clipped = strings.TrimSuffix(clipped, suffix)
+		trimmed := strings.TrimSuffix(clipped, suffix)
+		if trailingOpen == "" {
+			trailingOpen = lastEscapeSequence(trimmed)
+		}
+		clipped = trimmed
 	}
 	restore := suffix + prefix
 	clipped = strings.ReplaceAll(clipped, "\x1b[m", restore)
 	clipped = strings.ReplaceAll(clipped, "\x1b[0m", restore)
+	// A trailing segment that only set its OWN foreground (the common case -
+	// e.g. a Muted label) leaves the parent's background untouched once its
+	// closing reset is stripped, so padding can follow directly: byte-for-
+	// byte identical to before. But a trailing segment that also painted its
+	// OWN background (e.g. the amber-filled active tab, when it happens to
+	// be the LAST cell on the line) leaves that background open with nothing
+	// left to close it - every padding cell that follows would inherit the
+	// highlight instead of the parent's canvas. Restore the parent style
+	// before padding only in that case.
+	if setsBackground(trailingOpen) {
+		return prefix + clipped + restore + padding + suffix
+	}
 	return prefix + clipped + padding + suffix
+}
+
+// lastEscapeSequence returns the final ANSI SGR escape sequence in s, or ""
+// if s contains none.
+func lastEscapeSequence(s string) string {
+	idx := strings.LastIndex(s, "\x1b[")
+	if idx < 0 {
+		return ""
+	}
+	end := strings.IndexByte(s[idx:], 'm')
+	if end < 0 {
+		return ""
+	}
+	return s[idx : idx+end+1]
+}
+
+// setsBackground reports whether an SGR escape sequence sets a background
+// color: the extended code 48 (truecolor "48;2;r;g;b" or 256-color
+// "48;5;n"), or a standard/bright background code in the 40-47 / 100-107
+// range. Fields are walked as SGR CODES, consuming an extended code's
+// trailing color-component fields as it goes, rather than matched by
+// substring or by field position alone - a truecolor component's own 0-255
+// value (e.g. "47" or "148" inside "38;2;R;G;Bm") can coincide with a real
+// background code number, so only a field actually occupying a code
+// position counts.
+func setsBackground(seq string) bool {
+	if seq == "" {
+		return false
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(seq, "\x1b["), "m")
+	fields := strings.Split(body, ";")
+	for i := 0; i < len(fields); i++ {
+		code, err := strconv.Atoi(fields[i])
+		if err != nil {
+			continue
+		}
+		switch {
+		case code == 38 || code == 48:
+			isBackground := code == 48
+			// Extended color: "38/48;2;r;g;b" (truecolor) or "38/48;5;n"
+			// (256-color). Consume the mode selector plus its color
+			// components so they are never mistaken for standalone codes.
+			if i+1 < len(fields) {
+				switch fields[i+1] {
+				case "2":
+					i += 4 // mode + r + g + b
+				case "5":
+					i += 2 // mode + palette index
+				}
+			}
+			if isBackground {
+				return true
+			}
+		case code >= 40 && code <= 47:
+			return true
+		case code >= 100 && code <= 107:
+			return true
+		}
+	}
+	return false
 }
 
 // trimLastGraphemeCluster removes exactly one user-perceived character from s.
