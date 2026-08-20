@@ -1,8 +1,11 @@
 package settings
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
@@ -273,8 +276,15 @@ func (f *radioField[T]) render(d *Draft, styles theme.Styles, width int) string 
 	// Draw the help for the option in focus - the one under the cursor while the
 	// field is focused, else the selected value - so the user reads the meaning
 	// of the choice they are about to pick, conditional on the current selection.
+	// It wraps to width instead of clipping to one truncated line, matching how
+	// a field's own Description already wraps in Flow.renderBody - a narrow
+	// pane (e.g. the left pane of a WithExamplePane split) still shows the
+	// whole sentence, just over more rows.
 	if help := f.highlightedHelp(cur); help != "" {
-		lines = append(lines, "", styles.Muted.Render(clip(help, width)))
+		lines = append(lines, "")
+		for _, line := range strings.Split(ansi.Wrap(help, width, ""), "\n") {
+			lines = append(lines, styles.Muted.Render(line))
+		}
 	}
 	return joinLines(lines)
 }

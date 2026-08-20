@@ -452,6 +452,19 @@ func (p *PreviewSplit) SetSize(width, height int) {
 
 var _ Sizeable = (*PreviewSplit)(nil)
 
+// LeftPaneWidth reports the left pane's content width the split would use for
+// an outer width of totalWidth, without mutating p or requiring a prior
+// SetSize. It depends only on totalWidth and the configured ratio - never on
+// height - so a caller that wants to measure its left content's natural
+// height (e.g. to size the whole split around a control instead of stretching
+// it to fill whatever region a parent offered) can ask this before deciding
+// what height to pass to SetSize.
+func (p PreviewSplit) LeftPaneWidth(totalWidth int) int {
+	p.width = totalWidth
+	lw, _ := p.paneWidths()
+	return lw
+}
+
 // resizePanes hands each pane its share of the current inner region.
 func (p *PreviewSplit) resizePanes() {
 	lw, rw := p.paneWidths()

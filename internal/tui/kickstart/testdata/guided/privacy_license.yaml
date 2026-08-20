@@ -64,7 +64,11 @@ viewport:
   - name: common-height-focus-right-then-page-down-reveals-the-last-category
     width: 80
     height: 18
-    keys: [focus-right, page-down]
+    # The split's right pane now sizes itself to the left control's shorter
+    # (wrapped-description) content height rather than the full remaining
+    # terminal height, so its page size shrank too - two page-downs are now
+    # needed to reach the last category instead of one.
+    keys: [focus-right, page-down, page-down]
     wantContains:
       - '(•) standard'
       - 'github.com/example-org/example-repo'

@@ -1,6 +1,8 @@
 package settings
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
@@ -87,6 +89,11 @@ func (f *splitField) initCmd() tea.Cmd { return f.inner.initCmd() }
 func (f *splitField) focus() tea.Cmd { return f.split.Focus() }
 func (f *splitField) blur()          { f.split.Blur() }
 
+// setSize records the region a Flow step offered this field: w is applied to
+// the split directly, but h is a CEILING, not the split's actual height. The
+// split's real height is decided in render, once the wrapped control's
+// content (which may span more or fewer rows once its help text wraps) can be
+// measured against the left pane's actual width.
 func (f *splitField) setSize(w, h int) {
 	f.width, f.height = w, h
 	f.split.SetSize(w, h)
@@ -126,13 +133,31 @@ func (f *splitField) handle(d *Draft, msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-func (f *splitField) render(d *Draft, _ theme.Styles, width int) string {
+func (f *splitField) render(d *Draft, styles theme.Styles, width int) string {
 	f.rebind(d)
-	if width != f.width {
-		f.width = width
-		f.split.SetSize(width, f.height)
-	}
+	f.width = width
+	f.split.SetSize(width, f.contentHeight(d, styles, width))
 	return f.split.View()
+}
+
+// contentHeight measures the wrapped control's natural row count at the left
+// pane's actual width and clamps it to h, the ceiling the flow offered in
+// setSize. The split's real height follows the CONTROL, not the example: the
+// example pane inherits whatever height that leaves and scrolls for the rest,
+// so a longer per-option description grows the whole split (up to the
+// ceiling) instead of being clipped to compete with the example for a fixed
+// share of it.
+func (f *splitField) contentHeight(d *Draft, styles theme.Styles, width int) int {
+	leftWidth := f.split.LeftPaneWidth(width)
+	content := f.inner.render(d, styles, leftWidth)
+	desired := strings.Count(content, "\n") + 1
+	if desired < 1 {
+		desired = 1
+	}
+	if f.height > 0 && desired > f.height {
+		return f.height
+	}
+	return desired
 }
 
 func (f *splitField) reset(d *Draft) { f.inner.reset(d) }

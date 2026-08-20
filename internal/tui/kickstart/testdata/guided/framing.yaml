@@ -68,7 +68,11 @@ rows:
         - standard hides project identity but keeps git remote urls.
     wantContains:
       - before you publish
-      - personally identifiable information (PII)
+      # The split's right pane now sizes itself to the left control's own
+      # content height and scrolls the rest, so only the FIRST example
+      # category is guaranteed visible without paging - PII is covered
+      # directly by TestPrivacyGuideUsesRealStandardRedactor.
+      - credential
       - keeps git remote urls
     wantMissing:
       - before transcripts enter peasant's local store
