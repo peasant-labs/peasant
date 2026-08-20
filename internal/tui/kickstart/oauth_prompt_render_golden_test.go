@@ -102,7 +102,7 @@ func loadOAuthPromptRenderDoc(t *testing.T) oauthPromptRenderDoc {
 func buildOAuthPromptCase(t *testing.T, c oauthPromptRenderCase) kickstart.Program {
 	t.Helper()
 	p, _ := newTestProgram(t, kickstart.ProgramDeps{
-		Login: func(context.Context) (string, error) { return "fixture-user", nil },
+		Login: func(context.Context, func(string)) (string, error) { return "fixture-user", nil },
 	})
 	p.SetSize(c.Width, c.Height)
 	switch c.Phase {
