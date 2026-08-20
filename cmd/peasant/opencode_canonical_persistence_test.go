@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,7 +24,20 @@ import (
 
 const (
 	expectedCanonicalPersistenceCases     = 1
-	expectedCanonicalPersistenceMutations = 4
+	expectedCanonicalPersistenceSessions  = 7
+	expectedCanonicalPersistenceMutations = 11
+)
+
+type canonicalPersistenceCombination string
+
+const (
+	canonicalPersistenceAllThree      canonicalPersistenceCombination = "current_legacy_json"
+	canonicalPersistenceCurrentLegacy canonicalPersistenceCombination = "current_legacy"
+	canonicalPersistenceCurrentJSON   canonicalPersistenceCombination = "current_json"
+	canonicalPersistenceLegacyJSON    canonicalPersistenceCombination = "legacy_json"
+	canonicalPersistenceCurrentOnly   canonicalPersistenceCombination = "current_only"
+	canonicalPersistenceLegacyOnly    canonicalPersistenceCombination = "legacy_only"
+	canonicalPersistenceJSONOnly      canonicalPersistenceCombination = "json_only"
 )
 
 type canonicalPersistenceFixture struct {
@@ -34,21 +48,37 @@ type canonicalPersistenceFixture struct {
 }
 
 type canonicalPersistenceCase struct {
-	Name                  string                     `yaml:"name"`
-	SourceFixture         string                     `yaml:"source_fixture"`
-	ExpectedSessions      int                        `yaml:"expected_sessions"`
-	JSONSessions          []canonicalPersistenceJSON `yaml:"json_sessions"`
-	GraphSession          string                     `yaml:"graph_session"`
-	ParentEntry           string                     `yaml:"parent_entry"`
-	ChildEntry            string                     `yaml:"child_entry"`
-	MissingParentEntry    string                     `yaml:"missing_parent_entry"`
-	ToolCallID            string                     `yaml:"tool_call_id"`
-	ToolResultContains    string                     `yaml:"tool_result_contains"`
-	OrphanSession         string                     `yaml:"orphan_session"`
-	OrphanEntry           string                     `yaml:"orphan_entry"`
-	OrphanContentContains string                     `yaml:"orphan_content_contains"`
-	MinimumTurns          int                        `yaml:"minimum_turns"`
-	MinimumToolCalls      int                        `yaml:"minimum_tool_calls"`
+	Name                  string                        `yaml:"name"`
+	SourceFixture         string                        `yaml:"source_fixture"`
+	ExpectedSessions      int                           `yaml:"expected_sessions"`
+	JSONSessions          []canonicalPersistenceJSON    `yaml:"json_sessions"`
+	CanonicalSessions     []canonicalPersistenceSession `yaml:"canonical_sessions"`
+	GraphSession          string                        `yaml:"graph_session"`
+	ParentEntry           string                        `yaml:"parent_entry"`
+	ChildEntry            string                        `yaml:"child_entry"`
+	MissingParentEntry    string                        `yaml:"missing_parent_entry"`
+	ToolCallID            string                        `yaml:"tool_call_id"`
+	ToolResultContains    string                        `yaml:"tool_result_contains"`
+	OrphanSession         string                        `yaml:"orphan_session"`
+	OrphanEntry           string                        `yaml:"orphan_entry"`
+	OrphanContentContains string                        `yaml:"orphan_content_contains"`
+	ExpectedMetrics       canonicalPersistenceMetrics   `yaml:"expected_metrics"`
+}
+
+type canonicalPersistenceSession struct {
+	Name            string                          `yaml:"name"`
+	Combination     canonicalPersistenceCombination `yaml:"combination"`
+	SessionID       string                          `yaml:"session_id"`
+	WinningMarker   string                          `yaml:"winning_marker"`
+	LosingMarkers   []string                        `yaml:"losing_markers"`
+	OrderedEntryIDs []string                        `yaml:"ordered_entry_ids"`
+	ExpectedMetrics canonicalPersistenceMetrics     `yaml:"expected_metrics"`
+}
+
+type canonicalPersistenceMetrics struct {
+	TurnCount      int `yaml:"turn_count"`
+	ToolCalls      int `yaml:"tool_calls"`
+	ComputeVersion int `yaml:"compute_version"`
 }
 
 type canonicalPersistenceJSON struct {
@@ -80,16 +110,52 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 	}
 	seen := make(map[string]bool)
 	for _, testCase := range fixture.Cases {
-		if testCase.Name == "" || seen[testCase.Name] || testCase.SourceFixture == "" || testCase.ExpectedSessions <= 0 || len(testCase.JSONSessions) == 0 || testCase.GraphSession == "" || testCase.ParentEntry == "" || testCase.ChildEntry == "" || testCase.MissingParentEntry == "" || testCase.ToolCallID == "" || testCase.ToolResultContains == "" || testCase.OrphanSession == "" || testCase.OrphanEntry == "" || testCase.OrphanContentContains == "" || testCase.MinimumTurns <= 0 || testCase.MinimumToolCalls <= 0 {
+		if testCase.Name == "" || seen[testCase.Name] || testCase.SourceFixture == "" || testCase.ExpectedSessions != expectedCanonicalPersistenceSessions+2 || len(testCase.JSONSessions) == 0 || len(testCase.CanonicalSessions) != expectedCanonicalPersistenceSessions || testCase.GraphSession == "" || testCase.ParentEntry == "" || testCase.ChildEntry == "" || testCase.MissingParentEntry == "" || testCase.ToolCallID == "" || testCase.ToolResultContains == "" || testCase.OrphanSession == "" || testCase.OrphanEntry == "" || testCase.OrphanContentContains == "" || testCase.ExpectedMetrics.TurnCount <= 0 || testCase.ExpectedMetrics.ToolCalls <= 0 || testCase.ExpectedMetrics.ComputeVersion <= 0 {
 			return fixture, fmt.Errorf("canonical OpenCode persistence fixture contains incomplete or duplicate case %+v", testCase)
 		}
 		seen[testCase.Name] = true
-		jsonIDs := make(map[string]bool, len(testCase.JSONSessions))
+		wantedCombinations := map[canonicalPersistenceCombination]bool{
+			canonicalPersistenceAllThree: false, canonicalPersistenceCurrentLegacy: false,
+			canonicalPersistenceCurrentJSON: false, canonicalPersistenceLegacyJSON: false,
+			canonicalPersistenceCurrentOnly: false, canonicalPersistenceLegacyOnly: false,
+			canonicalPersistenceJSONOnly: false,
+		}
+		jsonMarkers := make(map[string]string, len(testCase.JSONSessions))
 		for _, session := range testCase.JSONSessions {
-			if session.SessionID == "" || session.Marker == "" || jsonIDs[session.SessionID] {
+			if session.SessionID == "" || session.Marker == "" || jsonMarkers[session.SessionID] != "" {
 				return fixture, fmt.Errorf("canonical persistence case %q has incomplete or duplicate JSON session %+v", testCase.Name, session)
 			}
-			jsonIDs[session.SessionID] = true
+			jsonMarkers[session.SessionID] = session.Marker
+		}
+		sessionIDs := make(map[string]bool, len(testCase.CanonicalSessions))
+		markers := make(map[string]bool)
+		for _, session := range testCase.CanonicalSessions {
+			_, knownCombination := wantedCombinations[session.Combination]
+			jsonMarker := jsonMarkers[session.SessionID]
+			if session.Name == "" || seen[session.Name] || !knownCombination || wantedCombinations[session.Combination] || session.SessionID == "" || sessionIDs[session.SessionID] || session.WinningMarker == "" || len(session.LosingMarkers) != session.Combination.expectedLosingMarkers() || (jsonMarker != "") != session.Combination.includesJSON() || jsonMarker != "" && session.WinningMarker != jsonMarker && !slices.Contains(session.LosingMarkers, jsonMarker) || len(session.OrderedEntryIDs) == 0 || !session.ExpectedMetrics.valid() {
+				return fixture, fmt.Errorf("canonical persistence case %q has incomplete, duplicate, or unknown session %+v", testCase.Name, session)
+			}
+			seen[session.Name] = true
+			sessionIDs[session.SessionID] = true
+			wantedCombinations[session.Combination] = true
+			for _, marker := range append([]string{session.WinningMarker}, session.LosingMarkers...) {
+				if marker == "" || markers[marker] {
+					return fixture, fmt.Errorf("canonical persistence case %q has empty or duplicate marker %q", testCase.Name, marker)
+				}
+				markers[marker] = true
+			}
+			entryIDs := make(map[string]bool, len(session.OrderedEntryIDs))
+			for _, entryID := range session.OrderedEntryIDs {
+				if entryID == "" || entryIDs[entryID] {
+					return fixture, fmt.Errorf("canonical persistence session %q has empty or duplicate ordered entry ID %q", session.Name, entryID)
+				}
+				entryIDs[entryID] = true
+			}
+		}
+		for sessionID := range jsonMarkers {
+			if !sessionIDs[sessionID] {
+				return fixture, fmt.Errorf("canonical persistence JSON session %q lacks a canonical-session expectation", sessionID)
+			}
 		}
 	}
 	for _, mutation := range fixture.LoaderMutations {
@@ -98,12 +164,38 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 		}
 		seen[mutation.Name] = true
 		switch mutation.Kind {
-		case "unknown_field", "wrong_count", "duplicate_name", "trailing_document":
+		case "unknown_field", "wrong_count", "duplicate_name", "trailing_document", "wrong_session_count", "duplicate_session_id", "unknown_combination", "orphan_json_reference", "missing_winning_marker", "missing_ordered_entry", "invalid_metrics":
 		default:
 			return fixture, fmt.Errorf("canonical persistence fixture has unknown mutation %q", mutation.Kind)
 		}
 	}
 	return fixture, nil
+}
+
+func (metrics canonicalPersistenceMetrics) valid() bool {
+	return metrics.TurnCount > 0 && metrics.ToolCalls >= 0 && metrics.ComputeVersion > 0
+}
+
+func (combination canonicalPersistenceCombination) expectedLosingMarkers() int {
+	switch combination {
+	case canonicalPersistenceAllThree:
+		return 2
+	case canonicalPersistenceCurrentLegacy, canonicalPersistenceCurrentJSON, canonicalPersistenceLegacyJSON:
+		return 1
+	case canonicalPersistenceCurrentOnly, canonicalPersistenceLegacyOnly, canonicalPersistenceJSONOnly:
+		return 0
+	default:
+		return -1
+	}
+}
+
+func (combination canonicalPersistenceCombination) includesJSON() bool {
+	switch combination {
+	case canonicalPersistenceAllThree, canonicalPersistenceCurrentJSON, canonicalPersistenceLegacyJSON, canonicalPersistenceJSONOnly:
+		return true
+	default:
+		return false
+	}
 }
 
 func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
@@ -131,6 +223,7 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			if err != nil || len(sessions) != testCase.ExpectedSessions {
 				t.Fatalf("real canonical store sessions=%d error=%v, want %d", len(sessions), err, testCase.ExpectedSessions)
 			}
+			assertCanonicalPersistenceSessions(t, database, testCase.CanonicalSessions)
 			graphID := mustCanonicalPersistenceSessionID(t, testCase.GraphSession)
 			entries, err := database.ListEntries(t.Context(), graphID)
 			if err != nil {
@@ -145,7 +238,7 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 				t.Fatalf("production session detail omitted paired tool output %q: error=%v detail=%s", testCase.ToolResultContains, marshalErr, detailJSON)
 			}
 			metrics, err := database.GetMetrics(t.Context(), graphID)
-			if err != nil || metrics == nil || metrics.TurnCount == nil || *metrics.TurnCount < testCase.MinimumTurns || metrics.ToolCalls == nil || *metrics.ToolCalls < testCase.MinimumToolCalls || metrics.ComputeVersion == nil || *metrics.ComputeVersion <= 0 {
+			if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != testCase.ExpectedMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != testCase.ExpectedMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != testCase.ExpectedMetrics.ComputeVersion {
 				t.Fatalf("real canonical analytics are incomplete: turns=%d tools=%d compute=%d error=%v", canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err)
 			}
 			orphanID := mustCanonicalPersistenceSessionID(t, testCase.OrphanSession)
@@ -155,6 +248,39 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			}
 			assertPersistedCanonicalOrphan(t, orphanEntries, testCase)
 		})
+	}
+}
+
+func assertCanonicalPersistenceSessions(t testing.TB, database *store.Store, sessions []canonicalPersistenceSession) {
+	t.Helper()
+	for _, expected := range sessions {
+		entries, err := database.ListEntries(t.Context(), mustCanonicalPersistenceSessionID(t, expected.SessionID))
+		if err != nil {
+			t.Fatalf("list persisted canonical session %q: %v", expected.Name, err)
+		}
+		entryIDs := make([]string, len(entries))
+		encoded, err := json.Marshal(entries)
+		if err != nil {
+			t.Fatalf("marshal persisted canonical session %q: %v", expected.Name, err)
+		}
+		for index, entry := range entries {
+			if entry.EntryID == nil {
+				t.Fatalf("persisted canonical session %q entry %d has no stable ID", expected.Name, index)
+			}
+			entryIDs[index] = *entry.EntryID
+		}
+		if !slices.Equal(entryIDs, expected.OrderedEntryIDs) || !bytes.Contains(encoded, []byte(expected.WinningMarker)) {
+			t.Fatalf("persisted canonical session %q entries=%v payload=%s, want ordered IDs %v and marker %q", expected.Name, entryIDs, encoded, expected.OrderedEntryIDs, expected.WinningMarker)
+		}
+		for _, marker := range expected.LosingMarkers {
+			if bytes.Contains(encoded, []byte(marker)) {
+				t.Fatalf("persisted canonical session %q leaked losing marker %q: %s", expected.Name, marker, encoded)
+			}
+		}
+		metrics, err := database.GetMetrics(t.Context(), mustCanonicalPersistenceSessionID(t, expected.SessionID))
+		if err != nil || metrics == nil || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }) != expected.ExpectedMetrics.TurnCount || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }) != expected.ExpectedMetrics.ToolCalls || canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }) != expected.ExpectedMetrics.ComputeVersion {
+			t.Fatalf("persisted canonical session %q metrics turns=%d tools=%d compute=%d error=%v, want %+v", expected.Name, canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.TurnCount }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ToolCalls }), canonicalMetricInt(metrics, func(value *ingest.SessionMetrics) *int { return value.ComputeVersion }), err, expected.ExpectedMetrics)
+		}
 	}
 }
 
@@ -284,6 +410,20 @@ func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
 			mutated = bytes.Replace(mutated, []byte("name: trailing-document"), []byte("name: unknown-field"), 1)
 		case "trailing_document":
 			mutated = append(mutated, []byte("\n---\nextra: true\n")...)
+		case "wrong_session_count":
+			mutated = bytes.Replace(mutated, []byte("expected_sessions: 9"), []byte("expected_sessions: 8"), 1)
+		case "duplicate_session_id":
+			mutated = bytes.Replace(mutated, []byte("ses_3cd91f52effeXd3QAJ54jOyzv6"), []byte("ses_3cd91f52effeXd3QAJ54jOyzv5"), 1)
+		case "unknown_combination":
+			mutated = bytes.Replace(mutated, []byte("combination: current_legacy_json"), []byte("combination: event_history"), 1)
+		case "orphan_json_reference":
+			mutated = bytes.Replace(mutated, []byte("session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, marker: JSON_ONLY"), []byte("session_id: ses_unknown_json, marker: JSON_ONLY"), 1)
+		case "missing_winning_marker":
+			mutated = bytes.Replace(mutated, []byte("winning_marker: CURRENT_ALL"), []byte("winning_marker: \"\""), 1)
+		case "missing_ordered_entry":
+			mutated = bytes.Replace(mutated, []byte("ordered_entry_ids: [msg_current_all]"), []byte("ordered_entry_ids: []"), 1)
+		case "invalid_metrics":
+			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 6}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
 		}
 		if _, err := loadCanonicalPersistenceFixture(mutated); err == nil || strings.TrimSpace(mutation.Name) == "" {
 			t.Errorf("canonical persistence loader mutation %q was accepted", mutation.Name)

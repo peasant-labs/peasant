@@ -18,9 +18,22 @@ cases:
     expected_path: /synthetic/a/session.json
     expected_clean_path: /synthetic/a/session.json
     permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
-declared_loader_mutations: 4
+declared_mounted_cases: 1
+mounted_cases:
+  - name: mounted-current-sqlite-lexical-winner
+    source_fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    marker_row_id: msg_01_user
+    root_names: [z-enumerated-first, a-lexical-winner]
+    enumeration: [0, 1]
+    expected_winner_index: 1
+    winning_marker: LEXICAL_PATH_WINNER
+    losing_marker: ENUMERATION_FIRST_LOSER
+declared_loader_mutations: 6
 loader_mutations:
   - {name: unknown-field, kind: unknown_field}
   - {name: wrong-count, kind: wrong_count}
   - {name: duplicate-name, kind: duplicate_name}
   - {name: unknown-representation, kind: unknown_representation}
+  - {name: wrong-mounted-count, kind: wrong_mounted_count}
+  - {name: winner-enumerated-first, kind: winner_enumerated_first}
