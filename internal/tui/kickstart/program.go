@@ -1085,30 +1085,55 @@ func dialogLine(b *strings.Builder, style lipgloss.Style, content string, width 
 // the terminal width so every character stays on screen instead of clipping.
 //
 // Every line here also paints the Canvas token as an explicit background
-// (the same fix and rationale as kit.Frame's border/footer rows): styles.Muted
-// only sets a foreground, so a line rendered with it alone falls back to the
-// terminal's own default background rather than the theme's, which reads as a
-// subtly different box per line against the overlay's Canvas-filled backdrop.
+// (the same fix and rationale as kit.Frame's border/footer rows): a bare
+// foreground-only style falls back to the terminal's own default background
+// rather than the theme's, which reads as a subtly different box per line
+// against the overlay's Canvas-filled backdrop.
+//
+// Every line is rendered through ONE shared width (the widest line in the
+// dialog) with Align(lipgloss.Center), so (a) each line's text is centered
+// within the block rather than flush-left, and (b) every line's Canvas
+// background box is padded out to that same width - a single uniform-width
+// panel instead of a staircase of differently-sized per-line boxes. p.centered
+// then places that whole block in the middle of the terminal, same as every
+// other kickstart dialog.
 func (p Program) viewConnecting() string {
 	styles := p.deps.Theme.Styles()
 	canvas := p.deps.Theme.Color(p.deps.Theme.Palette.Canvas)
-	muted := styles.Muted.Background(canvas)
-	accent := lipgloss.NewStyle().
-		Foreground(p.deps.Theme.Color(p.deps.Theme.Palette.Amber)).
-		Background(canvas)
+	base := lipgloss.NewStyle().Background(canvas)
+	muted := base.Foreground(styles.Muted.GetForeground())
+	accent := base.Foreground(p.deps.Theme.Color(p.deps.Theme.Palette.Amber))
 
-	lines := []string{p.spinner.View(), ""}
+	type styledLine struct {
+		text  string
+		style lipgloss.Style
+	}
+	var raw []styledLine
+	raw = append(raw, styledLine{p.spinner.View(), base}, styledLine{"", base})
 	if p.loginURL != "" {
 		url := p.loginURL
 		if p.width > 0 {
 			url = ansi.Wrap(url, p.width, "")
 		}
-		lines = append(lines,
-			muted.Render("opening your browser. can't see it? open this link:"),
-			accent.Render(url),
-			"")
+		raw = append(raw, styledLine{"opening your browser. can't see it? open this link:", muted})
+		for _, ln := range strings.Split(url, "\n") {
+			raw = append(raw, styledLine{ln, accent})
+		}
+		raw = append(raw, styledLine{"", base})
 	}
-	lines = append(lines, muted.Render("press esc to cancel, ctrl+c to quit"))
+	raw = append(raw, styledLine{"press esc to cancel, ctrl+c to quit", muted})
+
+	width := 0
+	for _, ln := range raw {
+		if w := lipgloss.Width(ln.text); w > width {
+			width = w
+		}
+	}
+
+	lines := make([]string, len(raw))
+	for i, ln := range raw {
+		lines[i] = ln.style.Width(width).Align(lipgloss.Center).Render(ln.text)
+	}
 	return p.centered(strings.Join(lines, "\n"))
 }
 
