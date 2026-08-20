@@ -278,7 +278,7 @@ func TestLoginFromChecksOnlySelectedCredentialStore(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			_, loginErr := LoginFrom(ctx, "https://village.example.test", false, customHome)
+			_, loginErr := LoginFrom(ctx, "https://village.example.test", false, customHome, nil)
 			if loginErr == nil {
 				t.Fatal("LoginFrom unexpectedly succeeded with a cancelled test context")
 			}
@@ -309,13 +309,18 @@ func TestLoginFromSavesSuccessfulCallbackIntoSelectedStore(t *testing.T) {
 	}
 	wantTime := time.Date(2026, time.August, 9, 12, 30, 0, 0, time.UTC)
 	callbackCalls := 0
+	var reportedURL string
 	got, err := loginFromWith(
 		context.Background(),
 		"https://village.example.test",
 		false,
 		customHome,
-		func(context.Context, string) (*Credentials, error) {
+		func(url string) { reportedURL = url },
+		func(_ context.Context, villageURL string, onURL func(string)) (*Credentials, error) {
 			callbackCalls++
+			if onURL != nil {
+				onURL(villageURL + "/reported")
+			}
 			return &Credentials{
 				APIKey: "custom-key", KeyID: "custom-key-id", UserID: "custom-user-id", Username: "custom-user",
 			}, nil
@@ -327,6 +332,9 @@ func TestLoginFromSavesSuccessfulCallbackIntoSelectedStore(t *testing.T) {
 	}
 	if callbackCalls != 1 || got == nil || got.Username != "custom-user" {
 		t.Fatalf("callback calls/result=%d/%#v, want one custom-profile result", callbackCalls, got)
+	}
+	if reportedURL != "https://village.example.test/reported" {
+		t.Fatalf("onURL reported = %q, want the exact URL the runner reported", reportedURL)
 	}
 	customCredentials, err := LoadCredentialsFrom(customHome)
 	if err != nil || customCredentials == nil {

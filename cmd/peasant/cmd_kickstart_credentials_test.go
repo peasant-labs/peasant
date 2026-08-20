@@ -29,7 +29,7 @@ func TestKickstartLoginUsesCommandCredentialStore(t *testing.T) {
 	login := kickstartLoginFunc(command, defaults.ResolveConfigFilePathWith(customHome).String())
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := login(cancelled); err == nil || !strings.Contains(err.Error(), "login cancelled") || strings.Contains(err.Error(), "default-user") {
+	if _, err := login(cancelled, nil); err == nil || !strings.Contains(err.Error(), "login cancelled") || strings.Contains(err.Error(), "default-user") {
 		t.Fatalf("custom kickstart login checked default credentials: %v", err)
 	}
 	if villageAlreadyConnected(customHome) {
@@ -45,7 +45,7 @@ func TestKickstartLoginUsesCommandCredentialStore(t *testing.T) {
 	if !villageAlreadyConnected(customHome) {
 		t.Fatal("custom kickstart profile did not detect its own credentials")
 	}
-	if _, err := login(context.Background()); err == nil || !strings.Contains(err.Error(), "already logged in as custom-user") {
+	if _, err := login(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "already logged in as custom-user") {
 		t.Fatalf("custom kickstart login did not check selected-profile identity: %v", err)
 	}
 	loadedDefault, err := auth.LoadCredentials()

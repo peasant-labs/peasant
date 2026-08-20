@@ -276,7 +276,7 @@ func TestVisibilityLoginRetainsSameSourceAndPreservesDraft(t *testing.T) {
 				Theme:  theme.New(theme.ModeDark),
 				Draft:  draft,
 				Source: source,
-				Login: func(context.Context) (string, error) {
+				Login: func(context.Context, func(string)) (string, error) {
 					loginCalls++
 					if row.Outcome == loginFailure {
 						return "", errors.New(row.Error)

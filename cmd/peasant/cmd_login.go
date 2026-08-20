@@ -2,12 +2,25 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/spf13/cobra"
 )
+
+// loginURLPrinter builds the onURL callback BuildLoginCommand hands to
+// auth.LoginFrom: it prints the exact login URL to out BEFORE the login blocks
+// on the OAuth callback, on every run — not only when browser.Open fails — so a
+// user whose browser opened to the wrong profile (or didn't open at all) can
+// still find the link immediately. Kept as a standalone function so it is
+// testable without driving the real network/browser login.
+func loginURLPrinter(out io.Writer) func(string) {
+	return func(loginURL string) {
+		fmt.Fprintf(out, "Log in to the village at:\n  %s\n", loginURL)
+	}
+}
 
 func BuildLoginCommand() *cobra.Command {
 	var local bool
@@ -39,11 +52,11 @@ func BuildLoginCommand() *cobra.Command {
 				}
 			}
 
-			creds, err := auth.LoginFrom(cmd.Context(), villageURL, false, configDir)
+			creds, err := auth.LoginFrom(cmd.Context(), villageURL, false, configDir, loginURLPrinter(cmd.OutOrStdout()))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Logged in as %s\n", creds.Username)
+			fmt.Fprintf(cmd.OutOrStdout(), "Logged in as %s\n", creds.Username)
 			return nil
 		},
 	}
