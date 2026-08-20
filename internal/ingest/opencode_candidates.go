@@ -29,6 +29,81 @@ const (
 	OpenCodeSourceLegacyJSON OpenCodeSourceKind = "legacy_json"
 )
 
+// OpenCodeCanonicalRepresentation identifies one materialized transcript
+// representation. The closed set deliberately excludes event, input, context,
+// migration, and external-output storage.
+type OpenCodeCanonicalRepresentation uint8
+
+const (
+	OpenCodeRepresentationLegacyJSON OpenCodeCanonicalRepresentation = iota + 1
+	OpenCodeRepresentationLegacySQLite
+	OpenCodeRepresentationCurrentSQLite
+)
+
+// Validate rejects values outside the selectable transcript representations.
+func (r OpenCodeCanonicalRepresentation) Validate() error {
+	switch r {
+	case OpenCodeRepresentationLegacyJSON, OpenCodeRepresentationLegacySQLite, OpenCodeRepresentationCurrentSQLite:
+		return nil
+	default:
+		return fmt.Errorf("OpenCode canonical representation %d is outside the supported closed set", r)
+	}
+}
+
+func (r OpenCodeCanonicalRepresentation) precedence() uint8 {
+	switch r {
+	case OpenCodeRepresentationCurrentSQLite:
+		return 3
+	case OpenCodeRepresentationLegacySQLite:
+		return 2
+	case OpenCodeRepresentationLegacyJSON:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// OpenCodeSelectedSourceIdentity is the complete freshness identity selected
+// for one raw OpenCode session. Diffing must use only the matching session's
+// freshness evidence from this representation and path.
+type OpenCodeSelectedSourceIdentity struct {
+	SessionID      SessionID
+	Representation OpenCodeCanonicalRepresentation
+	Path           ResolvedPath
+}
+
+// Validate rejects incomplete selected-source identities before diffing.
+func (i OpenCodeSelectedSourceIdentity) Validate() error {
+	if i.SessionID == "" {
+		return errors.New("selected OpenCode source identity has no session ID")
+	}
+	if err := i.Representation.Validate(); err != nil {
+		return err
+	}
+	if i.Path == "" {
+		return errors.New("selected OpenCode source identity has no attributable path")
+	}
+	return nil
+}
+
+// OpenCodeGraphDiagnosticCode identifies a non-fatal selected-graph repair.
+type OpenCodeGraphDiagnosticCode string
+
+const OpenCodeGraphMissingParent OpenCodeGraphDiagnosticCode = "opencode_missing_parent"
+
+// Validate rejects graph diagnostics outside the supported repair contract.
+func (c OpenCodeGraphDiagnosticCode) Validate() error {
+	if c != OpenCodeGraphMissingParent {
+		return fmt.Errorf("OpenCode graph diagnostic code %q is outside the supported closed set", c)
+	}
+	return nil
+}
+
+type openCodeSessionCandidate struct {
+	session  DiscoveredSession
+	identity OpenCodeSelectedSourceIdentity
+}
+
 // OpenCodeCandidateProvenance records why a path was considered. Candidate
 // order is override database, channel/default database, then legacy JSON root.
 type OpenCodeCandidateProvenance string
