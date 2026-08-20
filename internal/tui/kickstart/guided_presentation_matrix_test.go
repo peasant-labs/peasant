@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"gopkg.in/yaml.v3"
@@ -228,10 +229,22 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 
 			headingAt := exactMountedLine(view, fixture.Heading)
 			introAt := exactMountedLine(view, fixture.Intro)
-			controlAt := containingMountedLine(view, fixture.Control)
-			if headingAt < 0 || introAt < 0 || controlAt < 0 || !(headingAt < introAt && introAt < controlAt) {
-				t.Fatalf("mounted order heading/intro/control=%d/%d/%d for %q:\n%s",
-					headingAt, introAt, controlAt, row.Section, ansi.Strip(view))
+			if headingAt < 0 || introAt < 0 || headingAt >= introAt {
+				t.Fatalf("mounted heading/intro order=%d/%d for %q:\n%s",
+					headingAt, introAt, row.Section, ansi.Strip(view))
+			}
+			// The control must be REACHABLE: visible in the initial frame, or
+			// revealed by paging down when a long guide (the privacy examples)
+			// pushes it below the fold at the smallest terminal - the flow's
+			// documented PgDn behavior for content taller than the viewport.
+			controlView := view
+			for i := 0; containingMountedLine(controlView, fixture.Control) < 0 && i < row.Height; i++ {
+				flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+				controlView = flow.View()
+			}
+			if containingMountedLine(controlView, fixture.Control) < 0 {
+				t.Fatalf("mounted control %q not reachable (even after paging) for %q:\n%s",
+					fixture.Control, row.Section, ansi.Strip(controlView))
 			}
 			if count := strings.Count(ansi.Strip(view), fixture.Intro); count != 1 {
 				t.Fatalf("mounted section %q guide intro count=%d, want exactly one", row.Section, count)

@@ -55,7 +55,7 @@ viewport:
   - name: common-height-starts-before-the-choice-rows
     width: 80
     height: 18
-    wantContains: [CREDENTIAL, PATH, redaction level]
+    wantContains: [credential, path, redaction level]
     wantMissing: ['(•) standard', 'removes secrets, file paths, personal data, and project identity']
   - name: common-height-page-down-reveals-the-current-choice
     width: 80

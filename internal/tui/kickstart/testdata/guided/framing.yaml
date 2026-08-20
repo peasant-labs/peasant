@@ -68,7 +68,7 @@ rows:
         - standard hides project identity but keeps git remote urls.
     wantContains:
       - before you publish
-      - Personally Identifiable Information (PII)
+      - personally identifiable information (PII)
       - keeps git remote urls
     wantMissing:
       - before transcripts enter peasant's local store

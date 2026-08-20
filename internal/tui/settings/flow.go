@@ -759,6 +759,10 @@ func (f Flow) renderGuideExampleLines(styles theme.Styles, width int, example []
 		case GuideExampleLineText:
 			lines = append(lines, kit.FitLine(styles.Surface, line.Text, width))
 		case GuideExampleLineLabel:
+			// Separate each category's before/after block with a blank row - including
+			// the first, so the example set is set off from the guide text above it -
+			// so the examples read as distinct groups rather than one dense column.
+			lines = append(lines, kit.FitLine(styles.Surface, "", width))
 			lines = append(lines, kit.FitLine(styles.Header.Background(surface), line.Text, width))
 		case GuideExampleLineBefore:
 			lines = append(lines, kit.FitLine(styles.DiffDel.Background(surface), "- before: "+line.Text, width))

@@ -314,19 +314,19 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 		if after == row.Before {
 			t.Fatalf("real Standard redactor left synthetic %s sample unchanged", row.Category)
 		}
-		for _, want := range []string{row.CategoryLabel.String(), row.Before, after} {
+		// Headings are lowercase chrome (spelling out the opaque PII acronym),
+		// except the acronym itself which stays uppercase.
+		wantLabel := strings.ToLower(row.CategoryLabel.String())
+		if row.Category == redact.CategoryPII {
+			wantLabel = "personally identifiable information (PII)"
+		}
+		for _, want := range []string{wantLabel, row.Before, after} {
 			if !strings.Contains(view, want) {
 				t.Errorf("privacy example does not contain runtime-derived %q:\n%s", want, view)
 			}
 		}
 		base := sampleIndex * 3
 		labelLine, beforeLine, afterLine := lines[base], lines[base+1], lines[base+2]
-		// The guide spells out the opaque PII acronym on its heading; other
-		// categories keep their canonical typed label.
-		wantLabel := row.CategoryLabel.String()
-		if row.Category == redact.CategoryPII {
-			wantLabel = "Personally Identifiable Information (PII)"
-		}
 		if labelLine.Kind != settings.GuideExampleLineLabel || labelLine.Text != wantLabel {
 			t.Errorf("privacy sample %q label line=%#v, want display label %q", row.Name, labelLine, wantLabel)
 		}
