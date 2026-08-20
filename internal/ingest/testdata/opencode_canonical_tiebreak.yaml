@@ -1,0 +1,26 @@
+declared_cases: 3
+cases:
+  - name: current-sqlite-path-order
+    representation: current_sqlite
+    paths: [/synthetic/z-current.db, /synthetic/a-current.db, /synthetic/m-current.db]
+    expected_path: /synthetic/a-current.db
+    expected_clean_path: /synthetic/a-current.db
+    permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  - name: legacy-sqlite-path-order
+    representation: legacy_sqlite
+    paths: [/synthetic/z-legacy.db, /synthetic/b/../a-legacy.db, /synthetic/a-legacy.db]
+    expected_path: /synthetic/a-legacy.db
+    expected_clean_path: /synthetic/a-legacy.db
+    permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  - name: legacy-json-path-order
+    representation: legacy_json
+    paths: [/synthetic/z/session.json, /synthetic/a/session.json, /synthetic/m/session.json]
+    expected_path: /synthetic/a/session.json
+    expected_clean_path: /synthetic/a/session.json
+    permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+declared_loader_mutations: 4
+loader_mutations:
+  - {name: unknown-field, kind: unknown_field}
+  - {name: wrong-count, kind: wrong_count}
+  - {name: duplicate-name, kind: duplicate_name}
+  - {name: unknown-representation, kind: unknown_representation}

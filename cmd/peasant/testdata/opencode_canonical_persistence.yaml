@@ -1,0 +1,27 @@
+declared_cases: 1
+cases:
+  - name: mixed-canonical-sessions-persist-through-detail-and-analytics
+    source_fixture: canonical-selection-mixed
+    expected_sessions: 9
+    json_sessions:
+      - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, marker: JSON_ALL}
+      - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, marker: JSON_CURRENT}
+      - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, marker: JSON_LEGACY}
+      - {session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, marker: JSON_ONLY}
+    graph_session: ses_3cd91f52effeXd3QAJ54jOyzvC
+    parent_entry: msg_current_root
+    child_entry: msg_current_child
+    missing_parent_entry: msg_current_parent
+    tool_call_id: call_current_parent
+    tool_result_contains: CURRENT_TOOL_RESULT
+    orphan_session: ses_3cd91f52effeXd3QAJ54jOyzvD
+    orphan_entry: part_legacy_orphan
+    orphan_content_contains: LEGACY_ORPHAN_PART
+    minimum_turns: 2
+    minimum_tool_calls: 1
+declared_loader_mutations: 4
+loader_mutations:
+  - {name: unknown-field, kind: unknown_field}
+  - {name: wrong-count, kind: wrong_count}
+  - {name: duplicate-name, kind: duplicate_name}
+  - {name: trailing-document, kind: trailing_document}

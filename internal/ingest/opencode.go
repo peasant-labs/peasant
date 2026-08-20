@@ -3,8 +3,10 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -175,13 +177,6 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					continue
 				}
 
-				// Resolve ModTime from file stat.
-				fi, err := a.fs.Stat(sesPath)
-				var modTime time.Time
-				if err == nil {
-					modTime = fi.ModTime()
-				}
-
 				// Build DiscoveredSession.
 				var createdAt time.Time
 				if ses.Time.Created > 0 {
@@ -193,7 +188,6 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					SourcePath:   ResolvedPath(sesPath),
 					SourceFormat: SourceFormatJSON,
 					OriginalRoot: root,
-					ModTime:      modTime,
 					Title:        ses.Title,
 					ProjectName:  filepath.Base(ses.Directory),
 					CWD:          ses.Directory,
@@ -252,10 +246,17 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 			continue
 		}
 	}
-	return selectCanonicalOpenCodeSessions(candidates)
+	selected, err := selectCanonicalOpenCodeCandidates(candidates)
+	if err != nil {
+		return nil, err
+	}
+	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected)
 }
 
-func selectCanonicalOpenCodeSessions(candidates []openCodeSessionCandidate) ([]DiscoveredSession, error) {
+// selectCanonicalOpenCodeCandidates applies representation precedence first,
+// then normalized and raw attributable-path tie-breaks. Sorting the winners by
+// raw session ID makes both winner choice and output independent of enumeration.
+func selectCanonicalOpenCodeCandidates(candidates []openCodeSessionCandidate) ([]openCodeSessionCandidate, error) {
 	selected := make([]openCodeSessionCandidate, 0, len(candidates))
 	positions := make(map[SessionID]int, len(candidates))
 	for _, candidate := range candidates {
@@ -268,10 +269,92 @@ func selectCanonicalOpenCodeSessions(candidates []openCodeSessionCandidate) ([]D
 			selected = append(selected, candidate)
 			continue
 		}
-		if candidate.identity.Representation.precedence() > selected[position].identity.Representation.precedence() {
+		if canonicalOpenCodeCandidatePrecedes(candidate, selected[position]) {
 			selected[position] = candidate
 		}
 	}
+	sort.Slice(selected, func(left, right int) bool {
+		return string(selected[left].identity.SessionID) < string(selected[right].identity.SessionID)
+	})
+	return selected, nil
+}
+
+func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCandidate) bool {
+	candidateRank := candidate.identity.Representation.precedence()
+	incumbentRank := incumbent.identity.Representation.precedence()
+	if candidateRank != incumbentRank {
+		return candidateRank > incumbentRank
+	}
+	candidateClean := filepath.Clean(candidate.identity.Path.String())
+	incumbentClean := filepath.Clean(incumbent.identity.Path.String())
+	if candidateClean != incumbentClean {
+		return candidateClean < incumbentClean
+	}
+	return candidate.identity.Path.String() < incumbent.identity.Path.String()
+}
+
+func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate) ([]DiscoveredSession, error) {
+	bySQLitePath := make(map[string][]int)
+	for index := range selected {
+		candidate := &selected[index]
+		if candidate.identity.Representation == OpenCodeRepresentationLegacyJSON {
+			info, err := a.fs.Stat(candidate.identity.Path.String())
+			if err != nil {
+				return nil, fmt.Errorf("hydrate canonical OpenCode JSON freshness for session %q failed while statting selected path %q: %w; the winner cannot be diffed safely and no losing representation was consulted; restore read access to the selected session file and retry", candidate.identity.SessionID, candidate.identity.Path, err)
+			}
+			candidate.session.ModTime = info.ModTime()
+			continue
+		}
+		path := filepath.Clean(candidate.identity.Path.String())
+		bySQLitePath[path] = append(bySQLitePath[path], index)
+	}
+
+	paths := make([]string, 0, len(bySQLitePath))
+	for path := range bySQLitePath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, rawPath := range paths {
+		path, err := NewOpenCodeSQLiteSourcePath(rawPath)
+		if err != nil {
+			return nil, err
+		}
+		source, err := a.candidateOpener(ctx, path, a.candidateOptions)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate canonical OpenCode SQLite freshness failed while opening selected source %q read-only: %w; no losing representation freshness was consulted; restore source readability and retry", rawPath, err)
+		}
+		var hydrationErr error
+		for _, index := range bySQLitePath[rawPath] {
+			candidate := &selected[index]
+			switch candidate.identity.Representation {
+			case OpenCodeRepresentationCurrentSQLite:
+				id, idErr := NewOpenCodeCurrentSessionID(string(candidate.identity.SessionID))
+				if idErr != nil {
+					hydrationErr = idErr
+					break
+				}
+				candidate.session.ModTime, hydrationErr = source.CurrentSessionFreshness(ctx, id)
+			case OpenCodeRepresentationLegacySQLite:
+				id, idErr := NewOpenCodeLegacySessionID(string(candidate.identity.SessionID))
+				if idErr != nil {
+					hydrationErr = idErr
+					break
+				}
+				candidate.session.ModTime, hydrationErr = source.LegacySessionFreshness(ctx, id)
+			default:
+				hydrationErr = fmt.Errorf("selected representation %d cannot use SQLite freshness", candidate.identity.Representation)
+			}
+			if hydrationErr != nil {
+				hydrationErr = fmt.Errorf("hydrate canonical OpenCode freshness for selected session %q from %q failed: %w; the winner cannot be diffed and no losing representation freshness was consulted; verify the selected materialized rows and retry", candidate.identity.SessionID, rawPath, hydrationErr)
+				break
+			}
+		}
+		closeErr := source.Close(ctx)
+		if hydrationErr != nil || closeErr != nil {
+			return nil, errors.Join(hydrationErr, closeErr)
+		}
+	}
+
 	discovered := make([]DiscoveredSession, len(selected))
 	for index, candidate := range selected {
 		discovered[index] = candidate.session

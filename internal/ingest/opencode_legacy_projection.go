@@ -73,10 +73,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 			if idErr != nil {
 				return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, legacyID.String(), idErr)
 			}
-			modified, freshnessErr := source.LegacySessionFreshness(ctx, legacyID)
-			if freshnessErr != nil {
-				return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while deriving selected freshness for session %q: %w; no partial discovery result is eligible; verify the selected materialized rows and retry", candidate.Path, legacyID.String(), freshnessErr)
-			}
 			session := DiscoveredSession{
 				SessionID:        sessionID,
 				Harness:          HarnessOpenCode,
@@ -84,7 +80,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 				SourceFormat:     SourceFormatJSON,
 				OriginalRoot:     ResolvedPath(filepath.Dir(candidate.Path)),
 				TranscriptOrigin: TranscriptOriginOpenCodeLegacySQLite,
-				ModTime:          modified,
 			}
 			discovered = append(discovered, session)
 		}

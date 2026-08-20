@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,7 +147,12 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	}
 	environment := mountedCurrentEnvironment{"OPENCODE_DB": materialized.Path}
 	adapterFactory := canonicalAdapterFactory(t, environment)
-	adapter := adapterFactory(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
+	recorder := newCanonicalFreshnessRecorder()
+	filesystem := &canonicalFreshnessFileSystem{OSFileSystem: &ingest.OSFileSystem{}, sessionStats: make(map[string]int)}
+	adapter, err := ingest.NewOpenCodeAdapterWithCandidateProbe(filesystem, testutil.NoGitResolver(), salt.Salt{}, "latest", environment, filesystem, canonicalRecordingOpener(recorder), ingest.DefaultOpenCodeSQLiteSourceOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
 	discovered, err := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +160,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if len(discovered) != len(fixture.Cases) {
 		t.Fatalf("canonical discovery returned %d sessions, want %d unique raw IDs", len(discovered), len(fixture.Cases))
 	}
+	assertOnlyCanonicalFreshnessConsulted(t, fixture, rootPath, recorder, filesystem)
 	repeated, err := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 	if err != nil || !reflect.DeepEqual(discovered, repeated) {
 		t.Fatalf("canonical selection was not deterministic across repeated discovery: equal=%t error=%v", reflect.DeepEqual(discovered, repeated), err)
@@ -189,7 +197,7 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 				entriesMarker, _ = json.Marshal(entries)
 			}
 		} else {
-			metadata, entriesMarker, err = adapter.(ingest.TranscriptMaterializer).MaterializeTranscript(t.Context(), session)
+			metadata, entriesMarker, err = adapter.MaterializeTranscript(t.Context(), session)
 		}
 		if err != nil {
 			t.Errorf("materialize selected session %q: %v", testCase.SessionID, err)
@@ -229,6 +237,94 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if result.Summary.New != len(fixture.Cases) || len(store.InsertedEntries) != len(fixture.Cases) || len(metrics.IndexedEntries) != len(fixture.Cases) {
 		t.Fatalf("mounted canonical ingest summary=%+v store=%d indexed=%d, want %d unique sessions", result.Summary, len(store.InsertedEntries), len(metrics.IndexedEntries), len(fixture.Cases))
 	}
+}
+
+type canonicalFreshnessRecorder struct {
+	mu      sync.Mutex
+	current map[string]int
+	legacy  map[string]int
+}
+
+func newCanonicalFreshnessRecorder() *canonicalFreshnessRecorder {
+	return &canonicalFreshnessRecorder{current: make(map[string]int), legacy: make(map[string]int)}
+}
+
+type canonicalRecordingSource struct {
+	ingest.OpenCodeSQLiteSource
+	recorder *canonicalFreshnessRecorder
+}
+
+func (source canonicalRecordingSource) CurrentSessionFreshness(ctx context.Context, id ingest.OpenCodeCurrentSessionID) (time.Time, error) {
+	source.recorder.mu.Lock()
+	source.recorder.current[id.String()]++
+	source.recorder.mu.Unlock()
+	return source.OpenCodeSQLiteSource.CurrentSessionFreshness(ctx, id)
+}
+
+func (source canonicalRecordingSource) LegacySessionFreshness(ctx context.Context, id ingest.OpenCodeLegacySessionID) (time.Time, error) {
+	source.recorder.mu.Lock()
+	source.recorder.legacy[id.String()]++
+	source.recorder.mu.Unlock()
+	return source.OpenCodeSQLiteSource.LegacySessionFreshness(ctx, id)
+}
+
+func canonicalRecordingOpener(recorder *canonicalFreshnessRecorder) ingest.OpenCodeSQLiteSourceOpener {
+	return func(ctx context.Context, path ingest.OpenCodeSQLiteSourcePath, options ingest.OpenCodeSQLiteSourceOptions) (ingest.OpenCodeSQLiteSource, error) {
+		source, err := ingest.OpenOpenCodeSQLiteSource(ctx, path, options)
+		if err != nil {
+			return nil, err
+		}
+		return canonicalRecordingSource{OpenCodeSQLiteSource: source, recorder: recorder}, nil
+	}
+}
+
+type canonicalFreshnessFileSystem struct {
+	*ingest.OSFileSystem
+	mu           sync.Mutex
+	sessionStats map[string]int
+}
+
+func (filesystem *canonicalFreshnessFileSystem) Stat(path string) (os.FileInfo, error) {
+	if strings.HasSuffix(path, ".json") && strings.Contains(path, string(filepath.Separator)+"session"+string(filepath.Separator)) {
+		filesystem.mu.Lock()
+		filesystem.sessionStats[filepath.Clean(path)]++
+		filesystem.mu.Unlock()
+	}
+	return filesystem.OSFileSystem.Stat(path)
+}
+
+func assertOnlyCanonicalFreshnessConsulted(t testing.TB, fixture canonicalSelectionFixture, root string, recorder *canonicalFreshnessRecorder, filesystem *canonicalFreshnessFileSystem) {
+	t.Helper()
+	recorder.mu.Lock()
+	current := cloneIntMap(recorder.current)
+	legacy := cloneIntMap(recorder.legacy)
+	recorder.mu.Unlock()
+	filesystem.mu.Lock()
+	stats := cloneIntMap(filesystem.sessionStats)
+	filesystem.mu.Unlock()
+	for _, testCase := range fixture.Cases {
+		wantCurrent, wantLegacy, wantJSON := 0, 0, 0
+		switch testCase.Expected {
+		case canonicalFixtureCurrent:
+			wantCurrent = 1
+		case canonicalFixtureLegacy:
+			wantLegacy = 1
+		case canonicalFixtureJSON:
+			wantJSON = 1
+		}
+		jsonPath := filepath.Join(root, "storage", "session", "synthetic", testCase.SessionID+".json")
+		if current[testCase.SessionID] != wantCurrent || legacy[testCase.SessionID] != wantLegacy || stats[jsonPath] != wantJSON {
+			t.Fatalf("freshness consultations for %q current=%d legacy=%d json=%d, want %d/%d/%d from winner %q", testCase.SessionID, current[testCase.SessionID], legacy[testCase.SessionID], stats[jsonPath], wantCurrent, wantLegacy, wantJSON, testCase.Expected)
+		}
+	}
+}
+
+func cloneIntMap(source map[string]int) map[string]int {
+	cloned := make(map[string]int, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func assertCanonicalOrphanPart(t testing.TB, indexer *ingest.OpenCodeIndexer, session ingest.DiscoveredSession, managed []byte, testCase canonicalSelectionCase) {

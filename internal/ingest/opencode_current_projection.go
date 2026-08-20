@@ -263,11 +263,7 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, candidate O
 			if idErr != nil {
 				return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q found session identifier %q that Peasant cannot store: %w; no partial discovery result is eligible; repair the upstream identifier or use a supported export", candidate.Path, currentID.String(), idErr)
 			}
-			modified, freshnessErr := source.CurrentSessionFreshness(ctx, currentID)
-			if freshnessErr != nil {
-				return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed while deriving selected freshness for session %q: %w; no partial discovery result is eligible; verify the selected session_message rows and retry", candidate.Path, currentID.String(), freshnessErr)
-			}
-			discovered = append(discovered, DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: ResolvedPath(candidate.Path), SourceFormat: SourceFormatJSON, OriginalRoot: ResolvedPath(filepath.Dir(candidate.Path)), TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite, ModTime: modified})
+			discovered = append(discovered, DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: ResolvedPath(candidate.Path), SourceFormat: SourceFormatJSON, OriginalRoot: ResolvedPath(filepath.Dir(candidate.Path)), TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite})
 		}
 		if page.Next == nil {
 			break
