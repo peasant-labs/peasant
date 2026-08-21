@@ -299,14 +299,30 @@ func acceptPushStart(model push.PushWizardModel) push.PushWizardModel {
 }
 
 // sendPushMessage advances the wizard and settles the work the message started.
+//
+// It settles FOLLOW-UP work too, which is what gets a preview onto the capture.
+// Answering the opening prompt produces a result message, and handling that
+// message is what issues the preview load; a drain that stopped at the first
+// level dropped the load and every selection capture read "loading preview".
 func sendPushMessage(model push.PushWizardModel, message tea.Msg) push.PushWizardModel {
 	updated, command := model.Update(message)
-	next := updated.(push.PushWizardModel)
-	for _, follow := range collectMessages(command) {
-		updated, _ = next.Update(follow)
-		next = updated.(push.PushWizardModel)
+	return drainPushWizard(updated.(push.PushWizardModel), command, pushDrainDepth)
+}
+
+// pushDrainDepth bounds the follow-up drain so a repeating animation tick
+// cannot loop the capture.
+const pushDrainDepth = 3
+
+func drainPushWizard(model push.PushWizardModel, command tea.Cmd, depth int) push.PushWizardModel {
+	if command == nil || depth <= 0 {
+		return model
 	}
-	return next
+	for _, message := range collectMessages(command) {
+		updated, follow := model.Update(message)
+		model = updated.(push.PushWizardModel)
+		model = drainPushWizard(model, follow, depth-1)
+	}
+	return model
 }
 
 // pushWizardSessions turns the fixture inventory into the candidate list the

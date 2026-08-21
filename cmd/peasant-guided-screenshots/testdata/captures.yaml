@@ -179,7 +179,7 @@ pushStates:
   - key: start
     wantContains: ["push to village", "session(s) are ready to push", "yes"]
   - key: selection
-    wantContains: ["selected", "withheld by a branch conflict", "tab"]
+    wantContains: ["selected", "withheld by a branch conflict", "tab", "project: peasant", "sessions: 1"]
   - key: session-preview
     wantContains: ["push-current-0001", "<ANTHROPIC_KEY>", "peasant publishes the redacted form"]
   - key: consent
