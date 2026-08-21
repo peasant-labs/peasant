@@ -649,6 +649,11 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 		// Resolve the evidence entry for this path once, so a per-session
 		// diagnostic does not rescan the evidence slice for every session.
 		evidenceIndex := a.resolveCandidateEvidenceIndex(rawPath)
+		// Accumulate the affected sessions per outcome, so a database whose reads
+		// all fail records one diagnostic and one warn line per outcome naming the
+		// sessions, not one per session.
+		var freshnessSkipped, floorFallback, clocklessSkipped []string
+		var freshnessCause, floorFallbackCause, clocklessCause error
 		for _, index := range bySQLitePath[rawPath] {
 			candidate := &selected[index]
 			newest, hydrationErr := rowFreshness(candidate.identity)
@@ -659,10 +664,12 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 				// database and WAL mtime floor and keep the session. Only skip
 				// it when the floor is also unreadable, and name it either way.
 				if floorErr != nil {
-					a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read and the mtime floor was unavailable; that session was skipped", candidate.identity.SessionID), hydrationErr)
+					freshnessSkipped = append(freshnessSkipped, string(candidate.identity.SessionID))
+					freshnessCause = hydrationErr
 					continue
 				}
-				a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; the database and WAL mtime floor was used instead", candidate.identity.SessionID), hydrationErr)
+				floorFallback = append(floorFallback, string(candidate.identity.SessionID))
+				floorFallbackCause = hydrationErr
 				candidate.session.ModTime = floor
 				candidate.session.ActiveModTime = floor
 				keep[index] = true
@@ -678,9 +685,10 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			} else {
 				if floorErr != nil {
 					// The floor is this one session's freshness. Skip only this
-					// session and name it, so the other sessions on the same
-					// database are still hydrated.
-					a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected SQLite content freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), floorErr)
+					// session, so the other sessions on the same database are still
+					// hydrated.
+					clocklessSkipped = append(clocklessSkipped, string(candidate.identity.SessionID))
+					clocklessCause = floorErr
 					continue
 				}
 				if newest.Before(floor) {
@@ -689,6 +697,15 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			}
 			candidate.session.ModTime = newest
 			keep[index] = true
+		}
+		if len(freshnessSkipped) > 0 {
+			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness could not be read and the mtime floor was unavailable, so %d session(s) were skipped: %s", len(freshnessSkipped), strings.Join(freshnessSkipped, ", ")), freshnessCause)
+		}
+		if len(floorFallback) > 0 {
+			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness could not be read, so %d session(s) fell back to the database and WAL mtime floor: %s", len(floorFallback), strings.Join(floorFallback, ", ")), floorFallbackCause)
+		}
+		if len(clocklessSkipped) > 0 {
+			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected SQLite content freshness could not be read, so %d clockless session(s) were skipped: %s", len(clocklessSkipped), strings.Join(clocklessSkipped, ", ")), clocklessCause)
 		}
 	}
 
