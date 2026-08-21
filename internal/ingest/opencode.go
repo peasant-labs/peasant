@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -206,23 +207,81 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 			}
 		}
 	}
+	// Each supported SQLite candidate is opened once here and the one source is
+	// reused for its enumerations, its session-record read, and freshness
+	// hydration, so a single Discover never opens the same database repeatedly
+	// and enumeration, records, and freshness observe one consistent snapshot.
+	// The sources stay open until hydration finishes and are then closed once.
+	sqliteSources := make(map[string]OpenCodeSQLiteSource)
+	defer func() {
+		for path, source := range sqliteSources {
+			if closeErr := source.Close(ctx); closeErr != nil {
+				a.recordCandidateFailure(path, OpenCodeProbeFreshness, "selected SQLite source did not close cleanly after discovery and freshness reads", closeErr)
+			}
+		}
+	}()
 	for _, result := range evidence {
 		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Support != OpenCodeSupportSupported {
 			continue
 		}
-		candidates = append(candidates, a.discoverSQLiteCandidate(ctx, result)...)
+		sqliteCandidates, source := a.discoverSQLiteCandidate(ctx, result)
+		candidates = append(candidates, sqliteCandidates...)
+		if source != nil {
+			sqliteSources[filepath.Clean(result.Candidate.Path)] = source
+		}
 	}
 	selected, err := selectCanonicalOpenCodeCandidates(candidates)
 	if err != nil {
 		return nil, err
 	}
-	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected), nil
+	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected, sqliteSources), nil
 }
 
-// discoverSQLiteCandidate enumerates one supported SQLite candidate. A failure
-// is local to that candidate: the failure is recorded on its evidence and the
-// other candidates still contribute sessions.
-func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result OpenCodeProbeResult) []openCodeSessionCandidate {
+// openOpenCodeSQLiteSource opens one restrictive read-only source for a
+// candidate path. It centralizes the nil-opener guard and the source path
+// validation that every open site needs, so an open never runs without the
+// injected opener.
+func (a *OpenCodeAdapter) openOpenCodeSQLiteSource(ctx context.Context, candidatePath string) (OpenCodeSQLiteSource, error) {
+	if a.candidateOpener == nil {
+		return nil, fmt.Errorf("open OpenCode SQLite source for %q failed before source access: source opener is nil, so typed reads cannot run; no database was accessed; construct the adapter with OpenOpenCodeSQLiteSource", candidatePath)
+	}
+	path, err := NewOpenCodeSQLiteSourcePath(candidatePath)
+	if err != nil {
+		return nil, err
+	}
+	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
+	if err != nil {
+		return nil, fmt.Errorf("open OpenCode SQLite source %q failed while opening the restrictive read-only source: %w; no session was exposed; verify source readability and retry without modifying the database", candidatePath, err)
+	}
+	return source, nil
+}
+
+// withOpenCodeSQLiteSource opens one restrictive source for a candidate path,
+// runs fn against it, and closes it once. It is the scoped open site used where
+// the source does not need to outlive the call.
+func (a *OpenCodeAdapter) withOpenCodeSQLiteSource(ctx context.Context, candidatePath string, fn func(OpenCodeSQLiteSource) error) error {
+	source, err := a.openOpenCodeSQLiteSource(ctx, candidatePath)
+	if err != nil {
+		return err
+	}
+	fnErr := fn(source)
+	closeErr := source.Close(ctx)
+	return errors.Join(fnErr, closeErr)
+}
+
+// discoverSQLiteCandidate enumerates one supported SQLite candidate against a
+// single read-only source that it opens once. The one source is returned to the
+// caller so freshness hydration can reuse it and close it once, which removes
+// the snapshot skew between enumeration, records, and freshness. A failure is
+// local to that candidate: the failure is recorded on its evidence and the
+// other candidates still contribute sessions. The returned source is nil only
+// when the database could not be opened.
+func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result OpenCodeProbeResult) ([]openCodeSessionCandidate, OpenCodeSQLiteSource) {
+	source, err := a.openOpenCodeSQLiteSource(ctx, result.Candidate.Path)
+	if err != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "SQLite session enumeration could not open the restrictive source", err)
+		return nil, nil
+	}
 	candidates := make([]openCodeSessionCandidate, 0)
 	appendRepresentation := func(sessions []DiscoveredSession, representation OpenCodeCanonicalRepresentation) {
 		for _, session := range sessions {
@@ -235,25 +294,25 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	}
 	switch result.Capability {
 	case OpenCodeCapabilityLegacy:
-		sessions, err := a.discoverLegacySQLite(ctx, result.Candidate)
+		sessions, err := a.discoverLegacySQLite(ctx, source, result.Candidate)
 		if err != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "legacy SQLite session enumeration failed", err)
-			return nil
+			return nil, source
 		}
 		appendRepresentation(sessions, OpenCodeRepresentationLegacySQLite)
 	case OpenCodeCapabilityCurrent:
-		sessions, err := a.discoverCurrentSQLite(ctx, result.Candidate)
+		sessions, err := a.discoverCurrentSQLite(ctx, source, result.Candidate)
 		if err != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "current SQLite session enumeration failed", err)
-			return nil
+			return nil, source
 		}
 		appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite)
 	case OpenCodeCapabilityHybrid:
-		current, currentErr := a.discoverCurrentSQLite(ctx, result.Candidate)
-		legacy, legacyErr := a.discoverLegacySQLite(ctx, result.Candidate)
+		current, currentErr := a.discoverCurrentSQLite(ctx, source, result.Candidate)
+		legacy, legacyErr := a.discoverLegacySQLite(ctx, source, result.Candidate)
 		if currentErr != nil && legacyErr != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite session enumeration failed", fmt.Errorf("current projection is unusable (%w) and legacy fallback also failed (%v)", currentErr, legacyErr))
-			return nil
+			return nil, source
 		}
 		if currentErr != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite current projection is unusable; legacy rows were used", currentErr)
@@ -264,12 +323,12 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
 		appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite)
 	default:
-		return nil
+		return nil, source
 	}
-	records, err := a.discoverSQLiteSessionRecords(ctx, result.Candidate)
+	records, err := a.discoverSQLiteSessionRecords(ctx, source, result.Candidate)
 	if err != nil {
 		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session records could not be read; sessions stay discoverable as roots with file-based freshness", err)
-		return candidates
+		return candidates, source
 	}
 	for index := range candidates {
 		record, known := records.bySession[candidates[index].session.SessionID]
@@ -285,7 +344,7 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			candidates[index].sessionUpdatedAt = record.updatedAt
 		}
 	}
-	return candidates
+	return candidates, source
 }
 
 // openCodeSessionClock is one session row's parent link and update clock.
@@ -302,19 +361,10 @@ type openCodeSessionRecords struct {
 }
 
 // discoverSQLiteSessionRecords reads session.parent_id and session.time_updated
-// from one supported database. A database without those columns yields an
-// unsupported, empty result.
-func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, candidate OpenCodeCandidate) (openCodeSessionRecords, error) {
+// from the already-open source for one supported database. A database without
+// those columns yields an unsupported, empty result.
+func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) (openCodeSessionRecords, error) {
 	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock)}
-	path, err := NewOpenCodeSQLiteSourcePath(candidate.Path)
-	if err != nil {
-		return records, err
-	}
-	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
-	if err != nil {
-		return records, fmt.Errorf("read OpenCode session records from %q failed while opening the restrictive source: %w; sessions remain discoverable as roots; verify source readability and retry without modifying the database", candidate.Path, err)
-	}
-	defer func() { _ = source.Close(context.Background()) }()
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return records, err
@@ -511,7 +561,7 @@ func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCand
 // clock; only the floor path, used when a session has no usable clock, tracks
 // the file and WAL mtime. A SQLite candidate whose freshness cannot be read is
 // skipped and recorded; other winners stay.
-func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate) []DiscoveredSession {
+func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate, sources map[string]OpenCodeSQLiteSource) []DiscoveredSession {
 	bySQLitePath := make(map[string][]int)
 	keep := make([]bool, len(selected))
 	for index := range selected {
@@ -533,14 +583,12 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 	}
 	sort.Strings(paths)
 	for _, rawPath := range paths {
-		path, err := NewOpenCodeSQLiteSourcePath(rawPath)
-		if err != nil {
-			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite path is not a valid source path", err)
-			continue
-		}
-		source, err := a.candidateOpener(ctx, path, a.candidateOptions)
-		if err != nil {
-			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite source could not be opened read-only for freshness", err)
+		// The source was opened once during discovery and reused here, so
+		// freshness observes the same snapshot as enumeration and no second open
+		// is needed. The caller closes every source exactly once.
+		source, opened := sources[rawPath]
+		if !opened || source == nil {
+			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite source was not available for freshness because discovery did not open it", fmt.Errorf("no open source for %q", rawPath))
 			continue
 		}
 		// Read the newest row time of every session on this database with at
@@ -594,9 +642,6 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			}
 			candidate.session.ModTime = newest
 			keep[index] = true
-		}
-		if closeErr := source.Close(ctx); closeErr != nil {
-			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite source did not close cleanly after freshness reads", closeErr)
 		}
 	}
 

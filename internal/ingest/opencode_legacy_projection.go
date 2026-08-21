@@ -43,20 +43,7 @@ type openCodeLegacyProjectionPart struct {
 	Data        json.RawMessage `json:"data"`
 }
 
-func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
-	if a.candidateOpener == nil {
-		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed before row enumeration: source opener is nil, so typed reads cannot run; no session was exposed; construct the adapter with OpenOpenCodeSQLiteSource", candidate.Path)
-	}
-	path, err := NewOpenCodeSQLiteSourcePath(candidate.Path)
-	if err != nil {
-		return nil, err
-	}
-	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
-	if err != nil {
-		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while opening the restrictive source: %w; no session was exposed; verify source readability and retry without modifying the database", candidate.Path, err)
-	}
-	defer func() { _ = source.Close(context.Background()) }()
-
+func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
 	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
 	if err != nil {
 		return nil, err
@@ -87,9 +74,6 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 			break
 		}
 		cursor = page.Next
-	}
-	if closeErr := source.Close(ctx); closeErr != nil {
-		return nil, fmt.Errorf("discover legacy OpenCode SQLite candidate %q failed while closing its bounded read connection: %w; no partial discovery result is eligible; retry after the source lock clears", candidate.Path, closeErr)
 	}
 	return discovered, nil
 }
@@ -140,26 +124,18 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	if err != nil {
 		return nil, nil, err
 	}
-	path, err := NewOpenCodeSQLiteSourcePath(session.SourcePath.String())
-	if err != nil {
-		return nil, nil, err
-	}
-	if a.candidateOpener == nil {
-		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed before source access: source opener is nil; raw database bytes were not read and no managed state was written; construct the production adapter with OpenOpenCodeSQLiteSource", session.SessionID)
-	}
-	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
-	if err != nil {
-		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while opening %q read-only: %w; no managed artifact or store row was written; verify the selected database remains readable and retry", session.SessionID, session.SourcePath, err)
-	}
 	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
 	if err != nil {
-		_ = source.Close(context.Background())
 		return nil, nil, err
 	}
-	projection, dropped, readErr := readOpenCodeLegacyProjectionWithDiagnostics(ctx, source, legacyID, pageSize)
-	closeErr := source.Close(ctx)
-	if readErr != nil || closeErr != nil {
-		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, errors.Join(readErr, closeErr))
+	var projection openCodeLegacyProjection
+	var dropped []openCodeDroppedOrphanPart
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		var readErr error
+		projection, dropped, readErr = readOpenCodeLegacyProjectionWithDiagnostics(ctx, source, legacyID, pageSize)
+		return readErr
+	}); err != nil {
+		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
 	}
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q from %q produced no messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
