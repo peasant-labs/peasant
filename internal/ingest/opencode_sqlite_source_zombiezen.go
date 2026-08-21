@@ -59,6 +59,20 @@ type zombiezenOpenCodeSQLiteSource struct {
 	connClosed   bool
 	activeCancel context.CancelFunc
 	denied       string
+
+	// sessionColumns caches the session table's column support. The schema of a
+	// read-only source never changes, so the pragma runs once instead of on
+	// every session-record page.
+	sessionColumnsChecked bool
+	sessionColumns        openCodeSessionColumnSupport
+}
+
+// openCodeSessionColumnSupport records which session-record columns the session
+// table carries. present is false when the session table is absent.
+type openCodeSessionColumnSupport struct {
+	present   bool
+	hasParent bool
+	hasClock  bool
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
@@ -469,24 +483,16 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		return OpenCodeSessionRecordPage{}, err
 	}
 	defer lease.release()
-	columns, err := s.columnsLocked(lease.ctx, "session")
+	support, err := s.sessionColumnSupportLocked(lease.ctx)
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session)", "supported OpenCode session")
 	}
-	if len(columns) == 0 {
+	if !support.present {
 		// The session table is absent, so there is nothing to read. Older
 		// layouts stay discoverable as roots with file-based freshness.
 		return OpenCodeSessionRecordPage{}, nil
 	}
-	hasParent, hasClock := false, false
-	for _, column := range columns {
-		switch column.Name {
-		case "parent_id":
-			hasParent = true
-		case "time_updated":
-			hasClock = true
-		}
-	}
+	hasParent, hasClock := support.hasParent, support.hasClock
 	page := OpenCodeSessionRecordPage{Supported: true, HasParent: hasParent, HasClock: hasClock}
 	if !hasParent && !hasClock {
 		// The session table exists but carries neither the parent link nor the
@@ -596,6 +602,38 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		}
 	}
 	return page, nil
+}
+
+// sessionColumnSupportLocked returns the session table's column support and
+// caches it after the first read, so the pragma runs once per source rather
+// than on every session-record page. The caller holds the single connection.
+func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.Context) (openCodeSessionColumnSupport, error) {
+	s.stateMu.Lock()
+	if s.sessionColumnsChecked {
+		support := s.sessionColumns
+		s.stateMu.Unlock()
+		return support, nil
+	}
+	s.stateMu.Unlock()
+
+	columns, err := s.columnsLocked(ctx, "session")
+	if err != nil {
+		return openCodeSessionColumnSupport{}, err
+	}
+	support := openCodeSessionColumnSupport{present: len(columns) > 0}
+	for _, column := range columns {
+		switch column.Name {
+		case "parent_id":
+			support.hasParent = true
+		case "time_updated":
+			support.hasClock = true
+		}
+	}
+	s.stateMu.Lock()
+	s.sessionColumnsChecked = true
+	s.sessionColumns = support
+	s.stateMu.Unlock()
+	return support, nil
 }
 
 // legacyPartPageCollector decodes part rows, checks their scope, and
