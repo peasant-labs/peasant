@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	schema "github.com/peasant-labs/schema"
 )
 
@@ -388,7 +389,7 @@ func (m SessionModel) View() string {
 		if m.editorOpen {
 			// Overlay the editor modal centered on the screen.
 			editorView := m.editor.View()
-			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, editorView)
+			return kit.Center(editorView, m.width, m.height, TextBg)
 		}
 		return content
 	}

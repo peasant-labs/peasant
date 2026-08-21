@@ -654,15 +654,10 @@ type screenConfirmLayer struct{ confirm kit.Confirm }
 
 func (l screenConfirmLayer) View() string { return l.confirm.View() }
 
+// screenPad fits one plain-text cell to width through the kit layout
+// primitive, so the screen never repeats the truncate-and-pad rule itself.
 func screenPad(value string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	value = clip(value, width)
-	if padding := width - lipgloss.Width(value); padding > 0 {
-		value += strings.Repeat(" ", padding)
-	}
-	return value
+	return kit.FitCell(value, width)
 }
 
 func validateScreenBoundary(t theme.Theme, reg Registry, d *Draft) error {

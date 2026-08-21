@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/mdrender"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
@@ -343,5 +344,5 @@ func depthIndent(depth int) string {
 	if depth > maxIndentedDepth {
 		depth = maxIndentedDepth
 	}
-	return strings.Repeat(" ", depth*depthIndentWidth)
+	return kit.Indent(depth * depthIndentWidth)
 }
