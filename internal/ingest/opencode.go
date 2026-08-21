@@ -350,16 +350,15 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, cand
 // recordCandidateFailure attaches an actionable diagnostic to the failing
 // candidate's evidence and logs it. Discovery continues for other candidates.
 func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProbeStage, what string, cause error) {
-	diagnostic := OpenCodeProbeDiagnostic{
-		Code:        OpenCodeDiagnosticDiscoveryFailed,
-		Stage:       stage,
-		What:        what,
-		Why:         cause.Error(),
-		Where:       path,
-		When:        "during OpenCode discovery after the candidate probe reported a supported schema",
-		Meaning:     "sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
-		Remediation: "retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant",
-	}
+	diagnostic := actionableOpenCodeDiagnostic(
+		stage,
+		what,
+		cause.Error(),
+		path,
+		"during OpenCode discovery after the candidate probe reported a supported schema",
+		"sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
+		"retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant",
+	)
 	a.candidateMu.Lock()
 	cleanPath := filepath.Clean(path)
 	for index := range a.candidateEvidence {

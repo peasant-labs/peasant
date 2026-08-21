@@ -569,6 +569,8 @@ func actionableOpenCodeDiagnostic(stage OpenCodeProbeStage, what, why, where, wh
 		code = OpenCodeDiagnosticSourceOpenFailed
 	case OpenCodeProbeCatalog:
 		code = OpenCodeDiagnosticCatalogReadFailed
+	case OpenCodeProbeDiscover, OpenCodeProbeFreshness:
+		code = OpenCodeDiagnosticDiscoveryFailed
 	}
 	return OpenCodeProbeDiagnostic{Code: code, Stage: stage, What: what, Why: why, Where: where, When: when, Meaning: meaning, Remediation: fix}
 }
