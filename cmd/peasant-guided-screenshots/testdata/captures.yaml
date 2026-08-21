@@ -1,9 +1,9 @@
 expectedSheetCount: 3
 expectedGuidedSectionCount: 6
 expectedGuidedCaptureCount: 24
-expectedSelectionStateCount: 5
-expectedSelectionCaptureCount: 16
-expectedSelectionSessionCount: 5
+expectedSelectionStateCount: 6
+expectedSelectionCaptureCount: 20
+expectedSelectionSessionCount: 6
 expectedSelectionHarnessCount: 2
 expectedSelectionIngestedCount: 1
 
@@ -22,7 +22,7 @@ sheets:
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 4800}
+    viewport: {width: 1800, height: 5700}
 
 guidedSections:
   - key: auto-ingest
@@ -54,6 +54,9 @@ selectionStates:
   - key: session-preview
     query: ""
     wantContains: ["parent ses", "harness: claude code", scrubbed-body]
+  - key: harness-source-preview
+    query: ""
+    wantContains: ["harness: claude code", scrubbed-source-body, read in place]
 
 selection:
   repositories:
@@ -90,6 +93,15 @@ selection:
       title: imported session
       workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-imported
+    - harness: claude-code
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: not imported yet
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
+      source:
+        origin: file
     - harness: cursor
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
@@ -101,6 +113,10 @@ selection:
     cc-parent:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
       - {role: assistant, entryType: text, content: "the fixture transcript is loaded through the normal preview boundary"}
+  sourceTranscripts:
+    5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47:
+      - '{"type":"user","uuid":"h1","message":{"role":"user","content":"scrubbed-source-body: peasant read in place from the harness file"}}'
+      - '{"type":"assistant","uuid":"h2","parentUuid":"h1","message":{"role":"assistant","content":[{"type":"text","text":"peasant copies nothing and imports nothing to show this preview"}]}}'
   ingested: [cc-imported]
 
 guidedCaptures:
@@ -146,3 +162,7 @@ selectionCaptures:
   - {name: selection-session-preview-dark-120x40, state: session-preview, theme: dark, width: 120, height: 40}
   - {name: selection-session-preview-light-80x24, state: session-preview, theme: light, width: 80, height: 24}
   - {name: selection-session-preview-light-120x40, state: session-preview, theme: light, width: 120, height: 40}
+  - {name: selection-harness-source-preview-dark-80x24, state: harness-source-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-harness-source-preview-dark-120x40, state: harness-source-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-harness-source-preview-light-80x24, state: harness-source-preview, theme: light, width: 80, height: 24}
+  - {name: selection-harness-source-preview-light-120x40, state: harness-source-preview, theme: light, width: 120, height: 40}

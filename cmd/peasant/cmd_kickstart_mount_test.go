@@ -202,7 +202,11 @@ func TestRunKickstartFlowPairsRetentionBeforeMount(t *testing.T) {
 
 // mountPreviewSessions is the discovery listing the mounted preview names rows
 // from - the same shape the selection tree is folded from.
-func mountPreviewSessions() []ftue.SessionListing {
+// mountPreviewSessions builds the discovery listing the preview reads its
+// headers from. freshSource is where the harness left the transcript of the
+// session the store does not hold; an empty value stands for a session
+// discovery found no transcript for.
+func mountPreviewSessions(freshSource string) []ftue.SessionListing {
 	return []ftue.SessionListing{
 		{
 			Harness:     string(defaults.HarnessClaudeCode),
@@ -227,8 +231,33 @@ func mountPreviewSessions() []ftue.SessionListing {
 			ProjectName: "acme/tool",
 			GitRemote:   mountProjectRowID,
 			Branch:      "main",
+			Source:      freshSourceListing(freshSource),
 		},
 	}
+}
+
+// freshSourceListing points a listing at the transcript the harness wrote. An
+// empty path leaves the listing without a transcript location, which is the
+// state the pane reports as not imported.
+func freshSourceListing(path string) ftue.SessionSource {
+	if path == "" {
+		return ftue.SessionSource{}
+	}
+	return ftue.SessionSource{Path: path, Origin: ftue.SessionSourceOriginFile}
+}
+
+// writeHarnessTranscript puts the fixture transcript where the harness would
+// leave it. Nothing imports this file; the preview reads it in place.
+func writeHarnessTranscript(t *testing.T, lines []string) string {
+	t.Helper()
+	if len(lines) == 0 {
+		t.Fatal("the fixture records no harness transcript; every source case would take the not-imported path")
+	}
+	path := filepath.Join(t.TempDir(), "recorded.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write harness transcript: %v", err)
+	}
+	return path
 }
 
 // mountTestCmd builds the command instance the mount helpers read their data
@@ -387,6 +416,7 @@ type previewDoc struct {
 	ExpectedCaseCount int                    `yaml:"expectedCaseCount"`
 	Width             int                    `yaml:"width"`
 	Recorded          []testutil.TurnFixture `yaml:"recorded"`
+	SourceTranscript  []string               `yaml:"sourceTranscript"`
 	Cases             []previewCase          `yaml:"cases"`
 }
 
@@ -413,6 +443,9 @@ func loadPreviewDoc(t *testing.T) previewDoc {
 	}
 	if len(doc.Recorded) == 0 {
 		t.Fatal("fixture records no turns; every case would take the not-imported path")
+	}
+	if len(doc.SourceTranscript) == 0 {
+		t.Fatal("fixture records no harness transcript; the not-yet-imported session could show nothing")
 	}
 	if doc.Width <= 0 {
 		t.Fatalf("fixture declares width %d; a non-positive width renders nothing to assert on", doc.Width)
@@ -476,7 +509,8 @@ func TestKickstartPreview_ReadsTheLocalStore(t *testing.T) {
 		t.Fatal("openKickstartStore returned no store for a seeded data directory")
 	}
 
-	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions())
+	freshSource := writeHarnessTranscript(t, doc.SourceTranscript)
+	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions(freshSource))
 
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -517,7 +551,7 @@ func TestKickstartPreview_HighlightsCodeFromTheStore(t *testing.T) {
 	db, closeStore := openKickstartStore(cmd)
 	defer closeStore()
 
-	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions())
+	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions(""))
 	body, err := source.Body(mountImportedSessionID)
 	if err != nil {
 		t.Fatalf("preview body: %v", err)
@@ -554,7 +588,7 @@ func TestKickstartPreview_WithoutAStoreStillNamesSessions(t *testing.T) {
 	}
 	closeStore() // must be safe to call
 
-	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions())
+	source := kickstartPreview(cmd, db, theme.New(theme.ModeDark), mountPreviewSessions(""))
 	body, err := source.Body(mountImportedSessionID)
 	if err != nil {
 		t.Fatalf("preview body without a store: %v", err)
@@ -564,6 +598,41 @@ func TestKickstartPreview_WithoutAStoreStillNamesSessions(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("preview must contain %q; got:\n%s", want, got)
 		}
+	}
+}
+
+// TestKickstartPreview_WithoutAStoreReadsTheHarnessTranscript proves the first
+// run: there is no database at all, and the pane still shows the whole
+// conversation of a discovered session, read from the transcript its harness
+// wrote. The store stays absent, so nothing here can have imported anything.
+func TestKickstartPreview_WithoutAStoreReadsTheHarnessTranscript(t *testing.T) {
+	t.Parallel()
+	doc := loadPreviewDoc(t)
+	dataHome := t.TempDir()
+	cmd := mountTestCmd(t, dataHome)
+
+	db, closeStore := openKickstartStore(cmd)
+	if db != nil {
+		t.Fatal("openKickstartStore opened a store for a data directory with no database")
+	}
+	closeStore()
+
+	sessions := mountPreviewSessions(writeHarnessTranscript(t, doc.SourceTranscript))
+	body, err := kickstartPreview(cmd, db, theme.New(theme.ModeDark), sessions).Body(mountFreshSessionID)
+	if err != nil {
+		t.Fatalf("preview a discovered session with no store: %v", err)
+	}
+	got := flattenPane(body.Render(doc.Width))
+	for _, want := range []string{"harness: claude code", "you", "please refactor the ingest pipeline"} {
+		if !strings.Contains(got, needle(want)) {
+			t.Errorf("preview must contain %q; got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "not imported yet") {
+		t.Errorf("a session the pane can read must not be described as unreadable; got:\n%s", got)
+	}
+	if _, err := os.Stat(defaults.ResolveDBFilePathWith(dataHome).String()); !os.IsNotExist(err) {
+		t.Fatalf("the preview must not create a database; stat returned %v", err)
 	}
 }
 

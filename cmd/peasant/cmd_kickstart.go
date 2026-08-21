@@ -391,6 +391,10 @@ func ftueDiscoverWith(
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
 				WorkingDir:  workingDir,
+				// The transcript location travels with the listing so the
+				// selection step can preview a session before any import. The
+				// file stays where the harness wrote it.
+				Source: kickstart.ListingSource(d),
 			})
 		}
 		discovery.SessionCount = rootCount
