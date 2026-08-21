@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/schema"
 )
 
@@ -572,10 +573,9 @@ func fitProjectScopeCell(value string, width int) string {
 	}
 	value = strings.NewReplacer("\r", " ", "\n", " ").Replace(value)
 	value = lipgloss.NewStyle().MaxWidth(width).Render(value)
-	if padding := width - lipgloss.Width(value); padding > 0 {
-		value += strings.Repeat(" ", padding)
-	}
-	return value
+	// The kit layout primitive owns the pad rule, so this pane cannot drift
+	// from the rest of the TUI.
+	return kit.FitCell(value, width)
 }
 
 func (p *ProjectScopePage) View(width, height int) string {

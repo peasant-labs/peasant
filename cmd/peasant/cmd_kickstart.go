@@ -280,20 +280,32 @@ func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *disco
 	if err != nil {
 		return ftue.ProviderInventory{}, nil
 	}
+	// One open store answers both questions a scan asks of it: what it already
+	// resolved from git, and what discovery already mined from the transcripts.
+	db := openReusableStore(dbPath)
+	var cache ingest.ClaudeEvidenceCache
+	if db != nil {
+		defer db.Close()
+		cache = db
+	}
 	return ftueDiscoverWith(ctx, cfg, &ingest.OSFileSystem{}, &ingest.ExecGitResolver{},
-		loadKnownSessions(ctx, dbPath), spinner)
+		loadKnownSessionsFrom(ctx, db), cache, spinner)
 }
 
 // ftueDiscoverWith is the discovery core, with the filesystem, the git resolver,
-// and the store-recorded session index injected. A non-empty index turns the
-// per-session git resolution — the multi-second part of a scan — into a lookup
-// for every session the store already holds and whose source has not changed.
+// the store-recorded session index, and the transcript evidence cache injected.
+// A non-empty index turns the per-session git resolution, the multi-second part
+// of a scan, into a lookup for every session the store already holds and whose
+// source has not changed. The evidence cache does the same for the transcript
+// mining that links Claude teammate sessions. A nil cache mines every
+// transcript again, which is slower but always correct.
 func ftueDiscoverWith(
 	ctx context.Context,
 	cfg *config.Config,
 	fs ingest.FileSystem,
 	git ingest.GitResolver,
 	known knownSessionIndex,
+	evidence ingest.ClaudeEvidenceCache,
 	spinner *discoverySpinner,
 ) (ftue.ProviderInventory, []ftue.SessionListing) {
 	inventory := ftue.ProviderInventory{}
@@ -319,6 +331,7 @@ func ftueDiscoverWith(
 		src.Enabled = true
 		spinner.SetPhase(fmt.Sprintf("Discovering %s sessions...", schema.HarnessDisplayName(provider)))
 		adapter := factory(fs, git, salt.Salt{})
+		ingest.AttachClaudeEvidenceCache(adapter, evidence)
 		discovered, err := adapter.Discover(ctx, src)
 		if err != nil {
 			discovery.State = ftue.DiscoveryFailed
@@ -391,6 +404,10 @@ func ftueDiscoverWith(
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
 				WorkingDir:  workingDir,
+				// The transcript location travels with the listing so the
+				// selection step can preview a session before any import. The
+				// file stays where the harness wrote it.
+				Source: kickstart.ListingSource(d),
 			})
 		}
 		discovery.SessionCount = rootCount

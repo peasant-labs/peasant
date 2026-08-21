@@ -607,7 +607,7 @@ func TestUnofferedRedactionLevelError_IsActionableAndNamesTheRightRemedy(t *test
 			"keeps working",                    // that an existing config is not broken
 			RecommendedRedactionLevel.String(), // the value to use instead
 			RedactionLevelMenu(),               // every value that works
-			"KNOWN PATTERNS",                   // the hedge: what redaction can and cannot promise
+			"known patterns",                   // the hedge: what redaction can and cannot promise
 		} {
 			if !strings.Contains(message, want) {
 				t.Errorf("the refusal must state %q; got:\n%s", want, message)
@@ -729,7 +729,7 @@ func TestRedactionScopeSentence_NeverClaimsCompleteness(t *testing.T) {
 		t.Fatal("the scope sentence is empty, so every surface that quotes it says nothing about what redaction does")
 	}
 	for _, want := range []string{
-		"KNOWN PATTERNS",     // the scope
+		"known patterns",     // the scope
 		"best effort",        // the limit
 		"not a guarantee",    // said outright, not implied
 		"transcript content", // that content is covered, not only metadata

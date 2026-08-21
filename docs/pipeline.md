@@ -167,6 +167,36 @@ already-pushed sessions as ordinary push candidates once. That sends the missing
 Village association anchors before any later association-target annotation batch,
 without requiring users to discover `--force`.
 
+## Claude Discovery Evidence Cache
+
+Claude Code does not record which teammate session belongs to which parent
+session. Discovery mines that link from the transcripts themselves: it reads a
+root transcript and collects the identity the session declares and the teammates
+the session spawned. A link is accepted only when exactly one child and exactly
+one parent share one complete identity.
+
+Mining reads a whole transcript and parses every line, so the cost used to grow
+with the total transcript bytes on disk on EVERY scan. The `claude_transcript_evidence`
+table now holds the mined result of each transcript, keyed on the source path and
+stamped with the size and the modification time of the file that produced it.
+
+Rules:
+
+- Discovery stats each transcript, then reuses the cached record when the scope,
+  the size, and the modification time all agree.
+- A new or changed transcript is mined again, and the fresh record replaces the
+  cached one. The ambiguity rule is unchanged.
+- One read now produces every content fact discovery needs: the conversation
+  check, the teammate identity, the spawn records, and the display hints.
+- Discovery deletes the records of transcripts that are gone, but only under the
+  source paths that the run walked.
+- The cache is best effort. A missing or failing cache makes discovery mine every
+  transcript again, which is slower and always correct.
+
+Both discovery paths use it. The ingest pipeline passes the local store to the
+Claude adapter, and the kickstart scan opens the same store for the recorded
+session index and for this cache.
+
 ## Failure Modes
 
 The temp tree is also a cleanup boundary:

@@ -545,7 +545,7 @@ func assertRecordNamesTheAppliedLevel(t *testing.T, testCase pushDisclosureCase,
 	}
 	// The rule set must be the compiled one, not a version an older import wrote.
 	assertRedactionRecordEntry(t, stderr, "rule set version:", "v"+redact.RuleSetVersion)
-	for _, want := range []string{"KNOWN PATTERNS", "not a guarantee"} {
+	for _, want := range []string{"known patterns", "not a guarantee"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("the record must state %q; stderr:\n%s", want, stderr)
 		}

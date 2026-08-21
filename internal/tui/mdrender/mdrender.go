@@ -147,7 +147,7 @@ var (
 // plain text, because a preview pane showing plain words is useful and a
 // preview pane showing an error is not.
 func (r Renderer) Render(source string, width int) string {
-	clean := Sanitize(source)
+	clean := preservePlaceholders(Sanitize(source))
 	if strings.TrimSpace(clean) == "" {
 		return ""
 	}
@@ -295,6 +295,83 @@ func dropEmptyStyleRuns(line string) string {
 // prose, and leaving it would put a character of undefined display width into a
 // pane that measures its rows in cells.
 const tabExpansion = "    "
+
+// placeholderToken matches a redaction placeholder: an upper-case word in angle
+// brackets, such as <EMAIL>, <SSN>, or <ANTHROPIC_KEY>. The redactor writes these
+// into transcript text in place of the values it removed.
+var placeholderToken = regexp.MustCompile(`<([A-Z][A-Z0-9_]*)>`)
+
+// preservePlaceholders keeps redaction placeholders visible in rendered
+// markdown. Markdown reads <EMAIL> as an inline HTML tag and the renderer strips
+// HTML, so the placeholder vanished and the reader saw a gap where the redactor
+// had put a marker. A placeholder at the start of a line was worse: the whole
+// paragraph read as an HTML block and disappeared.
+//
+// Outside code, the angle brackets become the HTML entities &lt; and &gt;, which
+// markdown decodes back to text. Inside fenced or indented code blocks the text
+// is already literal, and an entity there would print as-is, so those lines are
+// left alone. Code spans decode entities too, so they need no special case.
+func preservePlaceholders(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	var (
+		inFence    bool
+		fenceChar  byte
+		fenceLen   int
+		prevBlank  = true
+		inIndented bool
+	)
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		indent := len(line) - len(trimmed)
+		if inFence {
+			if indent <= 3 && fenceRun(trimmed, fenceChar) >= fenceLen && strings.TrimSpace(trimmed[fenceRun(trimmed, fenceChar):]) == "" {
+				inFence = false
+			}
+			prevBlank = false
+			continue
+		}
+		if indent <= 3 {
+			if n := fenceRun(trimmed, '`'); n >= 3 && !strings.Contains(trimmed[n:], "`") {
+				inFence, fenceChar, fenceLen = true, '`', n
+				prevBlank = false
+				continue
+			}
+			if n := fenceRun(trimmed, '~'); n >= 3 {
+				inFence, fenceChar, fenceLen = true, '~', n
+				prevBlank = false
+				continue
+			}
+		}
+		blank := strings.TrimSpace(line) == ""
+		// An indented code block opens on a line with four or more leading
+		// spaces after a blank line, and continues while lines stay indented.
+		if blank {
+			prevBlank = true
+			continue
+		}
+		if indent >= 4 && (prevBlank || inIndented) {
+			inIndented = true
+			prevBlank = false
+			continue
+		}
+		inIndented = false
+		prevBlank = false
+		lines[i] = placeholderToken.ReplaceAllString(line, "&lt;$1&gt;")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// fenceRun counts the leading run of c in s.
+func fenceRun(s string, c byte) int {
+	n := 0
+	for n < len(s) && s[n] == c {
+		n++
+	}
+	return n
+}
 
 // Sanitize strips everything a recorded transcript can carry that must never
 // reach a terminal: escape sequences (CSI/OSC/DCS and friends) that would

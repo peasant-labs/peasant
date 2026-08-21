@@ -1,27 +1,29 @@
 # Scripted four-page walks of the push wizard, driven message-by-message through
 # the same Update loop the mounted program runs. The session inventory is the
 # shared testSessions() set (three sessions: current, stale, raw redaction
-# status), so wantSelectedIds names those IDs.
+# state), so wantSelectedIds names those IDs.
 #
-# keys are message tokens fed one per Update: enter/esc/space and single letters
-# map to the key events the wizard reads. A walk ends with the model confirmed
-# and the selected IDs it would hand back to the caller.
+# keys are message tokens fed one per Update: enter/esc/space/left/down and
+# single letters map to the key events the wizard reads. Each consent prompt
+# opens on "no", so a walk that accepts one presses left first. A walk ends with
+# the model confirmed and the selected IDs it would hand back to the caller.
 expectedScenarioCount: 3
 scenarios:
   - name: accept-every-session
-    # confirm start -> review -> redaction preview -> final -> confirm
-    keys: [enter, enter, enter, enter]
+    # accept start -> selector -> consent page -> accept the final prompt
+    keys: [left, enter, enter, enter, left, enter]
     wantConfirmed: true
     wantSelectedIds: [sess-aaa-111, sess-bbb-222, sess-ccc-333]
 
-  - name: exclude-first-session-on-review
-    # space on the review page toggles the cursor session (the first) to excluded
-    keys: [enter, space, enter, enter, enter]
+  - name: exclude-first-session-on-selection
+    # space on the first project row clears its only session
+    keys: [left, enter, space, enter, enter, left, enter]
     wantConfirmed: true
     wantSelectedIds: [sess-bbb-222, sess-ccc-333]
 
-  - name: exclude-all-then-reinclude-keeps-walk
-    # x excludes all, w re-includes the cursor session, then the walk completes
-    keys: [enter, x, w, enter, enter, enter]
+  - name: clear-all-then-reselect-one
+    # every session opens selected, so the select-all key clears the forest;
+    # down and space then reselect the first session alone
+    keys: [left, enter, a, down, space, enter, enter, left, enter]
     wantConfirmed: true
     wantSelectedIds: [sess-aaa-111]

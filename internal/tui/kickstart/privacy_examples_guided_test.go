@@ -130,7 +130,7 @@ func loadPrivacyAdapterFixture(t *testing.T) adapterFixtureDocument {
 	}
 	viewportMutations := 0
 	for _, row := range document.Viewport {
-		if strings.TrimSpace(row.Name) == "" || row.Width != 80 || row.Height != 24 || len(row.WantContains) == 0 || len(row.WantMissing) == 0 {
+		if strings.TrimSpace(row.Name) == "" || row.Width != 80 || row.Height != 18 || len(row.WantContains) == 0 || len(row.WantMissing) == 0 {
 			t.Fatalf("privacy adapter viewport row is incomplete: %#v", row)
 		}
 		if row.MutationProbe {

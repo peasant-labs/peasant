@@ -1,6 +1,7 @@
 // Package gates implements the shared hardcoded-value grep gates for the TUI
-// kit: the color grep gate (colors.go/colors_test.go) and the key grep gate
-// (keys.go/keys_test.go), both driven by the SAME
+// kit: the color grep gate (colors.go/colors_test.go), the key grep gate
+// (keys.go/keys_test.go), and the layout grep gate
+// (layout.go/layout_test.go), all driven by the SAME
 // testdata/legacy_allowlist.yaml - see Kind.
 //
 // This package is test-only: nothing outside internal/tui/gates imports it,
@@ -31,6 +32,11 @@ const (
 	// internal/tui/keymap, which owns dispatching key presses via
 	// keymap.Match against a named ActionID instead.
 	GateKeys Kind = "keys"
+	// GateLayout is the hand-rolled-layout grep gate
+	// (layout.go/layout_test.go): a surface padding, placing, aligning, or
+	// background-painting its own lines instead of composing through the kit
+	// layout primitives (kit.Panel and friends).
+	GateLayout Kind = "layout"
 )
 
 // String implements fmt.Stringer.
@@ -39,7 +45,7 @@ func (k Kind) String() string { return string(k) }
 // IsValid reports whether k is a known Kind.
 func (k Kind) IsValid() bool {
 	switch k {
-	case GateColors, GateKeys:
+	case GateColors, GateKeys, GateLayout:
 		return true
 	}
 	return false
@@ -169,13 +175,13 @@ func LoadAllowlist(data []byte) (Allowlist, error) {
 				"gates.LoadAllowlist: entry %q names no gates (%s).\n"+
 					"means: it exempts nothing and can never be matched by any scan, which is indistinguishable from a "+
 					"typo that dropped the gates list.\n"+
-					"fix: name at least one gate with a pinned expectedHits: colors, keys.", entry.Path, where)
+					"fix: name at least one gate with a pinned expectedHits: colors, keys, layout.", entry.Path, where)
 		}
 		seenGate := map[Kind]bool{}
 		for _, g := range entry.Gates {
 			if !g.Gate.IsValid() {
 				return list, fmt.Errorf(
-					"gates.LoadAllowlist: entry %q names unknown gate %q (%s); valid gates: colors, keys.",
+					"gates.LoadAllowlist: entry %q names unknown gate %q (%s); valid gates: colors, keys, layout.",
 					entry.Path, g.Gate, where)
 			}
 			if seenGate[g.Gate] {

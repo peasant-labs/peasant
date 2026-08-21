@@ -16,14 +16,17 @@ import (
 )
 
 const (
-	requiredSheetCount             = 3
+	requiredSheetCount             = 4
 	requiredGuidedSectionCount     = 6
 	requiredGuidedCaptureCount     = 24
-	requiredSelectionStateCount    = 5
-	requiredSelectionCaptureCount  = 16
-	requiredSelectionSessionCount  = 5
+	requiredSelectionStateCount    = 6
+	requiredSelectionCaptureCount  = 20
+	requiredSelectionSessionCount  = 6
 	requiredSelectionHarnessCount  = 2
 	requiredSelectionIngestedCount = 1
+	requiredPushStateCount         = 5
+	requiredPushCaptureCount       = 20
+	requiredPushSessionCount       = 3
 )
 
 type sheetName string
@@ -32,6 +35,7 @@ const (
 	sheetGuidedDark  sheetName = "guided-dark"
 	sheetGuidedLight sheetName = "guided-light"
 	sheetSelection   sheetName = "selection"
+	sheetPush        sheetName = "push"
 )
 
 type sheetKind string
@@ -39,6 +43,7 @@ type sheetKind string
 const (
 	sheetKindGuided    sheetKind = "guided"
 	sheetKindSelection sheetKind = "selection"
+	sheetKindPush      sheetKind = "push"
 )
 
 type captureTheme string
@@ -81,14 +86,97 @@ const (
 	selectionStateProjectPreview selectionState = "project-preview"
 	selectionStateBranchPreview  selectionState = "branch-preview"
 	selectionStateSessionPreview selectionState = "session-preview"
+	// selectionStateSourcePreview is a session the local store does not hold,
+	// previewed from the transcript its harness wrote.
+	selectionStateSourcePreview selectionState = "harness-source-preview"
 )
 
 func (s selectionState) valid() bool {
-	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview || s == selectionStateBranchPreview || s == selectionStateSessionPreview
+	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview ||
+		s == selectionStateBranchPreview || s == selectionStateSessionPreview || s == selectionStateSourcePreview
 }
 
 func (s selectionState) requiresBothThemes() bool {
-	return s == selectionStateProjectPreview || s == selectionStateBranchPreview || s == selectionStateSessionPreview
+	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
+		s == selectionStateSessionPreview || s == selectionStateSourcePreview
+}
+
+// pushState is the closed set of push-wizard screens the harness captures: the
+// consent prompt that opens the wizard, the selection tree over a project row,
+// the same tree over a session row (where the pane draws that session's
+// transcript as the push will publish it), the page that states what leaves the
+// machine, and the receipt.
+type pushState string
+
+const (
+	pushStateStart     pushState = "start"
+	pushStateSelection pushState = "selection"
+	// pushStateSessionPreview is the selection page with a SESSION highlighted,
+	// which is the only state that draws the published transcript.
+	pushStateSessionPreview pushState = "session-preview"
+	pushStateConsent        pushState = "consent"
+	pushStateReceipt        pushState = "receipt"
+)
+
+func (s pushState) valid() bool {
+	switch s {
+	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt:
+		return true
+	default:
+		return false
+	}
+}
+
+// pushRedactionState names the state of one fixture session's stored copy.
+type pushRedactionState string
+
+const (
+	pushRedactionCurrent pushRedactionState = "current"
+	pushRedactionStale   pushRedactionState = "stale"
+	pushRedactionRaw     pushRedactionState = "raw"
+)
+
+func (s pushRedactionState) valid() bool {
+	switch s {
+	case pushRedactionCurrent, pushRedactionStale, pushRedactionRaw:
+		return true
+	default:
+		return false
+	}
+}
+
+// pushStateFixture names what one captured push screen must show.
+type pushStateFixture struct {
+	Key          pushState `yaml:"key"`
+	WantContains []string  `yaml:"wantContains"`
+}
+
+// pushCaptureFixture is one push screen at one palette and one region.
+type pushCaptureFixture struct {
+	Name   string       `yaml:"name"`
+	State  pushState    `yaml:"state"`
+	Theme  captureTheme `yaml:"theme"`
+	Width  int          `yaml:"width"`
+	Height int          `yaml:"height"`
+}
+
+// pushSessionFixture is one candidate session the captured wizard offers.
+type pushSessionFixture struct {
+	SessionID string             `yaml:"sessionId"`
+	Harness   string             `yaml:"harness"`
+	Project   string             `yaml:"project"`
+	StartMs   int64              `yaml:"startMs"`
+	Redaction pushRedactionState `yaml:"redaction"`
+	Withheld  bool               `yaml:"withheld"`
+}
+
+// pushFixture is the candidate inventory the captured wizard mounts over.
+type pushFixture struct {
+	Sessions []pushSessionFixture `yaml:"sessions"`
+	// Transcripts holds the RECORDED entries of each session, keyed by session
+	// id. The capture feeds them through the real push redactor, so the preview
+	// pane in the sheet shows what a publish would send.
+	Transcripts map[string][]selectionTurnFixture `yaml:"transcripts"`
 }
 
 type viewportFixture struct {
@@ -135,7 +223,12 @@ type selectionFixture struct {
 	Repositories []selectionRepositoryFixture      `yaml:"repositories"`
 	Listings     []ftue.SessionListing             `yaml:"listings"`
 	Transcripts  map[string][]selectionTurnFixture `yaml:"transcripts"`
-	Ingested     []string                          `yaml:"ingested"`
+	// SourceTranscripts holds the harness transcript lines for sessions the
+	// local store does not hold. The renderer writes each one to its isolated
+	// workspace and points the listing at it, so the preview reads a real file
+	// through the production reader.
+	SourceTranscripts map[string][]string `yaml:"sourceTranscripts"`
+	Ingested          []string            `yaml:"ingested"`
 }
 
 type selectionRepositoryFixture struct {
@@ -151,6 +244,12 @@ type selectionTurnFixture struct {
 }
 
 type captureDocument struct {
+	ExpectedPushStateCount         int                       `yaml:"expectedPushStateCount"`
+	ExpectedPushCaptureCount       int                       `yaml:"expectedPushCaptureCount"`
+	ExpectedPushSessionCount       int                       `yaml:"expectedPushSessionCount"`
+	PushStates                     []pushStateFixture        `yaml:"pushStates"`
+	PushCaptures                   []pushCaptureFixture      `yaml:"pushCaptures"`
+	Push                           pushFixture               `yaml:"push"`
 	ExpectedSheetCount             int                       `yaml:"expectedSheetCount"`
 	ExpectedGuidedSectionCount     int                       `yaml:"expectedGuidedSectionCount"`
 	ExpectedGuidedCaptureCount     int                       `yaml:"expectedGuidedCaptureCount"`
@@ -199,7 +298,107 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 	if err := validateSelectionData(document.Selection); err != nil {
 		return document, err
 	}
+	if err := validatePushMatrix(document.PushStates, document.PushCaptures); err != nil {
+		return document, err
+	}
+	if err := validatePushData(document.Push); err != nil {
+		return document, err
+	}
 	return document, nil
+}
+
+// validatePushMatrix requires one capture per push screen, per palette, per
+// region: the push wizard is reviewed in both themes at both sizes.
+func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture) error {
+	stateRows := make(map[pushState]pushStateFixture, len(states))
+	for _, state := range states {
+		if !state.Key.valid() || stateRows[state.Key].Key != "" || !nonEmptyStrings(state.WantContains) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate push state: %#v", state)
+		}
+		stateRows[state.Key] = state
+	}
+	for _, key := range []pushState{
+		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt,
+	} {
+		if stateRows[key].Key == "" {
+			return fmt.Errorf("screenshot fixture omits push state %q", key)
+		}
+	}
+	seenNames := make(map[string]bool, len(captures))
+	pairs := make(map[string]int, len(captures))
+	for _, capture := range captures {
+		wantName := fmt.Sprintf("push-%s-%s-%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != wantName || seenNames[capture.Name] || stateRows[capture.State].Key == "" ||
+			!capture.Theme.valid() || !validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate push capture: %#v", capture)
+		}
+		seenNames[capture.Name] = true
+		pairs[fmt.Sprintf("%s/%s/%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)]++
+	}
+	for state := range stateRows {
+		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				pair := fmt.Sprintf("%s/%s/%dx%d", state, name, viewport.Width, viewport.Height)
+				if pairs[pair] != 1 {
+					return fmt.Errorf("screenshot fixture push pair %q has %d captures, want exactly one", pair, pairs[pair])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validatePushData requires a complete candidate inventory: every redaction
+// state a session can carry, plus one session the branch-aware selection
+// withheld, so the captured screens show every row form the wizard renders.
+func validatePushData(fixture pushFixture) error {
+	if len(fixture.Sessions) != requiredPushSessionCount {
+		return fmt.Errorf("screenshot fixture push sessions: actual=%d required=%d",
+			len(fixture.Sessions), requiredPushSessionCount)
+	}
+	ids := make(map[string]bool, len(fixture.Sessions))
+	states := make(map[pushRedactionState]bool, len(fixture.Sessions))
+	withheld := 0
+	for _, session := range fixture.Sessions {
+		if strings.TrimSpace(session.SessionID) == "" || strings.TrimSpace(session.Harness) == "" ||
+			strings.TrimSpace(session.Project) == "" || session.StartMs <= 0 ||
+			!session.Redaction.valid() || ids[session.SessionID] {
+			return fmt.Errorf("screenshot fixture has an incomplete or duplicate push session: %#v", session)
+		}
+		ids[session.SessionID] = true
+		states[session.Redaction] = true
+		if session.Withheld {
+			withheld++
+		}
+	}
+	if len(states) != 3 {
+		return fmt.Errorf("screenshot fixture push sessions cover %d redaction states, want all 3", len(states))
+	}
+	if withheld != 1 {
+		return fmt.Errorf("screenshot fixture push sessions hold %d withheld rows, want exactly 1", withheld)
+	}
+	// The preview capture is only evidence if a session actually has a stored
+	// transcript to draw. Without this the sheet would show the empty-transcript
+	// note in every theme and read as a passing capture of the wrong screen.
+	previewable := 0
+	for sessionID, entries := range fixture.Transcripts {
+		if !ids[sessionID] {
+			return fmt.Errorf("screenshot fixture holds a transcript for unknown push session %q", sessionID)
+		}
+		for _, entry := range entries {
+			if strings.TrimSpace(string(entry.Role)) == "" || strings.TrimSpace(string(entry.EntryType)) == "" ||
+				strings.TrimSpace(entry.Content) == "" {
+				return fmt.Errorf("screenshot fixture push transcript %q holds an incomplete entry: %#v", sessionID, entry)
+			}
+		}
+		if len(entries) > 0 {
+			previewable++
+		}
+	}
+	if previewable == 0 {
+		return fmt.Errorf("screenshot fixture holds no push transcript, so the preview capture would show no transcript")
+	}
+	return nil
 }
 
 func validateDeclaredCounts(document captureDocument) error {
@@ -220,6 +419,9 @@ func validateDeclaredCounts(document captureDocument) error {
 		{name: "selection captures", declared: document.ExpectedSelectionCaptureCount, actual: len(document.SelectionCaptures), required: requiredSelectionCaptureCount},
 		{name: "selection sessions", declared: document.ExpectedSelectionSessionCount, actual: len(document.Selection.Listings), required: requiredSelectionSessionCount},
 		{name: "selection ingested sessions", declared: document.ExpectedSelectionIngestedCount, actual: len(document.Selection.Ingested), required: requiredSelectionIngestedCount},
+		{name: "push states", declared: document.ExpectedPushStateCount, actual: len(document.PushStates), required: requiredPushStateCount},
+		{name: "push captures", declared: document.ExpectedPushCaptureCount, actual: len(document.PushCaptures), required: requiredPushCaptureCount},
+		{name: "push sessions", declared: document.ExpectedPushSessionCount, actual: len(document.Push.Sessions), required: requiredPushSessionCount},
 	}
 	for _, check := range checks {
 		if check.declared != check.required || check.actual != check.required {
@@ -238,7 +440,8 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 4800},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 5700},
+		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {
@@ -309,7 +512,10 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 		}
 		stateRows[state.Key] = state
 	}
-	for _, state := range []selectionState{selectionStateDefault, selectionStateSearch, selectionStateProjectPreview, selectionStateBranchPreview, selectionStateSessionPreview} {
+	for _, state := range []selectionState{
+		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
+		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
+	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
 		}
@@ -388,6 +594,36 @@ func validateSelectionData(selection selectionFixture) error {
 			if !sessionIDs[childID] {
 				return fmt.Errorf("screenshot fixture session %q references unknown child %q", listing.SessionID, childID)
 			}
+		}
+	}
+	if len(selection.SourceTranscripts) == 0 {
+		return fmt.Errorf("screenshot fixture records no harness transcript; the not-yet-imported preview would show nothing")
+	}
+	for sessionID, lines := range selection.SourceTranscripts {
+		if !sessionIDs[sessionID] || len(lines) == 0 {
+			return fmt.Errorf("screenshot fixture harness transcript %q is unknown or empty", sessionID)
+		}
+		if selection.Transcripts[sessionID] != nil {
+			return fmt.Errorf("screenshot fixture session %q has both a stored and a harness transcript; the capture could not show which one the pane read", sessionID)
+		}
+		for index, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				return fmt.Errorf("screenshot fixture harness transcript %q line %d is empty", sessionID, index)
+			}
+		}
+		var listed ftue.SessionListing
+		for _, listing := range selection.Listings {
+			if listing.SessionID == sessionID {
+				listed = listing
+			}
+		}
+		for _, ingestedID := range selection.Ingested {
+			if ingestedID == sessionID {
+				return fmt.Errorf("screenshot fixture session %q is imported, so its capture would not show the not-yet-imported preview", sessionID)
+			}
+		}
+		if listed.Source.Origin != ftue.SessionSourceOriginFile {
+			return fmt.Errorf("screenshot fixture session %q carries a harness transcript but declares origin %q", sessionID, listed.Source.Origin)
 		}
 	}
 	seenIngested := make(map[string]bool, len(selection.Ingested))

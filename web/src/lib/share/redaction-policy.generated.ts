@@ -56,4 +56,4 @@ export const UNSELECTABLE_REDACTION_LEVEL_REASONS: Readonly<Record<string, strin
  * copy had already drifted from the Go one ("shared" against "published" as
  * recorded) while config claimed the hedge lived in exactly one place.
  */
-export const REDACTION_SCOPE_SENTENCE = 'It redacts KNOWN PATTERNS of secrets, personal data and identifying paths in both metadata and transcript content, which is best effort and not a guarantee that every one was found.';
+export const REDACTION_SCOPE_SENTENCE = 'It redacts known patterns of secrets, personal data and identifying paths in both metadata and transcript content, which is best effort and not a guarantee that every one was found.';

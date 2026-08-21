@@ -83,7 +83,7 @@ privacy boundaries, and recovery behavior.
 | `peasant metrics compute` | Compute session metrics from stored transcripts |
 | `peasant web start` | Start the web dashboard server (default port 8690) |
 | `peasant web stop` | Stop the web dashboard server |
-| `peasant tui` | Launch the terminal UI |
+| `peasant tui` | Launch the terminal UI (deprecated; use `peasant web` and `peasant annotate`) |
 | `peasant kickstart` | Run the first-time setup wizard |
 | `peasant export sessions` | Export session transcripts as JSON |
 | `peasant export annotations` | Export annotations as JSONL |
@@ -185,7 +185,9 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | `--dev` | Proxy to Next.js dev server on localhost:3000 (implies --foreground) |
 | `--mock-data-store <sections>` | Use mock data for specific sections (replaces config, not additive) |
 
-### `peasant tui` flags
+### `peasant tui` flags (deprecated)
+
+`peasant tui` is deprecated. Use `peasant web` for the dashboard, sessions, and trends. Use `peasant annotate` for annotations. The command still runs and prints a notice. It will be removed after one release carries the notice.
 
 | Flag | Description |
 |------|-------------|
@@ -616,7 +618,7 @@ peasant web start --mock-data-store=web
 # Disable all mocks (even if config enables them)
 peasant web start --mock-data-store=none
 
-# Replace TUI sections
+# Replace TUI sections (peasant tui is deprecated)
 peasant tui --mock-data-store=tui
 ```
 

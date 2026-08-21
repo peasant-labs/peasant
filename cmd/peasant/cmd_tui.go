@@ -23,7 +23,13 @@ func BuildTUICommand() *cobra.Command {
 
 	tuiCmd := &cobra.Command{
 		Use:   "tui",
-		Short: "Launch the terminal UI",
+		Short: "Launch the terminal UI (deprecated)",
+		Long: "Launch the terminal UI.\n\n" +
+			"This command is deprecated. Use `peasant web` for the dashboard, sessions, and trends. " +
+			"Use `peasant annotate` for annotations. The command still runs. " +
+			"It will be removed after one release carries this notice.",
+		Deprecated: "use `peasant web` for the dashboard, sessions, and trends, and `peasant annotate` for annotations. " +
+			"The command still runs. It will be removed after one release carries this notice.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath := resolveConfigPath(cmd)
 			return runTUI(cmd, cfgPath, mockDataStore)

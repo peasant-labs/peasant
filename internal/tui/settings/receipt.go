@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
@@ -93,30 +94,36 @@ const receiptContinueCue = "▸ press enter to continue"
 // than one flat run of lines, so the review can be scanned instead of read
 // line-by-line. A styled continue cue always closes the render so the primary
 // action - press enter - stays obvious even when the groups above run long.
+//
+// The receipt is one kit.Panel. The panel fits every row to one shared width
+// and paints the page background behind each cell, so the review reads as a
+// single block instead of lines of different background widths.
 func (f Flow) renderReceipt(styles theme.Styles, width int) string {
-	var lines []string
-	lines = append(lines, styles.Header.Render(clip("review your changes", width)), "")
+	panel := kit.NewPanel(f.th)
+	panel.SetSize(width, 0)
+	panel.Line(styles.Header, "review your changes")
+	panel.Blank()
 	if f.consent != nil {
 		summary, err := f.consent(f.reg.consentContext(f.draft))
 		if err != nil {
 			for _, line := range splitLines(err.Error()) {
-				lines = append(lines, styles.Danger.Render(clip(line, width)))
+				panel.Line(styles.Danger, line)
 			}
-			lines = append(lines, "")
+			panel.Blank()
 		} else {
 			if len(summary.Values) > 0 {
-				lines = append(lines, styles.Header.Render(clip("your choices", width)))
+				panel.Line(styles.Header, "your choices")
 				for _, value := range summary.Values {
-					lines = append(lines, styles.Muted.Render(clip("  • "+value, width)))
+					panel.Line(styles.Muted, "  • "+value)
 				}
-				lines = append(lines, "")
+				panel.Blank()
 			}
 			if len(summary.Effects) > 0 {
-				lines = append(lines, styles.Header.Render(clip("when you confirm", width)))
+				panel.Line(styles.Header, "when you confirm")
 				for _, effect := range summary.Effects {
-					lines = append(lines, styles.Muted.Render(clip("  • "+effect, width)))
+					panel.Line(styles.Muted, "  • "+effect)
 				}
-				lines = append(lines, "")
+				panel.Blank()
 			}
 		}
 	}
@@ -137,27 +144,28 @@ func (f Flow) renderReceipt(styles theme.Styles, width int) string {
 		if title == "" {
 			title = s.Key
 		}
-		lines = append(lines, styles.Header.Render(clip(title, width)))
+		panel.Line(styles.Header, title)
 		for _, fld := range changed {
 			lbl := fld.Label()
 			if lbl == "" {
 				lbl = fld.Key()
 			}
-			lines = append(lines, styles.Muted.Render(clip("  • changed: "+lbl, width)))
+			panel.Line(styles.Muted, "  • changed: "+lbl)
 		}
-		lines = append(lines, "")
+		panel.Blank()
 	}
 	if !anyDirty {
-		lines = append(lines, styles.Muted.Render(clip("no changes to save", width)), "")
+		panel.Line(styles.Muted, "no changes to save")
+		panel.Blank()
 	}
 
 	if f.err != nil {
 		for _, ln := range splitLines(f.err.Error()) {
-			lines = append(lines, styles.Danger.Render(clip(ln, width)))
+			panel.Line(styles.Danger, ln)
 		}
-		lines = append(lines, "")
+		panel.Blank()
 	}
 
-	lines = append(lines, styles.Accent.Render(clip(receiptContinueCue, width)))
-	return joinLines(lines)
+	panel.Line(styles.Accent, receiptContinueCue)
+	return panel.View()
 }

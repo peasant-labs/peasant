@@ -12,7 +12,7 @@ import (
 
 // This is a program-level smoke test: it drives the push wizard end to end
 // through the exact Update loop the mounted program runs, on the hermetic
-// NewPushWizard([]PushWizardSession) seam (fixture sessions only — no village,
+// NewPushWizard seam (fixture sessions only - no village,
 // auth, or network). It proves the wizard launches, renders a non-empty first
 // frame, processes a scripted key walk across all four pages without panicking,
 // and hands back the confirmation and selection the walk implies.
@@ -65,20 +65,15 @@ func loadPushWalkFixture(t *testing.T) []pushWalkScenario {
 func TestPushWizard_ScriptedFourPageWalk(t *testing.T) {
 	for _, scenario := range loadPushWalkFixture(t) {
 		t.Run(scenario.Name, func(t *testing.T) {
-			m := NewPushWizard(testSessions())
+			m := mountWizard(testSessions())
 
 			// A launched program must render something to read.
 			if got := m.View().Content; got == "" {
 				t.Fatal("first frame is empty; the wizard rendered nothing on launch")
 			}
 
-			for i, token := range scenario.Keys {
-				updated, _ := m.Update(tuitest.Key(token))
-				next, ok := updated.(PushWizardModel)
-				if !ok {
-					t.Fatalf("key %d (%q): Update returned %T, not a PushWizardModel", i, token, updated)
-				}
-				m = next
+			for _, token := range scenario.Keys {
+				m = pressKey(m, tuitest.Key(token))
 			}
 
 			if got := m.Confirmed(); got != scenario.WantConfirmed {

@@ -447,7 +447,7 @@ func TestRedactionRecord_DescribesTheOutwardPushNotTheMetadataOnDisk(t *testing.
 				fmt.Sprintf("You are about to publish %d session(s).", testCase.SessionCount),
 				"Redaction report:",
 				// The hedge, shared verbatim with every refusal and the wizard.
-				"KNOWN PATTERNS",
+				"known patterns",
 				"not a guarantee",
 			} {
 				if !strings.Contains(rendered, want) {

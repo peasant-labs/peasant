@@ -1,0 +1,19 @@
+# Step tab strip coverage for the FULL guided flow. The one-section fixture
+# used by the mounted screenshot harness cannot overflow, so this fixture
+# declares every section title of the real guided flow and the narrow widths
+# at which the strip must still show the active tab.
+#
+# stepCount counts the sections; the strip also draws one trailing
+# "review & save" tab, so the strip holds stepCount + 1 tabs.
+expectedStepCount: 8
+expectedWidthCount: 3
+titles:
+  - choose sessions to import
+  - auto-ingest new branches
+  - publication
+  - privacy
+  - license
+  - sharing
+  - claude retention
+  - advanced
+widths: [40, 60, 80]

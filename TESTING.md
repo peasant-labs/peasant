@@ -405,13 +405,15 @@ The harness publishes three contact sheets under the commit-derived directory
 |------|----------------|----------|
 | `guided-dark.png` | `1800x3300` | The five guided sections in the dark theme: auto-ingest, privacy, license, destination, and retention. Each section includes `80x24` and `120x40` terminal renders. |
 | `guided-light.png` | `1800x3300` | The same five guided sections and terminal sizes in the light theme. |
-| `selection.png` | `1800x4800` | The mounted selection view, showing default and global-search states in dark mode plus project, branch, and transcript preview states in both themes. Every state includes `80x24` and `120x40` terminal renders. |
+| `selection.png` | `1800x5700` | The mounted selection view, showing default and global-search states in dark mode plus project, branch, imported-transcript, and harness-source preview states in both themes. Every state includes `80x24` and `120x40` terminal renders. |
 
-The selection fixture contains five synthetic sessions across two harnesses, with one session marked
-as already ingested and one carrying scrubbed transcript turns. Its states exercise the mounted
-hierarchy, global search, grouped repository and branch context, and the session transcript preview
-without depending on a developer's repository or session history. The guided matrix contains 20
-captures: five sections x two themes x two terminal sizes.
+The selection fixture contains six synthetic sessions across two harnesses. One session is marked as
+already ingested. One carries scrubbed transcript turns in the store. One carries a scrubbed harness
+transcript that the harness wrote and the store does not hold. Its states exercise the mounted
+hierarchy, global search, grouped repository and branch context, the stored session transcript
+preview, and the preview of a session that Peasant has not imported yet, without depending on a
+developer's repository or session history. The guided matrix contains 20 captures: five sections x
+two themes x two terminal sizes.
 
 The generated directory is local evidence and is ignored by git at `/out/test/screenshots/`; do not
 commit the PNGs. Manually inspect all three sheets after generation. Review both themes, both

@@ -125,12 +125,23 @@ func renderPrivacyExamples(level redact.RedactionLevel, samples []privacyExample
 				"repair the redactor replacement behavior instead of hard-coding example output")
 		}
 		lines = append(lines,
-			settings.GuideExampleLine{Kind: settings.GuideExampleLineLabel, Text: categoryLabel.String()},
+			settings.GuideExampleLine{Kind: settings.GuideExampleLineLabel, Text: privacyExampleHeading(sample.Category, categoryLabel)},
 			settings.GuideExampleLine{Kind: settings.GuideExampleLineBefore, Text: sample.Before},
 			settings.GuideExampleLine{Kind: settings.GuideExampleLineAfter, Text: after},
 		)
 	}
 	return lines, nil
+}
+
+// privacyExampleHeading is the lowercase heading shown above a category's
+// before/after example. It spells out the opaque PII acronym (keeping the acronym
+// itself uppercase) and lowercases the other category labels as UI chrome. This is
+// a display choice local to the guide; the canonical CategoryString is unchanged.
+func privacyExampleHeading(category redact.Category, label redact.CategoryString) string {
+	if category == redact.CategoryPII {
+		return "personally identifiable information (PII)"
+	}
+	return strings.ToLower(label.String())
 }
 
 func canonicalPrivacyCategoryLabel(category redact.Category) (redact.CategoryString, error) {

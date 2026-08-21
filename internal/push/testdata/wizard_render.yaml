@@ -1,0 +1,142 @@
+# Whole-screen captures of the push wizard.
+#
+# Each case names the state the model is driven into, the palette, and the
+# region it renders at. The two regions are the ones the terminal visual review
+# uses: a small 80x24 window and a large 120x40 one. Each state also names what
+# its screen must and must not show, so a golden that changes says WHAT changed
+# rather than only THAT it changed.
+expectedCaseCount: 14
+expectedAssertionCount: 7
+
+cases:
+  - name: start-dark-120x40
+    state: start
+    theme: dark
+    width: 120
+    height: 40
+  - name: start-light-80x24
+    state: start
+    theme: light
+    width: 80
+    height: 24
+  - name: selection-dark-120x40
+    state: selection
+    theme: dark
+    width: 120
+    height: 40
+  - name: selection-light-80x24
+    state: selection
+    theme: light
+    width: 80
+    height: 24
+  - name: session-preview-dark-120x40
+    state: session-preview
+    theme: dark
+    width: 120
+    height: 40
+  - name: session-preview-light-80x24
+    state: session-preview
+    theme: light
+    width: 80
+    height: 24
+  - name: empty-preview-dark-120x40
+    state: empty-preview
+    theme: dark
+    width: 120
+    height: 40
+  - name: empty-preview-light-80x24
+    state: empty-preview
+    theme: light
+    width: 80
+    height: 24
+  - name: consent-dark-120x40
+    state: consent
+    theme: dark
+    width: 120
+    height: 40
+  - name: consent-light-80x24
+    state: consent
+    theme: light
+    width: 80
+    height: 24
+  - name: receipt-dark-120x40
+    state: receipt
+    theme: dark
+    width: 120
+    height: 40
+  - name: receipt-light-80x24
+    state: receipt
+    theme: light
+    width: 80
+    height: 24
+  - name: help-dark-120x40
+    state: help
+    theme: dark
+    width: 120
+    height: 40
+  - name: help-light-80x24
+    state: help
+    theme: light
+    width: 80
+    height: 24
+
+assertions:
+  - state: start
+    wantContains:
+      - "push to village"
+      - "3 session(s) are ready to push"
+      - "yes"
+      - "no"
+    wantMissing:
+      - "Push to Village"
+  - state: selection
+    wantContains:
+      - "selected 3 of 3 sessions"
+      - "my-project"
+      - "tab"
+    wantMissing:
+      - "Session ID"
+      - "Provider"
+  - state: session-preview
+    wantContains:
+      - "sess-aaa-111"
+      - "<ANTHROPIC_KEY>"
+      - "redacts them"
+    wantMissing:
+      - "stored copy"
+      - "never been redacted"
+      - "sk-ant-api03"
+  - state: empty-preview
+    wantContains:
+      - "sess-ccc-333"
+      - "no transcript is stored for this session yet"
+    wantMissing:
+      - "stored copy"
+      - "never been redacted"
+  - state: consent
+    wantContains:
+      - "metadata"
+      - "known patterns"
+      - "deselect it"
+      - "before it publishes them to the village"
+      - "go back with esc to review one"
+    wantMissing:
+      - "No raw data will leave your machine"
+      - "stored copy"
+      - "older rule set"
+  - state: receipt
+    wantContains:
+      - "push 3 session(s) to the village."
+      - "nothing is removed from this machine."
+      - "sessions in this push"
+    wantMissing:
+      - "Proceed?"
+      - "leave this machine"
+      - "stay on it"
+  - state: help
+    wantContains:
+      - "keyboard shortcuts"
+      - "navigation"
+      - "actions"
+    wantMissing:
+      - "Navigation"

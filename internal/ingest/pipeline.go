@@ -947,6 +947,11 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		}
 		enabledCount++
 		adapter := factory(p.fs, p.git, p.salt)
+		// The local store doubles as the discovery evidence cache, so an
+		// unchanged transcript is never read and parsed again.
+		if cache, ok := p.store.(ClaudeEvidenceCache); ok {
+			AttachClaudeEvidenceCache(adapter, cache)
+		}
 		sessions, err := adapter.Discover(ctx, cfg)
 		if err != nil {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))

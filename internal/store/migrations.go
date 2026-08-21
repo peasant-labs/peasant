@@ -290,6 +290,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV41,
 		migrationV42,
 		migrationV43,
+		migrationV44,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -327,5 +328,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V41: association annotation target table + view recreation
 		{DisableForeignKeys: true}, // V42: recreates sessions + daily_summary_harness
 		nil,                        // V43: publication receipts and attempt diagnostics
+		nil,                        // V44: Claude discovery evidence cache (new table, no FKs)
 	},
 }

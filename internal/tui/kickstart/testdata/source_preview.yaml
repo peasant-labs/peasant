@@ -1,0 +1,127 @@
+# The selection step previewing a session that Peasant has not imported yet.
+#
+# transcript is the Claude Code JSONL file a harness wrote. The test writes it
+# to a temporary directory and points one listing at it, exactly as discovery
+# points a listing at the file it found. The reader parses that file in place.
+# It writes nothing, so the store stays empty through every case here.
+#
+# listings holds three sessions that cover the three answers the pane gives:
+# one with a transcript that holds turns, one with a transcript that holds no
+# turns, and one that discovery found no transcript for.
+#
+# readerCases drive the reader itself, including the failures that must stay
+# visible: a transcript that is gone, a harness with no reader, and an origin
+# outside the closed set.
+#
+# The expected*Count fields are the row-count guards.
+expectedListingCount: 3
+expectedTranscriptLineCount: 3
+expectedReaderCaseCount: 5
+expectedBodyCaseCount: 3
+expectedRenderCaseCount: 4
+width: 72
+sourceSessionId: 4b0d2e17-6c58-4a39-8f21-0d7e3b9c5a12
+emptySourceSessionId: 7e1f5c39-2b74-4d86-9c05-8a6d1e4f30b7
+plainSessionId: 92c6a418-3f57-4b0d-8e29-5c1a7d6b4f83
+transcript:
+  - '{"type":"user","uuid":"e1","message":{"role":"user","content":"please refactor the ingest pipeline so a failed write leaves nothing behind."}}'
+  - '{"type":"assistant","uuid":"e2","parentUuid":"e1","message":{"role":"assistant","content":[{"type":"text","text":"write to a temp directory first, then rename it into place.\n\n```go\nfunc write(dst string) error {\n    return os.Rename(tmp, dst)\n}\n```"}]}}'
+  - '{"type":"assistant","uuid":"e3","parentUuid":"e2","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./internal/ingest/"}}]}}'
+listings:
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    workingDir: /fixtures/claude/acme-tool
+    title: not imported yet
+    sessionId: 4b0d2e17-6c58-4a39-8f21-0d7e3b9c5a12
+    source:
+      origin: file
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    workingDir: /fixtures/claude/acme-tool
+    title: empty transcript
+    sessionId: 7e1f5c39-2b74-4d86-9c05-8a6d1e4f30b7
+    source:
+      origin: file
+  - harness: claude-code
+    projectName: acme/tool
+    gitRemote: "git@github.com:acme/tool.git"
+    branch: main
+    workingDir: /fixtures/claude/acme-tool
+    title: no transcript
+    sessionId: 92c6a418-3f57-4b0d-8e29-5c1a7d6b4f83
+readerCases:
+  - name: a-harness-transcript-folds-into-turns
+    harness: claude-code
+    origin: file
+    transcript: present
+    wantTurnCount: 3
+  - name: an-empty-transcript-yields-no-turns
+    harness: claude-code
+    origin: file
+    transcript: empty
+    wantTurnCount: 0
+  - name: a-transcript-that-is-gone-is-a-real-failure
+    harness: claude-code
+    origin: file
+    transcript: missing
+    wantErrorContains: read the harness transcript
+  - name: a-harness-with-no-reader-fails-closed
+    harness: nonesuch
+    origin: file
+    transcript: present
+    wantErrorContains: has no transcript reader
+  - name: an-origin-outside-the-closed-set-fails-closed
+    harness: claude-code
+    origin: ""
+    transcript: present
+    wantErrorContains: outside the supported closed set
+bodyCases:
+  - name: an-unimported-session-shows-its-harness-transcript
+    highlight: 4b0d2e17-6c58-4a39-8f21-0d7e3b9c5a12
+    wantContains:
+      - "harness: claude code"
+      - "project: acme/tool"
+      - "branch: main"
+      - you
+      - assistant
+      - please refactor the ingest pipeline so a failed write
+      - write to a temp directory first
+      - func write
+      - tool Bash
+    wantMissing:
+      - not imported yet
+  - name: an-empty-transcript-says-there-are-no-readable-turns
+    highlight: 7e1f5c39-2b74-4d86-9c05-8a6d1e4f30b7
+    wantContains:
+      - "harness: claude code"
+      - no readable turns are in this session's transcript yet
+    wantMissing:
+      - not imported yet
+  - name: a-session-with-no-transcript-says-it-is-not-imported
+    highlight: 92c6a418-3f57-4b0d-8e29-5c1a7d6b4f83
+    wantContains:
+      - "harness: claude code"
+      - not imported yet
+    wantMissing:
+      - please refactor the ingest pipeline
+renderCases:
+  - name: unimported-preview-dark
+    theme: dark
+    width: 120
+    height: 24
+  - name: unimported-preview-light
+    theme: light
+    width: 120
+    height: 24
+  - name: unimported-preview-narrow-dark
+    theme: dark
+    width: 80
+    height: 24
+  - name: unimported-preview-narrow-light
+    theme: light
+    width: 80
+    height: 24

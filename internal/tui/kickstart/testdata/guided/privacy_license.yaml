@@ -52,21 +52,29 @@ labelMutations:
 expectedViewportCount: 2
 expectedViewportMutationCount: 1
 viewport:
-  - name: common-height-starts-before-the-choice-rows
+  # The split keeps the control ALWAYS visible on the left, so this row now
+  # confirms the opposite regression from before the split: the control must
+  # already be on screen with no keys pressed, while the tail of the
+  # scrollable example (the last category) has not scrolled into view yet.
+  - name: common-height-shows-the-control-with-no-keys
     width: 80
-    height: 24
-    wantContains: [CREDENTIAL, INTERNAL, redaction level, '(•) standard']
-    wantMissing: ['removes secrets, file paths, personal data, and project identity']
-  - name: common-height-page-down-reveals-the-current-choice
+    height: 18
+    wantContains: ['redaction level', '(•) standard', credential]
+    wantMissing: ['github.com/example-org/example-repo']
+  - name: common-height-focus-right-then-page-down-reveals-the-last-category
     width: 80
-    height: 24
-    keys: [page-down]
+    height: 18
+    # The split's right pane now sizes itself to the left control's shorter
+    # (wrapped-description) content height rather than the full remaining
+    # terminal height, so its page size shrank too - two page-downs are now
+    # needed to reach the last category instead of one.
+    keys: [focus-right, page-down, page-down]
     wantContains:
       - '(•) standard'
-      - removes secrets, file paths, personal data, and project identity
-    wantMissing: [review & save]
+      - 'github.com/example-org/example-repo'
+    wantMissing: ['sk-ant-api03-EXAMPLEKEY0000000000000']
     mutationProbe: true
-    mutationReveal: removes secrets, file paths, personal data, and project identity
+    mutationReveal: 'github.com/example-org/example-repo'
 
 expectedLicenseCount: 4
 licenses:

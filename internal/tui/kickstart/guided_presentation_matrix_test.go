@@ -228,10 +228,17 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 
 			headingAt := exactMountedLine(view, fixture.Heading)
 			introAt := exactMountedLine(view, fixture.Intro)
-			controlAt := containingMountedLine(view, fixture.Control)
-			if headingAt < 0 || introAt < 0 || controlAt < 0 || !(headingAt < introAt && introAt < controlAt) {
-				t.Fatalf("mounted order heading/intro/control=%d/%d/%d for %q:\n%s",
-					headingAt, introAt, controlAt, row.Section, ansi.Strip(view))
+			if headingAt < 0 || introAt < 0 || headingAt >= introAt {
+				t.Fatalf("mounted heading/intro order=%d/%d for %q:\n%s",
+					headingAt, introAt, row.Section, ansi.Strip(view))
+			}
+			// The control must be VISIBLE in the initial frame - no paging
+			// required. A long guide (the privacy examples) scrolls in its own
+			// split pane beside the control instead of pushing the control
+			// itself below the fold at the smallest terminal.
+			if containingMountedLine(view, fixture.Control) < 0 {
+				t.Fatalf("mounted control %q not visible without paging for %q:\n%s",
+					fixture.Control, row.Section, ansi.Strip(view))
 			}
 			if count := strings.Count(ansi.Strip(view), fixture.Intro); count != 1 {
 				t.Fatalf("mounted section %q guide intro count=%d, want exactly one", row.Section, count)

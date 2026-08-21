@@ -13,6 +13,10 @@
 # transcript is on disk to recover the rest from. The pane must still show the
 # turn it has.
 #
+# sourceTranscript is the file a harness wrote for a session the store does not
+# hold. The preview reads that file in place, so the third case below shows a
+# real conversation for a session that Peasant never imported.
+#
 # expectedCaseCount is the row-count guard.
 expectedCaseCount: 5
 width: 72
@@ -38,6 +42,9 @@ recorded:
         arguments: '{"command":"go test ./internal/ingest/"}'
         result: |
           ok  github.com/peasant-labs/peasant/internal/ingest  0.412s
+sourceTranscript:
+  - '{"type":"user","uuid":"s1","message":{"role":"user","content":"please refactor the ingest pipeline so a failed write leaves nothing behind."}}'
+  - '{"type":"assistant","uuid":"s2","parentUuid":"s1","message":{"role":"assistant","content":[{"type":"text","text":"write to a temp directory first, then rename it into place."}]}}'
 cases:
   - name: an-imported-session-shows-its-whole-recorded-transcript
     highlight: 3f1c9a52-7b64-4e18-9a0d-2c5e8f7b1a44
@@ -72,14 +79,20 @@ cases:
     wantMissing:
       - not imported yet
 
-  - name: a-discovered-session-the-store-lacks-says-it-is-not-imported
+  # The store does not hold this session. Its transcript is still on disk where
+  # its harness wrote it, so the pane reads that file and shows the whole
+  # conversation instead of an explanation.
+  - name: a-discovered-session-the-store-lacks-reads-its-harness-transcript
     highlight: b47a0e63-5d28-4c91-8f37-6a1b2d9c4e05
     wantContains:
       - "harness: claude code"
       - "project: acme/tool"
-      - not imported yet
+      - you
+      - assistant
+      - please refactor the ingest pipeline so a failed write
+      - write to a temp directory first
     wantMissing:
-      - please refactor the ingest pipeline
+      - not imported yet
       - fresh session
 
   - name: a-project-row-explains-what-to-highlight

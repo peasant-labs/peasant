@@ -27,6 +27,9 @@ type SessionListing struct {
 	SessionID   string    `yaml:"sessionId"`   // raw session ID string supplied by discovery
 	SubagentIDs []string  `yaml:"subagentIds"` // child subagent session IDs (populated from discovery)
 	WorkingDir  string    `yaml:"workingDir"`  // session working directory, used only to focus its containing project
+	// Source locates the transcript the harness wrote. The selection step reads
+	// it to preview a session that Peasant has not imported yet.
+	Source SessionSource `yaml:"source"`
 }
 
 // StageProgress reports progress for a single pipeline stage.
