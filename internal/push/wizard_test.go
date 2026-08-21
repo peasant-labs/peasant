@@ -1,7 +1,6 @@
 package push
 
 import (
-	"github.com/peasant-labs/peasant/internal/testutil"
 	"strings"
 	"testing"
 
@@ -10,8 +9,23 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/tui/keymap"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 )
+
+// wizardTestWidth and wizardTestHeight are the region every interaction test
+// mounts the wizard into. They are large enough that the tree, the preview, and
+// the receipt all render their full form.
+const (
+	wizardTestWidth  = 120
+	wizardTestHeight = 40
+)
+
+// testTheme is the palette every wizard test renders with.
+func testTheme() theme.Theme { return theme.New(theme.ModeDark) }
 
 // testSessions returns a set of sessions for wizard tests.
 func testSessions() []PushWizardSession {
@@ -58,152 +72,187 @@ func testSessions() []PushWizardSession {
 	}
 }
 
-func TestWizard_InitialConfirm_Yes(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	if m.page != pageInitialConfirm {
-		t.Fatalf("expected pageInitialConfirm, got %d", m.page)
-	}
-
-	// confirmSel defaults to 0 (Yes), press enter to confirm.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
-	if m.page != pageSessionReview {
-		t.Fatalf("expected pageSessionReview after enter (Yes selected), got %d", m.page)
-	}
+// mountWizard builds the wizard over the fixture sessions and sizes it, which
+// is what the mounted program does before the first frame.
+func mountWizard(sessions []PushWizardSession) PushWizardModel {
+	return mountWizardSize(sessions, wizardTestWidth, wizardTestHeight)
 }
 
-func TestWizard_InitialConfirm_No(t *testing.T) {
-	m := NewPushWizard(testSessions())
+// mountWizardSize mounts the wizard into an exact terminal region.
+func mountWizardSize(sessions []PushWizardSession, width, height int) PushWizardModel {
+	m := NewPushWizard(testTheme(), sessions, testPublishedTurns())
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return updated.(PushWizardModel)
+}
 
-	// Move down to "No" option, then press enter.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = updated.(PushWizardModel)
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
-	if !m.quitting {
-		t.Fatal("expected quitting after selecting No")
-	}
+// collectMsgs runs a command and returns every message it produced, flattening
+// a batch into its parts.
+func collectMsgs(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
-		t.Fatal("expected tea.Quit cmd")
+		return nil
+	}
+	var out []tea.Msg
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			out = append(out, collectMsgs(c)...)
+		}
+		return out
+	}
+	if msg != nil {
+		out = append(out, msg)
+	}
+	return out
+}
+
+// drainWizard feeds back every message a command produced, and their immediate
+// follow-ups, as the runtime would. It stops one level deep so a repeating
+// animation tick cannot loop.
+func drainWizard(m PushWizardModel, cmd tea.Cmd) PushWizardModel {
+	for _, msg := range collectMsgs(cmd) {
+		updated, follow := m.Update(msg)
+		m = updated.(PushWizardModel)
+		for _, next := range collectMsgs(follow) {
+			updated, _ = m.Update(next)
+			m = updated.(PushWizardModel)
+		}
+	}
+	return m
+}
+
+// pressKey sends one key press and settles the work it started.
+func pressKey(m PushWizardModel, msg tea.KeyPressMsg) PushWizardModel {
+	updated, cmd := m.Update(msg)
+	return drainWizard(updated.(PushWizardModel), cmd)
+}
+
+// pressKeyWithCmd sends one key press and returns the command it produced,
+// unsettled, for a test that asserts on the command itself.
+func pressKeyWithCmd(m PushWizardModel, msg tea.KeyPressMsg) (PushWizardModel, tea.Cmd) {
+	updated, cmd := m.Update(msg)
+	return updated.(PushWizardModel), cmd
+}
+
+// Key events the interaction tests send.
+func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
+func keyEsc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEsc} }
+func keyLeft() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyLeft} }
+func keyDown() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyDown} }
+func keyUp() tea.KeyPressMsg    { return tea.KeyPressMsg{Code: tea.KeyUp} }
+func keySpace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeySpace} }
+func keyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// acceptStart answers the first page with yes, which opens the selector.
+func acceptStart(m PushWizardModel) PushWizardModel {
+	return pressKey(pressKey(m, keyLeft()), keyEnter())
+}
+
+func TestWizard_Start_Accept(t *testing.T) {
+	m := mountWizard(testSessions())
+	if m.page != pageInitialConfirm {
+		t.Fatalf("expected pageInitialConfirm, got %s", m.page)
+	}
+	m = acceptStart(m)
+	if m.page != pageSessionReview {
+		t.Fatalf("expected pageSessionReview after accepting the start prompt, got %s", m.page)
 	}
 }
 
-func TestWizard_SessionReview_SpaceCycles(t *testing.T) {
-	sessions := testSessions()
-	m := NewPushWizard(sessions)
-	// Advance to session review.
-	m.page = pageSessionReview
-	m.cursor = 0
-
-	if m.sessions[0].Action != PushWithRedaction {
-		t.Fatal("expected default PushWithRedaction")
+func TestWizard_Start_Decline(t *testing.T) {
+	m := mountWizard(testSessions())
+	// The prompt opens on "no", so enter alone declines.
+	m = pressKey(m, keyEnter())
+	if !m.quitting {
+		t.Fatal("expected quitting after declining the start prompt")
 	}
+}
 
-	// Space toggles to exclude.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
-	m = updated.(PushWizardModel)
+func TestWizard_Selection_SpaceTogglesTheHighlightedProject(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	if m.sessions[0].Action != PushWithRedaction {
+		t.Fatal("expected the first session to open selected")
+	}
+	// The cursor opens on the first project row, whose only child is the first
+	// session.
+	m = pressKey(m, keySpace())
 	if m.sessions[0].Action != PushExclude {
 		t.Fatalf("expected PushExclude after space, got %v", m.sessions[0].Action)
 	}
-
-	// Space toggles back.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
-	m = updated.(PushWizardModel)
+	m = pressKey(m, keySpace())
 	if m.sessions[0].Action != PushWithRedaction {
-		t.Fatalf("expected PushWithRedaction after second space, got %v", m.sessions[0].Action)
+		t.Fatalf("expected PushWithRedaction after a second space, got %v", m.sessions[0].Action)
 	}
 }
 
-func TestWizard_SessionReview_QSetsExclude(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageSessionReview
-	m.cursor = 1
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	m = updated.(PushWizardModel)
-	if m.sessions[1].Action != PushExclude {
-		t.Fatalf("expected PushExclude after 'q', got %v", m.sessions[1].Action)
+func TestWizard_Selection_SpaceTogglesTheHighlightedSession(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	// Down moves from the project row onto its session row.
+	m = pressKey(m, keyDown())
+	m = pressKey(m, keySpace())
+	if m.sessions[0].Action != PushExclude {
+		t.Fatalf("expected PushExclude after space on the session row, got %v", m.sessions[0].Action)
+	}
+	if m.sessions[1].Action != PushWithRedaction {
+		t.Fatalf("a toggle must change one session only; session 1 is %v", m.sessions[1].Action)
 	}
 }
 
-func TestWizard_SessionReview_WSetsWithRedaction(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageSessionReview
-	m.sessions[0].Action = PushExclude
-	m.cursor = 0
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
-	m = updated.(PushWizardModel)
-	if m.sessions[0].Action != PushWithRedaction {
-		t.Fatalf("expected PushWithRedaction after 'w', got %v", m.sessions[0].Action)
-	}
-}
-
-func TestWizard_SessionReview_ApproveAll(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageSessionReview
-	m.sessions[0].Action = PushExclude
-	m.sessions[1].Action = PushExclude
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	m = updated.(PushWizardModel)
-	for i, s := range m.sessions {
-		if s.Action != PushWithRedaction {
-			t.Fatalf("session %d: expected PushWithRedaction, got %v", i, s.Action)
-		}
-	}
-}
-
-func TestWizard_SessionReview_ExcludeAll(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageSessionReview
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	m = updated.(PushWizardModel)
+func TestWizard_Selection_SelectAllCycles(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	// Every session opens selected, so the ring skips the step that would
+	// change nothing: the first press clears the forest, the second restores
+	// the selection the cycle started from.
+	m = pressKey(m, keyRune('a'))
 	for i, s := range m.sessions {
 		if s.Action != PushExclude {
-			t.Fatalf("session %d: expected PushExclude, got %v", i, s.Action)
+			t.Fatalf("session %d: expected PushExclude after the clear step, got %v", i, s.Action)
+		}
+	}
+	m = pressKey(m, keyRune('a'))
+	for i, s := range m.sessions {
+		if s.Action != PushWithRedaction {
+			t.Fatalf("session %d: expected PushWithRedaction after the restore step, got %v", i, s.Action)
 		}
 	}
 }
 
-func TestWizard_PageNavigation(t *testing.T) {
-	m := NewPushWizard(testSessions())
-
-	// Page 1 → Page 2 (confirmSel=0 is Yes, press enter)
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
-	if m.page != pageSessionReview {
-		t.Fatalf("expected pageSessionReview, got %d", m.page)
+func TestWizard_Selection_Navigation(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	if got := m.tree.Cursor(); got != 0 {
+		t.Fatalf("expected the cursor to open on the first row, got %d", got)
 	}
+	m = pressKey(m, keyDown())
+	if got := m.tree.Cursor(); got != 1 {
+		t.Fatalf("expected cursor=1 after down, got %d", got)
+	}
+	m = pressKey(m, keyUp())
+	if got := m.tree.Cursor(); got != 0 {
+		t.Fatalf("expected cursor=0 after up, got %d", got)
+	}
+}
 
-	// Page 2 → Page 3
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
+func TestWizard_PageWalk(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	m = pressKey(m, keyEnter())
 	if m.page != pageRedactionPreview {
-		t.Fatalf("expected pageRedactionPreview, got %d", m.page)
+		t.Fatalf("expected pageRedactionPreview, got %s", m.page)
 	}
-
-	// Page 3 → Page 4
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
+	m = pressKey(m, keyEnter())
 	if m.page != pageFinalConfirm {
-		t.Fatalf("expected pageFinalConfirm, got %d", m.page)
+		t.Fatalf("expected pageFinalConfirm, got %s", m.page)
 	}
-
-	// Page 4 confirm (confirmSel=0 is Yes, press enter)
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
+	m = pressKey(m, keyLeft())
+	m, cmd := pressKeyWithCmd(m, keyEnter())
+	m = drainWizard(m, cmd)
 	if !m.confirmed {
-		t.Fatal("expected confirmed after enter on final page (Yes selected)")
-	}
-	if cmd == nil {
-		t.Fatal("expected tea.Quit cmd on confirmation")
+		t.Fatal("expected confirmed after accepting the final prompt")
 	}
 }
 
 func TestWizard_SelectedSessionIDs(t *testing.T) {
-	m := NewPushWizard(testSessions())
+	m := mountWizard(testSessions())
 	m.sessions[1].Action = PushExclude
 
 	ids := m.SelectedSessionIDs()
@@ -218,175 +267,105 @@ func TestWizard_SelectedSessionIDs(t *testing.T) {
 	}
 }
 
-func TestWizard_RedactionStatus(t *testing.T) {
+func TestWizard_RedactionState(t *testing.T) {
 	sessions := testSessions()
-
-	// Session 0: current (applied, hash matches)
-	if got := sessions[0].redactionStatus(); got != "current" {
-		t.Errorf("session 0: expected 'current', got %q", got)
+	cases := []struct {
+		index int
+		want  RedactionState
+	}{
+		{index: 0, want: RedactionStateCurrent},
+		{index: 1, want: RedactionStateStale},
+		{index: 2, want: RedactionStateRaw},
 	}
-	// Session 1: stale (applied, hash differs)
-	if got := sessions[1].redactionStatus(); got != "stale" {
-		t.Errorf("session 1: expected 'stale', got %q", got)
-	}
-	// Session 2: raw (not applied)
-	if got := sessions[2].redactionStatus(); got != "raw" {
-		t.Errorf("session 2: expected 'raw', got %q", got)
+	for _, c := range cases {
+		if got := sessions[c.index].RedactionState(); got != c.want {
+			t.Errorf("session %d: RedactionState() = %s, want %s", c.index, got, c.want)
+		}
 	}
 }
 
-func TestWizard_RedactionStatus_NilMeta(t *testing.T) {
-	s := PushWizardSession{
-		Row:  ingest.PushSessionRow{SessionID: "test"},
-		Meta: nil,
-	}
-	if got := s.redactionStatus(); got != "unknown" {
-		t.Errorf("expected 'unknown' for nil meta, got %q", got)
+func TestWizard_RedactionState_NilMeta(t *testing.T) {
+	s := PushWizardSession{Row: ingest.PushSessionRow{SessionID: "test"}}
+	if got := s.RedactionState(); got != RedactionStateUnknown {
+		t.Errorf("RedactionState() = %s, want %s for nil metadata", got, RedactionStateUnknown)
 	}
 }
 
 func TestWizard_BackNavigation(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageSessionReview
-
-	// Esc from session review goes back to initial confirm.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	m = updated.(PushWizardModel)
+	m := acceptStart(mountWizard(testSessions()))
+	m = pressKey(m, keyEsc())
 	if m.page != pageInitialConfirm {
-		t.Fatalf("expected pageInitialConfirm after esc, got %d", m.page)
+		t.Fatalf("expected pageInitialConfirm after esc, got %s", m.page)
 	}
 }
 
-func TestWizard_FinalConfirm_BackNavigation(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageFinalConfirm
-
-	// Move down to "No, go back" option, then press enter.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = updated.(PushWizardModel)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
+func TestWizard_FinalConfirm_Decline_ReturnsToSelection(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	m = pressKey(m, keyEnter())
+	m = pressKey(m, keyEnter())
+	if m.page != pageFinalConfirm {
+		t.Fatalf("expected pageFinalConfirm, got %s", m.page)
+	}
+	// The prompt opens on "no", so enter alone declines and returns.
+	m = pressKey(m, keyEnter())
 	if m.page != pageSessionReview {
-		t.Fatalf("expected pageSessionReview after selecting 'No, go back', got %d", m.page)
+		t.Fatalf("expected pageSessionReview after declining the final prompt, got %s", m.page)
 	}
-}
-
-func TestWizard_ConfirmSel_BoundaryClamping(t *testing.T) {
-	t.Run("InitialConfirm", func(t *testing.T) {
-		m := NewPushWizard(testSessions())
-		if m.page != pageInitialConfirm {
-			t.Fatalf("expected pageInitialConfirm, got %d", m.page)
-		}
-		if m.confirmSel != 0 {
-			t.Fatalf("expected confirmSel=0 initially, got %d", m.confirmSel)
-		}
-
-		// Press Up at position 0 — should stay at 0 (no underflow).
-		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-		m = updated.(PushWizardModel)
-		if m.confirmSel != 0 {
-			t.Fatalf("expected confirmSel=0 after up at top, got %d", m.confirmSel)
-		}
-
-		// Press Down — should move to 1.
-		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-		m = updated.(PushWizardModel)
-		if m.confirmSel != 1 {
-			t.Fatalf("expected confirmSel=1 after down, got %d", m.confirmSel)
-		}
-
-		// Press Down again at position 1 — should stay at 1 (no overflow).
-		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-		m = updated.(PushWizardModel)
-		if m.confirmSel != 1 {
-			t.Fatalf("expected confirmSel=1 after down at bottom, got %d", m.confirmSel)
-		}
-	})
-
-	t.Run("FinalConfirm", func(t *testing.T) {
-		m := NewPushWizard(testSessions())
-		m.page = pageFinalConfirm
-		// confirmSel resets to 0 when entering final confirm page.
-		m.confirmSel = 0
-
-		// Press Up at position 0 — should stay at 0 (no underflow).
-		updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-		m = updated.(PushWizardModel)
-		if m.confirmSel != 0 {
-			t.Fatalf("expected confirmSel=0 after up at top, got %d", m.confirmSel)
-		}
-
-		// Press Down — should move to 1.
-		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-		m = updated.(PushWizardModel)
-		if m.confirmSel != 1 {
-			t.Fatalf("expected confirmSel=1 after down, got %d", m.confirmSel)
-		}
-
-		// Press Down again at position 1 — should stay at 1 (no overflow).
-		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-		m = updated.(PushWizardModel)
-		if m.confirmSel != 1 {
-			t.Fatalf("expected confirmSel=1 after down at bottom, got %d", m.confirmSel)
-		}
-	})
-}
-
-func TestWizard_SessionReview_Navigation(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageSessionReview
-	m.cursor = 0
-	m.height = 40
-
-	// Move down.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = updated.(PushWizardModel)
-	if m.cursor != 1 {
-		t.Fatalf("expected cursor=1 after down, got %d", m.cursor)
-	}
-
-	// Move down again.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = updated.(PushWizardModel)
-	if m.cursor != 2 {
-		t.Fatalf("expected cursor=2 after second down, got %d", m.cursor)
-	}
-
-	// Move down at bottom (should clamp).
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = updated.(PushWizardModel)
-	if m.cursor != 2 {
-		t.Fatalf("expected cursor=2 at bottom, got %d", m.cursor)
-	}
-
-	// Move up.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	m = updated.(PushWizardModel)
-	if m.cursor != 1 {
-		t.Fatalf("expected cursor=1 after up, got %d", m.cursor)
+	if m.confirmed {
+		t.Fatal("declining the final prompt must not confirm the push")
 	}
 }
 
 func TestWizard_CtrlC_Cancels(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	m = updated.(PushWizardModel)
-	if !m.quitting {
+	m := mountWizard(testSessions())
+	next, cmd := pressKeyWithCmd(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if !next.quitting {
 		t.Fatal("expected quitting after ctrl+c")
 	}
 	if cmd == nil {
-		t.Fatal("expected tea.Quit cmd")
+		t.Fatal("expected a quit command")
 	}
 }
 
-func TestWizard_RedactionPreview_EscGoesBack(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageRedactionPreview
+func TestWizard_Help_OpensAndCloses(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	m = pressKey(m, keyRune('?'))
+	if !m.helping {
+		t.Fatal("expected the help overlay to open on ?")
+	}
+	view := ansi.Strip(m.viewString())
+	if !strings.Contains(view, "keyboard shortcuts") {
+		t.Errorf("the help overlay must name itself; got:\n%s", view)
+	}
+	for _, want := range []string{"tab", "shift+tab", "?"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the help overlay must list %q; got:\n%s", want, view)
+		}
+	}
+	m = pressKey(m, keyRune('?'))
+	if m.helping {
+		t.Fatal("expected the help overlay to close on a second ?")
+	}
+}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	m = updated.(PushWizardModel)
-	if m.page != pageSessionReview {
-		t.Fatalf("expected pageSessionReview after esc from redaction preview, got %d", m.page)
+func TestWizard_Selection_FooterNamesTheKitKeys(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	view := ansi.Strip(m.viewString())
+	for _, want := range []string{"tab", "prev field"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the selection footer must name %q; got:\n%s", want, view)
+		}
+	}
+	// The footer is truncated from the right, so the help key is asserted on the
+	// dispatchable set the footer and the overlay are both derived from.
+	found := false
+	for _, action := range m.availableActions() {
+		if action == keymap.ActionHelp {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the selection page must dispatch the help key")
 	}
 }
 
@@ -477,7 +456,7 @@ func TestWizardCandidates_SelectedExcludesLocked(t *testing.T) {
 	t.Parallel()
 	sel, kept, excluded, conflict := conflictSelectionFixture()
 
-	m := NewPushWizard(WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, sel))
+	m := mountWizard(WizardCandidates([]ingest.PushSessionRow{kept, excluded, conflict}, sel))
 	ids := m.SelectedSessionIDs()
 
 	if len(ids) != 1 || ids[0] != "kept-001" {
@@ -485,85 +464,114 @@ func TestWizardCandidates_SelectedExcludesLocked(t *testing.T) {
 	}
 }
 
-func TestWizard_SessionReview_SkipsLocked(t *testing.T) {
+// lockedSessions is the two-row fixture the withheld-session tests drive: one
+// selectable session and one the branch-aware selection withheld.
+func lockedSessions() []PushWizardSession {
+	return []PushWizardSession{
+		{
+			Row: ingest.PushSessionRow{
+				SessionID: "keep", ModelHarness: string(defaults.HarnessClaudeCode), ProjectName: "alpha",
+			},
+			Action: PushWithRedaction,
+		},
+		{
+			Row: ingest.PushSessionRow{
+				SessionID: "locked", ModelHarness: string(defaults.HarnessClaudeCode), ProjectName: "beta",
+			},
+			Action: PushExclude,
+			Locked: true,
+		},
+	}
+}
+
+func TestWizard_Selection_SkipsWithheldSessions(t *testing.T) {
 	t.Parallel()
-	sessions := []PushWizardSession{
-		{Row: ingest.PushSessionRow{SessionID: "keep"}, Action: PushWithRedaction},
-		{Row: ingest.PushSessionRow{SessionID: "locked"}, Action: PushExclude, Locked: true},
+	m := acceptStart(mountWizard(lockedSessions()))
+	// Move onto the withheld session row: project alpha, session keep, project
+	// beta, session locked.
+	for i := 0; i < 3; i++ {
+		m = pressKey(m, keyDown())
 	}
-	m := NewPushWizard(sessions)
-	m.page = pageSessionReview
-	m.cursor = 1 // cursor on the Locked row
-
-	// space must NOT toggle a Locked row.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
-	m = updated.(PushWizardModel)
+	m = pressKey(m, keySpace())
 	if m.sessions[1].Action != PushExclude {
-		t.Errorf("space on Locked row should not change Action; got %v", m.sessions[1].Action)
+		t.Errorf("space on a withheld row must not change its action; got %v", m.sessions[1].Action)
 	}
-
-	// 'w' (push approve) must NOT select a Locked row.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
-	m = updated.(PushWizardModel)
+	// The selectable row opens selected, so the ring clears it first and
+	// restores it next. The withheld row must not move on either step.
+	m = pressKey(m, keyRune('a'))
 	if m.sessions[1].Action != PushExclude {
-		t.Errorf("'w' on Locked row should not select it; got %v", m.sessions[1].Action)
+		t.Errorf("the clear step must leave the withheld row excluded; got %v", m.sessions[1].Action)
 	}
-
-	// 'a' (approve all) selects unlocked rows but skips Locked.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	m = updated.(PushWizardModel)
+	m = pressKey(m, keyRune('a'))
 	if m.sessions[0].Action != PushWithRedaction {
-		t.Errorf("'a' should select the unlocked row; got %v", m.sessions[0].Action)
+		t.Errorf("the restore step must select the selectable row; got %v", m.sessions[0].Action)
 	}
 	if m.sessions[1].Action != PushExclude {
-		t.Errorf("'a' should skip the Locked row; got %v", m.sessions[1].Action)
+		t.Errorf("select all must skip the withheld row; got %v", m.sessions[1].Action)
 	}
-
-	// 'x' (exclude all) leaves the Locked row excluded (never selected).
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	m = updated.(PushWizardModel)
-	if m.sessions[1].Action != PushExclude {
-		t.Errorf("'x' should leave Locked row excluded; got %v", m.sessions[1].Action)
-	}
-
-	// The Locked row is never in the approved set.
 	for _, id := range m.SelectedSessionIDs() {
 		if id == "locked" {
-			t.Errorf("Locked session must never appear in SelectedSessionIDs")
+			t.Error("a withheld session must never appear in SelectedSessionIDs")
 		}
 	}
 }
 
-func TestWizard_SessionReview_LockedRendered(t *testing.T) {
+func TestWizard_Selection_ReportsWhyASessionIsWithheld(t *testing.T) {
 	t.Parallel()
-	sessions := []PushWizardSession{
-		{Row: ingest.PushSessionRow{SessionID: "locked", ModelHarness: string(defaults.HarnessClaudeCode), ProjectName: "p"}, Action: PushExclude, Locked: true},
+	m := acceptStart(mountWizard(lockedSessions()))
+	for i := 0; i < 3; i++ {
+		m = pressKey(m, keyDown())
 	}
-	m := NewPushWizard(sessions)
-	m.page = pageSessionReview
-	m.height = 40
-	if got := m.viewSessionReview(); !strings.Contains(got, "withheld: branch conflict") {
-		t.Errorf("session review should render Locked row as 'withheld: branch conflict'; got:\n%s", got)
+	view := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
+	if !strings.Contains(view, "withheld") {
+		t.Errorf("the selector must say the highlighted session is withheld; got:\n%s", view)
+	}
+	if !strings.Contains(view, "branch") {
+		t.Errorf("the selector must name the branch conflict as the reason; got:\n%s", view)
 	}
 }
 
-func TestWizard_RedactionPreview_NoSelectedBlocksAdvance(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageRedactionPreview
-	// Exclude all sessions.
-	for i := range m.sessions {
-		m.sessions[i].Action = PushExclude
-	}
-
-	// Enter should NOT advance to final confirm when nothing selected.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = updated.(PushWizardModel)
+func TestWizard_Notice_NoSelectionBlocksAdvance(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	// Every session opens selected, so one press of the select-all key clears
+	// the whole forest.
+	m = pressKey(m, keyRune('a'))
+	m = pressKey(m, keyEnter())
 	if m.page != pageRedactionPreview {
-		t.Fatalf("expected to stay on pageRedactionPreview when no sessions selected, got %d", m.page)
+		t.Fatalf("expected pageRedactionPreview, got %s", m.page)
+	}
+	m = pressKey(m, keyEnter())
+	if m.page != pageRedactionPreview {
+		t.Fatalf("expected to stay on the consent page with nothing selected, got %s", m.page)
+	}
+	view := ansi.Strip(m.viewString())
+	if !strings.Contains(view, "no sessions are selected") {
+		t.Errorf("the consent page must say why it cannot advance; got:\n%s", view)
 	}
 }
 
-// TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep is the guard that did not
+func TestWizard_Notice_Scrolls(t *testing.T) {
+	// A short region is what makes the consent copy longer than the page, which
+	// is the state scrolling exists for. The region shrank when the copy did:
+	// the page dropped the stored-copy classification, so at 80x24 the whole
+	// notice now fits and there is nothing to scroll.
+	m := acceptStart(mountWizardSize(testSessions(), 80, 14))
+	m = pressKey(m, keyEnter())
+	first := m.viewString()
+	m = pressKey(m, keyDown())
+	if m.noticeScroll != 1 {
+		t.Fatalf("expected the consent page to scroll by one row, got %d", m.noticeScroll)
+	}
+	if m.viewString() == first {
+		t.Error("the consent page rendered the same screen after scrolling")
+	}
+	m = pressKey(m, keyUp())
+	if m.noticeScroll != 0 {
+		t.Fatalf("expected the consent page to scroll back, got %d", m.noticeScroll)
+	}
+}
+
+// TestWizard_Notice_MakesNoPromiseItCannotKeep is the guard that did not
 // exist when the screen promised something untrue.
 //
 // This is the screen a user confirms a publish on, so it is the highest-stakes
@@ -579,14 +587,8 @@ func TestWizard_RedactionPreview_NoSelectedBlocksAdvance(t *testing.T) {
 // test coverage, so the claim could be written once and never re-examined. That is
 // the gap this test closes, and it is why the forbidden list is phrased as claims
 // rather than as exact strings: a reworded promise is still a promise.
-func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
-	m := NewPushWizard(testSessions())
-	m.page = pageRedactionPreview
-	// Select everything, so the screen renders its full summary rather than the
-	// empty-selection short form.
-	for i := range m.sessions {
-		m.sessions[i].Action = PushWithRedaction
-	}
+func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
+	m := mountWizard(testSessions())
 	// Assertions run on WHITESPACE-NORMALISED text, because the screen wraps.
 	//
 	// This is not convenience. A wrapped line puts a newline inside a sentence, so
@@ -602,7 +604,7 @@ func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// point, so a raw substring guard would see escape bytes between two words a
 	// sentence keeps together. Stripping leaves the visible text this screen
 	// prints, which is what these claims are about.
-	screen := strings.Join(strings.Fields(ansi.Strip(m.redactionPreviewContent())), " ")
+	screen := strings.Join(strings.Fields(ansi.Strip(m.noticePanel(wizardTestWidth).View())), " ")
 
 	// The over-claims come from the SHARED corpus, not from a list written here.
 	//
@@ -634,6 +636,15 @@ func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// The six phrasings this screen printed or nearly printed, kept beside the
 	// corpus because they are specific to this surface's wording rather than to
 	// redaction copy in general.
+	// The classification of the STORED copy is forbidden here, not merely absent.
+	//
+	// The screen used to count the selected sessions by the redaction record of
+	// the copy on this machine: never redacted, older rule set, current rule set.
+	// Every count was true and none was about the push, so a maintainer read
+	// "session(s) whose stored copy has never been redacted" at the moment of
+	// consent and had nothing to do with it. Whatever the stored copy holds, what
+	// leaves is redacted on its way out. Naming the phrasings keeps a reworded
+	// return of the same idea out of this screen.
 	for _, forbidden := range []string{
 		"No raw data will leave your machine",
 		"All sessions are redacted",
@@ -641,9 +652,13 @@ func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
 		"will be re-redacted before push",
 		"Standard redaction will be applied",
 		"ready to push as-is",
+		"stored copy",
+		"has never been redacted",
+		"an older rule set",
+		"at the current rule set",
 	} {
 		if strings.Contains(screen, forbidden) {
-			t.Errorf("the consent screen must not promise %q: redaction finds KNOWN PATTERNS in metadata and content, so an "+
+			t.Errorf("the consent screen must not promise %q: redaction finds known patterns in metadata and content, so an "+
 				"absolute claim of completeness is one it cannot keep whatever it covers; got:\n%s", forbidden, screen)
 		}
 	}
@@ -658,13 +673,15 @@ func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// behaviour it describes moves, or it holds the copy to the old behaviour
 	// while every test stays green.
 	for _, required := range []string{
-		"METADATA",                             // what is redacted, still
-		"file paths and diagnostic locations",  // fields the configured level actually rewrites
-		"CONVERSATION CONTENT",                 // and what now is too
-		"KNOWN PATTERNS",                       // the hedge, which must survive every rewording
-		"not a guarantee",                      // said outright rather than implied
-		"can differ from what you see locally", // the consequence of redacting content
-		"deselect it",                          // the remedy that is one keystroke away here
+		"metadata",                                // what is redacted, still
+		"file paths and diagnostic locations",     // fields the configured level actually rewrites
+		"conversation content",                    // and what now is too
+		"known patterns",                          // the hedge, which must survive every rewording
+		"not a guarantee",                         // said outright rather than implied
+		"can differ from what you see locally",    // the consequence of redacting content
+		"deselect it",                             // the remedy that is one keystroke away here
+		"before it publishes them to the village", // what replaced the stored-copy counts
+		"go back with esc to review one",          // where the user sees the published text
 	} {
 		if !strings.Contains(screen, required) {
 			t.Errorf("the consent screen must state %q so the user can see what leaves and what to do about it; got:\n%s",
@@ -672,10 +689,83 @@ func TestWizard_RedactionPreview_MakesNoPromiseItCannotKeep(t *testing.T) {
 		}
 	}
 	for _, identityField := range []string{"the host slug", "the project name", "the git remote", "the git branch"} {
-		if strings.Contains(screen, "METADATA — "+identityField) || strings.Contains(screen, ", "+identityField) ||
-			strings.Contains(screen, "and "+identityField+" —") {
+		if strings.Contains(screen, "metadata - "+identityField) || strings.Contains(screen, ", "+identityField) ||
+			strings.Contains(screen, "and "+identityField+" -") {
 			t.Errorf("the consent screen claims %q is redacted at the configured level, but it is published as recorded; got:\n%s",
 				identityField, screen)
 		}
+	}
+}
+
+// TestWizard_SelectionTree_WithheldRowIsAConflict proves the withheld session
+// reaches the tree as the non-selectable state, which is what stops every
+// selection key from moving it into the push set.
+func TestWizard_SelectionTree_WithheldRowIsAConflict(t *testing.T) {
+	t.Parallel()
+	m := mountWizard(lockedSessions())
+	leaf, ok := m.leaves["locked"]
+	if !ok {
+		t.Fatal("the withheld session has no row in the selection tree")
+	}
+	if leaf.State != kit.Conflict {
+		t.Errorf("withheld row state = %s, want %s", leaf.State, kit.Conflict)
+	}
+}
+
+// windowSize is the resize message a mounted program receives from the
+// terminal.
+func windowSize(width, height int) tea.WindowSizeMsg {
+	return tea.WindowSizeMsg{Width: width, Height: height}
+}
+
+// TestWizard_Receipt_CountsThePushAndNotADeletion is the guard on the last
+// screen before an upload.
+//
+// It used to read "N session(s) leave this machine." over "M of N candidate
+// sessions stay on it." A push copies: nothing leaves and nothing is removed.
+// Read at the moment of confirmation, that pair says the selected sessions go
+// away and the rest are what is left - which is how a maintainer read it on a
+// real store.
+func TestWizard_Receipt_CountsThePushAndNotADeletion(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	// Space on the first project row deselects its only session, so the receipt
+	// has both a pushed set and a skipped one.
+	m = pressKey(m, keySpace())
+	m = pressKey(m, keyEnter())
+	m = pressKey(m, keyEnter())
+	if m.page != pageFinalConfirm {
+		t.Fatalf("expected pageFinalConfirm, got %s", m.page)
+	}
+	screen := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
+	for _, want := range []string{
+		"push 2 session(s) to the village.",
+		"1 session(s) are not selected and are not pushed.",
+		"nothing is removed from this machine.",
+		wizardReceiptDetails,
+	} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the receipt must state %q; got:\n%s", want, screen)
+		}
+	}
+	for _, forbidden := range []string{"leave this machine", "stay on it", "stored copy"} {
+		if strings.Contains(screen, forbidden) {
+			t.Errorf("the receipt must not say %q: a push removes nothing; got:\n%s", forbidden, screen)
+		}
+	}
+}
+
+// TestWizard_Receipt_OmitsTheSkippedLineWhenNothingIsSkipped proves the second
+// line is conditional: with every candidate selected there is no skipped set,
+// and a line reporting zero of them would be noise on the confirmation screen.
+func TestWizard_Receipt_OmitsTheSkippedLineWhenNothingIsSkipped(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	m = pressKey(m, keyEnter())
+	m = pressKey(m, keyEnter())
+	screen := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
+	if !strings.Contains(screen, "push 3 session(s) to the village.") {
+		t.Errorf("the receipt must count the whole push; got:\n%s", screen)
+	}
+	if strings.Contains(screen, "are not selected and are not pushed") {
+		t.Errorf("the receipt must not report a skipped set that is empty; got:\n%s", screen)
 	}
 }

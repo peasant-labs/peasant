@@ -29,6 +29,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -301,6 +302,30 @@ func BuildPushCommand() *cobra.Command {
 					runCfg.Selection = selection
 				}
 
+				// Home paths and PII are stripped from metadata on the way out even
+				// for a session imported before redaction existed, or under a level
+				// this version no longer offers. The resolution and its wording are
+				// shared with every other surface rather than phrased here, which is
+				// how the same configuration used to produce a different level
+				// depending on which command read it.
+				//
+				// It is built HERE, before the wizard, because the wizard's preview
+				// shows each transcript as it will be published. One redactor serves
+				// both, so what the user reads on the selection page and what the
+				// pipeline uploads cannot be redacted by two different objects. The
+				// raised-level disclosure is still printed after the wizard, where it
+				// was, so the message order on stderr is unchanged.
+				redactionPolicy := config.ResolveRedactionPolicy(cfg.Redaction.Level)
+				effectiveLevel := redactionPolicy.Effective
+				userPatterns, patErr := config.CustomPatternsToUserPatterns(cfg.Redaction.CustomPatterns)
+				if patErr != nil {
+					return fmt.Errorf("build push redactor: %w", patErr)
+				}
+				pushRedactor, err := redact.NewRedactor(effectiveLevel, userPatterns, resolveXDGPaths(cmd))
+				if err != nil {
+					return fmt.Errorf("create push redactor: %w", err)
+				}
+
 				// Run the push wizard for interactive confirmation.
 				// Skipped for --dry-run, --json, non-TTY, or --non-interactive/--yes.
 				isTTY := term.IsTerminal(int(os.Stdin.Fd()))
@@ -311,7 +336,11 @@ func BuildPushCommand() *cobra.Command {
 						Method:         cfg.Push.Method,
 						Sources:        cfg.Push.Sources,
 					}
-					wizardIDs, wizErr := runPushWizard(ctx, db, fs, cfg.Output.BasePath, wizQuery, runCfg.Selection)
+					wizardIDs, wizErr := runPushWizard(
+						ctx, db, fs, theme.New(themeModeFor(cfg)),
+						cfg.Output.BasePath, wizQuery, runCfg.Selection,
+						push.NewPublishedTurns(storedSessionEntries(ctx, db), pushRedactor),
+					)
 					if wizErr != nil {
 						return wizErr
 					}
@@ -322,25 +351,9 @@ func BuildPushCommand() *cobra.Command {
 					runCfg.FilterSessionIDs = wizardIDs
 				}
 
-				// Home paths and PII are stripped from metadata on the way out even
-				// for a session imported before redaction existed, or under a level
-				// this version no longer offers. The resolution and its wording are
-				// shared with every other surface rather than phrased here, which is
-				// how the same configuration used to produce a different level
-				// depending on which command read it.
-				redactionPolicy := config.ResolveRedactionPolicy(cfg.Redaction.Level)
-				effectiveLevel := redactionPolicy.Effective
 				if redactionPolicy.Raised() {
 					fmt.Fprintln(cmd.ErrOrStderr(),
 						quietAware(level, redactionPolicy.Disclosure(), redactionPolicy.BriefDisclosure()))
-				}
-				userPatterns, patErr := config.CustomPatternsToUserPatterns(cfg.Redaction.CustomPatterns)
-				if patErr != nil {
-					return fmt.Errorf("build push redactor: %w", patErr)
-				}
-				pushRedactor, err := redact.NewRedactor(effectiveLevel, userPatterns, resolveXDGPaths(cmd))
-				if err != nil {
-					return fmt.Errorf("create push redactor: %w", err)
 				}
 
 				visibilityPolicy := config.EffectiveVisibility(schema.Visibility(visibility), cfg)
@@ -1603,9 +1616,11 @@ func runPushWizard(
 	ctx context.Context,
 	db push.CandidateStore,
 	fs ingest.FileSystem,
+	th theme.Theme,
 	outputBasePath string,
 	q push.PushCandidateQuery,
 	selection *push.SessionSelection,
+	turns push.PublishedTurnsFunc,
 ) ([]string, error) {
 	wizSessions, err := buildPushWizardSessions(ctx, db, fs, outputBasePath, q, selection)
 	if err != nil {
@@ -1616,7 +1631,7 @@ func runPushWizard(
 		return []string{}, nil
 	}
 
-	model := push.NewPushWizard(wizSessions)
+	model := push.NewPushWizard(th, wizSessions, turns)
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -1629,6 +1644,20 @@ func runPushWizard(
 	}
 
 	return result.SelectedSessionIDs(), nil
+}
+
+// storedSessionEntries reads one session's indexed entries from the local store:
+// the SAME read the pipeline publishes from. The wizard preview redacts them and
+// renders the result, so the pane shows the transcript the push will send rather
+// than a second reading of the recorded text.
+func storedSessionEntries(ctx context.Context, db *store.Store) push.StoredEntriesFunc {
+	return func(sessionID string) ([]schema.SessionEntry, error) {
+		id, err := ingest.NewSessionID(sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("preview session %q: %w", sessionID, err)
+		}
+		return db.ListEntries(ctx, id)
+	}
 }
 
 // preparePushSelection reads every pushable row before pushed-at, provider,

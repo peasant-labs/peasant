@@ -49,11 +49,11 @@ func TestCaptureFixtureRejectsTrailingDocuments(t *testing.T) {
 }
 
 func TestCaptureFixturePinsDeclaredCounts(t *testing.T) {
-	old := []byte("expectedSheetCount: 3")
+	old := []byte("expectedSheetCount: 4")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("sheet-count mutation source occurs %d times, want exactly one", count)
 	}
-	mutated := bytes.Replace(captureFixtureData, old, []byte("expectedSheetCount: 4"), 1)
+	mutated := bytes.Replace(captureFixtureData, old, []byte("expectedSheetCount: 5"), 1)
 	if _, err := decodeCaptureDocument(mutated); err == nil {
 		t.Fatal("screenshot fixture accepted a changed sheet-count declaration")
 	}
@@ -68,5 +68,17 @@ func TestCaptureFixturePinsTheGuidedCrossProduct(t *testing.T) {
 	mutated := bytes.Replace(captureFixtureData, row, duplicate, 1)
 	if _, err := decodeCaptureDocument(mutated); err == nil {
 		t.Fatal("screenshot fixture accepted a missing guided matrix entry")
+	}
+}
+
+func TestCaptureFixturePinsThePushCrossProduct(t *testing.T) {
+	row := []byte("  - {name: push-receipt-light-120x40, state: receipt, theme: light, width: 120, height: 40}\n")
+	if count := bytes.Count(captureFixtureData, row); count != 1 {
+		t.Fatalf("push mutation source occurs %d times, want exactly one", count)
+	}
+	duplicate := []byte("  - {name: push-receipt-dark-120x40, state: receipt, theme: dark, width: 120, height: 40}\n")
+	mutated := bytes.Replace(captureFixtureData, row, duplicate, 1)
+	if _, err := decodeCaptureDocument(mutated); err == nil {
+		t.Fatal("screenshot fixture accepted a missing push matrix entry")
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"gopkg.in/yaml.v3"
 )
 
@@ -537,7 +538,8 @@ func mountedChooserIDs(t *testing.T, fixture mountedSelectionSafetyCase, world m
 	want := mountedExpectedIDs(fixture, func(row mountedSelectionRow) bool { return row.ExpectedPush })
 	assertMountedIDSet(t, "mounted chooser display", displayed, want)
 	selected := make(map[string]bool)
-	for _, sessionID := range push.NewPushWizard(wizardSessions).SelectedSessionIDs() {
+	// A nil preview read: the assertion is the selected set, not the pane.
+	for _, sessionID := range push.NewPushWizard(theme.New(theme.ModeDark), wizardSessions, nil).SelectedSessionIDs() {
 		selected[sessionID] = true
 	}
 	return selected
