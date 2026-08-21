@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -89,19 +90,29 @@ func (i OpenCodeSelectedSourceIdentity) Validate() error {
 // OpenCodeGraphDiagnosticCode identifies a non-fatal selected-graph repair.
 type OpenCodeGraphDiagnosticCode string
 
-const OpenCodeGraphMissingParent OpenCodeGraphDiagnosticCode = "opencode_missing_parent"
+const (
+	OpenCodeGraphMissingParent     OpenCodeGraphDiagnosticCode = "opencode_missing_parent"
+	OpenCodeGraphOrphanPartDropped OpenCodeGraphDiagnosticCode = "opencode_orphan_part_dropped"
+)
 
 // Validate rejects graph diagnostics outside the supported repair contract.
 func (c OpenCodeGraphDiagnosticCode) Validate() error {
-	if c != OpenCodeGraphMissingParent {
+	switch c {
+	case OpenCodeGraphMissingParent, OpenCodeGraphOrphanPartDropped:
+		return nil
+	default:
 		return fmt.Errorf("OpenCode graph diagnostic code %q is outside the supported closed set", c)
 	}
-	return nil
 }
 
 type openCodeSessionCandidate struct {
-	session  DiscoveredSession
-	identity OpenCodeSelectedSourceIdentity
+	session    DiscoveredSession
+	identity   OpenCodeSelectedSourceIdentity
+	provenance OpenCodeCandidateProvenance
+	// sessionClock is true when the source database carries the upstream
+	// session clock; sessionUpdatedAt is that clock for this session.
+	sessionClock     bool
+	sessionUpdatedAt time.Time
 }
 
 // OpenCodeCandidateProvenance records why a path was considered. Candidate
@@ -145,6 +156,10 @@ const (
 	OpenCodeProbeHeader   OpenCodeProbeStage = "sniff_header"
 	OpenCodeProbeOpen     OpenCodeProbeStage = "open_source"
 	OpenCodeProbeCatalog  OpenCodeProbeStage = "inspect_catalog"
+	// OpenCodeProbeDiscover covers session enumeration and parent-link reads.
+	OpenCodeProbeDiscover OpenCodeProbeStage = "discover_sessions"
+	// OpenCodeProbeFreshness covers selected-session freshness hydration.
+	OpenCodeProbeFreshness OpenCodeProbeStage = "hydrate_freshness"
 )
 
 // OpenCodeProbeDiagnosticCode is the machine-readable reason for a diagnostic.
@@ -158,6 +173,9 @@ const (
 	OpenCodeDiagnosticCatalogReadFailed OpenCodeProbeDiagnosticCode = "catalog_read_failed"
 	OpenCodeDiagnosticCatalogTruncated  OpenCodeProbeDiagnosticCode = "catalog_truncated"
 	OpenCodeDiagnosticSchemaIncomplete  OpenCodeProbeDiagnosticCode = "schema_incomplete"
+	// OpenCodeDiagnosticDiscoveryFailed marks a supported candidate that was
+	// skipped during one discovery run.
+	OpenCodeDiagnosticDiscoveryFailed OpenCodeProbeDiagnosticCode = "discovery_failed"
 )
 
 // OpenCodeCandidate is one deduplicated source location. SQLite candidates are
@@ -204,6 +222,22 @@ func (k OpenCodeSourceKind) Validate() error {
 		return nil
 	default:
 		return fmt.Errorf("source kind %q is outside the supported closed set", k)
+	}
+}
+
+// precedence ranks provenance for equal-representation tie-breaks. The
+// environment override outranks the channel database, which outranks the
+// legacy JSON root. This mirrors the resolver order.
+func (p OpenCodeCandidateProvenance) precedence() uint8 {
+	switch p {
+	case OpenCodeCandidateOverride:
+		return 3
+	case OpenCodeCandidateChannel:
+		return 2
+	case OpenCodeCandidateLegacyJSONRoot:
+		return 1
+	default:
+		return 0
 	}
 }
 

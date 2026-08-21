@@ -411,15 +411,12 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 	entries := make([]schema.SessionEntry, 0, len(messages))
 	messageIndexes := make(map[string]int, len(messages))
 	messageParents := make(map[int]string, len(messages))
-	messageParts := make(map[int][]int, len(messages))
 	entryIndex := 0
 	for _, message := range messages {
 		if message.Data.OrphanPart && len(message.Parts) == 1 {
-			entry, include := idx.openCodePartEntry(sessionID, message.Parts[0], 0, entryIndex, RoleSystem, nil)
-			if include {
-				entry.ParentIndex = nil
-				entry.Depth = 0
-				entries = append(entries, entry)
+			// Orphan parts follow the same depth gate as ordinary parts.
+			if idx.fullDepth {
+				entries = append(entries, idx.openCodeOrphanPartEntry(sessionID, message.Parts[0], entryIndex))
 				entryIndex++
 			}
 			continue
@@ -465,45 +462,80 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 				continue
 			}
 			entries = append(entries, partEntry)
-			messageParts[parentIndex] = append(messageParts[parentIndex], entryIndex)
 			entryIndex++
 		}
 	}
-	normalizeOpenCodeEntryGraph(entries, messageIndexes, messageParents, messageParts)
+	normalizeOpenCodeEntryGraph(entries, messageIndexes, messageParents)
 	return entries
 }
 
-func normalizeOpenCodeEntryGraph(entries []schema.SessionEntry, messageIndexes map[string]int, messageParents map[int]string, messageParts map[int][]int) {
-	for childIndex, parentID := range messageParents {
-		parentIndex, present := messageIndexes[parentID]
-		if !present || parentIndex == childIndex {
+// normalizeOpenCodeEntryGraph links each message to its parent message by
+// entry index. Depth keeps the shared consumer contract: messages stay at
+// Depth 0 and parts stay at Depth 1. Children are linked in entry order. A
+// parent reference that would close a cycle stays at the root, so the pinned
+// node is the same on every run.
+func normalizeOpenCodeEntryGraph(entries []schema.SessionEntry, messageIndexes map[string]int, messageParents map[int]string) {
+	children := make([]int, 0, len(messageParents))
+	for childIndex := range messageParents {
+		children = append(children, childIndex)
+	}
+	sort.Ints(children)
+	for _, childIndex := range children {
+		parentIndex, present := messageIndexes[messageParents[childIndex]]
+		if !present || parentIndex == childIndex || openCodeParentChainReaches(entries, parentIndex, childIndex) {
 			continue
 		}
 		parent := parentIndex
 		entries[childIndex].ParentIndex = &parent
 	}
-	resolved := make(map[int]int, len(messageIndexes))
-	var depth func(int, map[int]bool) int
-	depth = func(index int, visiting map[int]bool) int {
-		if value, ok := resolved[index]; ok {
-			return value
+}
+
+// openCodeParentChainReaches reports whether the parent chain that starts at
+// start already contains target.
+func openCodeParentChainReaches(entries []schema.SessionEntry, start, target int) bool {
+	visited := make(map[int]bool)
+	for index := start; ; {
+		if index == target {
+			return true
 		}
-		if visiting[index] || entries[index].ParentIndex == nil {
-			resolved[index] = 0
-			return 0
+		if visited[index] {
+			return false
 		}
-		visiting[index] = true
-		value := depth(*entries[index].ParentIndex, visiting) + 1
-		delete(visiting, index)
-		resolved[index] = value
-		return value
+		visited[index] = true
+		parent := entries[index].ParentIndex
+		if parent == nil {
+			return false
+		}
+		index = *parent
 	}
-	for _, messageIndex := range messageIndexes {
-		entries[messageIndex].Depth = depth(messageIndex, make(map[int]bool))
-		for _, partIndex := range messageParts[messageIndex] {
-			entries[partIndex].Depth = entries[messageIndex].Depth + 1
-		}
+}
+
+// openCodeOrphanPartEntry renders a part whose parent message is absent from
+// the selected source. The entry is an inert root-level system note. It never
+// becomes a tool turn, so consumers do not fold or count it as a tool call.
+func (idx *OpenCodeIndexer) openCodeOrphanPartEntry(sessionID SessionID, part openCodeSemanticPart, entryIndex int) schema.SessionEntry {
+	entry := schema.SessionEntry{SessionID: sessionID, EntryIndex: entryIndex, Harness: HarnessOpenCode, Role: RoleSystem, EntryType: EntryTypeSystem}
+	rawLength := len(part.Raw)
+	entry.RawByteLength = &rawLength
+	partType := part.Data.Type
+	entry.PartType = &partType
+	if part.TimeCreated > 0 {
+		timestamp := part.TimeCreated
+		entry.TimestampMs = &timestamp
 	}
+	if part.EntryID != "" {
+		entryID := part.EntryID
+		entry.EntryID = &entryID
+	}
+	text := part.Data.Text
+	if text == "" {
+		text = fmt.Sprintf("OpenCode %s part %s has no parent message in the selected source", partType, part.EntryID)
+	}
+	if !idx.fullContent {
+		text = truncateString(text, defaults.ContentPreviewLimit)
+	}
+	entry.ContentPreview = &text
+	return entry
 }
 
 func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []openCodeSemanticMessage) []DiagnosticEntry {

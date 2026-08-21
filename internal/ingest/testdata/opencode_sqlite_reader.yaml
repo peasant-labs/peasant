@@ -41,7 +41,7 @@ invalid_identifiers:
     value: " bad-part "
     error_contains: before source access
 
-declared_methods: 10
+declared_methods: 11
 methods:
   - name: Catalog
     signature: "func(context.Context) (ingest.OpenCodeSchemaEvidence, error)"
@@ -63,6 +63,8 @@ methods:
     signature: "func(context.Context, ingest.OpenCodeLegacySessionPageRequest) (ingest.OpenCodeLegacySessionPage, error)"
   - name: LegacySessionFreshness
     signature: "func(context.Context, ingest.OpenCodeLegacySessionID) (time.Time, error)"
+  - name: SessionRecords
+    signature: "func(context.Context, ingest.OpenCodeSessionRecordPageRequest) (ingest.OpenCodeSessionRecordPage, error)"
 
 declared_signature_rules: 5
 signature_rules:

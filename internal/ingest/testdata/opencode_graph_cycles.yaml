@@ -1,0 +1,38 @@
+# Message parent graphs that the OpenCode indexer must normalize the same way on
+# every run. Messages stay at Depth 0 and parts at Depth 1. A parent reference
+# that would close a cycle stays at the root; children are linked in entry order.
+declared_cases: 4
+repeat_runs: 25
+cases:
+  - name: two-cycle-pins-later-entry-to-root
+    messages:
+      - {id: msg_a, parent_id: msg_b, role: user}
+      - {id: msg_b, parent_id: msg_a, role: assistant}
+    expected_links:
+      - {id: msg_a, parent: msg_b}
+      - {id: msg_b, parent: ""}
+  - name: three-cycle-pins-last-entry-to-root
+    messages:
+      - {id: msg_a, parent_id: msg_c, role: user}
+      - {id: msg_b, parent_id: msg_a, role: assistant}
+      - {id: msg_c, parent_id: msg_b, role: assistant}
+    expected_links:
+      - {id: msg_a, parent: msg_c}
+      - {id: msg_b, parent: msg_a}
+      - {id: msg_c, parent: ""}
+  - name: chain-links-every-message-at-depth-zero
+    messages:
+      - {id: msg_root, parent_id: "", role: user}
+      - {id: msg_child, parent_id: msg_root, role: assistant}
+      - {id: msg_grandchild, parent_id: msg_child, role: assistant}
+    expected_links:
+      - {id: msg_root, parent: ""}
+      - {id: msg_child, parent: msg_root}
+      - {id: msg_grandchild, parent: msg_child}
+  - name: self-and-missing-parents-stay-at-root
+    messages:
+      - {id: msg_self, parent_id: msg_self, role: user}
+      - {id: msg_missing, parent_id: msg_absent, role: assistant}
+    expected_links:
+      - {id: msg_self, parent: ""}
+      - {id: msg_missing, parent: ""}

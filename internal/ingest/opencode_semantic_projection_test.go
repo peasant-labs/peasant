@@ -710,6 +710,8 @@ func assertSemanticEntries(t testing.TB, testCase openCodeSemanticCase, entries 
 
 type semanticNegativeSource struct{ rows []OpenCodeCurrentMessageRow }
 
+var _ OpenCodeSQLiteSource = semanticNegativeSource{}
+
 func (source semanticNegativeSource) Catalog(context.Context) (OpenCodeSchemaEvidence, error) {
 	return OpenCodeSchemaEvidence{}, nil
 }
@@ -733,6 +735,9 @@ func (source semanticNegativeSource) LegacyParts(context.Context, OpenCodeLegacy
 }
 func (source semanticNegativeSource) LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error) {
 	return OpenCodeLegacyPartPage{}, nil
+}
+func (source semanticNegativeSource) SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
+	return OpenCodeSessionRecordPage{}, nil
 }
 func (source semanticNegativeSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
 	return OpenCodeCurrentPage{Messages: source.rows}, nil

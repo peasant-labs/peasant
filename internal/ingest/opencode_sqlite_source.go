@@ -325,6 +325,51 @@ type OpenCodeLegacyOrphanPartPageRequest struct {
 	After     *OpenCodeLegacyPartCursor
 }
 
+// OpenCodeSessionRecordPageRequest requests bounded session records from the
+// upstream session table. Parent links and the per-session update clock are
+// shared by every representation.
+type OpenCodeSessionRecordPageRequest struct {
+	PageSize OpenCodeCurrentPageSize
+	After    *OpenCodeSessionRecordCursor
+}
+
+// OpenCodeSessionLinkID is a validated identifier from the shared session
+// table. It names either a session or its parent.
+type OpenCodeSessionLinkID struct{ value string }
+
+// NewOpenCodeSessionLinkID validates one session table identifier.
+func NewOpenCodeSessionLinkID(value string) (OpenCodeSessionLinkID, error) {
+	if err := validateOpenCodeCurrentToken("session link identifier", value); err != nil {
+		return OpenCodeSessionLinkID{}, err
+	}
+	return OpenCodeSessionLinkID{value: value}, nil
+}
+
+// String returns the validated identifier.
+func (id OpenCodeSessionLinkID) String() string { return id.value }
+
+// OpenCodeSessionRecordCursor continues session record enumeration after one
+// session identifier.
+type OpenCodeSessionRecordCursor struct{ sessionID OpenCodeSessionLinkID }
+
+// OpenCodeSessionRecord is one detached session row. ParentID is the zero
+// value for a root session. TimeUpdated is the upstream session clock, which
+// OpenCode moves on every session mutation, including revert and undo.
+type OpenCodeSessionRecord struct {
+	SessionID   OpenCodeSessionLinkID
+	ParentID    OpenCodeSessionLinkID
+	TimeUpdated int64
+}
+
+// OpenCodeSessionRecordPage is one bounded page of session records. Supported
+// is false when the database has no session table with parent_id and
+// time_updated columns; the page is then empty.
+type OpenCodeSessionRecordPage struct {
+	Supported bool
+	Records   []OpenCodeSessionRecord
+	Next      *OpenCodeSessionRecordCursor
+}
+
 // OpenCodeLegacyMessageRow is one detached current row from legacy message.
 type OpenCodeLegacyMessageRow struct {
 	ID          OpenCodeLegacyMessageID
@@ -499,6 +544,7 @@ type OpenCodeSQLiteSource interface {
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
 	LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error)
+	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	Close(context.Context) error
 }

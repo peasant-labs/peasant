@@ -39,7 +39,7 @@ const (
 	expectedOpenCodeProbeCases      = 13
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 20
+	expectedAllowedQueryStatements  = 22
 	expectedQueryGuardMutations     = 12
 	expectedEntryPathMutations      = 41
 	expectedEntryPathKindCount      = 41
@@ -49,7 +49,7 @@ const (
 	expectedCoverageGuardMutations  = 9
 	expectedBuildTaggedMutations    = 7
 	expectedBuildTopologyCases      = 3
-	expectedAdapterDiscoveryCases   = 5
+	expectedAdapterDiscoveryCases   = 6
 )
 
 //go:embed testdata/opencode_candidates.yaml
@@ -303,6 +303,7 @@ const (
 	openCodeAdapterHybridCurrent           openCodeAdapterDiscoveryMode = "hybrid_current_success"
 	openCodeAdapterHybridLegacyFallback    openCodeAdapterDiscoveryMode = "hybrid_legacy_fallback"
 	openCodeAdapterHybridFailure           openCodeAdapterDiscoveryMode = "hybrid_fallback_error"
+	openCodeAdapterSQLiteFailureKeepsJSON  openCodeAdapterDiscoveryMode = "sqlite_failure_keeps_json"
 )
 
 type openCodeAdapterDiscoveryCase struct {
@@ -390,7 +391,7 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		adapterCaseNames[testCase.Name] = struct{}{}
 		switch testCase.Mode {
-		case openCodeAdapterCapableProbeInitFailure, openCodeAdapterIncapableLegacyOnly, openCodeAdapterHybridCurrent, openCodeAdapterHybridLegacyFallback, openCodeAdapterHybridFailure:
+		case openCodeAdapterCapableProbeInitFailure, openCodeAdapterIncapableLegacyOnly, openCodeAdapterHybridCurrent, openCodeAdapterHybridLegacyFallback, openCodeAdapterHybridFailure, openCodeAdapterSQLiteFailureKeepsJSON:
 		default:
 			t.Fatalf("OpenCode adapter discovery fixture %q has unknown mode %q", testCase.Name, testCase.Mode)
 		}
@@ -400,7 +401,7 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 				t.Fatalf("OpenCode adapter discovery fixture %q has invalid expected origin %q: %v", testCase.Name, testCase.ExpectedOrigin, err)
 			}
 		}
-		if testCase.ErrorContains == "" && (testCase.Mode == openCodeAdapterCapableProbeInitFailure || testCase.Mode == openCodeAdapterHybridFailure) {
+		if testCase.ErrorContains == "" && (testCase.Mode == openCodeAdapterCapableProbeInitFailure || testCase.Mode == openCodeAdapterHybridFailure || testCase.Mode == openCodeAdapterSQLiteFailureKeepsJSON) {
 			t.Fatalf("OpenCode adapter discovery fixture %q must pin its actionable error", testCase.Name)
 		}
 		if testCase.ExpectedSessions < 0 {
@@ -2756,20 +2757,31 @@ func TestOpenCodeAdapterDiscoveryCapabilities(t *testing.T) {
 				opener = hybridOpenCodeSourceOpener(true, false)
 			case openCodeAdapterHybridFailure:
 				opener = hybridOpenCodeSourceOpener(true, true)
+			case openCodeAdapterSQLiteFailureKeepsJSON:
+				writeLegacyOnlyOpenCodeSession(t, root.String())
+				opener = hybridOpenCodeSourceOpener(true, true)
 			}
 			adapter, adapterErr := ingest.NewOpenCodeAdapterWithCandidateProbe(filesystem, testutil.NoGitResolver(), salt.Salt{}, "latest", environment, filesystem, opener, ingest.DefaultOpenCodeSQLiteSourceOptions())
 			if adapterErr != nil {
 				t.Fatalf("construct candidate-capable adapter: %v", adapterErr)
 			}
 			discovered, discoverErr := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
-			if fixtureCase.Mode == openCodeAdapterHybridFailure {
-				if discoverErr == nil || !strings.Contains(discoverErr.Error(), fixtureCase.ErrorContains) {
-					t.Fatalf("hybrid discovery error = %v, want actionable %q", discoverErr, fixtureCase.ErrorContains)
+			if discoverErr != nil {
+				t.Fatalf("candidate-capable discovery failed: %v", discoverErr)
+			}
+			if fixtureCase.Mode == openCodeAdapterHybridFailure || fixtureCase.Mode == openCodeAdapterSQLiteFailureKeepsJSON {
+				// A failing supported candidate is skipped and recorded. It never
+				// removes the sessions that other candidates discovered.
+				assertOpenCodeDiscoveryFailureRecorded(t, adapter.CandidateEvidence(), materialized.Path, fixtureCase.ErrorContains)
+				if len(discovered) != fixtureCase.ExpectedSessions {
+					t.Fatalf("discovery with a failing SQLite candidate = %+v, want %d sessions from the remaining candidates", discovered, fixtureCase.ExpectedSessions)
+				}
+				for _, session := range discovered {
+					if session.TranscriptOrigin != ingest.TranscriptOriginFile {
+						t.Fatalf("discovery with a failing SQLite candidate exposed %+v from the failed candidate", session)
+					}
 				}
 				return
-			}
-			if discoverErr != nil {
-				t.Fatalf("hybrid discovery failed: %v", discoverErr)
 			}
 			wantOrigin, originErr := fixtureCase.ExpectedOrigin.transcriptOrigin()
 			if originErr != nil {
@@ -2987,3 +2999,21 @@ func (syntheticRegularFileInfo) Mode() os.FileMode  { return 0o600 }
 func (syntheticRegularFileInfo) ModTime() time.Time { return time.Time{} }
 func (syntheticRegularFileInfo) IsDir() bool        { return false }
 func (syntheticRegularFileInfo) Sys() any           { return nil }
+
+// assertOpenCodeDiscoveryFailureRecorded checks that the failing SQLite
+// candidate carries an actionable discovery diagnostic on its evidence.
+func assertOpenCodeDiscoveryFailureRecorded(t testing.TB, evidence []ingest.OpenCodeProbeResult, databasePath, errorContains string) {
+	t.Helper()
+	for _, result := range evidence {
+		if result.Candidate.Kind != ingest.OpenCodeSourceSQLite || filepath.Clean(result.Candidate.Path) != filepath.Clean(databasePath) {
+			continue
+		}
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == ingest.OpenCodeDiagnosticDiscoveryFailed && diagnostic.Stage == ingest.OpenCodeProbeDiscover && strings.Contains(diagnostic.Why, errorContains) && diagnostic.What != "" && diagnostic.Where == databasePath && diagnostic.When != "" && diagnostic.Meaning != "" && diagnostic.Remediation != "" {
+				return
+			}
+		}
+		t.Fatalf("failing SQLite candidate %q has no actionable discovery diagnostic containing %q: %+v", databasePath, errorContains, result.Diagnostics)
+	}
+	t.Fatalf("failing SQLite candidate %q is absent from discovery evidence: %+v", databasePath, evidence)
+}

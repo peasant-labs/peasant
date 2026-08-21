@@ -32,7 +32,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -103,7 +103,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -172,7 +172,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -428,7 +428,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages: []
@@ -518,7 +518,7 @@ cases:
     corruption: ""
     declared_rows: {legacy_messages: 3, legacy_parts: 5, current_messages: 0, ignored_history: 0}
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -684,7 +684,7 @@ cases:
     corruption: ""
     declared_rows: {legacy_messages: 6, legacy_parts: 7, current_messages: 0, ignored_history: 0}
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:

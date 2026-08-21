@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	expectedCanonicalTieCases     = 3
-	expectedCanonicalPermutations = 6
-	expectedCanonicalMountedCases = 1
-	expectedCanonicalTieMutations = 6
+	expectedCanonicalTieCases              = 3
+	expectedCanonicalPermutations          = 6
+	expectedCanonicalProvenanceCases       = 2
+	expectedCanonicalMountedCases          = 1
+	expectedCanonicalMountedProvenanceCase = 1
+	expectedCanonicalTieMutations          = 8
 )
 
 type canonicalTieRepresentation string
@@ -33,13 +35,41 @@ const (
 	canonicalTieJSON    canonicalTieRepresentation = "legacy_json"
 )
 
+// canonicalTieMutationKind is the closed set of loader mutations the
+// tie-break fixture proves non-vacuous.
+type canonicalTieMutationKind string
+
+const (
+	canonicalTieMutationUnknownField          canonicalTieMutationKind = "unknown_field"
+	canonicalTieMutationWrongCount            canonicalTieMutationKind = "wrong_count"
+	canonicalTieMutationDuplicateName         canonicalTieMutationKind = "duplicate_name"
+	canonicalTieMutationUnknownRepresentation canonicalTieMutationKind = "unknown_representation"
+	canonicalTieMutationWrongMountedCount     canonicalTieMutationKind = "wrong_mounted_count"
+	canonicalTieMutationWinnerEnumeratedFirst canonicalTieMutationKind = "winner_enumerated_first"
+	canonicalTieMutationOverrideSortsFirst    canonicalTieMutationKind = "override_sorts_first"
+	canonicalTieMutationUnknownProvenance     canonicalTieMutationKind = "unknown_provenance"
+)
+
+func (kind canonicalTieMutationKind) validate() error {
+	switch kind {
+	case canonicalTieMutationUnknownField, canonicalTieMutationWrongCount, canonicalTieMutationDuplicateName, canonicalTieMutationUnknownRepresentation, canonicalTieMutationWrongMountedCount, canonicalTieMutationWinnerEnumeratedFirst, canonicalTieMutationOverrideSortsFirst, canonicalTieMutationUnknownProvenance:
+		return nil
+	default:
+		return fmt.Errorf("canonical tie fixture has unknown mutation %q", kind)
+	}
+}
+
 type canonicalTieFixture struct {
-	DeclaredCases           int                          `yaml:"declared_cases"`
-	Cases                   []canonicalTieCase           `yaml:"cases"`
-	DeclaredMountedCases    int                          `yaml:"declared_mounted_cases"`
-	MountedCases            []canonicalMountedTieCase    `yaml:"mounted_cases"`
-	DeclaredLoaderMutations int                          `yaml:"declared_loader_mutations"`
-	LoaderMutations         []canonicalTieLoaderMutation `yaml:"loader_mutations"`
+	DeclaredCases                  int                                 `yaml:"declared_cases"`
+	Cases                          []canonicalTieCase                  `yaml:"cases"`
+	DeclaredProvenanceCases        int                                 `yaml:"declared_provenance_cases"`
+	ProvenanceCases                []canonicalProvenanceTieCase        `yaml:"provenance_cases"`
+	DeclaredMountedCases           int                                 `yaml:"declared_mounted_cases"`
+	MountedCases                   []canonicalMountedTieCase           `yaml:"mounted_cases"`
+	DeclaredMountedProvenanceCases int                                 `yaml:"declared_mounted_provenance_cases"`
+	MountedProvenanceCases         []canonicalMountedProvenanceTieCase `yaml:"mounted_provenance_cases"`
+	DeclaredLoaderMutations        int                                 `yaml:"declared_loader_mutations"`
+	LoaderMutations                []canonicalTieLoaderMutation        `yaml:"loader_mutations"`
 }
 
 type canonicalMountedTieCase struct {
@@ -54,6 +84,18 @@ type canonicalMountedTieCase struct {
 	LosingMarker        string   `yaml:"losing_marker"`
 }
 
+// canonicalMountedProvenanceTieCase mounts one root that holds the channel
+// database and an override database whose name sorts after it.
+type canonicalMountedProvenanceTieCase struct {
+	Name          string `yaml:"name"`
+	SourceFixture string `yaml:"source_fixture"`
+	SessionID     string `yaml:"session_id"`
+	MarkerRowID   string `yaml:"marker_row_id"`
+	OverrideName  string `yaml:"override_name"`
+	WinningMarker string `yaml:"winning_marker"`
+	LosingMarker  string `yaml:"losing_marker"`
+}
+
 type canonicalTieCase struct {
 	Name              string                     `yaml:"name"`
 	Representation    canonicalTieRepresentation `yaml:"representation"`
@@ -63,9 +105,22 @@ type canonicalTieCase struct {
 	Permutations      [][]int                    `yaml:"permutations"`
 }
 
+type canonicalProvenanceCandidate struct {
+	Path       string                      `yaml:"path"`
+	Provenance OpenCodeCandidateProvenance `yaml:"provenance"`
+}
+
+type canonicalProvenanceTieCase struct {
+	Name           string                         `yaml:"name"`
+	Representation canonicalTieRepresentation     `yaml:"representation"`
+	Candidates     []canonicalProvenanceCandidate `yaml:"candidates"`
+	ExpectedPath   string                         `yaml:"expected_path"`
+	Permutations   [][]int                        `yaml:"permutations"`
+}
+
 type canonicalTieLoaderMutation struct {
-	Name string `yaml:"name"`
-	Kind string `yaml:"kind"`
+	Name string                   `yaml:"name"`
+	Kind canonicalTieMutationKind `yaml:"kind"`
 }
 
 //go:embed testdata/opencode_canonical_tiebreak.yaml
@@ -82,7 +137,7 @@ func loadCanonicalTieFixture(data []byte) (canonicalTieFixture, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fixture, errors.New("canonical OpenCode tie-break fixture must contain exactly one YAML document")
 	}
-	if fixture.DeclaredCases != expectedCanonicalTieCases || len(fixture.Cases) != expectedCanonicalTieCases || fixture.DeclaredMountedCases != expectedCanonicalMountedCases || len(fixture.MountedCases) != expectedCanonicalMountedCases || fixture.DeclaredLoaderMutations != expectedCanonicalTieMutations || len(fixture.LoaderMutations) != expectedCanonicalTieMutations {
+	if fixture.DeclaredCases != expectedCanonicalTieCases || len(fixture.Cases) != expectedCanonicalTieCases || fixture.DeclaredProvenanceCases != expectedCanonicalProvenanceCases || len(fixture.ProvenanceCases) != expectedCanonicalProvenanceCases || fixture.DeclaredMountedCases != expectedCanonicalMountedCases || len(fixture.MountedCases) != expectedCanonicalMountedCases || fixture.DeclaredMountedProvenanceCases != expectedCanonicalMountedProvenanceCase || len(fixture.MountedProvenanceCases) != expectedCanonicalMountedProvenanceCase || fixture.DeclaredLoaderMutations != expectedCanonicalTieMutations || len(fixture.LoaderMutations) != expectedCanonicalTieMutations {
 		return fixture, errors.New("canonical OpenCode tie-break fixture count guard failed")
 	}
 	seen := make(map[string]bool, len(fixture.Cases))
@@ -94,23 +149,29 @@ func loadCanonicalTieFixture(data []byte) (canonicalTieFixture, error) {
 		if _, err := testCase.Representation.production(); err != nil {
 			return fixture, err
 		}
-		permutations := make(map[string]bool, len(testCase.Permutations))
-		for _, permutation := range testCase.Permutations {
-			if len(permutation) != len(testCase.Paths) {
-				return fixture, fmt.Errorf("canonical tie case %q has incomplete permutation %v", testCase.Name, permutation)
+		if err := validateCanonicalPermutations(testCase.Name, len(testCase.Paths), testCase.Permutations); err != nil {
+			return fixture, err
+		}
+	}
+	for _, testCase := range fixture.ProvenanceCases {
+		if testCase.Name == "" || seen[testCase.Name] || len(testCase.Candidates) != 2 || len(testCase.Permutations) != 2 || !filepath.IsAbs(testCase.ExpectedPath) {
+			return fixture, fmt.Errorf("canonical OpenCode provenance tie fixture contains incomplete or duplicate case %+v", testCase)
+		}
+		seen[testCase.Name] = true
+		if _, err := testCase.Representation.production(); err != nil {
+			return fixture, err
+		}
+		if err := validateCanonicalPermutations(testCase.Name, len(testCase.Candidates), testCase.Permutations); err != nil {
+			return fixture, err
+		}
+		override, channel := testCase.Candidates[0], testCase.Candidates[1]
+		for _, candidate := range testCase.Candidates {
+			if err := candidate.Provenance.Validate(); err != nil {
+				return fixture, fmt.Errorf("canonical OpenCode provenance tie case %q: %w", testCase.Name, err)
 			}
-			positions := make(map[int]bool, len(permutation))
-			for _, position := range permutation {
-				if position < 0 || position >= len(testCase.Paths) || positions[position] {
-					return fixture, fmt.Errorf("canonical tie case %q has invalid permutation %v", testCase.Name, permutation)
-				}
-				positions[position] = true
-			}
-			key := fmt.Sprint(permutation)
-			if permutations[key] {
-				return fixture, fmt.Errorf("canonical tie case %q duplicates permutation %v", testCase.Name, permutation)
-			}
-			permutations[key] = true
+		}
+		if override.Provenance != OpenCodeCandidateOverride || channel.Provenance != OpenCodeCandidateChannel || override.Path != testCase.ExpectedPath || filepath.Clean(override.Path) <= filepath.Clean(channel.Path) {
+			return fixture, fmt.Errorf("canonical OpenCode provenance tie case %q must expect the override path that sorts after the channel path", testCase.Name)
 		}
 	}
 	for _, testCase := range fixture.MountedCases {
@@ -125,21 +186,52 @@ func loadCanonicalTieFixture(data []byte) (canonicalTieFixture, error) {
 			return fixture, fmt.Errorf("canonical mounted tie case %q does not enumerate the losing root first", testCase.Name)
 		}
 	}
+	for _, testCase := range fixture.MountedProvenanceCases {
+		if testCase.Name == "" || seen[testCase.Name] || testCase.SourceFixture == "" || testCase.SessionID == "" || testCase.MarkerRowID == "" || testCase.OverrideName == "" || filepath.IsAbs(testCase.OverrideName) || testCase.WinningMarker == "" || testCase.LosingMarker == "" || testCase.WinningMarker == testCase.LosingMarker {
+			return fixture, fmt.Errorf("canonical mounted provenance tie fixture contains incomplete or duplicate case %+v", testCase)
+		}
+		seen[testCase.Name] = true
+		if filepath.Clean(testCase.OverrideName) <= "opencode.db" {
+			return fixture, fmt.Errorf("canonical mounted provenance tie case %q must name an override database that sorts after the channel database", testCase.Name)
+		}
+	}
 	for _, mutation := range fixture.LoaderMutations {
 		if mutation.Name == "" || seen[mutation.Name] {
 			return fixture, fmt.Errorf("canonical tie fixture has incomplete or duplicate mutation %q", mutation.Name)
 		}
 		seen[mutation.Name] = true
-		switch mutation.Kind {
-		case "unknown_field", "wrong_count", "duplicate_name", "unknown_representation", "wrong_mounted_count", "winner_enumerated_first":
-		default:
-			return fixture, fmt.Errorf("canonical tie fixture has unknown mutation %q", mutation.Kind)
+		if err := mutation.Kind.validate(); err != nil {
+			return fixture, err
 		}
 	}
 	return fixture, nil
 }
 
+func validateCanonicalPermutations(name string, size int, permutations [][]int) error {
+	seen := make(map[string]bool, len(permutations))
+	for _, permutation := range permutations {
+		if len(permutation) != size {
+			return fmt.Errorf("canonical tie case %q has incomplete permutation %v", name, permutation)
+		}
+		positions := make(map[int]bool, len(permutation))
+		for _, position := range permutation {
+			if position < 0 || position >= size || positions[position] {
+				return fmt.Errorf("canonical tie case %q has invalid permutation %v", name, permutation)
+			}
+			positions[position] = true
+		}
+		key := fmt.Sprint(permutation)
+		if seen[key] {
+			return fmt.Errorf("canonical tie case %q duplicates permutation %v", name, permutation)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
 type canonicalTieEnvironment map[string]string
+
+var _ OpenCodeEnvironmentLookup = canonicalTieEnvironment{}
 
 func (environment canonicalTieEnvironment) LookupEnv(key string) (string, bool) {
 	value, ok := environment[key]
@@ -174,8 +266,9 @@ func TestCanonicalOpenCodeEqualRankTieBreakIsPermutationStable(t *testing.T) {
 			base := make([]openCodeSessionCandidate, len(testCase.Paths))
 			for index, path := range testCase.Paths {
 				base[index] = openCodeSessionCandidate{
-					session:  DiscoveredSession{SessionID: sessionID, SourcePath: ResolvedPath(path)},
-					identity: OpenCodeSelectedSourceIdentity{SessionID: sessionID, Representation: representation, Path: ResolvedPath(path)},
+					session:    DiscoveredSession{SessionID: sessionID, SourcePath: ResolvedPath(path)},
+					identity:   OpenCodeSelectedSourceIdentity{SessionID: sessionID, Representation: representation, Path: ResolvedPath(path)},
+					provenance: OpenCodeCandidateChannel,
 				}
 			}
 			for _, permutation := range testCase.Permutations {
@@ -186,6 +279,43 @@ func TestCanonicalOpenCodeEqualRankTieBreakIsPermutationStable(t *testing.T) {
 				selected, selectErr := selectCanonicalOpenCodeCandidates(candidates)
 				if selectErr != nil || len(selected) != 1 || selected[0].identity.Path.String() != testCase.ExpectedPath || filepath.Clean(selected[0].identity.Path.String()) != testCase.ExpectedCleanPath {
 					t.Fatalf("permutation %v selected %+v error=%v, want path %q (clean %q)", permutation, selected, selectErr, testCase.ExpectedPath, testCase.ExpectedCleanPath)
+				}
+			}
+		})
+	}
+}
+
+// TestCanonicalOpenCodeEqualRankProvenanceOutranksPath proves that within one
+// representation the environment override beats the channel database even when
+// the override path sorts after the channel path.
+func TestCanonicalOpenCodeEqualRankProvenanceOutranksPath(t *testing.T) {
+	fixture, err := loadCanonicalTieFixture(canonicalTieYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := NewSessionID("ses_3cd91f52effeXd3QAJ54jOyzv5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, testCase := range fixture.ProvenanceCases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			representation, _ := testCase.Representation.production()
+			base := make([]openCodeSessionCandidate, len(testCase.Candidates))
+			for index, candidate := range testCase.Candidates {
+				base[index] = openCodeSessionCandidate{
+					session:    DiscoveredSession{SessionID: sessionID, SourcePath: ResolvedPath(candidate.Path)},
+					identity:   OpenCodeSelectedSourceIdentity{SessionID: sessionID, Representation: representation, Path: ResolvedPath(candidate.Path)},
+					provenance: candidate.Provenance,
+				}
+			}
+			for _, permutation := range testCase.Permutations {
+				candidates := make([]openCodeSessionCandidate, len(permutation))
+				for index, sourceIndex := range permutation {
+					candidates[index] = base[sourceIndex]
+				}
+				selected, selectErr := selectCanonicalOpenCodeCandidates(candidates)
+				if selectErr != nil || len(selected) != 1 || selected[0].identity.Path.String() != testCase.ExpectedPath {
+					t.Fatalf("permutation %v selected %+v error=%v, want override path %q", permutation, selected, selectErr, testCase.ExpectedPath)
 				}
 			}
 		})
@@ -203,24 +333,12 @@ func TestCanonicalOpenCodeEqualRankTieBreakThroughMountedDiscover(t *testing.T) 
 			roots := make([]ResolvedPath, len(testCase.RootNames))
 			databasePaths := make([]string, len(testCase.RootNames))
 			for index, rootName := range testCase.RootNames {
-				source := testfixture.MaterializeByName(t, testCase.SourceFixture)
 				rootPath := filepath.Join(workspace, rootName)
-				if err := os.MkdirAll(rootPath, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				databasePaths[index] = filepath.Join(rootPath, "opencode.db")
-				data, err := os.ReadFile(source.Path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(databasePaths[index], data, 0o600); err != nil {
-					t.Fatal(err)
-				}
 				marker := testCase.LosingMarker
 				if index == testCase.ExpectedWinnerIndex {
 					marker = testCase.WinningMarker
 				}
-				setCanonicalMountedMarker(t, databasePaths[index], testCase.MarkerRowID, marker)
+				databasePaths[index] = copyCanonicalMountedDatabase(t, testCase.SourceFixture, rootPath, "opencode.db", testCase.MarkerRowID, marker)
 				roots[index], err = NewResolvedPath(rootPath)
 				if err != nil {
 					t.Fatal(err)
@@ -237,18 +355,74 @@ func TestCanonicalOpenCodeEqualRankTieBreakThroughMountedDiscover(t *testing.T) 
 				t.Fatal(err)
 			}
 			expectedPath := filepath.Clean(databasePaths[testCase.ExpectedWinnerIndex])
-			if len(discovered) != 1 || string(discovered[0].SessionID) != testCase.SessionID || filepath.Clean(discovered[0].SourcePath.String()) != expectedPath {
-				t.Fatalf("mounted equal-rank discovery selected %+v, want one session %q from lexical path %q", discovered, testCase.SessionID, expectedPath)
-			}
-			_, transcript, err := adapter.MaterializeTranscript(t.Context(), discovered[0])
+			assertCanonicalMountedWinner(t, adapter, discovered, testCase.SessionID, expectedPath, testCase.WinningMarker, testCase.LosingMarker)
+		})
+	}
+}
+
+// TestCanonicalOpenCodeOverrideOutranksChannelThroughMountedDiscover mounts
+// the channel database and an OPENCODE_DB override in one root. The override
+// wins even though its file name sorts after opencode.db.
+func TestCanonicalOpenCodeOverrideOutranksChannelThroughMountedDiscover(t *testing.T) {
+	fixture, err := loadCanonicalTieFixture(canonicalTieYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, testCase := range fixture.MountedProvenanceCases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			rootPath := t.TempDir()
+			copyCanonicalMountedDatabase(t, testCase.SourceFixture, rootPath, "opencode.db", testCase.MarkerRowID, testCase.LosingMarker)
+			overridePath := copyCanonicalMountedDatabase(t, testCase.SourceFixture, rootPath, testCase.OverrideName, testCase.MarkerRowID, testCase.WinningMarker)
+			root, err := NewResolvedPath(rootPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Contains(transcript, []byte(testCase.WinningMarker)) || bytes.Contains(transcript, []byte(testCase.LosingMarker)) {
-				t.Fatalf("mounted equal-rank winner payload=%s, want marker %q without %q", transcript, testCase.WinningMarker, testCase.LosingMarker)
+			filesystem := &OSFileSystem{}
+			adapter, err := NewOpenCodeAdapterWithCandidateProbe(filesystem, noGitResolver{}, salt.Salt{}, "latest", canonicalTieEnvironment{openCodeDatabaseOverrideEnv: overridePath}, filesystem, OpenOpenCodeSQLiteSource, DefaultOpenCodeSQLiteSourceOptions())
+			if err != nil {
+				t.Fatal(err)
 			}
+			discovered, err := adapter.Discover(t.Context(), SourceConfig{Enabled: true, Paths: []ResolvedPath{root}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertCanonicalMountedWinner(t, adapter, discovered, testCase.SessionID, filepath.Clean(overridePath), testCase.WinningMarker, testCase.LosingMarker)
 		})
 	}
+}
+
+func assertCanonicalMountedWinner(t testing.TB, adapter *OpenCodeAdapter, discovered []DiscoveredSession, sessionID, expectedPath, winningMarker, losingMarker string) {
+	t.Helper()
+	if len(discovered) != 1 || string(discovered[0].SessionID) != sessionID || filepath.Clean(discovered[0].SourcePath.String()) != expectedPath {
+		t.Fatalf("mounted equal-rank discovery selected %+v, want one session %q from path %q", discovered, sessionID, expectedPath)
+	}
+	_, transcript, err := adapter.MaterializeTranscript(t.Context(), discovered[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(transcript, []byte(winningMarker)) || bytes.Contains(transcript, []byte(losingMarker)) {
+		t.Fatalf("mounted equal-rank winner payload=%s, want marker %q without %q", transcript, winningMarker, losingMarker)
+	}
+}
+
+// copyCanonicalMountedDatabase materializes the named corpus, copies it into
+// rootPath under fileName, and stamps the marker row. It returns the copy path.
+func copyCanonicalMountedDatabase(t testing.TB, sourceFixture, rootPath, fileName, rowID, marker string) string {
+	t.Helper()
+	source := testfixture.MaterializeByName(t, sourceFixture)
+	if err := os.MkdirAll(rootPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	databasePath := filepath.Join(rootPath, fileName)
+	data, err := os.ReadFile(source.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(databasePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setCanonicalMountedMarker(t, databasePath, rowID, marker)
+	return databasePath
 }
 
 func setCanonicalMountedMarker(t testing.TB, path, rowID, marker string) {
@@ -273,18 +447,22 @@ func TestCanonicalOpenCodeTieFixtureRejectsMutations(t *testing.T) {
 	for _, mutation := range fixture.LoaderMutations {
 		mutated := append([]byte(nil), canonicalTieYAML...)
 		switch mutation.Kind {
-		case "unknown_field":
+		case canonicalTieMutationUnknownField:
 			mutated = bytes.Replace(mutated, []byte("expected_clean_path:"), []byte("unexpected:"), 1)
-		case "wrong_count":
+		case canonicalTieMutationWrongCount:
 			mutated = bytes.Replace(mutated, []byte("declared_cases: 3"), []byte("declared_cases: 2"), 1)
-		case "duplicate_name":
+		case canonicalTieMutationDuplicateName:
 			mutated = bytes.Replace(mutated, []byte("legacy-sqlite-path-order"), []byte("current-sqlite-path-order"), 1)
-		case "unknown_representation":
+		case canonicalTieMutationUnknownRepresentation:
 			mutated = bytes.Replace(mutated, []byte("representation: current_sqlite"), []byte("representation: event_history"), 1)
-		case "wrong_mounted_count":
+		case canonicalTieMutationWrongMountedCount:
 			mutated = bytes.Replace(mutated, []byte("declared_mounted_cases: 1"), []byte("declared_mounted_cases: 2"), 1)
-		case "winner_enumerated_first":
+		case canonicalTieMutationWinnerEnumeratedFirst:
 			mutated = bytes.Replace(mutated, []byte("enumeration: [0, 1]"), []byte("enumeration: [1, 0]"), 1)
+		case canonicalTieMutationOverrideSortsFirst:
+			mutated = bytes.Replace(mutated, []byte("override_name: z-override.db"), []byte("override_name: a-override.db"), 1)
+		case canonicalTieMutationUnknownProvenance:
+			mutated = bytes.Replace(mutated, []byte("provenance: environment_override"), []byte("provenance: event_history"), 1)
 		}
 		if _, err := loadCanonicalTieFixture(mutated); err == nil || strings.TrimSpace(mutation.Name) == "" {
 			t.Errorf("canonical tie loader mutation %q was accepted", mutation.Name)

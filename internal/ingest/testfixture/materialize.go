@@ -233,6 +233,11 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	if err := createSchema(conn, fixtureCase.Schema); err != nil {
 		return err
 	}
+	if fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid {
+		if err := insertSessionRows(conn, fixtureCase); err != nil {
+			return err
+		}
+	}
 	if err := insertLegacyMessages(conn, fixtureCase.LegacyMessages); err != nil {
 		return err
 	}
@@ -282,11 +287,11 @@ func createSchema(conn *sqlite.Conn, schema schemaKind) error {
 	case schemaEmpty:
 		script = `CREATE TABLE fixture_header_seed (id INTEGER); DROP TABLE fixture_header_seed;`
 	case schemaLegacy:
-		script = legacySchemaSQL
+		script = sessionSchemaSQL + legacySchemaSQL
 	case schemaCurrent:
-		script = currentSchemaSQL
+		script = sessionSchemaSQL + currentSchemaSQL
 	case schemaHybrid:
-		script = legacySchemaSQL + currentSchemaSQL
+		script = sessionSchemaSQL + legacySchemaSQL + currentSchemaSQL
 	case schemaCurrentMissingSeq:
 		script = currentMissingSeqSchemaSQL
 	case schemaCurrentNullableSeq:
@@ -303,6 +308,17 @@ func createSchema(conn *sqlite.Conn, schema schemaKind) error {
 	}
 	return nil
 }
+
+// sessionSchemaSQL mirrors the upstream session table columns that Peasant
+// reads: the parent link and the per-session update clock.
+const sessionSchemaSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0,
+  time_updated INTEGER NOT NULL DEFAULT 0
+);
+`
 
 const legacySchemaSQL = `
 CREATE TABLE message (
@@ -325,7 +341,6 @@ CREATE INDEX part_message_id_idx ON part(message_id, id);
 `
 
 const currentSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -341,7 +356,7 @@ CREATE INDEX session_message_seq_idx ON session_message(seq);
 `
 
 const currentMissingSeqSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -355,7 +370,7 @@ CREATE INDEX session_message_session_idx ON session_message(session_id);
 `
 
 const currentNullableSeqSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -370,7 +385,7 @@ CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message(session_i
 `
 
 const currentPartialSeqSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -404,15 +419,50 @@ func insertLegacyParts(conn *sqlite.Conn, rows []legacyPart) error {
 	return nil
 }
 
-func insertCurrentMessages(conn *sqlite.Conn, rows []currentMessage) error {
-	seenSessions := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if _, exists := seenSessions[row.SessionID]; !exists {
-			if err := sqlitex.Execute(conn, `INSERT INTO session (id) VALUES (?1);`, &sqlitex.ExecOptions{Args: []any{row.SessionID}}); err != nil {
-				return fmt.Errorf("insert synthetic current session %q with explicit columns: %w", row.SessionID, err)
-			}
-			seenSessions[row.SessionID] = struct{}{}
+// insertSessionRows writes one session row per distinct session id. The
+// session clock mirrors upstream: time_updated is the newest row time of the
+// session, so a later row change or an upstream revert moves it.
+func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
+	type clock struct{ created, updated int64 }
+	clocks := make(map[string]clock)
+	order := make([]string, 0)
+	observe := func(sessionID string, created, updated int64) {
+		value, exists := clocks[sessionID]
+		if !exists {
+			order = append(order, sessionID)
+			value = clock{created: created, updated: updated}
 		}
+		if created < value.created {
+			value.created = created
+		}
+		if updated > value.updated {
+			value.updated = updated
+		}
+		if created > value.updated {
+			value.updated = created
+		}
+		clocks[sessionID] = value
+	}
+	for _, row := range fixtureCase.LegacyMessages {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
+	for _, row := range fixtureCase.LegacyParts {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
+	for _, row := range fixtureCase.CurrentMessages {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
+	for _, sessionID := range order {
+		value := clocks[sessionID]
+		if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated) VALUES (?1, ?2, ?3);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, value.updated}}); err != nil {
+			return fmt.Errorf("insert synthetic session %q with explicit columns: %w", sessionID, err)
+		}
+	}
+	return nil
+}
+
+func insertCurrentMessages(conn *sqlite.Conn, rows []currentMessage) error {
+	for _, row := range rows {
 		const query = `INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);`
 		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{row.ID, row.SessionID, row.Type, row.TimeCreated, row.TimeUpdated, row.Data, row.Seq}}); err != nil {
 			return fmt.Errorf("insert synthetic current message %q with explicit columns: %w", row.ID, err)

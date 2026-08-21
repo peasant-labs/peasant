@@ -94,10 +94,13 @@ func (a *OpenCodeAdapter) discoverLegacySQLite(ctx context.Context, candidate Op
 	return discovered, nil
 }
 
-// legacySQLiteContentModTime returns the newest content-bearing source time.
-// SQLite's shared-memory sidecar contains reader coordination state rather than
-// committed transcript content and is deliberately never inspected here.
-func legacySQLiteContentModTime(filesystem FileSystem, databasePath string) (time.Time, error) {
+// sqliteContentModTime returns the newest content-bearing source time of one
+// OpenCode database. Discovery uses it as the freshness floor for every
+// selected SQLite session, because a row deletion moves the file or WAL mtime
+// but never raises the surviving rows' own times. SQLite's shared-memory
+// sidecar contains reader coordination state rather than committed transcript
+// content and is deliberately never inspected here.
+func sqliteContentModTime(filesystem FileSystem, databasePath string) (time.Time, error) {
 	databaseInfo, err := filesystem.Stat(databasePath)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("determine legacy OpenCode SQLite freshness for %q failed while inspecting the main database: %w; discovery cannot classify sessions safely without content evidence; verify the database still exists and is readable, then retry", databasePath, err)
@@ -153,7 +156,7 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 		_ = source.Close(context.Background())
 		return nil, nil, err
 	}
-	projection, readErr := readOpenCodeLegacyProjection(ctx, source, legacyID, pageSize)
+	projection, dropped, readErr := readOpenCodeLegacyProjectionWithDiagnostics(ctx, source, legacyID, pageSize)
 	closeErr := source.Close(ctx)
 	if readErr != nil || closeErr != nil {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, errors.Join(readErr, closeErr))
@@ -170,16 +173,63 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	if err != nil {
 		return nil, nil, err
 	}
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, droppedOpenCodeOrphanPartDiagnostics(session, dropped)...)
 	return metadata, data, nil
 }
 
+// openCodeDroppedOrphanPart records one selected orphan part row that the
+// projection could not carry as transcript content.
+type openCodeDroppedOrphanPart struct {
+	partID    string
+	messageID string
+	reason    string
+}
+
+// readOpenCodeLegacyProjection reads the selected legacy rows and discards the
+// dropped-orphan notes. Production callers use the diagnostics-returning form.
 func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize) (openCodeLegacyProjection, error) {
+	projection, _, err := readOpenCodeLegacyProjectionWithDiagnostics(ctx, source, sessionID, pageSize)
+	return projection, err
+}
+
+// unusableOpenCodeOrphanPartReason explains why an orphan part row cannot
+// enter the managed projection. It returns "" when the row is usable.
+func unusableOpenCodeOrphanPartReason(data []byte) string {
+	if err := requireJSONObject(data); err != nil {
+		return "its data is not a JSON object: " + err.Error()
+	}
+	part, err := parseOpenCodeSemanticPart("", 0, data)
+	if err != nil {
+		return "its data does not decode as an OpenCode part: " + err.Error()
+	}
+	if !isSupportedOpenCodeSemanticPartType(part.Data.Type) {
+		return fmt.Sprintf("its type %q is outside the supported transcript part set", part.Data.Type)
+	}
+	return ""
+}
+
+// droppedOpenCodeOrphanPartDiagnostics turns dropped orphan rows into
+// actionable warnings on the session metadata. The session still ingests.
+func droppedOpenCodeOrphanPartDiagnostics(session DiscoveredSession, dropped []openCodeDroppedOrphanPart) []DiagnosticEntry {
+	diagnostics := make([]DiagnosticEntry, 0, len(dropped))
+	for _, part := range dropped {
+		diagnostics = append(diagnostics, DiagnosticEntry{
+			ErrorType:   string(OpenCodeGraphOrphanPartDropped),
+			Location:    fmt.Sprintf("selected OpenCode session %s orphan part %s for absent message %s from %s", session.SessionID, part.partID, part.messageID, session.SourcePath),
+			Message:     fmt.Sprintf("orphan part %s was dropped from the selected transcript because %s; while materializing the selected legacy rows Peasant kept every other message and part, which means the session ingested without this row", part.partID, part.reason),
+			Remediation: "Let OpenCode finish or repair the session, then re-run ingest; if the row stays unusable, export the session through OpenCode rather than editing its database with Peasant.",
+		})
+	}
+	return diagnostics
+}
+
+func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize) (openCodeLegacyProjection, []openCodeDroppedOrphanPart, error) {
 	projection := openCodeLegacyProjection{Format: openCodeLegacyProjectionFormat, Version: openCodeLegacyProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	var messageCursor *OpenCodeLegacyMessageCursor
 	for {
 		page, err := source.LegacyMessages(ctx, OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize, After: messageCursor})
 		if err != nil {
-			return openCodeLegacyProjection{}, err
+			return openCodeLegacyProjection{}, nil, err
 		}
 		for _, row := range page.Messages {
 			message := openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Data: json.RawMessage(row.Data), Parts: []openCodeLegacyProjectionPart{}}
@@ -187,7 +237,7 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 			for {
 				parts, partErr := source.LegacyParts(ctx, OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: row.ID, PageSize: pageSize, After: partCursor})
 				if partErr != nil {
-					return openCodeLegacyProjection{}, partErr
+					return openCodeLegacyProjection{}, nil, partErr
 				}
 				for _, part := range parts.Parts {
 					message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)})
@@ -204,13 +254,19 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 		}
 		messageCursor = page.Next
 	}
+	var dropped []openCodeDroppedOrphanPart
 	var orphanCursor *OpenCodeLegacyPartCursor
 	for {
 		page, err := source.LegacyOrphanParts(ctx, OpenCodeLegacyOrphanPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: orphanCursor})
 		if err != nil {
-			return openCodeLegacyProjection{}, err
+			return openCodeLegacyProjection{}, nil, err
 		}
 		for _, part := range page.Parts {
+			if reason := unusableOpenCodeOrphanPartReason([]byte(part.Data)); reason != "" {
+				// An unusable orphan row must not fail the whole session.
+				dropped = append(dropped, openCodeDroppedOrphanPart{partID: part.ID.String(), messageID: part.MessageID.String(), reason: reason})
+				continue
+			}
 			syntheticMessageID := "orphan-parent-" + part.ID.String()
 			data, marshalErr := json.Marshal(map[string]any{
 				"id":                   syntheticMessageID,
@@ -220,7 +276,7 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 				"_peasant_orphan_part": true,
 			})
 			if marshalErr != nil {
-				return openCodeLegacyProjection{}, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
+				return openCodeLegacyProjection{}, nil, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
 			}
 			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{
 				ID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: data,
@@ -232,7 +288,7 @@ func readOpenCodeLegacyProjection(ctx context.Context, source OpenCodeSQLiteSour
 		}
 		orphanCursor = page.Next
 	}
-	return projection, nil
+	return projection, dropped, nil
 }
 
 func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection) (*UnifiedMetadata, error) {

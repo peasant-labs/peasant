@@ -86,9 +86,36 @@ type canonicalPersistenceJSON struct {
 	Marker    string `yaml:"marker"`
 }
 
+// canonicalPersistenceMutationKind is the closed set of loader mutations the
+// persistence fixture proves non-vacuous.
+type canonicalPersistenceMutationKind string
+
+const (
+	persistenceMutationUnknownField         canonicalPersistenceMutationKind = "unknown_field"
+	persistenceMutationWrongCount           canonicalPersistenceMutationKind = "wrong_count"
+	persistenceMutationDuplicateName        canonicalPersistenceMutationKind = "duplicate_name"
+	persistenceMutationTrailingDocument     canonicalPersistenceMutationKind = "trailing_document"
+	persistenceMutationWrongSessionCount    canonicalPersistenceMutationKind = "wrong_session_count"
+	persistenceMutationDuplicateSessionID   canonicalPersistenceMutationKind = "duplicate_session_id"
+	persistenceMutationUnknownCombination   canonicalPersistenceMutationKind = "unknown_combination"
+	persistenceMutationOrphanJSONReference  canonicalPersistenceMutationKind = "orphan_json_reference"
+	persistenceMutationMissingWinningMarker canonicalPersistenceMutationKind = "missing_winning_marker"
+	persistenceMutationMissingOrderedEntry  canonicalPersistenceMutationKind = "missing_ordered_entry"
+	persistenceMutationInvalidMetrics       canonicalPersistenceMutationKind = "invalid_metrics"
+)
+
+func (kind canonicalPersistenceMutationKind) validate() error {
+	switch kind {
+	case persistenceMutationUnknownField, persistenceMutationWrongCount, persistenceMutationDuplicateName, persistenceMutationTrailingDocument, persistenceMutationWrongSessionCount, persistenceMutationDuplicateSessionID, persistenceMutationUnknownCombination, persistenceMutationOrphanJSONReference, persistenceMutationMissingWinningMarker, persistenceMutationMissingOrderedEntry, persistenceMutationInvalidMetrics:
+		return nil
+	default:
+		return fmt.Errorf("canonical persistence fixture has unknown mutation %q", kind)
+	}
+}
+
 type canonicalPersistenceLoaderMutation struct {
-	Name string `yaml:"name"`
-	Kind string `yaml:"kind"`
+	Name string                           `yaml:"name"`
+	Kind canonicalPersistenceMutationKind `yaml:"kind"`
 }
 
 //go:embed testdata/opencode_canonical_persistence.yaml
@@ -163,10 +190,8 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 			return fixture, fmt.Errorf("canonical persistence fixture has incomplete or duplicate loader mutation %q", mutation.Name)
 		}
 		seen[mutation.Name] = true
-		switch mutation.Kind {
-		case "unknown_field", "wrong_count", "duplicate_name", "trailing_document", "wrong_session_count", "duplicate_session_id", "unknown_combination", "orphan_json_reference", "missing_winning_marker", "missing_ordered_entry", "invalid_metrics":
-		default:
-			return fixture, fmt.Errorf("canonical persistence fixture has unknown mutation %q", mutation.Kind)
+		if err := mutation.Kind.validate(); err != nil {
+			return fixture, err
 		}
 	}
 	return fixture, nil
@@ -306,7 +331,9 @@ func assertPersistedCanonicalGraph(t testing.TB, entries []schema.SessionEntry, 
 	parent, parentOK := indexes[testCase.ParentEntry]
 	child, childOK := indexes[testCase.ChildEntry]
 	missing, missingOK := indexes[testCase.MissingParentEntry]
-	if !parentOK || !childOK || entries[child].ParentIndex == nil || *entries[child].ParentIndex != entries[parent].EntryIndex || entries[child].Depth != entries[parent].Depth+1 {
+	// Messages stay at Depth 0 so consumers keep Depth 0/1 as the message and
+	// part discriminator; the parent link lives in ParentIndex only.
+	if !parentOK || !childOK || entries[child].ParentIndex == nil || *entries[child].ParentIndex != entries[parent].EntryIndex || entries[child].Depth != 0 || entries[parent].Depth != 0 {
 		t.Fatalf("persisted canonical parent graph is incorrect: parent=%d/%t child=%d/%t entries=%+v", parent, parentOK, child, childOK, entries)
 	}
 	if !missingOK || entries[missing].ParentIndex != nil || entries[missing].Depth != 0 || !toolPaired {
@@ -331,7 +358,7 @@ func assertCanonicalDetailGraph(t testing.TB, turns []ingest.Turn, testCase cano
 	rooted := false
 	for _, turn := range turns {
 		if turn.Index == childIndex && turn.ParentIndex != nil && *turn.ParentIndex == parentIndex {
-			if parent, ok := indexes[parentIndex]; ok && turn.Depth == parent.Depth+1 {
+			if parent, ok := indexes[parentIndex]; ok && turn.Depth == 0 && parent.Depth == 0 {
 				linked = true
 			}
 		}
@@ -402,27 +429,27 @@ func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
 	for _, mutation := range fixture.LoaderMutations {
 		mutated := append([]byte(nil), canonicalPersistenceYAML...)
 		switch mutation.Kind {
-		case "unknown_field":
+		case persistenceMutationUnknownField:
 			mutated = bytes.Replace(mutated, []byte("source_fixture:"), []byte("unexpected:"), 1)
-		case "wrong_count":
+		case persistenceMutationWrongCount:
 			mutated = bytes.Replace(mutated, []byte("declared_cases: 1"), []byte("declared_cases: 2"), 1)
-		case "duplicate_name":
+		case persistenceMutationDuplicateName:
 			mutated = bytes.Replace(mutated, []byte("name: trailing-document"), []byte("name: unknown-field"), 1)
-		case "trailing_document":
+		case persistenceMutationTrailingDocument:
 			mutated = append(mutated, []byte("\n---\nextra: true\n")...)
-		case "wrong_session_count":
+		case persistenceMutationWrongSessionCount:
 			mutated = bytes.Replace(mutated, []byte("expected_sessions: 9"), []byte("expected_sessions: 8"), 1)
-		case "duplicate_session_id":
+		case persistenceMutationDuplicateSessionID:
 			mutated = bytes.Replace(mutated, []byte("ses_3cd91f52effeXd3QAJ54jOyzv6"), []byte("ses_3cd91f52effeXd3QAJ54jOyzv5"), 1)
-		case "unknown_combination":
+		case persistenceMutationUnknownCombination:
 			mutated = bytes.Replace(mutated, []byte("combination: current_legacy_json"), []byte("combination: event_history"), 1)
-		case "orphan_json_reference":
+		case persistenceMutationOrphanJSONReference:
 			mutated = bytes.Replace(mutated, []byte("session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, marker: JSON_ONLY"), []byte("session_id: ses_unknown_json, marker: JSON_ONLY"), 1)
-		case "missing_winning_marker":
+		case persistenceMutationMissingWinningMarker:
 			mutated = bytes.Replace(mutated, []byte("winning_marker: CURRENT_ALL"), []byte("winning_marker: \"\""), 1)
-		case "missing_ordered_entry":
+		case persistenceMutationMissingOrderedEntry:
 			mutated = bytes.Replace(mutated, []byte("ordered_entry_ids: [msg_current_all]"), []byte("ordered_entry_ids: []"), 1)
-		case "invalid_metrics":
+		case persistenceMutationInvalidMetrics:
 			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 6}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
 		}
 		if _, err := loadCanonicalPersistenceFixture(mutated); err == nil || strings.TrimSpace(mutation.Name) == "" {

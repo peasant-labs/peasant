@@ -67,7 +67,7 @@ cases:
     orphan_session: ses_3cd91f52effeXd3QAJ54jOyzvD
     orphan_entry: part_legacy_orphan
     orphan_content_contains: LEGACY_ORPHAN_PART
-    expected_metrics: {turn_count: 2, tool_calls: 3, compute_version: 6}
+    expected_metrics: {turn_count: 3, tool_calls: 3, compute_version: 6}
 declared_loader_mutations: 11
 loader_mutations:
   - {name: unknown-field, kind: unknown_field}

@@ -18,6 +18,22 @@ cases:
     expected_path: /synthetic/a/session.json
     expected_clean_path: /synthetic/a/session.json
     permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+declared_provenance_cases: 2
+provenance_cases:
+  - name: current-override-outranks-channel-despite-path-order
+    representation: current_sqlite
+    candidates:
+      - {path: /synthetic/z-override.db, provenance: environment_override}
+      - {path: /synthetic/a-channel.db, provenance: channel_database}
+    expected_path: /synthetic/z-override.db
+    permutations: [[0, 1], [1, 0]]
+  - name: legacy-override-outranks-channel-despite-path-order
+    representation: legacy_sqlite
+    candidates:
+      - {path: /synthetic/z-override.db, provenance: environment_override}
+      - {path: /synthetic/a-channel.db, provenance: channel_database}
+    expected_path: /synthetic/z-override.db
+    permutations: [[0, 1], [1, 0]]
 declared_mounted_cases: 1
 mounted_cases:
   - name: mounted-current-sqlite-lexical-winner
@@ -29,7 +45,16 @@ mounted_cases:
     expected_winner_index: 1
     winning_marker: LEXICAL_PATH_WINNER
     losing_marker: ENUMERATION_FIRST_LOSER
-declared_loader_mutations: 6
+declared_mounted_provenance_cases: 1
+mounted_provenance_cases:
+  - name: mounted-override-outranks-channel-database
+    source_fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    marker_row_id: msg_01_user
+    override_name: z-override.db
+    winning_marker: OVERRIDE_WINNER
+    losing_marker: CHANNEL_LOSER
+declared_loader_mutations: 8
 loader_mutations:
   - {name: unknown-field, kind: unknown_field}
   - {name: wrong-count, kind: wrong_count}
@@ -37,3 +62,5 @@ loader_mutations:
   - {name: unknown-representation, kind: unknown_representation}
   - {name: wrong-mounted-count, kind: wrong_mounted_count}
   - {name: winner-enumerated-first, kind: winner_enumerated_first}
+  - {name: override-sorts-first, kind: override_sorts_first}
+  - {name: unknown-provenance, kind: unknown_provenance}

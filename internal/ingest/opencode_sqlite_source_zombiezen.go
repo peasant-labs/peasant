@@ -36,6 +36,8 @@ const (
 	openCodeLegacyMessageFreshnessStatement = "SELECT MAX(MAX(time_created, time_updated)) FROM message WHERE session_id = ?1"
 	openCodeLegacyPartFreshnessStatement    = "SELECT MAX(MAX(time_created, time_updated)) FROM part WHERE session_id = ?1"
 	openCodeCurrentFreshnessStatement       = "SELECT MAX(MAX(time_created, time_updated)) FROM session_message WHERE session_id = ?1"
+	openCodeSessionRecordsFirstStatement    = "SELECT id, parent_id, time_updated FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionRecordsAfterStatement    = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -345,35 +347,140 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyOrphanParts(ctx context.Context, r
 		return OpenCodeLegacyPartPage{}, err
 	}
 	defer lease.release()
-	rows := make([]OpenCodeLegacyPartRow, 0, request.PageSize.value+1)
-	decode := func(stmt *sqlite.Stmt) error {
-		row, decodeErr := decodeLegacyPartRow(stmt)
-		if decodeErr != nil {
-			return decodeErr
-		}
+	collector := newLegacyPartPageCollector(request.PageSize.value, false, func(row OpenCodeLegacyPartRow) error {
 		if row.SessionID != request.SessionID {
 			return fmt.Errorf("decode legacy orphan part row %q: projected session %q differs from requested session %q", row.ID.String(), row.SessionID.String(), request.SessionID.String())
 		}
-		rows = append(rows, row)
+		return nil
+	})
+	if request.After == nil {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyOrphanPartsFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, collector.decode)
+	} else {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyOrphanPartsAfterStatement, []any{request.SessionID.value, request.After.partID.value, request.PageSize.value + 1}, collector.decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy orphan part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
+	}
+	return collector.page(), nil
+}
+
+// SessionRecords returns session rows in identifier order with their parent
+// link and update clock. A database without a session table, or without the
+// parent_id and time_updated columns, reports Supported=false with no rows, so
+// older layouts stay discoverable as roots with file-based freshness.
+func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
+	if request.PageSize.value <= 0 || request.PageSize.value > MaxOpenCodeCurrentPageSize {
+		return OpenCodeSessionRecordPage{}, fmt.Errorf("validate OpenCode session record page request failed before source access: page size %d was not created by NewOpenCodeCurrentPageSize, so enumeration cannot be proven bounded; construct the page size with the validator", request.PageSize.value)
+	}
+	if request.After != nil {
+		if err := validateOpenCodeCurrentToken("session record cursor", request.After.sessionID.value); err != nil {
+			return OpenCodeSessionRecordPage{}, err
+		}
+	}
+	lease, err := s.beginSourceRead(ctx, "read bounded session record page")
+	if err != nil {
+		return OpenCodeSessionRecordPage{}, err
+	}
+	defer lease.release()
+	columns, err := s.columnsLocked(lease.ctx, "session")
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session)", "supported OpenCode session")
+	}
+	hasParent, hasClock := false, false
+	for _, column := range columns {
+		switch column.Name {
+		case "parent_id":
+			hasParent = true
+		case "time_updated":
+			hasClock = true
+		}
+	}
+	if !hasParent || !hasClock {
+		return OpenCodeSessionRecordPage{}, nil
+	}
+	rows := make([]OpenCodeSessionRecord, 0, request.PageSize.value+1)
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeText {
+			return fmt.Errorf("decode session record: id has SQLite type %s instead of text", stmt.ColumnType(0))
+		}
+		sessionID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(0))
+		if err != nil {
+			return fmt.Errorf("decode session record: %w", err)
+		}
+		record := OpenCodeSessionRecord{SessionID: sessionID}
+		if stmt.ColumnType(1) == sqlite.TypeText && stmt.ColumnText(1) != "" {
+			parentID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(1))
+			if err != nil {
+				return fmt.Errorf("decode session record %q parent: %w", sessionID.String(), err)
+			}
+			record.ParentID = parentID
+		}
+		switch stmt.ColumnType(2) {
+		case sqlite.TypeNull:
+		case sqlite.TypeInteger:
+			record.TimeUpdated = stmt.ColumnInt64(2)
+		default:
+			return fmt.Errorf("decode session record %q: time_updated has SQLite type %s instead of integer", sessionID.String(), stmt.ColumnType(2))
+		}
+		rows = append(rows, record)
 		return nil
 	}
 	if request.After == nil {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyOrphanPartsFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, decode)
+		err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
 	} else {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyOrphanPartsAfterStatement, []any{request.SessionID.value, request.After.partID.value, request.PageSize.value + 1}, decode)
+		err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
 	}
 	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy orphan part page", err, "part(id,message_id,session_id,time_created,time_updated,data)", "supported selected legacy projection")
+		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "session(id, parent_id, time_updated)", "supported OpenCode session")
 	}
 	hasNext := len(rows) > request.PageSize.value
 	if hasNext {
 		rows = rows[:request.PageSize.value]
 	}
+	page := OpenCodeSessionRecordPage{Supported: true, Records: rows[:len(rows):len(rows)]}
+	if hasNext {
+		page.Next = &OpenCodeSessionRecordCursor{sessionID: page.Records[len(page.Records)-1].SessionID}
+	}
+	return page, nil
+}
+
+// legacyPartPageCollector decodes part rows, checks their scope, and
+// assembles one bounded page with its continuation cursor. LegacyParts and
+// LegacyOrphanParts share it; each keeps its constant statements in its body.
+type legacyPartPageCollector struct {
+	pageSize    int
+	requireJSON bool
+	check       func(OpenCodeLegacyPartRow) error
+	rows        []OpenCodeLegacyPartRow
+}
+
+func newLegacyPartPageCollector(pageSize int, requireJSON bool, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
+	return &legacyPartPageCollector{pageSize: pageSize, requireJSON: requireJSON, check: check, rows: make([]OpenCodeLegacyPartRow, 0, pageSize+1)}
+}
+
+func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
+	row, err := decodeLegacyPartRow(stmt, c.requireJSON)
+	if err != nil {
+		return err
+	}
+	if err := c.check(row); err != nil {
+		return err
+	}
+	c.rows = append(c.rows, row)
+	return nil
+}
+
+func (c *legacyPartPageCollector) page() OpenCodeLegacyPartPage {
+	rows := c.rows
+	hasNext := len(rows) > c.pageSize
+	if hasNext {
+		rows = rows[:c.pageSize]
+	}
 	page := OpenCodeLegacyPartPage{Parts: rows[:len(rows):len(rows)]}
 	if hasNext {
 		page.Next = &OpenCodeLegacyPartCursor{partID: page.Parts[len(page.Parts)-1].ID}
 	}
-	return page, nil
+	return page
 }
 
 // LegacyMessages returns one session's current materialized legacy messages in
@@ -433,38 +540,21 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyParts(ctx context.Context, request
 		return OpenCodeLegacyPartPage{}, err
 	}
 	defer lease.release()
-
-	rows := make([]OpenCodeLegacyPartRow, 0, request.PageSize.value+1)
-	decode := func(stmt *sqlite.Stmt) error {
-		row, decodeErr := decodeLegacyPartRow(stmt)
-		if decodeErr != nil {
-			return decodeErr
-		}
+	collector := newLegacyPartPageCollector(request.PageSize.value, true, func(row OpenCodeLegacyPartRow) error {
 		if row.SessionID != request.SessionID || row.MessageID != request.MessageID {
 			return fmt.Errorf("decode legacy part row %q: projected session/message %q/%q differs from requested scope %q/%q", row.ID.String(), row.SessionID.String(), row.MessageID.String(), request.SessionID.String(), request.MessageID.String())
 		}
-		rows = append(rows, row)
 		return nil
-	}
+	})
 	if request.After == nil {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsFirstStatement, []any{request.SessionID.value, request.MessageID.value, request.PageSize.value + 1}, decode)
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsFirstStatement, []any{request.SessionID.value, request.MessageID.value, request.PageSize.value + 1}, collector.decode)
 	} else {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsAfterStatement, []any{request.SessionID.value, request.MessageID.value, request.After.partID.value, request.PageSize.value + 1}, decode)
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsAfterStatement, []any{request.SessionID.value, request.MessageID.value, request.After.partID.value, request.PageSize.value + 1}, collector.decode)
 	}
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
 	}
-	hasNext := len(rows) > request.PageSize.value
-	if hasNext {
-		rows = rows[:request.PageSize.value]
-	}
-	rows = rows[:len(rows):len(rows)]
-	page := OpenCodeLegacyPartPage{Parts: rows}
-	if hasNext {
-		cursor := OpenCodeLegacyPartCursor{partID: page.Parts[len(page.Parts)-1].ID}
-		page.Next = &cursor
-	}
-	return page, nil
+	return collector.page(), nil
 }
 
 // CurrentMessages returns one session's materialized current rows in seq order.
@@ -708,7 +798,10 @@ func decodeLegacyMessageRow(stmt *sqlite.Stmt) (OpenCodeLegacyMessageRow, error)
 	return OpenCodeLegacyMessageRow{ID: messageID, SessionID: sessionID, TimeCreated: stmt.ColumnInt64(2), TimeUpdated: stmt.ColumnInt64(3), Data: data}, nil
 }
 
-func decodeLegacyPartRow(stmt *sqlite.Stmt) (OpenCodeLegacyPartRow, error) {
+// decodeLegacyPartRow decodes one part row. Ordinary parts require valid JSON
+// data. Orphan parts keep malformed data so the projection can drop them with
+// a warning instead of failing the whole session.
+func decodeLegacyPartRow(stmt *sqlite.Stmt, requireJSON bool) (OpenCodeLegacyPartRow, error) {
 	if err := requireOpenCodeColumnTypes(stmt, []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger, sqlite.TypeText}); err != nil {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row: %w", err)
 	}
@@ -725,7 +818,7 @@ func decodeLegacyPartRow(stmt *sqlite.Stmt) (OpenCodeLegacyPartRow, error) {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row session: %w", err)
 	}
 	data := stmt.ColumnText(5)
-	if !json.Valid([]byte(data)) {
+	if requireJSON && !json.Valid([]byte(data)) {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row %q: data is not valid JSON", partID.String())
 	}
 	return OpenCodeLegacyPartRow{ID: partID, MessageID: messageID, SessionID: sessionID, TimeCreated: stmt.ColumnInt64(3), TimeUpdated: stmt.ColumnInt64(4), Data: data}, nil
