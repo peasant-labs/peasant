@@ -308,19 +308,23 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		}
 		appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite)
 	case OpenCodeCapabilityHybrid:
+		// A hybrid database has migrated to the current session_message
+		// projection, so the legacy message and part tables are stale leftovers.
+		// When the current projection discovers successfully, use it alone, so a
+		// session deleted from session_message is never resurrected by a stale
+		// legacy row. The legacy tables are read only when the current projection
+		// is unusable.
 		current, currentErr := a.discoverCurrentSQLite(ctx, source, result.Candidate)
+		if currentErr == nil {
+			appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
+			break
+		}
 		legacy, legacyErr := a.discoverLegacySQLite(ctx, source, result.Candidate)
-		if currentErr != nil && legacyErr != nil {
+		if legacyErr != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite session enumeration failed", fmt.Errorf("current projection is unusable (%w) and legacy fallback also failed (%v)", currentErr, legacyErr))
 			return nil, source
 		}
-		if currentErr != nil {
-			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite current projection is unusable; legacy rows were used", currentErr)
-		}
-		if legacyErr != nil {
-			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite legacy projection is unusable; current rows were used", legacyErr)
-		}
-		appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite current projection is unusable; legacy rows were used", currentErr)
 		appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite)
 	default:
 		return nil, source

@@ -1,7 +1,8 @@
 declared_cases: 1
 cases:
   - name: mixed-canonical-sessions-persist-through-detail-and-analytics
-    source_fixture: canonical-selection-mixed
+    source_fixture: canonical-selection-current
+    legacy_source_fixture: canonical-selection-legacy
     expected_sessions: 9
     json_sessions:
       - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, marker: JSON_ALL}

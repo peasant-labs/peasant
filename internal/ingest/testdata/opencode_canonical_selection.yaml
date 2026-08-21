@@ -1,5 +1,6 @@
 declared_cases: 9
-source_fixture: canonical-selection-mixed
+source_fixture: canonical-selection-current
+legacy_source_fixture: canonical-selection-legacy
 json_mtime_ms: 3000
 json_sessions:
   - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, marker: JSON_ALL}
