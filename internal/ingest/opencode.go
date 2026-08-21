@@ -389,6 +389,11 @@ func selectCanonicalOpenCodeCandidates(candidates []openCodeSessionCandidate) ([
 		if err := candidate.identity.Validate(); err != nil {
 			return nil, fmt.Errorf("select canonical OpenCode session failed before freshness diffing: %w; the candidate cannot enter the mounted pipeline; fix candidate construction and retry", err)
 		}
+		// precedence() ranks an unknown provenance as zero, which would silently
+		// misrank a winner, so reject an unknown value at the selection boundary.
+		if err := candidate.provenance.Validate(); err != nil {
+			return nil, fmt.Errorf("select canonical OpenCode session %q failed before freshness diffing: %w; the candidate cannot enter the mounted pipeline; construct provenance through the resolver and retry", candidate.identity.SessionID, err)
+		}
 		position, exists := positions[candidate.identity.SessionID]
 		if !exists {
 			positions[candidate.identity.SessionID] = len(selected)
