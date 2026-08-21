@@ -32,7 +32,7 @@ entries:
         expectedHits: 23
       - gate: layout
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "shared base/header/selected/dim/border styles for the pre-kit dashboard, session, trends, and annotation screens; a hand-picked terminal palette predating internal/tui/theme, including one package-level background style predating kit.Panel"
   - path: internal/tui/session.go
     gates:
@@ -40,13 +40,13 @@ entries:
         expectedHits: 2
       - gate: keys
         expectedHits: 2
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "session list row foreground/background colors; two switch-msg.String() key dispatch blocks (session list nav, detail view nav) predating internal/tui/keymap"
   - path: internal/tui/annotations.go
     gates:
       - gate: colors
         expectedHits: 2
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "annotation type badge colors"
   - path: internal/tui/annotation_editor.go
     gates:
@@ -54,7 +54,7 @@ entries:
         expectedHits: 1
       - gate: keys
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "annotation editor panel border color; one switch-msg.String() escape-key check predating internal/tui/keymap (the 1-9 digit-shortcut byte extraction elsewhere in this file is a distinct idiom the key grep gate does not flag)"
   - path: internal/tui/app.go
     gates:
@@ -62,13 +62,13 @@ entries:
         expectedHits: 3
       - gate: layout
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/keymap (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "top-level tab-switcher captures msg.String() into a local and raw-compares it for quit/tab-switch handling, predating internal/tui/keymap; it also paints the pre-kit page background by hand, predating kit.Panel"
   - path: internal/tui/dashboard.go
     gates:
       - gate: colors
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "dashboard metric row color"
   - path: internal/tui/trends.go
     gates:
@@ -76,7 +76,7 @@ entries:
         expectedHits: 1
       - gate: layout
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "trend bar chart color, and its bar style painting the pre-kit page background by hand, predating kit.Panel"
   - path: internal/push/wizard.go
     gates:
