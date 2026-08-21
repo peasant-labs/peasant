@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
@@ -352,7 +353,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvid
 	if err != nil {
 		t.Fatalf("buildPushWizardSessions: %v", err)
 	}
-	model := push.NewPushWizard(wiz)
+	model := push.NewPushWizard(theme.New(theme.ModeDark), wiz)
 	ids := map[string]bool{}
 	for _, id := range model.SelectedSessionIDs() {
 		ids[id] = true
@@ -517,7 +518,7 @@ func TestBuildPushWizardSessions_SelectionAware(t *testing.T) {
 	}
 
 	// Approved (unlocked) set == kept set == {selectedID}.
-	approved := push.NewPushWizard(wiz).SelectedSessionIDs()
+	approved := push.NewPushWizard(theme.New(theme.ModeDark), wiz).SelectedSessionIDs()
 	if len(approved) != 1 || approved[0] != selectedID {
 		t.Fatalf("approved set should be exactly [%s]; got %v", selectedID, approved)
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -311,7 +312,10 @@ func BuildPushCommand() *cobra.Command {
 						Method:         cfg.Push.Method,
 						Sources:        cfg.Push.Sources,
 					}
-					wizardIDs, wizErr := runPushWizard(ctx, db, fs, cfg.Output.BasePath, wizQuery, runCfg.Selection)
+					wizardIDs, wizErr := runPushWizard(
+						ctx, db, fs, theme.New(themeModeFor(cfg)),
+						cfg.Output.BasePath, wizQuery, runCfg.Selection,
+					)
 					if wizErr != nil {
 						return wizErr
 					}
@@ -1603,6 +1607,7 @@ func runPushWizard(
 	ctx context.Context,
 	db push.CandidateStore,
 	fs ingest.FileSystem,
+	th theme.Theme,
 	outputBasePath string,
 	q push.PushCandidateQuery,
 	selection *push.SessionSelection,
@@ -1616,7 +1621,7 @@ func runPushWizard(
 		return []string{}, nil
 	}
 
-	model := push.NewPushWizard(wizSessions)
+	model := push.NewPushWizard(th, wizSessions)
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
 	if err != nil {

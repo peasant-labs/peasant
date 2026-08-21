@@ -16,10 +16,12 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/schema"
 )
 
 type terminalCapture struct {
@@ -72,6 +74,22 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		selectionCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
 	}
 
+	pushCaptures := make(map[string]terminalCapture, len(document.PushCaptures))
+	pushStates := make(map[pushState]pushStateFixture, len(document.PushStates))
+	for _, state := range document.PushStates {
+		pushStates[state.Key] = state
+	}
+	for _, capture := range document.PushCaptures {
+		view, renderErr := renderPushCapture(document.Push, capture)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, pushStates[capture.State].WantContains); err != nil {
+			return nil, err
+		}
+		pushCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
+	}
+
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
@@ -80,6 +98,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, err = composeGuidedSheet(sheet, document.GuidedSections, document.GuidedCaptures, guidedCaptures)
 		case sheetKindSelection:
 			content, err = composeSelectionSheet(sheet, document.SelectionStates, document.SelectionCaptures, selectionCaptures)
+		case sheetKindPush:
+			content, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}
@@ -241,6 +261,86 @@ func storedThenHarnessTurns(transcripts map[string][]selectionTurnFixture, harne
 	}
 }
 
+// renderPushCapture drives the REAL push wizard - the same model the push
+// command mounts - into one screen and returns its rendered view.
+func renderPushCapture(fixture pushFixture, capture pushCaptureFixture) (string, error) {
+	model := push.NewPushWizard(captureThemeValue(capture.Theme), pushWizardSessions(fixture))
+	current := sendPushMessage(model, tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
+	switch capture.State {
+	case pushStateStart:
+	case pushStateSelection:
+		current = acceptPushStart(current)
+	case pushStateConsent:
+		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyEnter})
+	case pushStateReceipt:
+		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyEnter})
+		current = sendPushMessage(current, tea.KeyPressMsg{Code: tea.KeyEnter})
+	default:
+		return "", fmt.Errorf("render push capture %q: unknown push state %q", capture.Name, capture.State)
+	}
+	return current.View().Content, nil
+}
+
+// acceptPushStart answers the opening prompt with yes, which opens the
+// selection tree. The prompt opens on "no", so the left key moves onto "yes"
+// before the answer.
+func acceptPushStart(model push.PushWizardModel) push.PushWizardModel {
+	model = sendPushMessage(model, tea.KeyPressMsg{Code: tea.KeyLeft})
+	return sendPushMessage(model, tea.KeyPressMsg{Code: tea.KeyEnter})
+}
+
+// sendPushMessage advances the wizard and settles the work the message started.
+func sendPushMessage(model push.PushWizardModel, message tea.Msg) push.PushWizardModel {
+	updated, command := model.Update(message)
+	next := updated.(push.PushWizardModel)
+	for _, follow := range collectMessages(command) {
+		updated, _ = next.Update(follow)
+		next = updated.(push.PushWizardModel)
+	}
+	return next
+}
+
+// pushWizardSessions turns the fixture inventory into the candidate list the
+// wizard mounts over.
+func pushWizardSessions(fixture pushFixture) []push.PushWizardSession {
+	sessions := make([]push.PushWizardSession, 0, len(fixture.Sessions))
+	for _, row := range fixture.Sessions {
+		candidate := push.PushWizardSession{
+			Row: ingest.PushSessionRow{
+				SessionID:    row.SessionID,
+				ModelHarness: row.Harness,
+				ProjectName:  row.Project,
+				StartMs:      row.StartMs,
+			},
+			Meta:   pushCaptureMetadata(row.Redaction),
+			Action: push.PushWithRedaction,
+		}
+		if row.Withheld {
+			candidate.Action = push.PushExclude
+			candidate.Locked = true
+		}
+		sessions = append(sessions, candidate)
+	}
+	return sessions
+}
+
+// pushCaptureMetadata builds the stored-copy record one redaction state
+// produces, so the captured rows read as the wizard reads them.
+func pushCaptureMetadata(state pushRedactionState) *schema.UnifiedMetadata {
+	switch state {
+	case pushRedactionCurrent:
+		return &schema.UnifiedMetadata{
+			ContentHash: "content-hash",
+			Redaction:   schema.RedactionInfo{Applied: true, ContentHashAtRedact: "content-hash"},
+		}
+	case pushRedactionStale:
+		return &schema.UnifiedMetadata{
+			ContentHash: "content-hash-new",
+			Redaction:   schema.RedactionInfo{Applied: true, ContentHashAtRedact: "content-hash-old"},
+		}
+	default:
+		return &schema.UnifiedMetadata{ContentHash: "content-hash"}
+
 func selectionTurns(transcripts map[string][]selectionTurnFixture) kickstart.SessionTurnsFunc {
 	return func(sessionID string) ([]ingest.Turn, error) {
 		rows := transcripts[sessionID]
@@ -378,6 +478,44 @@ func composeSelectionSheet(
 		}
 	}
 	return renderContactSheet(sheet.Title, rows), nil
+}
+
+func composePushSheet(
+	sheet sheetFixture,
+	states []pushStateFixture,
+	cases []pushCaptureFixture,
+	captures map[string]terminalCapture,
+) (string, error) {
+	rows := make([]string, 0, len(states)*2)
+	for _, state := range states {
+		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
+			left, err := pushCaptureFor(cases, captures, state.Key, name, 80, 24)
+			if err != nil {
+				return "", err
+			}
+			right, err := pushCaptureFor(cases, captures, state.Key, name, 120, 40)
+			if err != nil {
+				return "", err
+			}
+			rows = append(rows, joinCapturePair(left, right))
+		}
+	}
+	return renderContactSheet(sheet.Title, rows), nil
+}
+
+func pushCaptureFor(
+	cases []pushCaptureFixture,
+	captures map[string]terminalCapture,
+	state pushState,
+	captureTheme captureTheme,
+	width, height int,
+) (terminalCapture, error) {
+	for _, capture := range cases {
+		if capture.State == state && capture.Theme == captureTheme && capture.Width == width && capture.Height == height {
+			return captures[capture.Name], nil
+		}
+	}
+	return terminalCapture{}, fmt.Errorf("compose push sheet: no capture for %s/%s/%dx%d", state, captureTheme, width, height)
 }
 
 func guidedCaptureFor(

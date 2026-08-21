@@ -5,8 +5,8 @@
 # entries naming the "keys" gate; the layout grep gate (layout_test.go)
 # checks entries naming the "layout" gate - see gates.Kind. All three gates
 # share this ONE file; a path may carry an independent expectedHits for each
-# gate it needs (e.g. internal/push/wizard.go below pins a colors count, a
-# keys count, and a layout count).
+# gate it needs (e.g. internal/tui/ftue/* below pins a colors count, a keys
+# count, and a layout count).
 #
 # Every entry's gates list PINS THE EXACT HIT COUNT (expectedHits) the named
 # path (or, for a "dir/*" entry, everything under that directory) currently
@@ -24,7 +24,7 @@
 # internal/tui/ftue/* is THIS epic's own entry and must reach expectedHits: 0
 # for EVERY gate it names (and then be deleted) before the epoch closes - every
 # other entry belongs to a different, later piece of work.
-expectedEntryCount: 9
+expectedEntryCount: 8
 entries:
   - path: internal/tui/styles.go
     gates:
@@ -78,16 +78,6 @@ entries:
         expectedHits: 1
     retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "trend bar chart color, and its bar style painting the pre-kit page background by hand, predating kit.Panel"
-  - path: internal/push/wizard.go
-    gates:
-      - gate: colors
-        expectedHits: 10
-      - gate: keys
-        expectedHits: 5
-      - gate: layout
-        expectedHits: 1
-    retiredBy: "planned peasant#26"
-    reason: "share wizard styling colors predating internal/tui/theme; five switch-msg.String() key dispatch blocks (one per wizard step) predating internal/tui/keymap; one package-level background style predating kit.Panel"
   - path: internal/tui/ftue/*
     gates:
       - gate: colors
