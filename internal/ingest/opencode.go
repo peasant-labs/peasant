@@ -380,8 +380,8 @@ func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProb
 
 // selectCanonicalOpenCodeCandidates applies representation precedence first,
 // then candidate provenance, then normalized and raw attributable-path
-// tie-breaks. Sorting the winners by raw session ID makes both winner choice
-// and output independent of enumeration.
+// tie-breaks. The winners are ordered parents before children, then by raw
+// session ID, so both winner choice and output are independent of enumeration.
 func selectCanonicalOpenCodeCandidates(candidates []openCodeSessionCandidate) ([]openCodeSessionCandidate, error) {
 	selected := make([]openCodeSessionCandidate, 0, len(candidates))
 	positions := make(map[SessionID]int, len(candidates))
@@ -399,10 +399,53 @@ func selectCanonicalOpenCodeCandidates(candidates []openCodeSessionCandidate) ([
 			selected[position] = candidate
 		}
 	}
-	sort.Slice(selected, func(left, right int) bool {
-		return string(selected[left].identity.SessionID) < string(selected[right].identity.SessionID)
-	})
+	orderCanonicalOpenCodeCandidatesParentsFirst(selected)
 	return selected, nil
+}
+
+// orderCanonicalOpenCodeCandidatesParentsFirst sorts winners so a parent
+// always precedes its children, then by raw session ID within one depth.
+// OpenCode session IDs are time-descending, so a child can sort before its
+// parent by raw ID. The pipeline parent gate admits a subagent only after its
+// root passed, so a child emitted first is wrongly marked unchanged in
+// selected mode. Depth from the nearest selected ancestor gives a stable
+// parents-first order; a child whose parent is not selected is treated as a
+// root, and a cyclic link stops at the in-progress ancestor.
+func orderCanonicalOpenCodeCandidatesParentsFirst(selected []openCodeSessionCandidate) {
+	positions := make(map[SessionID]int, len(selected))
+	for index := range selected {
+		positions[selected[index].session.SessionID] = index
+	}
+	depthOf := make(map[SessionID]int, len(selected))
+	var depth func(id SessionID) int
+	depth = func(id SessionID) int {
+		if value, computed := depthOf[id]; computed {
+			return value
+		}
+		// Mark in progress as a root so a cycle terminates.
+		depthOf[id] = 0
+		candidate := selected[positions[id]]
+		result := 0
+		if candidate.session.ParentUUID != nil {
+			parent := *candidate.session.ParentUUID
+			if _, present := positions[parent]; present && parent != id {
+				result = depth(parent) + 1
+			}
+		}
+		depthOf[id] = result
+		return result
+	}
+	for index := range selected {
+		depth(selected[index].session.SessionID)
+	}
+	sort.SliceStable(selected, func(left, right int) bool {
+		leftID := selected[left].session.SessionID
+		rightID := selected[right].session.SessionID
+		if depthOf[leftID] != depthOf[rightID] {
+			return depthOf[leftID] < depthOf[rightID]
+		}
+		return string(leftID) < string(rightID)
+	})
 }
 
 func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCandidate) bool {
