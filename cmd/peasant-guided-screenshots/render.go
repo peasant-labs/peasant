@@ -15,8 +15,8 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -340,6 +340,8 @@ func pushCaptureMetadata(state pushRedactionState) *schema.UnifiedMetadata {
 		}
 	default:
 		return &schema.UnifiedMetadata{ContentHash: "content-hash"}
+	}
+}
 
 func selectionTurns(transcripts map[string][]selectionTurnFixture) kickstart.SessionTurnsFunc {
 	return func(sessionID string) ([]ingest.Turn, error) {

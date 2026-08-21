@@ -30,6 +30,7 @@ sheets:
     kind: push
     title: "mounted push wizard: start, selection, consent, and receipt in both themes"
     theme: dark
+    viewport: {width: 1800, height: 4800}
 
 guidedSections:
   - key: auto-ingest
