@@ -350,9 +350,33 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, cand
 	return records, nil
 }
 
+// resolveCandidateEvidenceIndex returns the index of the SQLite evidence entry
+// for one path, or -1 when none matches. A caller that records several
+// diagnostics for the same path resolves the index once instead of scanning the
+// evidence slice for every diagnostic.
+func (a *OpenCodeAdapter) resolveCandidateEvidenceIndex(path string) int {
+	cleanPath := filepath.Clean(path)
+	a.candidateMu.Lock()
+	defer a.candidateMu.Unlock()
+	for index := range a.candidateEvidence {
+		if a.candidateEvidence[index].Candidate.Kind == OpenCodeSourceSQLite && filepath.Clean(a.candidateEvidence[index].Candidate.Path) == cleanPath {
+			return index
+		}
+	}
+	return -1
+}
+
 // recordCandidateFailure attaches an actionable diagnostic to the failing
 // candidate's evidence and logs it. Discovery continues for other candidates.
 func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProbeStage, what string, cause error) {
+	a.recordCandidateFailureAt(a.resolveCandidateEvidenceIndex(path), path, stage, what, cause)
+}
+
+// recordCandidateFailureAt records the diagnostic against a pre-resolved
+// evidence index, so a per-session loop does not rescan the evidence slice for
+// every session on one path. A negative index records nothing on the evidence
+// and only logs.
+func (a *OpenCodeAdapter) recordCandidateFailureAt(evidenceIndex int, path string, stage OpenCodeProbeStage, what string, cause error) {
 	diagnostic := actionableOpenCodeDiagnostic(
 		stage,
 		what,
@@ -362,14 +386,13 @@ func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProb
 		"sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
 		"retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant",
 	)
-	a.candidateMu.Lock()
-	cleanPath := filepath.Clean(path)
-	for index := range a.candidateEvidence {
-		if a.candidateEvidence[index].Candidate.Kind == OpenCodeSourceSQLite && filepath.Clean(a.candidateEvidence[index].Candidate.Path) == cleanPath {
-			a.candidateEvidence[index].Diagnostics = append(a.candidateEvidence[index].Diagnostics, diagnostic)
+	if evidenceIndex >= 0 {
+		a.candidateMu.Lock()
+		if evidenceIndex < len(a.candidateEvidence) {
+			a.candidateEvidence[evidenceIndex].Diagnostics = append(a.candidateEvidence[evidenceIndex].Diagnostics, diagnostic)
 		}
+		a.candidateMu.Unlock()
 	}
-	a.candidateMu.Unlock()
 	slog.Warn("opencode discovery: candidate skipped",
 		"what", diagnostic.What,
 		"why", diagnostic.Why,
@@ -528,11 +551,14 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 		// session on this database, independent of the changed clock. It is also
 		// the freshness floor for a session with no usable clock.
 		floor, floorErr := sqliteContentModTime(a.fs, rawPath)
+		// Resolve the evidence entry for this path once, so a per-session
+		// diagnostic does not rescan the evidence slice for every session.
+		evidenceIndex := a.resolveCandidateEvidenceIndex(rawPath)
 		for _, index := range bySQLitePath[rawPath] {
 			candidate := &selected[index]
 			newest, hydrationErr := rowFreshness(candidate.identity)
 			if hydrationErr != nil {
-				a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), hydrationErr)
+				a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), hydrationErr)
 				continue
 			}
 			if floorErr == nil {
@@ -544,8 +570,11 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 				}
 			} else {
 				if floorErr != nil {
-					a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite content freshness could not be read", floorErr)
-					break
+					// The floor is this one session's freshness. Skip only this
+					// session and name it, so the other sessions on the same
+					// database are still hydrated.
+					a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected SQLite content freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), floorErr)
+					continue
 				}
 				if newest.Before(floor) {
 					newest = floor
