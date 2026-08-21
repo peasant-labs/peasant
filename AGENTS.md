@@ -30,6 +30,11 @@ Every user-visible terminal UI change must follow
 changes to mounted layout, hierarchy, copy, previews, focus, search, facets, row annotations, themes,
 forms, and navigation.
 
+Compose every terminal surface through the layout primitives in
+`internal/tui/kit`. Do not pad, place, align, or paint a background at the
+surface. See [`docs/tui-layout.md`](docs/tui-layout.md); a grep gate enforces
+the rule.
+
 The required workflow runs the opt-in mounted screenshot tests, rasterizes deterministic ANSI states
 with Freeze, and manually inspects the changed states in both themes at `80x24` and `120x40`. If the
 strict capture fixture does not represent the changed state, extend it before capturing. ANSI goldens

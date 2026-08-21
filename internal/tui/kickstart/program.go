@@ -1028,14 +1028,13 @@ const (
 	bulletHangIndent = "  "
 )
 
-// renderBullets word-wraps each fact to width (0 means unwrapped) and writes
-// it as a "- " bulleted line, so the source stays a list of short sentences
-// instead of a hard-wrapped prose block. A wrapped continuation is
-// hang-indented under the fact text rather than restarting at column 0. Each
-// line is fit (truncated/padded) to the full dialog width and styled as one
-// unit, via [dialogLine], so every row in the dialog - not just the glyphs
-// on it - shares one solid background instead of a ragged per-line box.
-func renderBullets(b *strings.Builder, style lipgloss.Style, facts []string, width int) {
+// appendBullets word-wraps each fact to width (0 means unwrapped) and adds it
+// to the dialog panel as a "- " bulleted line, so the source stays a list of
+// short sentences instead of a hard-wrapped prose block. A wrapped
+// continuation is hang-indented under the fact text rather than restarting at
+// column 0. The panel then fits every line to one shared width, so each row of
+// the dialog - not only the glyphs on it - shares one solid background.
+func appendBullets(panel *kit.Panel, style lipgloss.Style, facts []string, width int) {
 	for _, fact := range facts {
 		text := fact
 		if width > 0 {
@@ -1050,22 +1049,9 @@ func renderBullets(b *strings.Builder, style lipgloss.Style, facts []string, wid
 			if i > 0 {
 				prefix = bulletHangIndent
 			}
-			dialogLine(b, style, prefix+ln, width)
+			panel.Line(style, prefix+ln)
 		}
 	}
-}
-
-// dialogLine writes one line of a centered dialog, fit (truncated/padded)
-// to width and styled as a single unit so its background fills the whole
-// row. A non-positive width falls back to rendering the bare content, for
-// callers that have not yet learned the terminal size.
-func dialogLine(b *strings.Builder, style lipgloss.Style, content string, width int) {
-	if width > 0 {
-		b.WriteString(kit.FitLine(style, content, width))
-	} else {
-		b.WriteString(style.Render(content))
-	}
-	b.WriteString("\n")
 }
 
 // viewConnecting renders the "connecting to village" spinner with the keys that
@@ -1084,81 +1070,49 @@ func dialogLine(b *strings.Builder, style lipgloss.Style, content string, width 
 // token as plain FOREGROUND text - restrained, not a fill - and is wrapped to
 // the terminal width so every character stays on screen instead of clipping.
 //
-// Every line here also paints the Canvas token as an explicit background
-// (the same fix and rationale as kit.Frame's border/footer rows): a bare
-// foreground-only style falls back to the terminal's own default background
-// rather than the theme's, which reads as a subtly different box per line
-// against the overlay's Canvas-filled backdrop.
-//
-// Every line is rendered through ONE shared width (the widest line in the
-// dialog) with Align(lipgloss.Center), so (a) each line's text is centered
-// within the block rather than flush-left, and (b) every line's Canvas
-// background box is padded out to that same width - a single uniform-width
-// panel instead of a staircase of differently-sized per-line boxes. p.centered
-// then places that whole block in the middle of the terminal, same as every
-// other kickstart dialog.
+// The whole dialog is one centered [kit.Panel]. The panel measures its widest
+// line, fits every line to that one width, and paints the Canvas token behind
+// every cell, so the block reads as a single uniform card instead of a
+// staircase of per-line boxes. A bare foreground-only theme role would leave
+// its padding on the terminal's own background, so the panel repaints each
+// role through [kit.Panel.Style]. p.centered then places the finished block in
+// the middle of the terminal, same as every other kickstart dialog.
 func (p Program) viewConnecting() string {
 	styles := p.deps.Theme.Styles()
-	canvas := p.deps.Theme.Color(p.deps.Theme.Palette.Canvas)
-	base := lipgloss.NewStyle().Background(canvas)
-	muted := base.Foreground(styles.Muted.GetForeground())
-	accent := base.Foreground(p.deps.Theme.Color(p.deps.Theme.Palette.Amber))
+	panel := kit.NewPanel(p.deps.Theme).WithAlign(kit.PanelAlignCenter)
+	accent := styles.Base.Foreground(p.deps.Theme.Color(p.deps.Theme.Palette.Amber))
 
-	type styledLine struct {
-		text  string
-		style lipgloss.Style
-	}
-	var raw []styledLine
-	raw = append(raw, styledLine{p.spinner.View(), base}, styledLine{"", base})
+	panel.Rendered(p.spinner.View())
+	panel.Blank()
 	if p.loginURL != "" {
 		url := p.loginURL
 		if p.width > 0 {
 			url = ansi.Wrap(url, p.width, "")
 		}
-		raw = append(raw, styledLine{"opening your browser. can't see it? open this link:", muted})
+		panel.Line(styles.Muted, "opening your browser. can't see it? open this link:")
 		for _, ln := range strings.Split(url, "\n") {
-			raw = append(raw, styledLine{ln, accent})
+			panel.Line(accent, ln)
 		}
-		raw = append(raw, styledLine{"", base})
+		panel.Blank()
 	}
-	raw = append(raw, styledLine{"press esc to cancel, ctrl+c to quit", muted})
-
-	width := 0
-	for _, ln := range raw {
-		if w := lipgloss.Width(ln.text); w > width {
-			width = w
-		}
-	}
-
-	lines := make([]string, len(raw))
-	for i, ln := range raw {
-		lines[i] = ln.style.Width(width).Align(lipgloss.Center).Render(ln.text)
-	}
-	return p.centered(strings.Join(lines, "\n"))
+	panel.Line(styles.Muted, "press esc to cancel, ctrl+c to quit")
+	return p.centered(panel.View())
 }
 
-// dialogStyles derives the Header/Muted/Danger variants the connect and
-// visibility dialogs render text with, each carrying the same page
-// background as styles.Base. Header and Muted are shared, backgroundless
-// styles used all over the TUI (a row on a raised panel, a hover state,
-// ...), so giving them a background globally would be wrong elsewhere; here,
-// inside a single centered dialog, every text run must paint the same
-// background as its padding, or the padded cells around a short line (the
-// heading, a short fact) fall back to the terminal's own default color and
-// read as a stray dark box against the dialog's canvas.
-type dialogStyles struct {
-	header lipgloss.Style
-	muted  lipgloss.Style
-	danger lipgloss.Style
+// dialogPanel builds the shared centered dialog panel the connect and
+// visibility prompts render into. Header, Muted, and Danger are shared,
+// backgroundless roles used all over the TUI, so the panel repaints them onto
+// its own background instead of any surface patching a background by hand.
+func (p Program) dialogPanel() kit.Panel {
+	return kit.NewPanel(p.deps.Theme)
 }
 
-func newDialogStyles(styles theme.Styles) dialogStyles {
-	bg := styles.Base.GetBackground()
-	return dialogStyles{
-		header: styles.Header.Background(bg),
-		muted:  styles.Muted.Background(bg),
-		danger: styles.Danger.Background(bg),
-	}
+// joinDialog stacks the dialog's text panel above its confirm control. The
+// confirm keeps its own View, so the centered placement below still centers
+// the short yes/no row inside the dialog, as it did before the panel owned the
+// text block.
+func joinDialog(panel, control string) string {
+	return panel + "\n" + control
 }
 
 // viewOAuth renders the connect-now dialog CENTERED in the terminal (the UAT
@@ -1168,44 +1122,51 @@ func newDialogStyles(styles theme.Styles) dialogStyles {
 // yes/no question ("connect to a village now?"), so the phrase "connect to a
 // village" is not repeated back to back.
 func (p Program) viewOAuth() string {
-	ds := newDialogStyles(p.deps.Theme.Styles())
+	styles := p.deps.Theme.Styles()
 	width := wrapPromptWidth(p.width)
-	var b strings.Builder
-	dialogLine(&b, ds.header, "before you connect", width)
-	dialogLine(&b, ds.muted, "", width)
-	renderBullets(&b, ds.muted, villageContextBullets, width)
+	panel := p.dialogPanel()
+	panel.SetSize(width, 0)
+	panel.Line(styles.Header, "before you connect")
+	panel.Line(styles.Muted, "")
+	appendBullets(&panel, styles.Muted, villageContextBullets, width)
 	if p.loginErr != nil {
-		dialogLine(&b, ds.muted, "", width)
+		panel.Line(styles.Muted, "")
 		for _, ln := range strings.Split(p.loginErr.Error(), "\n") {
-			dialogLine(&b, ds.danger, ln, width)
+			panel.Line(styles.Danger, ln)
 		}
 	}
-	dialogLine(&b, ds.muted, "", width)
-	b.WriteString(p.oauth.View())
-	return p.centered(b.String())
+	panel.Line(styles.Muted, "")
+	return p.centered(joinDialog(panel.View(), p.oauth.View()))
 }
 
 func (p Program) viewVisibility() string {
-	ds := newDialogStyles(p.deps.Theme.Styles())
+	styles := p.deps.Theme.Styles()
 	width := wrapPromptWidth(p.width)
-	var b strings.Builder
-	dialogLine(&b, ds.header, "choose sharing visibility", width)
-	dialogLine(&b, ds.muted, "", width)
-	renderBullets(&b, ds.muted, visibilityContextBullets, width)
+	panel := p.dialogPanel()
+	panel.SetSize(width, 0)
+	panel.Line(styles.Header, "choose sharing visibility")
+	panel.Line(styles.Muted, "")
+	appendBullets(&panel, styles.Muted, visibilityContextBullets, width)
 	if p.loginErr != nil {
-		dialogLine(&b, ds.muted, "", width)
-		dialogLine(&b, ds.muted, "", width)
+		panel.Line(styles.Muted, "")
+		panel.Line(styles.Muted, "")
 		for _, line := range strings.Split(p.loginErr.Error(), "\n") {
-			dialogLine(&b, ds.danger, line, width)
+			panel.Line(styles.Danger, line)
 		}
 	}
-	dialogLine(&b, ds.muted, "", width)
-	b.WriteString(p.visibility.View())
-	return p.centered(b.String())
+	panel.Line(styles.Muted, "")
+	return p.centered(joinDialog(panel.View(), p.visibility.View()))
 }
 
+// viewIngest renders the local import progress screen. The whole screen is one
+// [kit.Panel], so the spinner row, the heading, and every progress row share
+// one width and one background. Before the panel owned the rule, each row
+// painted only as many cells as its own text, and the block showed a ragged
+// edge.
 func (p Program) viewIngest() string {
 	styles := p.deps.Theme.Styles()
+	panel := kit.NewPanel(p.deps.Theme)
+	panel.SetSize(p.width, 0)
 	lines := []string{
 		p.spinner.View(),
 		"",
@@ -1215,7 +1176,10 @@ func (p Program) viewIngest() string {
 	if p.height > 0 && len(lines) > p.height {
 		lines = lines[:p.height]
 	}
-	return strings.Join(lines, "\n")
+	for _, line := range lines {
+		panel.Rendered(line)
+	}
+	return panel.View()
 }
 
 func (p Program) progressLines(styles theme.Styles, now time.Time) []string {

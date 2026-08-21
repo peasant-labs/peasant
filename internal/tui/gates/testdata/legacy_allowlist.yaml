@@ -2,10 +2,11 @@
 #
 # The color grep gate (colors_test.go) checks entries naming the "colors"
 # gate; the key grep gate (keys_test.go, added by the keymap slice) checks
-# entries naming the "keys" gate - see gates.Kind. Both gates share this ONE
-# file; a path may carry an independent expectedHits for each gate it needs
-# (e.g. internal/push/wizard.go below pins both a colors count and a keys
-# count).
+# entries naming the "keys" gate; the layout grep gate (layout_test.go)
+# checks entries naming the "layout" gate - see gates.Kind. All three gates
+# share this ONE file; a path may carry an independent expectedHits for each
+# gate it needs (e.g. internal/push/wizard.go below pins a colors count, a
+# keys count, and a layout count).
 #
 # Every entry's gates list PINS THE EXACT HIT COUNT (expectedHits) the named
 # path (or, for a "dir/*" entry, everything under that directory) currently
@@ -21,29 +22,31 @@
 # must be deleted, not left behind as a zero-weight permanent allowance.
 #
 # internal/tui/ftue/* is THIS epic's own entry and must reach expectedHits: 0
-# for BOTH gates (and then be deleted) before the epoch closes - every other
-# entry belongs to a different, later piece of work.
+# for EVERY gate it names (and then be deleted) before the epoch closes - every
+# other entry belongs to a different, later piece of work.
 expectedEntryCount: 9
 entries:
   - path: internal/tui/styles.go
     gates:
       - gate: colors
         expectedHits: 23
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
-    reason: "shared base/header/selected/dim/border styles for the pre-kit dashboard, session, trends, and annotation screens; a hand-picked terminal palette predating internal/tui/theme"
+      - gate: layout
+        expectedHits: 1
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
+    reason: "shared base/header/selected/dim/border styles for the pre-kit dashboard, session, trends, and annotation screens; a hand-picked terminal palette predating internal/tui/theme, including one package-level background style predating kit.Panel"
   - path: internal/tui/session.go
     gates:
       - gate: colors
         expectedHits: 2
       - gate: keys
         expectedHits: 2
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "session list row foreground/background colors; two switch-msg.String() key dispatch blocks (session list nav, detail view nav) predating internal/tui/keymap"
   - path: internal/tui/annotations.go
     gates:
       - gate: colors
         expectedHits: 2
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "annotation type badge colors"
   - path: internal/tui/annotation_editor.go
     gates:
@@ -51,39 +54,47 @@ entries:
         expectedHits: 1
       - gate: keys
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "annotation editor panel border color; one switch-msg.String() escape-key check predating internal/tui/keymap (the 1-9 digit-shortcut byte extraction elsewhere in this file is a distinct idiom the key grep gate does not flag)"
   - path: internal/tui/app.go
     gates:
       - gate: keys
         expectedHits: 3
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/keymap (not yet filed)"
-    reason: "top-level tab-switcher captures msg.String() into a local and raw-compares it for quit/tab-switch handling, predating internal/tui/keymap"
+      - gate: layout
+        expectedHits: 1
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
+    reason: "top-level tab-switcher captures msg.String() into a local and raw-compares it for quit/tab-switch handling, predating internal/tui/keymap; it also paints the pre-kit page background by hand, predating kit.Panel"
   - path: internal/tui/dashboard.go
     gates:
       - gate: colors
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
     reason: "dashboard metric row color"
   - path: internal/tui/trends.go
     gates:
       - gate: colors
         expectedHits: 1
-    retiredBy: "a future TUI-kit adoption follow-up migrating legacy internal/tui screens onto internal/tui/theme (not yet filed)"
-    reason: "trend bar chart color"
+      - gate: layout
+        expectedHits: 1
+    retiredBy: "peasant#165: peasant tui is deprecated and will be removed with its screens after one release carries the notice; this entry is deleted with the file"
+    reason: "trend bar chart color, and its bar style painting the pre-kit page background by hand, predating kit.Panel"
   - path: internal/push/wizard.go
     gates:
       - gate: colors
         expectedHits: 10
       - gate: keys
         expectedHits: 5
+      - gate: layout
+        expectedHits: 1
     retiredBy: "planned peasant#26"
-    reason: "share wizard styling colors predating internal/tui/theme; five switch-msg.String() key dispatch blocks (one per wizard step) predating internal/tui/keymap"
+    reason: "share wizard styling colors predating internal/tui/theme; five switch-msg.String() key dispatch blocks (one per wizard step) predating internal/tui/keymap; one package-level background style predating kit.Panel"
   - path: internal/tui/ftue/*
     gates:
       - gate: colors
         expectedHits: 13
       - gate: keys
         expectedHits: 18
+      - gate: layout
+        expectedHits: 1
     retiredBy: "this epic (peasant#28); must reach zero before epoch close"
-    reason: "kickstart FTUE wizard styling colors, and its raw msg.String() equality/switch key dispatch (wizard.go + page.go); this epic's kit/kickstart slices are expected to migrate ftue onto internal/tui/theme and internal/tui/keymap before close"
+    reason: "kickstart FTUE wizard styling colors, its raw msg.String() equality/switch key dispatch (wizard.go + page.go), and one package-level background style predating kit.Panel; this epic's kit/kickstart slices are expected to migrate ftue onto internal/tui/theme, internal/tui/keymap, and kit.Panel before close"

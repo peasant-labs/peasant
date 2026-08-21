@@ -1,0 +1,21 @@
+# Horizontal strip windowing: which items stay visible, and which side reports
+# hidden items, when the active item must always fit. Widths are display cells.
+# The eight tab widths model the full guided settings flow, whose strip is the
+# surface that first showed the clipped-active-tab defect.
+expectedCaseCount: 12
+gapWidth: 2
+markerWidth: 3
+itemWidths: [28, 26, 14, 9, 17, 9, 18, 15]
+cases:
+  - {name: everything-fits, active: 0, width: 200, wantStart: 0, wantEnd: 8, wantLeft: false, wantRight: false}
+  - {name: exact-fit, active: 7, width: 150, wantStart: 0, wantEnd: 8, wantLeft: false, wantRight: false}
+  - {name: first-active-narrow, active: 0, width: 80, wantStart: 0, wantEnd: 3, wantLeft: false, wantRight: true}
+  - {name: second-active-narrow, active: 1, width: 80, wantStart: 0, wantEnd: 3, wantLeft: false, wantRight: true}
+  - {name: middle-active-narrow, active: 3, width: 80, wantStart: 1, wantEnd: 5, wantLeft: true, wantRight: true}
+  - {name: privacy-active-narrow, active: 4, width: 80, wantStart: 1, wantEnd: 5, wantLeft: true, wantRight: true}
+  - {name: last-active-narrow, active: 7, width: 80, wantStart: 3, wantEnd: 8, wantLeft: true, wantRight: false}
+  - {name: last-active-tiny, active: 7, width: 40, wantStart: 6, wantEnd: 8, wantLeft: true, wantRight: false}
+  - {name: middle-active-tiny, active: 3, width: 20, wantStart: 3, wantEnd: 4, wantLeft: true, wantRight: true}
+  - {name: active-wider-than-budget, active: 0, width: 10, wantStart: 0, wantEnd: 1, wantLeft: false, wantRight: true}
+  - {name: active-index-below-range, active: -3, width: 80, wantStart: 0, wantEnd: 3, wantLeft: false, wantRight: true}
+  - {name: active-index-above-range, active: 99, width: 80, wantStart: 3, wantEnd: 8, wantLeft: true, wantRight: false}

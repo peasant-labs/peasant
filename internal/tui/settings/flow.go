@@ -493,13 +493,12 @@ func (f Flow) View() string {
 	return base
 }
 
-// stepTabs renders the ordered step navigation as a single tab strip with the
-// current step highlighted, so a user always sees which step they are on and
-// how many remain - the FTUE wizard always showed its step position, and prior
-// feedback flagged that changing steps without an indicator was disorienting. The
-// synthetic final commit step is shown as a trailing "review & save" tab.
-func (f Flow) stepTabs(width int) string {
-	styles := f.th.Styles()
+// stepTabGap separates two neighbouring tabs of the step strip.
+const stepTabGap = "  "
+
+// stepTabLabels lists every tab label in order, including the synthetic
+// trailing "review & save" tab for the final commit step.
+func (f Flow) stepTabLabels() []string {
 	labels := make([]string, 0, len(f.steps)+1)
 	for _, s := range f.steps {
 		lbl := s.Title
@@ -508,20 +507,32 @@ func (f Flow) stepTabs(width int) string {
 		}
 		labels = append(labels, lbl)
 	}
-	labels = append(labels, "review & save")
-	var b strings.Builder
+	return append(labels, "review & save")
+}
+
+// stepTabs renders the ordered step navigation as a single tab strip with the
+// current step highlighted, so a user always sees which step they are on and
+// how many remain - the FTUE wizard always showed its step position, and prior
+// feedback flagged that changing steps without an indicator was disorienting.
+//
+// The strip SCROLLS to the active tab. A narrow terminal cannot show every
+// tab of a long flow, and a plain right clip cut the highlighted tab off the
+// screen, which removed the one indicator the strip exists to provide. The
+// kit strip primitive instead windows the tabs around the active one and
+// marks each clipped side, so the current step is always fully readable.
+func (f Flow) stepTabs(width int) string {
+	styles := f.th.Styles()
+	panel := kit.NewPanel(f.th)
+	labels := f.stepTabLabels()
+	items := make([]kit.StripItem, 0, len(labels))
 	for i, lbl := range labels {
-		if i > 0 {
-			b.WriteString(styles.Muted.Render("  "))
-		}
-		cell := " " + lbl + " "
+		style := panel.Style(styles.Muted)
 		if i == f.cur {
-			b.WriteString(styles.Selected.Render(cell))
-		} else {
-			b.WriteString(styles.Muted.Render(cell))
+			style = panel.Style(styles.Selected)
 		}
+		items = append(items, kit.StripItem{Text: " " + lbl + " ", Style: style})
 	}
-	return clip(b.String(), width)
+	return kit.ScrollStrip(panel.Style(styles.Muted), items, f.cur, width, stepTabGap)
 }
 
 func (f Flow) title() string {
@@ -573,8 +584,7 @@ func (f Flow) renderBody(width, height int) string {
 	for _, fld := range visibleFields {
 		var chrome []string
 		if lbl := fld.Label(); lbl != "" && fld.Kind() != KindInfo {
-			headerStyle := styles.Header.Background(f.th.Color(f.th.Palette.Canvas))
-			chrome = append(chrome, kit.FitLine(headerStyle, lbl, width))
+			chrome = append(chrome, kit.FitLine(kit.NewPanel(f.th).Style(styles.Header), lbl, width))
 		}
 		if guidePending {
 			chrome = append(chrome, guide...)
@@ -795,27 +805,30 @@ func validateGuideExampleLines(example []GuideExampleLine) error {
 // verified at load time.
 func styleGuideExampleLines(th theme.Theme, width int, example []GuideExampleLine) []string {
 	styles := th.Styles()
-	surface := th.Color(th.Palette.Surface)
-	var lines []string
+	panel := kit.NewPanel(th).WithBackground(th.Palette.Surface)
+	panel.SetSize(width, 0)
 	for _, line := range example {
 		switch line.Kind {
 		case GuideExampleLineText:
-			lines = append(lines, kit.FitLine(styles.Surface, line.Text, width))
+			panel.Line(styles.Surface, line.Text)
 		case GuideExampleLineLabel:
 			// Separate each category's before/after block with a blank row - including
 			// the first, so the example set is set off from the guide text above it -
 			// so the examples read as distinct groups rather than one dense column.
-			lines = append(lines, kit.FitLine(styles.Surface, "", width))
-			lines = append(lines, kit.FitLine(styles.Header.Background(surface), line.Text, width))
+			panel.Line(styles.Surface, "")
+			panel.Line(styles.Header, line.Text)
 		case GuideExampleLineBefore:
-			lines = append(lines, kit.FitLine(styles.DiffDel.Background(surface), "- before: "+line.Text, width))
+			panel.Line(styles.DiffDel, "- before: "+line.Text)
 		case GuideExampleLineAfter:
-			lines = append(lines, kit.FitLine(styles.DiffAdd.Background(surface), "+ after: "+line.Text, width))
+			panel.Line(styles.DiffAdd, "+ after: "+line.Text)
 		case GuideExampleLineSpacer:
-			lines = append(lines, kit.FitLine(styles.Surface, "", width))
+			panel.Line(styles.Surface, "")
 		}
 	}
-	return lines
+	if panel.LineCount() == 0 {
+		return nil
+	}
+	return splitLines(panel.View())
 }
 
 func validateGuideExampleLine(index int, line GuideExampleLine) error {
@@ -876,16 +889,18 @@ func guideExampleContractError(what, why, fix string) error {
 }
 
 func (f Flow) guideErrorLines(styles theme.Styles, width int, err error) []string {
-	style := styles.Danger.Background(f.th.Color(f.th.Palette.Surface))
+	panel := kit.NewPanel(f.th).WithBackground(f.th.Palette.Surface)
+	panel.SetSize(width, 0)
 	values := append([]string{"example unavailable; unverified output withheld"}, splitLines(err.Error())...)
-	lines := make([]string, 0, len(values))
 	for _, value := range values {
 		if value != "" {
-			value = sanitizeTerminalLine(value)
-			lines = append(lines, kit.FitLine(style, value, width))
+			panel.Line(styles.Danger, sanitizeTerminalLine(value))
 		}
 	}
-	return lines
+	if panel.LineCount() == 0 {
+		return nil
+	}
+	return splitLines(panel.View())
 }
 
 func sanitizeTerminalLine(value string) string {
@@ -1086,22 +1101,6 @@ func (l helpLayer) View() string {
 	rows = append(rows, helpRow{"", helpRowBlank})
 	rows = append(rows, helpRow{"  press ? or esc to close", helpRowFooter})
 
-	// Width the panel to its widest row so every line shares the surface
-	// background, reading as one modal card rather than ragged text.
-	width := 0
-	for _, r := range rows {
-		if w := len([]rune(r.text)); w > width {
-			width = w
-		}
-	}
-	width += 2
-	surfaceBg := l.th.Color(l.th.Palette.Surface)
-	pad := func(base lipgloss.Style, s string) string {
-		if n := width - len([]rune(s)); n > 0 {
-			s += strings.Repeat(" ", n)
-		}
-		return base.Background(surfaceBg).Render(s)
-	}
 	styleFor := func(role helpRowRole) lipgloss.Style {
 		switch role {
 		case helpRowTitle:
@@ -1114,15 +1113,26 @@ func (l helpLayer) View() string {
 			return styles.Surface
 		}
 	}
-	var b strings.Builder
-	for i, r := range rows {
-		if i > 0 {
-			b.WriteString("\n")
+	// The panel measures its own widest row, so every line shares the surface
+	// background and the card has one straight right edge. The two extra cells
+	// keep a margin past the longest row.
+	widest := 0
+	for _, r := range rows {
+		if w := lipgloss.Width(r.text); w > widest {
+			widest = w
 		}
-		b.WriteString(pad(styleFor(r.role), r.text))
 	}
-	return b.String()
+	panel := kit.NewPanel(l.th).WithBackground(l.th.Palette.Surface)
+	panel.SetSize(widest+helpPanelMargin, 0)
+	for _, r := range rows {
+		panel.Line(styleFor(r.role), r.text)
+	}
+	return panel.View()
 }
+
+// helpPanelMargin is the trailing space the help card keeps past its widest
+// row so the text never touches the card edge.
+const helpPanelMargin = 2
 
 // runResult runs a command far enough to read the message it produced. The
 // confirm modal's command emits a single ConfirmResultMsg synchronously.

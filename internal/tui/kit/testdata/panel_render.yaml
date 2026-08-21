@@ -1,0 +1,27 @@
+# Panel render matrix: one block of mixed-length lines, drawn on each
+# background token, in each alignment, in both themes, at a fixed width and at
+# the panel's own measured width. The declarations are checked against
+# independent Go constants, so a coordinated edit cannot silently drop a
+# theme, a background, or an alignment.
+expectedCaseCount: 10
+expectedThemeCount: 2
+expectedBackgroundCount: 2
+expectedAlignCount: 2
+lines:
+  - {role: header, text: "before you connect"}
+  - {role: muted, text: ""}
+  - {role: muted, text: "- a village is a shared commons."}
+  - {role: muted, text: "- short line."}
+  - {role: danger, text: "login failed."}
+  - {role: selected, text: " review & save "}
+cases:
+  - {name: canvas-left-dark, theme: dark, background: canvas, align: left, width: 40, height: 0}
+  - {name: canvas-left-light, theme: light, background: canvas, align: left, width: 40, height: 0}
+  - {name: canvas-center-dark, theme: dark, background: canvas, align: center, width: 40, height: 0}
+  - {name: canvas-center-light, theme: light, background: canvas, align: center, width: 40, height: 0}
+  - {name: surface-left-dark, theme: dark, background: surface, align: left, width: 40, height: 0}
+  - {name: surface-left-light, theme: light, background: surface, align: left, width: 40, height: 0}
+  - {name: surface-center-dark, theme: dark, background: surface, align: center, width: 40, height: 0}
+  - {name: surface-center-light, theme: light, background: surface, align: center, width: 40, height: 0}
+  - {name: measured-left-dark, theme: dark, background: canvas, align: left, width: 0, height: 8}
+  - {name: measured-center-light, theme: light, background: canvas, align: center, width: 0, height: 8}
