@@ -19,7 +19,7 @@
 # that test needs every marker to survive on one line: a one-cell case would
 # break the marker across rows and make the contamination check unreadable.
 concurrencyWidth: 48
-expectedCaseCount: 9
+expectedCaseCount: 13
 expectedTokenNameCount: 6
 tokenNames: [ink, ink-strong, ink-3, mauve, teal, olive]
 cases:
@@ -136,3 +136,47 @@ cases:
     source: |
       ab cd
     wantVisible: [a, b, c, d]
+
+  - name: redaction-placeholders-stay-visible-in-prose
+    theme: dark
+    width: 60
+    source: |
+      mail <EMAIL> with key <ANTHROPIC_KEY> and ssn <SSN> done.
+    wantVisible: ["mail <EMAIL> with key <ANTHROPIC_KEY> and ssn <SSN> done."]
+    wantMissing: ["&lt;", "&gt;"]
+
+  - name: a-placeholder-at-line-start-keeps-its-paragraph
+    theme: dark
+    width: 60
+    source: |
+      first line
+      <EMAIL> wrote back
+
+      <REDACTED>
+    wantVisible: ["first line", "<EMAIL> wrote back", "<REDACTED>"]
+    wantMissing: ["&lt;"]
+
+  - name: placeholders-inside-fenced-code-stay-raw
+    theme: dark
+    width: 60
+    source: |
+      ```
+      export KEY=<ANTHROPIC_KEY>
+      contact <EMAIL>
+      ```
+      then `<EMAIL>` inline
+    wantVisible: ["export KEY=<ANTHROPIC_KEY>", "contact <EMAIL>", "<EMAIL>"]
+    wantMissing: ["&lt;", "&gt;"]
+
+  - name: placeholders-inside-indented-code-stay-raw
+    theme: dark
+    width: 60
+    source: |
+      setup:
+
+          token <GITHUB_PAT> here
+
+      mail <EMAIL> after
+    wantVisible: ["token <GITHUB_PAT> here", "mail <EMAIL> after"]
+    wantMissing: ["&lt;", "&gt;"]
+
