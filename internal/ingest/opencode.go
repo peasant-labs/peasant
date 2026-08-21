@@ -524,8 +524,10 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 		// most one GROUP BY aggregate per table, so freshness reads stay bounded
 		// by table count and never grow with the number of sessions.
 		rowFreshness := a.batchOpenCodeSQLiteRowFreshness(ctx, source, selected, bySQLitePath[rawPath])
-		var floor time.Time
-		floorKnown := false
+		// The database and WAL mtime is the active (staleness) time for every
+		// session on this database, independent of the changed clock. It is also
+		// the freshness floor for a session with no usable clock.
+		floor, floorErr := sqliteContentModTime(a.fs, rawPath)
 		for _, index := range bySQLitePath[rawPath] {
 			candidate := &selected[index]
 			newest, hydrationErr := rowFreshness(candidate.identity)
@@ -533,18 +535,17 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 				a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), hydrationErr)
 				continue
 			}
+			if floorErr == nil {
+				candidate.session.ActiveModTime = floor
+			}
 			if !candidate.sessionUpdatedAt.IsZero() {
 				if candidate.sessionUpdatedAt.After(newest) {
 					newest = candidate.sessionUpdatedAt
 				}
 			} else {
-				if !floorKnown {
-					floor, err = sqliteContentModTime(a.fs, rawPath)
-					if err != nil {
-						a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite content freshness could not be read", err)
-						break
-					}
-					floorKnown = true
+				if floorErr != nil {
+					a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite content freshness could not be read", floorErr)
+					break
 				}
 				if newest.Before(floor) {
 					newest = floor

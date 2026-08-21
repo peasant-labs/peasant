@@ -65,8 +65,12 @@ func TestCurrentOpenCodeSQLiteNormalCLIAdapterWiring(t *testing.T) {
 				t.Fatalf("normal OpenCode CLI harvest silently disabled current SQLite discovery: %v\n%s", err, output)
 			}
 			wantDiscovery := "peasant harvest: " + strconv.Itoa(testCase.ExpectedSessions) + " sessions"
-			if !strings.Contains(output, wantDiscovery) || !strings.Contains(output, "NEW        opencode") {
-				t.Fatalf("normal OpenCode CLI did not retain current SQLite discovery through its adapter factory; want %q and ingested OpenCode session in output:\n%s", wantDiscovery, output)
+			// The freshly materialized database's file mtime is within the
+			// staleness threshold while its row times and session clock are
+			// older, so a session still being written classifies active on its
+			// file mtime, not on the older changed clock.
+			if !strings.Contains(output, wantDiscovery) || !strings.Contains(output, "ACTIVE     opencode") {
+				t.Fatalf("normal OpenCode CLI did not classify a still-active current SQLite session on its file mtime through its adapter factory; want %q and an ACTIVE OpenCode session in output:\n%s", wantDiscovery, output)
 			}
 		})
 	}

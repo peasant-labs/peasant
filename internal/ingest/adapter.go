@@ -64,7 +64,8 @@ type DiscoveredSession struct {
 	ParentUUID        *SessionID        // nil for root sessions
 	SubagentPaths     []ResolvedPath    // Child session transcript paths
 	DebugPaths        []ResolvedPath    // Debug artifact paths
-	ModTime           time.Time         // Last modification time of source file
+	ModTime           time.Time         // Changed time of the source: when its content last changed
+	ActiveModTime     time.Time         // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
 	ProjectName       string            // Human-readable project name (optional, populated during discovery when cheap to extract)
 	Title             string            // Session title (optional, populated when available without extra I/O)
 	Branch            string            // Git branch active when session ran (optional, from session data not current repo)
@@ -72,6 +73,19 @@ type DiscoveredSession struct {
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction
 	TranscriptOrigin  TranscriptOrigin  // Typed materialization contract; zero means copy SourcePath as a transcript file.
+}
+
+// stalenessSourceTime returns the source time the staleness (active) gate reads.
+// It is the file or WAL mtime when the adapter recorded one separately from the
+// changed clock, and otherwise the ModTime. An OpenCode SQLite winner reports a
+// changed clock in ModTime and the raw file/WAL mtime in ActiveModTime, so a
+// session still being written classifies active on its file mtime even when its
+// changed clock is older.
+func (s DiscoveredSession) stalenessSourceTime() time.Time {
+	if !s.ActiveModTime.IsZero() {
+		return s.ActiveModTime
+	}
+	return s.ModTime
 }
 
 // AdapterFactory creates a SourceAdapter with injected dependencies.

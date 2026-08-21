@@ -994,7 +994,7 @@ func (p *Pipeline) diff(sessions []DiscoveredSession) DiffResult {
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
 func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalenessThreshold time.Duration) DiffStatus {
-	isActive := stalenessThreshold > 0 && time.Since(session.ModTime) < stalenessThreshold
+	isActive := stalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < stalenessThreshold
 
 	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
 		// Source modified more recently than DB ingested_ms: re-ingest.
@@ -1034,7 +1034,7 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 //  5. Source within staleness threshold (still being written): DiffActive
 //  6. Otherwise: DiffUnchanged
 func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
-	isActive := p.config.StalenessThreshold > 0 && time.Since(session.ModTime) < p.config.StalenessThreshold
+	isActive := p.config.StalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold
 
 	// Force: re-ingest, but only if we're also including active sessions (or
 	// the session is not active). With --force and without --include-active,
