@@ -6,7 +6,7 @@ cases:
     expected_stored_sessions: 2
     harvest: success
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
-    expected_projection_sha256: f9f29fcbe9d86ca105d3a4c23c5e7512c04af218b2049ecf61ecfe4672368d32
+    expected_projection_sha256: 1ea0da734bd3b7dfe1b64214979253e2ae99ff9c055a450ad09cc605508cb59a
     expected_entries: 5
     mutation: none
     entries:

@@ -13,9 +13,13 @@ import (
 )
 
 const (
-	openCodeLegacyProjectionFormat  = "peasant.opencode.legacy-sqlite"
-	openCodeLegacyProjectionVersion = 1
-	openCodeLegacyMaterializePage   = 128
+	openCodeLegacyProjectionFormat = "peasant.opencode.legacy-sqlite"
+	// openCodeLegacyProjectionVersion is version 2: the orphan slot is a typed
+	// message field rather than an in-band data marker with a fabricated parent.
+	// Version 1 artifacts remain readable through the in-band marker.
+	openCodeLegacyProjectionVersion            = 2
+	openCodeLegacyProjectionMinReadableVersion = 1
+	openCodeLegacyMaterializePage              = 128
 )
 
 type openCodeLegacyProjection struct {
@@ -32,6 +36,10 @@ type openCodeLegacyProjectionMessage struct {
 	TimeUpdated int64                          `json:"time_updated"`
 	Data        json.RawMessage                `json:"data"`
 	Parts       []openCodeLegacyProjectionPart `json:"parts"`
+	// Orphan marks a synthetic message that carries one orphan part whose parent
+	// message is absent from the selected source. The indexer reads it directly,
+	// so no fabricated parent link is needed.
+	Orphan bool `json:"orphan,omitempty"`
 }
 
 type openCodeLegacyProjectionPart struct {
@@ -249,18 +257,19 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 				continue
 			}
 			syntheticMessageID := "orphan-parent-" + part.ID.String()
+			// The orphan slot is a typed field on the message, not an in-band
+			// marker with a fabricated parentID. The synthetic message carries no
+			// parent link, so it never trips the missing-parent diagnostic.
 			data, marshalErr := json.Marshal(map[string]any{
-				"id":                   syntheticMessageID,
-				"sessionID":            sessionID.String(),
-				"role":                 RoleSystem.String(),
-				"parentID":             part.MessageID.String(),
-				"_peasant_orphan_part": true,
+				"id":        syntheticMessageID,
+				"sessionID": sessionID.String(),
+				"role":      RoleSystem.String(),
 			})
 			if marshalErr != nil {
 				return openCodeLegacyProjection{}, nil, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
 			}
 			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{
-				ID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: data,
+				ID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: data, Orphan: true,
 				Parts: []openCodeLegacyProjectionPart{{ID: part.ID.String(), MessageID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}},
 			})
 		}
@@ -423,8 +432,10 @@ func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expecte
 	if err := json.Unmarshal(fields["session_id"], &projection.SessionID); err != nil {
 		return projection, fmt.Errorf("decode managed envelope session_id: %w", err)
 	}
-	if projection.Format != expectedFormat || projection.Version != expectedVersion || projection.SessionID != string(sessionID) {
-		return projection, fmt.Errorf("managed envelope identity format=%q version=%d session_id=%q does not match expected format=%q version=%d selected_session_id=%q", projection.Format, projection.Version, projection.SessionID, expectedFormat, expectedVersion, sessionID)
+	// Accept any readable version up to the current write version, so a previously
+	// persisted artifact still decodes after the format is bumped.
+	if projection.Format != expectedFormat || projection.Version < 1 || projection.Version > expectedVersion || projection.SessionID != string(sessionID) {
+		return projection, fmt.Errorf("managed envelope identity format=%q version=%d session_id=%q does not match expected format=%q readable version 1..%d selected_session_id=%q", projection.Format, projection.Version, projection.SessionID, expectedFormat, expectedVersion, sessionID)
 	}
 	var rows []json.RawMessage
 	if err := json.Unmarshal(fields["messages"], &rows); err != nil {
@@ -449,11 +460,16 @@ func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expecte
 }
 
 func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID string, identities map[string]string) (openCodeLegacyProjectionMessage, error) {
-	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"})
+	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"}, "orphan")
 	if err != nil {
 		return openCodeLegacyProjectionMessage{}, err
 	}
 	var message openCodeLegacyProjectionMessage
+	if orphanField, present := fields["orphan"]; present {
+		if err := json.Unmarshal(orphanField, &message.Orphan); err != nil {
+			return message, fmt.Errorf("decode orphan: %w", err)
+		}
+	}
 	if err := json.Unmarshal(fields["id"], &message.ID); err != nil {
 		return message, fmt.Errorf("decode id: %w", err)
 	}
@@ -537,7 +553,7 @@ func decodeManagedOpenCodeProjectionPart(raw json.RawMessage, messageID, session
 	return part, nil
 }
 
-func decodeOpenCodeProjectionObject(data []byte, location string, expected []string) (map[string]json.RawMessage, error) {
+func decodeOpenCodeProjectionObject(data []byte, location string, expected []string, optional ...string) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
@@ -546,11 +562,14 @@ func decodeOpenCodeProjectionObject(data []byte, location string, expected []str
 		}
 		return nil, fmt.Errorf("decode %s: expected JSON object", location)
 	}
-	allowed := make(map[string]struct{}, len(expected))
+	allowed := make(map[string]struct{}, len(expected)+len(optional))
 	for _, key := range expected {
 		allowed[key] = struct{}{}
 	}
-	fields := make(map[string]json.RawMessage, len(expected))
+	for _, key := range optional {
+		allowed[key] = struct{}{}
+	}
+	fields := make(map[string]json.RawMessage, len(expected)+len(optional))
 	for decoder.More() {
 		keyToken, tokenErr := decoder.Token()
 		key, ok := keyToken.(string)

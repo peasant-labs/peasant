@@ -129,6 +129,7 @@ func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, k
 		if role := Role(semantic.Data.Role); !role.IsValid() {
 			return nil, fmt.Errorf("decode %s message row %q: role %q is outside the supported closed set", kind, message.ID, semantic.Data.Role)
 		}
+		semantic.Orphan = message.Orphan
 		for _, part := range message.Parts {
 			semanticPart, partErr := parseOpenCodeSemanticPart(part.ID, part.TimeCreated, part.Data)
 			if partErr != nil {
@@ -343,6 +344,9 @@ type openCodeSemanticMessage struct {
 	Raw           []byte
 	Data          openCodeIndexMsg
 	Parts         []openCodeSemanticPart
+	// Orphan marks a synthetic message that holds one orphan part whose parent
+	// is absent from the selected source. It replaces the in-band data marker.
+	Orphan bool
 }
 
 type openCodeSemanticPart struct {
@@ -413,7 +417,7 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 	messageParents := make(map[int]string, len(messages))
 	entryIndex := 0
 	for _, message := range messages {
-		if message.Data.OrphanPart && len(message.Parts) == 1 {
+		if isOrphanOpenCodeSemanticMessage(message) && len(message.Parts) == 1 {
 			// Orphan parts follow the same depth gate as ordinary parts.
 			if idx.fullDepth {
 				entries = append(entries, idx.openCodeOrphanPartEntry(sessionID, message.Parts[0], entryIndex))
@@ -538,36 +542,85 @@ func (idx *OpenCodeIndexer) openCodeOrphanPartEntry(sessionID SessionID, part op
 	return entry
 }
 
+// isOrphanOpenCodeSemanticMessage reports whether a message is a synthetic
+// orphan slot. Current artifacts set the typed Orphan field; version 1 artifacts
+// carry the retired in-band marker, which stays readable.
+func isOrphanOpenCodeSemanticMessage(message openCodeSemanticMessage) bool {
+	return message.Orphan || message.Data.OrphanPart
+}
+
 func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []openCodeSemanticMessage) []DiagnosticEntry {
 	identities := make(map[string]struct{}, len(messages))
+	parentOf := make(map[string]string, len(messages))
 	for _, message := range messages {
-		if message.EntryID != "" {
-			identities[message.EntryID] = struct{}{}
+		if message.EntryID == "" {
+			continue
+		}
+		identities[message.EntryID] = struct{}{}
+		if !isOrphanOpenCodeSemanticMessage(message) && message.Data.ParentID != "" {
+			parentOf[message.EntryID] = message.Data.ParentID
 		}
 	}
 	seen := make(map[string]struct{})
 	diagnostics := make([]DiagnosticEntry, 0)
 	for _, message := range messages {
+		// A synthetic orphan slot carries no real parent, so it never produces a
+		// missing-parent diagnostic.
+		if isOrphanOpenCodeSemanticMessage(message) {
+			continue
+		}
 		parentID := message.Data.ParentID
 		if parentID == "" {
 			continue
 		}
-		if _, present := identities[parentID]; present {
+		if _, present := identities[parentID]; !present {
+			key := message.EntryID + "\x00" + parentID
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			diagnostics = append(diagnostics, DiagnosticEntry{
+				ErrorType:   string(OpenCodeGraphMissingParent),
+				Location:    fmt.Sprintf("selected OpenCode session %s message %s from %s", session.SessionID, message.EntryID, session.SourcePath),
+				Message:     fmt.Sprintf("message %s references parent %s, but that parent is absent from the selected canonical representation; while normalizing the selected transcript Peasant retained the message at the root, which means no content was dropped but the upstream relationship is incomplete", message.EntryID, parentID),
+				Remediation: "Allow OpenCode to finish persisting the session, then re-run ingest; if the parent remains absent, keep the root-attached message and repair or export the source through OpenCode rather than modifying its database with Peasant.",
+			})
 			continue
 		}
-		key := message.EntryID + "\x00" + parentID
-		if _, duplicate := seen[key]; duplicate {
-			continue
+		// The parent exists but linking it would close a cycle, so the child was
+		// kept at the root. Name that broken link, not only absent parents.
+		if openCodeParentLinkFormsCycle(parentOf, message.EntryID) {
+			key := message.EntryID + "\x00" + parentID
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			diagnostics = append(diagnostics, DiagnosticEntry{
+				ErrorType:   string(OpenCodeGraphMissingParent),
+				Location:    fmt.Sprintf("selected OpenCode session %s message %s from %s", session.SessionID, message.EntryID, session.SourcePath),
+				Message:     fmt.Sprintf("message %s references parent %s, but linking it would close a parent cycle, so while normalizing the selected transcript Peasant kept the message at the root; no content was dropped but the upstream relationship is incomplete", message.EntryID, parentID),
+				Remediation: "Allow OpenCode to finish persisting the session, then re-run ingest; if the cycle remains, keep the root-attached message and repair or export the source through OpenCode rather than modifying its database with Peasant.",
+			})
 		}
-		seen[key] = struct{}{}
-		diagnostics = append(diagnostics, DiagnosticEntry{
-			ErrorType:   string(OpenCodeGraphMissingParent),
-			Location:    fmt.Sprintf("selected OpenCode session %s message %s from %s", session.SessionID, message.EntryID, session.SourcePath),
-			Message:     fmt.Sprintf("message %s references parent %s, but that parent is absent from the selected canonical representation; while normalizing the selected transcript Peasant retained the message at the root, which means no content was dropped but the upstream relationship is incomplete", message.EntryID, parentID),
-			Remediation: "Allow OpenCode to finish persisting the session, then re-run ingest; if the parent remains absent, keep the root-attached message and repair or export the source through OpenCode rather than modifying its database with Peasant.",
-		})
 	}
 	return diagnostics
+}
+
+// openCodeParentLinkFormsCycle reports whether following the parent chain from
+// child's parent returns to child, which is the cycle the entry-graph
+// normalization breaks by keeping the child at the root.
+func openCodeParentLinkFormsCycle(parentOf map[string]string, child string) bool {
+	visited := make(map[string]bool)
+	for cursor := parentOf[child]; cursor != ""; cursor = parentOf[cursor] {
+		if cursor == child {
+			return true
+		}
+		if visited[cursor] {
+			return false
+		}
+		visited[cursor] = true
+	}
+	return false
 }
 
 func openCodeMessageEntry(sessionID SessionID, index int, message openCodeSemanticMessage, fullContent bool) schema.SessionEntry {

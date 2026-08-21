@@ -390,8 +390,10 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 		}
 		if testCase.OrphanEntry != "" {
 			assertCanonicalOrphanPart(t, indexer, shallowIndexer, session, entriesMarker, testCase)
-			if !hasMissingParentWarning(metadata.Diagnostics.Warnings, testCase.OrphanParent) {
-				t.Errorf("selected session %q lacks orphan-part parent diagnostic for %q: %+v", testCase.SessionID, testCase.OrphanParent, metadata.Diagnostics.Warnings)
+			// The synthetic orphan slot carries no real parent, so it must not emit
+			// a missing-parent diagnostic naming the absent message it was attached to.
+			if hasMissingParentWarning(metadata.Diagnostics.Warnings, testCase.OrphanParent) {
+				t.Errorf("selected session %q emitted a spurious missing-parent diagnostic for orphan parent %q: %+v", testCase.SessionID, testCase.OrphanParent, metadata.Diagnostics.Warnings)
 			}
 		}
 		assertCanonicalDroppedOrphanParts(t, metadata, entriesMarker, testCase)

@@ -669,7 +669,7 @@ func mutateManagedEnvelope(t testing.TB, managedPath string, mutation legacySQLi
 	case legacySQLiteEnvelopeArbitrary:
 		data = []byte("{\"ordinary\":true}\n")
 	case legacySQLiteEnvelopeVersion:
-		data = bytes.Replace(data, []byte("\"version\":1"), []byte("\"version\":2"), 1)
+		data = bytes.Replace(data, []byte("\"version\":2"), []byte("\"version\":9"), 1)
 	case legacySQLiteEnvelopeKind:
 		data = bytes.Replace(data, []byte("peasant.opencode.legacy-sqlite"), []byte("peasant.opencode.other-source"), 1)
 	}
