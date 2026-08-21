@@ -470,13 +470,12 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyOrphanParts(ctx context.Context, r
 // parent_id and time_updated columns, reports Supported=false with no rows, so
 // older layouts stay discoverable as roots with file-based freshness.
 func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
-	if request.PageSize.value <= 0 || request.PageSize.value > MaxOpenCodeCurrentPageSize {
-		return OpenCodeSessionRecordPage{}, fmt.Errorf("validate OpenCode session record page request failed before source access: page size %d was not created by NewOpenCodeCurrentPageSize, so enumeration cannot be proven bounded; construct the page size with the validator", request.PageSize.value)
-	}
+	var cursor *string
 	if request.After != nil {
-		if err := validateOpenCodeCurrentToken("session record cursor", request.After.sessionID.value); err != nil {
-			return OpenCodeSessionRecordPage{}, err
-		}
+		cursor = &request.After.sessionID.value
+	}
+	if err := validateOpenCodeCurrentBoundedPage(request.PageSize.value, cursor, "session record cursor"); err != nil {
+		return OpenCodeSessionRecordPage{}, err
 	}
 	lease, err := s.beginSourceRead(ctx, "read bounded session record page")
 	if err != nil {
@@ -500,16 +499,15 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		// diagnostic and keeps the sessions as roots.
 		return page, nil
 	}
-	rows := make([]OpenCodeSessionRecord, 0, request.PageSize.value+1)
+	bounded := newOpenCodeBoundedPage[OpenCodeSessionRecord](request.PageSize.value)
 	var skipped []OpenCodeSessionRecordSkip
-	seen := 0
 	var cursorID *OpenCodeSessionLinkID
 	// An undecodable row is dropped with a skip note rather than failing the
 	// whole read, so one bad row never loses every session's parent link and
 	// clock. A row whose identifier is valid still advances the cursor even when
 	// the rest of the row is dropped, so pagination makes progress.
 	decode := func(stmt *sqlite.Stmt) error {
-		seen++
+		bounded.observe()
 		if stmt.ColumnType(0) != sqlite.TypeText {
 			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id has SQLite type %s instead of text", stmt.ColumnType(0))})
 			return nil
@@ -550,7 +548,7 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 				return nil
 			}
 		}
-		rows = append(rows, record)
+		bounded.keep(record)
 		return nil
 	}
 	// The statements stay compile-time constants at each call site so the
@@ -581,22 +579,18 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, projection, "supported OpenCode session")
 	}
-	// The page boundary counts every row seen, valid or skipped, so dropped rows
-	// never shrink a page below its bound and hide later sessions. The cursor is
-	// the last row whose identifier decoded, so continuation still advances.
-	hasNext := seen > request.PageSize.value
-	if len(rows) > request.PageSize.value {
-		rows = rows[:request.PageSize.value]
-	}
-	page.Records = rows[:len(rows):len(rows)]
+	// The shared bounded page counts every row seen, valid or skipped, so dropped
+	// rows never shrink a page below its bound and hide later sessions.
+	records, hasNext := bounded.assemble()
+	page.Records = records
 	page.Skipped = skipped
 	if hasNext {
 		// Prefer the last kept record so the sentinel row beyond it is re-fetched
 		// on the next page and never skipped. When a page keeps no valid record,
 		// advance past the last decodable identifier so pagination still moves.
 		switch {
-		case len(page.Records) > 0:
-			page.Next = &OpenCodeSessionRecordCursor{sessionID: page.Records[len(page.Records)-1].SessionID}
+		case len(records) > 0:
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: records[len(records)-1].SessionID}
 		case cursorID != nil:
 			page.Next = &OpenCodeSessionRecordCursor{sessionID: *cursorID}
 		}
@@ -636,20 +630,50 @@ func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.C
 	return support, nil
 }
 
+// openCodeBoundedPage assembles one bounded page of rows for any keyset read.
+// It counts every row observed, valid or dropped, so a dropped row never shrinks
+// a page below its bound and hides a later page, then trims the kept rows to the
+// requested size. The legacy part reads and the session-record read share it.
+type openCodeBoundedPage[Row any] struct {
+	pageSize int
+	seen     int
+	rows     []Row
+}
+
+func newOpenCodeBoundedPage[Row any](pageSize int) *openCodeBoundedPage[Row] {
+	return &openCodeBoundedPage[Row]{pageSize: pageSize, rows: make([]Row, 0, pageSize+1)}
+}
+
+// observe counts one row read from the source, whether or not it is kept.
+func (p *openCodeBoundedPage[Row]) observe() { p.seen++ }
+
+// keep retains one decoded row for the page.
+func (p *openCodeBoundedPage[Row]) keep(row Row) { p.rows = append(p.rows, row) }
+
+// assemble returns the kept rows trimmed to the page bound and whether a further
+// page exists.
+func (p *openCodeBoundedPage[Row]) assemble() ([]Row, bool) {
+	hasNext := p.seen > p.pageSize
+	rows := p.rows
+	if len(rows) > p.pageSize {
+		rows = rows[:p.pageSize]
+	}
+	return rows[:len(rows):len(rows)], hasNext
+}
+
 // legacyPartPageCollector decodes part rows, checks their scope, and
 // assembles one bounded page with its continuation cursor. LegacyParts and
 // LegacyOrphanParts share it; each keeps its constant statements in its body.
 type legacyPartPageCollector struct {
-	pageSize    int
+	bounded     *openCodeBoundedPage[OpenCodeLegacyPartRow]
 	requireJSON bool
 	tolerant    bool
 	check       func(OpenCodeLegacyPartRow) error
-	rows        []OpenCodeLegacyPartRow
 	dropped     []OpenCodeOrphanPartDrop
 }
 
 func newLegacyPartPageCollector(pageSize int, requireJSON bool, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
-	return &legacyPartPageCollector{pageSize: pageSize, requireJSON: requireJSON, check: check, rows: make([]OpenCodeLegacyPartRow, 0, pageSize+1)}
+	return &legacyPartPageCollector{bounded: newOpenCodeBoundedPage[OpenCodeLegacyPartRow](pageSize), requireJSON: requireJSON, check: check}
 }
 
 // newTolerantLegacyPartPageCollector collects orphan part rows and drops any
@@ -662,6 +686,7 @@ func newTolerantLegacyPartPageCollector(pageSize int, check func(OpenCodeLegacyP
 }
 
 func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
+	c.bounded.observe()
 	row, err := decodeLegacyPartRow(stmt, c.requireJSON)
 	if err != nil {
 		if c.tolerant {
@@ -677,19 +702,15 @@ func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
 		}
 		return err
 	}
-	c.rows = append(c.rows, row)
+	c.bounded.keep(row)
 	return nil
 }
 
 func (c *legacyPartPageCollector) page() OpenCodeLegacyPartPage {
-	rows := c.rows
-	hasNext := len(rows) > c.pageSize
-	if hasNext {
-		rows = rows[:c.pageSize]
-	}
-	page := OpenCodeLegacyPartPage{Parts: rows[:len(rows):len(rows)], Dropped: c.dropped}
-	if hasNext {
-		page.Next = &OpenCodeLegacyPartCursor{partID: page.Parts[len(page.Parts)-1].ID}
+	rows, hasNext := c.bounded.assemble()
+	page := OpenCodeLegacyPartPage{Parts: rows, Dropped: c.dropped}
+	if hasNext && len(rows) > 0 {
+		page.Next = &OpenCodeLegacyPartCursor{partID: rows[len(rows)-1].ID}
 	}
 	return page
 }
@@ -884,11 +905,23 @@ func validateCurrentPageRequest(request OpenCodeCurrentPageRequest) error {
 }
 
 func validateCurrentSessionPageRequest(request OpenCodeCurrentSessionPageRequest) error {
-	if request.PageSize.value <= 0 || request.PageSize.value > MaxOpenCodeCurrentPageSize {
-		return fmt.Errorf("validate OpenCode current session page request failed before source access: page size %d was not created by NewOpenCodeCurrentPageSize, so enumeration cannot be proven bounded; construct the page size with the validator", request.PageSize.value)
-	}
+	var cursor *string
 	if request.After != nil {
-		if err := validateOpenCodeCurrentToken("session cursor", request.After.sessionID.value); err != nil {
+		cursor = &request.After.sessionID.value
+	}
+	return validateOpenCodeCurrentBoundedPage(request.PageSize.value, cursor, "session cursor")
+}
+
+// validateOpenCodeCurrentBoundedPage validates the shared bounds every current
+// page request has: a page size within the fixed maximum and, when present, a
+// keyset cursor token. Current session enumeration and session-record
+// enumeration both delegate to it instead of duplicating the checks.
+func validateOpenCodeCurrentBoundedPage(pageSize int, cursor *string, cursorKind string) error {
+	if pageSize <= 0 || pageSize > MaxOpenCodeCurrentPageSize {
+		return fmt.Errorf("validate OpenCode bounded page request failed before source access: page size %d was not created by NewOpenCodeCurrentPageSize, so enumeration cannot be proven bounded; construct the page size with the validator", pageSize)
+	}
+	if cursor != nil {
+		if err := validateOpenCodeCurrentToken(cursorKind, *cursor); err != nil {
 			return err
 		}
 	}
