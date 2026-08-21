@@ -35,7 +35,7 @@ sections:
     fieldText: redaction level
     hasGuide: true
     fieldTextBeforeGuide: true
-    guideIntro: preview standard redaction before a later explicit publication.
+    guideIntro: preview how standard redaction changes your text before you publish.
     hasExample: true
     conditional: false
   - key: license

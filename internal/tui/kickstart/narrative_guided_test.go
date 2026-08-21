@@ -73,9 +73,20 @@ type privacyLabelMutationFixture struct {
 
 type privacyViewportKey string
 
-const privacyViewportPageDown privacyViewportKey = "page-down"
+const (
+	// privacyViewportFocusRight moves input to the split's right (example)
+	// pane, mirroring the kickstart selection step's own pane-focus key.
+	privacyViewportFocusRight privacyViewportKey = "focus-right"
+	// privacyViewportPageDown pages the currently-focused pane. On the
+	// left (radio) pane it is a no-op; on the right (example) pane it
+	// scrolls the illustrative example - the split's control never needs
+	// paging, since it is sized to stay fully visible.
+	privacyViewportPageDown privacyViewportKey = "page-down"
+)
 
-func (k privacyViewportKey) valid() bool { return k == privacyViewportPageDown }
+func (k privacyViewportKey) valid() bool {
+	return k == privacyViewportFocusRight || k == privacyViewportPageDown
+}
 
 type privacyViewportFixture struct {
 	Name           string               `yaml:"name"`
@@ -222,7 +233,7 @@ func loadPrivacyLicenseDocument(t *testing.T) privacyLicenseDocument {
 	viewportNames := map[string]bool{}
 	viewportMutations := 0
 	for _, row := range document.Viewport {
-		if strings.TrimSpace(row.Name) == "" || viewportNames[row.Name] || row.Width != 80 || row.Height != 24 ||
+		if strings.TrimSpace(row.Name) == "" || viewportNames[row.Name] || row.Width != 80 || row.Height != 18 ||
 			len(row.WantContains) == 0 || len(row.WantMissing) == 0 {
 			t.Fatalf("privacy viewport row is incomplete or duplicated: %#v", row)
 		}
@@ -314,15 +325,21 @@ func TestPrivacyGuideUsesRealStandardRedactor(t *testing.T) {
 		if after == row.Before {
 			t.Fatalf("real Standard redactor left synthetic %s sample unchanged", row.Category)
 		}
-		for _, want := range []string{row.CategoryLabel.String(), row.Before, after} {
+		// Headings are lowercase chrome (spelling out the opaque PII acronym),
+		// except the acronym itself which stays uppercase.
+		wantLabel := strings.ToLower(row.CategoryLabel.String())
+		if row.Category == redact.CategoryPII {
+			wantLabel = "personally identifiable information (PII)"
+		}
+		for _, want := range []string{wantLabel, row.Before, after} {
 			if !strings.Contains(view, want) {
 				t.Errorf("privacy example does not contain runtime-derived %q:\n%s", want, view)
 			}
 		}
 		base := sampleIndex * 3
 		labelLine, beforeLine, afterLine := lines[base], lines[base+1], lines[base+2]
-		if labelLine.Kind != settings.GuideExampleLineLabel || labelLine.Text != row.CategoryLabel.String() {
-			t.Errorf("privacy sample %q label line=%#v, want canonical typed label %q", row.Name, labelLine, row.CategoryLabel)
+		if labelLine.Kind != settings.GuideExampleLineLabel || labelLine.Text != wantLabel {
+			t.Errorf("privacy sample %q label line=%#v, want display label %q", row.Name, labelLine, wantLabel)
 		}
 		if beforeLine.Kind != settings.GuideExampleLineBefore || beforeLine.Text != row.Before {
 			t.Errorf("privacy sample %q before line=%#v, want typed unredacted input", row.Name, beforeLine)
@@ -381,6 +398,8 @@ func TestPrivacyGuideViewportAtCommonTerminalHeight(t *testing.T) {
 			}
 			for _, viewportKey := range row.Keys {
 				switch viewportKey {
+				case privacyViewportFocusRight:
+					flow, _ = flow.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 				case privacyViewportPageDown:
 					flow, _ = flow.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 				}

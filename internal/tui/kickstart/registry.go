@@ -135,17 +135,25 @@ func BuildRegistry(opts Options) settings.Registry {
 		{
 			Key:   SectionPrivacy,
 			Title: "privacy",
-			Guide: sectionGuideWithExample(
-				"preview standard redaction before a later explicit publication.",
-				privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
-				"local imports remain original unless you explicitly run `peasant redact`.",
-				"examples below use synthetic text and the same redactor as explicit publication.",
-				"standard keeps git remote urls and branch output; maximum removes them.",
-			),
+			// The before/after examples render beside the radio control in a
+			// scrollable split pane (see the Fields entry below), not inline
+			// under this guide, so the control itself never scrolls off the
+			// smallest supported terminal. Guide.Example stays populated with
+			// the same provider so it remains directly callable (e.g. by
+			// tests) independent of that split rendering.
+			Guide: &settings.Guide{
+				Intro:              "preview how standard redaction changes your text before you publish.",
+				Hints:              []string{"standard hides project identity but keeps git remote urls."},
+				Example:            privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
+				ExampleInSplitPane: true,
+			},
 			Fields: []settings.Field{
-				settings.WithDescription(
-					settings.Radio(FieldPrivacy, "redaction level", privacyAccessor(), privacyOptions()...),
-					"choose how much sensitive data peasant removes before a later explicit publication; this does not rewrite local imports."),
+				settings.WithExamplePane(
+					settings.WithDescription(
+						settings.Radio(FieldPrivacy, "redaction level", privacyAccessor(), privacyOptions()...),
+						"choose how much sensitive data peasant removes before a later explicit publication; this does not rewrite local imports."),
+					privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
+				),
 			},
 		},
 		{
@@ -220,9 +228,6 @@ func sectionGuide(intro string, hints ...string) *settings.Guide {
 	return &settings.Guide{Intro: intro, Hints: hints}
 }
 
-func sectionGuideWithExample(intro string, example settings.GuideExampleFunc, hints ...string) *settings.Guide {
-	return &settings.Guide{Intro: intro, Hints: hints, Example: example}
-}
 
 // selectionTreeOptions composes the selection tree's options: the harness facet
 // gutter always, and the side preview only when the mount supplied a source for

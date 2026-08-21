@@ -63,15 +63,17 @@ rows:
     headingText: redaction level
     controlText: '(•) standard'
     guide:
-      intro: preview standard redaction before a later explicit publication.
+      intro: preview how standard redaction changes your text before you publish.
       hints:
-        - local imports remain original unless you explicitly run `peasant redact`.
-        - examples below use synthetic text and the same redactor as explicit publication.
-        - standard keeps git remote urls and branch output; maximum removes them.
+        - standard hides project identity but keeps git remote urls.
     wantContains:
-      - later explicit publication
-      - local imports remain original
-      - peasant redact
+      - before you publish
+      # The split's right pane now sizes itself to the left control's own
+      # content height and scrolls the rest, so only the FIRST example
+      # category is guaranteed visible without paging - PII is covered
+      # directly by TestPrivacyGuideUsesRealStandardRedactor.
+      - credential
+      - keeps git remote urls
     wantMissing:
       - before transcripts enter peasant's local store
       - same redactor as local import

@@ -1,0 +1,21 @@
+expectedCaseCount: 2
+expectedErrorCaseCount: 1
+heading: split preview
+description: choose the policy applied by a later explicit action.
+exampleLines:
+  - {kind: label, text: CREDENTIAL}
+  - {kind: before, text: sk-example}
+  - {kind: after, text: '<CREDENTIAL>'}
+  - {kind: spacer, text: ''}
+  - {kind: label, text: PATH}
+  - {kind: before, text: /home/example/project}
+  - {kind: after, text: '<PATH>'}
+  - {kind: spacer, text: ''}
+  - {kind: label, text: INTERNAL}
+  - {kind: before, text: '"github.com/example-org/example-repo"'}
+  - {kind: after, text: '"<GO_IMPORT>"'}
+cases:
+  - {name: narrow-short, width: 60, height: 12}
+  - {name: wide-tall, width: 100, height: 20}
+errorCases:
+  - {name: provider-error, error: 'synthetic split example failure', wantVisible: 'preview unavailable'}

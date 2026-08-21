@@ -83,6 +83,15 @@ type Guide struct {
 	// Example optionally derives semantically typed example lines from the
 	// current draft.
 	Example GuideExampleFunc
+	// ExampleInSplitPane marks Example as already rendered elsewhere: beside
+	// the section's field control in a [kit.PreviewSplit] right pane, via
+	// [WithExamplePane] on that field, rather than inline beneath the guide
+	// text. A guided Flow skips its own inline Example rendering when this is
+	// set, so the same example is never drawn twice. Example itself stays
+	// directly callable either way - a caller that wants the raw derived
+	// lines (a test, or another presentation) is unaffected by where a
+	// guided Flow chooses to draw them.
+	ExampleInSplitPane bool
 }
 
 // Section is one step of a settings [Flow]: a titled group of [Field]s, shown
