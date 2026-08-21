@@ -329,7 +329,16 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	default:
 		return nil, source
 	}
-	records, err := a.discoverSQLiteSessionRecords(ctx, source, result.Candidate)
+	if len(candidates) == 0 {
+		// No session was enumerated from this database, so the session table has
+		// no parent link or clock to attach. Skip the whole session-table read.
+		return candidates, source
+	}
+	discoveredIDs := make(map[SessionID]struct{}, len(candidates))
+	for index := range candidates {
+		discoveredIDs[candidates[index].session.SessionID] = struct{}{}
+	}
+	records, err := a.discoverSQLiteSessionRecords(ctx, source, result.Candidate, discoveredIDs)
 	if err != nil {
 		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session records could not be read; sessions stay discoverable as roots with file-based freshness", err)
 		return candidates, source
@@ -386,8 +395,8 @@ type openCodeSessionRecords struct {
 // from the already-open source for one supported database. The parent link is
 // read whether or not the clock column exists. A database without a session
 // table yields an empty result with present false.
-func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) (openCodeSessionRecords, error) {
-	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock)}
+func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, discoveredIDs map[SessionID]struct{}) (openCodeSessionRecords, error) {
+	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock, len(discoveredIDs))}
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return records, err
@@ -410,6 +419,11 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 				// A source-valid identifier that Peasant cannot store is dropped
 				// with a diagnostic rather than a silent continue.
 				records.skipped = append(records.skipped, fmt.Sprintf("session row %q was dropped because its identifier cannot be stored: %v", row.SessionID.String(), sessionErr))
+				continue
+			}
+			// Retain only the rows for sessions this database actually discovered,
+			// so freshness and parent links are read for the discovered ids only.
+			if _, discovered := discoveredIDs[sessionID]; !discovered {
 				continue
 			}
 			clock := openCodeSessionClock{}
