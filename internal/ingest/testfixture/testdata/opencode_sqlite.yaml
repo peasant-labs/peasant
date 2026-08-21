@@ -1,4 +1,4 @@
-declared_cases: 25
+declared_cases: 27
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -780,5 +780,45 @@ cases:
     legacy_parts:
       - {id: part_clock_present, message_id: msg_clock_present, session_id: ses_3cd91f52effeXd3QAJ54jOyzvE, time_created: 1001, time_updated: 1001, data: '{"id":"part_clock_present","messageID":"msg_clock_present","type":"text","text":"CLOCK_PRESENT","time":{"created":1001}}'}
       - {id: part_absent_old, message_id: msg_absent_old, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1501, time_updated: 1501, data: '{"id":"part_absent_old","messageID":"msg_absent_old","type":"text","text":"ABSENT_OLD","time":{"created":1501}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-clock-absent-floor
+    logical_path: absentclock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    session_clock: absent
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 1, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_absent_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGA, time_created: 1000, time_updated: 1010, data: '{"id":"msg_absent_a","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGA","role":"user","path":{"cwd":"/synthetic/absentclock"},"time":{"created":1000,"completed":1010},"content":"absent clock older"}'}
+      - {id: msg_absent_b, session_id: ses_3cd91f52effeXd3QAJ54jOyzGA, time_created: 1100, time_updated: 1110, data: '{"id":"msg_absent_b","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGA","role":"user","path":{"cwd":"/synthetic/absentclock"},"time":{"created":1100,"completed":1110},"content":"absent clock newest"}'}
+    legacy_parts:
+      - {id: part_absent_a, message_id: msg_absent_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGA, time_created: 1001, time_updated: 1001, data: '{"id":"part_absent_a","messageID":"msg_absent_a","type":"text","text":"ABSENT_A","time":{"created":1001}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-clock-lagging
+    logical_path: laggingclock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    session_clock: lagging
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 1, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_lag_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1000, time_updated: 1010, data: '{"id":"msg_lag_a","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGB","role":"user","path":{"cwd":"/synthetic/laggingclock"},"time":{"created":1000,"completed":1010},"content":"lagging older"}'}
+      - {id: msg_lag_b, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1200, time_updated: 1210, data: '{"id":"msg_lag_b","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGB","role":"user","path":{"cwd":"/synthetic/laggingclock"},"time":{"created":1200,"completed":1210},"content":"lagging newest"}'}
+    legacy_parts:
+      - {id: part_lag_a, message_id: msg_lag_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1001, time_updated: 1001, data: '{"id":"part_lag_a","messageID":"msg_lag_a","type":"text","text":"LAG_A","time":{"created":1001}}'}
     current_messages: []
     ignored_history: []

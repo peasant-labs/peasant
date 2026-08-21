@@ -230,10 +230,10 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return fmt.Errorf("set %s journal mode during setup: %w", fixtureCase.JournalMode, err)
 	}
 
-	if err := createSchema(conn, fixtureCase.Schema); err != nil {
+	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock); err != nil {
 		return err
 	}
-	if fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid {
+	if (fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid) && fixtureCase.SessionClock != sessionClockAbsent {
 		if err := insertSessionRows(conn, fixtureCase); err != nil {
 			return err
 		}
@@ -281,17 +281,23 @@ func applyCatalogPadding(conn *sqlite.Conn, padding catalogPaddingSpec) error {
 	return nil
 }
 
-func createSchema(conn *sqlite.Conn, schema schemaKind) error {
+func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode) error {
+	sessionSchema := sessionSchemaSQL
+	if clock == sessionClockAbsent {
+		// A session table without the time_updated column has no usable clock,
+		// so discovery falls back to the database and WAL mtime floor.
+		sessionSchema = sessionSchemaNoClockSQL
+	}
 	var script string
 	switch schema {
 	case schemaEmpty:
 		script = `CREATE TABLE fixture_header_seed (id INTEGER); DROP TABLE fixture_header_seed;`
 	case schemaLegacy:
-		script = sessionSchemaSQL + legacySchemaSQL
+		script = sessionSchema + legacySchemaSQL
 	case schemaCurrent:
-		script = sessionSchemaSQL + currentSchemaSQL
+		script = sessionSchema + currentSchemaSQL
 	case schemaHybrid:
-		script = sessionSchemaSQL + legacySchemaSQL + currentSchemaSQL
+		script = sessionSchema + legacySchemaSQL + currentSchemaSQL
 	case schemaCurrentMissingSeq:
 		script = currentMissingSeqSchemaSQL
 	case schemaCurrentNullableSeq:
@@ -317,6 +323,17 @@ CREATE TABLE session (
   parent_id TEXT,
   time_created INTEGER NOT NULL DEFAULT 0,
   time_updated INTEGER NOT NULL DEFAULT 0
+);
+`
+
+// sessionSchemaNoClockSQL is an older session table with no update clock, so
+// discovery reports no usable clock and every session falls back to the
+// database and WAL mtime floor. It exercises the floor path end to end.
+const sessionSchemaNoClockSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0
 );
 `
 
@@ -454,7 +471,13 @@ func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	}
 	for _, sessionID := range order {
 		value := clocks[sessionID]
-		if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated) VALUES (?1, ?2, ?3);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, value.updated}}); err != nil {
+		updated := value.updated
+		if fixtureCase.SessionClock == sessionClockLagging {
+			// The clock lags the session's row times, so the newest row time,
+			// not the clock, is the changed time and a row change is still seen.
+			updated = value.created
+		}
+		if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated) VALUES (?1, ?2, ?3);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated}}); err != nil {
 			return fmt.Errorf("insert synthetic session %q with explicit columns: %w", sessionID, err)
 		}
 	}

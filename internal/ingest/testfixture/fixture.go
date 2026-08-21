@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 25
+const expectedCaseCount = 27
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -47,6 +47,31 @@ const (
 	journalWAL    journalMode = "wal"
 )
 
+// sessionClockMode controls how the synthetic session table carries the
+// per-session update clock, so tests can cover the floor path and clock lag.
+type sessionClockMode string
+
+const (
+	// sessionClockMirror advances time_updated to the newest row time, so the
+	// clock never lags. It is the default upstream-faithful behaviour.
+	sessionClockMirror sessionClockMode = ""
+	// sessionClockLagging leaves time_updated behind the newest row time, so
+	// the newest row time is the changed time and a row change is still seen.
+	sessionClockLagging sessionClockMode = "lagging"
+	// sessionClockAbsent omits the time_updated column, so the session has no
+	// usable clock and freshness falls back to the database and WAL mtime floor.
+	sessionClockAbsent sessionClockMode = "absent"
+)
+
+func (m sessionClockMode) validate() error {
+	switch m {
+	case sessionClockMirror, sessionClockLagging, sessionClockAbsent:
+		return nil
+	default:
+		return fmt.Errorf("unknown session clock mode %q", m)
+	}
+}
+
 type corruptionKind string
 
 const (
@@ -76,6 +101,7 @@ type caseSpec struct {
 	Format          sourceFormat        `yaml:"format"`
 	Schema          schemaKind          `yaml:"schema"`
 	JournalMode     journalMode         `yaml:"journal_mode"`
+	SessionClock    sessionClockMode    `yaml:"session_clock"`
 	Corruption      corruptionKind      `yaml:"corruption"`
 	DeclaredRows    declaredRowCounts   `yaml:"declared_rows"`
 	ExpectedCatalog expectedCatalogSpec `yaml:"expected_catalog"`
@@ -224,8 +250,8 @@ func (c caseSpec) validate() error {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
 	}
 	if c.Format == sourceFormatCorrupt {
-		if c.Schema != "" || c.JournalMode != "" {
-			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources must not declare a SQLite schema or journal mode", c.Name)
+		if c.Schema != "" || c.JournalMode != "" || c.SessionClock != sessionClockMirror {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources must not declare a SQLite schema, journal mode, or session clock", c.Name)
 		}
 		if err := c.Corruption.validate(); err != nil {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt source has invalid evidence: %w", c.Name, err)
@@ -245,6 +271,12 @@ func (c caseSpec) validate() error {
 		}
 		if c.Corruption != corruptionNone {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: SQLite sources must not declare corruption %q", c.Name, c.Corruption)
+		}
+		if err := c.SessionClock.validate(); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
+		}
+		if c.SessionClock != sessionClockMirror && c.Schema != schemaLegacy && c.Schema != schemaCurrent && c.Schema != schemaHybrid {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: session clock mode %q requires a legacy, current, or hybrid schema", c.Name, c.SessionClock)
 		}
 	}
 	if err := c.CatalogPadding.validate(c.Schema); err != nil {
