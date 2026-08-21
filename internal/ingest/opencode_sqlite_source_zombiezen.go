@@ -36,8 +36,12 @@ const (
 	openCodeLegacyMessageFreshnessStatement = "SELECT MAX(MAX(time_created, time_updated)) FROM message WHERE session_id = ?1"
 	openCodeLegacyPartFreshnessStatement    = "SELECT MAX(MAX(time_created, time_updated)) FROM part WHERE session_id = ?1"
 	openCodeCurrentFreshnessStatement       = "SELECT MAX(MAX(time_created, time_updated)) FROM session_message WHERE session_id = ?1"
-	openCodeSessionRecordsFirstStatement    = "SELECT id, parent_id, time_updated FROM session ORDER BY id LIMIT ?1"
-	openCodeSessionRecordsAfterStatement    = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+
+	openCodeLegacyMessageFreshnessBySessionStatement = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM message GROUP BY session_id"
+	openCodeLegacyPartFreshnessBySessionStatement    = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM part GROUP BY session_id"
+	openCodeCurrentFreshnessBySessionStatement       = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM session_message GROUP BY session_id"
+	openCodeSessionRecordsFirstStatement             = "SELECT id, parent_id, time_updated FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionRecordsAfterStatement             = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -317,6 +321,74 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionFreshness(ctx context.Cont
 		return time.Time{}, s.sourceReadError(lease.ctx, "read selected current message freshness", err, "session_message(time_created,time_updated)", "supported selected current projection")
 	}
 	return selectedFreshnessTime(newest, found), nil
+}
+
+// LegacyFreshnessBySession returns the newest row time of every legacy session
+// in one database with one GROUP BY aggregate per table, so freshness reads are
+// bounded by table count rather than by session count. A session absent from
+// the result has no legacy rows and is left to the caller's floor.
+func (s *zombiezenOpenCodeSQLiteSource) LegacyFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
+	lease, err := s.beginSourceRead(ctx, "read legacy freshness by session")
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	result := make(map[string]time.Time)
+	decode := newFreshnessBySessionDecoder(result)
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyMessageFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read legacy message freshness by session", err, "message(session_id,time_created,time_updated)", "supported legacy message/part")
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyPartFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read legacy part freshness by session", err, "part(session_id,time_created,time_updated)", "supported legacy message/part")
+	}
+	return result, nil
+}
+
+// CurrentFreshnessBySession returns the newest row time of every current session
+// in one database with one GROUP BY aggregate, so freshness reads are bounded by
+// table count rather than by session count. A session absent from the result has
+// no current rows and is left to the caller's floor.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
+	lease, err := s.beginSourceRead(ctx, "read current freshness by session")
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	result := make(map[string]time.Time)
+	decode := newFreshnessBySessionDecoder(result)
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read current freshness by session", err, "session_message(session_id,time_created,time_updated)", "supported current session_message")
+	}
+	return result, nil
+}
+
+// newFreshnessBySessionDecoder returns a row decoder for a
+// (session_id, MAX(MAX(time_created,time_updated))) GROUP BY aggregate. It keeps
+// the newest millisecond per session across every statement it decodes, so the
+// legacy message and part statements merge into one map. A null aggregate
+// contributes nothing.
+func newFreshnessBySessionDecoder(result map[string]time.Time) func(*sqlite.Stmt) error {
+	return func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeText {
+			return fmt.Errorf("decode freshness by session: session_id has SQLite type %s instead of text", stmt.ColumnType(0))
+		}
+		sessionID := stmt.ColumnText(0)
+		if sessionID == "" {
+			return fmt.Errorf("decode freshness by session: session_id is empty")
+		}
+		switch stmt.ColumnType(1) {
+		case sqlite.TypeNull:
+			return nil
+		case sqlite.TypeInteger:
+			candidate := time.UnixMilli(stmt.ColumnInt64(1))
+			if existing, ok := result[sessionID]; !ok || candidate.After(existing) {
+				result[sessionID] = candidate
+			}
+			return nil
+		default:
+			return fmt.Errorf("decode freshness by session %q: aggregate has SQLite type %s instead of integer", sessionID, stmt.ColumnType(1))
+		}
+	}
 }
 
 // newSelectedFreshnessDecoder returns a row decoder for one

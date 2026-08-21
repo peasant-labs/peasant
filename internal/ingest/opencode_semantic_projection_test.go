@@ -727,6 +727,12 @@ func (source semanticNegativeSource) CurrentSessionFreshness(context.Context, Op
 func (source semanticNegativeSource) LegacySessionFreshness(context.Context, OpenCodeLegacySessionID) (time.Time, error) {
 	return time.Time{}, nil
 }
+func (source semanticNegativeSource) CurrentFreshnessBySession(context.Context) (map[string]time.Time, error) {
+	return nil, nil
+}
+func (source semanticNegativeSource) LegacyFreshnessBySession(context.Context) (map[string]time.Time, error) {
+	return nil, nil
+}
 func (source semanticNegativeSource) LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error) {
 	return OpenCodeLegacyMessagePage{}, nil
 }

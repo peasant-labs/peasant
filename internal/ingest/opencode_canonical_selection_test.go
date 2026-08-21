@@ -401,9 +401,11 @@ func assertCanonicalParentLink(t testing.TB, session ingest.DiscoveredSession, t
 }
 
 type canonicalFreshnessRecorder struct {
-	mu      sync.Mutex
-	current map[string]int
-	legacy  map[string]int
+	mu           sync.Mutex
+	current      map[string]int
+	legacy       map[string]int
+	currentBatch int
+	legacyBatch  int
 }
 
 func newCanonicalFreshnessRecorder() *canonicalFreshnessRecorder {
@@ -429,6 +431,20 @@ func (source canonicalRecordingSource) LegacySessionFreshness(ctx context.Contex
 	source.recorder.legacy[id.String()]++
 	source.recorder.mu.Unlock()
 	return source.OpenCodeSQLiteSource.LegacySessionFreshness(ctx, id)
+}
+
+func (source canonicalRecordingSource) CurrentFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
+	source.recorder.mu.Lock()
+	source.recorder.currentBatch++
+	source.recorder.mu.Unlock()
+	return source.OpenCodeSQLiteSource.CurrentFreshnessBySession(ctx)
+}
+
+func (source canonicalRecordingSource) LegacyFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
+	source.recorder.mu.Lock()
+	source.recorder.legacyBatch++
+	source.recorder.mu.Unlock()
+	return source.OpenCodeSQLiteSource.LegacyFreshnessBySession(ctx)
 }
 
 func canonicalRecordingOpener(recorder *canonicalFreshnessRecorder) ingest.OpenCodeSQLiteSourceOpener {
@@ -464,23 +480,38 @@ func assertOnlyCanonicalFreshnessConsulted(t testing.TB, fixture canonicalSelect
 	recorder.mu.Lock()
 	current := cloneIntMap(recorder.current)
 	legacy := cloneIntMap(recorder.legacy)
+	currentBatch := recorder.currentBatch
+	legacyBatch := recorder.legacyBatch
 	recorder.mu.Unlock()
 	filesystem.mu.Lock()
 	stats := cloneIntMap(filesystem.sessionStats)
 	filesystem.mu.Unlock()
+	// Row freshness is read per table, never per session, so no per-session
+	// aggregate is consulted and the batch statement count is bounded by the
+	// present representations rather than by the number of sessions.
+	if len(current) != 0 || len(legacy) != 0 {
+		t.Fatalf("per-session freshness was consulted: current=%v legacy=%v", current, legacy)
+	}
+	wantCurrentBatch, wantLegacyBatch := 0, 0
 	for _, testCase := range fixture.Cases {
-		wantCurrent, wantLegacy, wantJSON := 0, 0, 0
 		switch testCase.Expected {
 		case canonicalFixtureCurrent:
-			wantCurrent = 1
+			wantCurrentBatch = 1
 		case canonicalFixtureLegacy:
-			wantLegacy = 1
-		case canonicalFixtureJSON:
+			wantLegacyBatch = 1
+		}
+	}
+	if currentBatch != wantCurrentBatch || legacyBatch != wantLegacyBatch {
+		t.Fatalf("row freshness batch statements current=%d legacy=%d, want %d/%d bounded by present representations", currentBatch, legacyBatch, wantCurrentBatch, wantLegacyBatch)
+	}
+	for _, testCase := range fixture.Cases {
+		wantJSON := 0
+		if testCase.Expected == canonicalFixtureJSON {
 			wantJSON = 1
 		}
 		jsonPath := filepath.Join(root, "storage", "session", "synthetic", testCase.SessionID+".json")
-		if current[testCase.SessionID] != wantCurrent || legacy[testCase.SessionID] != wantLegacy || stats[jsonPath] != wantJSON {
-			t.Fatalf("freshness consultations for %q current=%d legacy=%d json=%d, want %d/%d/%d from winner %q", testCase.SessionID, current[testCase.SessionID], legacy[testCase.SessionID], stats[jsonPath], wantCurrent, wantLegacy, wantJSON, testCase.Expected)
+		if stats[jsonPath] != wantJSON {
+			t.Fatalf("JSON freshness stat for %q = %d, want %d from winner %q", testCase.SessionID, stats[jsonPath], wantJSON, testCase.Expected)
 		}
 	}
 }

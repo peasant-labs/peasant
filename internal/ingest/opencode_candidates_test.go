@@ -39,7 +39,7 @@ const (
 	expectedOpenCodeProbeCases      = 13
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 22
+	expectedAllowedQueryStatements  = 25
 	expectedQueryGuardMutations     = 12
 	expectedEntryPathMutations      = 41
 	expectedEntryPathKindCount      = 41

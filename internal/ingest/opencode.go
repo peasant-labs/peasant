@@ -520,11 +520,15 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite source could not be opened read-only for freshness", err)
 			continue
 		}
+		// Read the newest row time of every session on this database with at
+		// most one GROUP BY aggregate per table, so freshness reads stay bounded
+		// by table count and never grow with the number of sessions.
+		rowFreshness := a.batchOpenCodeSQLiteRowFreshness(ctx, source, selected, bySQLitePath[rawPath])
 		var floor time.Time
 		floorKnown := false
 		for _, index := range bySQLitePath[rawPath] {
 			candidate := &selected[index]
-			newest, hydrationErr := selectedOpenCodeSQLiteFreshness(ctx, source, candidate.identity)
+			newest, hydrationErr := rowFreshness(candidate.identity)
 			if hydrationErr != nil {
 				a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), hydrationErr)
 				continue
@@ -563,22 +567,49 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 	return discovered
 }
 
-func selectedOpenCodeSQLiteFreshness(ctx context.Context, source OpenCodeSQLiteSource, identity OpenCodeSelectedSourceIdentity) (time.Time, error) {
-	switch identity.Representation {
-	case OpenCodeRepresentationCurrentSQLite:
-		id, err := NewOpenCodeCurrentSessionID(string(identity.SessionID))
-		if err != nil {
-			return time.Time{}, err
+// batchOpenCodeSQLiteRowFreshness reads the newest row time of every session on
+// one database with at most one GROUP BY aggregate per table, then returns a
+// lookup that resolves a single winner's row freshness from the shared result.
+// Only the tables that a winner actually uses are read, so a database of N
+// sessions costs at most one statement per present table, never one per session.
+// A read failure for a table is returned to every winner of that
+// representation, so a caller can fail closed per session without dropping
+// winners of the other representation. A session absent from a table's result
+// has no rows there and resolves to the zero time, leaving the caller's clock
+// or floor to decide freshness.
+func (a *OpenCodeAdapter) batchOpenCodeSQLiteRowFreshness(ctx context.Context, source OpenCodeSQLiteSource, selected []openCodeSessionCandidate, indexes []int) func(OpenCodeSelectedSourceIdentity) (time.Time, error) {
+	needLegacy, needCurrent := false, false
+	for _, index := range indexes {
+		switch selected[index].identity.Representation {
+		case OpenCodeRepresentationLegacySQLite:
+			needLegacy = true
+		case OpenCodeRepresentationCurrentSQLite:
+			needCurrent = true
 		}
-		return source.CurrentSessionFreshness(ctx, id)
-	case OpenCodeRepresentationLegacySQLite:
-		id, err := NewOpenCodeLegacySessionID(string(identity.SessionID))
-		if err != nil {
-			return time.Time{}, err
+	}
+	var legacyBySession, currentBySession map[string]time.Time
+	var legacyErr, currentErr error
+	if needLegacy {
+		legacyBySession, legacyErr = source.LegacyFreshnessBySession(ctx)
+	}
+	if needCurrent {
+		currentBySession, currentErr = source.CurrentFreshnessBySession(ctx)
+	}
+	return func(identity OpenCodeSelectedSourceIdentity) (time.Time, error) {
+		switch identity.Representation {
+		case OpenCodeRepresentationCurrentSQLite:
+			if currentErr != nil {
+				return time.Time{}, currentErr
+			}
+			return currentBySession[string(identity.SessionID)], nil
+		case OpenCodeRepresentationLegacySQLite:
+			if legacyErr != nil {
+				return time.Time{}, legacyErr
+			}
+			return legacyBySession[string(identity.SessionID)], nil
+		default:
+			return time.Time{}, fmt.Errorf("selected representation %d cannot use SQLite freshness", identity.Representation)
 		}
-		return source.LegacySessionFreshness(ctx, id)
-	default:
-		return time.Time{}, fmt.Errorf("selected representation %d cannot use SQLite freshness", identity.Representation)
 	}
 }
 

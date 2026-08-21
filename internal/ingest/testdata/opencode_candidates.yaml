@@ -65,7 +65,7 @@ forbidden_query_tokens:
   - attach
   - payload
   - " union "
-declared_allowed_query_statements: 22
+declared_allowed_query_statements: 25
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -103,6 +103,12 @@ allowed_query_statements:
     statement: 'select max(max(time_created, time_updated)) from part where session_id = ?1'
   - name: current-message-freshness
     statement: 'select max(max(time_created, time_updated)) from session_message where session_id = ?1'
+  - name: legacy-message-freshness-by-session
+    statement: 'select session_id, max(max(time_created, time_updated)) from message group by session_id'
+  - name: legacy-part-freshness-by-session
+    statement: 'select session_id, max(max(time_created, time_updated)) from part group by session_id'
+  - name: current-freshness-by-session
+    statement: 'select session_id, max(max(time_created, time_updated)) from session_message group by session_id'
   - name: session-records-first
     statement: 'select id, parent_id, time_updated from session order by id limit ?1'
   - name: session-records-after

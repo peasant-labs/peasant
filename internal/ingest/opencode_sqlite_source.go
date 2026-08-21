@@ -541,6 +541,8 @@ type OpenCodeSQLiteSource interface {
 	LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error)
 	CurrentSessionFreshness(context.Context, OpenCodeCurrentSessionID) (time.Time, error)
 	LegacySessionFreshness(context.Context, OpenCodeLegacySessionID) (time.Time, error)
+	CurrentFreshnessBySession(context.Context) (map[string]time.Time, error)
+	LegacyFreshnessBySession(context.Context) (map[string]time.Time, error)
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
 	LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error)
