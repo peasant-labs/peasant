@@ -742,6 +742,9 @@ func (source semanticNegativeSource) LegacyParts(context.Context, OpenCodeLegacy
 func (source semanticNegativeSource) LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error) {
 	return OpenCodeLegacyPartPage{}, nil
 }
+func (source semanticNegativeSource) LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error) {
+	return OpenCodeLegacyPartPage{}, nil
+}
 func (source semanticNegativeSource) SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
 	return OpenCodeSessionRecordPage{}, nil
 }

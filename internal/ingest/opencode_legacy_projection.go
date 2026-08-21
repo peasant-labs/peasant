@@ -209,6 +209,9 @@ func droppedOpenCodeOrphanPartDiagnostics(session DiscoveredSession, dropped []o
 
 func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize) (openCodeLegacyProjection, []openCodeDroppedOrphanPart, error) {
 	projection := openCodeLegacyProjection{Format: openCodeLegacyProjectionFormat, Version: openCodeLegacyProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
+	// Read the session's messages first and remember each message's slot, so the
+	// single part pass can attach a part to its message in memory.
+	messageSlot := make(map[string]int)
 	var messageCursor *OpenCodeLegacyMessageCursor
 	for {
 		page, err := source.LegacyMessages(ctx, OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize, After: messageCursor})
@@ -216,41 +219,41 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 			return openCodeLegacyProjection{}, nil, err
 		}
 		for _, row := range page.Messages {
-			message := openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Data: json.RawMessage(row.Data), Parts: []openCodeLegacyProjectionPart{}}
-			var partCursor *OpenCodeLegacyPartCursor
-			for {
-				parts, partErr := source.LegacyParts(ctx, OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: row.ID, PageSize: pageSize, After: partCursor})
-				if partErr != nil {
-					return openCodeLegacyProjection{}, nil, partErr
-				}
-				for _, part := range parts.Parts {
-					message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)})
-				}
-				if parts.Next == nil {
-					break
-				}
-				partCursor = parts.Next
-			}
-			projection.Messages = append(projection.Messages, message)
+			messageSlot[row.ID.String()] = len(projection.Messages)
+			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Data: json.RawMessage(row.Data), Parts: []openCodeLegacyProjectionPart{}})
 		}
 		if page.Next == nil {
 			break
 		}
 		messageCursor = page.Next
 	}
+	// Read every part of the session once, in identifier order, and partition it
+	// in memory: a part whose message is present attaches to that message; a part
+	// whose message is absent is an orphan. This replaces the per-message part
+	// read plus the correlated orphan scan, which read the part table twice.
 	var dropped []openCodeDroppedOrphanPart
-	var orphanCursor *OpenCodeLegacyPartCursor
+	var partCursor *OpenCodeLegacyPartCursor
 	for {
-		page, err := source.LegacyOrphanParts(ctx, OpenCodeLegacyOrphanPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: orphanCursor})
+		page, err := source.LegacySessionParts(ctx, OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: partCursor})
 		if err != nil {
 			return openCodeLegacyProjection{}, nil, err
 		}
 		for _, drop := range page.Dropped {
-			// An orphan row the source could not decode is dropped with the same
+			// A part row the source could not decode is dropped with the orphan
 			// warning, never a session failure.
 			dropped = append(dropped, openCodeDroppedOrphanPart{reason: drop.Reason})
 		}
 		for _, part := range page.Parts {
+			projectionPart := openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}
+			if slot, present := messageSlot[part.MessageID.String()]; present {
+				// A part whose message is present must carry valid JSON, matching
+				// the strict per-message read this pass replaces.
+				if !json.Valid([]byte(part.Data)) {
+					return openCodeLegacyProjection{}, nil, fmt.Errorf("read OpenCode legacy part %q for message %q failed while partitioning the single part pass: its data is not valid JSON; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", part.ID.String(), part.MessageID.String())
+				}
+				projection.Messages[slot].Parts = append(projection.Messages[slot].Parts, projectionPart)
+				continue
+			}
 			if reason := unusableOpenCodeOrphanPartReason([]byte(part.Data)); reason != "" {
 				// An unusable orphan row must not fail the whole session.
 				dropped = append(dropped, openCodeDroppedOrphanPart{partID: part.ID.String(), messageID: part.MessageID.String(), reason: reason})
@@ -276,7 +279,7 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 		if page.Next == nil {
 			break
 		}
-		orphanCursor = page.Next
+		partCursor = page.Next
 	}
 	return projection, dropped, nil
 }

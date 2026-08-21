@@ -20,7 +20,7 @@ import (
 const (
 	expectedReaderPageCases          = 3
 	expectedReaderInvalidIdentifiers = 1
-	expectedReaderMethods            = 13
+	expectedReaderMethods            = 14
 	expectedReaderSignatureRules     = 5
 	expectedReaderGuardMutations     = 5
 	expectedReaderLoaderMutations    = 4
@@ -646,7 +646,7 @@ func mutateReaderFixture(source []byte, kind readerLoaderMutationKind) ([]byte, 
 	case readerLoaderTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_page_cases: 0\n")...), nil
 	case readerLoaderDeclaredCount:
-		return replaceOnce("declared_methods: 13", "declared_methods: 12")
+		return replaceOnce("declared_methods: 14", "declared_methods: 13")
 	case readerLoaderDuplicateMethod:
 		return replaceOnce("  - name: Close\n", "  - name: Catalog\n")
 	default:

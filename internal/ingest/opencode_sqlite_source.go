@@ -325,6 +325,15 @@ type OpenCodeLegacyOrphanPartPageRequest struct {
 	After     *OpenCodeLegacyPartCursor
 }
 
+// OpenCodeLegacySessionPartPageRequest requests every part row of one session in
+// part identifier order, so the projection reads a session's parts once and
+// partitions them into message parts and orphans in memory.
+type OpenCodeLegacySessionPartPageRequest struct {
+	SessionID OpenCodeLegacySessionID
+	PageSize  OpenCodeLegacyPageSize
+	After     *OpenCodeLegacyPartCursor
+}
+
 // OpenCodeSessionRecordPageRequest requests bounded session records from the
 // upstream session table. Parent links and the per-session update clock are
 // shared by every representation.
@@ -570,6 +579,7 @@ type OpenCodeSQLiteSource interface {
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
 	LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error)
+	LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error)
 	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	Close(context.Context) error

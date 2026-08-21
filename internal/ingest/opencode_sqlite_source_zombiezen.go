@@ -16,26 +16,28 @@ import (
 )
 
 const (
-	openCodeEnableQueryOnlyStatement        = "PRAGMA query_only=ON"
-	openCodeReadQueryOnlyStatement          = "PRAGMA query_only"
-	openCodeCatalogTablesStatement          = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
-	openCodeCatalogColumnsStatement         = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
-	openCodeCatalogIndexesStatement         = "SELECT il.name, il.\"unique\", il.partial, xi.seqno, xi.cid, xi.name, xi.desc, xi.coll, xi.key FROM pragma_index_list(?1) AS il JOIN pragma_index_xinfo(il.name) AS xi ORDER BY il.name, xi.seqno LIMIT 65"
-	openCodeLegacySessionsFirstStatement    = "SELECT DISTINCT session_id FROM message ORDER BY session_id LIMIT ?1"
-	openCodeLegacySessionsAfterStatement    = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
-	openCodeLegacyMessagesFirstStatement    = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created, id LIMIT ?2"
-	openCodeLegacyMessagesAfterStatement    = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 AND (time_created > ?2 OR (time_created = ?2 AND id > ?3)) ORDER BY time_created, id LIMIT ?4"
-	openCodeLegacyPartsFirstStatement       = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 ORDER BY id LIMIT ?3"
-	openCodeLegacyPartsAfterStatement       = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 AND id > ?3 ORDER BY id LIMIT ?4"
-	openCodeLegacyOrphanPartsFirstStatement = "SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data FROM part AS p WHERE p.session_id = ?1 AND NOT EXISTS (SELECT 1 FROM message AS m WHERE m.session_id = p.session_id AND m.id = p.message_id) ORDER BY p.id LIMIT ?2"
-	openCodeLegacyOrphanPartsAfterStatement = "SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data FROM part AS p WHERE p.session_id = ?1 AND p.id > ?2 AND NOT EXISTS (SELECT 1 FROM message AS m WHERE m.session_id = p.session_id AND m.id = p.message_id) ORDER BY p.id LIMIT ?3"
-	openCodeCurrentSessionsFirstStatement   = "SELECT DISTINCT session_id FROM session_message ORDER BY session_id LIMIT ?1"
-	openCodeCurrentSessionsAfterStatement   = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
-	openCodeCurrentMessagesFirstStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
-	openCodeCurrentMessagesAfterStatement   = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
-	openCodeLegacyMessageFreshnessStatement = "SELECT MAX(MAX(time_created, time_updated)) FROM message WHERE session_id = ?1"
-	openCodeLegacyPartFreshnessStatement    = "SELECT MAX(MAX(time_created, time_updated)) FROM part WHERE session_id = ?1"
-	openCodeCurrentFreshnessStatement       = "SELECT MAX(MAX(time_created, time_updated)) FROM session_message WHERE session_id = ?1"
+	openCodeEnableQueryOnlyStatement         = "PRAGMA query_only=ON"
+	openCodeReadQueryOnlyStatement           = "PRAGMA query_only"
+	openCodeCatalogTablesStatement           = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
+	openCodeCatalogColumnsStatement          = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
+	openCodeCatalogIndexesStatement          = "SELECT il.name, il.\"unique\", il.partial, xi.seqno, xi.cid, xi.name, xi.desc, xi.coll, xi.key FROM pragma_index_list(?1) AS il JOIN pragma_index_xinfo(il.name) AS xi ORDER BY il.name, xi.seqno LIMIT 65"
+	openCodeLegacySessionsFirstStatement     = "SELECT DISTINCT session_id FROM message ORDER BY session_id LIMIT ?1"
+	openCodeLegacySessionsAfterStatement     = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
+	openCodeLegacyMessagesFirstStatement     = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created, id LIMIT ?2"
+	openCodeLegacyMessagesAfterStatement     = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 AND (time_created > ?2 OR (time_created = ?2 AND id > ?3)) ORDER BY time_created, id LIMIT ?4"
+	openCodeLegacyPartsFirstStatement        = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 ORDER BY id LIMIT ?3"
+	openCodeLegacyPartsAfterStatement        = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 AND id > ?3 ORDER BY id LIMIT ?4"
+	openCodeLegacyOrphanPartsFirstStatement  = "SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data FROM part AS p WHERE p.session_id = ?1 AND NOT EXISTS (SELECT 1 FROM message AS m WHERE m.session_id = p.session_id AND m.id = p.message_id) ORDER BY p.id LIMIT ?2"
+	openCodeLegacyOrphanPartsAfterStatement  = "SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data FROM part AS p WHERE p.session_id = ?1 AND p.id > ?2 AND NOT EXISTS (SELECT 1 FROM message AS m WHERE m.session_id = p.session_id AND m.id = p.message_id) ORDER BY p.id LIMIT ?3"
+	openCodeLegacySessionPartsFirstStatement = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 ORDER BY id LIMIT ?2"
+	openCodeLegacySessionPartsAfterStatement = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeCurrentSessionsFirstStatement    = "SELECT DISTINCT session_id FROM session_message ORDER BY session_id LIMIT ?1"
+	openCodeCurrentSessionsAfterStatement    = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
+	openCodeCurrentMessagesFirstStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
+	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+	openCodeLegacyMessageFreshnessStatement  = "SELECT MAX(MAX(time_created, time_updated)) FROM message WHERE session_id = ?1"
+	openCodeLegacyPartFreshnessStatement     = "SELECT MAX(MAX(time_created, time_updated)) FROM part WHERE session_id = ?1"
+	openCodeCurrentFreshnessStatement        = "SELECT MAX(MAX(time_created, time_updated)) FROM session_message WHERE session_id = ?1"
 
 	openCodeLegacyMessageFreshnessBySessionStatement = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM message GROUP BY session_id"
 	openCodeLegacyPartFreshnessBySessionStatement    = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM part GROUP BY session_id"
@@ -463,6 +465,52 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyOrphanParts(ctx context.Context, r
 		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy orphan part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
 	}
 	return collector.page(), nil
+}
+
+// LegacySessionParts returns every part row of one session in identifier order,
+// so the projection reads a session's parts once and partitions them into
+// message parts and orphans in memory instead of scanning parts per message and
+// again for orphans. It tolerates a row it cannot decode by dropping it, so one
+// malformed part never fails the read.
+func (s *zombiezenOpenCodeSQLiteSource) LegacySessionParts(ctx context.Context, request OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error) {
+	if err := validateLegacySessionPartPageRequest(request); err != nil {
+		return OpenCodeLegacyPartPage{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read bounded legacy session part page")
+	if err != nil {
+		return OpenCodeLegacyPartPage{}, err
+	}
+	defer lease.release()
+	collector := newTolerantLegacyPartPageCollector(request.PageSize.value, func(row OpenCodeLegacyPartRow) error {
+		if row.SessionID != request.SessionID {
+			return fmt.Errorf("decode legacy session part row %q: projected session %q differs from requested session %q", row.ID.String(), row.SessionID.String(), request.SessionID.String())
+		}
+		return nil
+	})
+	if request.After == nil {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacySessionPartsFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, collector.decode)
+	} else {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacySessionPartsAfterStatement, []any{request.SessionID.value, request.After.partID.value, request.PageSize.value + 1}, collector.decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy session part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
+	}
+	return collector.page(), nil
+}
+
+func validateLegacySessionPartPageRequest(request OpenCodeLegacySessionPartPageRequest) error {
+	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
+		return fmt.Errorf("validate OpenCode legacy session part page request: %w", err)
+	}
+	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
+		return err
+	}
+	if request.After != nil {
+		if err := validateOpenCodeLegacyIdentifier("part cursor", request.After.partID.value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SessionRecords returns session rows in identifier order with their parent
