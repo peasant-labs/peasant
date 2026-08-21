@@ -434,7 +434,7 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyOrphanParts(ctx context.Context, r
 		return OpenCodeLegacyPartPage{}, err
 	}
 	defer lease.release()
-	collector := newLegacyPartPageCollector(request.PageSize.value, false, func(row OpenCodeLegacyPartRow) error {
+	collector := newTolerantLegacyPartPageCollector(request.PageSize.value, func(row OpenCodeLegacyPartRow) error {
 		if row.SessionID != request.SessionID {
 			return fmt.Errorf("decode legacy orphan part row %q: projected session %q differs from requested session %q", row.ID.String(), row.SessionID.String(), request.SessionID.String())
 		}
@@ -604,20 +604,39 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 type legacyPartPageCollector struct {
 	pageSize    int
 	requireJSON bool
+	tolerant    bool
 	check       func(OpenCodeLegacyPartRow) error
 	rows        []OpenCodeLegacyPartRow
+	dropped     []OpenCodeOrphanPartDrop
 }
 
 func newLegacyPartPageCollector(pageSize int, requireJSON bool, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
 	return &legacyPartPageCollector{pageSize: pageSize, requireJSON: requireJSON, check: check, rows: make([]OpenCodeLegacyPartRow, 0, pageSize+1)}
 }
 
+// newTolerantLegacyPartPageCollector collects orphan part rows and drops any
+// row it cannot decode or scope instead of failing the whole read, so one
+// malformed orphan row never fails the session.
+func newTolerantLegacyPartPageCollector(pageSize int, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
+	collector := newLegacyPartPageCollector(pageSize, false, check)
+	collector.tolerant = true
+	return collector
+}
+
 func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
 	row, err := decodeLegacyPartRow(stmt, c.requireJSON)
 	if err != nil {
+		if c.tolerant {
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{Reason: fmt.Sprintf("orphan part row with id %q could not be decoded: %v", stmt.ColumnText(0), err)})
+			return nil
+		}
 		return err
 	}
 	if err := c.check(row); err != nil {
+		if c.tolerant {
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{Reason: fmt.Sprintf("orphan part row %q was out of scope: %v", row.ID.String(), err)})
+			return nil
+		}
 		return err
 	}
 	c.rows = append(c.rows, row)
@@ -630,7 +649,7 @@ func (c *legacyPartPageCollector) page() OpenCodeLegacyPartPage {
 	if hasNext {
 		rows = rows[:c.pageSize]
 	}
-	page := OpenCodeLegacyPartPage{Parts: rows[:len(rows):len(rows)]}
+	page := OpenCodeLegacyPartPage{Parts: rows[:len(rows):len(rows)], Dropped: c.dropped}
 	if hasNext {
 		page.Next = &OpenCodeLegacyPartCursor{partID: page.Parts[len(page.Parts)-1].ID}
 	}
@@ -953,10 +972,17 @@ func decodeLegacyMessageRow(stmt *sqlite.Stmt) (OpenCodeLegacyMessageRow, error)
 }
 
 // decodeLegacyPartRow decodes one part row. Ordinary parts require valid JSON
-// data. Orphan parts keep malformed data so the projection can drop them with
-// a warning instead of failing the whole session.
+// data in a text column. Orphan parts (requireJSON false) keep malformed or
+// non-text data so the projection can drop them with a warning instead of
+// failing the whole session.
 func decodeLegacyPartRow(stmt *sqlite.Stmt, requireJSON bool) (OpenCodeLegacyPartRow, error) {
-	if err := requireOpenCodeColumnTypes(stmt, []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger, sqlite.TypeText}); err != nil {
+	expected := []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger}
+	if requireJSON {
+		// Only ordinary parts require a text data column; an orphan row with BLOB
+		// data is tolerated and dropped later with a warning.
+		expected = append(expected, sqlite.TypeText)
+	}
+	if err := requireOpenCodeColumnTypes(stmt, expected); err != nil {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row: %w", err)
 	}
 	partID, err := NewOpenCodeLegacyPartID(stmt.ColumnText(0))

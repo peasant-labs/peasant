@@ -237,6 +237,11 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 		if err != nil {
 			return openCodeLegacyProjection{}, nil, err
 		}
+		for _, drop := range page.Dropped {
+			// An orphan row the source could not decode is dropped with the same
+			// warning, never a session failure.
+			dropped = append(dropped, openCodeDroppedOrphanPart{reason: drop.Reason})
+		}
 		for _, part := range page.Parts {
 			if reason := unusableOpenCodeOrphanPartReason([]byte(part.Data)); reason != "" {
 				// An unusable orphan row must not fail the whole session.

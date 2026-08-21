@@ -416,10 +416,19 @@ type OpenCodeLegacyMessagePage struct {
 	Next     *OpenCodeLegacyMessageCursor
 }
 
-// OpenCodeLegacyPartPage is a detached bounded part page.
+// OpenCodeOrphanPartDrop records one orphan part row the bounded read could not
+// decode into a typed row. Reason explains why the row was dropped. An orphan
+// row is always dropped rather than failing the whole session.
+type OpenCodeOrphanPartDrop struct {
+	Reason string
+}
+
+// OpenCodeLegacyPartPage is a detached bounded part page. Dropped is populated
+// only by the orphan read and names orphan rows that could not be decoded.
 type OpenCodeLegacyPartPage struct {
-	Parts []OpenCodeLegacyPartRow
-	Next  *OpenCodeLegacyPartCursor
+	Parts   []OpenCodeLegacyPartRow
+	Dropped []OpenCodeOrphanPartDrop
+	Next    *OpenCodeLegacyPartCursor
 }
 
 // OpenCodeSQLiteSourcePath is an absolute path to an OpenCode-owned SQLite

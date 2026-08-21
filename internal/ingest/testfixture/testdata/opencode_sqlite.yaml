@@ -1,4 +1,4 @@
-declared_cases: 31
+declared_cases: 32
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -795,6 +795,24 @@ cases:
       - {id: part_hco_deleted, message_id: msg_hco_deleted, session_id: ses_3cd91f52effeXd3QAJ54jOyzH2, time_created: 1101, time_updated: 1101, data: '{"id":"part_hco_deleted","messageID":"msg_hco_deleted","type":"text","text":"HCO_DELETED","time":{"created":1101}}'}
     current_messages:
       - {id: msg_hco_current, session_id: ses_3cd91f52effeXd3QAJ54jOyzH1, type: user, time_created: 2000, time_updated: 2010, data: '{"id":"msg_hco_current","text":"HCO_CURRENT","files":[],"agents":[],"metadata":{"cwd":"/synthetic/hco"},"time":{"created":2000}}', seq: 1}
+    ignored_history: []
+
+  - name: legacy-orphan-tolerance
+    logical_path: orphantolerance/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 1, legacy_parts: 1, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_orphan_host, session_id: ses_3cd91f52effeXd3QAJ54jOyzO1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_orphan_host","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzO1","role":"user","path":{"cwd":"/synthetic/orphan"},"time":{"created":1000,"completed":1010},"content":"host message"}'}
+    legacy_parts:
+      - {id: part_orphan_host, message_id: msg_orphan_host, session_id: ses_3cd91f52effeXd3QAJ54jOyzO1, time_created: 1001, time_updated: 1001, data: '{"id":"part_orphan_host","messageID":"msg_orphan_host","type":"text","text":"ORPHAN_HOST","time":{"created":1001}}'}
+    current_messages: []
     ignored_history: []
 
   - name: session-records-degrade
