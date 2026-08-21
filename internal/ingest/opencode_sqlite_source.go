@@ -361,18 +361,27 @@ type OpenCodeSessionRecord struct {
 	TimeUpdated int64
 }
 
+// OpenCodeSessionRecordSkip records one session row the bounded read could not
+// decode. Reason explains why the row was dropped and names the row's
+// best-effort raw identifier when the identifier itself decoded.
+type OpenCodeSessionRecordSkip struct {
+	Reason string
+}
+
 // OpenCodeSessionRecordPage is one bounded page of session records. Supported
 // is false when the database has no session table at all; the page is then
 // empty. HasParent and HasClock report which of the parent_id and time_updated
 // columns the session table carries, so parent links are read whether or not the
 // clock column exists. When the session table exists but carries neither column,
 // Supported is true while HasParent and HasClock are both false and the page is
-// empty.
+// empty. Skipped names the rows that could not be decoded; an undecodable row is
+// dropped rather than failing the whole read.
 type OpenCodeSessionRecordPage struct {
 	Supported bool
 	HasParent bool
 	HasClock  bool
 	Records   []OpenCodeSessionRecord
+	Skipped   []OpenCodeSessionRecordSkip
 	Next      *OpenCodeSessionRecordCursor
 }
 

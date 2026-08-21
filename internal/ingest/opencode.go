@@ -340,6 +340,11 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	if records.present && !records.hasParent && !records.hasClock {
 		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session table carries neither parent_id nor time_updated, so parent links and the changed clock are unavailable; sessions stay discoverable as roots with file-based freshness", errors.New("session table lacks both parent_id and time_updated"))
 	}
+	if len(records.skipped) > 0 {
+		// One diagnostic names every dropped row, so the good rows keep their
+		// parent link and clock while the bad ones are visible.
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session row(s) were dropped while keeping the others: %s", len(records.skipped), strings.Join(records.skipped, "; ")), errors.New("one or more session rows were undecodable"))
+	}
 	for index := range candidates {
 		record, known := records.bySession[candidates[index].session.SessionID]
 		if known && record.parent != "" {
@@ -372,6 +377,9 @@ type openCodeSessionRecords struct {
 	hasParent bool
 	hasClock  bool
 	bySession map[SessionID]openCodeSessionClock
+	// skipped names the rows the read could not use, so one bad row is dropped
+	// with a diagnostic while the others keep their parent link and clock.
+	skipped []string
 }
 
 // discoverSQLiteSessionRecords reads session.parent_id and session.time_updated
@@ -393,9 +401,15 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 		records.present = page.Supported
 		records.hasParent = page.HasParent
 		records.hasClock = page.HasClock
+		for _, skip := range page.Skipped {
+			records.skipped = append(records.skipped, skip.Reason)
+		}
 		for _, row := range page.Records {
 			sessionID, sessionErr := NewSessionID(row.SessionID.String())
 			if sessionErr != nil {
+				// A source-valid identifier that Peasant cannot store is dropped
+				// with a diagnostic rather than a silent continue.
+				records.skipped = append(records.skipped, fmt.Sprintf("session row %q was dropped because its identifier cannot be stored: %v", row.SessionID.String(), sessionErr))
 				continue
 			}
 			clock := openCodeSessionClock{}
@@ -403,7 +417,9 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 				clock.updatedAt = time.UnixMilli(row.TimeUpdated)
 			}
 			if row.ParentID.String() != "" {
-				if parentID, parentErr := NewSessionID(row.ParentID.String()); parentErr == nil && parentID != sessionID {
+				if parentID, parentErr := NewSessionID(row.ParentID.String()); parentErr != nil {
+					records.skipped = append(records.skipped, fmt.Sprintf("parent link for session %q was dropped because the parent identifier cannot be stored: %v", sessionID, parentErr))
+				} else if parentID != sessionID {
 					clock.parent = parentID
 				}
 			}

@@ -1,4 +1,4 @@
-declared_cases: 30
+declared_cases: 31
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -795,6 +795,26 @@ cases:
       - {id: part_hco_deleted, message_id: msg_hco_deleted, session_id: ses_3cd91f52effeXd3QAJ54jOyzH2, time_created: 1101, time_updated: 1101, data: '{"id":"part_hco_deleted","messageID":"msg_hco_deleted","type":"text","text":"HCO_DELETED","time":{"created":1101}}'}
     current_messages:
       - {id: msg_hco_current, session_id: ses_3cd91f52effeXd3QAJ54jOyzH1, type: user, time_created: 2000, time_updated: 2010, data: '{"id":"msg_hco_current","text":"HCO_CURRENT","files":[],"agents":[],"metadata":{"cwd":"/synthetic/hco"},"time":{"created":2000}}', seq: 1}
+    ignored_history: []
+
+  - name: session-records-degrade
+    logical_path: recordsdegrade/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 2, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_deg_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzB1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_deg_child","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzB1","role":"user","path":{"cwd":"/synthetic/degrade"},"time":{"created":1000,"completed":1010},"content":"good child"}'}
+      - {id: msg_deg_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzB2, time_created: 900, time_updated: 910, data: '{"id":"msg_deg_parent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzB2","role":"user","path":{"cwd":"/synthetic/degrade"},"time":{"created":900,"completed":910},"content":"parent with a corrupt row"}'}
+    legacy_parts:
+      - {id: part_deg_child, message_id: msg_deg_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzB1, time_created: 1001, time_updated: 1001, data: '{"id":"part_deg_child","messageID":"msg_deg_child","type":"text","text":"DEG_CHILD","time":{"created":1001}}'}
+      - {id: part_deg_parent, message_id: msg_deg_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzB2, time_created: 901, time_updated: 901, data: '{"id":"part_deg_parent","messageID":"msg_deg_parent","type":"text","text":"DEG_PARENT","time":{"created":901}}'}
+    current_messages: []
     ignored_history: []
 
   - name: session-parent-no-clock

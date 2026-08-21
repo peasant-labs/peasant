@@ -495,14 +495,27 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		return page, nil
 	}
 	rows := make([]OpenCodeSessionRecord, 0, request.PageSize.value+1)
+	var skipped []OpenCodeSessionRecordSkip
+	seen := 0
+	var cursorID *OpenCodeSessionLinkID
+	// An undecodable row is dropped with a skip note rather than failing the
+	// whole read, so one bad row never loses every session's parent link and
+	// clock. A row whose identifier is valid still advances the cursor even when
+	// the rest of the row is dropped, so pagination makes progress.
 	decode := func(stmt *sqlite.Stmt) error {
+		seen++
 		if stmt.ColumnType(0) != sqlite.TypeText {
-			return fmt.Errorf("decode session record: id has SQLite type %s instead of text", stmt.ColumnType(0))
+			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id has SQLite type %s instead of text", stmt.ColumnType(0))})
+			return nil
 		}
-		sessionID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(0))
+		rawID := stmt.ColumnText(0)
+		sessionID, err := NewOpenCodeSessionLinkID(rawID)
 		if err != nil {
-			return fmt.Errorf("decode session record: %w", err)
+			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id %q is not a valid identifier: %v", rawID, err)})
+			return nil
 		}
+		linkID := sessionID
+		cursorID = &linkID
 		record := OpenCodeSessionRecord{SessionID: sessionID}
 		// The parent link is column 1 whenever it is selected. The clock is the
 		// last selected column: column 2 when both are present, otherwise
@@ -511,7 +524,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 			if stmt.ColumnType(1) == sqlite.TypeText && stmt.ColumnText(1) != "" {
 				parentID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(1))
 				if err != nil {
-					return fmt.Errorf("decode session record %q parent: %w", sessionID.String(), err)
+					skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("session row %q was dropped because parent_id is not a valid identifier: %v", rawID, err)})
+					return nil
 				}
 				record.ParentID = parentID
 			}
@@ -526,7 +540,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 			case sqlite.TypeInteger:
 				record.TimeUpdated = stmt.ColumnInt64(clockColumn)
 			default:
-				return fmt.Errorf("decode session record %q: time_updated has SQLite type %s instead of integer", sessionID.String(), stmt.ColumnType(clockColumn))
+				skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("session row %q was dropped because time_updated has SQLite type %s instead of integer", rawID, stmt.ColumnType(clockColumn))})
+				return nil
 			}
 		}
 		rows = append(rows, record)
@@ -560,13 +575,25 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, projection, "supported OpenCode session")
 	}
-	hasNext := len(rows) > request.PageSize.value
-	if hasNext {
+	// The page boundary counts every row seen, valid or skipped, so dropped rows
+	// never shrink a page below its bound and hide later sessions. The cursor is
+	// the last row whose identifier decoded, so continuation still advances.
+	hasNext := seen > request.PageSize.value
+	if len(rows) > request.PageSize.value {
 		rows = rows[:request.PageSize.value]
 	}
 	page.Records = rows[:len(rows):len(rows)]
+	page.Skipped = skipped
 	if hasNext {
-		page.Next = &OpenCodeSessionRecordCursor{sessionID: page.Records[len(page.Records)-1].SessionID}
+		// Prefer the last kept record so the sentinel row beyond it is re-fetched
+		// on the next page and never skipped. When a page keeps no valid record,
+		// advance past the last decodable identifier so pagination still moves.
+		switch {
+		case len(page.Records) > 0:
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: page.Records[len(page.Records)-1].SessionID}
+		case cursorID != nil:
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: *cursorID}
+		}
 	}
 	return page, nil
 }
