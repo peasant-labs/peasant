@@ -5,8 +5,8 @@
 # uses: a small 80x24 window and a large 120x40 one. Each state also names what
 # its screen must and must not show, so a golden that changes says WHAT changed
 # rather than only THAT it changed.
-expectedCaseCount: 12
-expectedAssertionCount: 6
+expectedCaseCount: 14
+expectedAssertionCount: 7
 
 cases:
   - name: start-dark-120x40
@@ -36,6 +36,16 @@ cases:
     height: 40
   - name: session-preview-light-80x24
     state: session-preview
+    theme: light
+    width: 80
+    height: 24
+  - name: empty-preview-dark-120x40
+    state: empty-preview
+    theme: dark
+    width: 120
+    height: 40
+  - name: empty-preview-light-80x24
+    state: empty-preview
     theme: light
     width: 80
     height: 24
@@ -89,23 +99,40 @@ assertions:
       - "Provider"
   - state: session-preview
     wantContains:
-      - "stored copy"
       - "sess-aaa-111"
+      - "<ANTHROPIC_KEY>"
+      - "redacts them"
     wantMissing:
-      - "Redaction"
+      - "stored copy"
+      - "never been redacted"
+      - "sk-ant-api03"
+  - state: empty-preview
+    wantContains:
+      - "sess-ccc-333"
+      - "no transcript is stored for this session yet"
+    wantMissing:
+      - "stored copy"
+      - "never been redacted"
   - state: consent
     wantContains:
       - "metadata"
       - "known patterns"
       - "deselect it"
+      - "before it publishes them to the village"
+      - "go back with esc to review one"
     wantMissing:
       - "No raw data will leave your machine"
+      - "stored copy"
+      - "older rule set"
   - state: receipt
     wantContains:
-      - "leave this machine"
+      - "push 3 session(s) to the village."
+      - "nothing is removed from this machine."
       - "sessions in this push"
     wantMissing:
       - "Proceed?"
+      - "leave this machine"
+      - "stay on it"
   - state: help
     wantContains:
       - "keyboard shortcuts"

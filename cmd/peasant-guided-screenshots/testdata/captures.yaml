@@ -6,8 +6,8 @@ expectedSelectionCaptureCount: 20
 expectedSelectionSessionCount: 6
 expectedSelectionHarnessCount: 2
 expectedSelectionIngestedCount: 1
-expectedPushStateCount: 4
-expectedPushCaptureCount: 16
+expectedPushStateCount: 5
+expectedPushCaptureCount: 20
 expectedPushSessionCount: 3
 
 sheets:
@@ -28,9 +28,9 @@ sheets:
     viewport: {width: 1800, height: 5700}
   - name: push
     kind: push
-    title: "mounted push wizard: start, selection, consent, and receipt in both themes"
+    title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
     theme: dark
-    viewport: {width: 1800, height: 4800}
+    viewport: {width: 1800, height: 6000}
 
 guidedSections:
   - key: auto-ingest
@@ -180,10 +180,12 @@ pushStates:
     wantContains: ["push to village", "session(s) are ready to push", "yes"]
   - key: selection
     wantContains: ["selected", "withheld by a branch conflict", "tab"]
+  - key: session-preview
+    wantContains: ["push-current-0001", "<ANTHROPIC_KEY>", "peasant publishes the redacted form"]
   - key: consent
-    wantContains: ["metadata", "known patterns"]
+    wantContains: ["metadata", "known patterns", "before it publishes them to the village"]
   - key: receipt
-    wantContains: ["leave this machine", "sessions in this push"]
+    wantContains: ["to the village.", "nothing is removed from this machine.", "sessions in this push"]
 
 push:
   sessions:
@@ -203,6 +205,12 @@ push:
       startMs: 1700002000000
       redaction: raw
       withheld: true
+  transcripts:
+    push-current-0001:
+      - {role: user, entryType: text, content: "ship the release with sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}
+      - {role: assistant, entryType: text, content: "peasant publishes the redacted form of this turn"}
+    push-stale-0002:
+      - {role: user, entryType: text, content: "check the village accepted the last publish"}
 
 pushCaptures:
   - {name: push-start-dark-80x24, state: start, theme: dark, width: 80, height: 24}
@@ -213,6 +221,10 @@ pushCaptures:
   - {name: push-selection-dark-120x40, state: selection, theme: dark, width: 120, height: 40}
   - {name: push-selection-light-80x24, state: selection, theme: light, width: 80, height: 24}
   - {name: push-selection-light-120x40, state: selection, theme: light, width: 120, height: 40}
+  - {name: push-session-preview-dark-80x24, state: session-preview, theme: dark, width: 80, height: 24}
+  - {name: push-session-preview-dark-120x40, state: session-preview, theme: dark, width: 120, height: 40}
+  - {name: push-session-preview-light-80x24, state: session-preview, theme: light, width: 80, height: 24}
+  - {name: push-session-preview-light-120x40, state: session-preview, theme: light, width: 120, height: 40}
   - {name: push-consent-dark-80x24, state: consent, theme: dark, width: 80, height: 24}
   - {name: push-consent-dark-120x40, state: consent, theme: dark, width: 120, height: 40}
   - {name: push-consent-light-80x24, state: consent, theme: light, width: 80, height: 24}

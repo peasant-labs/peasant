@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -264,12 +265,20 @@ func storedThenHarnessTurns(transcripts map[string][]selectionTurnFixture, harne
 // renderPushCapture drives the REAL push wizard - the same model the push
 // command mounts - into one screen and returns its rendered view.
 func renderPushCapture(fixture pushFixture, capture pushCaptureFixture) (string, error) {
-	model := push.NewPushWizard(captureThemeValue(capture.Theme), pushWizardSessions(fixture))
+	turns, err := pushPublishedTurns(fixture)
+	if err != nil {
+		return "", fmt.Errorf("render push capture %q: %w", capture.Name, err)
+	}
+	model := push.NewPushWizard(captureThemeValue(capture.Theme), pushWizardSessions(fixture), turns)
 	current := sendPushMessage(model, tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
 	switch capture.State {
 	case pushStateStart:
 	case pushStateSelection:
 		current = acceptPushStart(current)
+	case pushStateSessionPreview:
+		// One row down from the opening project row is its session, which is
+		// what makes the pane draw a transcript.
+		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyDown})
 	case pushStateConsent:
 		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyEnter})
 	case pushStateReceipt:
@@ -322,6 +331,35 @@ func pushWizardSessions(fixture pushFixture) []push.PushWizardSession {
 		sessions = append(sessions, candidate)
 	}
 	return sessions
+}
+
+// pushPublishedTurns is the preview read the captured wizard mounts with: the
+// fixture's recorded entries, through the REAL push redactor at the level a
+// push runs at. The sheet therefore shows the transcript a publish would send,
+// including the placeholders redaction leaves behind.
+func pushPublishedTurns(fixture pushFixture) (push.PublishedTurnsFunc, error) {
+	redactor, err := redact.NewRedactor(config.RecommendedRedactionLevel, nil, redact.XDGPaths{})
+	if err != nil {
+		return nil, fmt.Errorf("build the push preview redactor: %w", err)
+	}
+	stored := make(map[string][]schema.SessionEntry, len(fixture.Transcripts))
+	for sessionID, rows := range fixture.Transcripts {
+		entries := make([]schema.SessionEntry, 0, len(rows))
+		for index, row := range rows {
+			content := row.Content
+			entries = append(entries, schema.SessionEntry{
+				SessionID:      schema.SessionID(sessionID),
+				EntryIndex:     index,
+				EntryType:      schema.EntryType(row.EntryType),
+				Role:           schema.Role(row.Role),
+				ContentPreview: &content,
+			})
+		}
+		stored[sessionID] = entries
+	}
+	return push.NewPublishedTurns(func(sessionID string) ([]schema.SessionEntry, error) {
+		return stored[sessionID], nil
+	}, redactor), nil
 }
 
 // pushCaptureMetadata builds the stored-copy record one redaction state

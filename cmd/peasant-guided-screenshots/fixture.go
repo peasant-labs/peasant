@@ -24,8 +24,8 @@ const (
 	requiredSelectionSessionCount  = 6
 	requiredSelectionHarnessCount  = 2
 	requiredSelectionIngestedCount = 1
-	requiredPushStateCount         = 4
-	requiredPushCaptureCount       = 16
+	requiredPushStateCount         = 5
+	requiredPushCaptureCount       = 20
 	requiredPushSessionCount       = 3
 )
 
@@ -102,20 +102,25 @@ func (s selectionState) requiresBothThemes() bool {
 }
 
 // pushState is the closed set of push-wizard screens the harness captures: the
-// consent prompt that opens the wizard, the selection tree with its preview,
-// the page that states what leaves the machine, and the receipt.
+// consent prompt that opens the wizard, the selection tree over a project row,
+// the same tree over a session row (where the pane draws that session's
+// transcript as the push will publish it), the page that states what leaves the
+// machine, and the receipt.
 type pushState string
 
 const (
 	pushStateStart     pushState = "start"
 	pushStateSelection pushState = "selection"
-	pushStateConsent   pushState = "consent"
-	pushStateReceipt   pushState = "receipt"
+	// pushStateSessionPreview is the selection page with a SESSION highlighted,
+	// which is the only state that draws the published transcript.
+	pushStateSessionPreview pushState = "session-preview"
+	pushStateConsent        pushState = "consent"
+	pushStateReceipt        pushState = "receipt"
 )
 
 func (s pushState) valid() bool {
 	switch s {
-	case pushStateStart, pushStateSelection, pushStateConsent, pushStateReceipt:
+	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt:
 		return true
 	default:
 		return false
@@ -168,6 +173,10 @@ type pushSessionFixture struct {
 // pushFixture is the candidate inventory the captured wizard mounts over.
 type pushFixture struct {
 	Sessions []pushSessionFixture `yaml:"sessions"`
+	// Transcripts holds the RECORDED entries of each session, keyed by session
+	// id. The capture feeds them through the real push redactor, so the preview
+	// pane in the sheet shows what a publish would send.
+	Transcripts map[string][]selectionTurnFixture `yaml:"transcripts"`
 }
 
 type viewportFixture struct {
@@ -308,7 +317,9 @@ func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture
 		}
 		stateRows[state.Key] = state
 	}
-	for _, key := range []pushState{pushStateStart, pushStateSelection, pushStateConsent, pushStateReceipt} {
+	for _, key := range []pushState{
+		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt,
+	} {
 		if stateRows[key].Key == "" {
 			return fmt.Errorf("screenshot fixture omits push state %q", key)
 		}
@@ -366,6 +377,27 @@ func validatePushData(fixture pushFixture) error {
 	if withheld != 1 {
 		return fmt.Errorf("screenshot fixture push sessions hold %d withheld rows, want exactly 1", withheld)
 	}
+	// The preview capture is only evidence if a session actually has a stored
+	// transcript to draw. Without this the sheet would show the empty-transcript
+	// note in every theme and read as a passing capture of the wrong screen.
+	previewable := 0
+	for sessionID, entries := range fixture.Transcripts {
+		if !ids[sessionID] {
+			return fmt.Errorf("screenshot fixture holds a transcript for unknown push session %q", sessionID)
+		}
+		for _, entry := range entries {
+			if strings.TrimSpace(string(entry.Role)) == "" || strings.TrimSpace(string(entry.EntryType)) == "" ||
+				strings.TrimSpace(entry.Content) == "" {
+				return fmt.Errorf("screenshot fixture push transcript %q holds an incomplete entry: %#v", sessionID, entry)
+			}
+		}
+		if len(entries) > 0 {
+			previewable++
+		}
+	}
+	if previewable == 0 {
+		return fmt.Errorf("screenshot fixture holds no push transcript, so the preview capture would show no transcript")
+	}
 	return nil
 }
 
@@ -409,7 +441,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
 		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 5700},
-		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 4800},
+		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {

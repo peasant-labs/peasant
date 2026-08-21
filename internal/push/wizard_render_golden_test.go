@@ -26,8 +26,8 @@ import (
 var wizardRenderData []byte
 
 const (
-	expectedWizardRenderCaseCount      = 12
-	expectedWizardRenderAssertionCount = 6
+	expectedWizardRenderCaseCount      = 14
+	expectedWizardRenderAssertionCount = 7
 )
 
 // wizardRenderState is the closed set of screens the goldens capture.
@@ -37,6 +37,7 @@ const (
 	wizardRenderStart          wizardRenderState = "start"
 	wizardRenderSelection      wizardRenderState = "selection"
 	wizardRenderSessionPreview wizardRenderState = "session-preview"
+	wizardRenderEmptyPreview   wizardRenderState = "empty-preview"
 	wizardRenderConsent        wizardRenderState = "consent"
 	wizardRenderReceipt        wizardRenderState = "receipt"
 	wizardRenderHelp           wizardRenderState = "help"
@@ -45,7 +46,7 @@ const (
 func (s wizardRenderState) valid() bool {
 	switch s {
 	case wizardRenderStart, wizardRenderSelection, wizardRenderSessionPreview,
-		wizardRenderConsent, wizardRenderReceipt, wizardRenderHelp:
+		wizardRenderEmptyPreview, wizardRenderConsent, wizardRenderReceipt, wizardRenderHelp:
 		return true
 	default:
 		return false
@@ -164,7 +165,7 @@ func loadWizardRenderDoc(t *testing.T) wizardRenderDoc {
 // state and returns it ready to render.
 func buildWizardScreen(t *testing.T, c wizardRenderCase) PushWizardModel {
 	t.Helper()
-	m := NewPushWizard(theme.New(c.Theme.mode()), testSessions())
+	m := NewPushWizard(theme.New(c.Theme.mode()), testSessions(), testPublishedTurns())
 	updated, _ := m.Update(windowSize(c.Width, c.Height))
 	m = updated.(PushWizardModel)
 	switch c.State {
@@ -174,6 +175,14 @@ func buildWizardScreen(t *testing.T, c wizardRenderCase) PushWizardModel {
 		return acceptStart(m)
 	case wizardRenderSessionPreview:
 		return pressKey(acceptStart(m), keyDown())
+	case wizardRenderEmptyPreview:
+		// Five rows down is the last session in the forest, which the fixture
+		// store holds no transcript for.
+		m = acceptStart(m)
+		for i := 0; i < 5; i++ {
+			m = pressKey(m, keyDown())
+		}
+		return m
 	case wizardRenderConsent:
 		return pressKey(acceptStart(m), keyEnter())
 	case wizardRenderReceipt:

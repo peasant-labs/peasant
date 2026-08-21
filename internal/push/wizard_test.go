@@ -80,7 +80,7 @@ func mountWizard(sessions []PushWizardSession) PushWizardModel {
 
 // mountWizardSize mounts the wizard into an exact terminal region.
 func mountWizardSize(sessions []PushWizardSession, width, height int) PushWizardModel {
-	m := NewPushWizard(testTheme(), sessions)
+	m := NewPushWizard(testTheme(), sessions, testPublishedTurns())
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	return updated.(PushWizardModel)
 }
@@ -552,8 +552,10 @@ func TestWizard_Notice_NoSelectionBlocksAdvance(t *testing.T) {
 
 func TestWizard_Notice_Scrolls(t *testing.T) {
 	// A short region is what makes the consent copy longer than the page, which
-	// is the state scrolling exists for.
-	m := acceptStart(mountWizardSize(testSessions(), 80, 24))
+	// is the state scrolling exists for. The region shrank when the copy did:
+	// the page dropped the stored-copy classification, so at 80x24 the whole
+	// notice now fits and there is nothing to scroll.
+	m := acceptStart(mountWizardSize(testSessions(), 80, 14))
 	m = pressKey(m, keyEnter())
 	first := m.viewString()
 	m = pressKey(m, keyDown())
@@ -634,6 +636,15 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// The six phrasings this screen printed or nearly printed, kept beside the
 	// corpus because they are specific to this surface's wording rather than to
 	// redaction copy in general.
+	// The classification of the STORED copy is forbidden here, not merely absent.
+	//
+	// The screen used to count the selected sessions by the redaction record of
+	// the copy on this machine: never redacted, older rule set, current rule set.
+	// Every count was true and none was about the push, so a maintainer read
+	// "session(s) whose stored copy has never been redacted" at the moment of
+	// consent and had nothing to do with it. Whatever the stored copy holds, what
+	// leaves is redacted on its way out. Naming the phrasings keeps a reworded
+	// return of the same idea out of this screen.
 	for _, forbidden := range []string{
 		"No raw data will leave your machine",
 		"All sessions are redacted",
@@ -641,6 +652,10 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 		"will be re-redacted before push",
 		"Standard redaction will be applied",
 		"ready to push as-is",
+		"stored copy",
+		"has never been redacted",
+		"an older rule set",
+		"at the current rule set",
 	} {
 		if strings.Contains(screen, forbidden) {
 			t.Errorf("the consent screen must not promise %q: redaction finds known patterns in metadata and content, so an "+
@@ -658,13 +673,15 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// behaviour it describes moves, or it holds the copy to the old behaviour
 	// while every test stays green.
 	for _, required := range []string{
-		"metadata",                             // what is redacted, still
-		"file paths and diagnostic locations",  // fields the configured level actually rewrites
-		"conversation content",                 // and what now is too
-		"known patterns",                       // the hedge, which must survive every rewording
-		"not a guarantee",                      // said outright rather than implied
-		"can differ from what you see locally", // the consequence of redacting content
-		"deselect it",                          // the remedy that is one keystroke away here
+		"metadata",                                // what is redacted, still
+		"file paths and diagnostic locations",     // fields the configured level actually rewrites
+		"conversation content",                    // and what now is too
+		"known patterns",                          // the hedge, which must survive every rewording
+		"not a guarantee",                         // said outright rather than implied
+		"can differ from what you see locally",    // the consequence of redacting content
+		"deselect it",                             // the remedy that is one keystroke away here
+		"before it publishes them to the village", // what replaced the stored-copy counts
+		"go back with esc to review one",          // where the user sees the published text
 	} {
 		if !strings.Contains(screen, required) {
 			t.Errorf("the consent screen must state %q so the user can see what leaves and what to do about it; got:\n%s",
@@ -699,4 +716,56 @@ func TestWizard_SelectionTree_WithheldRowIsAConflict(t *testing.T) {
 // terminal.
 func windowSize(width, height int) tea.WindowSizeMsg {
 	return tea.WindowSizeMsg{Width: width, Height: height}
+}
+
+// TestWizard_Receipt_CountsThePushAndNotADeletion is the guard on the last
+// screen before an upload.
+//
+// It used to read "N session(s) leave this machine." over "M of N candidate
+// sessions stay on it." A push copies: nothing leaves and nothing is removed.
+// Read at the moment of confirmation, that pair says the selected sessions go
+// away and the rest are what is left - which is how a maintainer read it on a
+// real store.
+func TestWizard_Receipt_CountsThePushAndNotADeletion(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	// Space on the first project row deselects its only session, so the receipt
+	// has both a pushed set and a skipped one.
+	m = pressKey(m, keySpace())
+	m = pressKey(m, keyEnter())
+	m = pressKey(m, keyEnter())
+	if m.page != pageFinalConfirm {
+		t.Fatalf("expected pageFinalConfirm, got %s", m.page)
+	}
+	screen := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
+	for _, want := range []string{
+		"push 2 session(s) to the village.",
+		"1 session(s) are not selected and are not pushed.",
+		"nothing is removed from this machine.",
+		wizardReceiptDetails,
+	} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the receipt must state %q; got:\n%s", want, screen)
+		}
+	}
+	for _, forbidden := range []string{"leave this machine", "stay on it", "stored copy"} {
+		if strings.Contains(screen, forbidden) {
+			t.Errorf("the receipt must not say %q: a push removes nothing; got:\n%s", forbidden, screen)
+		}
+	}
+}
+
+// TestWizard_Receipt_OmitsTheSkippedLineWhenNothingIsSkipped proves the second
+// line is conditional: with every candidate selected there is no skipped set,
+// and a line reporting zero of them would be noise on the confirmation screen.
+func TestWizard_Receipt_OmitsTheSkippedLineWhenNothingIsSkipped(t *testing.T) {
+	m := acceptStart(mountWizard(testSessions()))
+	m = pressKey(m, keyEnter())
+	m = pressKey(m, keyEnter())
+	screen := strings.Join(strings.Fields(ansi.Strip(m.viewString())), " ")
+	if !strings.Contains(screen, "push 3 session(s) to the village.") {
+		t.Errorf("the receipt must count the whole push; got:\n%s", screen)
+	}
+	if strings.Contains(screen, "are not selected and are not pushed") {
+		t.Errorf("the receipt must not report a skipped set that is empty; got:\n%s", screen)
+	}
 }

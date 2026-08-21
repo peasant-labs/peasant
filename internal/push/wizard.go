@@ -194,7 +194,11 @@ type PushWizardModel struct {
 // NewPushWizard creates a push wizard model over theme th with the given
 // sessions. Every unlocked session starts selected for push, which is the same
 // default the pre-kit wizard opened with.
-func NewPushWizard(th theme.Theme, sessions []PushWizardSession) PushWizardModel {
+//
+// turns is the preview read: it returns the transcript of one session as the
+// push will publish it. The selection page draws it beside the tree, loaded
+// asynchronously per highlighted row.
+func NewPushWizard(th theme.Theme, sessions []PushWizardSession, turns PublishedTurnsFunc) PushWizardModel {
 	tree, leaves := newSelectionTree(th, sessions)
 	m := PushWizardModel{
 		th:       th,
@@ -205,7 +209,8 @@ func NewPushWizard(th theme.Theme, sessions []PushWizardSession) PushWizardModel
 		confirm:  kit.NewConfirm(th, startPrompt(len(sessions))),
 		overlay:  kit.NewOverlay(th),
 	}
-	m.split = kit.NewPreviewSplit(th, kit.NewTreeLeftPane(m.tree), sessionPreview{sessions: sessions})
+	m.split = kit.NewPreviewSplitWithBodies(th, kit.NewTreeLeftPane(m.tree),
+		wizardPreviewSource(sessions, turns, th))
 	m.confirm.Focus()
 	m.tree.Focus()
 	return m
@@ -360,84 +365,6 @@ func (m *PushWizardModel) syncSelection() {
 // ---------------------------------------------------------------------------
 // Preview pane
 // ---------------------------------------------------------------------------
-
-// sessionPreview is the split's right pane: what one highlighted row is, and
-// what pushing it means. A project row explains the group; a session row names
-// its identity, the state of its stored copy, and whether it is withheld.
-type sessionPreview struct{ sessions []PushWizardSession }
-
-var _ kit.ContentSource = sessionPreview{}
-
-// Content returns the preview body for one tree row.
-func (p sessionPreview) Content(id string, _ int) (string, error) {
-	if strings.HasPrefix(id, projectNodePrefix) {
-		return p.projectBody(strings.TrimPrefix(id, projectNodePrefix)), nil
-	}
-	for _, s := range p.sessions {
-		if s.Row.SessionID != id {
-			continue
-		}
-		return p.sessionBody(s), nil
-	}
-	return "select a session to see what this push sends.", nil
-}
-
-// projectBody describes one project group.
-func (p sessionPreview) projectBody(project string) string {
-	total, selected := 0, 0
-	for _, s := range p.sessions {
-		if projectLabelOf(s) != project {
-			continue
-		}
-		total++
-		if !s.Locked && s.Action == PushWithRedaction {
-			selected++
-		}
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "project: %s\n", project)
-	fmt.Fprintf(&b, "sessions: %d\n", total)
-	fmt.Fprintf(&b, "selected: %d\n\n", selected)
-	b.WriteString("press space to select every session in this project.")
-	return b.String()
-}
-
-// sessionBody describes one session.
-func (p sessionPreview) sessionBody(s PushWizardSession) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "session: %s\n", s.Row.SessionID)
-	fmt.Fprintf(&b, "project: %s\n", projectLabelOf(s))
-	fmt.Fprintf(&b, "harness: %s\n", s.Row.ModelHarness)
-	fmt.Fprintf(&b, "started: %s\n", sessionStartText(s.Row))
-	fmt.Fprintf(&b, "stored copy: %s\n\n", s.RedactionState())
-	b.WriteString(storedCopyExplanation(s.RedactionState()))
-	b.WriteString("\n\n")
-	switch {
-	case s.Locked:
-		b.WriteString("withheld: this branch matches more than one project, so peasant cannot tell which one records it. this session stays out of the push.")
-	case s.Action == PushWithRedaction:
-		b.WriteString("selected: this session is in the push.")
-	default:
-		b.WriteString("not selected: this session stays on your machine.")
-	}
-	return b.String()
-}
-
-// storedCopyExplanation says what one redaction state means for the copy on
-// this machine. It describes the STORED copy only. What leaves the machine is
-// redacted on its own way out, which the consent page states.
-func storedCopyExplanation(state RedactionState) string {
-	switch state {
-	case RedactionStateCurrent:
-		return "the stored copy was redacted at the current rule set."
-	case RedactionStateStale:
-		return "the stored copy was redacted by an older rule set, and the content has changed since."
-	case RedactionStateRaw:
-		return "the stored copy has never been redacted."
-	default:
-		return "peasant cannot read the redaction record of the stored copy."
-	}
-}
 
 // projectLabelOf returns the project a candidate is grouped under.
 func projectLabelOf(s PushWizardSession) string {
@@ -872,48 +799,25 @@ func (m PushWizardModel) noticePanel(width int) kit.Panel {
 		return panel
 	}
 
-	panel.Wrapped(styles.Base, fmt.Sprintf("%d session(s) are selected for push:", len(selected)))
-
-	var stale, raw, current int
-	for _, s := range selected {
-		switch s.RedactionState() {
-		case RedactionStateStale:
-			stale++
-		case RedactionStateRaw:
-			raw++
-		case RedactionStateCurrent:
-			current++
-		}
-	}
-
-	// These counts describe the STORED copy on this machine. They are reported
-	// because they are true and a user may want to know, but they are deliberately
-	// not phrased as a promise about the upload: what is published comes from the
-	// indexed entries rather than from the transcript file these counts describe,
-	// and it is redacted on its own way out - metadata AND content - independently
-	// of whatever the stored copy happens to be.
+	// WHAT THIS SCREEN SAYS ABOUT THE SESSIONS, and what it no longer says.
 	//
-	// This sentence used to end "nothing here is re-redacted on the way out except
-	// metadata". That was true when written and later work falsified it, thirty
-	// lines above the consent copy that now tells the user content is redacted
-	// too: the paragraph a maintainer reads immediately before editing that copy
-	// argued for the state the copy no longer describes.
-	if current > 0 {
-		panel.Blank()
-		panel.Wrapped(styles.Success, fmt.Sprintf(
-			"  %d session(s) whose stored copy was redacted at the current rule set.", current))
-	}
-	if stale > 0 {
-		panel.Blank()
-		panel.Wrapped(styles.Warning, fmt.Sprintf(
-			"  %d session(s) whose stored copy was redacted by an older rule set.", stale))
-		panel.Wrapped(styles.Muted, "    content has changed since redaction was last applied.")
-	}
-	if raw > 0 {
-		panel.Blank()
-		panel.Wrapped(styles.Danger, fmt.Sprintf(
-			"  %d session(s) whose stored copy has never been redacted.", raw))
-	}
+	// It used to classify the selected sessions by the redaction record of their
+	// STORED copy: how many had never been redacted, how many carried an older
+	// rule set, how many were current. Every one of those counts was true and
+	// none of them was about the push. A user read "N session(s) whose stored
+	// copy has never been redacted" immediately before consenting to publish and
+	// had no action to take on it, because what leaves the machine is redacted on
+	// its own way out whatever the stored copy holds. The counts read as a
+	// warning about the upload while describing a file on disk.
+	//
+	// The reassurance below is what the push actually does, and the pointer after
+	// it is the one action that answers the question the counts provoked: look at
+	// the transcript the push will send.
+	panel.Wrapped(styles.Base, fmt.Sprintf(
+		"peasant redacts these %d session(s) before it publishes them to the village.", len(selected)))
+	panel.Blank()
+	panel.Wrapped(styles.Muted,
+		"the preview on the selection page shows each transcript as it will be published. go back with esc to review one.")
 
 	// What actually happens on upload.
 	//
@@ -984,9 +888,20 @@ func (m PushWizardModel) receiptBody(width, height int) string {
 	// already used before it decides how many details fit. The frame pads the
 	// body to the page height.
 	panel.SetSize(width, 0)
-	panel.Wrapped(styles.Header, fmt.Sprintf("%d session(s) leave this machine.", len(selected)))
-	panel.Wrapped(styles.Muted, fmt.Sprintf("%d of %d candidate sessions stay on it.",
-		len(m.sessions)-len(selected), len(m.sessions)))
+	// The receipt counts the push, and it counts nothing else.
+	//
+	// It used to open "N session(s) leave this machine." and follow with "M of N
+	// candidate sessions stay on it." A push copies; it moves nothing and it
+	// deletes nothing. Read at the moment of confirmation, that pair says the
+	// selected sessions go away and the rest are what remain - which is what a
+	// maintainer read on a real store. The lines below name the action, name the
+	// sessions the action skips, and say outright that the machine keeps
+	// everything.
+	panel.Wrapped(styles.Header, fmt.Sprintf("push %d session(s) to the village.", len(selected)))
+	if skipped := len(m.sessions) - len(selected); skipped > 0 {
+		panel.Wrapped(styles.Muted, fmt.Sprintf("%d session(s) are not selected and are not pushed.", skipped))
+	}
+	panel.Wrapped(styles.Muted, "nothing is removed from this machine.")
 	panel.Blank()
 	panel.Line(styles.Header, wizardReceiptDetails)
 
