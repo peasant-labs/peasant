@@ -65,7 +65,7 @@ forbidden_query_tokens:
   - attach
   - payload
   - " union "
-declared_allowed_query_statements: 25
+declared_allowed_query_statements: 29
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -113,6 +113,14 @@ allowed_query_statements:
     statement: 'select id, parent_id, time_updated from session order by id limit ?1'
   - name: session-records-after
     statement: 'select id, parent_id, time_updated from session where id > ?1 order by id limit ?2'
+  - name: session-parents-first
+    statement: 'select id, parent_id from session order by id limit ?1'
+  - name: session-parents-after
+    statement: 'select id, parent_id from session where id > ?1 order by id limit ?2'
+  - name: session-clock-first
+    statement: 'select id, time_updated from session order by id limit ?1'
+  - name: session-clock-after
+    statement: 'select id, time_updated from session where id > ?1 order by id limit ?2'
   - name: legacy-orphan-parts-first
     statement: 'select p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data from part as p where p.session_id = ?1 and not exists (select 1 from message as m where m.session_id = p.session_id and m.id = p.message_id) order by p.id limit ?2'
   - name: legacy-orphan-parts-after

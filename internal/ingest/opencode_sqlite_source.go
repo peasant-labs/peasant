@@ -362,10 +362,16 @@ type OpenCodeSessionRecord struct {
 }
 
 // OpenCodeSessionRecordPage is one bounded page of session records. Supported
-// is false when the database has no session table with parent_id and
-// time_updated columns; the page is then empty.
+// is false when the database has no session table at all; the page is then
+// empty. HasParent and HasClock report which of the parent_id and time_updated
+// columns the session table carries, so parent links are read whether or not the
+// clock column exists. When the session table exists but carries neither column,
+// Supported is true while HasParent and HasClock are both false and the page is
+// empty.
 type OpenCodeSessionRecordPage struct {
 	Supported bool
+	HasParent bool
+	HasClock  bool
 	Records   []OpenCodeSessionRecord
 	Next      *OpenCodeSessionRecordCursor
 }

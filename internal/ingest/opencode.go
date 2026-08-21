@@ -334,6 +334,12 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session records could not be read; sessions stay discoverable as roots with file-based freshness", err)
 		return candidates, source
 	}
+	// A session table that carries neither the parent link nor the changed clock
+	// supplies nothing, so name it. A table that has only the parent link, or
+	// only the clock, is used for whichever it has and is not a failure.
+	if records.present && !records.hasParent && !records.hasClock {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session table carries neither parent_id nor time_updated, so parent links and the changed clock are unavailable; sessions stay discoverable as roots with file-based freshness", errors.New("session table lacks both parent_id and time_updated"))
+	}
 	for index := range candidates {
 		record, known := records.bySession[candidates[index].session.SessionID]
 		if known && record.parent != "" {
@@ -357,16 +363,21 @@ type openCodeSessionClock struct {
 	updatedAt time.Time
 }
 
-// openCodeSessionRecords holds every session row of one database. supported
-// is false when the database has no usable session table.
+// openCodeSessionRecords holds every session row of one database. present is
+// false when the database has no session table. hasParent and hasClock report
+// which of the parent link and changed clock columns the session table carries,
+// so parent links are read whether or not the clock column exists.
 type openCodeSessionRecords struct {
-	supported bool
+	present   bool
+	hasParent bool
+	hasClock  bool
 	bySession map[SessionID]openCodeSessionClock
 }
 
 // discoverSQLiteSessionRecords reads session.parent_id and session.time_updated
-// from the already-open source for one supported database. A database without
-// those columns yields an unsupported, empty result.
+// from the already-open source for one supported database. The parent link is
+// read whether or not the clock column exists. A database without a session
+// table yields an empty result with present false.
 func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) (openCodeSessionRecords, error) {
 	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock)}
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
@@ -379,7 +390,9 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 		if readErr != nil {
 			return records, fmt.Errorf("read OpenCode session records from %q failed while enumerating a bounded session page: %w; sessions remain discoverable as roots; verify the session table and retry", candidate.Path, readErr)
 		}
-		records.supported = page.Supported
+		records.present = page.Supported
+		records.hasParent = page.HasParent
+		records.hasClock = page.HasClock
 		for _, row := range page.Records {
 			sessionID, sessionErr := NewSessionID(row.SessionID.String())
 			if sessionErr != nil {

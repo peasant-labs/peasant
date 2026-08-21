@@ -42,6 +42,10 @@ const (
 	openCodeCurrentFreshnessBySessionStatement       = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM session_message GROUP BY session_id"
 	openCodeSessionRecordsFirstStatement             = "SELECT id, parent_id, time_updated FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionRecordsAfterStatement             = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionParentsFirstStatement             = "SELECT id, parent_id FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionClockAfterStatement               = "SELECT id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -469,6 +473,11 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session)", "supported OpenCode session")
 	}
+	if len(columns) == 0 {
+		// The session table is absent, so there is nothing to read. Older
+		// layouts stay discoverable as roots with file-based freshness.
+		return OpenCodeSessionRecordPage{}, nil
+	}
 	hasParent, hasClock := false, false
 	for _, column := range columns {
 		switch column.Name {
@@ -478,8 +487,12 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 			hasClock = true
 		}
 	}
-	if !hasParent || !hasClock {
-		return OpenCodeSessionRecordPage{}, nil
+	page := OpenCodeSessionRecordPage{Supported: true, HasParent: hasParent, HasClock: hasClock}
+	if !hasParent && !hasClock {
+		// The session table exists but carries neither the parent link nor the
+		// changed clock, so it can supply nothing. The caller records a
+		// diagnostic and keeps the sessions as roots.
+		return page, nil
 	}
 	rows := make([]OpenCodeSessionRecord, 0, request.PageSize.value+1)
 	decode := func(stmt *sqlite.Stmt) error {
@@ -491,36 +504,67 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 			return fmt.Errorf("decode session record: %w", err)
 		}
 		record := OpenCodeSessionRecord{SessionID: sessionID}
-		if stmt.ColumnType(1) == sqlite.TypeText && stmt.ColumnText(1) != "" {
-			parentID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(1))
-			if err != nil {
-				return fmt.Errorf("decode session record %q parent: %w", sessionID.String(), err)
+		// The parent link is column 1 whenever it is selected. The clock is the
+		// last selected column: column 2 when both are present, otherwise
+		// column 1.
+		if hasParent {
+			if stmt.ColumnType(1) == sqlite.TypeText && stmt.ColumnText(1) != "" {
+				parentID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(1))
+				if err != nil {
+					return fmt.Errorf("decode session record %q parent: %w", sessionID.String(), err)
+				}
+				record.ParentID = parentID
 			}
-			record.ParentID = parentID
 		}
-		switch stmt.ColumnType(2) {
-		case sqlite.TypeNull:
-		case sqlite.TypeInteger:
-			record.TimeUpdated = stmt.ColumnInt64(2)
-		default:
-			return fmt.Errorf("decode session record %q: time_updated has SQLite type %s instead of integer", sessionID.String(), stmt.ColumnType(2))
+		if hasClock {
+			clockColumn := 1
+			if hasParent {
+				clockColumn = 2
+			}
+			switch stmt.ColumnType(clockColumn) {
+			case sqlite.TypeNull:
+			case sqlite.TypeInteger:
+				record.TimeUpdated = stmt.ColumnInt64(clockColumn)
+			default:
+				return fmt.Errorf("decode session record %q: time_updated has SQLite type %s instead of integer", sessionID.String(), stmt.ColumnType(clockColumn))
+			}
 		}
 		rows = append(rows, record)
 		return nil
 	}
-	if request.After == nil {
-		err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
-	} else {
-		err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+	// The statements stay compile-time constants at each call site so the
+	// read-only source-statement guard resolves the fixed statement set.
+	projection := "session(id, parent_id, time_updated)"
+	switch {
+	case hasParent && hasClock:
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	case hasParent:
+		projection = "session(id, parent_id)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	default:
+		projection = "session(id, time_updated)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionClockFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionClockAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
 	}
 	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "session(id, parent_id, time_updated)", "supported OpenCode session")
+		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, projection, "supported OpenCode session")
 	}
 	hasNext := len(rows) > request.PageSize.value
 	if hasNext {
 		rows = rows[:request.PageSize.value]
 	}
-	page := OpenCodeSessionRecordPage{Supported: true, Records: rows[:len(rows):len(rows)]}
+	page.Records = rows[:len(rows):len(rows)]
 	if hasNext {
 		page.Next = &OpenCodeSessionRecordCursor{sessionID: page.Records[len(page.Records)-1].SessionID}
 	}
