@@ -293,23 +293,15 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacySessionFreshness(ctx context.Conte
 	}
 	defer lease.release()
 	var newest int64
-	decode := func(stmt *sqlite.Stmt) error {
-		if stmt.ColumnType(0) == sqlite.TypeNull {
-			return nil
-		}
-		if stmt.ColumnType(0) != sqlite.TypeInteger {
-			return fmt.Errorf("decode selected legacy freshness: aggregate has SQLite type %s instead of integer", stmt.ColumnType(0))
-		}
-		newest = max(newest, stmt.ColumnInt64(0))
-		return nil
-	}
-	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyMessageFreshnessStatement, []any{sessionID.String()}, decode); err != nil {
+	found := false
+	decode := newSelectedFreshnessDecoder(&newest, &found)
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyMessageFreshnessStatement, []any{sessionID.String()}, decode); err != nil || lease.ctx.Err() != nil {
 		return time.Time{}, s.sourceReadError(lease.ctx, "read selected legacy message freshness", err, "message(time_created,time_updated)", "supported selected legacy projection")
 	}
 	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyPartFreshnessStatement, []any{sessionID.String()}, decode); err != nil || lease.ctx.Err() != nil {
 		return time.Time{}, s.sourceReadError(lease.ctx, "read selected legacy part freshness", err, "part(time_created,time_updated)", "supported selected legacy projection")
 	}
-	return time.UnixMilli(newest), nil
+	return selectedFreshnessTime(newest, found), nil
 }
 
 func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionFreshness(ctx context.Context, sessionID OpenCodeCurrentSessionID) (time.Time, error) {
@@ -318,22 +310,41 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionFreshness(ctx context.Cont
 		return time.Time{}, err
 	}
 	defer lease.release()
-	var milliseconds int64
-	decode := func(stmt *sqlite.Stmt) error {
+	var newest int64
+	found := false
+	decode := newSelectedFreshnessDecoder(&newest, &found)
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentFreshnessStatement, []any{sessionID.String()}, decode); err != nil || lease.ctx.Err() != nil {
+		return time.Time{}, s.sourceReadError(lease.ctx, "read selected current message freshness", err, "session_message(time_created,time_updated)", "supported selected current projection")
+	}
+	return selectedFreshnessTime(newest, found), nil
+}
+
+// newSelectedFreshnessDecoder returns a row decoder for one
+// MAX(MAX(time_created,time_updated)) aggregate. It records the newest
+// millisecond across every statement it decodes and sets found when any row
+// contributed a value, so a caller can tell an empty projection from an epoch
+// timestamp. The statement stays a compile-time constant at each call site.
+func newSelectedFreshnessDecoder(newest *int64, found *bool) func(*sqlite.Stmt) error {
+	return func(stmt *sqlite.Stmt) error {
 		if stmt.ColumnType(0) == sqlite.TypeNull {
 			return nil
 		}
 		if stmt.ColumnType(0) != sqlite.TypeInteger {
 			return fmt.Errorf("decode selected freshness: aggregate has SQLite type %s instead of integer", stmt.ColumnType(0))
 		}
-		milliseconds = stmt.ColumnInt64(0)
+		*newest = max(*newest, stmt.ColumnInt64(0))
+		*found = true
 		return nil
 	}
-	err = s.executeRowsLocked(lease.ctx, openCodeCurrentFreshnessStatement, []any{sessionID.String()}, decode)
-	if err != nil || lease.ctx.Err() != nil {
-		return time.Time{}, s.sourceReadError(lease.ctx, "read selected current message freshness", err, "session_message(time_created,time_updated)", "supported selected current projection")
+}
+
+// selectedFreshnessTime returns the zero time when no row contributed an
+// aggregate value, so callers can tell an empty projection from epoch.
+func selectedFreshnessTime(milliseconds int64, found bool) time.Time {
+	if !found {
+		return time.Time{}
 	}
-	return time.UnixMilli(milliseconds), nil
+	return time.UnixMilli(milliseconds)
 }
 
 // LegacyOrphanParts retains malformed selected rows without reading any other
