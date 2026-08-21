@@ -180,7 +180,7 @@ pushStates:
   - key: selection
     wantContains: ["selected", "withheld by a branch conflict", "tab"]
   - key: consent
-    wantContains: ["METADATA", "KNOWN PATTERNS"]
+    wantContains: ["metadata", "known patterns"]
   - key: receipt
     wantContains: ["leave this machine", "sessions in this push"]
 

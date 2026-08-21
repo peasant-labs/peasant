@@ -95,8 +95,8 @@ assertions:
       - "Redaction"
   - state: consent
     wantContains:
-      - "METADATA"
-      - "KNOWN PATTERNS"
+      - "metadata"
+      - "known patterns"
       - "deselect it"
     wantMissing:
       - "No raw data will leave your machine"

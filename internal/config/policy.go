@@ -364,7 +364,7 @@ func (e *UnofferedRedactionLevelError) Unwrap() error { return ErrUnofferedRedac
 // generated web policy at once - the same leverage that makes one hedge in one
 // place worth having makes one over-claim expensive. Nothing replaces it: what
 // this sentence can say honestly is what Peasant itself does.
-const redactionScopeSentence = "It redacts KNOWN PATTERNS of secrets, personal data and identifying paths in both " +
+const redactionScopeSentence = "It redacts known patterns of secrets, personal data and identifying paths in both " +
 	"metadata and transcript content, which is best effort and not a guarantee that every one was found."
 
 // RedactionScopeSentence is redactionScopeSentence for surfaces outside this

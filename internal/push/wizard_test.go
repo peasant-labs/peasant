@@ -643,7 +643,7 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 		"ready to push as-is",
 	} {
 		if strings.Contains(screen, forbidden) {
-			t.Errorf("the consent screen must not promise %q: redaction finds KNOWN PATTERNS in metadata and content, so an "+
+			t.Errorf("the consent screen must not promise %q: redaction finds known patterns in metadata and content, so an "+
 				"absolute claim of completeness is one it cannot keep whatever it covers; got:\n%s", forbidden, screen)
 		}
 	}
@@ -658,10 +658,10 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 	// behaviour it describes moves, or it holds the copy to the old behaviour
 	// while every test stays green.
 	for _, required := range []string{
-		"METADATA",                             // what is redacted, still
+		"metadata",                             // what is redacted, still
 		"file paths and diagnostic locations",  // fields the configured level actually rewrites
-		"CONVERSATION CONTENT",                 // and what now is too
-		"KNOWN PATTERNS",                       // the hedge, which must survive every rewording
+		"conversation content",                 // and what now is too
+		"known patterns",                       // the hedge, which must survive every rewording
 		"not a guarantee",                      // said outright rather than implied
 		"can differ from what you see locally", // the consequence of redacting content
 		"deselect it",                          // the remedy that is one keystroke away here
@@ -672,7 +672,7 @@ func TestWizard_Notice_MakesNoPromiseItCannotKeep(t *testing.T) {
 		}
 	}
 	for _, identityField := range []string{"the host slug", "the project name", "the git remote", "the git branch"} {
-		if strings.Contains(screen, "METADATA - "+identityField) || strings.Contains(screen, ", "+identityField) ||
+		if strings.Contains(screen, "metadata - "+identityField) || strings.Contains(screen, ", "+identityField) ||
 			strings.Contains(screen, "and "+identityField+" -") {
 			t.Errorf("the consent screen claims %q is redacted at the configured level, but it is published as recorded; got:\n%s",
 				identityField, screen)

@@ -951,7 +951,7 @@ func (m PushWizardModel) noticePanel(width int) kit.Panel {
 		panel.Wrapped(styles.Base, "before upload, peasant redacts at your configured level, never below standard.")
 	default:
 		panel.Wrapped(styles.Base, "before upload, peasant redacts at your configured level, never below standard:")
-		panel.Wrapped(styles.Base, "METADATA - "+joinFieldLabels(covered)+" - and CONVERSATION CONTENT, including tool arguments and tool results.")
+		panel.Wrapped(styles.Base, "metadata - "+joinFieldLabels(covered)+" - and conversation content, including tool arguments and tool results.")
 	}
 	panel.Blank()
 	// THE HEDGE IS THE SHARED CONSTANT, CONSUMED VERBATIM.
@@ -988,7 +988,7 @@ func (m PushWizardModel) receiptBody(width, height int) string {
 	panel.Wrapped(styles.Muted, fmt.Sprintf("%d of %d candidate sessions stay on it.",
 		len(m.sessions)-len(selected), len(m.sessions)))
 	panel.Blank()
-	panel.Line(styles.Muted, wizardReceiptDetails)
+	panel.Line(styles.Header, wizardReceiptDetails)
 
 	// The receipt lists what it can and says how much it left out, rather than
 	// running past the bottom of the box where the reader cannot see it.
