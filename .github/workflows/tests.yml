@@ -21,6 +21,7 @@ on:
   pull_request:
     paths:
       - "**.go"
+      - "**/testdata/**"
       - "go.mod"
       - "go.sum"
       - "Makefile"
@@ -49,6 +50,7 @@ on:
     branches: [develop, main]
     paths:
       - "**.go"
+      - "**/testdata/**"
       - "go.mod"
       - "go.sum"
       - "Makefile"
