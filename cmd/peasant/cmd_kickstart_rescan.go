@@ -70,6 +70,19 @@ func (k knownSessionIndex) reusable(session ingest.DiscoveredSession, staleness 
 // always correct, so a database this build cannot reuse must never fail
 // onboarding.
 func loadKnownSessions(ctx context.Context, dbPath string) knownSessionIndex {
+	db := openReusableStore(dbPath)
+	if db == nil {
+		return nil
+	}
+	defer db.Close()
+	return loadKnownSessionsFrom(ctx, db)
+}
+
+// openReusableStore opens the local database ONLY when this build can reuse it
+// as it stands. A missing file, an older file, or a file written by a newer
+// build all return nil, and a scan then does the full work. The caller owns the
+// returned store and must close it.
+func openReusableStore(dbPath string) *store.Store {
 	if dbPath == "" {
 		return nil
 	}
@@ -85,8 +98,15 @@ func loadKnownSessions(ctx context.Context, dbPath string) knownSessionIndex {
 	if err != nil {
 		return nil
 	}
-	defer db.Close()
+	return db
+}
 
+// loadKnownSessionsFrom reads the recorded sessions from an already open store.
+// Any read problem returns nil, so a scan resolves everything the full way.
+func loadKnownSessionsFrom(ctx context.Context, db *store.Store) knownSessionIndex {
+	if db == nil {
+		return nil
+	}
 	rows, err := db.AllIngestedSessions(ctx)
 	if err != nil {
 		return nil

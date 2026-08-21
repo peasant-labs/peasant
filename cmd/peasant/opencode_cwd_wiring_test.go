@@ -170,7 +170,7 @@ func TestOpenCodeProjectDirectoriesReachKickstartListings(t *testing.T) {
 	world := newMountedOpenCodeWorld(t)
 	git := newMountedOpenCodeGitResolver(world.cloneA, world.cloneB)
 	inventory, listings := ftueDiscoverWith(
-		t.Context(), mountedOpenCodeConfig(t, world.root), &ingest.OSFileSystem{}, git, nil, nil,
+		t.Context(), mountedOpenCodeConfig(t, world.root), &ingest.OSFileSystem{}, git, nil, nil, nil,
 	)
 	if got := inventory[defaults.HarnessOpenCode].SessionCount; got != 2 {
 		t.Fatalf("OpenCode inventory count = %d, want 2 sessions from distinct clones", got)
@@ -236,7 +236,7 @@ func TestKickstartReuseFallsBackToRecordedOpenCodeDirectories(t *testing.T) {
 		},
 	}
 	_, listings := ftueDiscoverWith(
-		t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, testutil.NoGitResolver(), known, nil,
+		t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, testutil.NoGitResolver(), known, nil, nil,
 	)
 	if len(listings) != 2 {
 		t.Fatalf("kickstart listed %d reusable OpenCode sessions, want 2", len(listings))
@@ -346,7 +346,7 @@ func TestOpenCodeCurrentSQLiteEntersMountedProductionThroughManagedProjection(t 
 
 	git := testutil.NoGitResolver()
 	filesystem := &observingOpenCodeFileSystem{OSFileSystem: &ingest.OSFileSystem{}}
-	inventory, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, sourceRoot), filesystem, git, nil, nil)
+	inventory, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, sourceRoot), filesystem, git, nil, nil, nil)
 	if !filesystem.Opened(materialized.Path) {
 		t.Fatalf("mounted kickstart production discovery did not resolve and header-probe configured OpenCode candidate %q; opened=%v", materialized.Path, filesystem.Paths())
 	}

@@ -19,16 +19,24 @@ import (
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
-	fs   FileSystem
-	git  GitResolver
-	salt salt.Salt
+	fs       FileSystem
+	git      GitResolver
+	salt     salt.Salt
+	evidence ClaudeEvidenceCache
 }
 
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
+var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
 func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapter {
 	return &ClaudeAdapter{fs: fs, git: git, salt: s}
+}
+
+// SetClaudeEvidenceCache makes discovery reuse the evidence it mined during an
+// earlier run. Without a cache the adapter mines every transcript again.
+func (a *ClaudeAdapter) SetClaudeEvidenceCache(cache ClaudeEvidenceCache) {
+	a.evidence = cache
 }
 
 func (a *ClaudeAdapter) Harness() Harness {
@@ -38,14 +46,14 @@ func (a *ClaudeAdapter) Harness() Harness {
 // claudeJSONLLine is the raw shape of each line in a Claude Code JSONL transcript.
 // Fields are parsed only as-needed; unmapped fields are silently ignored.
 type claudeJSONLLine struct {
-	SessionID string `json:"sessionId"`
-	Version   string `json:"version"`
-	Type      string `json:"type"` // "user" or "assistant"
-	CWD       string `json:"cwd"`
-	GitBranch string `json:"gitBranch"`
-	AgentID   string `json:"agentId"`
-	UUID      string `json:"uuid"`
-	Timestamp string `json:"timestamp"`
+	SessionID string           `json:"sessionId"`
+	Version   string           `json:"version"`
+	Type      claudeRecordType `json:"type"`
+	CWD       string           `json:"cwd"`
+	GitBranch string           `json:"gitBranch"`
+	AgentID   string           `json:"agentId"`
+	UUID      string           `json:"uuid"`
+	Timestamp string           `json:"timestamp"`
 	Message   struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
@@ -59,13 +67,28 @@ type claudeJSONLLine struct {
 	} `json:"message"`
 }
 
-// claudeTeammateIdentity is deliberately private to discovery. Claude's team
-// metadata is useful for relating separately stored transcripts, but is not a
-// public session contract.
-type claudeTeammateIdentity struct {
-	team string
-	name string
+// claudeRecordType names the record kinds discovery reads from a transcript.
+type claudeRecordType string
+
+// String returns the wire form of the record type.
+func (t claudeRecordType) String() string { return string(t) }
+
+// isConversation reports whether the record type is one a reader can render as
+// part of the conversation.
+func (t claudeRecordType) isConversation() bool {
+	return t == claudeRecordTypeUser || t == claudeRecordTypeAssistant
 }
+
+const (
+	// claudeRecordTypeUser marks a user record.
+	claudeRecordTypeUser claudeRecordType = "user"
+	// claudeRecordTypeAssistant marks an assistant record.
+	claudeRecordTypeAssistant claudeRecordType = "assistant"
+)
+
+// claudeHintLineLimit caps how many leading lines discovery reads for the
+// display hints, so a large transcript never costs a full hint scan.
+const claudeHintLineLimit = 10
 
 // contentBlock is a typed block inside an assistant message content array.
 type contentBlock struct {
@@ -87,6 +110,14 @@ type claudeFileOpener interface {
 // Per RFC Section 6.4, symlinks are skipped silently.
 func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]DiscoveredSession, error) {
 	var sessions []DiscoveredSession
+
+	// Mining a transcript is the expensive part of Claude discovery: it reads
+	// the whole file and parses every line. Load what an earlier run mined,
+	// reuse every record whose transcript has not changed, and write back only
+	// the records this run had to mine again.
+	cached := a.loadCachedEvidence(ctx)
+	mined := make(map[ResolvedPath]ClaudeTranscriptEvidence, len(cached))
+	var remined []ClaudeTranscriptEvidence
 
 	for _, basePath := range cfg.Paths {
 		root := string(basePath)
@@ -175,18 +206,27 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		rootIndex := make(map[string]int)
 
 		for _, entry := range rootEntries {
-			if !a.hasClaudeConversationRecord(entry.path) {
-				continue
-			}
-			sid, _ := NewSessionID(entry.sessionID) // already validated in pass 1
-
 			info, err := a.fs.Stat(entry.path)
 			if err != nil {
 				continue
 			}
-
 			rp := ResolvedPath(entry.path)
-			hints := a.extractClaudeHints(entry.path)
+
+			evidence, ok := cached[rp]
+			if !ok || !evidence.Fresh(ClaudeEvidenceScopeRoot, info) {
+				var cacheable bool
+				evidence, cacheable = a.mineClaudeRootTranscript(rp, info)
+				if cacheable {
+					remined = append(remined, evidence)
+				}
+			}
+			mined[rp] = evidence
+
+			if !evidence.HasConversationRecord {
+				continue
+			}
+			sid, _ := NewSessionID(entry.sessionID) // already validated in pass 1
+
 			ds := DiscoveredSession{
 				SessionID:     sid,
 				Harness:       HarnessClaudeCode,
@@ -196,27 +236,33 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				SubagentPaths: []ResolvedPath{},
 				DebugPaths:    []ResolvedPath{},
 				ModTime:       info.ModTime(),
-				Title:         hints.title,
-				Branch:        hints.branch,
-				CWD:           hints.cwd,
+				Title:         evidence.Title,
+				Branch:        evidence.Branch,
+				CWD:           evidence.CWD,
 			}
 			rootIndex[entry.sessionID] = len(sessions)
 			sessions = append(sessions, ds)
 		}
 
 		for _, entry := range subagentEntries {
-			if !a.hasClaudeConversationRecord(entry.path) {
-				continue
-			}
-			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
-			subSID, _ := NewSessionID(entry.subagentID)       // already validated
-
 			info, err := a.fs.Stat(entry.path)
 			if err != nil {
 				continue
 			}
-
 			rp := ResolvedPath(entry.path)
+
+			evidence, ok := cached[rp]
+			if !ok || !evidence.Fresh(ClaudeEvidenceScopeSubagent, info) {
+				evidence = a.mineClaudeSubagentTranscript(rp, info)
+				remined = append(remined, evidence)
+			}
+			mined[rp] = evidence
+
+			if !evidence.HasConversationRecord {
+				continue
+			}
+			parentSID, _ := NewSessionID(entry.parentUUIDStr) // already validated
+			subSID, _ := NewSessionID(entry.subagentID)       // already validated
 
 			// Link to parent's SubagentPaths — guaranteed parent is already registered.
 			if idx, ok := rootIndex[entry.parentUUIDStr]; ok {
@@ -238,15 +284,59 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
-	a.linkClaudeTeammates(sessions)
+	a.linkClaudeTeammates(sessions, mined)
+	a.saveMinedEvidence(ctx, cfg, cached, mined, remined)
 	return sessions, nil
+}
+
+// loadCachedEvidence returns the evidence an earlier discovery mined. A missing
+// or failing cache returns an empty map, so discovery mines everything again.
+func (a *ClaudeAdapter) loadCachedEvidence(ctx context.Context) map[ResolvedPath]ClaudeTranscriptEvidence {
+	if a.evidence == nil {
+		return nil
+	}
+	records, err := a.evidence.LoadClaudeEvidence(ctx)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+// saveMinedEvidence writes the records this run mined and removes the records
+// whose transcripts are gone. Only the walked source paths are pruned, so a
+// record left by a path this run did not visit stays in the cache. A cache
+// failure is silent: the next discovery simply mines the transcripts again.
+func (a *ClaudeAdapter) saveMinedEvidence(
+	ctx context.Context,
+	cfg SourceConfig,
+	cached map[ResolvedPath]ClaudeTranscriptEvidence,
+	mined map[ResolvedPath]ClaudeTranscriptEvidence,
+	remined []ClaudeTranscriptEvidence,
+) {
+	if a.evidence == nil {
+		return
+	}
+	var deletes []ResolvedPath
+	for path := range cached {
+		if _, seen := mined[path]; seen {
+			continue
+		}
+		if pathUnderAnyRoot(path, cfg.Paths) {
+			deletes = append(deletes, path)
+		}
+	}
+	if len(remined) == 0 && len(deletes) == 0 {
+		return
+	}
+	_ = a.evidence.SaveClaudeEvidence(ctx, remined, deletes)
 }
 
 // linkClaudeTeammates links independently persisted Claude root transcripts.
 // A relationship is accepted only when both sides provide one unambiguous
 // complete identity. Files that cannot be read or parsed simply provide no
-// evidence and do not make discovery fail.
-func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession) {
+// evidence and do not make discovery fail. The evidence comes from the mined
+// records, so a cached record links exactly as a freshly read file does.
+func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession, mined map[ResolvedPath]ClaudeTranscriptEvidence) {
 	rootByPath := make(map[ResolvedPath]int)
 	for i := range sessions {
 		if sessions[i].ParentUUID == nil {
@@ -254,17 +344,18 @@ func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession) {
 		}
 	}
 
-	identities := make(map[claudeTeammateIdentity][]int)
-	spawns := make(map[claudeTeammateIdentity]map[int]struct{})
+	identities := make(map[ClaudeTeammateIdentity][]int)
+	spawns := make(map[ClaudeTeammateIdentity]map[int]struct{})
 	for i := range sessions {
 		if _, ok := rootByPath[sessions[i].SourcePath]; !ok {
 			continue
 		}
-		identity, spawnRecords := a.readClaudeTeammateEvidence(sessions[i].SourcePath)
-		if identity != nil {
-			identities[*identity] = append(identities[*identity], i)
+		evidence := mined[sessions[i].SourcePath]
+		if evidence.Identity != nil {
+			identity := *evidence.Identity
+			identities[identity] = append(identities[identity], i)
 		}
-		for _, spawn := range spawnRecords {
+		for _, spawn := range evidence.Spawns {
 			if spawns[spawn] == nil {
 				spawns[spawn] = make(map[int]struct{})
 			}
@@ -290,21 +381,60 @@ func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession) {
 	}
 }
 
-func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTeammateIdentity, []claudeTeammateIdentity) {
+// mineClaudeRootTranscript reads one root transcript ONCE and derives every
+// fact discovery takes from its content: whether it holds a conversation, the
+// teammate identity it declares, the teammates it spawned, and the display
+// hints. One read replaces the three separate passes over the same bytes.
+//
+// The second result reports whether the record may be cached. An unreadable
+// file produces no durable fact, so it is mined again on the next discovery.
+func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.FileInfo) (ClaudeTranscriptEvidence, bool) {
+	evidence := newClaudeEvidence(path, ClaudeEvidenceScopeRoot, info)
+
 	data, err := a.fs.ReadFile(path.String())
 	if err != nil {
-		return nil, nil
+		// An unreadable file fails open, exactly as the conversation check does,
+		// so discovery can surface it instead of discarding it silently.
+		evidence.HasConversationRecord = true
+		return evidence, false
 	}
+
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, defaults.ScannerInitBuf), defaults.ScannerMaxLine)
-	var identity *claudeTeammateIdentity
-	var invalidIdentity bool
-	var spawns []claudeTeammateIdentity
+
+	var identity *ClaudeTeammateIdentity
+	var invalidIdentity, malformed, conversation bool
+	var validRecords, lineNumber int
+	var hints claudeSessionHints
+
 	for scanner.Scan() {
-		var value map[string]any
-		if json.Unmarshal(scanner.Bytes(), &value) != nil {
+		raw := scanner.Bytes()
+		if lineNumber < claudeHintLineLimit && !hints.complete() {
+			applyClaudeHints(&hints, raw)
+		}
+		lineNumber++
+
+		line := bytes.TrimSpace(raw)
+		if len(line) == 0 {
 			continue
 		}
+		var value map[string]any
+		if json.Unmarshal(line, &value) != nil {
+			// A record this build cannot parse fails open.
+			malformed = true
+			continue
+		}
+		validRecords++
+		if recordType, present := value["type"]; present {
+			text, isText := recordType.(string)
+			switch {
+			case !isText:
+				malformed = true
+			case claudeRecordType(text).isConversation():
+				conversation = true
+			}
+		}
+
 		_, hasTeam := value["teamName"]
 		_, hasName := value["agentName"]
 		if hasTeam || hasName {
@@ -313,7 +443,7 @@ func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTe
 			if !teamOK || !nameOK || team == "" || name == "" {
 				invalidIdentity = true
 			} else {
-				candidate := claudeTeammateIdentity{team: team, name: name}
+				candidate := ClaudeTeammateIdentity{Team: team, Name: name}
 				if identity == nil {
 					identity = &candidate
 				} else if *identity != candidate {
@@ -322,13 +452,38 @@ func (a *ClaudeAdapter) readClaudeTeammateEvidence(path ResolvedPath) (*claudeTe
 			}
 		}
 		if spawn, ok := claudeTeammateSpawn(value); ok {
-			spawns = append(spawns, spawn)
+			evidence.Spawns = append(evidence.Spawns, spawn)
 		}
 	}
-	if invalidIdentity {
-		identity = nil
+
+	if !invalidIdentity {
+		evidence.Identity = identity
 	}
-	return identity, spawns
+	evidence.HasConversationRecord = conversation || malformed || scanner.Err() != nil || validRecords == 0
+	evidence.Title = hints.title
+	evidence.Branch = hints.branch
+	evidence.CWD = hints.cwd
+	return evidence, true
+}
+
+// mineClaudeSubagentTranscript checks one subagent transcript for a
+// conversation record. A subagent file carries no teammate identity and no
+// display hints, so the streaming check that stops at the first conversation
+// record stays the cheapest way to read it.
+func (a *ClaudeAdapter) mineClaudeSubagentTranscript(path ResolvedPath, info os.FileInfo) ClaudeTranscriptEvidence {
+	evidence := newClaudeEvidence(path, ClaudeEvidenceScopeSubagent, info)
+	evidence.HasConversationRecord = a.hasClaudeConversationRecord(path.String())
+	return evidence
+}
+
+// newClaudeEvidence starts a record keyed on the file that produced it.
+func newClaudeEvidence(path ResolvedPath, scope ClaudeEvidenceScope, info os.FileInfo) ClaudeTranscriptEvidence {
+	return ClaudeTranscriptEvidence{
+		SourcePath:      path,
+		Scope:           scope,
+		ModTimeUnixNano: info.ModTime().UnixNano(),
+		SizeBytes:       info.Size(),
+	}
 }
 
 // hasClaudeConversationRecord reports whether path contains at least one native
@@ -366,13 +521,13 @@ func (a *ClaudeAdapter) hasClaudeConversationRecord(path string) bool {
 			continue
 		}
 		var value struct {
-			Type string `json:"type"`
+			Type claudeRecordType `json:"type"`
 		}
 		if json.Unmarshal(line, &value) != nil {
 			return true
 		}
 		validRecords++
-		if value.Type == "user" || value.Type == "assistant" {
+		if value.Type.isConversation() {
 			return true
 		}
 	}
@@ -382,20 +537,20 @@ func (a *ClaudeAdapter) hasClaudeConversationRecord(path string) bool {
 // claudeTeammateSpawn recognizes only the top-level native tool result. Tool
 // output may contain arbitrary JSON-shaped text, so recursive matching would
 // let an unrelated tool payload forge discovery evidence.
-func claudeTeammateSpawn(value map[string]any) (claudeTeammateIdentity, bool) {
+func claudeTeammateSpawn(value map[string]any) (ClaudeTeammateIdentity, bool) {
 	result, ok := value["toolUseResult"].(map[string]any)
 	if !ok {
-		return claudeTeammateIdentity{}, false
+		return ClaudeTeammateIdentity{}, false
 	}
 	if status, _ := result["status"].(string); status != "teammate_spawned" {
-		return claudeTeammateIdentity{}, false
+		return ClaudeTeammateIdentity{}, false
 	}
 	team, teamOK := result["team_name"].(string)
 	name, nameOK := result["name"].(string)
 	if !teamOK || !nameOK || team == "" || name == "" {
-		return claudeTeammateIdentity{}, false
+		return ClaudeTeammateIdentity{}, false
 	}
-	return claudeTeammateIdentity{team: team, name: name}, true
+	return ClaudeTeammateIdentity{Team: team, Name: name}, true
 }
 
 // claudeSessionHints holds metadata extracted from the first few JSONL lines.
@@ -405,49 +560,36 @@ type claudeSessionHints struct {
 	cwd    string
 }
 
-// extractClaudeHints reads the first few lines of a JSONL file to extract
-// the session title, git branch, and working directory.
-// Best-effort: returns zero values on any error.
-func (a *ClaudeAdapter) extractClaudeHints(path string) claudeSessionHints {
-	data, err := a.fs.ReadFile(path)
-	if err != nil {
-		return claudeSessionHints{}
+// complete reports whether every hint already has a value, so the caller can
+// stop looking at further lines.
+func (h claudeSessionHints) complete() bool {
+	return h.title != "" && h.branch != "" && h.cwd != ""
+}
+
+// applyClaudeHints takes the session title, the git branch, and the working
+// directory from one raw JSONL line. Each hint keeps the first value it finds.
+// A line this build cannot parse contributes nothing.
+func applyClaudeHints(hints *claudeSessionHints, raw []byte) {
+	var line claudeJSONLLine
+	if err := json.Unmarshal(raw, &line); err != nil {
+		return
 	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	buf := make([]byte, defaults.ScannerInitBuf)
-	scanner.Buffer(buf, defaults.ScannerMaxLine)
-
-	var hints claudeSessionHints
-
-	// Scan at most 10 lines to avoid reading entire large files.
-	for i := 0; i < 10 && scanner.Scan(); i++ {
-		var line claudeJSONLLine
-		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
-			continue
-		}
-		// Grab branch and CWD from the first line that has them.
-		if hints.branch == "" && line.GitBranch != "" {
-			hints.branch = line.GitBranch
-		}
-		if hints.cwd == "" && line.CWD != "" {
-			hints.cwd = line.CWD
-		}
-		// Derive the display title from the first user message. The shared
-		// redaction-free pipeline strips Claude's own markup (system-reminder
-		// blocks, command/query wrappers) and caps the length, so the raw markup
-		// no longer leaks into the title.
-		if hints.title == "" && line.Type == "user" && line.Message.Role == "user" {
-			if text := extractTextFromContent(line.Message.Content); text != "" {
-				hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
-			}
-		}
-		// Stop early if we have everything.
-		if hints.title != "" && hints.branch != "" && hints.cwd != "" {
-			break
+	// Grab branch and CWD from the first line that has them.
+	if hints.branch == "" && line.GitBranch != "" {
+		hints.branch = line.GitBranch
+	}
+	if hints.cwd == "" && line.CWD != "" {
+		hints.cwd = line.CWD
+	}
+	// Derive the display title from the first user message. The shared
+	// redaction-free pipeline strips Claude's own markup (system-reminder
+	// blocks, command/query wrappers) and caps the length, so the raw markup
+	// no longer leaks into the title.
+	if hints.title == "" && line.Type == claudeRecordTypeUser && line.Message.Role == "user" {
+		if text := extractTextFromContent(line.Message.Content); text != "" {
+			hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
 		}
 	}
-	return hints
 }
 
 // extractTextFromContent extracts plain text from a Claude message content field.
@@ -544,12 +686,12 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		}
 
 		// Count turns.
-		if line.Type == "user" || line.Type == "assistant" {
+		if line.Type.isConversation() {
 			turnCount++
 		}
 
 		// Count tool calls and accumulate tokens from assistant messages.
-		if line.Type == "assistant" && len(line.Message.Content) > 0 {
+		if line.Type == claudeRecordTypeAssistant && len(line.Message.Content) > 0 {
 			// content may be a string or an array of blocks.
 			// Only count tool_use blocks from arrays.
 			var blocks []contentBlock

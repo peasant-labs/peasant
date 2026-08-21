@@ -1,0 +1,197 @@
+package store_test
+
+import (
+	"bytes"
+	"context"
+	_ "embed"
+	"errors"
+	"io"
+	"testing"
+
+	"github.com/peasant-labs/peasant/internal/ingest"
+	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite/sqlitex"
+)
+
+//go:embed testdata/migrations/v44_claude_evidence.yaml
+var claudeEvidenceFixture []byte
+
+type claudeEvidenceFixtureFile struct {
+	DeclaredRecords    int                           `yaml:"declared_records"`
+	DeclaredRejections int                           `yaml:"declared_rejections"`
+	Records            []claudeEvidenceFixtureRecord `yaml:"records"`
+	Rejections         []claudeEvidenceRejection     `yaml:"rejections"`
+}
+
+type claudeEvidenceFixtureRecord struct {
+	Name            string                      `yaml:"name"`
+	SourcePath      string                      `yaml:"source_path"`
+	Scope           ingest.ClaudeEvidenceScope  `yaml:"scope"`
+	ModTimeUnixNano int64                       `yaml:"mod_time_unix_nano"`
+	SizeBytes       int64                       `yaml:"size_bytes"`
+	HasConversation bool                        `yaml:"has_conversation"`
+	IdentityTeam    string                      `yaml:"identity_team"`
+	IdentityName    string                      `yaml:"identity_name"`
+	Spawns          []claudeEvidenceSpawnRecord `yaml:"spawns"`
+	Title           string                      `yaml:"title"`
+	Branch          string                      `yaml:"branch"`
+	CWD             string                      `yaml:"cwd"`
+}
+
+type claudeEvidenceSpawnRecord struct {
+	Team string `yaml:"team"`
+	Name string `yaml:"name"`
+}
+
+type claudeEvidenceRejection struct {
+	Name string `yaml:"name"`
+	SQL  string `yaml:"sql"`
+}
+
+func loadClaudeEvidenceFixture(t *testing.T) claudeEvidenceFixtureFile {
+	t.Helper()
+	decoder := yaml.NewDecoder(bytes.NewReader(claudeEvidenceFixture))
+	decoder.KnownFields(true)
+	var fixture claudeEvidenceFixtureFile
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode Claude evidence fixture: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		t.Fatalf("Claude evidence fixture must contain exactly one YAML document: %v", err)
+	}
+	if fixture.DeclaredRecords != len(fixture.Records) {
+		t.Fatalf("Claude evidence record guard failed: declared=%d actual=%d", fixture.DeclaredRecords, len(fixture.Records))
+	}
+	if fixture.DeclaredRejections != len(fixture.Rejections) {
+		t.Fatalf("Claude evidence rejection guard failed: declared=%d actual=%d", fixture.DeclaredRejections, len(fixture.Rejections))
+	}
+	return fixture
+}
+
+// toEvidence converts one fixture row into the discovery record the store writes.
+func (r claudeEvidenceFixtureRecord) toEvidence() ingest.ClaudeTranscriptEvidence {
+	record := ingest.ClaudeTranscriptEvidence{
+		SourcePath:            ingest.ResolvedPath(r.SourcePath),
+		Scope:                 r.Scope,
+		ModTimeUnixNano:       r.ModTimeUnixNano,
+		SizeBytes:             r.SizeBytes,
+		HasConversationRecord: r.HasConversation,
+		Title:                 r.Title,
+		Branch:                r.Branch,
+		CWD:                   r.CWD,
+	}
+	if r.IdentityTeam != "" && r.IdentityName != "" {
+		record.Identity = &ingest.ClaudeTeammateIdentity{Team: r.IdentityTeam, Name: r.IdentityName}
+	}
+	for _, spawn := range r.Spawns {
+		record.Spawns = append(record.Spawns, ingest.ClaudeTeammateIdentity{Team: spawn.Team, Name: spawn.Name})
+	}
+	return record
+}
+
+// TestMigrationV44ClaudeEvidenceRoundTrip verifies that the discovery evidence
+// cache returns every mined value unchanged, that a delete removes a record,
+// and that the closed constraints refuse a wrong row.
+func TestMigrationV44ClaudeEvidenceRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fixture := loadClaudeEvidenceFixture(t)
+	s := openTestStore(t)
+
+	upserts := make([]ingest.ClaudeTranscriptEvidence, 0, len(fixture.Records))
+	for _, row := range fixture.Records {
+		upserts = append(upserts, row.toEvidence())
+	}
+	if err := s.SaveClaudeEvidence(ctx, upserts, nil); err != nil {
+		t.Fatalf("SaveClaudeEvidence: %v", err)
+	}
+
+	records, err := s.LoadClaudeEvidence(ctx)
+	if err != nil {
+		t.Fatalf("LoadClaudeEvidence: %v", err)
+	}
+	if len(records) != len(upserts) {
+		t.Fatalf("LoadClaudeEvidence returned %d records, want %d", len(records), len(upserts))
+	}
+	for _, want := range upserts {
+		got, ok := records[want.SourcePath]
+		if !ok {
+			t.Fatalf("transcript %q missing from the cache", want.SourcePath)
+		}
+		assertClaudeEvidenceEqual(t, got, want)
+	}
+
+	// A record whose transcript is gone must be removable.
+	removed := upserts[0].SourcePath
+	if err := s.SaveClaudeEvidence(ctx, nil, []ingest.ResolvedPath{removed}); err != nil {
+		t.Fatalf("SaveClaudeEvidence delete: %v", err)
+	}
+	records, err = s.LoadClaudeEvidence(ctx)
+	if err != nil {
+		t.Fatalf("LoadClaudeEvidence after delete: %v", err)
+	}
+	if _, ok := records[removed]; ok {
+		t.Errorf("transcript %q is still cached after a delete", removed)
+	}
+	if len(records) != len(upserts)-1 {
+		t.Errorf("cache holds %d records after a delete, want %d", len(records), len(upserts)-1)
+	}
+
+	conn := takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(conn)
+	for _, rejection := range fixture.Rejections {
+		if err := sqlitex.ExecuteTransient(conn, rejection.SQL, nil); err == nil {
+			t.Errorf("the table accepted %s, want a constraint failure", rejection.Name)
+		}
+	}
+}
+
+// TestClaudeEvidenceRejectsUnknownScope proves the write boundary fails closed
+// on a scope this build does not know.
+func TestClaudeEvidenceRejectsUnknownScope(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	err := s.SaveClaudeEvidence(context.Background(), []ingest.ClaudeTranscriptEvidence{{
+		SourcePath: "/tmp/unknown-scope.jsonl",
+		Scope:      ingest.ClaudeEvidenceScope("teammate"),
+	}}, nil)
+	if err == nil {
+		t.Fatal("SaveClaudeEvidence accepted an unknown scope, want an error")
+	}
+}
+
+// assertClaudeEvidenceEqual compares every stored field of one record.
+func assertClaudeEvidenceEqual(t *testing.T, got, want ingest.ClaudeTranscriptEvidence) {
+	t.Helper()
+	if got.Scope != want.Scope {
+		t.Errorf("transcript %q scope = %q, want %q", want.SourcePath, got.Scope, want.Scope)
+	}
+	if got.ModTimeUnixNano != want.ModTimeUnixNano {
+		t.Errorf("transcript %q modification time = %d, want %d", want.SourcePath, got.ModTimeUnixNano, want.ModTimeUnixNano)
+	}
+	if got.SizeBytes != want.SizeBytes {
+		t.Errorf("transcript %q size = %d, want %d", want.SourcePath, got.SizeBytes, want.SizeBytes)
+	}
+	if got.HasConversationRecord != want.HasConversationRecord {
+		t.Errorf("transcript %q conversation flag = %t, want %t", want.SourcePath, got.HasConversationRecord, want.HasConversationRecord)
+	}
+	if (got.Identity == nil) != (want.Identity == nil) {
+		t.Fatalf("transcript %q identity presence = %t, want %t", want.SourcePath, got.Identity != nil, want.Identity != nil)
+	}
+	if got.Identity != nil && *got.Identity != *want.Identity {
+		t.Errorf("transcript %q identity = %+v, want %+v", want.SourcePath, *got.Identity, *want.Identity)
+	}
+	if len(got.Spawns) != len(want.Spawns) {
+		t.Fatalf("transcript %q holds %d spawns, want %d", want.SourcePath, len(got.Spawns), len(want.Spawns))
+	}
+	for index := range want.Spawns {
+		if got.Spawns[index] != want.Spawns[index] {
+			t.Errorf("transcript %q spawn %d = %+v, want %+v", want.SourcePath, index, got.Spawns[index], want.Spawns[index])
+		}
+	}
+	if got.Title != want.Title || got.Branch != want.Branch || got.CWD != want.CWD {
+		t.Errorf("transcript %q hints = (%q, %q, %q), want (%q, %q, %q)",
+			want.SourcePath, got.Title, got.Branch, got.CWD, want.Title, want.Branch, want.CWD)
+	}
+}

@@ -431,7 +431,7 @@ func TestKickstartRescan_ReusesRecordedSessions(t *testing.T) {
 	}
 
 	git := newDirCountingGitResolver(fixtures.ResolvedRemote, fixtures.ResolvedBranch)
-	inventory, sessions := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, known, nil)
+	inventory, sessions := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, known, nil, nil)
 
 	if got := inventory[defaults.HarnessClaudeCode].SessionCount; got != len(fixtures.Cases) {
 		t.Errorf("Claude inventory count = %d, want %d discovered sessions", got, len(fixtures.Cases))
@@ -505,7 +505,7 @@ func TestKickstartRescan_FallsBackWithoutCompatibleDatabase(t *testing.T) {
 	fs := testutil.NewMemFS()
 	writeRescanSources(t, fs, fixtures, ingestedAt)
 	git := newDirCountingGitResolver(fixtures.ResolvedRemote, fixtures.ResolvedBranch)
-	_, sessions := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, nil, nil)
+	_, sessions := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, nil, nil, nil)
 
 	byID := listingByID(sessions)
 	for _, c := range fixtures.Cases {

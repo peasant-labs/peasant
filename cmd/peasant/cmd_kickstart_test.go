@@ -30,7 +30,7 @@ func TestKickstartDiscoveryMountsCurrentOnlyOpenCodeSession(t *testing.T) {
 	cfg.Sources.Cursor.Paths = nil
 	cfg.Sources.Strike.Paths = nil
 
-	inventory, sessions := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil)
+	inventory, sessions := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
 	discovery := inventory[defaults.HarnessOpenCode]
 	if discovery.SessionCount != 1 || discovery.State == ftue.DiscoveryFailed {
 		t.Fatalf("kickstart current-only inventory = %+v, want one available OpenCode session", discovery)
