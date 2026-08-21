@@ -85,6 +85,12 @@ indented and tool entries use box-drawing characters. `--turn` indexes by raw
 `entry_index` (the value stored in `session_entries`), so it lines up with the
 indices reported elsewhere rather than a re-counted ordinal.
 
+`parent_index` names the parent entry. For a depth-1 entry it is the enclosing
+depth-0 turn. For a depth-0 entry it is empty unless the harness records a
+message graph: OpenCode links a depth-0 message to its parent message. Renderers
+decide nesting by `depth`, not by whether `parent_index` is set, so a depth-0
+entry with a parent is still a top-level turn.
+
 ## `peasant sessions tag`
 
 Session tags are free-form labels you can attach to sessions and then filter on

@@ -26,13 +26,19 @@ type Session struct {
 
 // Turn represents a single interaction turn within a session.
 type Turn struct {
-	Index       int
-	Role        Role
-	Content     string
-	ToolCalls   []ToolCall
-	Timestamp   time.Time
-	Depth       int  // 0 = main agent, 1+ = subagent nesting levels
-	ParentIndex *int // entry_index of parent turn (nil for depth=0)
+	Index     int
+	Role      Role
+	Content   string
+	ToolCalls []ToolCall
+	Timestamp time.Time
+	Depth     int // 0 = main agent, 1+ = subagent nesting levels
+	// ParentIndex is the entry_index of the parent entry. At depth 1 and deeper
+	// it names the enclosing depth-0 turn. At depth 0 it is nil unless the
+	// harness records a message graph; OpenCode links a depth-0 message to its
+	// parent message here. Consumers key child behaviour on Depth, never on
+	// ParentIndex being set: a depth-0 entry with a ParentIndex is still a
+	// top-level turn.
+	ParentIndex *int
 	// ObservedModel is exact source evidence. Omission remains omission; readers
 	// derive sticky state without mutating this raw observation.
 	ObservedModel ObservedModelID
