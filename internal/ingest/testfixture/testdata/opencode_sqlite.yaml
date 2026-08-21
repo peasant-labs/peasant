@@ -1,4 +1,4 @@
-declared_cases: 24
+declared_cases: 25
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -760,4 +760,25 @@ cases:
       - {id: msg_current_root, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: user, time_created: 2400, time_updated: 2410, data: '{"id":"msg_current_root","text":"CURRENT_ROOT","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2400}}', seq: 1}
       - {id: msg_current_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2411, time_updated: 2420, data: '{"id":"msg_current_child","parentID":"msg_current_root","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_current_parent","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"CURRENT_TOOL_RESULT"}],"result":"CURRENT_TOOL_RESULT"},"time":{"created":2412,"completed":2419}}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2411,"completed":2420}}', seq: 2}
       - {id: msg_current_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2421, time_updated: 2430, data: '{"id":"msg_current_parent","parentID":"msg_absent","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"part_current_parent","text":"CURRENT_PARENT"}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2421,"completed":2430}}', seq: 3}
+    ignored_history: []
+
+  - name: session-clock-present-and-absent
+    logical_path: clock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 3, legacy_parts: 2, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_clock_present, session_id: ses_3cd91f52effeXd3QAJ54jOyzvE, time_created: 1000, time_updated: 1010, data: '{"id":"msg_clock_present","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvE","role":"user","path":{"cwd":"/synthetic/clock"},"time":{"created":1000,"completed":1010},"content":"clock present"}'}
+      - {id: msg_absent_old, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1500, time_updated: 1510, data: '{"id":"msg_absent_old","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvF","role":"user","path":{"cwd":"/synthetic/clock"},"time":{"created":1500,"completed":1510},"content":"absent clock older"}'}
+      - {id: msg_absent_new, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1600, time_updated: 1610, data: '{"id":"msg_absent_new","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvF","role":"user","path":{"cwd":"/synthetic/clock"},"time":{"created":1600,"completed":1610},"content":"absent clock newest"}'}
+    legacy_parts:
+      - {id: part_clock_present, message_id: msg_clock_present, session_id: ses_3cd91f52effeXd3QAJ54jOyzvE, time_created: 1001, time_updated: 1001, data: '{"id":"part_clock_present","messageID":"msg_clock_present","type":"text","text":"CLOCK_PRESENT","time":{"created":1001}}'}
+      - {id: part_absent_old, message_id: msg_absent_old, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1501, time_updated: 1501, data: '{"id":"part_absent_old","messageID":"msg_absent_old","type":"text","text":"ABSENT_OLD","time":{"created":1501}}'}
+    current_messages: []
     ignored_history: []

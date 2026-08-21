@@ -109,9 +109,12 @@ type openCodeSessionCandidate struct {
 	session    DiscoveredSession
 	identity   OpenCodeSelectedSourceIdentity
 	provenance OpenCodeCandidateProvenance
-	// sessionClock is true when the source database carries the upstream
-	// session clock; sessionUpdatedAt is that clock for this session.
-	sessionClock     bool
+	// sessionUpdatedAt is this one session's usable upstream clock
+	// (session.time_updated). It is the single optional clock value per
+	// session: a zero value means the session has no usable clock, so the
+	// database and WAL mtime floor applies instead. A session whose database
+	// has the session table but no row for it, or whose row has a null or zero
+	// time_updated, has a zero value here and takes the mtime-floor path.
 	sessionUpdatedAt time.Time
 }
 

@@ -277,7 +277,10 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			parentID := record.parent
 			candidates[index].session.ParentUUID = &parentID
 		}
-		candidates[index].sessionClock = records.supported
+		// The clock is per session, not per database. A supported database
+		// with no row for this session, or a row without a usable
+		// time_updated, leaves sessionUpdatedAt zero, so the session takes the
+		// mtime-floor path and a row deletion still moves its freshness.
 		if known {
 			candidates[index].sessionUpdatedAt = record.updatedAt
 		}
@@ -473,12 +476,18 @@ func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCand
 
 // hydrateCanonicalOpenCodeFreshness sets ModTime for every winner. A JSON
 // winner uses its file mtime and degrades to zero when stat fails. A SQLite
-// winner uses the newest selected row time combined with the upstream session
-// clock (session.time_updated), which OpenCode moves on revert and undo, so a
-// row deletion still moves freshness without touching sibling sessions. A
-// database without that clock falls back to the database and WAL mtime as a
-// floor. A SQLite candidate whose freshness cannot be read is skipped and
-// recorded; other winners stay.
+// winner combines the newest selected row time with the session's own clock
+// (session.time_updated) when that session has a usable clock. OpenCode moves
+// that clock on revert and undo, so a row deletion still moves freshness
+// without touching sibling sessions. A session with no usable clock falls back
+// to the database and WAL mtime as a floor, so a row deletion is still seen.
+//
+// The changed clock reports content edits and deletions, not the raw file
+// mtime. An in-place row rewrite that moves no time column and no session
+// clock therefore is not detected as a change for a session that has a usable
+// clock; only the floor path, used when a session has no usable clock, tracks
+// the file and WAL mtime. A SQLite candidate whose freshness cannot be read is
+// skipped and recorded; other winners stay.
 func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate) []DiscoveredSession {
 	bySQLitePath := make(map[string][]int)
 	keep := make([]bool, len(selected))
@@ -520,7 +529,7 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 				a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), hydrationErr)
 				continue
 			}
-			if candidate.sessionClock {
+			if !candidate.sessionUpdatedAt.IsZero() {
 				if candidate.sessionUpdatedAt.After(newest) {
 					newest = candidate.sessionUpdatedAt
 				}
