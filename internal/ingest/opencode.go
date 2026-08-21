@@ -558,7 +558,19 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			candidate := &selected[index]
 			newest, hydrationErr := rowFreshness(candidate.identity)
 			if hydrationErr != nil {
-				a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; that session was skipped", candidate.identity.SessionID), hydrationErr)
+				// Canonical selection already discarded the losing
+				// representations, so dropping the winner here would drop a
+				// session that had a readable representation. Fall back to the
+				// database and WAL mtime floor and keep the session. Only skip
+				// it when the floor is also unreadable, and name it either way.
+				if floorErr != nil {
+					a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read and the mtime floor was unavailable; that session was skipped", candidate.identity.SessionID), hydrationErr)
+					continue
+				}
+				a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness for session %q could not be read; the database and WAL mtime floor was used instead", candidate.identity.SessionID), hydrationErr)
+				candidate.session.ModTime = floor
+				candidate.session.ActiveModTime = floor
+				keep[index] = true
 				continue
 			}
 			if floorErr == nil {
