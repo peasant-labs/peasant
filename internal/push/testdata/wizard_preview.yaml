@@ -1,0 +1,40 @@
+# Stored transcripts the push wizard's selection preview renders.
+#
+# The preview shows each session AS IT WILL BE PUBLISHED, so these entries are
+# fed through the real push redactor before they reach the pane. The recorded
+# text therefore carries values a push must not publish, and every case names
+# both the published form the pane must show and the recorded form it must not.
+#
+# The third session holds no entries: that is the state the pane answers with
+# one short note instead of a transcript.
+expectedSessionCount: 3
+expectedCaseCount: 3
+
+sessions:
+  - sessionId: sess-aaa-111
+    entries:
+      - {role: user, entryType: text, content: "publish this run with sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}
+      - {role: assistant, entryType: text, content: "the preview reads the stored entries and redacts them"}
+  - sessionId: sess-bbb-222
+    entries:
+      - {role: user, entryType: text, content: "tell alice@example.com when the village has it"}
+  - sessionId: sess-ccc-333
+    entries: []
+
+cases:
+  - name: secrets-are-replaced-before-the-pane-draws-them
+    sessionId: sess-aaa-111
+    wantContains: ["<ANTHROPIC_KEY>", "redacts them"]
+    wantMissing: ["sk-ant-api03", "stored copy", "never been redacted", "older rule set"]
+  # The recorded address is gone and the prose around it survives. The pane is
+  # not asked for the placeholder itself: the markdown renderer beneath it drops
+  # <EMAIL> as an inline HTML tag, while a placeholder holding an underscore
+  # (<ANTHROPIC_KEY> above) is not a valid tag name and survives as text.
+  - name: personal-data-is-replaced-before-the-pane-draws-it
+    sessionId: sess-bbb-222
+    wantContains: ["tell", "when the village has it"]
+    wantMissing: ["alice@example.com", "example.com", "stored copy"]
+  - name: a-session-with-no-stored-entries-gets-one-note
+    sessionId: sess-ccc-333
+    wantContains: ["no transcript is stored for this session yet."]
+    wantMissing: ["stored copy", "never been redacted"]

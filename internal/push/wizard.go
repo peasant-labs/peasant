@@ -1,73 +1,23 @@
 package push
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/peasant-labs/peasant/internal/config"
-	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/keymap"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/peasant-labs/schema"
 )
 
 // ---------------------------------------------------------------------------
-// Styles (push wizard specific, mirrors FTUE patterns)
-// ---------------------------------------------------------------------------
-
-var wizBaseBg = lipgloss.Color(defaults.ColorBg.String())
-
-var (
-	wizTitle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color(defaults.ColorFg.String())).
-			Background(wizBaseBg)
-
-	wizText = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(defaults.ColorFg.String())).
-		Background(wizBaseBg)
-
-	wizDim = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(defaults.ColorDimText.String())).
-		Background(wizBaseBg).
-		Italic(true)
-
-	wizBold = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(defaults.ColorFg.String())).
-		Background(wizBaseBg)
-
-	wizCursor = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color(defaults.ColorFg.String())).
-			Background(wizBaseBg)
-
-	wizBg = lipgloss.NewStyle().Background(wizBaseBg)
-
-	wizBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(defaults.ColorBorder.String())).
-			Background(wizBaseBg).
-			Padding(1, 2)
-
-	wizGreen = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(defaults.ColorPastelMint.String())).
-			Background(wizBaseBg)
-
-	wizYellow = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(defaults.ColorPastelLemon.String())).
-			Background(wizBaseBg)
-
-	wizRed = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(defaults.ColorPastelPink.String())).
-		Background(wizBaseBg)
-)
-
-// ---------------------------------------------------------------------------
-// PushWizardSession — session with metadata and action
+// PushWizardSession - session with metadata and action
 // ---------------------------------------------------------------------------
 
 // PushWizardSession pairs a push session row with its metadata and action.
@@ -77,9 +27,9 @@ type PushWizardSession struct {
 	Action PushAction
 	// Locked marks a session that the branch-aware selection withheld due to a
 	// multi-project conflict (BranchMatchWithheldConflict). Locked sessions are
-	// shown in the wizard flagged ("withheld: branch conflict") but are
-	// non-selectable: navigation/select/toggle keys skip them and
-	// SelectedSessionIDs never returns them.
+	// shown in the wizard as a conflict row, and they are non-selectable: the
+	// selection tree never toggles them and SelectedSessionIDs never returns
+	// them.
 	Locked bool
 }
 
@@ -104,50 +54,75 @@ func WizardCandidates(sessions []ingest.PushSessionRow, sel *SessionSelection) [
 	return out
 }
 
-// redactionLabel returns a styled label based on RedactionInfo state.
-func (s PushWizardSession) redactionLabel() string {
-	if s.Meta == nil {
-		return wizDim.Render("unknown")
-	}
-	ri := s.Meta.Redaction
-	ch := s.Meta.ContentHash
-	switch {
-	case ri.IsCurrent(ch):
-		return wizGreen.Render("current")
-	case ri.IsStale(ch):
-		return wizYellow.Render("stale")
-	case ri.IsRaw():
-		return wizRed.Render("raw")
+// RedactionState is the closed set of redaction states the wizard reports for
+// the STORED copy of one session. It is a named enum rather than a bare string
+// so a screen, a fixture, and a test all name the same value.
+type RedactionState uint8
+
+const (
+	// RedactionStateUnknown is the zero value. The wizard reports it when the
+	// session carries no readable metadata.
+	RedactionStateUnknown RedactionState = iota
+	// RedactionStateCurrent marks a stored copy redacted at the current rule
+	// set, for the current content.
+	RedactionStateCurrent
+	// RedactionStateStale marks a stored copy redacted by an older rule set, or
+	// before the content last changed.
+	RedactionStateStale
+	// RedactionStateRaw marks a stored copy that redaction never ran over.
+	RedactionStateRaw
+)
+
+// IsValid reports whether s is one of the four known states.
+func (s RedactionState) IsValid() bool {
+	switch s {
+	case RedactionStateUnknown, RedactionStateCurrent, RedactionStateStale, RedactionStateRaw:
+		return true
 	default:
-		return wizDim.Render("unknown")
+		return false
 	}
 }
 
-// redactionStatus returns an unstyled status string for redaction.
-func (s PushWizardSession) redactionStatus() string {
-	if s.Meta == nil {
-		return "unknown"
-	}
-	ri := s.Meta.Redaction
-	ch := s.Meta.ContentHash
-	switch {
-	case ri.IsCurrent(ch):
+// String returns a stable, lower-case name for s, or "unknown" for an
+// out-of-range value.
+func (s RedactionState) String() string {
+	switch s {
+	case RedactionStateCurrent:
 		return "current"
-	case ri.IsStale(ch):
+	case RedactionStateStale:
 		return "stale"
-	case ri.IsRaw():
+	case RedactionStateRaw:
 		return "raw"
 	default:
 		return "unknown"
 	}
 }
 
+// RedactionState reports the state of the session's STORED copy.
+func (s PushWizardSession) RedactionState() RedactionState {
+	if s.Meta == nil {
+		return RedactionStateUnknown
+	}
+	info := s.Meta.Redaction
+	hash := s.Meta.ContentHash
+	switch {
+	case info.IsCurrent(hash):
+		return RedactionStateCurrent
+	case info.IsStale(hash):
+		return RedactionStateStale
+	case info.IsRaw():
+		return RedactionStateRaw
+	default:
+		return RedactionStateUnknown
+	}
+}
+
 // ---------------------------------------------------------------------------
-// PushWizardModel — 4-page push wizard
+// PushWizardModel - a four-page wizard composed from the TUI kit
 // ---------------------------------------------------------------------------
 
 // wizardPage identifies each page of the push wizard.
-type wizardPage int
+type wizardPage uint8
 
 const (
 	pageInitialConfirm wizardPage = iota
@@ -157,42 +132,97 @@ const (
 	pageCount
 )
 
-// PushWizardModel is the top-level BubbleTea model for the push wizard.
+// IsValid reports whether p names a page the wizard renders.
+func (p wizardPage) IsValid() bool { return p < pageCount }
+
+// String returns a stable, lower-case name for p, or "unknown" for an
+// out-of-range value.
+func (p wizardPage) String() string {
+	switch p {
+	case pageInitialConfirm:
+		return "start"
+	case pageSessionReview:
+		return "select sessions"
+	case pageRedactionPreview:
+		return "what leaves your machine"
+	case pageFinalConfirm:
+		return "confirm push"
+	default:
+		return "unknown"
+	}
+}
+
+// Page chrome the frame title carries. The wizard keeps all chrome
+// lower-case, like every other kit surface.
+const (
+	wizardTitle          = "push to village"
+	wizardCancelledText  = "push cancelled."
+	unknownProjectLabel  = "(unknown project)"
+	projectNodePrefix    = "project:"
+	wizardSummaryRows    = 1
+	wizardReceiptDetails = "sessions in this push"
+)
+
+// PushWizardModel is the top-level BubbleTea model for the push wizard. Every
+// page composes kit components over one theme: a bordered [kit.Frame], a
+// [kit.Panel] body, the [kit.PreviewSplit] session selector, and [kit.Confirm]
+// for the two consent pages. The model owns no colors, no padding, and no
+// background fill of its own.
 type PushWizardModel struct {
-	page         wizardPage
-	sessions     []PushWizardSession
-	cursor       int
-	offset       int // scroll offset for session review
-	vpOffset     int // scroll offset for redaction preview
-	width        int
-	height       int
-	quitting     bool
-	confirmed    bool
-	confirmSel   int                     // 0=Yes, 1=No for option select pages
-	redactResult *RedactionPreviewResult // populated before redaction preview page
+	th       theme.Theme
+	page     wizardPage
+	sessions []PushWizardSession
+
+	// tree is held by pointer because the split drives the SAME forest; both
+	// must never work on diverging copies.
+	tree   *kit.Tree
+	leaves map[string]*kit.TreeNode
+	split  kit.PreviewSplit
+
+	confirm kit.Confirm
+	overlay kit.Overlay
+	helping bool
+
+	noticeScroll int
+
+	width     int
+	height    int
+	quitting  bool
+	confirmed bool
 }
 
-// RedactionPreviewResult holds the result of running a dry-run redaction for preview.
-type RedactionPreviewResult struct {
-	Entries []RedactionPreviewEntry
-}
-
-// RedactionPreviewEntry shows what was redacted in a single session.
-type RedactionPreviewEntry struct {
-	SessionID    string
-	Status       string // "current", "stale", "raw"
-	SampleBefore string // first ~200 chars of transcript before redaction
-	SampleAfter  string // first ~200 chars of transcript after redaction
-	Changed      bool   // whether redaction changed anything
-}
-
-// NewPushWizard creates a push wizard model with the given sessions.
-// All sessions default to PushWithRedaction.
-func NewPushWizard(sessions []PushWizardSession) PushWizardModel {
-	return PushWizardModel{
+// NewPushWizard creates a push wizard model over theme th with the given
+// sessions. Every unlocked session starts selected for push, which is the same
+// default the pre-kit wizard opened with.
+//
+// turns is the preview read: it returns the transcript of one session as the
+// push will publish it. The selection page draws it beside the tree, loaded
+// asynchronously per highlighted row.
+func NewPushWizard(th theme.Theme, sessions []PushWizardSession, turns PublishedTurnsFunc) PushWizardModel {
+	tree, leaves := newSelectionTree(th, sessions)
+	m := PushWizardModel{
+		th:       th,
 		page:     pageInitialConfirm,
 		sessions: sessions,
+		tree:     tree,
+		leaves:   leaves,
+		confirm:  kit.NewConfirm(th, startPrompt(len(sessions))),
+		overlay:  kit.NewOverlay(th),
 	}
+	m.split = kit.NewPreviewSplitWithBodies(th, kit.NewTreeLeftPane(m.tree),
+		wizardPreviewSource(sessions, turns, th))
+	m.confirm.Focus()
+	m.tree.Focus()
+	return m
+}
+
+// startPrompt is the first page's question. It names the number of sessions so
+// the user reads the size of the action before answering it.
+func startPrompt(count int) string {
+	if count == 1 {
+		return "push 1 session to the village?"
+	}
+	return fmt.Sprintf("push %d sessions to the village?", count)
 }
 
 // Confirmed returns true if the user confirmed the push.
@@ -216,35 +246,405 @@ func (m PushWizardModel) SelectedSessionIDs() []string {
 	return ids
 }
 
+// selectedSessions returns the sessions the user approved, in display order.
+func (m PushWizardModel) selectedSessions() []PushWizardSession {
+	var out []PushWizardSession
+	for _, s := range m.sessions {
+		if s.Locked {
+			continue
+		}
+		if s.Action == PushWithRedaction {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func (m PushWizardModel) Init() tea.Cmd { return nil }
+
+// ---------------------------------------------------------------------------
+// Selection forest
+// ---------------------------------------------------------------------------
+
+// staticTreeSource serves a forest the wizard already holds. The wizard reads
+// its candidates before it mounts, so nothing here scans: the source exists so
+// the tree keeps one source contract for every caller.
+type staticTreeSource struct{ roots []*kit.TreeNode }
+
+// Load returns the prepared forest. It never blocks and never fails.
+func (s staticTreeSource) Load(context.Context) ([]*kit.TreeNode, error) { return s.roots, nil }
+
+var _ kit.TreeSource = staticTreeSource{}
+
+// newSelectionTree folds the candidates into a project -> session forest and
+// returns the mounted tree plus a lookup from session ID to its leaf, which is
+// how the wizard reads the user's selection back out.
+func newSelectionTree(th theme.Theme, sessions []PushWizardSession) (*kit.Tree, map[string]*kit.TreeNode) {
+	var roots []*kit.TreeNode
+	byProject := make(map[string]*kit.TreeNode, len(sessions))
+	leaves := make(map[string]*kit.TreeNode, len(sessions))
+	for _, s := range sessions {
+		project := s.Row.ProjectName
+		if strings.TrimSpace(project) == "" {
+			project = unknownProjectLabel
+		}
+		root, ok := byProject[project]
+		if !ok {
+			root = &kit.TreeNode{ID: projectNodePrefix + project, Label: project}
+			byProject[project] = root
+			roots = append(roots, root)
+		}
+		leaf := &kit.TreeNode{
+			ID:    s.Row.SessionID,
+			Label: sessionRowLabel(s),
+			State: leafState(s),
+		}
+		root.Children = append(root.Children, leaf)
+		leaves[s.Row.SessionID] = leaf
+	}
+	tree := kit.NewTree(th, staticTreeSource{roots: roots}).WithRoots(roots)
+	return &tree, leaves
+}
+
+// leafState maps a candidate onto the tri-state the tree renders. A withheld
+// session is a Conflict: the tree draws it distinctly and refuses to select it,
+// which is exactly the "shown but non-selectable" rule the branch-aware
+// selection needs.
+func leafState(s PushWizardSession) kit.TriState {
+	switch {
+	case s.Locked:
+		return kit.Conflict
+	case s.Action == PushWithRedaction:
+		return kit.Checked
+	default:
+		return kit.Unchecked
+	}
+}
+
+// sessionRowLabel is one selection row: the session, the harness that recorded
+// it, and when it started.
+func sessionRowLabel(s PushWizardSession) string {
+	return fmt.Sprintf("%s  %s  %s",
+		shortSessionID(s.Row.SessionID), s.Row.ModelHarness, sessionStartText(s.Row))
+}
+
+// shortSessionID clips a session ID to a readable prefix.
+func shortSessionID(id string) string {
+	const keep = 10
+	if len(id) > keep {
+		return id[:keep] + ".."
+	}
+	return id
+}
+
+// sessionStartText formats a session's start time for a row or a receipt line.
+func sessionStartText(row ingest.PushSessionRow) string {
+	return time.UnixMilli(row.StartMs).Format("Jan 02 15:04")
+}
+
+// syncSelection copies the tree's checkboxes back onto the candidate actions.
+// Locked sessions keep their withheld action: the tree cannot toggle a Conflict
+// leaf, so nothing can move them into the push set.
+func (m *PushWizardModel) syncSelection() {
+	for i := range m.sessions {
+		if m.sessions[i].Locked {
+			continue
+		}
+		leaf, ok := m.leaves[m.sessions[i].Row.SessionID]
+		if !ok {
+			continue
+		}
+		if leaf.State == kit.Checked {
+			m.sessions[i].Action = PushWithRedaction
+			continue
+		}
+		m.sessions[i].Action = PushExclude
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Preview pane
+// ---------------------------------------------------------------------------
+
+// projectLabelOf returns the project a candidate is grouped under.
+func projectLabelOf(s PushWizardSession) string {
+	if strings.TrimSpace(s.Row.ProjectName) == "" {
+		return unknownProjectLabel
+	}
+	return s.Row.ProjectName
+}
+
+// ---------------------------------------------------------------------------
+// Keys and availability
+// ---------------------------------------------------------------------------
+
+// actionKeymap returns the one production keymap, with quit narrowed to the
+// interrupt key while the selection tree edits search text. A user typing "q"
+// into the search box must get the letter; the interrupt must still quit.
+func (m PushWizardModel) actionKeymap() keymap.Keymap {
+	km := keymap.Default()
+	if !m.filterEditing() {
+		return km
+	}
+	if binding, ok := km[keymap.ActionQuit]; ok {
+		binding.SetKeys(interruptKey)
+		km[keymap.ActionQuit] = binding
+	}
+	return km
+}
+
+// interruptKey is the keystroke that always quits, including while a text
+// field holds the printable keys.
+const interruptKey = "ctrl+c"
+
+// filterEditing reports whether the selection tree currently captures printable
+// keys as search text.
+func (m PushWizardModel) filterEditing() bool {
+	return m.page == pageSessionReview && m.tree != nil && m.tree.FilterState().Editing()
+}
+
+// availability reports the actions the current page dispatches, in priority
+// order. The component's own actions come FIRST so a component key (the search
+// box's enter, for example) is never shadowed by page chrome. Dispatch, the
+// footer, and the help overlay all read this one list.
+func (m PushWizardModel) availability() keymap.Availability {
+	return staticAvailability(m.availableActions())
+}
+
+func (m PushWizardModel) availableActions() []keymap.ActionID {
+	var actions []keymap.ActionID
+	switch m.page {
+	case pageInitialConfirm, pageFinalConfirm:
+		actions = append(actions, m.confirm.AvailableActions()...)
+	case pageSessionReview:
+		actions = append(actions, m.split.AvailableActions()...)
+		actions = append(actions, keymap.ActionConfirm, keymap.ActionBack)
+	case pageRedactionPreview:
+		actions = append(actions,
+			keymap.ActionUp, keymap.ActionDown,
+			keymap.ActionPageUp, keymap.ActionPageDown,
+			keymap.ActionTop, keymap.ActionBottom,
+			keymap.ActionConfirm, keymap.ActionBack,
+		)
+	}
+	actions = append(actions, keymap.ActionQuit, keymap.ActionHelp)
+	return dropPrintable(m.actionKeymap(), dedupeActions(actions), m.filterEditing())
+}
+
+// helpAvailability is what the open help overlay dispatches: the help key
+// again, or back. Both close it.
+func helpAvailability() keymap.Availability {
+	return staticAvailability([]keymap.ActionID{keymap.ActionHelp, keymap.ActionBack})
+}
+
+// staticAvailability is a fixed action list presented as a keymap.Availability.
+type staticAvailability []keymap.ActionID
+
+func (s staticAvailability) AvailableActions() []keymap.ActionID { return []keymap.ActionID(s) }
+
+var _ keymap.Availability = staticAvailability(nil)
+
+// dedupeActions removes repeats while keeping first-seen order, so an action a
+// component and the page chrome both advertise is dispatched, hinted, and
+// documented exactly once.
+func dedupeActions(actions []keymap.ActionID) []keymap.ActionID {
+	seen := make(map[keymap.ActionID]bool, len(actions))
+	out := make([]keymap.ActionID, 0, len(actions))
+	for _, action := range actions {
+		if seen[action] {
+			continue
+		}
+		seen[action] = true
+		out = append(out, action)
+	}
+	return out
+}
+
+// dropPrintable removes every action whose key a focused text field receives as
+// printable input. Dispatch, the footer, and the help overlay consume the
+// returned set, so a printable binding can never shadow search text in one of
+// them and not the others.
+func dropPrintable(km keymap.Keymap, actions []keymap.ActionID, capturing bool) []keymap.ActionID {
+	if !capturing {
+		return actions
+	}
+	out := make([]keymap.ActionID, 0, len(actions))
+	for _, action := range actions {
+		if keymap.HasPrintableBinding(km, action) {
+			continue
+		}
+		out = append(out, action)
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
 
 func (m PushWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.setSize(msg.Width, msg.Height)
 		return m, nil
 
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case defaults.KeyInterrupt.String():
-			m.quitting = true
-			return m, tea.Quit
-		}
+	case kit.ConfirmResultMsg:
+		return m.applyConfirmResult(msg)
 
-		switch m.page {
-		case pageInitialConfirm:
-			return m.updateInitialConfirm(msg)
-		case pageSessionReview:
-			return m.updateSessionReview(msg)
-		case pageRedactionPreview:
-			return m.updateRedactionPreview(msg)
-		case pageFinalConfirm:
-			return m.updateFinalConfirm(msg)
+	case tea.KeyPressMsg:
+		return m.handleKey(msg)
+
+	default:
+		if m.page == pageSessionReview && m.split.OwnsAsync(msg) {
+			var cmd tea.Cmd
+			m.split, cmd = m.split.Update(msg)
+			return m, cmd
 		}
 	}
 	return m, nil
 }
+
+// setSize records the terminal region and hands every child its share of it.
+func (m *PushWizardModel) setSize(width, height int) {
+	m.width, m.height = width, height
+	m.overlay.SetSize(width, height)
+	frame := m.frame()
+	inner := frame.InnerWidth()
+	body := frame.InnerHeight() - wizardSummaryRows
+	if body < 1 {
+		body = 1
+	}
+	m.split.SetSize(inner, body)
+	m.confirm.SetSize(inner, kit.ConfirmMinSize.Height)
+}
+
+// handleKey resolves one key press against the current page.
+func (m PushWizardModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	km := m.actionKeymap()
+	if m.helping {
+		if _, ok := keymap.Match(km, msg, helpAvailability()); ok {
+			m.helping = false
+		}
+		return m, nil
+	}
+	action, ok := keymap.Match(km, msg, m.availability())
+	if !ok {
+		return m, nil
+	}
+	switch action {
+	case keymap.ActionHelp:
+		m.helping = true
+		return m, nil
+	case keymap.ActionQuit:
+		m.quitting = true
+		return m, tea.Quit
+	}
+
+	switch m.page {
+	case pageInitialConfirm, pageFinalConfirm:
+		var cmd tea.Cmd
+		m.confirm, cmd = m.confirm.Update(msg)
+		return m, cmd
+	case pageSessionReview:
+		return m.updateSelection(action, msg)
+	case pageRedactionPreview:
+		return m.updateNotice(action)
+	}
+	return m, nil
+}
+
+// updateSelection advances the selection page. Page chrome owns confirm and
+// back; every other key belongs to the split.
+func (m PushWizardModel) updateSelection(action keymap.ActionID, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch action {
+	case keymap.ActionConfirm:
+		m.page = pageRedactionPreview
+		m.noticeScroll = 0
+		return m, nil
+	case keymap.ActionBack:
+		m.page = pageInitialConfirm
+		m.confirm = kit.NewConfirm(m.th, startPrompt(len(m.sessions)))
+		m.confirm.Focus()
+		m.setSize(m.width, m.height)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.split, cmd = m.split.Update(msg)
+	m.syncSelection()
+	return m, cmd
+}
+
+// updateNotice scrolls the consent page, or moves off it.
+func (m PushWizardModel) updateNotice(action keymap.ActionID) (tea.Model, tea.Cmd) {
+	page := m.noticeHeight()
+	switch action {
+	case keymap.ActionConfirm:
+		if len(m.selectedSessions()) == 0 {
+			// Nothing to confirm. The page keeps saying so rather than
+			// advancing to an empty receipt.
+			return m, nil
+		}
+		m.page = pageFinalConfirm
+		m.confirm = kit.NewConfirm(m.th, finalPrompt(len(m.selectedSessions())))
+		m.confirm.Focus()
+		m.setSize(m.width, m.height)
+		return m, nil
+	case keymap.ActionBack:
+		m.page = pageSessionReview
+		return m, nil
+	case keymap.ActionUp:
+		m.noticeScroll--
+	case keymap.ActionDown:
+		m.noticeScroll++
+	case keymap.ActionPageUp:
+		m.noticeScroll -= page
+	case keymap.ActionPageDown:
+		m.noticeScroll += page
+	case keymap.ActionTop:
+		m.noticeScroll = 0
+	case keymap.ActionBottom:
+		m.noticeScroll = m.noticeLineCount()
+	}
+	m.clampNoticeScroll()
+	return m, nil
+}
+
+// applyConfirmResult acts on the answer a kit.Confirm produced. The first page
+// starts or cancels the wizard; the last page pushes or returns to the
+// selection.
+func (m PushWizardModel) applyConfirmResult(msg kit.ConfirmResultMsg) (tea.Model, tea.Cmd) {
+	switch m.page {
+	case pageInitialConfirm:
+		if !msg.OK {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		m.page = pageSessionReview
+		m.tree.Focus()
+		m.setSize(m.width, m.height)
+		return m, m.split.Load()
+	case pageFinalConfirm:
+		if !msg.OK {
+			m.page = pageSessionReview
+			return m, nil
+		}
+		m.confirmed = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// finalPrompt is the last question the user answers before anything uploads.
+func finalPrompt(count int) string {
+	if count == 1 {
+		return "push 1 session now?"
+	}
+	return fmt.Sprintf("push %d sessions now?", count)
+}
+
+// ---------------------------------------------------------------------------
+// View
+// ---------------------------------------------------------------------------
 
 func (m PushWizardModel) View() tea.View {
 	v := tea.NewView(m.viewString())
@@ -252,311 +652,172 @@ func (m PushWizardModel) View() tea.View {
 	return v
 }
 
+// frame builds the bordered container for the current page. It is the ONE place
+// the wizard's chrome height and width accounting lives.
+func (m PushWizardModel) frame() kit.Frame {
+	frame := kit.NewFrame(m.th).
+		WithTitle(wizardTitle + " - " + m.page.String()).
+		WithFooter(keymap.FooterView(m.th, m.actionKeymap(), m.availability()))
+	frame.SetSize(m.width, m.height)
+	return frame
+}
+
 func (m PushWizardModel) viewString() string {
 	if m.quitting {
-		return wizDim.Render("Push cancelled.\n")
+		panel := kit.NewPanel(m.th)
+		panel.SetSize(m.width, 0)
+		panel.Line(m.th.Styles().Muted, wizardCancelledText)
+		return panel.View()
 	}
+	frame := m.frame()
+	frame.SetContent(m.body(frame.InnerWidth(), frame.InnerHeight()))
+	base := frame.View()
+	if m.helping {
+		layer := helpLayer{th: m.th, entries: keymap.HelpEntries(m.actionKeymap(), m.availability())}
+		return m.overlay.Push(layer).View(base)
+	}
+	return base
+}
 
-	var content string
+// body renders the current page into the frame's inner region.
+func (m PushWizardModel) body(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
 	switch m.page {
 	case pageInitialConfirm:
-		content = m.viewInitialConfirm()
+		return m.startBody(width, height)
 	case pageSessionReview:
-		content = m.viewSessionReview()
+		return m.selectionBody(width, height)
 	case pageRedactionPreview:
-		content = m.viewRedactionPreview()
+		return m.noticeBody(width, height)
 	case pageFinalConfirm:
-		content = m.viewFinalConfirm()
+		return m.receiptBody(width, height)
 	}
-
-	if m.width > 0 {
-		return wizBorder.Width(m.width - 4).Render(content)
-	}
-	return wizBorder.Render(content)
+	return ""
 }
 
-// ---------------------------------------------------------------------------
-// Page 1: Initial Confirm
-// ---------------------------------------------------------------------------
-
-func (m PushWizardModel) updateInitialConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
-		if m.confirmSel > 0 {
-			m.confirmSel--
-		}
-	case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-		if m.confirmSel < 1 {
-			m.confirmSel++
-		}
-	case defaults.KeySpace.String(), defaults.KeyEnter.String():
-		if m.confirmSel == 0 { // Yes
-			m.page = pageSessionReview
-			m.cursor = 0
-			m.offset = 0
-		} else { // No
-			m.quitting = true
-			return m, tea.Quit
-		}
-	case defaults.KeyEscape.String(), defaults.KeyInterrupt.String():
-		m.quitting = true
-		return m, tea.Quit
-	}
-	return m, nil
+// startBody introduces the push and asks the first question.
+func (m PushWizardModel) startBody(width, height int) string {
+	styles := m.th.Styles()
+	panel := kit.NewPanel(m.th)
+	panel.SetSize(width, height)
+	panel.Wrapped(styles.Base, fmt.Sprintf("%d session(s) are ready to push.", len(m.sessions)))
+	panel.Blank()
+	panel.Wrapped(styles.Muted, "the village keeps what you publish. you choose the sessions on the next page.")
+	panel.Blank()
+	panel.Rendered(m.confirm.View())
+	return panel.View()
 }
 
-func (m PushWizardModel) viewInitialConfirm() string {
-	var b strings.Builder
-	b.WriteString(wizTitle.Render("Push to Village"))
-	b.WriteString(wizBg.Render("\n\n"))
-	b.WriteString(wizText.Render(fmt.Sprintf(
-		"You have %d session(s) ready to push.", len(m.sessions))))
-	b.WriteString(wizBg.Render("\n\n"))
-	b.WriteString(wizBold.Render("Are you sure you want to push your data to the village?"))
-	b.WriteString(wizBg.Render("\n\n"))
-
-	options := []string{"Yes, continue", "No, cancel"}
-	for i, opt := range options {
-		if i == m.confirmSel {
-			b.WriteString(wizCursor.Render("▸ "))
-			b.WriteString(wizBold.Render(opt))
-		} else {
-			b.WriteString(wizBg.Render("  "))
-			b.WriteString(wizText.Render(opt))
-		}
-		b.WriteString(wizBg.Render("\n"))
-	}
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizDim.Render("↑/↓: select  enter: confirm  esc: cancel"))
-	return b.String()
+// selectionBody renders the selection count over the tree/preview split.
+func (m PushWizardModel) selectionBody(width, height int) string {
+	styles := m.th.Styles()
+	panel := kit.NewPanel(m.th)
+	panel.SetSize(width, height)
+	panel.Line(styles.Muted, m.selectionSummary())
+	panel.Rendered(m.split.View())
+	return panel.View()
 }
 
-// ---------------------------------------------------------------------------
-// Page 2: Session Review
-// ---------------------------------------------------------------------------
-
-// viewportHeight returns the number of visible session rows.
-func (m PushWizardModel) viewportHeight() int {
-	// Reserve space for title, column header, help bar, and border chrome.
-	h := m.height - 12
-	if h < 5 {
-		h = 5
-	}
-	if h > len(m.sessions) {
-		h = len(m.sessions)
-	}
-	return h
-}
-
-func (m PushWizardModel) updateSessionReview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	vh := m.viewportHeight()
-	switch msg.String() {
-	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
-		if m.cursor > 0 {
-			m.cursor--
-			if m.cursor < m.offset {
-				m.offset = m.cursor
-			}
-		}
-	case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-		if m.cursor < len(m.sessions)-1 {
-			m.cursor++
-			if m.cursor >= m.offset+vh {
-				m.offset = m.cursor - vh + 1
-			}
-		}
-	case defaults.KeySpace.String(): // cycle action (Locked sessions are non-selectable)
-		if !m.sessions[m.cursor].Locked {
-			m.sessions[m.cursor].Action = (m.sessions[m.cursor].Action + 1) % 2
-		}
-	case defaults.KeyQuit.String(): // set to exclude
-		if !m.sessions[m.cursor].Locked {
-			m.sessions[m.cursor].Action = PushExclude
-		}
-	case defaults.KeyPushApprove.String(): // set to push
-		if !m.sessions[m.cursor].Locked {
-			m.sessions[m.cursor].Action = PushWithRedaction
-		}
-	case defaults.KeyAnnotate.String(): // approve all (a) — skips Locked
-		for i := range m.sessions {
-			if !m.sessions[i].Locked {
-				m.sessions[i].Action = PushWithRedaction
-			}
-		}
-	case defaults.KeyExclude.String(): // exclude all (x) — skips Locked
-		for i := range m.sessions {
-			if !m.sessions[i].Locked {
-				m.sessions[i].Action = PushExclude
-			}
-		}
-	case defaults.KeyEnter.String():
-		m.page = pageRedactionPreview
-		m.vpOffset = 0
-	case defaults.KeyEscape.String():
-		m.page = pageInitialConfirm
-	}
-	return m, nil
-}
-
-func (m PushWizardModel) viewSessionReview() string {
-	var b strings.Builder
-	b.WriteString(wizTitle.Render("Review Sessions"))
-	b.WriteString(wizBg.Render("\n\n"))
-
-	// Column header
-	header := fmt.Sprintf("  %-12s %-10s %-14s %-12s %-10s %s",
-		"Session ID", "Provider", "Project", "Date", "Redaction", "Action")
-	b.WriteString(wizDim.Render(header))
-	b.WriteString(wizBg.Render("\n"))
-
-	vh := m.viewportHeight()
-	end := m.offset + vh
-	if end > len(m.sessions) {
-		end = len(m.sessions)
-	}
-
-	if m.offset > 0 {
-		b.WriteString(wizDim.Render(fmt.Sprintf("  ... %d more above", m.offset)))
-		b.WriteString(wizBg.Render("\n"))
-	}
-
-	for i := m.offset; i < end; i++ {
-		s := m.sessions[i]
-		cursor := wizBg.Render("  ")
-		if i == m.cursor {
-			cursor = wizCursor.Render("▸ ")
-		}
-
-		sid := s.Row.SessionID
-		if len(sid) > 10 {
-			sid = sid[:10] + ".."
-		}
-
-		provider := s.Row.ModelHarness
-		if len(provider) > 8 {
-			provider = provider[:8] + ".."
-		}
-
-		project := s.Row.ProjectName
-		if project == "" {
-			project = "(unknown)"
-		}
-		if len(project) > 12 {
-			project = project[:12] + ".."
-		}
-
-		date := time.UnixMilli(s.Row.StartMs).Format("Jan 02 15:04")
-
-		redaction := s.redactionLabel()
-
-		var actionLabel string
-		switch {
-		case s.Locked:
-			actionLabel = wizYellow.Render("withheld: branch conflict")
-		case s.Action == PushWithRedaction:
-			actionLabel = wizGreen.Render("push")
-		case s.Action == PushExclude:
-			actionLabel = wizRed.Render("exclude")
-		}
-
-		// The redaction label is styled (variable width from ANSI), so we pad differently.
-		// We format everything as simple columns; the styled redaction field will be appended.
-		row := fmt.Sprintf("%-12s %-10s %-14s %-12s ", sid, provider, project, date)
-
-		if i == m.cursor {
-			b.WriteString(cursor + wizBold.Render(row) + redaction + wizBg.Render("  ") + actionLabel)
-		} else {
-			b.WriteString(cursor + wizText.Render(row) + redaction + wizBg.Render("  ") + actionLabel)
-		}
-		b.WriteString(wizBg.Render("\n"))
-	}
-
-	if end < len(m.sessions) {
-		b.WriteString(wizDim.Render(fmt.Sprintf("  ... %d more below", len(m.sessions)-end)))
-		b.WriteString(wizBg.Render("\n"))
-	}
-
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizDim.Render("↑/↓: navigate  space: toggle  a: select all  x: clear all  enter: confirm  esc: back"))
-
-	return b.String()
-}
-
-// ---------------------------------------------------------------------------
-// Page 3: Redaction Preview
-// ---------------------------------------------------------------------------
-
-// wrapToContentWidth wraps prose to the width the wizard's border leaves for
-// content, so the scroll viewport's line count matches what is drawn.
-//
-// The fallback applies before the terminal size is known, which is the state the
-// first frame renders in.
-func wrapToContentWidth(text string, width int) string {
-	const fallback = 76
-	content := width - 8
-	if width <= 0 || content < 20 {
-		content = fallback
-	}
-	return lipgloss.NewStyle().Width(content).Render(text)
-}
-
-func (m PushWizardModel) redactionPreviewContent() string {
-	var b strings.Builder
-
-	var pushSessions []PushWizardSession
+// selectionSummary is the one-line count over the selector. It reports the
+// selected set, the whole candidate set, and how many sessions the branch-aware
+// selection withheld.
+func (m PushWizardModel) selectionSummary() string {
+	withheld := 0
 	for _, s := range m.sessions {
-		if s.Action == PushWithRedaction {
-			pushSessions = append(pushSessions, s)
+		if s.Locked {
+			withheld++
 		}
 	}
+	summary := fmt.Sprintf("selected %d of %d sessions", len(m.selectedSessions()), len(m.sessions))
+	if withheld > 0 {
+		summary += fmt.Sprintf("  -  %d withheld by a branch conflict", withheld)
+	}
+	return summary
+}
 
-	if len(pushSessions) == 0 {
-		b.WriteString(wizText.Render("No sessions selected for push."))
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizDim.Render("Press esc to go back and select sessions."))
-		return b.String()
+// noticeHeight is the number of body rows the consent page scrolls by.
+func (m PushWizardModel) noticeHeight() int {
+	height := m.frame().InnerHeight()
+	if height < 1 {
+		return 1
+	}
+	return height
+}
+
+// noticeLineCount is how many lines the consent copy occupies at the current
+// width.
+func (m PushWizardModel) noticeLineCount() int {
+	return len(strings.Split(m.noticePanel(m.frame().InnerWidth()).View(), "\n"))
+}
+
+// clampNoticeScroll keeps the scroll offset inside the content.
+func (m *PushWizardModel) clampNoticeScroll() {
+	max := m.noticeLineCount() - m.noticeHeight()
+	if max < 0 {
+		max = 0
+	}
+	if m.noticeScroll > max {
+		m.noticeScroll = max
+	}
+	if m.noticeScroll < 0 {
+		m.noticeScroll = 0
+	}
+}
+
+// noticeBody renders the consent copy, windowed to the current scroll offset.
+func (m PushWizardModel) noticeBody(width, height int) string {
+	lines := strings.Split(m.noticePanel(width).View(), "\n")
+	start := m.noticeScroll
+	if start > len(lines)-1 {
+		start = len(lines) - 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
+// noticePanel builds the whole consent copy at width cells. It is what the user
+// reads immediately before the push, so every claim on it is measured rather
+// than asserted.
+func (m PushWizardModel) noticePanel(width int) kit.Panel {
+	styles := m.th.Styles()
+	panel := kit.NewPanel(m.th)
+	panel.SetSize(width, 0)
+
+	selected := m.selectedSessions()
+	if len(selected) == 0 {
+		panel.Wrapped(styles.Base, "no sessions are selected for push.")
+		panel.Blank()
+		panel.Wrapped(styles.Muted, "press esc to go back and select sessions.")
+		return panel
 	}
 
-	b.WriteString(wizText.Render(fmt.Sprintf("%d session(s) selected for push:\n", len(pushSessions))))
-
-	var stale, raw, current int
-	for _, s := range pushSessions {
-		switch s.redactionStatus() {
-		case "stale":
-			stale++
-		case "raw":
-			raw++
-		case "current":
-			current++
-		}
-	}
-
-	// These counts describe the STORED copy on this machine. They are reported
-	// because they are true and a user may want to know, but they are deliberately
-	// not phrased as a promise about the upload: what is published comes from the
-	// indexed entries rather than from the transcript file these counts describe,
-	// and it is redacted on its own way out - metadata AND content - independently
-	// of whatever the stored copy happens to be.
+	// WHAT THIS SCREEN SAYS ABOUT THE SESSIONS, and what it no longer says.
 	//
-	// This sentence used to end "nothing here is re-redacted on the way out except
-	// metadata". That was true when written and this work falsified it, thirty
-	// lines above the consent copy that now tells the user content is redacted
-	// too: the paragraph a maintainer reads immediately before editing that copy
-	// argued for the state the copy no longer describes.
-	if current > 0 {
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizGreen.Render(fmt.Sprintf("  %d session(s) whose stored copy was redacted at the current rule set.", current)))
-	}
-	if stale > 0 {
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizYellow.Render(fmt.Sprintf("  %d session(s) whose stored copy was redacted by an older rule set.", stale)))
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizDim.Render("    Content has changed since redaction was last applied."))
-	}
-	if raw > 0 {
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizRed.Render(fmt.Sprintf("  %d session(s) whose stored copy has never been redacted.", raw)))
-	}
+	// It used to classify the selected sessions by the redaction record of their
+	// STORED copy: how many had never been redacted, how many carried an older
+	// rule set, how many were current. Every one of those counts was true and
+	// none of them was about the push. A user read "N session(s) whose stored
+	// copy has never been redacted" immediately before consenting to publish and
+	// had no action to take on it, because what leaves the machine is redacted on
+	// its own way out whatever the stored copy holds. The counts read as a
+	// warning about the upload while describing a file on disk.
+	//
+	// The reassurance below is what the push actually does, and the pointer after
+	// it is the one action that answers the question the counts provoked: look at
+	// the transcript the push will send.
+	panel.Wrapped(styles.Base, fmt.Sprintf(
+		"peasant redacts these %d session(s) before it publishes them to the village.", len(selected)))
+	panel.Blank()
+	panel.Wrapped(styles.Muted,
+		"the preview on the selection page shows each transcript as it will be published. go back with esc to review one.")
 
 	// What actually happens on upload.
 	//
@@ -572,8 +833,8 @@ func (m PushWizardModel) redactionPreviewContent() string {
 	// conclude the control does nothing and stop reading it.
 	//
 	// What it must not become again is an absolute. Matching finds KNOWN patterns.
-	b.WriteString(wizBg.Render("\n\n"))
-	// WHAT REDACTION COVERS, DERIVED - not written here.
+	//
+	// WHAT REDACTION COVERS IS DERIVED, not written here.
 	//
 	// This block hand-listed "file paths, the host slug, the project name, the git
 	// remote". Measured at standard, the only level a user can select: the project
@@ -586,190 +847,153 @@ func (m PushWizardModel) redactionPreviewContent() string {
 	// The fields now come from running the real redactor, so a claim that stops
 	// being true disappears instead of being carried forward.
 	covered, coverErr := redactedMetadataFields(config.RecommendedRedactionLevel)
-	b.WriteString(wizBg.Render("\n\n"))
+	panel.Blank()
 	switch {
 	case coverErr != nil || len(covered) == 0:
 		// Say nothing rather than guess. A screen that cannot measure what it
 		// covers has no business naming fields.
-		b.WriteString(wizText.Render("Before upload, Peasant redacts at your configured level, never below standard."))
+		panel.Wrapped(styles.Base, "before upload, peasant redacts at your configured level, never below standard.")
 	default:
-		b.WriteString(wizText.Render("Before upload, Peasant redacts at your configured level, never below standard:"))
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizText.Render("METADATA — " + joinFieldLabels(covered) + " — and CONVERSATION CONTENT,"))
-		b.WriteString(wizBg.Render("\n"))
-		b.WriteString(wizText.Render("including tool arguments and tool results."))
+		panel.Wrapped(styles.Base, "before upload, peasant redacts at your configured level, never below standard:")
+		panel.Wrapped(styles.Base, "metadata - "+joinFieldLabels(covered)+" - and conversation content, including tool arguments and tool results.")
 	}
-	b.WriteString(wizBg.Render("\n\n"))
+	panel.Blank()
 	// THE HEDGE IS THE SHARED CONSTANT, CONSUMED VERBATIM.
 	//
 	// This screen hand-wrote its own wording of a sentence that exists once, in
 	// config.RedactionScopeSentence, which every other surface consumes - the
 	// onboarding screen, every push record, both sync refusals and the generated
-	// web policy. Rewording it here only ever produced a third phrasing: the last
+	// web policy. Rewording it here only ever produced a third phrasing: an earlier
 	// edit claimed to match the canonical one and did not, and dropped its scope
 	// clause ("in both metadata and transcript content") while doing so.
 	//
-	// Consuming the constant is what ends that. It also removes two statements the
-	// hand-written version had just acquired: that what leaves is "what the
-	// patterns above matched" (the opposite of the line above it, which says
-	// matched tokens are REPLACED), and that "nothing else scans this on your
-	// behalf" (false for the transcript part, which the village does scan).
-	// Wrapped to the content width HERE rather than left to the outer border.
+	// Consuming the constant is what ends that. The panel wraps it at the pane
+	// width, so the line count the scroll math uses equals the line count the
+	// screen draws.
+	panel.Wrapped(styles.Warning, config.RedactionScopeSentence())
+	panel.Blank()
+	panel.Wrapped(styles.Warning, "source code is published with matched tokens replaced, so a published transcript can differ from what you see locally. read what you share.")
+	panel.Blank()
+	panel.Wrapped(styles.Base, "if a session holds something you do not want published, deselect it: press esc to go back, then space to toggle it off.")
+	return panel
+}
+
+// receiptBody renders the last page: a short summary, then the details it
+// summarises, then the question.
+func (m PushWizardModel) receiptBody(width, height int) string {
+	styles := m.th.Styles()
+	selected := m.selectedSessions()
+	panel := kit.NewPanel(m.th)
+	// The panel measures its own lines, so the receipt can count the rows it has
+	// already used before it decides how many details fit. The frame pads the
+	// body to the page height.
+	panel.SetSize(width, 0)
+	// The receipt counts the push, and it counts nothing else.
 	//
-	// The border does wrap it - measured, no rendered line exceeds the terminal -
-	// but this page slices its content into lines for the scroll viewport BEFORE
-	// the border sees it, so a 180-character sentence counts as one line for the
-	// height accounting and three on screen. Wrapping it now keeps the two in
-	// agreement.
-	b.WriteString(wizYellow.Render(wrapToContentWidth(config.RedactionScopeSentence(), m.width)))
-	b.WriteString(wizBg.Render("\n\n"))
-	b.WriteString(wizYellow.Render("Source code is published with matched tokens replaced, so a published"))
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizYellow.Render("transcript can differ from what you see locally. Read what you share."))
-	b.WriteString(wizBg.Render("\n\n"))
-	b.WriteString(wizText.Render("If a session holds something you do not want published, deselect it:"))
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizText.Render("press esc to go back, then space to toggle it off."))
+	// It used to open "N session(s) leave this machine." and follow with "M of N
+	// candidate sessions stay on it." A push copies; it moves nothing and it
+	// deletes nothing. Read at the moment of confirmation, that pair says the
+	// selected sessions go away and the rest are what remain - which is what a
+	// maintainer read on a real store. The lines below name the action, name the
+	// sessions the action skips, and say outright that the machine keeps
+	// everything.
+	panel.Wrapped(styles.Header, fmt.Sprintf("push %d session(s) to the village.", len(selected)))
+	if skipped := len(m.sessions) - len(selected); skipped > 0 {
+		panel.Wrapped(styles.Muted, fmt.Sprintf("%d session(s) are not selected and are not pushed.", skipped))
+	}
+	panel.Wrapped(styles.Muted, "nothing is removed from this machine.")
+	panel.Blank()
+	panel.Line(styles.Header, wizardReceiptDetails)
 
-	return b.String()
-}
-
-func (m PushWizardModel) updateRedactionPreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case defaults.KeyEnter.String():
-		// Only advance if there are sessions to push.
-		hasSelected := false
-		for _, s := range m.sessions {
-			if s.Action == PushWithRedaction {
-				hasSelected = true
-				break
-			}
+	// The receipt lists what it can and says how much it left out, rather than
+	// running past the bottom of the box where the reader cannot see it.
+	rows := height - panel.LineCount() - kit.ConfirmMinSize.Height - 1
+	if rows < 0 {
+		rows = 0
+	}
+	shown := len(selected)
+	if shown > rows {
+		shown = rows
+		if shown > 0 {
+			shown--
 		}
-		if hasSelected {
-			m.page = pageFinalConfirm
-			m.confirmSel = 0
-		}
-	case defaults.KeyEscape.String():
-		m.page = pageSessionReview
-	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
-		if m.vpOffset > 0 {
-			m.vpOffset--
-		}
-	case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-		m.vpOffset++
 	}
-	return m, nil
-}
-
-func (m PushWizardModel) viewRedactionPreview() string {
-	var b strings.Builder
-	b.WriteString(wizTitle.Render("Redaction Preview"))
-	b.WriteString(wizBg.Render("\n\n"))
-
-	content := m.redactionPreviewContent()
-
-	// Simple scrollable viewport using line slicing.
-	lines := strings.Split(content, "\n")
-	vpHeight := m.height - 10
-	if vpHeight < 5 {
-		vpHeight = 5
+	for _, s := range selected[:shown] {
+		panel.Line(styles.Base, fmt.Sprintf("  %s  %s  %s  %s",
+			shortSessionID(s.Row.SessionID), s.Row.ModelHarness, projectLabelOf(s), sessionStartText(s.Row)))
 	}
-	maxOffset := len(lines) - vpHeight
-	if maxOffset < 0 {
-		maxOffset = 0
+	if remaining := len(selected) - shown; remaining > 0 {
+		panel.Line(styles.Muted, fmt.Sprintf("  and %d more.", remaining))
 	}
-	if m.vpOffset > maxOffset {
-		m.vpOffset = maxOffset
-	}
-
-	end := m.vpOffset + vpHeight
-	if end > len(lines) {
-		end = len(lines)
-	}
-	for i := m.vpOffset; i < end; i++ {
-		b.WriteString(lines[i])
-		b.WriteString("\n")
-	}
-
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizDim.Render("↑/↓: scroll  enter: continue  esc: back"))
-
-	return b.String()
+	panel.Blank()
+	panel.Rendered(m.confirm.View())
+	return panel.View()
 }
 
 // ---------------------------------------------------------------------------
-// Page 4: Final Confirm
+// Help overlay
 // ---------------------------------------------------------------------------
 
-func (m PushWizardModel) updateFinalConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case defaults.KeyUp.String(), defaults.KeyVimUp.String():
-		if m.confirmSel > 0 {
-			m.confirmSel--
-		}
-	case defaults.KeyDown.String(), defaults.KeyVimDown.String():
-		if m.confirmSel < 1 {
-			m.confirmSel++
-		}
-	case defaults.KeySpace.String(), defaults.KeyEnter.String():
-		if m.confirmSel == 0 { // Yes, push
-			m.confirmed = true
-			return m, tea.Quit
-		}
-		// No, go back
-		m.page = pageSessionReview
-	case defaults.KeyEscape.String(), defaults.KeyInterrupt.String():
-		m.quitting = true
-		return m, tea.Quit
-	}
-	return m, nil
+// helpLayer renders the full keybinding list for the current page as a raised
+// card. Its rows come from keymap.HelpEntries over the SAME availability the
+// dispatch and the footer use, so the card cannot advertise a key the page
+// cannot dispatch.
+type helpLayer struct {
+	th      theme.Theme
+	entries []keymap.HelpEntry
 }
 
-func (m PushWizardModel) viewFinalConfirm() string {
-	var b strings.Builder
-	b.WriteString(wizTitle.Render("Confirm Push"))
-	b.WriteString(wizBg.Render("\n\n"))
+var _ kit.OverlayLayer = helpLayer{}
 
-	var selected []PushWizardSession
-	for _, s := range m.sessions {
-		if s.Action == PushWithRedaction {
-			selected = append(selected, s)
+// helpPanelMargin is the trailing space the card keeps past its widest row.
+const helpPanelMargin = 2
+
+func (l helpLayer) View() string {
+	styles := l.th.Styles()
+	var nav, act []keymap.HelpEntry
+	for _, entry := range l.entries {
+		if entry.Action.IsNavigation() {
+			nav = append(nav, entry)
+			continue
 		}
+		act = append(act, entry)
 	}
 
-	b.WriteString(wizBold.Render(fmt.Sprintf(
-		"You are about to push %d session(s) to the village.", len(selected))))
-	b.WriteString(wizBg.Render("\n\n"))
-
-	// Show selected sessions summary.
-	for _, s := range selected {
-		sid := s.Row.SessionID
-		if len(sid) > 10 {
-			sid = sid[:10] + ".."
-		}
-		date := time.UnixMilli(s.Row.StartMs).Format("Jan 02 15:04")
-		b.WriteString(wizText.Render(fmt.Sprintf("  %s  %s  %s  %s",
-			sid, s.Row.ModelHarness, s.Row.ProjectName, date)))
-		b.WriteString(wizBg.Render("\n"))
+	type row struct {
+		text   string
+		header bool
 	}
-
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizBold.Render("Proceed?"))
-	b.WriteString(wizBg.Render("\n\n"))
-
-	options := []string{"Yes, push now", "No, go back"}
-	for i, opt := range options {
-		if i == m.confirmSel {
-			b.WriteString(wizCursor.Render("▸ "))
-			b.WriteString(wizBold.Render(opt))
-		} else {
-			b.WriteString(wizBg.Render("  "))
-			b.WriteString(wizText.Render(opt))
+	rows := make([]row, 0, len(l.entries)+6)
+	rows = append(rows, row{text: "keyboard shortcuts", header: true})
+	appendCategory := func(name string, entries []keymap.HelpEntry) {
+		if len(entries) == 0 {
+			return
 		}
-		b.WriteString(wizBg.Render("\n"))
+		rows = append(rows, row{})
+		rows = append(rows, row{text: "  " + name, header: true})
+		for _, entry := range entries {
+			rows = append(rows, row{text: fmt.Sprintf("    %-12s %s", entry.Key, entry.Desc)})
+		}
 	}
-	b.WriteString(wizBg.Render("\n"))
-	b.WriteString(wizDim.Render("↑/↓: select  enter: confirm  esc: cancel"))
+	appendCategory("navigation", nav)
+	appendCategory("actions", act)
+	rows = append(rows, row{})
+	rows = append(rows, row{text: "  press ? or esc to close"})
 
-	return b.String()
+	widest := 0
+	for _, r := range rows {
+		if len(r.text) > widest {
+			widest = len(r.text)
+		}
+	}
+	panel := kit.NewPanel(l.th).WithBackground(l.th.Palette.Surface)
+	panel.SetSize(widest+helpPanelMargin, 0)
+	for _, r := range rows {
+		style := styles.Surface
+		if r.header {
+			style = styles.Header
+		}
+		panel.Line(style, r.text)
+	}
+	return panel.View()
 }

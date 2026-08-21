@@ -628,7 +628,7 @@ func TestRedactionClaims_AreBestEffortNotAbsolute(t *testing.T) {
 	// And the refusal has to say the best-effort part out loud, not merely avoid
 	// the absolute phrasing.
 	refusal := surfaces["the refusal"]
-	for _, want := range []string{"KNOWN PATTERNS", "best effort"} {
+	for _, want := range []string{"known patterns", "best effort"} {
 		if !strings.Contains(refusal, want) {
 			t.Errorf("the refusal must state that redaction is best effort, containing %q; got:\n%s", want, refusal)
 		}
