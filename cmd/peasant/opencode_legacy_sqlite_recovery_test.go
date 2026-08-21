@@ -350,7 +350,7 @@ func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
 			}
 
 			cfg := mountedOpenCodeConfig(t, root)
-			inventory, listings := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil)
+			inventory, listings := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
 			if inventory[defaults.HarnessOpenCode].SessionCount != len(testCase.ExpectedSessionIDs) || !slices.Equal(listingSessionStrings(listings), testCase.ExpectedSessionIDs) {
 				t.Fatalf("kickstart candidate listings=%v inventory=%d, want %v", listingSessionStrings(listings), inventory[defaults.HarnessOpenCode].SessionCount, testCase.ExpectedSessionIDs)
 			}

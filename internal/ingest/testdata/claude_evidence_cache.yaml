@@ -1,0 +1,116 @@
+declared_rows: 4
+cases:
+  - name: unchanged corpus reuses the cached evidence
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"coordinate work"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"teammate started"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: coordinate work
+        branch: main
+        cwd: /workspace
+        subagent_paths:
+          - /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+      - session_id: 22222222-2222-4222-8222-222222222222
+        title: write tests
+        cwd: /workspace
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+    expected_second_run_reads: []
+    expected_after:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: coordinate work
+        branch: main
+        cwd: /workspace
+        subagent_paths:
+          - /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+      - session_id: 22222222-2222-4222-8222-222222222222
+        title: write tests
+        cwd: /workspace
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+
+  - name: a changed transcript is mined again and links the teammate
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate work"}}'
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: coordinate work
+        cwd: /workspace
+      - session_id: 22222222-2222-4222-8222-222222222222
+        title: write tests
+        cwd: /workspace
+    rewrite:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate work"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"teammate started later"}}'
+    expected_second_run_reads:
+      - /claude/-workspace/11111111-1111-4111-8111-111111111111.jsonl
+    expected_after:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: coordinate work
+        cwd: /workspace
+        subagent_paths:
+          - /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+      - session_id: 22222222-2222-4222-8222-222222222222
+        title: write tests
+        cwd: /workspace
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+
+  - name: a removed transcript drops out and leaves the rest cached
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate work"}}'
+      - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+        lines:
+          - '{"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","cwd":"/workspace","message":{"role":"user","content":"separate session"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: coordinate work
+        cwd: /workspace
+      - session_id: 33333333-3333-4333-8333-333333333333
+        title: separate session
+        cwd: /workspace
+    remove:
+      - -workspace/33333333-3333-4333-8333-333333333333.jsonl
+    expected_second_run_reads: []
+    expected_after:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: coordinate work
+        cwd: /workspace
+
+  - name: a nested subagent transcript is cached with its parent
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"root"}}'
+      - path: -workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
+        lines:
+          - '{"sessionId":"agent-a3aee4f","type":"user","message":{"role":"user","content":"nested"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: root
+        cwd: /workspace
+        subagent_paths:
+          - /claude/-workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
+      - session_id: agent-a3aee4f
+        parent_uuid: 11111111-1111-4111-8111-111111111111
+    expected_second_run_reads: []
+    expected_after:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        title: root
+        cwd: /workspace
+        subagent_paths:
+          - /claude/-workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
+      - session_id: agent-a3aee4f
+        parent_uuid: 11111111-1111-4111-8111-111111111111
