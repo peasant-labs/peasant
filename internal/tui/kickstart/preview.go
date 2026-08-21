@@ -90,6 +90,12 @@ func WithListingPreviewContextSource(source ListingPreviewContextSource) Listing
 // store does not hold yet - the normal case on a first run.
 const notImportedBody = "not imported yet. peasant shows the transcript here after it imports this session."
 
+// emptySourceBody is what the preview says for a discovered session whose
+// harness transcript holds no readable turns. The pane can reach that
+// transcript, so it must not repeat the not-imported explanation, which would
+// blame the import for an empty source.
+const emptySourceBody = "no readable turns are in this session's transcript yet."
+
 // notASessionBody is what the preview says for a row that is not a session (a
 // project or a branch).
 const notASessionBody = "select a session to preview it."
@@ -155,6 +161,8 @@ func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 	}
 	body := sessionBody{th: p.th, header: headerLines(sess)}
 	if p.turns == nil {
+		// No reader at all: nothing can say more than that the store does not
+		// hold the session yet.
 		body.note = notImportedBody
 		return body, nil
 	}
@@ -174,11 +182,21 @@ func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 				return body, nil
 			}
 		}
-		body.note = notImportedBody
+		body.note = emptyNote(sess)
 		return body, nil
 	}
 	body.transcript = p.renderer.Document(recorded)
 	return body, nil
+}
+
+// emptyNote explains a session that produced no turns. A session whose harness
+// transcript discovery found is readable now, so its empty pane is about the
+// transcript. A session with no known transcript is simply not imported yet.
+func emptyNote(sess ftue.SessionListing) string {
+	if sess.Source.IsZero() {
+		return notImportedBody
+	}
+	return emptySourceBody
 }
 
 func cloneListingPreviewContext(context ListingPreviewContext) ListingPreviewContext {

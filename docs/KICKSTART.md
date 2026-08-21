@@ -49,8 +49,11 @@ validation, and persisted values are the same canonical definitions used by the 
 
 On the transcript-selection step, the left pane is the project tree and the right pane previews the
 highlighted session. An imported session is read through the same local-store path used by the
-transcript viewer. A session that has not been imported yet is identified as such rather than shown
-as an empty recording.
+transcript viewer. A session that Peasant has not imported yet is read from the transcript its
+harness wrote, which discovery found before any import. Peasant reads that file in place. It copies
+no transcript, and it writes nothing to disk or to the local store to show the preview. Kickstart
+keeps the turns of the last few previewed sessions in memory only, and it drops them when it exits.
+A session that discovery found no transcript for is identified as not imported yet.
 
 Changing selection controls future discovery and import lists. It does not delete sessions already in
 the local store and does not remove copies shared previously.

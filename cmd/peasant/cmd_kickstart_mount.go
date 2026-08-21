@@ -320,10 +320,16 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 }
 
 // kickstartPreview builds the selection step's side preview over the discovery
-// listing and the local store: the highlighted session is named from the same
-// listing the tree was folded from, and its body is the WHOLE recorded
-// transcript the store holds. With no store the preview still names the session
-// and says it is not imported yet, which is exactly true on a first run.
+// listing, the local store, and the harness transcripts discovery found: the
+// highlighted session is named from the same listing the tree was folded from,
+// and its body is the WHOLE transcript.
+//
+// The store is the first source, because it holds the transcript Peasant
+// already imported and indexed. A session the store does not hold falls back to
+// the transcript its harness wrote, which discovery located before any import.
+// The user therefore previews every discovered session, including on a first
+// run with no database at all. The fallback reads the transcript in place. It
+// copies nothing, and it writes nothing to disk or to the database.
 //
 // The turns come from api.StoreDataProvider.SessionByID - the SAME read the
 // session_detail channel and the transcript viewer use - rather than a second
@@ -346,31 +352,48 @@ func kickstartPreview(
 	contexts ...kickstart.ListingPreviewContextSource,
 ) kit.BodySource {
 	ctx := cmd.Context()
-	var turns kickstart.SessionTurnsFunc
+	// storedTurns reports the turns AND whether the store holds the session at
+	// all, so the two outcomes stay distinguishable: a session the store never
+	// imported falls back to its harness transcript, while a store that could
+	// not be read is a real failure the pane must surface. Collapsing both into
+	// "no turns" would report a broken database as an empty session.
+	var storedTurns func(sessionID string) ([]ingest.Turn, bool, error)
 	if db != nil {
-		ctx := cmd.Context()
 		provider := api.NewStoreDataProvider(db, sessionvisibility.All())
-		turns = func(sessionID string) ([]ingest.Turn, error) {
-			// Ask whether the store holds this session BEFORE reading it, so
-			// the two outcomes stay distinguishable: a session that was never
-			// imported is the normal onboarding case and reads "not imported
-			// yet", while a store that could not be read is a real failure the
-			// pane must surface. Collapsing both into "no turns" would report a
-			// broken database as an empty session.
+		storedTurns = func(sessionID string) ([]ingest.Turn, bool, error) {
 			row, err := db.SessionDetailByID(ctx, sessionID)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if row == nil {
-				return nil, nil
+				return nil, false, nil
 			}
 			session, err := provider.SessionByID(ctx, sessionID)
 			if err != nil {
-				return nil, err
+				return nil, true, err
 			}
-			return session.Turns, nil
+			return session.Turns, true, nil
 		}
 	}
+	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions)
+	turns := kickstart.SessionTurnsFunc(func(sessionID string) ([]ingest.Turn, error) {
+		if storedTurns != nil {
+			recorded, held, err := storedTurns(sessionID)
+			if err != nil {
+				return nil, err
+			}
+			if len(recorded) > 0 {
+				return recorded, nil
+			}
+			if held {
+				// The store holds the session but produced no turns. That state
+				// has its own explanation, with the raw source records, so the
+				// harness transcript must not overwrite it here.
+				return nil, nil
+			}
+		}
+		return sourceTurns.Turns(sessionID)
+	})
 	var opts []kickstart.ListingPreviewOption
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))

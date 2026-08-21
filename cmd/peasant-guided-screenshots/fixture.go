@@ -19,9 +19,9 @@ const (
 	requiredSheetCount             = 3
 	requiredGuidedSectionCount     = 6
 	requiredGuidedCaptureCount     = 24
-	requiredSelectionStateCount    = 5
-	requiredSelectionCaptureCount  = 16
-	requiredSelectionSessionCount  = 5
+	requiredSelectionStateCount    = 6
+	requiredSelectionCaptureCount  = 20
+	requiredSelectionSessionCount  = 6
 	requiredSelectionHarnessCount  = 2
 	requiredSelectionIngestedCount = 1
 )
@@ -81,14 +81,19 @@ const (
 	selectionStateProjectPreview selectionState = "project-preview"
 	selectionStateBranchPreview  selectionState = "branch-preview"
 	selectionStateSessionPreview selectionState = "session-preview"
+	// selectionStateSourcePreview is a session the local store does not hold,
+	// previewed from the transcript its harness wrote.
+	selectionStateSourcePreview selectionState = "harness-source-preview"
 )
 
 func (s selectionState) valid() bool {
-	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview || s == selectionStateBranchPreview || s == selectionStateSessionPreview
+	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview ||
+		s == selectionStateBranchPreview || s == selectionStateSessionPreview || s == selectionStateSourcePreview
 }
 
 func (s selectionState) requiresBothThemes() bool {
-	return s == selectionStateProjectPreview || s == selectionStateBranchPreview || s == selectionStateSessionPreview
+	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
+		s == selectionStateSessionPreview || s == selectionStateSourcePreview
 }
 
 type viewportFixture struct {
@@ -135,7 +140,12 @@ type selectionFixture struct {
 	Repositories []selectionRepositoryFixture      `yaml:"repositories"`
 	Listings     []ftue.SessionListing             `yaml:"listings"`
 	Transcripts  map[string][]selectionTurnFixture `yaml:"transcripts"`
-	Ingested     []string                          `yaml:"ingested"`
+	// SourceTranscripts holds the harness transcript lines for sessions the
+	// local store does not hold. The renderer writes each one to its isolated
+	// workspace and points the listing at it, so the preview reads a real file
+	// through the production reader.
+	SourceTranscripts map[string][]string `yaml:"sourceTranscripts"`
+	Ingested          []string            `yaml:"ingested"`
 }
 
 type selectionRepositoryFixture struct {
@@ -238,7 +248,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 4800},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 5700},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {
@@ -309,7 +319,10 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 		}
 		stateRows[state.Key] = state
 	}
-	for _, state := range []selectionState{selectionStateDefault, selectionStateSearch, selectionStateProjectPreview, selectionStateBranchPreview, selectionStateSessionPreview} {
+	for _, state := range []selectionState{
+		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
+		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
+	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
 		}
@@ -388,6 +401,36 @@ func validateSelectionData(selection selectionFixture) error {
 			if !sessionIDs[childID] {
 				return fmt.Errorf("screenshot fixture session %q references unknown child %q", listing.SessionID, childID)
 			}
+		}
+	}
+	if len(selection.SourceTranscripts) == 0 {
+		return fmt.Errorf("screenshot fixture records no harness transcript; the not-yet-imported preview would show nothing")
+	}
+	for sessionID, lines := range selection.SourceTranscripts {
+		if !sessionIDs[sessionID] || len(lines) == 0 {
+			return fmt.Errorf("screenshot fixture harness transcript %q is unknown or empty", sessionID)
+		}
+		if selection.Transcripts[sessionID] != nil {
+			return fmt.Errorf("screenshot fixture session %q has both a stored and a harness transcript; the capture could not show which one the pane read", sessionID)
+		}
+		for index, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				return fmt.Errorf("screenshot fixture harness transcript %q line %d is empty", sessionID, index)
+			}
+		}
+		var listed ftue.SessionListing
+		for _, listing := range selection.Listings {
+			if listing.SessionID == sessionID {
+				listed = listing
+			}
+		}
+		for _, ingestedID := range selection.Ingested {
+			if ingestedID == sessionID {
+				return fmt.Errorf("screenshot fixture session %q is imported, so its capture would not show the not-yet-imported preview", sessionID)
+			}
+		}
+		if listed.Source.Origin != ftue.SessionSourceOriginFile {
+			return fmt.Errorf("screenshot fixture session %q carries a harness transcript but declares origin %q", sessionID, listed.Source.Origin)
 		}
 	}
 	seenIngested := make(map[string]bool, len(selection.Ingested))

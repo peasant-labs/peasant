@@ -228,7 +228,6 @@ func sectionGuide(intro string, hints ...string) *settings.Guide {
 	return &settings.Guide{Intro: intro, Hints: hints}
 }
 
-
 // selectionTreeOptions composes the selection tree's options: the harness facet
 // gutter always, and the side preview only when the mount supplied a source for
 // it (a run with no readable local store renders the tree alone).

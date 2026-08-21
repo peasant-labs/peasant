@@ -15,6 +15,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -127,8 +128,12 @@ func renderSelectionCapture(
 		return "", err
 	}
 	th := captureThemeValue(capture.Theme)
+	listings, err := listingsWithHarnessTranscripts(workingDirectory, index, selection)
+	if err != nil {
+		return "", err
+	}
 	source := kickstart.NewScannerTreeSource(
-		selection.Listings,
+		listings,
 		kickstart.WithPathIdentityResolver(capturePathResolver{}),
 		kickstart.WithRepositoryIdentityResolver(newCaptureRepositoryResolver(selection.Repositories)),
 		kickstart.WithIngestedSessionIDs(selection.Ingested),
@@ -139,8 +144,11 @@ func renderSelectionCapture(
 		Source: source,
 		Preview: kickstart.NewListingPreview(
 			th,
-			selection.Listings,
-			selectionTurns(selection.Transcripts),
+			listings,
+			// The store first, then the transcript the harness wrote. This is
+			// the order the mounted command wires, so a session with no store
+			// row previews from its own source file.
+			storedThenHarnessTurns(selection.Transcripts, kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)),
 			kickstart.WithListingPreviewContextSource(source),
 		),
 	})
@@ -160,11 +168,77 @@ func renderSelectionCapture(
 	if state.Key == selectionStateBranchPreview {
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if state.Key == selectionStateSessionPreview {
-		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
-		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview {
+		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil
+}
+
+// advanceToMarkers steps the tree cursor one visible row at a time until the
+// screen shows every marker the state requires. Deriving the number of steps
+// keeps the capture on the intended row when the tree adds or reorders a row.
+// The capture validator still fails when no row shows the markers.
+func advanceToMarkers(program kickstart.Program, markers []string) kickstart.Program {
+	const maxSteps = 12
+	for i := 0; i < maxSteps; i++ {
+		if captureShowsMarkers(program.View(), markers) {
+			return program
+		}
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
+	return program
+}
+
+func captureShowsMarkers(view string, markers []string) bool {
+	plain := ansi.Strip(view)
+	for _, marker := range markers {
+		if !strings.Contains(plain, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+// listingsWithHarnessTranscripts writes the fixture's harness transcripts into
+// the isolated capture workspace and points their listings at them. The files
+// exist only for the capture run and hold scrubbed fixture text.
+func listingsWithHarnessTranscripts(workingDirectory string, index int, selection selectionFixture) ([]ftue.SessionListing, error) {
+	listings := append([]ftue.SessionListing(nil), selection.Listings...)
+	if len(selection.SourceTranscripts) == 0 {
+		return listings, nil
+	}
+	dir := filepath.Join(workingDirectory, fmt.Sprintf("harness-%02d", index))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create harness transcript workspace: %w", err)
+	}
+	for i := range listings {
+		lines, ok := selection.SourceTranscripts[listings[i].SessionID]
+		if !ok {
+			continue
+		}
+		path := filepath.Join(dir, listings[i].SessionID+".jsonl")
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+			return nil, fmt.Errorf("write harness transcript %q: %w", path, err)
+		}
+		listings[i].Source.Path = path
+	}
+	return listings, nil
+}
+
+// storedThenHarnessTurns reads the store first and falls back to the harness
+// transcript, which is the order the mounted command wires.
+func storedThenHarnessTurns(transcripts map[string][]selectionTurnFixture, harness *kickstart.SourceTurns) kickstart.SessionTurnsFunc {
+	stored := selectionTurns(transcripts)
+	return func(sessionID string) ([]ingest.Turn, error) {
+		turns, err := stored(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if len(turns) > 0 {
+			return turns, nil
+		}
+		return harness.Turns(sessionID)
+	}
 }
 
 func selectionTurns(transcripts map[string][]selectionTurnFixture) kickstart.SessionTurnsFunc {
