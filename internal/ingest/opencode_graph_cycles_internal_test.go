@@ -131,17 +131,20 @@ func TestOpenCodeIndexerGraphLinksAreDeterministicAndKeepDepthContract(t *testin
 				if entry.Depth != wantDepth {
 					t.Fatalf("entry %+v has Depth %d, want %d: messages stay at 0 and parts at 1", entry, entry.Depth, wantDepth)
 				}
+				if entry.Depth == 0 && entry.ParentIndex != nil {
+					t.Fatalf("depth-0 message %+v carries ParentIndex %d; the contract keeps depth-0 ParentIndex nil", entry, *entry.ParentIndex)
+				}
 			}
 			for _, link := range testCase.ExpectedLinks {
 				entry := first[indexes[link.ID]]
 				if link.Parent == "" {
-					if entry.ParentIndex != nil {
-						t.Fatalf("message %q should stay at the root, got parent index %d", link.ID, *entry.ParentIndex)
+					if entry.ParentEntryID != nil {
+						t.Fatalf("message %q should stay at the root, got parent link %q", link.ID, *entry.ParentEntryID)
 					}
 					continue
 				}
-				if entry.ParentIndex == nil || *entry.ParentIndex != indexes[link.Parent] {
-					t.Fatalf("message %q parent=%v, want index of %q (%d)", link.ID, entry.ParentIndex, link.Parent, indexes[link.Parent])
+				if entry.ParentEntryID == nil || *entry.ParentEntryID != link.Parent {
+					t.Fatalf("message %q parent link=%v, want %q", link.ID, entry.ParentEntryID, link.Parent)
 				}
 			}
 		})
@@ -156,8 +159,8 @@ func describeOpenCodeGraph(entries []schema.SessionEntry) string {
 			id = *entry.EntryID
 		}
 		parent := "root"
-		if entry.ParentIndex != nil {
-			parent = fmt.Sprint(*entry.ParentIndex)
+		if entry.ParentEntryID != nil {
+			parent = *entry.ParentEntryID
 		}
 		fmt.Fprintf(&buffer, "%d:%s depth=%d parent=%s; ", entry.EntryIndex, id, entry.Depth, parent)
 	}

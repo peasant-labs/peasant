@@ -1,6 +1,8 @@
 # Message parent graphs that the OpenCode indexer must normalize the same way on
-# every run. Messages stay at Depth 0 and parts at Depth 1. A parent reference
-# that would close a cycle stays at the root; children are linked in entry order.
+# every run. Messages stay at Depth 0 with a nil ParentIndex; parts stay at
+# Depth 1. Each expected link is the native parent id the indexer records on the
+# child message ParentEntryID. A parent reference that would close a cycle stays
+# at the root (empty parent); children are linked in entry order.
 declared_cases: 4
 repeat_runs: 25
 cases:

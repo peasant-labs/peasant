@@ -642,10 +642,11 @@ func assertCanonicalGraphAndToolPairing(t testing.TB, indexer *ingest.OpenCodeIn
 	parentIndex, parentFound := indexes[testCase.LinkedParent]
 	childIndex, childFound := indexes[testCase.LinkedChild]
 	missingIndex, missingFound := indexes[testCase.MissingEntry]
-	if !parentFound || !childFound || entries[childIndex].ParentIndex == nil || *entries[childIndex].ParentIndex != parentIndex || entries[childIndex].Depth != 0 || entries[parentIndex].Depth != 0 {
+	childLinked := childFound && entries[childIndex].ParentEntryID != nil && *entries[childIndex].ParentEntryID == testCase.LinkedParent && entries[childIndex].ParentIndex == nil
+	if !parentFound || !childLinked || entries[childIndex].Depth != 0 || entries[parentIndex].Depth != 0 {
 		t.Fatalf("selected parent graph was not preserved at message depth: parent=%d/%t child=%d/%t child_entry=%+v", parentIndex, parentFound, childIndex, childFound, entries[childIndex])
 	}
-	if !missingFound || entries[missingIndex].ParentIndex != nil || entries[missingIndex].Depth != 0 {
+	if !missingFound || entries[missingIndex].ParentEntryID != nil || entries[missingIndex].ParentIndex != nil || entries[missingIndex].Depth != 0 {
 		t.Fatalf("missing-parent entry was not retained at root: index=%d found=%t entry=%+v", missingIndex, missingFound, entries[missingIndex])
 	}
 	if !toolPaired {

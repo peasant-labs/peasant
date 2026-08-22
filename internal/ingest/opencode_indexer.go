@@ -473,30 +473,36 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 	return entries
 }
 
-// normalizeOpenCodeEntryGraph links each message to its parent message by
-// entry index. Depth keeps the shared consumer contract: messages stay at
-// Depth 0 and parts stay at Depth 1. Children are linked in entry order. A
-// parent reference that would close a cycle stays at the root, so the pinned
-// node is the same on every run.
+// normalizeOpenCodeEntryGraph carries the OpenCode message graph on
+// ParentEntryID. A depth-0 message names its parent message by native id, the
+// same field the Claude and Cursor indexers set at depth 0. ParentIndex stays
+// nil at depth 0; parts keep their depth-1 ParentIndex to the enclosing
+// message. The link is set only when the parent message is present in the
+// selected source. A parent reference that would close a cycle stays at the
+// root, so the pinned node is the same on every run.
 func normalizeOpenCodeEntryGraph(entries []schema.SessionEntry, messageIndexes map[string]int, messageParents map[int]string) {
 	children := make([]int, 0, len(messageParents))
 	for childIndex := range messageParents {
 		children = append(children, childIndex)
 	}
 	sort.Ints(children)
+	linked := make(map[int]int, len(messageParents))
 	for _, childIndex := range children {
 		parentIndex, present := messageIndexes[messageParents[childIndex]]
-		if !present || parentIndex == childIndex || openCodeParentChainReaches(entries, parentIndex, childIndex) {
+		if !present || parentIndex == childIndex || openCodeLinkedChainReaches(linked, parentIndex, childIndex) {
 			continue
 		}
-		parent := parentIndex
-		entries[childIndex].ParentIndex = &parent
+		linked[childIndex] = parentIndex
+		parentID := messageParents[childIndex]
+		entries[childIndex].ParentEntryID = &parentID
 	}
 }
 
-// openCodeParentChainReaches reports whether the parent chain that starts at
-// start already contains target.
-func openCodeParentChainReaches(entries []schema.SessionEntry, start, target int) bool {
+// openCodeLinkedChainReaches reports whether the already-linked parent chain
+// that starts at start already contains target. It walks only the links this
+// pass has applied, so linking children in entry order breaks a cycle at the
+// same member on every run.
+func openCodeLinkedChainReaches(linked map[int]int, start, target int) bool {
 	visited := make(map[int]bool)
 	for index := start; ; {
 		if index == target {
@@ -506,11 +512,11 @@ func openCodeParentChainReaches(entries []schema.SessionEntry, start, target int
 			return false
 		}
 		visited[index] = true
-		parent := entries[index].ParentIndex
-		if parent == nil {
+		parent, present := linked[index]
+		if !present {
 			return false
 		}
-		index = *parent
+		index = parent
 	}
 }
 

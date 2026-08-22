@@ -19,13 +19,14 @@ var depthZeroParentLinkFixtureYAML []byte
 var depthZeroParentLinkManifestYAML []byte
 
 type depthZeroParentLinkEntry struct {
-	Index       int    `yaml:"index"`
-	Role        string `yaml:"role"`
-	Depth       int    `yaml:"depth"`
-	ParentIndex *int   `yaml:"parentIndex,omitempty"`
-	EntryType   string `yaml:"entryType,omitempty"`
-	ToolCallID  string `yaml:"toolCallId,omitempty"`
-	Content     string `yaml:"content,omitempty"`
+	Index         int    `yaml:"index"`
+	Role          string `yaml:"role"`
+	Depth         int    `yaml:"depth"`
+	ParentIndex   *int   `yaml:"parentIndex,omitempty"`
+	ParentEntryID string `yaml:"parentEntryId,omitempty"`
+	EntryType     string `yaml:"entryType,omitempty"`
+	ToolCallID    string `yaml:"toolCallId,omitempty"`
+	Content       string `yaml:"content,omitempty"`
 }
 
 type depthZeroParentLinkTurn struct {
@@ -93,6 +94,10 @@ func depthZeroParentLinkEntries(fixtureCase depthZeroParentLinkCase) []schema.Se
 			ParentIndex: source.ParentIndex,
 			EntryType:   schema.EntryType(source.EntryType),
 		}
+		if source.ParentEntryID != "" {
+			parentEntryID := source.ParentEntryID
+			entry.ParentEntryID = &parentEntryID
+		}
 		if entry.EntryType == "" {
 			entry.EntryType = schema.EntryTypeText
 		}
@@ -110,10 +115,11 @@ func depthZeroParentLinkEntries(fixtureCase depthZeroParentLinkCase) []schema.Se
 	return entries
 }
 
-// TestDepthZeroParentLinkIsNotAChild proves the ParentIndex contract: a depth-0
-// entry that carries a ParentIndex (a harness message graph) still folds as its
-// own top-level turn, its depth-1 tool entries still fold into it, and the
-// content overlay never adopts it as a child of the entry it points at.
+// TestDepthZeroParentLinkIsNotAChild proves the parent-link contract: a depth-0
+// entry that carries a ParentEntryID (a harness message graph) with a nil
+// ParentIndex still folds as its own top-level turn, its depth-1 tool entries
+// still fold into it, and the content overlay never adopts it as a child of the
+// entry it points at.
 func TestDepthZeroParentLinkIsNotAChild(t *testing.T) {
 	fixture := loadDepthZeroParentLinkFixture(t)
 	for _, fixtureCase := range fixture.Cases {

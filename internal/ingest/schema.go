@@ -33,11 +33,10 @@ type Turn struct {
 	Timestamp time.Time
 	Depth     int // 0 = main agent, 1+ = subagent nesting levels
 	// ParentIndex is the entry_index of the parent entry. At depth 1 and deeper
-	// it names the enclosing depth-0 turn. At depth 0 it is nil unless the
-	// harness records a message graph; OpenCode links a depth-0 message to its
-	// parent message here. Consumers key child behaviour on Depth, never on
-	// ParentIndex being set: a depth-0 entry with a ParentIndex is still a
-	// top-level turn.
+	// it names the enclosing depth-0 turn. At depth 0 it is nil. A harness
+	// message graph, when one exists, is carried on the entry ParentEntryID
+	// link, not here; OpenCode records a depth-0 message's parent message there.
+	// Consumers key child nesting on Depth.
 	ParentIndex *int
 	// ObservedModel is exact source evidence. Omission remains omission; readers
 	// derive sticky state without mutating this raw observation.

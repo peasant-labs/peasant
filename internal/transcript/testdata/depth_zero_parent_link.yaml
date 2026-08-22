@@ -1,12 +1,13 @@
-# Proves that consumers key child behaviour on Depth, not on ParentIndex.
-# A depth-0 entry may carry a ParentIndex when the harness records a message
-# graph (OpenCode). It must still render as a top-level turn, and the overlay
-# must not adopt it as a child of the entry it points at.
+# Proves that consumers key child behaviour on Depth, not on a parent link.
+# A depth-0 entry may carry a ParentEntryID when the harness records a message
+# graph (OpenCode). Its ParentIndex stays nil. It must still render as a
+# top-level turn, and the overlay must not adopt it as a child of the entry it
+# points at.
 cases:
   - name: depth_zero_parent_link_keeps_its_own_turn
     entries:
       - {index: 0, role: user, depth: 0, content: "ship the release"}
-      - {index: 1, role: assistant, depth: 0, parentIndex: 0, content: "on it"}
+      - {index: 1, role: assistant, depth: 0, parentEntryId: entry-0, content: "on it"}
       - {index: 2, role: assistant, depth: 1, parentIndex: 1, entryType: tool_use, toolCallId: call-1, content: "bash"}
       - {index: 3, role: tool, depth: 1, parentIndex: 1, entryType: tool_result, toolCallId: call-1, content: "ok"}
     expectedTurns:
@@ -15,7 +16,7 @@ cases:
   - name: overlay_does_not_adopt_a_linked_depth_zero_entry
     entries:
       - {index: 0, role: user, depth: 0}
-      - {index: 1, role: assistant, depth: 0, parentIndex: 0, content: "reply"}
+      - {index: 1, role: assistant, depth: 0, parentEntryId: entry-0, content: "reply"}
     expectedOverlay:
       1: "reply"
     expectedMissingOverlay: [0]
