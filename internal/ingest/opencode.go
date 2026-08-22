@@ -215,7 +215,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 	sqliteSources := make(map[string]OpenCodeSQLiteSource)
 	defer func() {
 		for path, source := range sqliteSources {
-			if closeErr := source.Close(ctx); closeErr != nil {
+			if closeErr := closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout); closeErr != nil {
 				a.recordCandidateFailure(path, OpenCodeProbeFreshness, "selected SQLite source did not close cleanly after discovery and freshness reads", closeErr)
 			}
 		}
@@ -235,6 +235,23 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 		return nil, err
 	}
 	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected, sqliteSources), nil
+}
+
+// closeDeferredOpenCodeSource closes a source that stayed open for the whole
+// Discover. It derives the close context from context.Background rather than the
+// caller context, so an already-cancelled discovery context cannot make Close
+// take its cancellation branch and skip releasing the single connection. That
+// skip would leak the connection in the long-lived web process. The close stays
+// bounded by the source query timeout, so a genuinely stuck cleanup still ends.
+// The caller context is intentionally not passed through.
+func closeDeferredOpenCodeSource(callerCtx context.Context, source OpenCodeSQLiteSource, bound time.Duration) error {
+	_ = callerCtx
+	if bound <= 0 {
+		bound = defaultOpenCodeSQLiteQueryTimeout
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	return source.Close(closeCtx)
 }
 
 // openOpenCodeSQLiteSource opens one restrictive read-only source for a
