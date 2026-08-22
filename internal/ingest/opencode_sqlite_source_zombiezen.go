@@ -748,14 +748,14 @@ func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
 	row, err := decodeLegacyPartRow(stmt, c.requireJSON)
 	if err != nil {
 		if c.tolerant {
-			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: rawPartID, MessageID: rawMessageID, Reason: fmt.Sprintf("part row with id %q could not be decoded: %v", rawPartID, err)})
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: NewOpenCodeRawRowIdentifier(rawPartID), MessageID: NewOpenCodeRawRowIdentifier(rawMessageID), Reason: fmt.Sprintf("part row with id %q could not be decoded: %v", rawPartID, err)})
 			return nil
 		}
 		return err
 	}
 	if err := c.check(row); err != nil {
 		if c.tolerant {
-			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: row.ID.String(), MessageID: row.MessageID.String(), Reason: fmt.Sprintf("part row %q was out of scope: %v", row.ID.String(), err)})
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: NewOpenCodeRawRowIdentifier(row.ID.String()), MessageID: NewOpenCodeRawRowIdentifier(row.MessageID.String()), Reason: fmt.Sprintf("part row %q was out of scope: %v", row.ID.String(), err)})
 			return nil
 		}
 		return err

@@ -425,6 +425,23 @@ type OpenCodeLegacyMessagePage struct {
 	Next     *OpenCodeLegacyMessageCursor
 }
 
+// OpenCodeRawRowIdentifier is a best-effort identifier read directly from a text
+// column of a row the bounded read could not decode. It is deliberately not
+// validated, so it stays distinct from the validated identity handles and never
+// drives a read; it only names a dropped row in a diagnostic.
+type OpenCodeRawRowIdentifier struct{ value string }
+
+// NewOpenCodeRawRowIdentifier wraps a raw column value with no validation.
+func NewOpenCodeRawRowIdentifier(value string) OpenCodeRawRowIdentifier {
+	return OpenCodeRawRowIdentifier{value: value}
+}
+
+// String returns the raw identifier text, which may be empty.
+func (r OpenCodeRawRowIdentifier) String() string { return r.value }
+
+// IsEmpty reports whether the source column was absent or not text.
+func (r OpenCodeRawRowIdentifier) IsEmpty() bool { return r.value == "" }
+
 // OpenCodeOrphanPartDrop records one part row the bounded read could not decode
 // into a typed row. PartID and MessageID are the row's best-effort raw
 // identifiers, read directly from the text columns even when the rest of the
@@ -433,8 +450,8 @@ type OpenCodeLegacyMessagePage struct {
 // than failing; the caller decides whether the drop is tolerable, because a
 // part whose message is present is a session failure, not an orphan.
 type OpenCodeOrphanPartDrop struct {
-	PartID    string
-	MessageID string
+	PartID    OpenCodeRawRowIdentifier
+	MessageID OpenCodeRawRowIdentifier
 	Reason    string
 }
 

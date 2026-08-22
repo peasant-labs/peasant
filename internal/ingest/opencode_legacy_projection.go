@@ -239,15 +239,15 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 			return openCodeLegacyProjection{}, nil, err
 		}
 		for _, drop := range page.Dropped {
-			if _, present := messageSlot[drop.MessageID]; present && drop.MessageID != "" {
+			if _, present := messageSlot[drop.MessageID.String()]; present && !drop.MessageID.IsEmpty() {
 				// A part whose message is present must decode. A decode failure
 				// fails the whole session, matching the strict per-message read
 				// this single pass replaces; it is not a tolerable orphan.
-				return openCodeLegacyProjection{}, nil, fmt.Errorf("read OpenCode legacy part %q for present message %q failed while partitioning the single part pass: %s; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", drop.PartID, drop.MessageID, drop.Reason)
+				return openCodeLegacyProjection{}, nil, fmt.Errorf("read OpenCode legacy part %q for present message %q failed while partitioning the single part pass: %s; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", drop.PartID.String(), drop.MessageID.String(), drop.Reason)
 			}
 			// A part row whose message is absent is a true orphan. Drop it with a
 			// warning that names the row, never a session failure.
-			dropped = append(dropped, openCodeDroppedOrphanPart{partID: drop.PartID, messageID: drop.MessageID, reason: drop.Reason})
+			dropped = append(dropped, openCodeDroppedOrphanPart{partID: drop.PartID.String(), messageID: drop.MessageID.String(), reason: drop.Reason})
 		}
 		for _, part := range page.Parts {
 			projectionPart := openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}
