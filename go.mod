@@ -16,7 +16,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.2.0
-	github.com/peasant-labs/redact v0.1.1
+	github.com/peasant-labs/redact v0.1.2-0.20260822015537-7879d7ab328d
 	github.com/peasant-labs/schema v0.1.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.2
