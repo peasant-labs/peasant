@@ -5,6 +5,17 @@ All notable changes to Peasant are recorded here. The format follows
 [Semantic Versioning](https://semver.org/). Each version links to its GitHub
 Release, which holds the signed artifacts and checksums.
 
+## [Unreleased]
+
+### Fixed
+- A session title is taken from the first user turn that holds real user prose.
+  A leading harness-injected turn (a slash command wrapper, local command output,
+  a system reminder, an environment context block, or a skill body) is skipped,
+  and a turn whose markup cannot be cleaned safely is never shown raw. This
+  applies to the published title, the local display title, and the session
+  heading in the web viewer, which now shows a plain placeholder when a session
+  has no title yet (#175).
+
 ## [0.3.0] - 2026-08-21
 
 ### Added
