@@ -537,14 +537,19 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	page.Records = records
 	page.Skipped = skipped
 	if hasNext {
-		// Prefer the last kept record so the sentinel row beyond it is re-fetched
-		// on the next page and never skipped. When a page keeps no valid record,
-		// advance past the last decodable identifier so pagination still moves.
 		switch {
-		case len(records) > 0:
+		case bounded.overflowKept():
+			// Every fetched row was kept and one was trimmed, so re-fetch from the
+			// last kept record. The trimmed row returns on the next page and is
+			// never lost. No row was dropped on this page.
 			page.Next = &OpenCodeSessionRecordCursor{sessionID: records[len(records)-1].SessionID}
 		case cursorID != nil:
+			// A row was dropped, so advance past the last identifier this page
+			// observed. A dropped tail row is not re-fetched, so each dropped row
+			// is reported once rather than again on the next page.
 			page.Next = &OpenCodeSessionRecordCursor{sessionID: *cursorID}
+		case len(records) > 0:
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: records[len(records)-1].SessionID}
 		}
 	}
 	return page, nil
@@ -601,6 +606,11 @@ func (p *openCodeBoundedPage[Row]) observe() { p.seen++ }
 
 // keep retains one decoded row for the page.
 func (p *openCodeBoundedPage[Row]) keep(row Row) { p.rows = append(p.rows, row) }
+
+// overflowKept reports whether more valid rows were kept than the page bound, so
+// a kept row was trimmed and must be re-fetched on the next page. It is only
+// true when every fetched row was kept, so no row was dropped on this page.
+func (p *openCodeBoundedPage[Row]) overflowKept() bool { return len(p.rows) > p.pageSize }
 
 // assemble returns the kept rows trimmed to the page bound and whether a further
 // page exists.
