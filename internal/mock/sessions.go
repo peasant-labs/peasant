@@ -245,6 +245,10 @@ func GenerateQualitySessions() []api.QualitySession {
 		}
 		dayOffset++
 	}
+	// Appended after the seeded loop finishes so it draws nothing from r and
+	// cannot perturb the deterministic sequence above. See
+	// heroTitleFixtureQualitySession.
+	sessions = append(sessions, heroTitleFixtureQualitySession())
 	return sessions
 }
 
@@ -278,7 +282,7 @@ func Sessions() []ingest.Session {
 		schema.OutcomeFailed,
 	}
 
-	sessions := make([]ingest.Session, len(data.Sessions)+1)
+	sessions := make([]ingest.Session, len(data.Sessions)+1, len(data.Sessions)+1+len(heroTitleFixtureSessions()))
 	sessions[0] = canonicalStrikeMockFixture.session()
 	for i, s := range data.Sessions {
 		startTime, _ := time.Parse(time.RFC3339, s.StartTime)
@@ -301,7 +305,96 @@ func Sessions() []ingest.Session {
 			},
 		}
 	}
+	// Additive capture fixtures for the session hero heading (peasant#175) —
+	// appended after every yaml-driven session so they never shift an
+	// existing index or ID. See heroTitleFixtureSessions for what each one
+	// demonstrates.
+	sessions = append(sessions, heroTitleFixtureSessions()...)
 	return sessions
+}
+
+// heroTitleGeneratedSessionID and heroTitleUntitledSessionID name the two
+// additive mock sessions the visual-review harness captures for the session
+// hero heading (peasant#175, web/scripts/visual/README.md "session-detail"
+// boot surface). heroTitleFixtureProject reuses the existing "fortuna" mock
+// project so no new project-summary/routing wiring is needed.
+const (
+	heroTitleGeneratedSessionID = "sess-hero-title-generated"
+	heroTitleUntitledSessionID  = "sess-hero-title-untitled"
+	heroTitleFixtureProject     = "fortuna"
+)
+
+// heroTitleFixtureSessions returns two additive mock sessions:
+//   - heroTitleGeneratedSessionID has a matching heroTitleFixtureQualitySession
+//     row, so the hero renders that generated title.
+//   - heroTitleUntitledSessionID has no quality row and opens with the same
+//     local-command harness markup the SessionDetailV2 hero-title regression
+//     test pins (testdata/hero_title.yaml), so the hero renders the
+//     "Untitled session" placeholder instead of that markup.
+//
+// Neither entry touches an existing session, index, or the seeded-PRNG draw
+// sequence used elsewhere in this file.
+func heroTitleFixtureSessions() []ingest.Session {
+	generatedStart := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	untitledStart := generatedStart.Add(time.Hour)
+	return []ingest.Session{
+		{
+			ID:        schema.SessionID(heroTitleGeneratedSessionID),
+			Project:   heroTitleFixtureProject,
+			Harness:   schema.HarnessClaudeCode,
+			StartTime: generatedStart,
+			EndTime:   generatedStart.Add(6 * time.Minute),
+			Turns:     MockTurns(4, generatedStart),
+			Metadata: ingest.SessionMetadata{
+				TotalTokens:   4200,
+				Duration:      6 * time.Minute,
+				TurnCount:     4,
+				ToolCallCount: 1,
+			},
+		},
+		{
+			ID:        schema.SessionID(heroTitleUntitledSessionID),
+			Project:   heroTitleFixtureProject,
+			Harness:   schema.HarnessClaudeCode,
+			StartTime: untitledStart,
+			EndTime:   untitledStart.Add(6 * time.Minute),
+			Turns: []ingest.Turn{
+				{
+					Index:     0,
+					Role:      ingest.RoleUser,
+					Content:   "<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>",
+					Timestamp: untitledStart,
+				},
+				{
+					Index:     1,
+					Role:      ingest.RoleAssistant,
+					Content:   "the branch has no staged changes",
+					Timestamp: untitledStart.Add(2 * time.Minute),
+				},
+			},
+			Metadata: ingest.SessionMetadata{
+				TotalTokens:   900,
+				Duration:      6 * time.Minute,
+				TurnCount:     2,
+				ToolCallCount: 0,
+			},
+		},
+	}
+}
+
+// heroTitleFixtureQualitySession is the quality row matched by ID to
+// heroTitleGeneratedSessionID above, so the mock quality channel supplies a
+// generated title for that one fixture session. heroTitleUntitledSessionID
+// deliberately has no matching row.
+func heroTitleFixtureQualitySession() api.QualitySession {
+	return api.QualitySession{
+		ID:      heroTitleGeneratedSessionID,
+		Date:    "2026-08-01T09:00:00Z",
+		Project: heroTitleFixtureProject,
+		Scope:   scopeNames[0],
+		Title:   "refactor the ingest pipeline",
+		Outcome: "resolved",
+	}
 }
 
 // mockScorecardMetrics builds deterministic per-session quality signals so the
