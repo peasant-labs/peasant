@@ -718,6 +718,7 @@ type legacyPartPageCollector struct {
 	tolerant    bool
 	check       func(OpenCodeLegacyPartRow) error
 	dropped     []OpenCodeOrphanPartDrop
+	cursorID    *OpenCodeLegacyPartID
 }
 
 func newLegacyPartPageCollector(pageSize int, requireJSON bool, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
@@ -735,17 +736,26 @@ func newTolerantLegacyPartPageCollector(pageSize int, check func(OpenCodeLegacyP
 
 func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
 	c.bounded.observe()
+	rawPartID, rawMessageID := bestEffortLegacyPartIdentifiers(stmt)
+	// A row whose part id is a valid identifier advances the cursor even when the
+	// rest of the row is dropped, so a page of all-dropped rows still makes
+	// progress instead of ending pagination.
+	if rawPartID != "" {
+		if partID, idErr := NewOpenCodeLegacyPartID(rawPartID); idErr == nil {
+			c.cursorID = &partID
+		}
+	}
 	row, err := decodeLegacyPartRow(stmt, c.requireJSON)
 	if err != nil {
 		if c.tolerant {
-			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{Reason: fmt.Sprintf("orphan part row with id %q could not be decoded: %v", stmt.ColumnText(0), err)})
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: rawPartID, MessageID: rawMessageID, Reason: fmt.Sprintf("part row with id %q could not be decoded: %v", rawPartID, err)})
 			return nil
 		}
 		return err
 	}
 	if err := c.check(row); err != nil {
 		if c.tolerant {
-			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{Reason: fmt.Sprintf("orphan part row %q was out of scope: %v", row.ID.String(), err)})
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: row.ID.String(), MessageID: row.MessageID.String(), Reason: fmt.Sprintf("part row %q was out of scope: %v", row.ID.String(), err)})
 			return nil
 		}
 		return err
@@ -754,11 +764,32 @@ func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
 	return nil
 }
 
+// bestEffortLegacyPartIdentifiers reads the part and message identifiers
+// directly from their text columns, so a dropped row still names its message.
+// Either identifier is empty when its column is not text.
+func bestEffortLegacyPartIdentifiers(stmt *sqlite.Stmt) (partID string, messageID string) {
+	if stmt.ColumnType(0) == sqlite.TypeText {
+		partID = stmt.ColumnText(0)
+	}
+	if stmt.ColumnType(1) == sqlite.TypeText {
+		messageID = stmt.ColumnText(1)
+	}
+	return partID, messageID
+}
+
 func (c *legacyPartPageCollector) page() OpenCodeLegacyPartPage {
 	rows, hasNext := c.bounded.assemble()
 	page := OpenCodeLegacyPartPage{Parts: rows, Dropped: c.dropped}
-	if hasNext && len(rows) > 0 {
-		page.Next = &OpenCodeLegacyPartCursor{partID: rows[len(rows)-1].ID}
+	if hasNext {
+		// Prefer the last kept row so the sentinel row beyond it is re-fetched on
+		// the next page. When a page keeps no valid row, advance past the last
+		// decodable part id so a page of all-dropped rows still moves.
+		switch {
+		case len(rows) > 0:
+			page.Next = &OpenCodeLegacyPartCursor{partID: rows[len(rows)-1].ID}
+		case c.cursorID != nil:
+			page.Next = &OpenCodeLegacyPartCursor{partID: *c.cursorID}
+		}
 	}
 	return page
 }

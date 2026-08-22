@@ -425,11 +425,17 @@ type OpenCodeLegacyMessagePage struct {
 	Next     *OpenCodeLegacyMessageCursor
 }
 
-// OpenCodeOrphanPartDrop records one orphan part row the bounded read could not
-// decode into a typed row. Reason explains why the row was dropped. An orphan
-// row is always dropped rather than failing the whole session.
+// OpenCodeOrphanPartDrop records one part row the bounded read could not decode
+// into a typed row. PartID and MessageID are the row's best-effort raw
+// identifiers, read directly from the text columns even when the rest of the
+// row does not decode; either is empty when its column is not text. Reason
+// explains why the row was dropped. The read always drops such a row rather
+// than failing; the caller decides whether the drop is tolerable, because a
+// part whose message is present is a session failure, not an orphan.
 type OpenCodeOrphanPartDrop struct {
-	Reason string
+	PartID    string
+	MessageID string
+	Reason    string
 }
 
 // OpenCodeLegacyPartPage is a detached bounded part page. Dropped is populated
