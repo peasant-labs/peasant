@@ -581,10 +581,12 @@ func applyClaudeHints(hints *claudeSessionHints, raw []byte) {
 	if hints.cwd == "" && line.CWD != "" {
 		hints.cwd = line.CWD
 	}
-	// Derive the display title from the first user message. The shared
-	// redaction-free pipeline strips Claude's own markup (system-reminder
-	// blocks, command/query wrappers) and caps the length, so the raw markup
-	// no longer leaks into the title.
+	// Derive the display title from the first user message that carries real
+	// user prose. The shared redaction-free pipeline strips Claude's own markup
+	// (system-reminder blocks, command and local-command wrappers, skill
+	// bodies) and caps the length, so the raw markup no longer leaks into the
+	// title. A turn that cleans to nothing, or that cannot be cleaned safely,
+	// leaves the hint empty and the next user line becomes the candidate.
 	if hints.title == "" && line.Type == claudeRecordTypeUser && line.Message.Role == "user" {
 		if text := extractTextFromContent(line.Message.Content); text != "" {
 			hints.title = simpleTitle(text, defaults.HarnessClaudeCode)
