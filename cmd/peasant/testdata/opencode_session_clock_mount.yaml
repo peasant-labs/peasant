@@ -1,0 +1,15 @@
+# Mounted-harvest re-ingest cases for the two OpenCode session-clock fixtures.
+# Each case names the source fixture and the freshness mutation applied before
+# the second harvest. The mtime-floor mutation moves the content mtime forward
+# for a database with no session clock; the row-time mutation moves one row time
+# forward while keeping the floor old, so the changed time tracks the newest row.
+declared_cases: 2
+cases:
+  - name: absent-clock-re-ingests-when-the-mtime-floor-moves
+    fixture: session-clock-absent-floor
+    mutation: mtime-floor
+  - name: lagging-clock-re-ingests-when-a-row-time-moves
+    fixture: session-clock-lagging
+    mutation: row-time
+    rowTable: message
+    rowID: msg_lag_b
