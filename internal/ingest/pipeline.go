@@ -581,8 +581,10 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	staging := NewStagingBuffer(len(toProcessEntries)+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
 	for parentID := range externalParents {
 		// The parent is outside this batch, so DB insertion is the authority on
-		// whether it already exists. Mark it committed only for staging order;
-		// a missing parent still fails the real sessions.parent_id FK actionably.
+		// whether it already exists. Mark it committed only for staging order.
+		// A parent that is neither in this batch nor already stored does not
+		// fail an FK: the store skips the child row instead, so discovery must
+		// not set a ParentUUID whose parent it did not discover.
 		staging.Commit(parentID)
 	}
 

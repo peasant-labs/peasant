@@ -354,6 +354,11 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		// parent link and clock while the bad ones are visible.
 		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session row(s) were dropped while keeping the others: %s", len(records.skipped), strings.Join(records.skipped, "; ")), errors.New("one or more session rows were undecodable"))
 	}
+	if len(records.danglingParents) > 0 {
+		// The children are ingested as roots and the missing links are named, so
+		// a parent this run did not discover never silently skips its child.
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session(s) were ingested as roots because their parent was not discovered in this run: %s", len(records.danglingParents), strings.Join(records.danglingParents, "; ")), errors.New("one or more parent sessions were absent from discovery"))
+	}
 	for index := range candidates {
 		record, known := records.bySession[candidates[index].session.SessionID]
 		if known && record.parent != "" {
@@ -389,6 +394,10 @@ type openCodeSessionRecords struct {
 	// skipped names the rows the read could not use, so one bad row is dropped
 	// with a diagnostic while the others keep their parent link and clock.
 	skipped []string
+	// danglingParents names discovered sessions whose parent this run did not
+	// discover. The child is ingested as a root and the missing link is named,
+	// so a dangling parent_id never skips the child at store time.
+	danglingParents []string
 }
 
 // discoverSQLiteSessionRecords reads session.parent_id and session.time_updated
@@ -434,7 +443,17 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 				if parentID, parentErr := NewSessionID(row.ParentID.String()); parentErr != nil {
 					records.skipped = append(records.skipped, fmt.Sprintf("parent link for session %q was dropped because the parent identifier cannot be stored: %v", sessionID, parentErr))
 				} else if parentID != sessionID {
-					clock.parent = parentID
+					// The parent link is kept only when this run discovered the
+					// parent session. A parent the run never discovered cannot
+					// satisfy the sessions.parent_id relationship, so the child is
+					// left a root and the missing link is named. The store has no
+					// role at discovery, so the discovered set is the only
+					// authority here.
+					if _, discovered := discoveredIDs[parentID]; discovered {
+						clock.parent = parentID
+					} else {
+						records.danglingParents = append(records.danglingParents, fmt.Sprintf("session %q references parent %q, which this run did not discover", sessionID, parentID))
+					}
 				}
 			}
 			records.bySession[sessionID] = clock
