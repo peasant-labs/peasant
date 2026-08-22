@@ -44,11 +44,11 @@ func openLegacyToleranceSource(t *testing.T, path string) OpenCodeSQLiteSource {
 // with blank identifiers.
 func TestOpenCodeLegacyPresentMessageBadPartFailsSession(t *testing.T) {
 	const session = "ses_3cd91f52effeXd3QAJ54jOyzO1"
-	const presentMessage = "msg_orphan_host"
+	const presentHost = "msg_orphan_host"
 	materialized := testfixture.MaterializeByName(t, "legacy-orphan-tolerance")
 	// A REAL time_created keeps the column non-integer, so the source drops the
 	// row. Its message is present, so the drop must fail the session.
-	insertLegacyPartRow(t, materialized.Path, "part_present_bad", presentMessage, session, 1002.5, `{"id":"part_present_bad","messageID":"msg_orphan_host","type":"text","text":"BAD"}`)
+	insertLegacyPartRow(t, materialized.Path, "part_present_bad", presentHost, session, 1002.5, `{"id":"part_present_bad","messageID":"msg_orphan_host","type":"text","text":"BAD"}`)
 
 	source := openLegacyToleranceSource(t, materialized.Path)
 	sessionID, err := NewOpenCodeLegacySessionID(session)
@@ -63,8 +63,8 @@ func TestOpenCodeLegacyPresentMessageBadPartFailsSession(t *testing.T) {
 	if readErr == nil {
 		t.Fatal("projection read succeeded, want a session failure naming the present message with a decoded-part error")
 	}
-	if !strings.Contains(readErr.Error(), presentMessage) {
-		t.Fatalf("session failure = %q, want it to name the present message %q", readErr.Error(), presentMessage)
+	if !strings.Contains(readErr.Error(), presentHost) {
+		t.Fatalf("session failure = %q, want it to name the present message %q", readErr.Error(), presentHost)
 	}
 }
 
