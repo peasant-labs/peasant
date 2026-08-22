@@ -338,11 +338,16 @@ func assertPersistedCanonicalGraph(t testing.TB, entries []schema.SessionEntry, 
 	child, childOK := indexes[testCase.ChildEntry]
 	missing, missingOK := indexes[testCase.MissingParentEntry]
 	// Messages stay at Depth 0 so consumers keep Depth 0/1 as the message and
-	// part discriminator; the parent link lives in ParentIndex only.
-	if !parentOK || !childOK || entries[child].ParentIndex == nil || *entries[child].ParentIndex != entries[parent].EntryIndex || entries[child].Depth != 0 || entries[parent].Depth != 0 {
+	// part discriminator. The depth-0 parent link lives in ParentEntryID, which
+	// names the parent message by its native id, and ParentIndex stays nil at
+	// Depth 0, matching the Claude and Cursor indexers.
+	if !parentOK || !childOK || entries[parent].EntryID == nil ||
+		entries[child].ParentEntryID == nil || *entries[child].ParentEntryID != *entries[parent].EntryID ||
+		entries[child].ParentIndex != nil || entries[parent].ParentIndex != nil ||
+		entries[child].Depth != 0 || entries[parent].Depth != 0 {
 		t.Fatalf("persisted canonical parent graph is incorrect: parent=%d/%t child=%d/%t entries=%+v", parent, parentOK, child, childOK, entries)
 	}
-	if !missingOK || entries[missing].ParentIndex != nil || entries[missing].Depth != 0 || !toolPaired {
+	if !missingOK || entries[missing].ParentEntryID != nil || entries[missing].ParentIndex != nil || entries[missing].Depth != 0 || !toolPaired {
 		t.Fatalf("persisted canonical root/tool state is incorrect: missing=%d/%t tool_paired=%t entries=%+v", missing, missingOK, toolPaired, entries)
 	}
 	return entries[parent].EntryIndex, entries[child].EntryIndex, entries[missing].EntryIndex
@@ -360,20 +365,18 @@ func assertCanonicalDetailGraph(t testing.TB, turns []ingest.Turn, testCase cano
 			}
 		}
 	}
-	linked := false
-	rooted := false
-	for _, turn := range turns {
-		if turn.Index == childIndex && turn.ParentIndex != nil && *turn.ParentIndex == parentIndex {
-			if parent, ok := indexes[parentIndex]; ok && turn.Depth == 0 && parent.Depth == 0 {
-				linked = true
-			}
-		}
-		if turn.Index == missingIndex && turn.ParentIndex == nil && turn.Depth == 0 {
-			rooted = true
-		}
-	}
-	if !linked || !rooted || !toolPaired {
-		t.Fatalf("production detail conversion lost graph or tool pairing: linked=%t rooted=%t tool=%t turns=%+v", linked, rooted, toolPaired, turns)
+	// The depth-0 message graph lives on the entry ParentEntryID, not on the
+	// wire turn ParentIndex, so a linked depth-0 child folds as its own
+	// top-level turn with a nil ParentIndex, exactly like the parent and the
+	// root. The wire keeps ParentIndex nil at Depth 0.
+	child, childTopLevel := indexes[childIndex]
+	parent, parentTopLevel := indexes[parentIndex]
+	root, rootTopLevel := indexes[missingIndex]
+	childTopLevel = childTopLevel && child.Depth == 0 && child.ParentIndex == nil
+	parentTopLevel = parentTopLevel && parent.Depth == 0 && parent.ParentIndex == nil
+	rootTopLevel = rootTopLevel && root.Depth == 0 && root.ParentIndex == nil
+	if !childTopLevel || !parentTopLevel || !rootTopLevel || !toolPaired {
+		t.Fatalf("production detail conversion lost the depth-0 turn contract or tool pairing: child=%t parent=%t root=%t tool=%t turns=%+v", childTopLevel, parentTopLevel, rootTopLevel, toolPaired, turns)
 	}
 }
 
