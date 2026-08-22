@@ -13,6 +13,8 @@ cases:
     expected_links:
       - {id: msg_a, parent: msg_b}
       - {id: msg_b, parent: ""}
+    expected_cycle_diagnostics: [msg_b]
+    expected_missing_diagnostics: []
   - name: three-cycle-pins-last-entry-to-root
     messages:
       - {id: msg_a, parent_id: msg_c, role: user}
@@ -22,6 +24,8 @@ cases:
       - {id: msg_a, parent: msg_c}
       - {id: msg_b, parent: msg_a}
       - {id: msg_c, parent: ""}
+    expected_cycle_diagnostics: [msg_c]
+    expected_missing_diagnostics: []
   - name: chain-links-every-message-at-depth-zero
     messages:
       - {id: msg_root, parent_id: "", role: user}
@@ -31,6 +35,8 @@ cases:
       - {id: msg_root, parent: ""}
       - {id: msg_child, parent: msg_root}
       - {id: msg_grandchild, parent: msg_child}
+    expected_cycle_diagnostics: []
+    expected_missing_diagnostics: []
   - name: self-and-missing-parents-stay-at-root
     messages:
       - {id: msg_self, parent_id: msg_self, role: user}
@@ -38,3 +44,5 @@ cases:
     expected_links:
       - {id: msg_self, parent: ""}
       - {id: msg_missing, parent: ""}
+    expected_cycle_diagnostics: [msg_self]
+    expected_missing_diagnostics: [msg_missing]

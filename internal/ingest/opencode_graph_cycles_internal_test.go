@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/schema"
@@ -22,9 +23,11 @@ type openCodeGraphCycleFixture struct {
 }
 
 type openCodeGraphCycleCase struct {
-	Name          string                      `yaml:"name"`
-	Messages      []openCodeGraphCycleMessage `yaml:"messages"`
-	ExpectedLinks []openCodeGraphCycleLink    `yaml:"expected_links"`
+	Name                       string                      `yaml:"name"`
+	Messages                   []openCodeGraphCycleMessage `yaml:"messages"`
+	ExpectedLinks              []openCodeGraphCycleLink    `yaml:"expected_links"`
+	ExpectedCycleDiagnostics   []string                    `yaml:"expected_cycle_diagnostics"`
+	ExpectedMissingDiagnostics []string                    `yaml:"expected_missing_diagnostics"`
 }
 
 type openCodeGraphCycleMessage struct {
@@ -71,6 +74,16 @@ func loadOpenCodeGraphCycleFixture(data []byte) (openCodeGraphCycleFixture, erro
 		for _, link := range testCase.ExpectedLinks {
 			if !ids[link.ID] || (link.Parent != "" && !ids[link.Parent]) {
 				return fixture, fmt.Errorf("OpenCode graph cycle case %q has an expected link to an unknown message %+v", testCase.Name, link)
+			}
+		}
+		for _, id := range testCase.ExpectedCycleDiagnostics {
+			if !ids[id] {
+				return fixture, fmt.Errorf("OpenCode graph cycle case %q expects a cycle diagnostic for unknown message %q", testCase.Name, id)
+			}
+		}
+		for _, id := range testCase.ExpectedMissingDiagnostics {
+			if !ids[id] {
+				return fixture, fmt.Errorf("OpenCode graph cycle case %q expects a missing-parent diagnostic for unknown message %q", testCase.Name, id)
 			}
 		}
 	}
@@ -165,4 +178,88 @@ func describeOpenCodeGraph(entries []schema.SessionEntry) string {
 		fmt.Fprintf(&buffer, "%d:%s depth=%d parent=%s; ", entry.EntryIndex, id, entry.Depth, parent)
 	}
 	return buffer.String()
+}
+
+// TestOpenCodeCycleDiagnosticNamesOnlyTheDroppedLink proves that a parent cycle
+// yields exactly one cycle diagnostic, for the single member whose link
+// normalization dropped, not one diagnostic per node on the cycle. It also
+// checks that an absent parent still yields its own missing-parent diagnostic.
+func TestOpenCodeCycleDiagnosticNamesOnlyTheDroppedLink(t *testing.T) {
+	fixture, err := loadOpenCodeGraphCycleFixture(openCodeGraphCycleYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := NewSessionID("ses_3cd91f52effeXd3QAJ54jOyzv5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourcePath, err := NewResolvedPath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := DiscoveredSession{SessionID: sessionID, Harness: HarnessOpenCode, SourcePath: sourcePath}
+
+	const (
+		cycleMarker   = "linking it would close a parent cycle"
+		missingMarker = "absent from the selected canonical representation"
+	)
+	for _, testCase := range fixture.Cases {
+		t.Run(testCase.Name, func(t *testing.T) {
+			messages := openCodeGraphCycleMessages(t, testCase.Messages)
+			diagnostics := missingOpenCodeParentDiagnostics(session, messages)
+
+			cycleIDs := make(map[string]int)
+			missingIDs := make(map[string]int)
+			for _, diagnostic := range diagnostics {
+				switch {
+				case strings.Contains(diagnostic.Message, cycleMarker):
+					cycleIDs[messageIDFromCycleDiagnostic(t, testCase.Messages, diagnostic.Message)]++
+				case strings.Contains(diagnostic.Message, missingMarker):
+					missingIDs[messageIDFromCycleDiagnostic(t, testCase.Messages, diagnostic.Message)]++
+				default:
+					t.Fatalf("diagnostic wording is neither cycle nor missing-parent: %q", diagnostic.Message)
+				}
+			}
+
+			wantCycle := countedIDSet(testCase.ExpectedCycleDiagnostics)
+			wantMissing := countedIDSet(testCase.ExpectedMissingDiagnostics)
+			if !reflect.DeepEqual(cycleIDs, wantCycle) {
+				t.Fatalf("cycle diagnostics = %v, want exactly %v", cycleIDs, wantCycle)
+			}
+			if !reflect.DeepEqual(missingIDs, wantMissing) {
+				t.Fatalf("missing-parent diagnostics = %v, want exactly %v", missingIDs, wantMissing)
+			}
+			if got, want := len(diagnostics), len(testCase.ExpectedCycleDiagnostics)+len(testCase.ExpectedMissingDiagnostics); got != want {
+				t.Fatalf("total diagnostics = %d, want %d for case %q", got, want, testCase.Name)
+			}
+		})
+	}
+}
+
+// messageIDFromCycleDiagnostic recovers which fixture message a diagnostic names
+// by finding the one message id its wording mentions. The message id is unique
+// within a case, so exactly one matches.
+func messageIDFromCycleDiagnostic(t testing.TB, messages []openCodeGraphCycleMessage, text string) string {
+	t.Helper()
+	match := ""
+	for _, message := range messages {
+		if strings.Contains(text, "message "+message.ID+" references") {
+			if match != "" {
+				t.Fatalf("diagnostic %q names more than one message", text)
+			}
+			match = message.ID
+		}
+	}
+	if match == "" {
+		t.Fatalf("diagnostic %q names no known message", text)
+	}
+	return match
+}
+
+func countedIDSet(ids []string) map[string]int {
+	set := make(map[string]int)
+	for _, id := range ids {
+		set[id]++
+	}
+	return set
 }

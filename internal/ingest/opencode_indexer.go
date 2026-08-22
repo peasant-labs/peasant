@@ -557,16 +557,16 @@ func isOrphanOpenCodeSemanticMessage(message openCodeSemanticMessage) bool {
 
 func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []openCodeSemanticMessage) []DiagnosticEntry {
 	identities := make(map[string]struct{}, len(messages))
-	parentOf := make(map[string]string, len(messages))
 	for _, message := range messages {
 		if message.EntryID == "" {
 			continue
 		}
 		identities[message.EntryID] = struct{}{}
-		if !isOrphanOpenCodeSemanticMessage(message) && message.Data.ParentID != "" {
-			parentOf[message.EntryID] = message.Data.ParentID
-		}
 	}
+	// Replay the entry-graph normalization once to learn which single link each
+	// cycle actually dropped, so the cycle diagnostic names only the pinned
+	// member rather than every node on the cycle.
+	droppedCycleLinks := openCodeDroppedCycleLinks(messages)
 	seen := make(map[string]struct{})
 	diagnostics := make([]DiagnosticEntry, 0)
 	for _, message := range messages {
@@ -593,9 +593,10 @@ func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []open
 			})
 			continue
 		}
-		// The parent exists but linking it would close a cycle, so the child was
-		// kept at the root. Name that broken link, not only absent parents.
-		if openCodeParentLinkFormsCycle(parentOf, message.EntryID) {
+		// The parent exists but linking it would have closed a cycle, so
+		// normalization kept exactly this member at the root. Name that one
+		// broken link, not every node on the cycle.
+		if _, dropped := droppedCycleLinks[message.EntryID]; dropped {
 			key := message.EntryID + "\x00" + parentID
 			if _, duplicate := seen[key]; duplicate {
 				continue
@@ -612,21 +613,62 @@ func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []open
 	return diagnostics
 }
 
-// openCodeParentLinkFormsCycle reports whether following the parent chain from
-// child's parent returns to child, which is the cycle the entry-graph
-// normalization breaks by keeping the child at the root.
-func openCodeParentLinkFormsCycle(parentOf map[string]string, child string) bool {
+// openCodeDroppedCycleLinks replays the message linking that
+// normalizeOpenCodeEntryGraph performs and returns each message whose parent
+// link was dropped because linking it would have closed a cycle. Normalization
+// links children in entry order and drops only the one reference that closes
+// each cycle, so this names that single pinned member per cycle, not every node
+// on it. A self reference counts as a dropped link.
+func openCodeDroppedCycleLinks(messages []openCodeSemanticMessage) map[string]string {
+	present := make(map[string]struct{}, len(messages))
+	for _, message := range messages {
+		if message.EntryID == "" || isOrphanOpenCodeSemanticMessage(message) {
+			continue
+		}
+		present[message.EntryID] = struct{}{}
+	}
+	linked := make(map[string]string, len(messages))
+	dropped := make(map[string]string)
+	for _, message := range messages {
+		if message.EntryID == "" || isOrphanOpenCodeSemanticMessage(message) {
+			continue
+		}
+		parentID := message.Data.ParentID
+		if parentID == "" {
+			continue
+		}
+		if _, ok := present[parentID]; !ok {
+			continue
+		}
+		if parentID == message.EntryID || openCodeLinkedChainReachesID(linked, parentID, message.EntryID) {
+			dropped[message.EntryID] = parentID
+			continue
+		}
+		linked[message.EntryID] = parentID
+	}
+	return dropped
+}
+
+// openCodeLinkedChainReachesID reports whether the already-linked parent chain
+// that starts at start already contains target. It walks only the links applied
+// so far, so linking children in entry order breaks a cycle at the same member
+// on every run.
+func openCodeLinkedChainReachesID(linked map[string]string, start, target string) bool {
 	visited := make(map[string]bool)
-	for cursor := parentOf[child]; cursor != ""; cursor = parentOf[cursor] {
-		if cursor == child {
+	for cursor := start; ; {
+		if cursor == target {
 			return true
 		}
 		if visited[cursor] {
 			return false
 		}
 		visited[cursor] = true
+		parent, present := linked[cursor]
+		if !present {
+			return false
+		}
+		cursor = parent
 	}
-	return false
 }
 
 func openCodeMessageEntry(sessionID SessionID, index int, message openCodeSemanticMessage, fullContent bool) schema.SessionEntry {
