@@ -411,6 +411,18 @@ func ftueDiscoverWith(
 			})
 		}
 		discovery.SessionCount = rootCount
+		// A provider can enumerate some sources and skip others without failing.
+		// Name the skipped databases so a short session count is explained rather
+		// than silent.
+		if reporter, ok := adapter.(ingest.DiscoveryDiagnosticReporter); ok {
+			if diagnostics := reporter.DiscoveryDiagnostics(); len(diagnostics) > 0 {
+				skipped := make([]string, 0, len(diagnostics))
+				for _, diagnostic := range diagnostics {
+					skipped = append(skipped, fmt.Sprintf("%s (%s)", diagnostic.Location, diagnostic.Summary))
+				}
+				discovery.Detail = fmt.Sprintf("%d source(s) could not be fully read: %s", len(diagnostics), strings.Join(skipped, "; "))
+			}
+		}
 		inventory[provider] = discovery
 	}
 	return inventory, sessions

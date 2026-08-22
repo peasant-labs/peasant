@@ -791,6 +791,48 @@ func (a *OpenCodeAdapter) CandidateEvidence() []OpenCodeProbeResult {
 	return cloneOpenCodeProbeResults(a.candidateEvidence)
 }
 
+var _ DiscoveryDiagnosticReporter = (*OpenCodeAdapter)(nil)
+
+// DiscoveryDiagnostics flattens the candidate evidence from the most recent
+// discovery into provider-agnostic records for the pipeline result. Only the
+// failures that skipped or degraded a candidate are surfaced, so a caller sees
+// a database that could not be fully enumerated rather than an unexplained
+// short session count. A healthy candidate contributes nothing here.
+func (a *OpenCodeAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	a.candidateMu.Lock()
+	defer a.candidateMu.Unlock()
+	var diagnostics []DiscoveryDiagnostic
+	for _, result := range a.candidateEvidence {
+		for _, diagnostic := range result.Diagnostics {
+			if !openCodeDiscoveryDiagnosticSurfaces(diagnostic.Code) {
+				continue
+			}
+			diagnostics = append(diagnostics, DiscoveryDiagnostic{
+				Provider: HarnessOpenCode,
+				Code:     string(diagnostic.Code),
+				Location: result.Candidate.Path,
+				Summary:  diagnostic.What,
+				Detail:   diagnostic.Why,
+			})
+		}
+	}
+	return diagnostics
+}
+
+// openCodeDiscoveryDiagnosticSurfaces reports whether a probe diagnostic names a
+// candidate that failed to contribute its sessions, as opposed to a path that
+// was simply not an OpenCode database.
+func openCodeDiscoveryDiagnosticSurfaces(code OpenCodeProbeDiagnosticCode) bool {
+	switch code {
+	case OpenCodeDiagnosticSourceOpenFailed, OpenCodeDiagnosticCatalogReadFailed,
+		OpenCodeDiagnosticCatalogTruncated, OpenCodeDiagnosticSchemaIncomplete,
+		OpenCodeDiagnosticDiscoveryFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) []OpenCodeProbeResult {
 	if a.candidateProber == nil {
 		return nil

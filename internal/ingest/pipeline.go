@@ -64,6 +64,10 @@ type PipelineResult struct {
 	Sessions []SessionResult
 	Duration time.Duration
 	IndexLog []IndexLogEntry // per-session indexing outcomes (populated during INDEX stage)
+	// DiscoveryDiagnostics names source locations an adapter could not fully
+	// enumerate. Discovery stayed non-fatal per location, so the run continued;
+	// these records make each skipped location visible to the caller.
+	DiscoveryDiagnostics []DiscoveryDiagnostic
 }
 
 // PipelineSummary holds aggregate counts for a pipeline run.
@@ -194,6 +198,11 @@ type Pipeline struct {
 	// in the DB, enabling O(1) fast-path lookups in findMetadataPath without per-session
 	// DB round-trips. Nil before Run() populates it.
 	locationCache map[SessionID]SessionLocation
+
+	// discoveryDiagnostics accumulates per-location discovery failures reported
+	// by adapters during discover(), copied into every PipelineResult so a
+	// skipped database is visible even though discovery stayed non-fatal.
+	discoveryDiagnostics []DiscoveryDiagnostic
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -519,8 +528,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// that shared FILTER pass and performs no extraction, write, or store action.
 	if p.config.DryRun {
 		result := &PipelineResult{
-			Duration: time.Since(start),
-			Sessions: dryRunSessions,
+			Duration:             time.Since(start),
+			Sessions:             dryRunSessions,
+			DiscoveryDiagnostics: p.discoveryDiagnostics,
 		}
 		for _, session := range dryRunSessions {
 			switch session.Status {
@@ -955,6 +965,12 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 			AttachClaudeEvidenceCache(adapter, cache)
 		}
 		sessions, err := adapter.Discover(ctx, cfg)
+		// Per-location discovery failures are collected whether or not the whole
+		// provider errored, so a partially-enumerated provider still reports the
+		// databases it skipped.
+		if reporter, ok := adapter.(DiscoveryDiagnosticReporter); ok {
+			p.discoveryDiagnostics = append(p.discoveryDiagnostics, reporter.DiscoveryDiagnostics()...)
+		}
 		if err != nil {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))
 			continue
@@ -1863,9 +1879,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// REPORT.
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageReport})
 	pipelineResult := &PipelineResult{
-		Sessions: sessionResults,
-		Duration: time.Since(start),
-		IndexLog: indexLogEntries,
+		Sessions:             sessionResults,
+		Duration:             time.Since(start),
+		IndexLog:             indexLogEntries,
+		DiscoveryDiagnostics: p.discoveryDiagnostics,
 	}
 	pipelineResult.Summary.StoreError = storeErr
 	pipelineResult.Summary.Indexed = indexed

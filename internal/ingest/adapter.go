@@ -93,6 +93,26 @@ func (s DiscoveredSession) stalenessSourceTime() time.Time {
 // DeriveProjectIdentifiers. Stub adapters in tests may ignore it.
 type AdapterFactory func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter
 
+// DiscoveryDiagnostic reports one source location an adapter could not fully
+// enumerate during discovery. Discovery stays non-fatal per location, so the
+// run continues; this record makes the skipped location visible in the result
+// rather than only in a log line.
+type DiscoveryDiagnostic struct {
+	Provider Harness
+	Code     string
+	Location string
+	Summary  string
+	Detail   string
+}
+
+// DiscoveryDiagnosticReporter is the optional capability an adapter implements
+// to surface per-location discovery failures after Discover returns. The
+// pipeline collects these into its result so a caller sees a database that was
+// skipped, instead of a silently short session count.
+type DiscoveryDiagnosticReporter interface {
+	DiscoveryDiagnostics() []DiscoveryDiagnostic
+}
+
 // DefaultAdapterRegistry maps providers to their adapter factories.
 var DefaultAdapterRegistry = map[Harness]AdapterFactory{
 	HarnessClaudeCode: func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter {
