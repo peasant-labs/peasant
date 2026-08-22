@@ -2267,3 +2267,45 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 		t.Errorf("ListStaleIndexSessions(1): expected session 33..., got %s", stale1[0])
 	}
 }
+
+// indexVersionBeforeOpenCodeGraph is the index version in force before the
+// OpenCode entry shape changed. A session stored at this version must be re-read
+// as stale under the current version, so the OpenCode indexer output change
+// actually re-indexes existing sessions.
+const indexVersionBeforeOpenCodeGraph = 12
+
+// TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterVersionBump proves that
+// an OpenCode session indexed at the version before the entry shape changed is
+// stale under the current index version, so the version bump re-indexes it.
+func TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterVersionBump(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	hash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const rawSession = "44444444-4444-4444-4444-444444444444"
+	entries := []ingest.StoreEntry{
+		makeStoreEntry(t, rawSession, hash, "github.com-test", defaults.HarnessOpenCode, 1700000000000, 100, 50),
+	}
+	if err := s.InsertSessions(ctx, entries); err != nil {
+		t.Fatalf("InsertSessions: %v", err)
+	}
+	sid, _ := ingest.NewSessionID(rawSession)
+	if err := s.UpdateIndexState(ctx, sid, indexVersionBeforeOpenCodeGraph, 1705276800000); err != nil {
+		t.Fatalf("UpdateIndexState(opencode, pre-graph version): %v", err)
+	}
+
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
+	if err != nil {
+		t.Fatalf("ListStaleIndexSessions(current): %v", err)
+	}
+	found := false
+	for _, staleID := range stale {
+		if staleID == sid {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", indexVersionBeforeOpenCodeGraph, ingest.CurrentIndexVersion)
+	}
+}
