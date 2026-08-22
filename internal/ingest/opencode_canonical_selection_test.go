@@ -433,14 +433,12 @@ func assertCanonicalParentLink(t testing.TB, session ingest.DiscoveredSession, t
 
 type canonicalFreshnessRecorder struct {
 	mu           sync.Mutex
-	current      map[string]int
-	legacy       map[string]int
 	currentBatch int
 	legacyBatch  int
 }
 
 func newCanonicalFreshnessRecorder() *canonicalFreshnessRecorder {
-	return &canonicalFreshnessRecorder{current: make(map[string]int), legacy: make(map[string]int)}
+	return &canonicalFreshnessRecorder{}
 }
 
 type canonicalRecordingSource struct {
@@ -449,20 +447,6 @@ type canonicalRecordingSource struct {
 }
 
 var _ ingest.OpenCodeSQLiteSource = canonicalRecordingSource{}
-
-func (source canonicalRecordingSource) CurrentSessionFreshness(ctx context.Context, id ingest.OpenCodeCurrentSessionID) (time.Time, error) {
-	source.recorder.mu.Lock()
-	source.recorder.current[id.String()]++
-	source.recorder.mu.Unlock()
-	return source.OpenCodeSQLiteSource.CurrentSessionFreshness(ctx, id)
-}
-
-func (source canonicalRecordingSource) LegacySessionFreshness(ctx context.Context, id ingest.OpenCodeLegacySessionID) (time.Time, error) {
-	source.recorder.mu.Lock()
-	source.recorder.legacy[id.String()]++
-	source.recorder.mu.Unlock()
-	return source.OpenCodeSQLiteSource.LegacySessionFreshness(ctx, id)
-}
 
 func (source canonicalRecordingSource) CurrentFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
 	source.recorder.mu.Lock()
@@ -509,20 +493,15 @@ func (filesystem *canonicalFreshnessFileSystem) Stat(path string) (os.FileInfo, 
 func assertOnlyCanonicalFreshnessConsulted(t testing.TB, fixture canonicalSelectionFixture, root string, recorder *canonicalFreshnessRecorder, filesystem *canonicalFreshnessFileSystem) {
 	t.Helper()
 	recorder.mu.Lock()
-	current := cloneIntMap(recorder.current)
-	legacy := cloneIntMap(recorder.legacy)
 	currentBatch := recorder.currentBatch
 	legacyBatch := recorder.legacyBatch
 	recorder.mu.Unlock()
 	filesystem.mu.Lock()
 	stats := cloneIntMap(filesystem.sessionStats)
 	filesystem.mu.Unlock()
-	// Row freshness is read per table, never per session, so no per-session
-	// aggregate is consulted and the batch statement count is bounded by the
-	// present representations rather than by the number of sessions.
-	if len(current) != 0 || len(legacy) != 0 {
-		t.Fatalf("per-session freshness was consulted: current=%v legacy=%v", current, legacy)
-	}
+	// Row freshness is read per table, never per session, so the batch
+	// statement count is bounded by the present representations rather than by
+	// the number of sessions.
 	wantCurrentBatch, wantLegacyBatch := 0, 0
 	for _, testCase := range fixture.Cases {
 		switch testCase.Expected {

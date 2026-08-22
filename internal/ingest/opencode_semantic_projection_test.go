@@ -721,12 +721,6 @@ func (source semanticNegativeSource) CurrentSessionIDs(context.Context, OpenCode
 func (source semanticNegativeSource) LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error) {
 	return OpenCodeLegacySessionPage{}, nil
 }
-func (source semanticNegativeSource) CurrentSessionFreshness(context.Context, OpenCodeCurrentSessionID) (time.Time, error) {
-	return time.Time{}, nil
-}
-func (source semanticNegativeSource) LegacySessionFreshness(context.Context, OpenCodeLegacySessionID) (time.Time, error) {
-	return time.Time{}, nil
-}
 func (source semanticNegativeSource) CurrentFreshnessBySession(context.Context) (map[string]time.Time, error) {
 	return nil, nil
 }
@@ -735,12 +729,6 @@ func (source semanticNegativeSource) LegacyFreshnessBySession(context.Context) (
 }
 func (source semanticNegativeSource) LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error) {
 	return OpenCodeLegacyMessagePage{}, nil
-}
-func (source semanticNegativeSource) LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error) {
-	return OpenCodeLegacyPartPage{}, nil
-}
-func (source semanticNegativeSource) LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error) {
-	return OpenCodeLegacyPartPage{}, nil
 }
 func (source semanticNegativeSource) LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error) {
 	return OpenCodeLegacyPartPage{}, nil

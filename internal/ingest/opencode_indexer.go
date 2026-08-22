@@ -289,12 +289,11 @@ type openCodeIndexMsg struct {
 		ID      string `json:"id"`
 		ModelID string `json:"modelID"`
 	} `json:"model"`
-	Version    string `json:"version"`
-	Directory  string `json:"directory"`
-	CWD        string `json:"cwd"`
-	ParentID   string `json:"parentID"`
-	OrphanPart bool   `json:"_peasant_orphan_part"`
-	Path       struct {
+	Version   string `json:"version"`
+	Directory string `json:"directory"`
+	CWD       string `json:"cwd"`
+	ParentID  string `json:"parentID"`
+	Path      struct {
 		CWD  string `json:"cwd"`
 		Root string `json:"root"`
 	} `json:"path"`
@@ -549,10 +548,9 @@ func (idx *OpenCodeIndexer) openCodeOrphanPartEntry(sessionID SessionID, part op
 }
 
 // isOrphanOpenCodeSemanticMessage reports whether a message is a synthetic
-// orphan slot. Current artifacts set the typed Orphan field; version 1 artifacts
-// carry the retired in-band marker, which stays readable.
+// orphan slot. The managed projection sets the typed Orphan field.
 func isOrphanOpenCodeSemanticMessage(message openCodeSemanticMessage) bool {
-	return message.Orphan || message.Data.OrphanPart
+	return message.Orphan
 }
 
 func missingOpenCodeParentDiagnostics(session DiscoveredSession, messages []openCodeSemanticMessage) []DiagnosticEntry {

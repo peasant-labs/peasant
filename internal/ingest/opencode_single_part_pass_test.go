@@ -16,28 +16,12 @@ import (
 
 type partReadCounts struct {
 	mu           sync.Mutex
-	legacyParts  int
-	orphanParts  int
 	sessionParts int
 }
 
 type partReadCountingSource struct {
 	ingest.OpenCodeSQLiteSource
 	counts *partReadCounts
-}
-
-func (source partReadCountingSource) LegacyParts(ctx context.Context, request ingest.OpenCodeLegacyPartPageRequest) (ingest.OpenCodeLegacyPartPage, error) {
-	source.counts.mu.Lock()
-	source.counts.legacyParts++
-	source.counts.mu.Unlock()
-	return source.OpenCodeSQLiteSource.LegacyParts(ctx, request)
-}
-
-func (source partReadCountingSource) LegacyOrphanParts(ctx context.Context, request ingest.OpenCodeLegacyOrphanPartPageRequest) (ingest.OpenCodeLegacyPartPage, error) {
-	source.counts.mu.Lock()
-	source.counts.orphanParts++
-	source.counts.mu.Unlock()
-	return source.OpenCodeSQLiteSource.LegacyOrphanParts(ctx, request)
 }
 
 func (source partReadCountingSource) LegacySessionParts(ctx context.Context, request ingest.OpenCodeLegacySessionPartPageRequest) (ingest.OpenCodeLegacyPartPage, error) {
@@ -92,12 +76,9 @@ func TestOpenCodeLegacyProjectionReadsPartsOnce(t *testing.T) {
 		t.Fatalf("materialize legacy session failed: err=%v data=%d", err, len(data))
 	}
 	counts.mu.Lock()
-	legacyParts, orphanParts, sessionParts := counts.legacyParts, counts.orphanParts, counts.sessionParts
+	sessionParts := counts.sessionParts
 	counts.mu.Unlock()
 	if sessionParts == 0 {
-		t.Fatalf("session-part pass was never used: legacy=%d orphan=%d session=%d", legacyParts, orphanParts, sessionParts)
-	}
-	if legacyParts != 0 || orphanParts != 0 {
-		t.Fatalf("part table was read twice: per-message=%d orphan-scan=%d, want the single session-part pass only", legacyParts, orphanParts)
+		t.Fatalf("session-part pass was never used: session=%d; the per-message read and the correlated orphan scan no longer exist, so parts must come from the single session-part pass", sessionParts)
 	}
 }

@@ -65,7 +65,7 @@ forbidden_query_tokens:
   - attach
   - payload
   - " union "
-declared_allowed_query_statements: 31
+declared_allowed_query_statements: 24
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -85,10 +85,6 @@ allowed_query_statements:
     statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?2'
   - name: legacy-messages-after
     statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 and (time_created > ?2 or (time_created = ?2 and id > ?3)) order by time_created, id limit ?4'
-  - name: legacy-parts-first
-    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by id limit ?3'
-  - name: legacy-parts-after
-    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 and id > ?3 order by id limit ?4'
   - name: current-sessions-first
     statement: 'select distinct session_id from session_message order by session_id limit ?1'
   - name: current-sessions-after
@@ -97,12 +93,6 @@ allowed_query_statements:
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 order by seq limit ?2'
   - name: current-messages-after
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
-  - name: legacy-message-freshness
-    statement: 'select max(max(time_created, time_updated)) from message where session_id = ?1'
-  - name: legacy-part-freshness
-    statement: 'select max(max(time_created, time_updated)) from part where session_id = ?1'
-  - name: current-message-freshness
-    statement: 'select max(max(time_created, time_updated)) from session_message where session_id = ?1'
   - name: legacy-message-freshness-by-session
     statement: 'select session_id, max(max(time_created, time_updated)) from message group by session_id'
   - name: legacy-part-freshness-by-session
@@ -121,10 +111,6 @@ allowed_query_statements:
     statement: 'select id, time_updated from session order by id limit ?1'
   - name: session-clock-after
     statement: 'select id, time_updated from session where id > ?1 order by id limit ?2'
-  - name: legacy-orphan-parts-first
-    statement: 'select p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data from part as p where p.session_id = ?1 and not exists (select 1 from message as m where m.session_id = p.session_id and m.id = p.message_id) order by p.id limit ?2'
-  - name: legacy-orphan-parts-after
-    statement: 'select p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data from part as p where p.session_id = ?1 and p.id > ?2 and not exists (select 1 from message as m where m.session_id = p.session_id and m.id = p.message_id) order by p.id limit ?3'
   - name: legacy-session-parts-first
     statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by id limit ?2'
   - name: legacy-session-parts-after
@@ -138,14 +124,14 @@ query_guard_mutations:
     replace_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 and (time_created > ?2 or (time_created = ?2 and id > ?3)) order by time_created, id limit ?4'
     replacement_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?4'
   - name: canonical-order
-    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by id limit ?3'
-    replacement_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by time_created limit ?3'
+    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by id limit ?2'
+    replacement_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by time_created limit ?2'
   - name: bound-parameter
     replace_statement: 'select distinct session_id from message order by session_id limit ?1'
     replacement_statement: 'select distinct session_id from message order by session_id limit 129'
   - name: forbidden-history
-    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 and id > ?3 order by id limit ?4'
-    replacement_statement: 'select id, stable_id, session_id, time_created, time_created, data from event where session_id = ?1 and stable_id = ?2 and id > ?3 order by id limit ?4'
+    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and id > ?2 order by id limit ?3'
+    replacement_statement: 'select id, stable_id, session_id, time_created, time_created, data from event where session_id = ?1 and id > ?2 order by id limit ?3'
   - name: generic-offset-escape
     replace_statement: 'select distinct session_id from message where session_id > ?1 order by session_id limit ?2'
     replacement_statement: 'select distinct session_id from message order by session_id limit ?2 offset ?1'

@@ -309,22 +309,6 @@ type OpenCodeLegacyMessagePageRequest struct {
 	After     *OpenCodeLegacyMessageCursor
 }
 
-// OpenCodeLegacyPartPageRequest requests one bounded page for one message.
-type OpenCodeLegacyPartPageRequest struct {
-	SessionID OpenCodeLegacySessionID
-	MessageID OpenCodeLegacyMessageID
-	PageSize  OpenCodeLegacyPageSize
-	After     *OpenCodeLegacyPartCursor
-}
-
-// OpenCodeLegacyOrphanPartPageRequest requests selected parts whose message
-// parent is absent from the same session projection.
-type OpenCodeLegacyOrphanPartPageRequest struct {
-	SessionID OpenCodeLegacySessionID
-	PageSize  OpenCodeLegacyPageSize
-	After     *OpenCodeLegacyPartCursor
-}
-
 // OpenCodeLegacySessionPartPageRequest requests every part row of one session in
 // part identifier order, so the projection reads a session's parts once and
 // partitions them into message parts and orphans in memory.
@@ -595,13 +579,9 @@ type OpenCodeSQLiteSource interface {
 	Catalog(context.Context) (OpenCodeSchemaEvidence, error)
 	CurrentSessionIDs(context.Context, OpenCodeCurrentSessionPageRequest) (OpenCodeCurrentSessionPage, error)
 	LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error)
-	CurrentSessionFreshness(context.Context, OpenCodeCurrentSessionID) (time.Time, error)
-	LegacySessionFreshness(context.Context, OpenCodeLegacySessionID) (time.Time, error)
 	CurrentFreshnessBySession(context.Context) (map[string]time.Time, error)
 	LegacyFreshnessBySession(context.Context) (map[string]time.Time, error)
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
-	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
-	LegacyOrphanParts(context.Context, OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error)
 	LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error)
 	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)

@@ -82,9 +82,9 @@ func (source countingLegacySource) LegacyMessages(ctx context.Context, request i
 	return source.OpenCodeSQLiteSource.LegacyMessages(ctx, request)
 }
 
-func (source countingLegacySource) LegacyParts(ctx context.Context, request ingest.OpenCodeLegacyPartPageRequest) (ingest.OpenCodeLegacyPartPage, error) {
+func (source countingLegacySource) LegacySessionParts(ctx context.Context, request ingest.OpenCodeLegacySessionPartPageRequest) (ingest.OpenCodeLegacyPartPage, error) {
 	source.counter.parts.Add(1)
-	return source.OpenCodeSQLiteSource.LegacyParts(ctx, request)
+	return source.OpenCodeSQLiteSource.LegacySessionParts(ctx, request)
 }
 
 type fixedOpenCodeEnvironment map[string]string

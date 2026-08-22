@@ -25,19 +25,12 @@ const (
 	openCodeLegacySessionsAfterStatement     = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
 	openCodeLegacyMessagesFirstStatement     = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created, id LIMIT ?2"
 	openCodeLegacyMessagesAfterStatement     = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 AND (time_created > ?2 OR (time_created = ?2 AND id > ?3)) ORDER BY time_created, id LIMIT ?4"
-	openCodeLegacyPartsFirstStatement        = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 ORDER BY id LIMIT ?3"
-	openCodeLegacyPartsAfterStatement        = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 AND id > ?3 ORDER BY id LIMIT ?4"
-	openCodeLegacyOrphanPartsFirstStatement  = "SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data FROM part AS p WHERE p.session_id = ?1 AND NOT EXISTS (SELECT 1 FROM message AS m WHERE m.session_id = p.session_id AND m.id = p.message_id) ORDER BY p.id LIMIT ?2"
-	openCodeLegacyOrphanPartsAfterStatement  = "SELECT p.id, p.message_id, p.session_id, p.time_created, p.time_updated, p.data FROM part AS p WHERE p.session_id = ?1 AND p.id > ?2 AND NOT EXISTS (SELECT 1 FROM message AS m WHERE m.session_id = p.session_id AND m.id = p.message_id) ORDER BY p.id LIMIT ?3"
 	openCodeLegacySessionPartsFirstStatement = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 ORDER BY id LIMIT ?2"
 	openCodeLegacySessionPartsAfterStatement = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
 	openCodeCurrentSessionsFirstStatement    = "SELECT DISTINCT session_id FROM session_message ORDER BY session_id LIMIT ?1"
 	openCodeCurrentSessionsAfterStatement    = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
 	openCodeCurrentMessagesFirstStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
-	openCodeLegacyMessageFreshnessStatement  = "SELECT MAX(MAX(time_created, time_updated)) FROM message WHERE session_id = ?1"
-	openCodeLegacyPartFreshnessStatement     = "SELECT MAX(MAX(time_created, time_updated)) FROM part WHERE session_id = ?1"
-	openCodeCurrentFreshnessStatement        = "SELECT MAX(MAX(time_created, time_updated)) FROM session_message WHERE session_id = ?1"
 
 	openCodeLegacyMessageFreshnessBySessionStatement = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM message GROUP BY session_id"
 	openCodeLegacyPartFreshnessBySessionStatement    = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM part GROUP BY session_id"
@@ -310,39 +303,6 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionIDs(ctx context.Context, r
 	return page, nil
 }
 
-func (s *zombiezenOpenCodeSQLiteSource) LegacySessionFreshness(ctx context.Context, sessionID OpenCodeLegacySessionID) (time.Time, error) {
-	lease, err := s.beginSourceRead(ctx, "read selected legacy freshness")
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer lease.release()
-	var newest int64
-	found := false
-	decode := newSelectedFreshnessDecoder(&newest, &found)
-	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyMessageFreshnessStatement, []any{sessionID.String()}, decode); err != nil || lease.ctx.Err() != nil {
-		return time.Time{}, s.sourceReadError(lease.ctx, "read selected legacy message freshness", err, "message(time_created,time_updated)", "supported selected legacy projection")
-	}
-	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyPartFreshnessStatement, []any{sessionID.String()}, decode); err != nil || lease.ctx.Err() != nil {
-		return time.Time{}, s.sourceReadError(lease.ctx, "read selected legacy part freshness", err, "part(time_created,time_updated)", "supported selected legacy projection")
-	}
-	return selectedFreshnessTime(newest, found), nil
-}
-
-func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionFreshness(ctx context.Context, sessionID OpenCodeCurrentSessionID) (time.Time, error) {
-	lease, err := s.beginSourceRead(ctx, "read selected current message freshness")
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer lease.release()
-	var newest int64
-	found := false
-	decode := newSelectedFreshnessDecoder(&newest, &found)
-	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentFreshnessStatement, []any{sessionID.String()}, decode); err != nil || lease.ctx.Err() != nil {
-		return time.Time{}, s.sourceReadError(lease.ctx, "read selected current message freshness", err, "session_message(time_created,time_updated)", "supported selected current projection")
-	}
-	return selectedFreshnessTime(newest, found), nil
-}
-
 // LegacyFreshnessBySession returns the newest row time of every legacy session
 // in one database with one GROUP BY aggregate per table, so freshness reads are
 // bounded by table count rather than by session count. A session absent from
@@ -409,62 +369,6 @@ func newFreshnessBySessionDecoder(result map[string]time.Time) func(*sqlite.Stmt
 			return fmt.Errorf("decode freshness by session %q: aggregate has SQLite type %s instead of integer", sessionID, stmt.ColumnType(1))
 		}
 	}
-}
-
-// newSelectedFreshnessDecoder returns a row decoder for one
-// MAX(MAX(time_created,time_updated)) aggregate. It records the newest
-// millisecond across every statement it decodes and sets found when any row
-// contributed a value, so a caller can tell an empty projection from an epoch
-// timestamp. The statement stays a compile-time constant at each call site.
-func newSelectedFreshnessDecoder(newest *int64, found *bool) func(*sqlite.Stmt) error {
-	return func(stmt *sqlite.Stmt) error {
-		if stmt.ColumnType(0) == sqlite.TypeNull {
-			return nil
-		}
-		if stmt.ColumnType(0) != sqlite.TypeInteger {
-			return fmt.Errorf("decode selected freshness: aggregate has SQLite type %s instead of integer", stmt.ColumnType(0))
-		}
-		*newest = max(*newest, stmt.ColumnInt64(0))
-		*found = true
-		return nil
-	}
-}
-
-// selectedFreshnessTime returns the zero time when no row contributed an
-// aggregate value, so callers can tell an empty projection from epoch.
-func selectedFreshnessTime(milliseconds int64, found bool) time.Time {
-	if !found {
-		return time.Time{}
-	}
-	return time.UnixMilli(milliseconds)
-}
-
-// LegacyOrphanParts retains malformed selected rows without reading any other
-// session or inventing a source parent.
-func (s *zombiezenOpenCodeSQLiteSource) LegacyOrphanParts(ctx context.Context, request OpenCodeLegacyOrphanPartPageRequest) (OpenCodeLegacyPartPage, error) {
-	if err := validateLegacyOrphanPartPageRequest(request); err != nil {
-		return OpenCodeLegacyPartPage{}, err
-	}
-	lease, err := s.beginSourceRead(ctx, "read bounded legacy orphan part page")
-	if err != nil {
-		return OpenCodeLegacyPartPage{}, err
-	}
-	defer lease.release()
-	collector := newTolerantLegacyPartPageCollector(request.PageSize.value, func(row OpenCodeLegacyPartRow) error {
-		if row.SessionID != request.SessionID {
-			return fmt.Errorf("decode legacy orphan part row %q: projected session %q differs from requested session %q", row.ID.String(), row.SessionID.String(), request.SessionID.String())
-		}
-		return nil
-	})
-	if request.After == nil {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyOrphanPartsFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, collector.decode)
-	} else {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyOrphanPartsAfterStatement, []any{request.SessionID.value, request.After.partID.value, request.PageSize.value + 1}, collector.decode)
-	}
-	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy orphan part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
-	}
-	return collector.page(), nil
 }
 
 // LegacySessionParts returns every part row of one session in identifier order,
@@ -840,34 +744,6 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyMessages(ctx context.Context, requ
 	return page, nil
 }
 
-// LegacyParts returns one message's current materialized legacy parts in part
-// identifier order while retaining both session and message scope.
-func (s *zombiezenOpenCodeSQLiteSource) LegacyParts(ctx context.Context, request OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error) {
-	if err := validateLegacyPartPageRequest(request); err != nil {
-		return OpenCodeLegacyPartPage{}, err
-	}
-	lease, err := s.beginSourceRead(ctx, "read bounded legacy part page")
-	if err != nil {
-		return OpenCodeLegacyPartPage{}, err
-	}
-	defer lease.release()
-	collector := newLegacyPartPageCollector(request.PageSize.value, true, func(row OpenCodeLegacyPartRow) error {
-		if row.SessionID != request.SessionID || row.MessageID != request.MessageID {
-			return fmt.Errorf("decode legacy part row %q: projected session/message %q/%q differs from requested scope %q/%q", row.ID.String(), row.SessionID.String(), row.MessageID.String(), request.SessionID.String(), request.MessageID.String())
-		}
-		return nil
-	})
-	if request.After == nil {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsFirstStatement, []any{request.SessionID.value, request.MessageID.value, request.PageSize.value + 1}, collector.decode)
-	} else {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsAfterStatement, []any{request.SessionID.value, request.MessageID.value, request.After.partID.value, request.PageSize.value + 1}, collector.decode)
-	}
-	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
-	}
-	return collector.page(), nil
-}
-
 // CurrentMessages returns one session's materialized current rows in seq order.
 func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, request OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
 	if err := validateCurrentPageRequest(request); err != nil {
@@ -1063,39 +939,6 @@ func validateLegacyMessagePageRequest(request OpenCodeLegacyMessagePageRequest) 
 	}
 	if request.After != nil {
 		if err := validateOpenCodeLegacyIdentifier("message cursor", request.After.messageID.value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateLegacyPartPageRequest(request OpenCodeLegacyPartPageRequest) error {
-	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
-		return fmt.Errorf("validate OpenCode legacy part page request: %w", err)
-	}
-	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
-		return err
-	}
-	if err := validateOpenCodeLegacyIdentifier("message", request.MessageID.value); err != nil {
-		return err
-	}
-	if request.After != nil {
-		if err := validateOpenCodeLegacyIdentifier("part cursor", request.After.partID.value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateLegacyOrphanPartPageRequest(request OpenCodeLegacyOrphanPartPageRequest) error {
-	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
-		return fmt.Errorf("validate OpenCode legacy orphan part page request: %w", err)
-	}
-	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
-		return err
-	}
-	if request.After != nil {
-		if err := validateOpenCodeLegacyIdentifier("part cursor", request.After.partID.value); err != nil {
 			return err
 		}
 	}

@@ -15,8 +15,8 @@ import (
 const (
 	openCodeLegacyProjectionFormat = "peasant.opencode.legacy-sqlite"
 	// openCodeLegacyProjectionVersion is version 2: the orphan slot is a typed
-	// message field rather than an in-band data marker with a fabricated parent.
-	// Version 1 artifacts remain readable through the in-band marker.
+	// message field. The minimum readable version is the version-field floor a
+	// decoded artifact must meet.
 	openCodeLegacyProjectionVersion            = 2
 	openCodeLegacyProjectionMinReadableVersion = 1
 	openCodeLegacyMaterializePage              = 128
@@ -443,7 +443,7 @@ func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expecte
 	}
 	// Accept any readable version up to the current write version, so a previously
 	// persisted artifact still decodes after the format is bumped.
-	if projection.Format != expectedFormat || projection.Version < 1 || projection.Version > expectedVersion || projection.SessionID != string(sessionID) {
+	if projection.Format != expectedFormat || projection.Version < openCodeLegacyProjectionMinReadableVersion || projection.Version > expectedVersion || projection.SessionID != string(sessionID) {
 		return projection, fmt.Errorf("managed envelope identity format=%q version=%d session_id=%q does not match expected format=%q readable version 1..%d selected_session_id=%q", projection.Format, projection.Version, projection.SessionID, expectedFormat, expectedVersion, sessionID)
 	}
 	var rows []json.RawMessage

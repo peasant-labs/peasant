@@ -20,7 +20,7 @@ import (
 const (
 	expectedReaderPageCases          = 3
 	expectedReaderInvalidIdentifiers = 1
-	expectedReaderMethods            = 14
+	expectedReaderMethods            = 10
 	expectedReaderSignatureRules     = 5
 	expectedReaderGuardMutations     = 5
 	expectedReaderLoaderMutations    = 4
@@ -152,9 +152,8 @@ func TestOpenCodeLegacyReaderPagesMatchStrictFixture(t *testing.T) {
 				})
 			case readerPageParts:
 				sessionID := mustLegacySessionID(t, fixtureCase.SessionID)
-				messageID := mustLegacyMessageID(t, fixtureCase.MessageID)
 				assertFixturePages(t, fixtureCase, func(cursor *ingest.OpenCodeLegacyPartCursor) (readerFetchedPage[ingest.OpenCodeLegacyPartCursor], error) {
-					page, err := source.LegacyParts(t.Context(), ingest.OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: messageID, PageSize: pageSize, After: cursor})
+					page, err := source.LegacySessionParts(t.Context(), ingest.OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
 					return readerFetchedPage[ingest.OpenCodeLegacyPartCursor]{IDs: legacyPartStrings(page.Parts), Capacity: cap(page.Parts), Next: page.Next}, err
 				})
 			default:
@@ -646,7 +645,7 @@ func mutateReaderFixture(source []byte, kind readerLoaderMutationKind) ([]byte, 
 	case readerLoaderTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_page_cases: 0\n")...), nil
 	case readerLoaderDeclaredCount:
-		return replaceOnce("declared_methods: 14", "declared_methods: 13")
+		return replaceOnce("declared_methods: 10", "declared_methods: 9")
 	case readerLoaderDuplicateMethod:
 		return replaceOnce("  - name: Close\n", "  - name: Catalog\n")
 	default:
