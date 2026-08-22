@@ -54,8 +54,7 @@ func firstLine(s string) string {
 }
 
 // fallbackTitle is the pre-pipeline behaviour: the first line, capped to 80
-// code points. It is only reached when the pipeline cannot be built or the
-// input markup is malformed.
+// code points. It is only reached when the pipeline cannot be built.
 func fallbackTitle(text string) string {
 	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
 		text = text[:idx]
