@@ -409,13 +409,13 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			}
 		}
 		if len(deleted) > 0 {
-			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session(s) were skipped because they were deleted from OpenCode and have no row in the session table: %s", len(deleted), strings.Join(deleted, "; ")), errors.New("one or more sessions were deleted from the session table"))
+			a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeDeleted, fmt.Sprintf("%d session(s) were skipped because they were deleted from OpenCode and have no row in the session table: %s", len(deleted), strings.Join(deleted, "; ")), errors.New("one or more sessions were deleted from the session table"))
 		}
 	}
 	if len(records.danglingParents) > 0 {
 		// The children are ingested as roots and the missing links are named, so
 		// a parent this run did not discover never silently skips its child.
-		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session(s) were ingested as roots because their parent was not discovered in this run: %s", len(records.danglingParents), strings.Join(records.danglingParents, "; ")), errors.New("one or more parent sessions were absent from discovery"))
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeIngestedAsRoots, fmt.Sprintf("%d session(s) were ingested as roots because their parent was not discovered in this run: %s", len(records.danglingParents), strings.Join(records.danglingParents, "; ")), errors.New("one or more parent sessions were absent from discovery"))
 	}
 	for index := range candidates {
 		record, known := records.bySession[candidates[index].session.SessionID]
@@ -554,25 +554,94 @@ func (a *OpenCodeAdapter) resolveCandidateEvidenceIndex(path string) int {
 	return -1
 }
 
-// recordCandidateFailure attaches an actionable diagnostic to the failing
-// candidate's evidence and logs it. Discovery continues for other candidates.
-func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProbeStage, what string, cause error) {
-	a.recordCandidateFailureAt(a.resolveCandidateEvidenceIndex(path), path, stage, what, cause)
+// openCodeDiagnosticOutcome names what happened to the sessions a discovery
+// diagnostic describes, so the diagnostic's meaning and remediation match the
+// event rather than assuming every diagnostic skipped its sessions.
+type openCodeDiagnosticOutcome int
+
+const (
+	// openCodeOutcomeSkipped is the default: the candidate could not contribute
+	// some or all of its sessions this run.
+	openCodeOutcomeSkipped openCodeDiagnosticOutcome = iota
+	// openCodeOutcomeIngestedAsRoots names sessions kept as roots because this
+	// run did not discover their parent. Nothing was skipped.
+	openCodeOutcomeIngestedAsRoots
+	// openCodeOutcomeFloorFallback names sessions whose freshness fell back to
+	// the database and write-ahead-log file time. Nothing was skipped.
+	openCodeOutcomeFloorFallback
+	// openCodeOutcomeDeleted names sessions removed from OpenCode and skipped so
+	// a deleted session does not reappear from its historical rows.
+	openCodeOutcomeDeleted
+)
+
+// meaningAndRemediation returns the Meaning and Remediation text for the
+// outcome. Keeping them beside the outcome constant means one diagnostic can no
+// longer report that sessions were skipped when they were ingested as roots or
+// only fell back for freshness.
+func (o openCodeDiagnosticOutcome) meaningAndRemediation() (string, string) {
+	switch o {
+	case openCodeOutcomeIngestedAsRoots:
+		return "the named sessions were ingested as roots because this run did not discover their parent; no session was skipped and every other session was still discovered",
+			"discover the parent to restore the link, for example by widening the selection or ingesting the parent's source; if the parent no longer exists in OpenCode, the root attachment is correct and no action is needed"
+	case openCodeOutcomeFloorFallback:
+		return "the named sessions used the database and write-ahead-log file time as a freshness floor; no session was skipped and every session was still discovered",
+			"no action is needed; the file time still moves a session when its rows change"
+	case openCodeOutcomeDeleted:
+		return "the named sessions were deleted from OpenCode and were skipped so a removed session does not reappear from its historical rows; every session OpenCode still keeps was discovered",
+			"no action is needed; the sessions were deleted in OpenCode"
+	default:
+		return "sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
+			"retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant"
+	}
 }
 
-// recordCandidateFailureAt records the diagnostic against a pre-resolved
-// evidence index, so a per-session loop does not rescan the evidence slice for
-// every session on one path. A negative index records nothing on the evidence
-// and only logs.
+// logSummary is the one-line slog message for the outcome.
+func (o openCodeDiagnosticOutcome) logSummary() string {
+	switch o {
+	case openCodeOutcomeIngestedAsRoots:
+		return "opencode discovery: sessions ingested as roots"
+	case openCodeOutcomeFloorFallback:
+		return "opencode discovery: freshness used the file-time floor"
+	case openCodeOutcomeDeleted:
+		return "opencode discovery: deleted sessions skipped"
+	default:
+		return "opencode discovery: candidate skipped"
+	}
+}
+
+// recordCandidateFailure attaches a skip diagnostic to the failing candidate's
+// evidence and logs it. Discovery continues for other candidates.
+func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProbeStage, what string, cause error) {
+	a.recordCandidateOutcomeAt(a.resolveCandidateEvidenceIndex(path), path, stage, openCodeOutcomeSkipped, what, cause)
+}
+
+// recordCandidateOutcome attaches a diagnostic whose meaning matches the given
+// outcome, so a non-skip event such as a root-attached session or a freshness
+// floor fallback no longer reports that sessions were skipped.
+func (a *OpenCodeAdapter) recordCandidateOutcome(path string, stage OpenCodeProbeStage, outcome openCodeDiagnosticOutcome, what string, cause error) {
+	a.recordCandidateOutcomeAt(a.resolveCandidateEvidenceIndex(path), path, stage, outcome, what, cause)
+}
+
+// recordCandidateFailureAt records a skip diagnostic against a pre-resolved
+// evidence index.
 func (a *OpenCodeAdapter) recordCandidateFailureAt(evidenceIndex int, path string, stage OpenCodeProbeStage, what string, cause error) {
+	a.recordCandidateOutcomeAt(evidenceIndex, path, stage, openCodeOutcomeSkipped, what, cause)
+}
+
+// recordCandidateOutcomeAt records the outcome-specific diagnostic against a
+// pre-resolved evidence index, so a per-session loop does not rescan the
+// evidence slice for every session on one path. A negative index records
+// nothing on the evidence and only logs.
+func (a *OpenCodeAdapter) recordCandidateOutcomeAt(evidenceIndex int, path string, stage OpenCodeProbeStage, outcome openCodeDiagnosticOutcome, what string, cause error) {
+	meaning, remediation := outcome.meaningAndRemediation()
 	diagnostic := actionableOpenCodeDiagnostic(
 		stage,
 		what,
 		cause.Error(),
 		path,
 		"during OpenCode discovery after the candidate probe reported a supported schema",
-		"sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
-		"retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant",
+		meaning,
+		remediation,
 	)
 	if evidenceIndex >= 0 {
 		a.candidateMu.Lock()
@@ -581,7 +650,7 @@ func (a *OpenCodeAdapter) recordCandidateFailureAt(evidenceIndex int, path strin
 		}
 		a.candidateMu.Unlock()
 	}
-	slog.Warn("opencode discovery: candidate skipped",
+	slog.Warn(outcome.logSummary(),
 		"what", diagnostic.What,
 		"why", diagnostic.Why,
 		"where", diagnostic.Where,
@@ -793,7 +862,7 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness could not be read and the mtime floor was unavailable, so %d session(s) were skipped: %s", len(freshnessSkipped), strings.Join(freshnessSkipped, ", ")), freshnessCause)
 		}
 		if len(floorFallback) > 0 {
-			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness could not be read, so %d session(s) fell back to the database and WAL mtime floor: %s", len(floorFallback), strings.Join(floorFallback, ", ")), floorFallbackCause)
+			a.recordCandidateOutcomeAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, openCodeOutcomeFloorFallback, fmt.Sprintf("selected freshness could not be read, so %d session(s) fell back to the database and WAL mtime floor: %s", len(floorFallback), strings.Join(floorFallback, ", ")), floorFallbackCause)
 		}
 		if len(clocklessSkipped) > 0 {
 			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected SQLite content freshness could not be read, so %d clockless session(s) were skipped: %s", len(clocklessSkipped), strings.Join(clocklessSkipped, ", ")), clocklessCause)
