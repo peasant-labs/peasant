@@ -45,6 +45,13 @@ import { TurnLabelPopover } from './canvas/TurnLabelPopover';
 import { TurnTouchedFiles } from './panels/TurnTouchedFiles';
 import { adaptQualitySessions } from '@/lib/quality/types';
 
+/**
+ * The heading shown for a session that has no generated title yet. The hero
+ * always receives a title, because the alternative — letting the viewer derive
+ * one from the first prompt — puts recorded harness markup in the heading.
+ */
+export const UNTITLED_SESSION_TITLE = 'Untitled session';
+
 interface SessionDetailV2Props {
   sessionId: string;
   projectHash: ProjectHash;
@@ -235,15 +242,17 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
       analytics,
     );
     // `SessionVM.title` is documented as "render-when-present; else the consumer
-    // derives one from the first prompt". Nothing was supplying it, so the hero
-    // fell back to deriving one — which on a session that opens with tooling
-    // preamble rendered that preamble as the title (the
-    // "<local-command-caveat>Caveat: …" heading). Title is not a wire field, so
-    // the host has to supply it: the generated title comes off the quality
-    // channel. When there is none the derived fallback still applies.
-    return sessionTitle
-      ? { ...adapted, session: { ...adapted.session, title: sessionTitle } }
-      : adapted;
+    // derives one from the first prompt". Deriving is never right here: the
+    // first prompt of a recorded session often opens with harness markup, so
+    // the hero rendered that markup as the heading (the
+    // "<local-command-caveat>Caveat: ..." heading). Title is not a wire field,
+    // so the host has to supply one ALWAYS: the generated title when the
+    // quality channel has one, and a plain placeholder when it does not, which
+    // keeps the derived fallback from ever running.
+    return {
+      ...adapted,
+      session: { ...adapted.session, title: sessionTitle ?? UNTITLED_SESSION_TITLE },
+    };
   }, [detail, displayTurns, medians, turns, sessionTitle]);
 
   // Cooked tool calls by turn index, fed into the graph engine's tool nodes.

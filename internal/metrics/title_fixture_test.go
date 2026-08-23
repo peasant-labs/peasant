@@ -28,6 +28,11 @@ const (
 	assertTitleIdempotent titleAssertion = "idempotent"
 )
 
+// titleFixtureCaseCount is the exact number of cases the canonical title
+// fixture must hold. It fails a silent fixture truncation or an accidental
+// duplicate load, which would otherwise let whole cases stop running unnoticed.
+const titleFixtureCaseCount = 15
+
 type titleFixture struct {
 	Cases []titleCase `yaml:"cases"`
 }
@@ -73,7 +78,10 @@ func loadTitleFixture(t *testing.T) titleFixture {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		t.Fatalf("title fixture must contain exactly one YAML document: %v", err)
 	}
-	requiredNames := map[string]bool{"shared_project_path_parity": false, "canonical_cwd_fallback": false, "nested_user_is_not_title": false, "malformed_wrapper_omits_title": false, "no_root_user_omits_title": false, "context_lookup_error_omits_title": false, "unicode_code_point_cap": false, "generated_title_is_idempotent": false}
+	if len(fixture.Cases) != titleFixtureCaseCount {
+		t.Fatalf("title fixture holds %d cases, want exactly %d; update titleFixtureCaseCount when a case is deliberately added or removed", len(fixture.Cases), titleFixtureCaseCount)
+	}
+	requiredNames := map[string]bool{"shared_project_path_parity": false, "canonical_cwd_fallback": false, "nested_user_is_not_title": false, "malformed_wrapper_omits_title": false, "no_root_user_omits_title": false, "context_lookup_error_omits_title": false, "unicode_code_point_cap": false, "generated_title_is_idempotent": false, "command_with_args_titles_the_argument_prose": false, "bare_command_then_prose_titles_the_prose": false, "local_command_output_then_prose_titles_the_prose": false, "codex_environment_context_then_prose_titles_the_prose": false, "system_reminder_then_prose_titles_the_prose": false, "malformed_first_candidate_then_prose_titles_the_prose": false, "only_injected_turns_omits_title": false}
 	requiredArms := map[titleAssertion]bool{assertTitleExact: false, assertTitleAbsent: false, assertTitleUnicodeCap: false, assertTitleIdempotent: false}
 	seen := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {

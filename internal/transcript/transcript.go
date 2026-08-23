@@ -2,9 +2,12 @@
 // session_entries to the rendered SessionDetailPayload. It is imported by BOTH
 // the local dashboard (internal/api) and the push pipeline (internal/push) so
 // the village receives EXACTLY what the local session viewer shows. It lives in
-// its own package (depending only on ingest + schema) to break the api->push
-// import cycle: internal/api imports internal/push, so the builder cannot live
-// in internal/api if push must also call it.
+// its own package (depending only on ingest, schema, and the harness-markup
+// wrapper names exported by redact) to break the api->push import cycle:
+// internal/api imports internal/push, so the builder cannot live in
+// internal/api if push must also call it. Only redact's wrapper-name constants
+// are used here, and redact itself imports only schema, so no cycle is
+// possible.
 //
 // There is ONE conversion path. Changes here affect the web dashboard, the
 // `peasant export sessions` output, AND the `peasant push` structured upload.
@@ -17,6 +20,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
 )
 
@@ -85,13 +89,16 @@ func isInjectedCommandWrapperOnly(content string) bool {
 }
 
 func commandWrapperAtStart(content string) (commandWrapperKind, string, string, bool) {
+	// The wrapper names come from redact, which owns the one catalog of
+	// harness-injected markup names, so this gate and the title pipeline can
+	// never recognize different command wrappers.
 	const (
-		nameOpen     = "<command-name>"
-		nameClose    = "</command-name>"
-		messageOpen  = "<command-message>"
-		messageClose = "</command-message>"
-		argsOpen     = "<command-args>"
-		argsClose    = "</command-args>"
+		nameOpen     = "<" + redact.WrapperCommandName + ">"
+		nameClose    = "</" + redact.WrapperCommandName + ">"
+		messageOpen  = "<" + redact.WrapperCommandMessage + ">"
+		messageClose = "</" + redact.WrapperCommandMessage + ">"
+		argsOpen     = "<" + redact.WrapperCommandArgs + ">"
+		argsClose    = "</" + redact.WrapperCommandArgs + ">"
 	)
 
 	switch {

@@ -10,6 +10,10 @@ import (
 // Pipeline is the complete title surface Peasant consumes.
 type Pipeline interface {
 	Generate(string, redact.TitleContext) (redact.TitleResult, error)
+	// GenerateFromTurns returns the first usable generated title in turn
+	// order, the index of the turn that produced it, and one error per turn
+	// that was unusable. It returns index -1 when no turn is usable.
+	GenerateFromTurns([]string, redact.TitleContext) (redact.TitleResult, int, []error)
 	Sanitize(string, redact.TitleContext) (redact.TitleResult, error)
 }
 
