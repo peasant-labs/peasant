@@ -578,6 +578,13 @@ func rewriteMountedSessionIDs(t testing.TB, path string, originals, replacements
 			_ = connection.Close()
 			t.Fatalf("rewrite synthetic override part session IDs: %v", err)
 		}
+		// The session table is OpenCode's authoritative session list, so rewrite
+		// its identifier too. Otherwise the rewritten sessions have no session
+		// row and discovery treats them as deleted.
+		if err := sqlitex.ExecuteTransient(connection, "UPDATE session SET id = ?1 WHERE id = ?2", options); err != nil {
+			_ = connection.Close()
+			t.Fatalf("rewrite synthetic override session table IDs: %v", err)
+		}
 	}
 	if err := connection.Close(); err != nil {
 		t.Fatalf("close synthetic override session rewrite database: %v", err)

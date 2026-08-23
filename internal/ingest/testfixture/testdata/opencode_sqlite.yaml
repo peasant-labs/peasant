@@ -1,4 +1,4 @@
-declared_cases: 30
+declared_cases: 31
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -760,6 +760,31 @@ cases:
       - {id: msg_current_root, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: user, time_created: 2400, time_updated: 2410, data: '{"id":"msg_current_root","text":"CURRENT_ROOT","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2400}}', seq: 1}
       - {id: msg_current_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2411, time_updated: 2420, data: '{"id":"msg_current_child","parentID":"msg_current_root","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_current_parent","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"CURRENT_TOOL_RESULT"}],"result":"CURRENT_TOOL_RESULT"},"time":{"created":2412,"completed":2419}}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2411,"completed":2420}}', seq: 2}
       - {id: msg_current_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2421, time_updated: 2430, data: '{"id":"msg_current_parent","parentID":"msg_absent","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"part_current_parent","text":"CURRENT_PARENT"}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2421,"completed":2430}}', seq: 3}
+    ignored_history: []
+
+  - name: hybrid-deleted-sessions-skipped
+    logical_path: hybriddeleted/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 3, legacy_parts: 3, current_messages: 2, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - {id: msg_del_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzG1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_del_legacy_only","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzG1","role":"user","path":{"cwd":"/synthetic/deleted"},"time":{"created":1000,"completed":1010},"content":"legacy only survivor"}'}
+      - {id: msg_del_both, session_id: ses_3cd91f52effeXd3QAJ54jOyzG2, time_created: 1100, time_updated: 1110, data: '{"id":"msg_del_both","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzG2","role":"user","path":{"cwd":"/synthetic/deleted"},"time":{"created":1100,"completed":1110},"content":"legacy side of both"}'}
+      - {id: msg_del_legacy_gone, session_id: ses_3cd91f52effeXd3QAJ54jOyzG3, time_created: 1200, time_updated: 1210, data: '{"id":"msg_del_legacy_gone","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzG3","role":"user","path":{"cwd":"/synthetic/deleted"},"time":{"created":1200,"completed":1210},"content":"legacy row of a deleted session"}'}
+    legacy_parts:
+      - {id: part_del_legacy_only, message_id: msg_del_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzG1, time_created: 1001, time_updated: 1001, data: '{"id":"part_del_legacy_only","messageID":"msg_del_legacy_only","type":"text","text":"DEL_LEGACY_ONLY","time":{"created":1001}}'}
+      - {id: part_del_both, message_id: msg_del_both, session_id: ses_3cd91f52effeXd3QAJ54jOyzG2, time_created: 1101, time_updated: 1101, data: '{"id":"part_del_both","messageID":"msg_del_both","type":"text","text":"DEL_BOTH","time":{"created":1101}}'}
+      - {id: part_del_legacy_gone, message_id: msg_del_legacy_gone, session_id: ses_3cd91f52effeXd3QAJ54jOyzG3, time_created: 1201, time_updated: 1201, data: '{"id":"part_del_legacy_gone","messageID":"msg_del_legacy_gone","type":"text","text":"DEL_LEGACY_GONE","time":{"created":1201}}'}
+    current_messages:
+      - {id: sm_del_both, session_id: ses_3cd91f52effeXd3QAJ54jOyzG2, type: message, time_created: 2100, time_updated: 2110, data: '{"role":"assistant","parts":[{"type":"text","text":"current side of both"}]}', seq: 0}
+      - {id: sm_del_current_gone, session_id: ses_3cd91f52effeXd3QAJ54jOyzG4, type: message, time_created: 2200, time_updated: 2210, data: '{"role":"assistant","parts":[{"type":"text","text":"current row of a deleted session"}]}', seq: 0}
+    deleted_session_rows: [ses_3cd91f52effeXd3QAJ54jOyzG3, ses_3cd91f52effeXd3QAJ54jOyzG4]
     ignored_history: []
 
   - name: legacy-orphan-tolerance

@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 30
+const expectedCaseCount = 31
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -110,6 +110,12 @@ type caseSpec struct {
 	LegacyParts     []legacyPart        `yaml:"legacy_parts"`
 	CurrentMessages []currentMessage    `yaml:"current_messages"`
 	IgnoredHistory  []historyRow        `yaml:"ignored_history"`
+	// DeletedSessionRows names sessions whose session-table row is removed after
+	// materialization while their message or session_message rows remain. This
+	// models a session OpenCode deleted from its authoritative session list while
+	// its historical rows linger, so discovery can prove that a deleted session
+	// is skipped rather than resurrected.
+	DeletedSessionRows []string `yaml:"deleted_session_rows"`
 }
 
 type catalogPaddingSpec struct {

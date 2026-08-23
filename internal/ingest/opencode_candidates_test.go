@@ -2844,6 +2844,20 @@ func (source hybridOpenCodeSource) CurrentSessionIDs(_ context.Context, request 
 	return ingest.OpenCodeCurrentSessionPage{SessionIDs: []ingest.OpenCodeCurrentSessionID{id}}, nil
 }
 
+// SessionRecords keeps the fake session table aligned with the projected
+// session id, so the deletion rule that skips a session absent from the session
+// table does not drop the mocked session that both projections return.
+func (source hybridOpenCodeSource) SessionRecords(_ context.Context, request ingest.OpenCodeSessionRecordPageRequest) (ingest.OpenCodeSessionRecordPage, error) {
+	if request.After != nil {
+		return ingest.OpenCodeSessionRecordPage{Supported: true, HasParent: true, HasClock: true}, nil
+	}
+	id, err := ingest.NewOpenCodeSessionLinkID("ses_3cd91f52effeXd3QAJ54jOyzv5")
+	if err != nil {
+		return ingest.OpenCodeSessionRecordPage{}, err
+	}
+	return ingest.OpenCodeSessionRecordPage{Supported: true, HasParent: true, HasClock: true, PresentSessionIDs: []ingest.OpenCodeSessionLinkID{id}}, nil
+}
+
 func (source hybridOpenCodeSource) LegacySessionIDs(_ context.Context, request ingest.OpenCodeLegacySessionPageRequest) (ingest.OpenCodeLegacySessionPage, error) {
 	if source.failLegacy {
 		return ingest.OpenCodeLegacySessionPage{}, errors.New("synthetic legacy projection unavailable")

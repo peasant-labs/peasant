@@ -374,8 +374,14 @@ type OpenCodeSessionRecordPage struct {
 	HasParent bool
 	HasClock  bool
 	Records   []OpenCodeSessionRecord
-	Skipped   []OpenCodeSessionRecordSkip
-	Next      *OpenCodeSessionRecordCursor
+	// PresentSessionIDs names every row on this page whose identifier decoded,
+	// including a row whose parent link or clock was dropped. A session that
+	// still has a row here exists in OpenCode; a discovered session missing from
+	// every page was deleted from the session table and its historical message
+	// or session_message rows are stale.
+	PresentSessionIDs []OpenCodeSessionLinkID
+	Skipped           []OpenCodeSessionRecordSkip
+	Next              *OpenCodeSessionRecordCursor
 }
 
 // OpenCodeLegacyMessageRow is one detached current row from legacy message.

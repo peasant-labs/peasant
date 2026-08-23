@@ -247,6 +247,9 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	if err := insertCurrentMessages(conn, fixtureCase.CurrentMessages); err != nil {
 		return err
 	}
+	if err := deleteSessionRows(conn, fixtureCase.DeletedSessionRows); err != nil {
+		return err
+	}
 	if err := createHistoryTables(conn, fixtureCase.IgnoredHistory); err != nil {
 		return err
 	}
@@ -479,6 +482,26 @@ func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		}
 		if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated) VALUES (?1, ?2, ?3);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated}}); err != nil {
 			return fmt.Errorf("insert synthetic session %q with explicit columns: %w", sessionID, err)
+		}
+	}
+	return nil
+}
+
+// deleteSessionRows removes the named session rows while leaving their message
+// and session_message rows in place. Foreign keys stay disabled during the
+// delete so the cascade does not remove the historical rows the deletion case
+// relies on, modelling a session OpenCode dropped from its session list while
+// its rows linger.
+func deleteSessionRows(conn *sqlite.Conn, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := sqlitex.Execute(conn, `PRAGMA foreign_keys=OFF;`, nil); err != nil {
+		return fmt.Errorf("disable foreign keys before removing synthetic session rows: %w", err)
+	}
+	for _, id := range ids {
+		if err := sqlitex.Execute(conn, `DELETE FROM session WHERE id = ?1;`, &sqlitex.ExecOptions{Args: []any{id}}); err != nil {
+			return fmt.Errorf("remove synthetic session row %q: %w", id, err)
 		}
 	}
 	return nil

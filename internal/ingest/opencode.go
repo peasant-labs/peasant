@@ -373,6 +373,45 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		// parent link and clock while the bad ones are visible.
 		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session row(s) were dropped while keeping the others: %s", len(records.skipped), strings.Join(records.skipped, "; ")), errors.New("one or more session rows were undecodable"))
 	}
+	// OpenCode keeps its authoritative session list in the session table; the
+	// message and session_message rows are historical. When the session table
+	// carries the changed clock, which is the real OpenCode shape, a discovered
+	// session with no row there was deleted from OpenCode, so it is skipped
+	// rather than resurrected from stale rows. A session table without the clock
+	// column is a degraded or synthetic shape, so the rule fails safe and keeps
+	// every discovered session as a root rather than risk skipping a live one.
+	if records.present && records.hasClock {
+		surviving := candidates[:0]
+		survivingIDs := make(map[SessionID]struct{}, len(candidates))
+		var deleted []string
+		for index := range candidates {
+			sessionID := candidates[index].session.SessionID
+			if _, kept := records.rowIDs[sessionID]; kept {
+				surviving = append(surviving, candidates[index])
+				survivingIDs[sessionID] = struct{}{}
+				continue
+			}
+			deleted = append(deleted, fmt.Sprintf("session %q has no row in the session table", sessionID))
+		}
+		candidates = surviving
+		// A parent the deletion rule removed can no longer satisfy the parent
+		// link, so clear the link and name the child. The child stays a
+		// discovered root instead of pointing at a deleted session.
+		for index := range candidates {
+			record, known := records.bySession[candidates[index].session.SessionID]
+			if !known || record.parent == "" {
+				continue
+			}
+			if _, present := survivingIDs[record.parent]; !present {
+				records.danglingParents = append(records.danglingParents, fmt.Sprintf("session %q references parent %q, which this run did not discover", candidates[index].session.SessionID, record.parent))
+				record.parent = ""
+				records.bySession[candidates[index].session.SessionID] = record
+			}
+		}
+		if len(deleted) > 0 {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session(s) were skipped because they were deleted from OpenCode and have no row in the session table: %s", len(deleted), strings.Join(deleted, "; ")), errors.New("one or more sessions were deleted from the session table"))
+		}
+	}
 	if len(records.danglingParents) > 0 {
 		// The children are ingested as roots and the missing links are named, so
 		// a parent this run did not discover never silently skips its child.
@@ -410,6 +449,12 @@ type openCodeSessionRecords struct {
 	hasParent bool
 	hasClock  bool
 	bySession map[SessionID]openCodeSessionClock
+	// rowIDs names every session that still has a row in the session table,
+	// including a row whose parent link or clock could not be decoded. A
+	// discovered session missing from rowIDs while the table is present and
+	// enumerable was deleted from OpenCode, so it is skipped rather than
+	// resurrected from its historical message or session_message rows.
+	rowIDs map[SessionID]struct{}
 	// skipped names the rows the read could not use, so one bad row is dropped
 	// with a diagnostic while the others keep their parent link and clock.
 	skipped []string
@@ -424,7 +469,7 @@ type openCodeSessionRecords struct {
 // read whether or not the clock column exists. A database without a session
 // table yields an empty result with present false.
 func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, discoveredIDs map[SessionID]struct{}) (openCodeSessionRecords, error) {
-	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock, len(discoveredIDs))}
+	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock, len(discoveredIDs)), rowIDs: make(map[SessionID]struct{}, len(discoveredIDs))}
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return records, err
@@ -440,6 +485,14 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 		records.hasClock = page.HasClock
 		for _, skip := range page.Skipped {
 			records.skipped = append(records.skipped, skip.Reason)
+		}
+		for _, rowID := range page.PresentSessionIDs {
+			// A row whose stored identifier is valid marks the session present.
+			// An identifier Peasant cannot store cannot match a discovered
+			// candidate, so it never affects the deletion decision.
+			if sessionID, sessionErr := NewSessionID(rowID.String()); sessionErr == nil {
+				records.rowIDs[sessionID] = struct{}{}
+			}
 		}
 		for _, row := range page.Records {
 			sessionID, sessionErr := NewSessionID(row.SessionID.String())

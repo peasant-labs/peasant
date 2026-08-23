@@ -453,6 +453,7 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	}
 	bounded := newOpenCodeBoundedPage[OpenCodeSessionRecord](request.PageSize.value)
 	var skipped []OpenCodeSessionRecordSkip
+	var present []OpenCodeSessionLinkID
 	var cursorID *OpenCodeSessionLinkID
 	// An undecodable row is dropped with a skip note rather than failing the
 	// whole read, so one bad row never loses every session's parent link and
@@ -472,6 +473,10 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		}
 		linkID := sessionID
 		cursorID = &linkID
+		// The row exists, so record its identifier before any column-level drop.
+		// A session whose row is present is not deleted, even when its parent
+		// link or clock cannot be decoded.
+		present = append(present, sessionID)
 		record := OpenCodeSessionRecord{SessionID: sessionID}
 		// The parent link is column 1 whenever it is selected. The clock is the
 		// last selected column: column 2 when both are present, otherwise
@@ -535,6 +540,7 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// rows never shrink a page below its bound and hide later sessions.
 	records, hasNext := bounded.assemble()
 	page.Records = records
+	page.PresentSessionIDs = present
 	page.Skipped = skipped
 	if hasNext {
 		switch {
