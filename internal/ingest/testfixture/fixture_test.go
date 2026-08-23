@@ -569,7 +569,7 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 	case mutationTrailingDoc:
 		return append(append([]byte(nil), source...), []byte("---\ndeclared_cases: 0\ncases: []\n")...), nil
 	case mutationDeclaredCount:
-		return replaceOnce("declared_cases: 32", "declared_cases: 31")
+		return replaceOnce("declared_cases: 30", "declared_cases: 29")
 	case mutationDuplicateName:
 		return replaceOnce("name: legacy-message-part", "name: empty-valid")
 	case mutationMissingName:

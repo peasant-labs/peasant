@@ -79,7 +79,6 @@ func (kind canonicalSelectionMutationKind) validate() error {
 type canonicalSelectionFixture struct {
 	DeclaredCases           int                                `yaml:"declared_cases"`
 	SourceFixture           string                             `yaml:"source_fixture"`
-	LegacySourceFixture     string                             `yaml:"legacy_source_fixture"`
 	JSONMTimeMS             int64                              `yaml:"json_mtime_ms"`
 	JSONSessions            []canonicalSelectionJSONSession    `yaml:"json_sessions"`
 	ParentLinks             []canonicalSelectionParentLink     `yaml:"parent_links"`
@@ -168,7 +167,7 @@ func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, erro
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fixture, errors.New("canonical OpenCode selection fixture must contain exactly one YAML document")
 	}
-	if fixture.DeclaredCases != expectedCanonicalSelectionCases || len(fixture.Cases) != expectedCanonicalSelectionCases || fixture.DeclaredLoaderMutations != expectedCanonicalSelectionMutations || len(fixture.LoaderMutations) != expectedCanonicalSelectionMutations || fixture.SourceFixture == "" || fixture.LegacySourceFixture == "" || fixture.JSONMTimeMS <= 0 {
+	if fixture.DeclaredCases != expectedCanonicalSelectionCases || len(fixture.Cases) != expectedCanonicalSelectionCases || fixture.DeclaredLoaderMutations != expectedCanonicalSelectionMutations || len(fixture.LoaderMutations) != expectedCanonicalSelectionMutations || fixture.SourceFixture == "" || fixture.JSONMTimeMS <= 0 {
 		return fixture, errors.New("canonical OpenCode selection fixture count or source guard failed")
 	}
 	if fixture.Freshness.SelectedSession == "" || fixture.Freshness.NonSelectedRow.ID == "" || fixture.Freshness.SelectedRow.ID == "" || fixture.Freshness.Deletion.ID == "" || fixture.Freshness.Deletion.Session == "" {
@@ -242,36 +241,22 @@ func hasCanonicalRepresentation(testCase canonicalSelectionCase, wanted canonica
 	return false
 }
 
-// prepareCanonicalSelectionRoot materializes the current and legacy corpora,
-// writes the JSON fixtures, and inserts the parent links and stray parts. The
-// current database is the channel database under the root; the legacy database
-// is a separate database that discovery reaches through the override, so legacy
-// sessions never live on the current session_message projection. It returns the
-// root, the current database path, and the legacy database path.
-func prepareCanonicalSelectionRoot(t testing.TB, fixture canonicalSelectionFixture) (string, string, string) {
+// prepareCanonicalSelectionRoot materializes the corpus, writes the JSON
+// fixtures, and inserts the parent links and stray parts.
+func prepareCanonicalSelectionRoot(t testing.TB, fixture canonicalSelectionFixture) (string, string) {
 	t.Helper()
-	currentSource := testfixture.MaterializeByName(t, fixture.SourceFixture)
-	legacySource := testfixture.MaterializeByName(t, fixture.LegacySourceFixture)
-	rootPath := filepath.Dir(currentSource.Path)
+	materialized := testfixture.MaterializeByName(t, fixture.SourceFixture)
+	rootPath := filepath.Dir(materialized.Path)
 	writeCanonicalJSONFixtures(t, rootPath, fixture)
-	// Parent links are applied to both databases so the winner reads its parent
-	// from its own database. A session absent from a database is created there
-	// only as a session row and is never enumerated from that projection.
-	for _, path := range []string{currentSource.Path, legacySource.Path} {
-		withCanonicalConnection(t, path, func(connection *sqlite.Conn) error {
-			for _, link := range fixture.ParentLinks {
-				if err := sqlitex.Execute(connection, `INSERT OR IGNORE INTO session(id) VALUES (?1)`, &sqlitex.ExecOptions{Args: []any{link.SessionID}}); err != nil {
-					return err
-				}
-				if err := sqlitex.Execute(connection, `UPDATE session SET parent_id = ?2 WHERE id = ?1`, &sqlitex.ExecOptions{Args: []any{link.SessionID, link.ParentID}}); err != nil {
-					return err
-				}
+	withCanonicalConnection(t, materialized.Path, func(connection *sqlite.Conn) error {
+		for _, link := range fixture.ParentLinks {
+			if err := sqlitex.Execute(connection, `INSERT OR IGNORE INTO session(id) VALUES (?1)`, &sqlitex.ExecOptions{Args: []any{link.SessionID}}); err != nil {
+				return err
 			}
-			return nil
-		})
-	}
-	// Stray orphan parts are legacy part rows and belong on the legacy database.
-	withCanonicalConnection(t, legacySource.Path, func(connection *sqlite.Conn) error {
+			if err := sqlitex.Execute(connection, `UPDATE session SET parent_id = ?2 WHERE id = ?1`, &sqlitex.ExecOptions{Args: []any{link.SessionID, link.ParentID}}); err != nil {
+				return err
+			}
+		}
 		for _, part := range fixture.StrayOrphanParts {
 			if err := sqlitex.Execute(connection, `INSERT INTO part(id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?4, ?5)`, &sqlitex.ExecOptions{Args: []any{part.ID, part.MessageID, part.SessionID, part.TimeCreated, part.Data}}); err != nil {
 				return err
@@ -279,19 +264,7 @@ func prepareCanonicalSelectionRoot(t testing.TB, fixture canonicalSelectionFixtu
 		}
 		return nil
 	})
-	return rootPath, currentSource.Path, legacySource.Path
-}
-
-// canonicalSelectionRowDatabase routes a freshness probe to the database that
-// owns the named table. The legacy message and part tables live on the legacy
-// database; session_message lives on the current database.
-func canonicalSelectionRowDatabase(table, currentDB, legacyDB string) string {
-	switch table {
-	case "message", "part":
-		return legacyDB
-	default:
-		return currentDB
-	}
+	return rootPath, materialized.Path
 }
 
 func withCanonicalConnection(t testing.TB, path string, work func(*sqlite.Conn) error) {
@@ -312,14 +285,12 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootPath, _, legacyDBPath := prepareCanonicalSelectionRoot(t, fixture)
+	rootPath, databasePath := prepareCanonicalSelectionRoot(t, fixture)
 	root, err := ingest.NewResolvedPath(rootPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The current database is the channel database under the root; the override
-	// points discovery at the separate legacy database.
-	environment := mountedCurrentEnvironment{"OPENCODE_DB": legacyDBPath}
+	environment := mountedCurrentEnvironment{"OPENCODE_DB": databasePath}
 	adapterFactory := canonicalAdapterFactory(t, environment)
 	recorder := newCanonicalFreshnessRecorder()
 	filesystem := &canonicalFreshnessFileSystem{OSFileSystem: &ingest.OSFileSystem{}, sessionStats: make(map[string]int)}
@@ -642,9 +613,9 @@ func TestCanonicalOpenCodeSelectedSourceFreshness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootPath, currentDBPath, legacyDBPath := prepareCanonicalSelectionRoot(t, fixture)
+	rootPath, databasePath := prepareCanonicalSelectionRoot(t, fixture)
 	root, _ := ingest.NewResolvedPath(rootPath)
-	adapterFactory := canonicalAdapterFactory(t, mountedCurrentEnvironment{"OPENCODE_DB": legacyDBPath})
+	adapterFactory := canonicalAdapterFactory(t, mountedCurrentEnvironment{"OPENCODE_DB": databasePath})
 	discover := func(sessionID string) ingest.DiscoveredSession {
 		adapter := adapterFactory(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
 		sessions, discoverErr := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
@@ -664,13 +635,13 @@ func TestCanonicalOpenCodeSelectedSourceFreshness(t *testing.T) {
 	ingestedMS := time.Now().UnixMilli()
 	location := ingest.SessionLocation{IngestedMs: &ingestedMS, SchemaVersion: int(ingest.CurrentSchemaVersion)}
 
-	updateSyntheticSelectionRow(t, canonicalSelectionRowDatabase(probe.NonSelectedRow.Table, currentDBPath, legacyDBPath), probe.NonSelectedRow.Table, probe.NonSelectedRow.ID, ingestedMS+10_000)
+	updateSyntheticSelectionRow(t, databasePath, probe.NonSelectedRow.Table, probe.NonSelectedRow.ID, ingestedMS+10_000)
 	nonSelectedChanged := discover(probe.SelectedSession)
 	if !nonSelectedChanged.ModTime.Equal(selected.ModTime) || ingest.ClassifyAgainstStore(nonSelectedChanged, location, 0) != ingest.DiffUnchanged {
 		t.Fatalf("non-selected legacy change altered selected freshness: before=%s after=%s", selected.ModTime, nonSelectedChanged.ModTime)
 	}
 
-	updateSyntheticSelectionRow(t, canonicalSelectionRowDatabase(probe.SelectedRow.Table, currentDBPath, legacyDBPath), probe.SelectedRow.Table, probe.SelectedRow.ID, ingestedMS+20_000)
+	updateSyntheticSelectionRow(t, databasePath, probe.SelectedRow.Table, probe.SelectedRow.ID, ingestedMS+20_000)
 	selectedChanged := discover(probe.SelectedSession)
 	if !selectedChanged.ModTime.Equal(time.UnixMilli(ingestedMS+20_000)) || ingest.ClassifyAgainstStore(selectedChanged, location, 0) != ingest.DiffUpdated {
 		t.Fatalf("selected current change did not trigger re-ingest: selected freshness=%s ingested=%s", selectedChanged.ModTime, time.UnixMilli(ingestedMS))
@@ -683,10 +654,9 @@ func TestCanonicalOpenCodeSelectedSourceFreshness(t *testing.T) {
 	// OpenCode deletes rows on revert and undo and moves session.time_updated
 	// in the same flow. The surviving rows' own times go down, so only the
 	// session clock can report the change.
-	deletionDB := canonicalSelectionRowDatabase(probe.Deletion.Table, currentDBPath, legacyDBPath)
-	deleteSyntheticSelectionRow(t, deletionDB, probe.Deletion.Table, probe.Deletion.ID)
+	deleteSyntheticSelectionRow(t, databasePath, probe.Deletion.Table, probe.Deletion.ID)
 	deletedAt := time.UnixMilli(ingestedMS + 10_000)
-	updateSyntheticSessionClock(t, deletionDB, probe.Deletion.Session, deletedAt.UnixMilli())
+	updateSyntheticSessionClock(t, databasePath, probe.Deletion.Session, deletedAt.UnixMilli())
 	afterDeletion := discover(probe.Deletion.Session)
 	if !afterDeletion.ModTime.Equal(deletedAt) || ingest.ClassifyAgainstStore(afterDeletion, location, 0) != ingest.DiffUpdated {
 		t.Fatalf("row deletion did not trigger re-ingest: freshness=%s ingested=%s", afterDeletion.ModTime, time.UnixMilli(ingestedMS))

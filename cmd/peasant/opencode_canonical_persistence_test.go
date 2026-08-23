@@ -50,7 +50,6 @@ type canonicalPersistenceFixture struct {
 type canonicalPersistenceCase struct {
 	Name                  string                        `yaml:"name"`
 	SourceFixture         string                        `yaml:"source_fixture"`
-	LegacySourceFixture   string                        `yaml:"legacy_source_fixture"`
 	ExpectedSessions      int                           `yaml:"expected_sessions"`
 	JSONSessions          []canonicalPersistenceJSON    `yaml:"json_sessions"`
 	CanonicalSessions     []canonicalPersistenceSession `yaml:"canonical_sessions"`
@@ -138,7 +137,7 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 	}
 	seen := make(map[string]bool)
 	for _, testCase := range fixture.Cases {
-		if testCase.Name == "" || seen[testCase.Name] || testCase.SourceFixture == "" || testCase.LegacySourceFixture == "" || testCase.ExpectedSessions != expectedCanonicalPersistenceSessions+2 || len(testCase.JSONSessions) == 0 || len(testCase.CanonicalSessions) != expectedCanonicalPersistenceSessions || testCase.GraphSession == "" || testCase.ParentEntry == "" || testCase.ChildEntry == "" || testCase.MissingParentEntry == "" || testCase.ToolCallID == "" || testCase.ToolResultContains == "" || testCase.OrphanSession == "" || testCase.OrphanEntry == "" || testCase.OrphanContentContains == "" || testCase.ExpectedMetrics.TurnCount <= 0 || testCase.ExpectedMetrics.ToolCalls <= 0 || testCase.ExpectedMetrics.ComputeVersion <= 0 {
+		if testCase.Name == "" || seen[testCase.Name] || testCase.SourceFixture == "" || testCase.ExpectedSessions != expectedCanonicalPersistenceSessions+2 || len(testCase.JSONSessions) == 0 || len(testCase.CanonicalSessions) != expectedCanonicalPersistenceSessions || testCase.GraphSession == "" || testCase.ParentEntry == "" || testCase.ChildEntry == "" || testCase.MissingParentEntry == "" || testCase.ToolCallID == "" || testCase.ToolResultContains == "" || testCase.OrphanSession == "" || testCase.OrphanEntry == "" || testCase.OrphanContentContains == "" || testCase.ExpectedMetrics.TurnCount <= 0 || testCase.ExpectedMetrics.ToolCalls <= 0 || testCase.ExpectedMetrics.ComputeVersion <= 0 {
 			return fixture, fmt.Errorf("canonical OpenCode persistence fixture contains incomplete or duplicate case %+v", testCase)
 		}
 		seen[testCase.Name] = true
@@ -232,12 +231,7 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			materialized := testfixture.MaterializeByName(t, testCase.SourceFixture)
-			legacyMaterialized := testfixture.MaterializeByName(t, testCase.LegacySourceFixture)
 			root := filepath.Dir(materialized.Path)
-			// The current database is the channel database under the root; the
-			// override points harvest at the separate legacy database, so legacy
-			// sessions never live on the current session_message projection.
-			t.Setenv("OPENCODE_DB", legacyMaterialized.Path)
 			writeCanonicalPersistenceJSON(t, root, testCase.JSONSessions)
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")

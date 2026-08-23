@@ -325,23 +325,25 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		}
 		appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite)
 	case OpenCodeCapabilityHybrid:
-		// A hybrid database has migrated to the current session_message
-		// projection, so the legacy message and part tables are stale leftovers.
-		// When the current projection discovers successfully, use it alone, so a
-		// session deleted from session_message is never resurrected by a stale
-		// legacy row. The legacy tables are read only when the current projection
-		// is unusable.
+		// A hybrid database carries both projections, so enumerate both and let
+		// canonical selection keep one projection per session. Current outranks
+		// legacy, so a session in both is a current winner while a session only
+		// in the legacy tables is a legacy winner. A session the current
+		// projection dropped but the legacy tables still hold is handled by the
+		// session-table deletion rule below, not by hiding the legacy tables.
 		current, currentErr := a.discoverCurrentSQLite(ctx, source, result.Candidate)
-		if currentErr == nil {
-			appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
-			break
-		}
 		legacy, legacyErr := a.discoverLegacySQLite(ctx, source, result.Candidate)
-		if legacyErr != nil {
+		if currentErr != nil && legacyErr != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite session enumeration failed", fmt.Errorf("current projection is unusable (%w) and legacy fallback also failed (%v)", currentErr, legacyErr))
 			return nil, source
 		}
-		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite current projection is unusable; legacy rows were used", currentErr)
+		if currentErr != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite current projection is unusable; legacy rows were used", currentErr)
+		}
+		if legacyErr != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite legacy projection is unusable; current rows were used", legacyErr)
+		}
+		appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
 		appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite)
 	default:
 		return nil, source
