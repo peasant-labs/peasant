@@ -756,18 +756,25 @@ func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCand
 
 // hydrateCanonicalOpenCodeFreshness sets ModTime for every winner. A JSON
 // winner uses its file mtime and degrades to zero when stat fails. A SQLite
-// winner combines the newest selected row time with the session's own clock
-// (session.time_updated) when that session has a usable clock. OpenCode moves
-// that clock on revert and undo, so a row deletion still moves freshness
-// without touching sibling sessions. A session with no usable clock falls back
-// to the database and WAL mtime as a floor, so a row deletion is still seen.
+// winner with a usable clock (session.time_updated) uses that clock as its
+// changed time and reads no row aggregate. OpenCode moves that clock on revert
+// and undo, so a row deletion still moves freshness without touching sibling
+// sessions. A session with no usable clock reads the per-table row aggregate
+// and falls back to the database and WAL mtime as a floor, so a row deletion is
+// still seen. The active (staleness) time is always the database and WAL mtime.
+//
+// The row aggregate is read only for the clockless sessions of a database, so a
+// database whose sessions all carry a clock reads no freshness aggregate at all
+// and a very large legacy table is never scanned for a session that already has
+// a clock. A failed aggregate read therefore demotes only the clockless
+// sessions to the mtime floor; a clock-bearing session keeps its clock.
 //
 // The changed clock reports content edits and deletions, not the raw file
 // mtime. An in-place row rewrite that moves no time column and no session
 // clock therefore is not detected as a change for a session that has a usable
 // clock; only the floor path, used when a session has no usable clock, tracks
-// the file and WAL mtime. A SQLite candidate whose freshness cannot be read is
-// skipped and recorded; other winners stay.
+// the file and WAL mtime. A clockless SQLite candidate whose freshness cannot
+// be read is skipped and recorded; other winners stay.
 func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate, sources map[string]OpenCodeSQLiteSource) []DiscoveredSession {
 	bySQLitePath := make(map[string][]int)
 	keep := make([]bool, len(selected))
@@ -798,10 +805,23 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite source was not available for freshness because discovery did not open it", fmt.Errorf("no open source for %q", rawPath))
 			continue
 		}
-		// Read the newest row time of every session on this database with at
-		// most one GROUP BY aggregate per table, so freshness reads stay bounded
-		// by table count and never grow with the number of sessions.
-		rowFreshness := a.batchOpenCodeSQLiteRowFreshness(ctx, source, selected, bySQLitePath[rawPath])
+		// A session with a usable clock (session.time_updated) uses that clock as
+		// its changed time and reads no row aggregate, so only the clockless
+		// sessions on this database need the per-table freshness read. Collect
+		// them first. A database whose sessions all carry a clock reads no
+		// freshness aggregate at all, so a very large legacy table is never
+		// scanned for a session that already has a clock.
+		var clockless []int
+		for _, index := range bySQLitePath[rawPath] {
+			if selected[index].sessionUpdatedAt.IsZero() {
+				clockless = append(clockless, index)
+			}
+		}
+		// Read the newest row time of every clockless session on this database
+		// with at most one GROUP BY aggregate per table they use, so freshness
+		// reads stay bounded by table count and never grow with the number of
+		// sessions. An empty clockless set reads nothing.
+		rowFreshness := a.batchOpenCodeSQLiteRowFreshness(ctx, source, selected, clockless)
 		// The database and WAL mtime is the active (staleness) time for every
 		// session on this database, independent of the changed clock. It is also
 		// the freshness floor for a session with no usable clock.
@@ -816,6 +836,18 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 		var freshnessCause, floorFallbackCause, clocklessCause error
 		for _, index := range bySQLitePath[rawPath] {
 			candidate := &selected[index]
+			if !candidate.sessionUpdatedAt.IsZero() {
+				// Clock-first: the session clock is the changed time and the
+				// database and WAL mtime is the active time. No row aggregate is
+				// read, so a failed aggregate read never demotes this session.
+				candidate.session.ModTime = candidate.sessionUpdatedAt
+				if floorErr == nil {
+					candidate.session.ActiveModTime = floor
+				}
+				keep[index] = true
+				continue
+			}
+			// Clockless: the row aggregate and the mtime floor decide freshness.
 			newest, hydrationErr := rowFreshness(candidate.identity)
 			if hydrationErr != nil {
 				// Canonical selection already discarded the losing
@@ -838,22 +870,16 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 			if floorErr == nil {
 				candidate.session.ActiveModTime = floor
 			}
-			if !candidate.sessionUpdatedAt.IsZero() {
-				if candidate.sessionUpdatedAt.After(newest) {
-					newest = candidate.sessionUpdatedAt
-				}
-			} else {
-				if floorErr != nil {
-					// The floor is this one session's freshness. Skip only this
-					// session, so the other sessions on the same database are still
-					// hydrated.
-					clocklessSkipped = append(clocklessSkipped, string(candidate.identity.SessionID))
-					clocklessCause = floorErr
-					continue
-				}
-				if newest.Before(floor) {
-					newest = floor
-				}
+			if floorErr != nil {
+				// The floor is this one session's freshness. Skip only this
+				// session, so the other sessions on the same database are still
+				// hydrated.
+				clocklessSkipped = append(clocklessSkipped, string(candidate.identity.SessionID))
+				clocklessCause = floorErr
+				continue
+			}
+			if newest.Before(floor) {
+				newest = floor
 			}
 			candidate.session.ModTime = newest
 			keep[index] = true
@@ -878,11 +904,12 @@ func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context,
 	return discovered
 }
 
-// batchOpenCodeSQLiteRowFreshness reads the newest row time of every session on
-// one database with at most one GROUP BY aggregate per table, then returns a
-// lookup that resolves a single winner's row freshness from the shared result.
-// Only the tables that a winner actually uses are read, so a database of N
-// sessions costs at most one statement per present table, never one per session.
+// batchOpenCodeSQLiteRowFreshness reads the newest row time of the passed
+// sessions on one database with at most one GROUP BY aggregate per table, then
+// returns a lookup that resolves a single winner's row freshness from the
+// shared result. Only the tables that a passed session actually uses are read,
+// so an empty index set reads nothing and a set of clockless sessions costs at
+// most one statement per present table, never one per session.
 // A read failure for a table is returned to every winner of that
 // representation, so a caller can fail closed per session without dropping
 // winners of the other representation. A session absent from a table's result

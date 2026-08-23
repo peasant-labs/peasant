@@ -470,20 +470,12 @@ func assertOnlyCanonicalFreshnessConsulted(t testing.TB, fixture canonicalSelect
 	filesystem.mu.Lock()
 	stats := cloneIntMap(filesystem.sessionStats)
 	filesystem.mu.Unlock()
-	// Row freshness is read per table, never per session, so the batch
-	// statement count is bounded by the present representations rather than by
-	// the number of sessions.
-	wantCurrentBatch, wantLegacyBatch := 0, 0
-	for _, testCase := range fixture.Cases {
-		switch testCase.Expected {
-		case canonicalFixtureCurrent:
-			wantCurrentBatch = 1
-		case canonicalFixtureLegacy:
-			wantLegacyBatch = 1
-		}
-	}
-	if currentBatch != wantCurrentBatch || legacyBatch != wantLegacyBatch {
-		t.Fatalf("row freshness batch statements current=%d legacy=%d, want %d/%d bounded by present representations", currentBatch, legacyBatch, wantCurrentBatch, wantLegacyBatch)
+	// Every session in this fixture carries a usable session clock, so freshness
+	// is clock-first and no row aggregate is read at all. The row aggregate runs
+	// only for a clockless session, and a database whose sessions all have a
+	// clock never scans a message, part, or session_message table for freshness.
+	if currentBatch != 0 || legacyBatch != 0 {
+		t.Fatalf("row freshness batch statements current=%d legacy=%d, want 0/0 because every session has a clock", currentBatch, legacyBatch)
 	}
 	for _, testCase := range fixture.Cases {
 		wantJSON := 0
@@ -606,8 +598,9 @@ func assertCanonicalGraphAndToolPairing(t testing.TB, indexer *ingest.OpenCodeIn
 
 // TestCanonicalOpenCodeSelectedSourceFreshness proves three freshness rules.
 // A losing representation's row change does not move the winner. The winner's
-// row change moves it. A row deletion moves it through the upstream session
-// clock even though the surviving rows' times went down.
+// content change, which moves its session clock, moves it. A row deletion moves
+// it through the upstream session clock even though the surviving rows' times
+// went down.
 func TestCanonicalOpenCodeSelectedSourceFreshness(t *testing.T) {
 	fixture, err := loadCanonicalSelectionFixture(canonicalSelectionYAML)
 	if err != nil {
@@ -641,7 +634,12 @@ func TestCanonicalOpenCodeSelectedSourceFreshness(t *testing.T) {
 		t.Fatalf("non-selected legacy change altered selected freshness: before=%s after=%s", selected.ModTime, nonSelectedChanged.ModTime)
 	}
 
+	// OpenCode moves session.time_updated in the same flow as the row edit, so
+	// the winner's content change moves its session clock. A clock-bearing
+	// session reads its clock, not the row aggregate, so the clock carries the
+	// change.
 	updateSyntheticSelectionRow(t, databasePath, probe.SelectedRow.Table, probe.SelectedRow.ID, ingestedMS+20_000)
+	updateSyntheticSessionClock(t, databasePath, probe.SelectedSession, ingestedMS+20_000)
 	selectedChanged := discover(probe.SelectedSession)
 	if !selectedChanged.ModTime.Equal(time.UnixMilli(ingestedMS+20_000)) || ingest.ClassifyAgainstStore(selectedChanged, location, 0) != ingest.DiffUpdated {
 		t.Fatalf("selected current change did not trigger re-ingest: selected freshness=%s ingested=%s", selectedChanged.ModTime, time.UnixMilli(ingestedMS))

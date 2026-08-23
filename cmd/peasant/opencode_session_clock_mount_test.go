@@ -23,8 +23,8 @@ import (
 type openCodeSessionClockMutation string
 
 const (
-	openCodeSessionClockMutationMTimeFloor openCodeSessionClockMutation = "mtime-floor"
-	openCodeSessionClockMutationRowTime    openCodeSessionClockMutation = "row-time"
+	openCodeSessionClockMutationMTimeFloor   openCodeSessionClockMutation = "mtime-floor"
+	openCodeSessionClockMutationSessionClock openCodeSessionClockMutation = "session-clock"
 )
 
 type openCodeSessionClockMountDocument struct {
@@ -33,11 +33,10 @@ type openCodeSessionClockMountDocument struct {
 }
 
 type openCodeSessionClockCase struct {
-	Name     string                       `yaml:"name"`
-	Fixture  string                       `yaml:"fixture"`
-	Mutation openCodeSessionClockMutation `yaml:"mutation"`
-	RowTable string                       `yaml:"rowTable"`
-	RowID    string                       `yaml:"rowID"`
+	Name      string                       `yaml:"name"`
+	Fixture   string                       `yaml:"fixture"`
+	Mutation  openCodeSessionClockMutation `yaml:"mutation"`
+	SessionID string                       `yaml:"sessionID"`
 }
 
 //go:embed testdata/opencode_session_clock_mount.yaml
@@ -69,9 +68,9 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 		seen[testCase.Name] = struct{}{}
 		switch testCase.Mutation {
 		case openCodeSessionClockMutationMTimeFloor:
-		case openCodeSessionClockMutationRowTime:
-			if testCase.RowTable == "" || testCase.RowID == "" {
-				return nil, fmt.Errorf("%s row-time case %q must name rowTable and rowID", fixturePath, testCase.Name)
+		case openCodeSessionClockMutationSessionClock:
+			if testCase.SessionID == "" {
+				return nil, fmt.Errorf("%s session-clock case %q must name sessionID", fixturePath, testCase.Name)
 			}
 		default:
 			return nil, fmt.Errorf("%s case %q has unknown mutation %q", fixturePath, testCase.Name, testCase.Mutation)
@@ -83,9 +82,9 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 // TestOpenCodeSessionClockFixturesMountedHarvest proves both clock fixtures flow
 // through the mounted harvest command and re-ingest when their freshness moves.
 // The absent-clock database re-ingests when its content mtime floor moves,
-// because it has no session clock. The lagging-clock database re-ingests when a
-// row time passes the recorded ingest time, because the changed time tracks the
-// newest row time rather than the lagging clock.
+// because it has no session clock. The clock-bearing database re-ingests when
+// its session clock moves past the recorded ingest time, because freshness is
+// clock-first for a session that has a clock and reads no row aggregate.
 func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 	oldModTime := time.Unix(1_700_001_000, 0)
 	newerModTime := time.Unix(1_700_002_000, 0)
@@ -118,9 +117,11 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			switch testCase.Mutation {
 			case openCodeSessionClockMutationMTimeFloor:
 				setSyntheticSQLiteContentModTime(t, materialized.Path, newerModTime)
-			case openCodeSessionClockMutationRowTime:
-				updateSourceRowTime(t, materialized.Path, testCase.RowTable, testCase.RowID, newRowMS)
-				// Keep the floor old so only the newest row time drives the change.
+			case openCodeSessionClockMutationSessionClock:
+				updateSourceRowTime(t, materialized.Path, "session", testCase.SessionID, newRowMS)
+				// Keep the floor old so only the moved session clock drives the
+				// change, proving freshness is clock-first for a clock-bearing
+				// session.
 				setSyntheticSQLiteContentModTime(t, materialized.Path, oldModTime)
 			}
 			setLocalIngestedTimestamp(t, storePath, ingestedBetweenMS)

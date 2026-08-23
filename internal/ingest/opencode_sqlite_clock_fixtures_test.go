@@ -56,14 +56,16 @@ func TestOpenCodeAbsentSessionClockFixtureUsesFloor(t *testing.T) {
 	}
 }
 
-// TestOpenCodeLaggingSessionClockFixtureTracksRowTimes proves the lagging-clock
-// fixture leaves session.time_updated behind the newest row time, and that the
-// changed time still tracks the newest row time rather than the lagging clock.
-func TestOpenCodeLaggingSessionClockFixtureTracksRowTimes(t *testing.T) {
+// TestOpenCodeLaggingSessionClockFixtureUsesTheClock proves the lagging-clock
+// fixture leaves session.time_updated behind the newest row time, and that a
+// clock-bearing session uses its session clock as the changed time. The clock is
+// the authority for a session that has one, so the row aggregate is not read and
+// a clock that lags the newest row time reports the lagging clock. OpenCode moves
+// this clock on every content edit, so the clock does not lag a real change.
+func TestOpenCodeLaggingSessionClockFixtureUsesTheClock(t *testing.T) {
 	const (
-		sessionID   = "ses_3cd91f52effeXd3QAJ54jOyzGB"
-		newestRowMS = 1210
-		laggingMS   = 1000
+		sessionID = "ses_3cd91f52effeXd3QAJ54jOyzGB"
+		laggingMS = 1000
 	)
 	materialized := testfixture.MaterializeByName(t, "session-clock-lagging")
 	databasePath := materialized.Path
@@ -73,7 +75,7 @@ func TestOpenCodeLaggingSessionClockFixtureTracksRowTimes(t *testing.T) {
 	}
 
 	if clock := readSessionClock(t, databasePath, sessionID); clock != laggingMS {
-		t.Fatalf("lagging fixture session clock = %d, want %d strictly below the newest row time %d", clock, laggingMS, newestRowMS)
+		t.Fatalf("lagging fixture session clock = %d, want %d", clock, laggingMS)
 	}
 
 	adapter := canonicalAdapterFactory(t, mountedCurrentEnvironment{"OPENCODE_DB": databasePath})(&ingest.OSFileSystem{}, testutil.NoGitResolver(), salt.Salt{})
@@ -90,8 +92,8 @@ func TestOpenCodeLaggingSessionClockFixtureTracksRowTimes(t *testing.T) {
 	if string(session.SessionID) != sessionID {
 		t.Fatalf("session %q was not discovered", sessionID)
 	}
-	if !session.ModTime.Equal(time.UnixMilli(newestRowMS)) {
-		t.Fatalf("changed time followed the lagging clock instead of the newest row time: ModTime=%s want %s", session.ModTime, time.UnixMilli(newestRowMS))
+	if !session.ModTime.Equal(time.UnixMilli(laggingMS)) {
+		t.Fatalf("changed time did not follow the session clock: ModTime=%s want %s", session.ModTime, time.UnixMilli(laggingMS))
 	}
 }
 

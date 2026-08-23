@@ -429,6 +429,13 @@ func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
 		t.Fatalf("open synthetic source-change control: %v", err)
 	}
 	updateErr := sqlitex.ExecuteTransient(connection, `UPDATE message SET data = '{"role":"user","version":"changed-source","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700002000010}}', time_updated = 1700002000010 WHERE id = 'msg_equal_a'`, nil)
+	if updateErr == nil {
+		// OpenCode moves the owning session's changed clock in the same flow as a
+		// content edit, and freshness is clock-first for a session that has a
+		// clock. Move the clock so the edited session re-ingests while its
+		// sibling session, whose clock is untouched, stays unchanged.
+		updateErr = sqlitex.ExecuteTransient(connection, `UPDATE session SET time_updated = 1700002000010 WHERE id = (SELECT session_id FROM message WHERE id = 'msg_equal_a')`, nil)
+	}
 	closeErr := connection.Close()
 	if updateErr != nil || closeErr != nil {
 		t.Fatalf("prepare synthetic source change: %v", errors.Join(updateErr, closeErr))

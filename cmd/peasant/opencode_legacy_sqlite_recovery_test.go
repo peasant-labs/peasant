@@ -516,7 +516,14 @@ func appendMountedLegacyWALRows(writer *sqlite.Conn, testCase legacySQLiteFreshn
 	if err = sqlitex.ExecuteTransient(writer, "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)", &sqlitex.ExecOptions{Args: []any{testCase.MessageID, testCase.TargetSession, testCase.MessageTimeCreated, testCase.MessageTimeUpdated, testCase.MessageData}}); err != nil {
 		return err
 	}
-	return sqlitex.ExecuteTransient(writer, "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", &sqlitex.ExecOptions{Args: []any{testCase.PartID, testCase.MessageID, testCase.TargetSession, testCase.PartTimeCreated, testCase.PartTimeUpdated, testCase.PartData}})
+	if err = sqlitex.ExecuteTransient(writer, "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", &sqlitex.ExecOptions{Args: []any{testCase.PartID, testCase.MessageID, testCase.TargetSession, testCase.PartTimeCreated, testCase.PartTimeUpdated, testCase.PartData}}); err != nil {
+		return err
+	}
+	// OpenCode moves the session's changed clock in the same commit as the new
+	// content. Freshness is clock-first for a session that has a clock, so the
+	// committed WAL update moves the target session's clock to the new content
+	// time and re-ingests it.
+	return sqlitex.ExecuteTransient(writer, "UPDATE session SET time_updated = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{testCase.MessageTimeUpdated, testCase.TargetSession}})
 }
 
 func copySyntheticDatabase(t testing.TB, source, destination string) {

@@ -24,11 +24,12 @@ func (source currentFreshnessFaultSource) CurrentFreshnessBySession(context.Cont
 	return nil, fmt.Errorf("synthetic current freshness read failure")
 }
 
-// TestOpenCodeWinnerFreshnessFailureFallsBackToFloor proves a session that has a
-// readable representation is never dropped when the winner's freshness read
-// fails. The session is present in both JSON and current SQLite, the SQLite
-// winner's freshness read is fault-injected, and the session still discovers
-// with the database and WAL mtime floor as its freshness.
+// TestOpenCodeWinnerFreshnessFailureFallsBackToFloor proves a clockless session
+// that has a readable representation is never dropped when the winner's row
+// freshness read fails. The session is present in both JSON and current SQLite,
+// its session clock is cleared so it needs the row aggregate, the SQLite winner's
+// freshness read is fault-injected, and the session still discovers with the
+// database and WAL mtime floor as its freshness.
 func TestOpenCodeWinnerFreshnessFailureFallsBackToFloor(t *testing.T) {
 	const sessionID = "ses_3cd91f52effeXd3QAJ54jOyzv5"
 	materialized := testfixture.MaterializeByName(t, "semantic-parity-current")
@@ -39,6 +40,11 @@ func TestOpenCodeWinnerFreshnessFailureFallsBackToFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeOpenCodeJSONSession(t, rootPath, sessionID)
+
+	// A clock-bearing session reads no row aggregate, so it would never reach the
+	// fault. Clear the clock so the session takes the row-aggregate path the
+	// fault exercises.
+	updateSyntheticSessionClock(t, databasePath, sessionID, 0)
 
 	floor := time.UnixMilli(1_600_000_000_000)
 	setDatabaseModTime(t, databasePath, floor)

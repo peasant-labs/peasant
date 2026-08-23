@@ -25,10 +25,14 @@ func (source legacyFreshnessFailingSource) LegacyFreshnessBySession(context.Cont
 }
 
 // TestOpenCodeFreshnessDiagnosticAggregatedPerPath proves that a database whose
-// freshness read fails for every session records one freshness diagnostic naming
-// the affected sessions, not one diagnostic per session.
+// row freshness read fails for every clockless session records one freshness
+// diagnostic naming the affected sessions, not one diagnostic per session. Both
+// sessions lose their session clock so both take the row-aggregate path that the
+// failing read exercises.
 func TestOpenCodeFreshnessDiagnosticAggregatedPerPath(t *testing.T) {
 	materialized := testfixture.MaterializeByName(t, "session-clock-present-and-absent")
+	updateSyntheticSessionClock(t, materialized.Path, "ses_3cd91f52effeXd3QAJ54jOyzvE", 0)
+	updateSyntheticSessionClock(t, materialized.Path, "ses_3cd91f52effeXd3QAJ54jOyzvF", 0)
 	root, err := ingest.NewResolvedPath(filepath.Dir(materialized.Path))
 	if err != nil {
 		t.Fatalf("resolve synthetic OpenCode root: %v", err)
