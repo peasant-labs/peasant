@@ -158,7 +158,15 @@ func isSupportedOpenCodeSemanticPartType(partType string) bool {
 // and returns SessionEntry rows ordered by filename (alphabetical ≈ chronological).
 func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
 	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
-		data, err := idx.fs.ReadFile(session.SourcePath.String())
+		projectionPath := session.SourcePath.String()
+		info, statErr := idx.fs.Stat(projectionPath)
+		if statErr != nil {
+			return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while sizing %q: %w; no entry rows were stored, so re-run harvest to restore the managed artifact", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, projectionPath, statErr)
+		}
+		if info.Size() > defaults.OpenCodeManagedProjectionMaxBytes {
+			return nil, fmt.Errorf("index %s OpenCode projection for session %q refused %q because it is %d bytes, past the %d byte managed-projection bound; no entry rows were stored and the file was never read into memory; this path must hold the small per-session managed projection, so run harvest to regenerate the projection and never point the reader at the OpenCode database", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, projectionPath, info.Size(), int64(defaults.OpenCodeManagedProjectionMaxBytes))
+		}
+		data, err := idx.fs.ReadFile(projectionPath)
 		if err != nil {
 			return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while reading %q: %w; no entry rows were stored, so re-run harvest to restore the managed artifact", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, session.SourcePath, err)
 		}

@@ -44,6 +44,19 @@ const (
 // ContentPreviewLimit is the maximum character length for ContentPreview fields.
 const ContentPreviewLimit = 2000
 
+// OpenCodeManagedProjectionMaxBytes bounds the Peasant-managed OpenCode SQLite
+// projection file the indexer reads from disk. The projection holds one
+// session's normalized message and part rows as JSON, so it is small; a real
+// projection is kilobytes to low megabytes. The bound exists as defense in
+// depth: an OpenCode SQLite session's discovered source path is the provider
+// database, and only the post-harvest managed projection ever belongs at the
+// path the indexer reads. If any wiring mistake ever points the reader at the
+// database instead of the projection, the reader refuses the oversized file
+// rather than loading a multi-gigabyte database into memory and aborting the
+// process. 64 MiB is far above any real projection and far below a database
+// that would exhaust memory.
+const OpenCodeManagedProjectionMaxBytes = 64 << 20 // 64 MiB
+
 // Scanner buffer sizes for reading large JSONL lines.
 const (
 	ScannerMaxLine = 10 << 20 // 10 MiB
