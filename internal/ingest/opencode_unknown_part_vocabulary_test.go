@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"gopkg.in/yaml.v3"
 )
-
-const expectedUnknownPartVocabularyCases = 1
 
 type unknownTypeExpectation struct {
 	Type  string `yaml:"type"`
@@ -38,7 +37,7 @@ type unknownPartVocabularyCase struct {
 }
 
 type unknownPartVocabularyDocument struct {
-	DeclaredCases int                         `yaml:"declared_cases"`
+	RequiredCases []string                    `yaml:"required_cases"`
 	Cases         []unknownPartVocabularyCase `yaml:"cases"`
 }
 
@@ -56,8 +55,17 @@ func loadUnknownPartVocabularyDocument(data []byte) (unknownPartVocabularyDocume
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return document, errors.New("expected exactly one YAML document")
 	}
-	if document.DeclaredCases != expectedUnknownPartVocabularyCases || len(document.Cases) != expectedUnknownPartVocabularyCases {
-		return document, errors.New("unknown-part vocabulary fixture count guard failed")
+	presentVocab := make(map[string]struct{}, len(document.Cases))
+	for _, testCase := range document.Cases {
+		presentVocab[testCase.Name] = struct{}{}
+	}
+	if len(document.RequiredCases) == 0 {
+		return document, errors.New("unknown-part vocabulary fixture declares no required cases")
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := presentVocab[name]; !ok {
+			return document, fmt.Errorf("unknown-part vocabulary fixture is missing required case %q", name)
+		}
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {

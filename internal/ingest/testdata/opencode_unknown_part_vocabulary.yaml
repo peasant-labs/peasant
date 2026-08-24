@@ -3,7 +3,10 @@
 # text-bearing unknown part becomes an inert system note, a text-free one is
 # dropped, and one diagnostic per distinct unknown type names the type and how
 # many rows it covered. The known parts keep their exact prior rendering.
-declared_cases: 1
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - legacy-step-start-and-file-tolerated
 cases:
   - name: legacy-step-start-and-file-tolerated
     source_fixture: legacy-unknown-part-vocabulary
