@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/annotations"
@@ -69,6 +70,22 @@ type Server struct {
 	server *http.Server
 	hub    *Hub
 	ln     net.Listener
+
+	// bg tracks background tasks spawned by request handlers (WebSocket
+	// broadcasts after a mutation). Shutdown drains it so no task can touch
+	// the store after the owner closes it.
+	bg sync.WaitGroup
+}
+
+// spawnBackground runs fn on its own goroutine, tracked in s.bg so Shutdown
+// waits for it. ctx is the serve context: cancellation interrupts the task's
+// store reads so shutdown stays prompt.
+func (s *Server) spawnBackground(ctx context.Context, fn func(context.Context)) {
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		fn(ctx)
+	}()
 }
 
 // Addr returns the listener's address after ListenAndServe has bound.
@@ -121,6 +138,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	ah := &annotationHandler{
 		annotationStore: s.cfg.Store,
 		hub:             s.hub,
+		spawn:           func(fn func(context.Context)) { s.spawnBackground(ctx, fn) },
 	}
 	if s.cfg.Store != nil {
 		ah.typeReader = annotations.NewTypeReader(s.cfg.Store)
@@ -199,7 +217,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.ServerShutdownGrace)
 		defer cancel()
-		return s.server.Shutdown(shutdownCtx)
+		return s.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -216,12 +234,15 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	return s.Serve(ctx)
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server, then waits for every tracked
+// background task so the caller can safely close the store afterwards.
 func (s *Server) Shutdown(ctx context.Context) error {
+	var err error
 	if s.server != nil {
-		return s.server.Shutdown(ctx)
+		err = s.server.Shutdown(ctx)
 	}
-	return nil
+	s.bg.Wait()
+	return err
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -483,10 +504,8 @@ func (s *Server) handleShutdown(_ context.Context) http.HandlerFunc {
 		go func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.ServerShutdownTimeout)
 			defer cancel()
-			if s.server != nil {
-				if err := s.server.Shutdown(shutdownCtx); err != nil {
-					log.Printf("server shutdown error: %v", err)
-				}
+			if err := s.Shutdown(shutdownCtx); err != nil {
+				log.Printf("server shutdown error: %v", err)
 			}
 		}()
 	}

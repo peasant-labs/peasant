@@ -20,6 +20,20 @@ type annotationHandler struct {
 	annotationStore *store.Store
 	typeReader      schema.AnnotationTypeReader
 	hub             *Hub
+	// spawn runs a broadcast task on a Server-tracked goroutine so shutdown
+	// drains it before the store closes. The server wires it in Listen.
+	spawn func(fn func(context.Context))
+}
+
+// async runs fn through the server-tracked spawner. A handler constructed
+// without one (not a path the server produces) degrades to running inline,
+// which is always safe: the store is still open for the request's duration.
+func (h *annotationHandler) async(fn func(context.Context)) {
+	if h.spawn != nil {
+		h.spawn(fn)
+		return
+	}
+	fn(context.Background())
 }
 
 // createAnnotationRequest is the JSON body for POST /api/v1/annotations.
@@ -234,11 +248,12 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 		_ = err
 	}
 
-	// Broadcast annotation update to WebSocket subscribers.
+	// Broadcast annotation update to WebSocket subscribers on a tracked
+	// goroutine: shutdown drains it before the store can be closed.
 	if h.hub != nil {
 		sessionID := req.SessionID
-		go func() {
-			rows, err := h.annotationStore.GetAnnotationsForSession(context.Background(), sessionID)
+		h.async(func(ctx context.Context) {
+			rows, err := h.annotationStore.GetAnnotationsForSession(ctx, sessionID)
 			if err != nil {
 				return
 			}
@@ -250,7 +265,7 @@ func (h *annotationHandler) handleCreateAnnotation(w http.ResponseWriter, r *htt
 					Annotations: annotationRowsToSummaries(rows),
 				},
 			})
-		}()
+		})
 	}
 }
 
@@ -409,8 +424,8 @@ func (h *annotationHandler) handleBatchCreateAnnotations(w http.ResponseWriter, 
 			if ann.SessionID != "" && !seen[ann.SessionID] {
 				seen[ann.SessionID] = true
 				sessionID := ann.SessionID
-				go func() {
-					rows, err := h.annotationStore.GetAnnotationsForSession(context.Background(), sessionID)
+				h.async(func(ctx context.Context) {
+					rows, err := h.annotationStore.GetAnnotationsForSession(ctx, sessionID)
 					if err != nil {
 						return
 					}
@@ -422,11 +437,12 @@ func (h *annotationHandler) handleBatchCreateAnnotations(w http.ResponseWriter, 
 							Annotations: annotationRowsToSummaries(rows),
 						},
 					})
-				}()
+				})
 			}
 		}
 		// Annotations affect quality metrics (e.g. effectiveAnnotations) —
-		// trigger an async quality refresh for subscribers.
-		go h.hub.RefreshQuality(context.Background())
+		// trigger an async quality refresh for subscribers, tracked like the
+		// broadcasts above so shutdown drains it too.
+		h.async(h.hub.RefreshQuality)
 	}
 }
