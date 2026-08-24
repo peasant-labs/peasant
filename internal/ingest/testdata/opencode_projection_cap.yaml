@@ -3,7 +3,11 @@
 # filesystem double, so no real large file is written. A file past the bound is
 # refused before any read; a file within the bound is read. size = bound +
 # offset_from_bound.
-declared_cases: 2
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - oversized-projection-is-refused-before-any-read
+  - within-bound-projection-is-read
 cases:
   - name: oversized-projection-is-refused-before-any-read
     origin: opencode-legacy-sqlite

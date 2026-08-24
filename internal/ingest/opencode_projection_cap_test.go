@@ -20,8 +20,6 @@ import (
 //go:embed testdata/opencode_projection_cap.yaml
 var openCodeProjectionCapData []byte
 
-const expectedOpenCodeProjectionCapCaseCount = 2
-
 const capProjectionPath = "/synthetic/store/opencode-managed-projection.json"
 
 // openCodeProjectionCapCase sizes one synthetic projection file relative to the
@@ -52,7 +50,7 @@ func (c openCodeProjectionCapCase) transcriptOrigin(t *testing.T) ingest.Transcr
 }
 
 type openCodeProjectionCapDoc struct {
-	DeclaredCases int                         `yaml:"declared_cases"`
+	RequiredCases []string                    `yaml:"required_cases"`
 	Cases         []openCodeProjectionCapCase `yaml:"cases"`
 }
 
@@ -68,8 +66,17 @@ func loadOpenCodeProjectionCapDoc(t *testing.T) openCodeProjectionCapDoc {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("projection cap fixture must hold exactly one document")
 	}
-	if doc.DeclaredCases != expectedOpenCodeProjectionCapCaseCount || len(doc.Cases) != expectedOpenCodeProjectionCapCaseCount {
-		t.Fatalf("projection cap fixture count guard failed: declared %d, cases %d, want %d", doc.DeclaredCases, len(doc.Cases), expectedOpenCodeProjectionCapCaseCount)
+	presentCap := make(map[string]struct{}, len(doc.Cases))
+	for _, c := range doc.Cases {
+		presentCap[c.Name] = struct{}{}
+	}
+	if len(doc.RequiredCases) == 0 {
+		t.Fatal("projection cap fixture declares no required cases")
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := presentCap[name]; !ok {
+			t.Fatalf("projection cap fixture is missing required case %q", name)
+		}
 	}
 	seen := make(map[string]struct{}, len(doc.Cases))
 	for _, c := range doc.Cases {
