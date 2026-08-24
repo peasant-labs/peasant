@@ -400,6 +400,7 @@ func ftueDiscoverWith(
 				GitRemote:   gitRemote,
 				Branch:      branchName,
 				Title:       title,
+				Agent:       d.Agent,
 				Date:        date,
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],

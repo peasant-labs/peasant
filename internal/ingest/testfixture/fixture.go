@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 32
+const expectedCaseCount = 33
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -122,13 +122,31 @@ type caseSpec struct {
 	// time. A session that has a row but is absent from this list keeps a null
 	// directory and title, so the reader still yields empty attribution for it.
 	SessionAttribution []sessionAttribution `yaml:"session_attribution"`
+	// SessionExtended widens the synthetic session table to the full column set
+	// the record read consumes: the base attribution columns plus agent, the five
+	// token aggregates, cost, version, slug, and revert. The attribution rows then
+	// set those columns, so discovery reads the session statistics, identity, and
+	// agent label through the production extended-record path.
+	SessionExtended bool `yaml:"session_extended"`
 }
 
-// sessionAttribution is the working directory and title of one session row.
+// sessionAttribution is one session row's working directory, title, and, when
+// the case is extended, its agent label, token aggregates, cost, version, slug,
+// and revert marker.
 type sessionAttribution struct {
-	SessionID string `yaml:"session_id"`
-	Directory string `yaml:"directory"`
-	Title     string `yaml:"title"`
+	SessionID        string  `yaml:"session_id"`
+	Directory        string  `yaml:"directory"`
+	Title            string  `yaml:"title"`
+	Agent            string  `yaml:"agent"`
+	TokensInput      int64   `yaml:"tokens_input"`
+	TokensOutput     int64   `yaml:"tokens_output"`
+	TokensReasoning  int64   `yaml:"tokens_reasoning"`
+	TokensCacheRead  int64   `yaml:"tokens_cache_read"`
+	TokensCacheWrite int64   `yaml:"tokens_cache_write"`
+	Cost             float64 `yaml:"cost"`
+	Version          string  `yaml:"version"`
+	Slug             string  `yaml:"slug"`
+	Revert           string  `yaml:"revert"`
 }
 
 type catalogPaddingSpec struct {
@@ -318,6 +336,9 @@ func (c caseSpec) validate() error {
 
 func (c caseSpec) validateSessionAttribution() error {
 	if len(c.SessionAttribution) == 0 {
+		if c.SessionExtended {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: an extended session table requires session attribution rows", c.Name)
+		}
 		return nil
 	}
 	if c.Format == sourceFormatCorrupt {

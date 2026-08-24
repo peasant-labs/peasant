@@ -69,6 +69,7 @@ type DiscoveredSession struct {
 	ProjectName       string            // Human-readable project name (optional, populated during discovery when cheap to extract)
 	Title             string            // Session title (optional, populated when available without extra I/O)
 	Branch            string            // Git branch active when session ran (optional, from session data not current repo)
+	Agent             string            // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
 	CWD               string            // Working directory when session ran (optional, for git resolution fallback)
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction

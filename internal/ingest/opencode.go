@@ -190,6 +190,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					SourceFormat: SourceFormatJSON,
 					OriginalRoot: root,
 					Title:        ses.Title,
+					Agent:        ses.Agent,
 					ProjectName:  filepath.Base(ses.Directory),
 					CWD:          ses.Directory,
 					CreatedAt:    createdAt,
@@ -438,6 +439,9 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			candidates[index].session.CWD = record.directory
 			candidates[index].session.Title = record.title
 			candidates[index].session.CreatedAt = record.createdAt
+			// The agent label carries a subagent OpenCode session's agent type so
+			// the kickstart listing can show it, mirroring a Claude teammate.
+			candidates[index].session.Agent = record.agent
 		}
 	}
 	return candidates, source
@@ -454,6 +458,7 @@ type openCodeSessionClock struct {
 	directory string
 	title     string
 	createdAt time.Time
+	agent     string
 }
 
 // openCodeSessionRecords holds every session row of one database. present is
@@ -523,7 +528,7 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 			if _, discovered := discoveredIDs[sessionID]; !discovered {
 				continue
 			}
-			clock := openCodeSessionClock{directory: row.Directory, title: row.Title}
+			clock := openCodeSessionClock{directory: row.Directory, title: row.Title, agent: row.Agent}
 			if row.TimeUpdated > 0 {
 				clock.updatedAt = time.UnixMilli(row.TimeUpdated)
 			}
@@ -1266,6 +1271,7 @@ type openCodeSession struct {
 	ID        string `json:"id"`
 	Slug      string `json:"slug"`
 	Version   string `json:"version"`
+	Agent     string `json:"agent"`
 	ProjectID string `json:"projectID"`
 	Directory string `json:"directory"`
 	ParentID  string `json:"parentID"`

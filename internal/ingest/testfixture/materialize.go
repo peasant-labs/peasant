@@ -230,7 +230,7 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return fmt.Errorf("set %s journal mode during setup: %w", fixtureCase.JournalMode, err)
 	}
 
-	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0); err != nil {
+	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0, fixtureCase.SessionExtended); err != nil {
 		return err
 	}
 	if (fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid) && fixtureCase.SessionClock != sessionClockAbsent {
@@ -284,9 +284,14 @@ func applyCatalogPadding(conn *sqlite.Conn, padding catalogPaddingSpec) error {
 	return nil
 }
 
-func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution bool) error {
+func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution, extended bool) error {
 	sessionSchema := sessionSchemaSQL
-	if attribution {
+	if extended {
+		// The session table carries every column the extended record read
+		// consumes, mirroring the real OpenCode shape whose session row records
+		// the agent, token aggregates, cost, version, slug, and revert marker.
+		sessionSchema = sessionSchemaWithExtendedSQL
+	} else if attribution {
 		// The session table carries the working directory and title alongside the
 		// parent link, creation time, and clock, mirroring the real OpenCode shape.
 		sessionSchema = sessionSchemaWithAttributionSQL
@@ -344,6 +349,30 @@ CREATE TABLE session (
   time_updated INTEGER NOT NULL DEFAULT 0,
   directory TEXT,
   title TEXT
+);
+`
+
+// sessionSchemaWithExtendedSQL mirrors the real OpenCode session table columns
+// the extended record read consumes: the base attribution columns plus the
+// agent label, the five token aggregates, cost, version, slug, and revert.
+const sessionSchemaWithExtendedSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0,
+  time_updated INTEGER NOT NULL DEFAULT 0,
+  directory TEXT,
+  title TEXT,
+  agent TEXT,
+  tokens_input INTEGER,
+  tokens_output INTEGER,
+  tokens_reasoning INTEGER,
+  tokens_cache_read INTEGER,
+  tokens_cache_write INTEGER,
+  cost REAL,
+  version TEXT,
+  slug TEXT,
+  revert TEXT
 );
 `
 
@@ -502,6 +531,16 @@ func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
 			// The clock lags the session's row times, so the newest row time,
 			// not the clock, is the changed time and a row change is still seen.
 			updated = value.created
+		}
+		if fixtureCase.SessionExtended {
+			// The extended session table records the agent label, token aggregates,
+			// cost, version, slug, and revert marker alongside the attribution, so
+			// the production extended-record read carries them into discovery.
+			row := attribution[sessionID]
+			if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated, directory, title, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated, nullableText(row.Directory), nullableText(row.Title), nullableText(row.Agent), row.TokensInput, row.TokensOutput, row.TokensReasoning, row.TokensCacheRead, row.TokensCacheWrite, row.Cost, nullableText(row.Version), nullableText(row.Slug), nullableText(row.Revert)}}); err != nil {
+				return fmt.Errorf("insert synthetic session %q with extended columns: %w", sessionID, err)
+			}
+			continue
 		}
 		if hasAttribution {
 			// A session absent from the attribution list keeps a null directory
