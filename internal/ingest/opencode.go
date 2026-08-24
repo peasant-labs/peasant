@@ -429,15 +429,31 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		// mtime-floor path and a row deletion still moves its freshness.
 		if known {
 			candidates[index].sessionUpdatedAt = record.updatedAt
+			// Attribute the SQLite-discovered session to its working directory,
+			// title, and creation time from the session row. The JSON path sets
+			// these from the session file; the SQLite path reads them from the
+			// session table so kickstart groups the session under the project its
+			// working directory resolves to. An older session table without those
+			// columns leaves the fields empty.
+			candidates[index].session.CWD = record.directory
+			candidates[index].session.Title = record.title
+			candidates[index].session.CreatedAt = record.createdAt
 		}
 	}
 	return candidates, source
 }
 
-// openCodeSessionClock is one session row's parent link and update clock.
+// openCodeSessionClock is one session row's parent link, update clock, and
+// attribution. directory, title, and createdAt come from the session row when
+// the session table exposes them and stay empty for an older layout, so
+// discovery attributes a session to its working directory, title, and creation
+// time without a second read.
 type openCodeSessionClock struct {
 	parent    SessionID
 	updatedAt time.Time
+	directory string
+	title     string
+	createdAt time.Time
 }
 
 // openCodeSessionRecords holds every session row of one database. present is
@@ -507,9 +523,12 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 			if _, discovered := discoveredIDs[sessionID]; !discovered {
 				continue
 			}
-			clock := openCodeSessionClock{}
+			clock := openCodeSessionClock{directory: row.Directory, title: row.Title}
 			if row.TimeUpdated > 0 {
 				clock.updatedAt = time.UnixMilli(row.TimeUpdated)
+			}
+			if row.TimeCreated > 0 {
+				clock.createdAt = time.UnixMilli(row.TimeCreated)
 			}
 			if row.ParentID.String() != "" {
 				if parentID, parentErr := NewSessionID(row.ParentID.String()); parentErr != nil {
