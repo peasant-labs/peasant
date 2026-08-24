@@ -14,10 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedOpenCodeGraphCycleCases = 4
-
 type openCodeGraphCycleFixture struct {
-	DeclaredCases int                      `yaml:"declared_cases"`
+	RequiredCases []string                 `yaml:"required_cases"`
 	RepeatRuns    int                      `yaml:"repeat_runs"`
 	Cases         []openCodeGraphCycleCase `yaml:"cases"`
 }
@@ -55,8 +53,17 @@ func loadOpenCodeGraphCycleFixture(data []byte) (openCodeGraphCycleFixture, erro
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fixture, errors.New("OpenCode graph cycle fixture must contain exactly one YAML document")
 	}
-	if fixture.DeclaredCases != expectedOpenCodeGraphCycleCases || len(fixture.Cases) != expectedOpenCodeGraphCycleCases || fixture.RepeatRuns < 2 {
-		return fixture, errors.New("OpenCode graph cycle fixture count guard failed")
+	if len(fixture.RequiredCases) == 0 || fixture.RepeatRuns < 2 {
+		return fixture, errors.New("OpenCode graph cycle fixture guard failed")
+	}
+	presentCycle := make(map[string]struct{}, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		presentCycle[testCase.Name] = struct{}{}
+	}
+	for _, name := range fixture.RequiredCases {
+		if _, ok := presentCycle[name]; !ok {
+			return fixture, fmt.Errorf("OpenCode graph cycle fixture is missing required case %q", name)
+		}
 	}
 	seen := make(map[string]bool, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {

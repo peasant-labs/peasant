@@ -3,7 +3,13 @@
 # Depth 1. Each expected link is the native parent id the indexer records on the
 # child message ParentEntryID. A parent reference that would close a cycle stays
 # at the root (empty parent); children are linked in entry order.
-declared_cases: 4
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - two-cycle-pins-later-entry-to-root
+  - three-cycle-pins-last-entry-to-root
+  - chain-links-every-message-at-depth-zero
+  - self-and-missing-parents-stay-at-root
 repeat_runs: 25
 cases:
   - name: two-cycle-pins-later-entry-to-root
