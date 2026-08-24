@@ -4,7 +4,11 @@
 # that session through the transcript materializer. A SQLite session's source
 # path is the provider database, so the preview must never read that path
 # directly; it must materialize the one selected session's rows instead.
-declared_cases: 2
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - legacy-sqlite-session-previews-through-the-materializer
+  - current-sqlite-session-previews-through-the-materializer
 cases:
   - name: legacy-sqlite-session-previews-through-the-materializer
     source_fixture: legacy-mounted-projection

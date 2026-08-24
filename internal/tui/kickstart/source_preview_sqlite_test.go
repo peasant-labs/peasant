@@ -21,8 +21,6 @@ import (
 //go:embed testdata/source_preview_sqlite.yaml
 var sourcePreviewSQLiteData []byte
 
-const expectedSourcePreviewSQLiteCaseCount = 2
-
 // sourcePreviewSQLiteCase drives one preview over a synthetic OpenCode SQLite
 // source. The synthetic database is materialized by the testfixture package and
 // discovered by the production adapter, so the listing carries the database
@@ -35,7 +33,7 @@ type sourcePreviewSQLiteCase struct {
 }
 
 type sourcePreviewSQLiteDoc struct {
-	DeclaredCases int                       `yaml:"declared_cases"`
+	RequiredCases []string                  `yaml:"required_cases"`
 	Cases         []sourcePreviewSQLiteCase `yaml:"cases"`
 }
 
@@ -51,8 +49,8 @@ func loadSourcePreviewSQLiteDoc(t *testing.T) sourcePreviewSQLiteDoc {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("SQLite preview fixture must hold exactly one document")
 	}
-	if doc.DeclaredCases != expectedSourcePreviewSQLiteCaseCount || len(doc.Cases) != expectedSourcePreviewSQLiteCaseCount {
-		t.Fatalf("SQLite preview fixture count guard failed: declared %d, cases %d, want %d", doc.DeclaredCases, len(doc.Cases), expectedSourcePreviewSQLiteCaseCount)
+	if len(doc.RequiredCases) == 0 {
+		t.Fatal("SQLite preview fixture declares no required cases")
 	}
 	seen := make(map[string]struct{}, len(doc.Cases))
 	for _, c := range doc.Cases {
@@ -66,6 +64,11 @@ func loadSourcePreviewSQLiteDoc(t *testing.T) sourcePreviewSQLiteDoc {
 			t.Fatalf("SQLite preview fixture has a duplicate case name %q", c.Name)
 		}
 		seen[c.Name] = struct{}{}
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("SQLite preview fixture is missing required case %q", name)
+		}
 	}
 	return doc
 }
