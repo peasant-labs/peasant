@@ -16,17 +16,29 @@ import (
 // must instead go through redact's Generate. Constructed once.
 var sharedTitlePipeline = sync.OnceValues(redact.NewTitlePipeline)
 
-// simpleTitle derives a legible display title from a session's first user-turn
-// text using the shared pipeline. On any construction or cleanup error it falls
-// back to a plain first-line, length-capped title, so a session always carries
-// some label rather than none.
+// simpleTitle derives a legible display title from one candidate user turn
+// using the shared pipeline. It returns the empty string when the turn cannot
+// become a title, so the caller advances to the next user turn:
+//
+//   - The pipeline cleans the turn to nothing, meaning the turn held only
+//     harness-injected markup and no user prose.
+//   - The pipeline reports that the turn is unusable because its markup is
+//     unbalanced, crossed, or nested. The raw turn may then hide injected text,
+//     so it must never be shown as the title.
+//
+// The plain first-line fallback stays reachable ONLY when the pipeline itself
+// cannot be constructed, because in that case no turn can ever be cleaned and a
+// session would otherwise carry no label at all.
 func simpleTitle(firstTurn string, harness schema.Harness) string {
-	if p, err := sharedTitlePipeline(); err == nil {
-		if title, terr := p.SimpleTitle(firstTurn, harness); terr == nil {
-			return firstLine(title)
-		}
+	p, err := sharedTitlePipeline()
+	if err != nil {
+		return firstLine(fallbackTitle(firstTurn))
 	}
-	return firstLine(fallbackTitle(firstTurn))
+	title, terr := p.SimpleTitle(firstTurn, harness)
+	if terr != nil {
+		return ""
+	}
+	return firstLine(title)
 }
 
 // firstLine reduces a title to its first non-empty line, so a multi-line first
@@ -42,8 +54,7 @@ func firstLine(s string) string {
 }
 
 // fallbackTitle is the pre-pipeline behaviour: the first line, capped to 80
-// code points. It is only reached when the pipeline cannot be built or the
-// input markup is malformed.
+// code points. It is only reached when the pipeline cannot be built.
 func fallbackTitle(text string) string {
 	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
 		text = text[:idx]

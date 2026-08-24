@@ -1,0 +1,72 @@
+# Display-title cases for the Claude discovery hint path. Each case is one root
+# transcript whose leading user records mix harness-injected markup with real
+# user prose. The expected title is what discovery must show for that session.
+declared_rows: 15
+cases:
+  - name: a system reminder alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<system-reminder>private setup notes</system-reminder>"}}'
+    expected_title: ''
+  - name: a local command caveat alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>"}}'
+    expected_title: ''
+  - name: local command stdout alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<local-command-stdout>On branch develop, nothing to commit</local-command-stdout>"}}'
+    expected_title: ''
+  - name: local command stderr alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<local-command-stderr>fatal: not a git repository</local-command-stderr>"}}'
+    expected_title: ''
+  - name: a command name alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<command-name>/effort</command-name>"}}'
+    expected_title: ''
+  - name: a command message alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<command-message>research</command-message>"}}'
+    expected_title: ''
+  - name: a task notification alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<task-notification>the background command finished</task-notification>"}}'
+    expected_title: ''
+  - name: a teammate message alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<teammate-message from=\"reviewer\">the slice is ready</teammate-message>"}}'
+    expected_title: ''
+  - name: an environment context block alone leaves no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<environment_context>shell: zsh, os: linux</environment_context>"}}'
+    expected_title: ''
+  - name: a command with arguments is titled by the argument prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<command-name>/research</command-name>\n<command-message>research</command-message>\n<command-args>compare the two cache eviction policies</command-args>"}}'
+    expected_title: 'compare the two cache eviction policies'
+  - name: a caveat and its stdout are skipped for the following prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"<local-command-stdout>On branch develop, nothing to commit</local-command-stdout>"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Explain why the branch has no staged changes"}}'
+    expected_title: 'Explain why the branch has no staged changes'
+  - name: a skill body is skipped for the following prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"Base directory for this skill: /workspace/.claude/skills/epoch\n\n# Epoch\n\nThis skill runs the audit workflow."}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Start the review wave for the ingest slice"}}'
+    expected_title: 'Start the review wave for the ingest slice'
+  - name: a bare command is skipped for the following prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args></command-args>"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Raise the retry budget for the ingest worker"}}'
+    expected_title: 'Raise the retry budget for the ingest worker'
+  - name: a truncated wrapper is skipped for the following prose
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","message":{"role":"user","content":"<system-reminder>truncated private setup"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Rename the release guard step"}}'
+    expected_title: 'Rename the release guard step'
+  - name: injected records only leave no title
+    lines:
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","gitBranch":"main","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"<command-name>/effort</command-name>\n<command-message>effort</command-message>"}}'
+      - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","message":{"role":"user","content":"Base directory for this skill: /workspace/.claude/skills/epoch"}}'
+    expected_title: ''

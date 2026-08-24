@@ -72,3 +72,89 @@ cases:
         depth: 0
         preview: 'Fix /Users/alice/work/app/src/auth.go without exposing private paths'
     expected: 'Fix /Users/<USER>/<PATH>/app/src/auth.go without exposing private paths'
+  - name: command_with_args_titles_the_argument_prose
+    assertion: exact
+    harness: claude-code
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: "<command-name>/research</command-name>\n<command-message>research</command-message>\n<command-args>compare the two cache eviction policies</command-args>"
+    expected: 'compare the two cache eviction policies'
+  - name: bare_command_then_prose_titles_the_prose
+    assertion: exact
+    harness: claude-code
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: "<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args></command-args>"
+      - role: user
+        depth: 0
+        preview: 'Raise the retry budget for the ingest worker'
+    expected: 'Raise the retry budget for the ingest worker'
+  - name: local_command_output_then_prose_titles_the_prose
+    assertion: exact
+    harness: claude-code
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+      - role: user
+        depth: 0
+        preview: '<local-command-stdout>On branch develop, nothing to commit</local-command-stdout>'
+      - role: user
+        depth: 0
+        preview: 'Explain why the branch has no staged changes'
+    expected: 'Explain why the branch has no staged changes'
+  - name: codex_environment_context_then_prose_titles_the_prose
+    assertion: exact
+    harness: codex
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: '<environment_context>shell: zsh, os: linux</environment_context>'
+      - role: user
+        depth: 0
+        preview: 'Add a timeout to the publish request'
+    expected: 'Add a timeout to the publish request'
+  - name: system_reminder_then_prose_titles_the_prose
+    assertion: exact
+    harness: claude-code
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: '<system-reminder>private setup notes</system-reminder>'
+      - role: user
+        depth: 0
+        preview: 'Document the pull skip-gate behaviour'
+    expected: 'Document the pull skip-gate behaviour'
+  - name: malformed_first_candidate_then_prose_titles_the_prose
+    assertion: exact
+    harness: claude-code
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: '<system-reminder>truncated private setup'
+      - role: user
+        depth: 0
+        preview: 'Rename the release guard step'
+    expected: 'Rename the release guard step'
+  - name: only_injected_turns_omits_title
+    assertion: absent
+    harness: claude-code
+    worktree: /Users/alice/work/app
+    entries:
+      - role: user
+        depth: 0
+        preview: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+      - role: user
+        depth: 0
+        preview: "<command-name>/effort</command-name>\n<command-message>effort</command-message>"
+      - role: user
+        depth: 0
+        preview: 'Base directory for this skill: /Users/alice/.claude/skills/epoch'

@@ -1,0 +1,26 @@
+# The mounted session hero must never derive its heading from the first
+# recorded prompt. A recorded prompt often opens with harness markup, so the
+# derived heading rendered that markup. Every case below carries raw
+# local-command markup in the first user turn, so a regression that stops
+# supplying a title shows the markup in the heading and fails here.
+cases:
+  - name: a generated title is the hero heading
+    qualitySessionPresent: true
+    generatedTitle: refactor the ingest pipeline
+    firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+    expectedTitle: refactor the ingest pipeline
+  - name: a blank generated title falls back to the placeholder heading
+    qualitySessionPresent: true
+    generatedTitle: '   '
+    firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+    expectedTitle: Untitled session
+  - name: an empty generated title falls back to the placeholder heading
+    qualitySessionPresent: true
+    generatedTitle: ''
+    firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+    expectedTitle: Untitled session
+  - name: a session with no quality row falls back to the placeholder heading
+    qualitySessionPresent: false
+    generatedTitle: ''
+    firstTurnContent: '<local-command-caveat>Caveat: the messages below were generated while running local commands.</local-command-caveat>'
+    expectedTitle: Untitled session

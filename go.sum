@@ -117,8 +117,8 @@ github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELU
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
 github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdhx/f4=
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/peasant-labs/redact v0.1.1 h1:SxpHcD326NZOfGPtpBlTfHnqRyygkhN4XYBOUqRNKf0=
-github.com/peasant-labs/redact v0.1.1/go.mod h1:X3C7ssZnus4U/t4+HnbbQ4IE9e7txyPIlZYSftvp3Cs=
+github.com/peasant-labs/redact v0.1.2 h1:QLLYZH760Qo+Mj1WfQ8j2IxGS+EgaTFo2bKTiu0dEuw=
+github.com/peasant-labs/redact v0.1.2/go.mod h1:X3C7ssZnus4U/t4+HnbbQ4IE9e7txyPIlZYSftvp3Cs=
 github.com/peasant-labs/schema v0.1.1 h1:gMW3ZbYWpFkVFl4aV0LpXULpYyBRAZq13rr7wDe3mwc=
 github.com/peasant-labs/schema v0.1.1/go.mod h1:zuSUP1kUd6Bn3QcNPFfjJbMqZHV6HLpsKPSihU+Q1qo=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=

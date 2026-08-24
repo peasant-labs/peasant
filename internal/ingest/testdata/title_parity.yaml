@@ -1,0 +1,30 @@
+# Parity between the harness-markup names this repository recognizes when it
+# reclassifies injected records and the names the shared title pipeline cleans.
+# Each row pins the literal name both catalogs must agree on. A rename on either
+# side fails this fixture instead of silently splitting the two catalogs.
+declared_rows: 5
+cases:
+  - name: system reminder blocks
+    subject: system_reminder
+    kind: paired_tag
+    wrapper_name: system-reminder
+  - name: task notification blocks
+    subject: task_notification
+    kind: paired_tag
+    wrapper_name: task-notification
+  - name: teammate message blocks
+    subject: teammate_message
+    kind: open_prefix
+    wrapper_name: teammate-message
+  - name: local command output blocks
+    subject: local_command
+    kind: family_prefix
+    family_prefix: local-command-
+    wrapper_names:
+      - local-command-caveat
+      - local-command-stdout
+      - local-command-stderr
+  - name: skill body injections
+    subject: skill_body
+    kind: whole_turn_prefix
+    turn_prefix: 'Base directory for this skill:'

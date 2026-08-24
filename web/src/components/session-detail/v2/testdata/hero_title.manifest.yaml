@@ -1,0 +1,18 @@
+expectedCaseCount: 4
+requiredNames:
+  - a generated title is the hero heading
+  - a blank generated title falls back to the placeholder heading
+  - an empty generated title falls back to the placeholder heading
+  - a session with no quality row falls back to the placeholder heading
+expectedLoaderMutationCount: 2
+loaderMutations:
+  - name: hero title case count drift is rejected
+    target: manifest
+    find: "expectedCaseCount: 4\nrequiredNames:"
+    replace: "expectedCaseCount: 3\nrequiredNames:"
+    expectedError: independent manifest
+  - name: hero title duplicate names are rejected
+    target: cases
+    find: "a blank generated title falls back to the placeholder heading"
+    replace: "a generated title is the hero heading"
+    expectedError: duplicates name

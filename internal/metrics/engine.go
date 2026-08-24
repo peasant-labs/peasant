@@ -17,7 +17,7 @@ import (
 
 // CurrentComputeVersion is the compute_version written by this build.
 // Increment when MetricFunc logic changes to trigger recomputation.
-const CurrentComputeVersion = 6
+const CurrentComputeVersion = 7
 
 // MetricFunc computes a partial SessionMetrics update from session entries.
 // It receives the session's entries and existing metrics, and returns a
@@ -75,18 +75,24 @@ func newEngine(store ingest.MetricsStore) *Engine {
 	return &Engine{store: store, titles: pipeline}
 }
 
+// computeTitle derives the published title from the first user turn that
+// carries real user prose. Every depth-0 turn whose stored role is user is a
+// candidate, in transcript order, and the canonical pipeline decides which one
+// is usable: a turn that cleans to empty text held only harness-injected markup,
+// and a turn that fails to clean is unusable and must never be exposed raw.
+// Both are skipped in favour of the next candidate. When no candidate is usable
+// the metric is omitted and the generic harness fallback applies downstream.
 func (e *Engine) computeTitle(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
 	if e.titles == nil {
 		return nil
 	}
-	var preview string
+	var candidates []string
 	for i := range entries {
-		if entries[i].Depth == 0 && entries[i].Role == ingest.RoleUser && entries[i].ContentPreview != nil {
-			preview = *entries[i].ContentPreview
-			break
+		if entries[i].Depth == 0 && entries[i].Role == ingest.RoleUser && entries[i].ContentPreview != nil && *entries[i].ContentPreview != "" {
+			candidates = append(candidates, *entries[i].ContentPreview)
 		}
 	}
-	if preview == "" {
+	if len(candidates) == 0 {
 		return nil
 	}
 	harness, projectPath, err := e.store.GetTitleContext(ctx, sessionID)
@@ -94,12 +100,14 @@ func (e *Engine) computeTitle(ctx context.Context, sessionID ingest.SessionID, e
 		slog.Warn("metrics: load complete title context; generated title omitted", "session_id", sessionID, "error", err)
 		return nil
 	}
-	result, err := e.titles.Generate(preview, redact.TitleContext{Harness: harness, ProjectPath: projectPath})
-	if err != nil {
-		slog.Warn("metrics: generate canonical title; generated title omitted", "session_id", sessionID, "error", err)
-		return nil
+	result, index, skipped := e.titles.GenerateFromTurns(candidates, redact.TitleContext{Harness: harness, ProjectPath: projectPath})
+	// The pipeline reports one error per unusable candidate, in candidate order,
+	// but a candidate skipped for holding no prose reports no error, so the
+	// ordinal below counts unusable candidates rather than transcript turns.
+	for order, skipErr := range skipped {
+		slog.Warn("metrics: skip unusable user turn while generating the title", "session_id", sessionID, "unusable_candidate", order+1, "user_turn_candidates", len(candidates), "error", skipErr)
 	}
-	if result.Text == "" {
+	if index == -1 {
 		return nil
 	}
 	return &ingest.SessionMetrics{QualityMetrics: schema.QualityMetrics{TitleGenerated: &result.Text}}
