@@ -8,4 +8,4 @@ packages:
 # covered by Peasant's mounted gates while the upstream peer range is widened.
 peerDependencyRules:
   allowedVersions:
-    '@peasant-labs/transcript-browser@0.0.7>@peasant-labs/fairtrade': 0.0.15
+    '@peasant-labs/transcript-browser@0.0.7>@peasant-labs/fairtrade': 0.0.16
