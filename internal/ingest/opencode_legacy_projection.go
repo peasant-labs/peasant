@@ -310,6 +310,17 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	metadata.Stats = StatsInfo{TurnCount: summary.turnCount, ToolCallCount: summary.toolCallCount, TokensIn: summary.tokensIn, TokensOut: summary.tokensOut, DurationMs: summary.endMS - summary.startMS}
 	metadata.Timestamp = TimestampInfo{Start: summary.startMS, End: summary.endMS}
 	metadata.Version = summary.version
+	// The session row carries authoritative token totals and the harness version,
+	// so a session whose row exposed them fills the statistics and version without
+	// folding entries. An older layout leaves these zero or empty on the session,
+	// so the folded summary above still stands.
+	if session.TokensIn > 0 || session.TokensOut > 0 {
+		metadata.Stats.TokensIn = session.TokensIn
+		metadata.Stats.TokensOut = session.TokensOut
+	}
+	if session.Version != "" {
+		metadata.Version = session.Version
+	}
 	workDir := session.CWD
 	if workDir == "" {
 		workDir = summary.cwd

@@ -183,14 +183,20 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 				if ses.Time.Created > 0 {
 					createdAt = time.UnixMilli(ses.Time.Created)
 				}
+				title := ses.Title
+				if title == "" {
+					title = ses.Slug
+				}
 				ds := DiscoveredSession{
 					SessionID:    sessionID,
 					Harness:      HarnessOpenCode,
 					SourcePath:   ResolvedPath(sesPath),
 					SourceFormat: SourceFormatJSON,
 					OriginalRoot: root,
-					Title:        ses.Title,
+					Title:        title,
 					Agent:        ses.Agent,
+					Slug:         ses.Slug,
+					Version:      ses.Version,
 					ProjectName:  filepath.Base(ses.Directory),
 					CWD:          ses.Directory,
 					CreatedAt:    createdAt,
@@ -437,11 +443,24 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			// working directory resolves to. An older session table without those
 			// columns leaves the fields empty.
 			candidates[index].session.CWD = record.directory
-			candidates[index].session.Title = record.title
+			// Slug is the display-name fallback: a session whose row carries no
+			// title shows its harness-generated slug in the listing and metadata.
+			title := record.title
+			if title == "" {
+				title = record.slug
+			}
+			candidates[index].session.Title = title
+			candidates[index].session.Slug = record.slug
 			candidates[index].session.CreatedAt = record.createdAt
 			// The agent label carries a subagent OpenCode session's agent type so
 			// the kickstart listing can show it, mirroring a Claude teammate.
 			candidates[index].session.Agent = record.agent
+			// The session row aggregates fill the metadata statistics and version
+			// without folding entries.
+			candidates[index].session.Version = record.version
+			candidates[index].session.TokensIn = int(record.tokensIn)
+			candidates[index].session.TokensOut = int(record.tokensOut)
+			candidates[index].session.Cost = record.cost
 		}
 	}
 	return candidates, source
@@ -459,6 +478,11 @@ type openCodeSessionClock struct {
 	title     string
 	createdAt time.Time
 	agent     string
+	slug      string
+	version   string
+	tokensIn  int64
+	tokensOut int64
+	cost      float64
 }
 
 // openCodeSessionRecords holds every session row of one database. present is
@@ -528,7 +552,7 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 			if _, discovered := discoveredIDs[sessionID]; !discovered {
 				continue
 			}
-			clock := openCodeSessionClock{directory: row.Directory, title: row.Title, agent: row.Agent}
+			clock := openCodeSessionClock{directory: row.Directory, title: row.Title, agent: row.Agent, slug: row.Slug, version: row.Version, tokensIn: row.TokensInput, tokensOut: row.TokensOutput, cost: row.Cost}
 			if row.TimeUpdated > 0 {
 				clock.updatedAt = time.UnixMilli(row.TimeUpdated)
 			}

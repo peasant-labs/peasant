@@ -56,20 +56,30 @@ type SourceConfig struct {
 
 // DiscoveredSession represents a session found during discovery.
 type DiscoveredSession struct {
-	SessionID         SessionID
-	Harness           Harness
-	SourcePath        ResolvedPath      // Path to the main transcript file
-	SourceFormat      SourceFormat      // "jsonl" for Claude, "json" for OpenCode
-	OriginalRoot      ResolvedPath      // Harness root for multi-directory access (e.g. OpenCode message/part)
-	ParentUUID        *SessionID        // nil for root sessions
-	SubagentPaths     []ResolvedPath    // Child session transcript paths
-	DebugPaths        []ResolvedPath    // Debug artifact paths
-	ModTime           time.Time         // Changed time of the source: when its content last changed
-	ActiveModTime     time.Time         // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
-	ProjectName       string            // Human-readable project name (optional, populated during discovery when cheap to extract)
-	Title             string            // Session title (optional, populated when available without extra I/O)
-	Branch            string            // Git branch active when session ran (optional, from session data not current repo)
-	Agent             string            // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
+	SessionID     SessionID
+	Harness       Harness
+	SourcePath    ResolvedPath   // Path to the main transcript file
+	SourceFormat  SourceFormat   // "jsonl" for Claude, "json" for OpenCode
+	OriginalRoot  ResolvedPath   // Harness root for multi-directory access (e.g. OpenCode message/part)
+	ParentUUID    *SessionID     // nil for root sessions
+	SubagentPaths []ResolvedPath // Child session transcript paths
+	DebugPaths    []ResolvedPath // Debug artifact paths
+	ModTime       time.Time      // Changed time of the source: when its content last changed
+	ActiveModTime time.Time      // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
+	ProjectName   string         // Human-readable project name (optional, populated during discovery when cheap to extract)
+	Title         string         // Session title (optional, populated when available without extra I/O)
+	Branch        string         // Git branch active when session ran (optional, from session data not current repo)
+	Agent         string         // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
+	// Slug is the harness-generated session name, used as the display-name
+	// fallback when Title is empty. Version, TokensIn, TokensOut, and Cost carry
+	// the session-level aggregates the harness records on the session row, so
+	// metadata reports them without folding entries. They stay empty or zero when
+	// the source does not expose them.
+	Slug              string
+	Version           string
+	TokensIn          int
+	TokensOut         int
+	Cost              float64
 	CWD               string            // Working directory when session ran (optional, for git resolution fallback)
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction

@@ -954,24 +954,29 @@ cases:
   - name: extended-attribution
     logical_path: extendedattribution/opencode.db
     format: sqlite
-    schema: hybrid
+    schema: legacy
     journal_mode: delete
     corruption: ""
     declared_rows:
-      legacy_messages: 1
-      legacy_parts: 1
-      current_messages: 1
+      legacy_messages: 2
+      legacy_parts: 2
+      current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part, session, session_message]
-      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
-      seq: not_null
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
     session_extended: true
     legacy_messages:
       - id: msg_ext_1
         session_id: ses_3cd91f52effeXd3QAJ54jOyzX1
         time_created: 3000
         time_updated: 3000
+        data: '{"role":"assistant"}'
+      - id: msg_ext_2
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzX2
+        time_created: 3010
+        time_updated: 3010
         data: '{"role":"assistant"}'
     legacy_parts:
       - id: part_ext_1
@@ -980,14 +985,12 @@ cases:
         time_created: 3001
         time_updated: 3001
         data: '{"type":"text","text":"synthetic legacy projection"}'
-    current_messages:
-      - id: sm_ext_1
+      - id: part_ext_2
+        message_id: msg_ext_2
         session_id: ses_3cd91f52effeXd3QAJ54jOyzX2
-        type: message
-        time_created: 3010
-        time_updated: 3010
-        data: '{"role":"assistant","parts":[{"type":"text","text":"synthetic current projection"}]}'
-        seq: 0
+        time_created: 3011
+        time_updated: 3011
+        data: '{"type":"text","text":"synthetic legacy projection"}'
     ignored_history: []
     session_attribution:
       - session_id: ses_3cd91f52effeXd3QAJ54jOyzX1
