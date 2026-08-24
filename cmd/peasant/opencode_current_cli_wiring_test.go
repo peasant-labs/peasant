@@ -15,8 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCurrentSQLiteCLIWiringCases = 1
-
 type currentSQLiteCLIWiringCase struct {
 	Name             string `yaml:"name"`
 	SourceFixture    string `yaml:"source_fixture"`
@@ -24,7 +22,7 @@ type currentSQLiteCLIWiringCase struct {
 }
 
 type currentSQLiteCLIWiringDocument struct {
-	DeclaredCases int                          `yaml:"declared_cases"`
+	RequiredCases []string                     `yaml:"required_cases"`
 	Cases         []currentSQLiteCLIWiringCase `yaml:"cases"`
 }
 
@@ -43,8 +41,17 @@ func loadCurrentSQLiteCLIWiringDocument(t testing.TB) currentSQLiteCLIWiringDocu
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("current SQLite CLI wiring fixture must contain exactly one document: %v", err)
 	}
-	if document.DeclaredCases != expectedCurrentSQLiteCLIWiringCases || len(document.Cases) != expectedCurrentSQLiteCLIWiringCases {
-		t.Fatalf("current SQLite CLI wiring fixture row guard: declared=%d actual=%d expected=%d", document.DeclaredCases, len(document.Cases), expectedCurrentSQLiteCLIWiringCases)
+	presentWiring := make(map[string]struct{}, len(document.Cases))
+	for _, testCase := range document.Cases {
+		presentWiring[testCase.Name] = struct{}{}
+	}
+	if len(document.RequiredCases) == 0 {
+		t.Fatal("current SQLite CLI wiring fixture declares no required cases")
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := presentWiring[name]; !ok {
+			t.Fatalf("current SQLite CLI wiring fixture is missing required case %q", name)
+		}
 	}
 	for _, testCase := range document.Cases {
 		if strings.TrimSpace(testCase.Name) == "" || strings.TrimSpace(testCase.SourceFixture) == "" || testCase.ExpectedSessions < 1 {
