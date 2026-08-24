@@ -1,4 +1,15 @@
-declared_cases: 9
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - legacy-rich
+  - malformed-required-json
+  - current-eligible
+  - hybrid-invalid-identifiers-ineligible
+  - unsupported-ineligible
+  - catalog-overflow-ineligible
+  - empty-ineligible
+  - corrupt-ineligible
+  - mixed-root-preserves-json
 cases:
   - name: legacy-rich
     source_fixture: legacy-mounted-projection

@@ -29,8 +29,6 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const expectedLegacySQLiteMountCases = 9
-
 type legacySQLiteHarvestExpectation string
 
 const (
@@ -80,7 +78,7 @@ type legacySQLiteToolExpectation struct {
 }
 
 type legacySQLiteMountDocument struct {
-	DeclaredCases int                     `yaml:"declared_cases"`
+	RequiredCases []string                `yaml:"required_cases"`
 	Cases         []legacySQLiteMountCase `yaml:"cases"`
 }
 
@@ -99,8 +97,8 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("legacy SQLite mounted expectations must contain exactly one document: %v", err)
 	}
-	if document.DeclaredCases != expectedLegacySQLiteMountCases || len(document.Cases) != expectedLegacySQLiteMountCases {
-		t.Fatalf("legacy SQLite mounted expectation row guard: declared=%d actual=%d expected=%d", document.DeclaredCases, len(document.Cases), expectedLegacySQLiteMountCases)
+	if len(document.RequiredCases) == 0 {
+		t.Fatal("legacy SQLite mounted expectation fixture declares no required cases")
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {
@@ -123,6 +121,11 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 		case legacySQLiteMutationNone, legacySQLiteMutationMalformedMessage, legacySQLiteMutationMixedJSON:
 		default:
 			t.Fatalf("legacy SQLite mounted expectation %q has unknown mutation %q", testCase.Name, testCase.Mutation)
+		}
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("legacy SQLite mounted expectation is missing required case %q", name)
 		}
 	}
 	return document
