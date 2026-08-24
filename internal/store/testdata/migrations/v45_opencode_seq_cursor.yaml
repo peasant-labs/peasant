@@ -1,0 +1,20 @@
+# Round-trip cases for the OpenCode change cursor. Each record is a session and
+# the last ingested event sequence stored for it; each rejection is a row the
+# table's closed constraints must refuse. One YAML file drives both.
+declared_records: 3
+declared_rejections: 2
+records:
+  - name: first-ingest
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzC1
+    last_seq: 0
+  - name: advanced-cursor
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzC2
+    last_seq: 128
+  - name: large-cursor
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzC3
+    last_seq: 4058
+rejections:
+  - name: reject-negative-sequence
+    sql: "INSERT INTO opencode_session_seq_cursor (session_id, last_seq) VALUES ('ses_bad', -1)"
+  - name: reject-null-sequence
+    sql: "INSERT INTO opencode_session_seq_cursor (session_id, last_seq) VALUES ('ses_null', NULL)"

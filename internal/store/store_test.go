@@ -156,7 +156,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	//   seed) are data-only. V40 adds the durable association ledger and V41 adds
 	//   its normalized annotation target table. V43 adds the publication receipt
 	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
-	//   cache.
+	//   cache. V45 adds the OpenCode change cursor.
 	var tableCount int
 	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -167,8 +167,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 51 {
-		t.Errorf("expected 51 tables including the Claude discovery evidence cache, got %d", tableCount)
+	if tableCount != 52 {
+		t.Errorf("expected 52 tables including the OpenCode change cursor, got %d", tableCount)
 	}
 
 	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
@@ -221,8 +221,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
-	if userVersion != 44 {
-		t.Errorf("expected user_version=44 after all migrations, got %d", userVersion)
+	if userVersion != 45 {
+		t.Errorf("expected user_version=45 after all migrations, got %d", userVersion)
 	}
 }
 

@@ -472,7 +472,48 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	} else {
 		attributeOpenCodeProjects(candidates, attribution)
 	}
+	// Read the newest event sequence per session so a rescan detects an in-place
+	// rewrite that moves no time column. The change cursor is an additional
+	// trigger; the session clock stays the primary changed signal.
+	a.attributeOpenCodeEventSequences(ctx, source, result.Candidate, candidates)
 	return candidates, source
+}
+
+// attributeOpenCodeEventSequences sets each discovered session's newest event
+// sequence. It reads the event_sequence table once per database; a database
+// without that table falls back to the payload-free per-session MAX(seq) seek
+// over the event table. The event payload is never read. A read failure leaves
+// the sequence zero, so the session keeps its clock-only changed signal.
+func (a *OpenCodeAdapter) attributeOpenCodeEventSequences(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, candidates []openCodeSessionCandidate) {
+	sequence, err := source.EventSequenceBySession(ctx)
+	if err != nil {
+		a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, "event sequence could not be read; sessions keep the clock-only changed signal", err)
+		return
+	}
+	if sequence.Present {
+		for index := range candidates {
+			if seq, known := sequence.BySession[string(candidates[index].session.SessionID)]; known {
+				candidates[index].session.EventSeq = seq
+			}
+		}
+		return
+	}
+	// The event_sequence table is absent, so seek each discovered session's newest
+	// sequence directly from the event table with the payload-free MAX(seq).
+	for index := range candidates {
+		linkID, linkErr := NewOpenCodeSessionLinkID(string(candidates[index].session.SessionID))
+		if linkErr != nil {
+			continue
+		}
+		maxSeq, seekErr := source.MaxEventSeq(ctx, linkID)
+		if seekErr != nil {
+			a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("event sequence seek failed for session %q; it keeps the clock-only changed signal", candidates[index].session.SessionID), seekErr)
+			continue
+		}
+		if maxSeq.Present {
+			candidates[index].session.EventSeq = maxSeq.Seq
+		}
+	}
 }
 
 // attributeOpenCodeProjects resolves each session's project name and worktree

@@ -613,8 +613,27 @@ type OpenCodeSQLiteSource interface {
 	LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error)
 	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
 	ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error)
+	EventSequenceBySession(context.Context) (OpenCodeEventSequence, error)
+	MaxEventSeq(context.Context, OpenCodeSessionLinkID) (OpenCodeSessionSeq, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	Close(context.Context) error
+}
+
+// OpenCodeEventSequence is the newest event sequence per session, read once from
+// the event_sequence table. Present is false when the table is absent, so the
+// caller falls back to the per-session MAX(seq) seek. BySession maps a session
+// identifier to its newest sequence.
+type OpenCodeEventSequence struct {
+	Present   bool
+	BySession map[string]int64
+}
+
+// OpenCodeSessionSeq is one session's newest event sequence read from the event
+// table by the fallback seek. Present is false when the session has no event
+// rows, so the caller keeps the clock-only signal for it.
+type OpenCodeSessionSeq struct {
+	Present bool
+	Seq     int64
 }
 
 // OpenCodeProjectID is a validated identifier from the project table. It keeps

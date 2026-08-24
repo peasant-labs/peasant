@@ -41,7 +41,7 @@ invalid_identifiers:
     value: " bad-part "
     error_contains: before source access
 
-declared_methods: 11
+declared_methods: 13
 methods:
   - name: Catalog
     signature: "func(context.Context) (ingest.OpenCodeSchemaEvidence, error)"
@@ -65,6 +65,10 @@ methods:
     signature: "func(context.Context, ingest.OpenCodeSessionRecordPageRequest) (ingest.OpenCodeSessionRecordPage, error)"
   - name: ProjectAttribution
     signature: "func(context.Context) (ingest.OpenCodeProjectAttribution, error)"
+  - name: EventSequenceBySession
+    signature: "func(context.Context) (ingest.OpenCodeEventSequence, error)"
+  - name: MaxEventSeq
+    signature: "func(context.Context, ingest.OpenCodeSessionLinkID) (ingest.OpenCodeSessionSeq, error)"
 
 declared_signature_rules: 5
 signature_rules:

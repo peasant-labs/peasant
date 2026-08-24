@@ -41,6 +41,9 @@ const (
 	openCodeSessionAttributionAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionExtendedFirstStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionExtendedAfterStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeEventSequenceFirstStatement              = "SELECT aggregate_id, seq FROM event_sequence ORDER BY aggregate_id LIMIT ?1"
+	openCodeEventSequenceAfterStatement              = "SELECT aggregate_id, seq FROM event_sequence WHERE aggregate_id > ?1 ORDER BY aggregate_id LIMIT ?2"
+	openCodeEventMaxSeqStatement                     = "SELECT MAX(seq) FROM event WHERE aggregate_id = ?1"
 	openCodeProjectFirstStatement                    = "SELECT id, worktree, vcs, name FROM project ORDER BY id LIMIT ?1"
 	openCodeProjectAfterStatement                    = "SELECT id, worktree, vcs, name FROM project WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeProjectDirectoryFirstStatement           = "SELECT project_id, directory, type FROM project_directory ORDER BY project_id, directory LIMIT ?1"
@@ -855,6 +858,90 @@ func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) 
 		}
 	}
 	return attribution, nil
+}
+
+// EventSequenceBySession reads the newest event sequence for every session from
+// the event_sequence table in one bounded pass. It never touches the event table
+// or its payload. When the event_sequence table or its required columns are
+// absent it reports Present false, so the caller falls back to the per-session
+// MAX(seq) seek.
+func (s *zombiezenOpenCodeSQLiteSource) EventSequenceBySession(ctx context.Context) (OpenCodeEventSequence, error) {
+	lease, err := s.beginSourceRead(ctx, "read event sequence by session")
+	if err != nil {
+		return OpenCodeEventSequence{}, err
+	}
+	defer lease.release()
+	columns, err := s.columnsLocked(lease.ctx, "event_sequence")
+	if err != nil {
+		return OpenCodeEventSequence{}, s.sourceReadError(lease.ctx, "read event_sequence columns", err, "pragma_table_info(event_sequence)", "supported OpenCode event_sequence")
+	}
+	if !projectColumnsPresent(columns, "aggregate_id", "seq") {
+		return OpenCodeEventSequence{}, nil
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return OpenCodeEventSequence{}, err
+	}
+	limit := pageSize.value
+	result := OpenCodeEventSequence{Present: true, BySession: make(map[string]int64)}
+	var cursor *string
+	for {
+		batch := 0
+		var lastAggregate string
+		decode := func(stmt *sqlite.Stmt) error {
+			batch++
+			lastAggregate = stmt.ColumnText(0)
+			result.BySession[stmt.ColumnText(0)] = stmt.ColumnInt64(1)
+			return nil
+		}
+		if cursor == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeEventSequenceFirstStatement, []any{limit}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeEventSequenceAfterStatement, []any{*cursor, limit}, decode)
+		}
+		if err != nil || lease.ctx.Err() != nil {
+			return OpenCodeEventSequence{}, s.sourceReadError(lease.ctx, "read bounded event_sequence page", err, "event_sequence(aggregate_id, seq)", "supported OpenCode event_sequence")
+		}
+		if batch < limit {
+			break
+		}
+		next := lastAggregate
+		cursor = &next
+	}
+	return result, nil
+}
+
+// MaxEventSeq reads one session's newest event sequence directly from the event
+// table with the payload-free indexed MAX(seq) aggregate. It projects no payload
+// column. Present is false when the session has no event rows, so the caller
+// keeps the clock-only signal for it. This is the fallback for a database with no
+// event_sequence table.
+func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
+	lease, err := s.beginSourceRead(ctx, "read max event sequence for session")
+	if err != nil {
+		return OpenCodeSessionSeq{}, err
+	}
+	defer lease.release()
+	columns, err := s.columnsLocked(lease.ctx, "event")
+	if err != nil {
+		return OpenCodeSessionSeq{}, s.sourceReadError(lease.ctx, "read event columns", err, "pragma_table_info(event)", "supported OpenCode event")
+	}
+	if !projectColumnsPresent(columns, "aggregate_id", "seq") {
+		// No event table to seek, so the session keeps its clock-only signal.
+		return OpenCodeSessionSeq{}, nil
+	}
+	result := OpenCodeSessionSeq{}
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) == sqlite.TypeInteger {
+			result.Present = true
+			result.Seq = stmt.ColumnInt64(0)
+		}
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeEventMaxSeqStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodeSessionSeq{}, s.sourceReadError(lease.ctx, "read max event sequence", err, "event(seq) where aggregate_id", "supported OpenCode event")
+	}
+	return result, nil
 }
 
 // openCodeBoundedPage assembles one bounded page of rows for any keyset read.

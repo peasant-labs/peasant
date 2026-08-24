@@ -742,6 +742,12 @@ func (source semanticNegativeSource) CurrentMessages(context.Context, OpenCodeCu
 func (source semanticNegativeSource) ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error) {
 	return OpenCodeProjectAttribution{}, nil
 }
+func (source semanticNegativeSource) EventSequenceBySession(context.Context) (OpenCodeEventSequence, error) {
+	return OpenCodeEventSequence{}, nil
+}
+func (source semanticNegativeSource) MaxEventSeq(context.Context, OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
+	return OpenCodeSessionSeq{}, nil
+}
 func (source semanticNegativeSource) Close(context.Context) error { return nil }
 
 func TestOpenCodeCurrentNormalizationRejectsStrictNegativeCases(t *testing.T) {
