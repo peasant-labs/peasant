@@ -3,7 +3,11 @@
 # cost, version, slug, and revert. The older-layout case carries only the base
 # attribution columns, so the extended fields stay empty or zero while the base
 # attribution still resolves. One YAML file drives both, never an inline table.
-declared_cases: 2
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - populated-extended-layout
+  - older-layout-empty
 cases:
   - name: populated-extended-layout
     extended: true

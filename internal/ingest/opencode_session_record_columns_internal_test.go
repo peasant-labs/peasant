@@ -15,7 +15,7 @@ import (
 var openCodeSessionRecordColumnsYAML []byte
 
 type openCodeSessionRecordColumnsFixture struct {
-	DeclaredCases int                               `yaml:"declared_cases"`
+	RequiredCases []string                          `yaml:"required_cases"`
 	Cases         []openCodeSessionRecordColumnCase `yaml:"cases"`
 }
 
@@ -50,8 +50,17 @@ func loadOpenCodeSessionRecordColumnsFixture(t *testing.T) openCodeSessionRecord
 	if err := yaml.Unmarshal(openCodeSessionRecordColumnsYAML, &fixture); err != nil {
 		t.Fatalf("decode session-record columns fixture: %v", err)
 	}
-	if fixture.DeclaredCases != len(fixture.Cases) || fixture.DeclaredCases != 2 {
-		t.Fatalf("session-record columns fixture row guard: declared=%d actual=%d required=2", fixture.DeclaredCases, len(fixture.Cases))
+	presentRec := make(map[string]struct{}, len(fixture.Cases))
+	for _, c := range fixture.Cases {
+		presentRec[c.Name] = struct{}{}
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("session-record columns fixture declares no required cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if _, ok := presentRec[name]; !ok {
+			t.Fatalf("session-record columns fixture is missing required case %q", name)
+		}
 	}
 	return fixture
 }
