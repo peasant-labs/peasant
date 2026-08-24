@@ -1,0 +1,19 @@
+# Mounted preview cases for an un-ingested OpenCode SQLite session. Each case
+# names a synthetic database the testfixture package materializes, then builds
+# the discovery listing kickstart would hold and previews it through the mounted
+# kickstartPreview wiring with no local store. The readable case renders real
+# turns; the unreadable case surfaces an actionable error string, never a panic.
+declared_cases: 2
+cases:
+  - name: readable-sqlite-session-renders-turns
+    source_fixture: legacy-mounted-projection
+    origin: opencode-legacy-sqlite
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expect_error: false
+    want_contains: synthetic question
+  - name: unreadable-sqlite-session-surfaces-an-error
+    source_fixture: corrupt-non-sqlite
+    origin: opencode-legacy-sqlite
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    expect_error: true
+    want_contains: ""

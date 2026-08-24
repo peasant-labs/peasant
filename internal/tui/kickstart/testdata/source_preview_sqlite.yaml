@@ -1,0 +1,16 @@
+# Preview cases over an OpenCode SQLite session that discovery found but the
+# local store has not imported. Each case names a synthetic database the
+# testfixture package materializes, discovers one session from it, and previews
+# that session through the transcript materializer. A SQLite session's source
+# path is the provider database, so the preview must never read that path
+# directly; it must materialize the one selected session's rows instead.
+declared_cases: 2
+cases:
+  - name: legacy-sqlite-session-previews-through-the-materializer
+    source_fixture: legacy-mounted-projection
+    origin: opencode-legacy-sqlite
+    min_turns: 1
+  - name: current-sqlite-session-previews-through-the-materializer
+    source_fixture: semantic-parity-current
+    origin: opencode-current-sqlite
+    min_turns: 1
