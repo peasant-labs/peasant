@@ -4,7 +4,11 @@
 # for a database with no session clock; the session-clock mutation moves one
 # session's changed clock forward while keeping the floor old, so freshness is
 # clock-first and the moved clock drives the change.
-declared_cases: 2
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - absent-clock-re-ingests-when-the-mtime-floor-moves
+  - clock-bearing-session-re-ingests-when-its-session-clock-moves
 cases:
   - name: absent-clock-re-ingests-when-the-mtime-floor-moves
     fixture: session-clock-absent-floor

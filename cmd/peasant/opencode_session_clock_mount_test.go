@@ -28,7 +28,7 @@ const (
 )
 
 type openCodeSessionClockMountDocument struct {
-	DeclaredCases int                        `yaml:"declared_cases"`
+	RequiredCases []string                   `yaml:"required_cases"`
 	Cases         []openCodeSessionClockCase `yaml:"cases"`
 }
 
@@ -54,8 +54,8 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s must contain exactly one YAML document", fixturePath)
 	}
-	if document.DeclaredCases != len(document.Cases) || len(document.Cases) == 0 {
-		return nil, fmt.Errorf("%s declared %d cases but has %d", fixturePath, document.DeclaredCases, len(document.Cases))
+	if len(document.RequiredCases) == 0 {
+		return nil, fmt.Errorf("%s declares no required cases", fixturePath)
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {
@@ -74,6 +74,11 @@ func loadOpenCodeSessionClockMountCases(data []byte) ([]openCodeSessionClockCase
 			}
 		default:
 			return nil, fmt.Errorf("%s case %q has unknown mutation %q", fixturePath, testCase.Name, testCase.Mutation)
+		}
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			return nil, fmt.Errorf("%s is missing required case %q", fixturePath, name)
 		}
 	}
 	return document.Cases, nil
