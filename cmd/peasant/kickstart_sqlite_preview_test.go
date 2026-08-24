@@ -20,8 +20,6 @@ import (
 //go:embed testdata/kickstart_sqlite_preview.yaml
 var kickstartSQLitePreviewData []byte
 
-const expectedKickstartSQLitePreviewCaseCount = 2
-
 // kickstartSQLitePreviewCase drives the mounted preview over one synthetic
 // OpenCode SQLite database that discovery found but no store imported.
 type kickstartSQLitePreviewCase struct {
@@ -34,7 +32,7 @@ type kickstartSQLitePreviewCase struct {
 }
 
 type kickstartSQLitePreviewDoc struct {
-	DeclaredCases int                          `yaml:"declared_cases"`
+	RequiredCases []string                     `yaml:"required_cases"`
 	Cases         []kickstartSQLitePreviewCase `yaml:"cases"`
 }
 
@@ -50,8 +48,8 @@ func loadKickstartSQLitePreviewDoc(t *testing.T) kickstartSQLitePreviewDoc {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("mounted SQLite preview fixture must hold exactly one document")
 	}
-	if doc.DeclaredCases != expectedKickstartSQLitePreviewCaseCount || len(doc.Cases) != expectedKickstartSQLitePreviewCaseCount {
-		t.Fatalf("mounted SQLite preview fixture count guard failed: declared %d, cases %d, want %d", doc.DeclaredCases, len(doc.Cases), expectedKickstartSQLitePreviewCaseCount)
+	if len(doc.RequiredCases) == 0 {
+		t.Fatal("mounted SQLite preview fixture declares no required cases")
 	}
 	seen := make(map[string]struct{}, len(doc.Cases))
 	for _, c := range doc.Cases {
@@ -65,6 +63,11 @@ func loadKickstartSQLitePreviewDoc(t *testing.T) kickstartSQLitePreviewDoc {
 			t.Fatalf("mounted SQLite preview fixture has a duplicate case name %q", c.Name)
 		}
 		seen[c.Name] = struct{}{}
+	}
+	for _, name := range doc.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("mounted SQLite preview fixture is missing required case %q", name)
+		}
 	}
 	return doc
 }

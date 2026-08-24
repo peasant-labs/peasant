@@ -3,7 +3,11 @@
 # the discovery listing kickstart would hold and previews it through the mounted
 # kickstartPreview wiring with no local store. The readable case renders real
 # turns; the unreadable case surfaces an actionable error string, never a panic.
-declared_cases: 2
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - readable-sqlite-session-renders-turns
+  - unreadable-sqlite-session-surfaces-an-error
 cases:
   - name: readable-sqlite-session-renders-turns
     source_fixture: legacy-mounted-projection
