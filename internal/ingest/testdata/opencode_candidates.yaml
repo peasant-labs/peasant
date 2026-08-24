@@ -1,4 +1,12 @@
-declared_resolution_cases: 8
+required_resolution_cases:
+  - production-channel
+  - local-channel
+  - sanitized-channel
+  - disabled-channel
+  - disable-flag-is-upstream-case-sensitive
+  - relative-override-deduplicates-default
+  - absolute-override-precedes-default
+  - memory-override-is-preserved-as-evidence-only
 resolution_cases:
   - name: production-channel
     channel: prod
@@ -46,7 +54,20 @@ resolution_cases:
     paths: [":memory:", opencode.db, .]
     provenance: [environment_override, channel_database, legacy_json_root]
 
-declared_probe_cases: 13
+required_probe_fixtures:
+  - empty-valid
+  - legacy-message-part
+  - current-session-message
+  - hybrid-catalog
+  - current-missing-seq
+  - current-nullable-seq
+  - unsupported-schema
+  - corrupt-non-sqlite
+  - wal-capable
+  - catalog-table-overflow
+  - catalog-column-overflow
+  - catalog-index-overflow
+  - current-partial-ordering-index
 # The session table is guarded by an explicit allowlist of readable columns
 # (readable_session_columns below), not by a per-column denylist. The shape and
 # foreign-table tokens here still fail closed for every statement: no wildcard
@@ -94,7 +115,8 @@ readable_session_columns:
   - version
   - slug
   - revert
-declared_session_column_mutations: 1
+required_session_column_mutations:
+  - reject-forbidden-session-projection
 session_column_mutations:
   - name: reject-forbidden-session-projection
     statement: 'select id, parent_id, time_updated, share_url from session order by id limit ?1'
@@ -106,7 +128,6 @@ session_column_mutations:
 # so every new read fails closed on an unlisted column. The event table itself
 # stays payload-unreadable: only a MAX(seq) aggregate over it is allowed, wired
 # in the change-cursor read, and its data and type columns are never projected.
-declared_readable_table_allowlists: 4
 readable_table_columns:
   - table: project
     columns: [id, worktree, vcs, name]
@@ -116,7 +137,11 @@ readable_table_columns:
     columns: [id, type, name, branch, directory, extra, project_id, time_used]
   - table: event_sequence
     columns: [aggregate_id, seq, owner_id]
-declared_table_column_mutations: 4
+required_table_column_mutations:
+  - reject-forbidden-project-projection
+  - reject-forbidden-project-directory-projection
+  - reject-forbidden-workspace-projection
+  - reject-forbidden-event-sequence-projection
 table_column_mutations:
   - name: reject-forbidden-project-projection
     table: project
@@ -134,7 +159,6 @@ table_column_mutations:
     table: event_sequence
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
-declared_allowed_query_statements: 36
 allowed_query_statements:
   - name: current-substantive-probe
     statement: "select 1 from session_message where session_id = ?1 and type not in ('agent-switched', 'model-switched') limit 1"
@@ -208,7 +232,19 @@ allowed_query_statements:
     statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by id limit ?2'
   - name: legacy-session-parts-after
     statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and id > ?2 order by id limit ?3'
-declared_query_guard_mutations: 12
+required_query_guard_mutations:
+  - payload-table-scope
+  - keyset-predicate
+  - canonical-order
+  - bound-parameter
+  - forbidden-history
+  - generic-offset-escape
+  - current-unscoped-scan
+  - current-session-enumeration-offset
+  - current-session-enumeration-history
+  - current-offset-pagination
+  - current-timestamp-order
+  - current-wildcard-projection
 query_guard_mutations:
   - name: payload-table-scope
     replace_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?2'
@@ -246,7 +282,6 @@ query_guard_mutations:
   - name: current-wildcard-projection
     replace_statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
     replacement_statement: 'select * from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
-declared_entry_path_mutations: 41
 entry_path_mutations:
   - {name: reject-sqlitex-execute-bypass, kind: sqlitex_execute, error_contains: unapproved SQLite entry path}
   - {name: reject-direct-prepare-bypass, kind: prepare, error_contains: unapproved SQLite entry path}
@@ -289,7 +324,6 @@ entry_path_mutations:
   - {name: reject-session-table-diff, kind: session_diff, error_contains: direct-data entry path}
   - {name: reject-session-changeset-output, kind: session_changeset, error_contains: direct-data entry path}
   - {name: reject-interface-prepare-inside-exact-executor, kind: executor_prepare_interface, error_contains: direct preparation is permitted only once for exact PrepareTransient}
-declared_file_inventory_mutations: 46
 file_inventory_mutations:
   - {name: reject-exec-in-existing-opencode-source, filename: opencode.go, kind: sqlitex_exec, error_contains: unapproved SQLite entry path}
   - {name: reject-exec-in-new-opencode-source, filename: opencode_future_exec.go, kind: sqlitex_exec, error_contains: unapproved SQLite entry path}
@@ -337,7 +371,16 @@ file_inventory_mutations:
   - {name: reject-backup-step-value-in-new-opencode-source, filename: opencode_future_backup_step_alias.go, kind: backup_step_alias, error_contains: first-class SQLite callable}
   - {name: reject-blob-read-value-in-existing-opencode-source, filename: opencode.go, kind: blob_read_alias, error_contains: first-class SQLite callable}
   - {name: reject-blob-read-value-in-new-opencode-source, filename: opencode_future_blob_read_alias.go, kind: blob_read_alias, error_contains: first-class SQLite callable}
-declared_coverage_guard_mutations: 9
+required_coverage_guard_mutations:
+  - reject-required-entry-kind-replacement
+  - reject-file-matrix-kind-substitution
+  - reject-file-matrix-existing-class-omission
+  - reject-build-tagged-kind-substitution
+  - reject-build-tagged-class-substitution
+  - reject-build-tagged-name-substitution
+  - reject-topology-tag-substitution
+  - reject-topology-expression-substitution
+  - reject-topology-outcome-substitution
 coverage_guard_mutations:
   - {name: reject-required-entry-kind-replacement, kind: entry_kind_replacement, error_contains: want exactly one}
   - {name: reject-file-matrix-kind-substitution, kind: file_kind_substitution, error_contains: want 23 exact existing/new families}
@@ -348,7 +391,6 @@ coverage_guard_mutations:
   - {name: reject-topology-tag-substitution, kind: topology_tag_substitution, error_contains: build-topology custom tags}
   - {name: reject-topology-expression-substitution, kind: topology_expression_substitution, error_contains: activated in}
   - {name: reject-topology-outcome-substitution, kind: topology_outcome_substitution, error_contains: enumerate build-topology configurations}
-declared_build_tagged_mutations: 7
 build_tagged_mutations:
   - {name: reject-build-tagged-direct-executor, filename: sqlite_tagged_direct.go, build_tags: [evidence_negative_indexer], kind: direct_execute, class: direct, error_contains: unapproved SQLite entry path}
   - {name: reject-build-tagged-callable-alias, filename: sqlite_tagged_alias.go, build_tags: [evidence_negative_indexer], kind: callable_alias, class: alias, error_contains: first-class SQLite callable}
@@ -357,7 +399,6 @@ build_tagged_mutations:
   - {name: reject-build-tagged-struct-field, filename: sqlite_tagged_field.go, build_tags: [evidence_negative_indexer], kind: struct_field, class: field, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-returned-callable, filename: sqlite_tagged_return.go, build_tags: [evidence_negative_indexer], kind: returned_callable, class: return, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-blob-callable-aliases, filename: sqlite_tagged_blob.go, build_tags: [evidence_negative_indexer], kind: blob_callable_aliases, class: direct_data, error_contains: first-class SQLite callable}
-declared_build_topology_cases: 3
 build_topology_cases:
   - name: discover-independent-custom-tags
     sources:
@@ -386,7 +427,13 @@ build_topology_cases:
     expected_forbidden_configurations: 0
     expected_outcome: unreachable_file
     error_contains: never activated production source
-declared_index_evidence_cases: 6
+required_index_evidence_cases:
+  - full-binary-ascending-key
+  - reject-partial-key
+  - reject-expression-key
+  - accept-reversible-descending-sequence
+  - reject-incompatible-collation
+  - reject-nonunique-key
 index_evidence_cases:
   - name: full-binary-ascending-key
     unique: true
@@ -492,7 +539,11 @@ probe_cases:
     capability: none
     support: partial
 
-declared_continuation_candidates: 4
+required_continuation_candidates:
+  - memory-is-not-file-evidence
+  - missing-candidate-remains-local
+  - valid-candidate-after-failures
+  - legacy-root-after-failures
 continuation_candidates:
   - name: memory-is-not-file-evidence
     path_template: memory
@@ -520,7 +571,13 @@ continuation_candidates:
     expected_support: supported
     expected_capability: none
 
-declared_adapter_discovery_cases: 6
+required_adapter_discovery_cases:
+  - capable-probe-init-failure-surfaces
+  - incapable-filesystem-remains-legacy-only
+  - hybrid-prefers-current-projection
+  - hybrid-falls-back-to-legacy-when-current-is-unusable
+  - hybrid-surfaces-both-projection-failures
+  - errored-supported-sqlite-keeps-json-sessions
 adapter_discovery_cases:
   - name: capable-probe-init-failure-surfaces
     source_fixture: legacy-message-part
@@ -559,7 +616,14 @@ adapter_discovery_cases:
     expected_sessions: 1
     error_contains: "synthetic legacy projection unavailable"
 
-declared_closed_set_cases: 7
+required_closed_set_cases:
+  - empty-kind
+  - unknown-kind
+  - empty-path
+  - empty-provenance
+  - unknown-provenance
+  - empty-support
+  - unknown-support
 closed_set_cases:
   - name: empty-kind
     field: kind

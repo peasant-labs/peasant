@@ -35,66 +35,48 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
+// These closed-set coverage counts are the contract itself: the fixture must
+// cover every value of an enum exactly once, so the number equals the enum
+// size rather than a churny row tally.
 const (
-	expectedOpenCodeResolutionCases = 8
-	expectedOpenCodeProbeCases      = 13
-	expectedContinuationCandidates  = 4
-	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 36
-	expectedReadableSessionColumns  = 16
-	expectedSessionColumnMutations  = 1
-	expectedReadableTableAllowlists = 4
-	expectedTableColumnMutations    = 4
-	expectedQueryGuardMutations     = 12
-	expectedEntryPathMutations      = 41
-	expectedEntryPathKindCount      = 41
-	expectedIndexEvidenceCases      = 6
-	expectedFileInventoryMutations  = 46
-	expectedFileMatrixKindCount     = 23
-	expectedCoverageGuardMutations  = 9
-	expectedBuildTaggedMutations    = 7
-	expectedBuildTopologyCases      = 3
-	expectedAdapterDiscoveryCases   = 6
+	expectedEntryPathKindCount   = 41
+	expectedFileMatrixKindCount  = 23
+	expectedBuildTaggedMutations = 7
+	expectedBuildTopologyCases   = 3
 )
 
 //go:embed testdata/opencode_candidates.yaml
 var openCodeCandidateFixtureYAML []byte
 
 type openCodeCandidateFixture struct {
-	DeclaredResolutionCases  int                               `yaml:"declared_resolution_cases"`
-	ResolutionCases          []openCodeCandidateResolutionCase `yaml:"resolution_cases"`
-	DeclaredProbeCases       int                               `yaml:"declared_probe_cases"`
-	ForbiddenQueryTokens     []string                          `yaml:"forbidden_query_tokens"`
-	ReadableSessionColumns   []string                          `yaml:"readable_session_columns"`
-	DeclaredSessionColumns   int                               `yaml:"declared_session_column_mutations"`
-	SessionColumnMutations   []openCodeSessionColumnMutation   `yaml:"session_column_mutations"`
-	DeclaredReadableTables   int                               `yaml:"declared_readable_table_allowlists"`
-	ReadableTableColumns     []openCodeReadableTableAllowlist  `yaml:"readable_table_columns"`
-	DeclaredTableColumnMuts  int                               `yaml:"declared_table_column_mutations"`
-	TableColumnMutations     []openCodeTableColumnMutation     `yaml:"table_column_mutations"`
-	DeclaredAllowedQueries   int                               `yaml:"declared_allowed_query_statements"`
-	AllowedQueryStatements   []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
-	DeclaredQueryMutations   int                               `yaml:"declared_query_guard_mutations"`
-	QueryGuardMutations      []openCodeQueryGuardMutation      `yaml:"query_guard_mutations"`
-	DeclaredEntryMutations   int                               `yaml:"declared_entry_path_mutations"`
-	EntryPathMutations       []openCodeEntryPathMutation       `yaml:"entry_path_mutations"`
-	DeclaredIndexCases       int                               `yaml:"declared_index_evidence_cases"`
-	IndexEvidenceCases       []openCodeIndexEvidenceCase       `yaml:"index_evidence_cases"`
-	DeclaredFileMutations    int                               `yaml:"declared_file_inventory_mutations"`
-	FileInventoryMutations   []openCodeFileInventoryMutation   `yaml:"file_inventory_mutations"`
-	DeclaredCoverageGuards   int                               `yaml:"declared_coverage_guard_mutations"`
-	CoverageGuardMutations   []openCodeCoverageGuardMutation   `yaml:"coverage_guard_mutations"`
-	DeclaredBuildTagged      int                               `yaml:"declared_build_tagged_mutations"`
-	BuildTaggedMutations     []openCodeBuildTaggedMutation     `yaml:"build_tagged_mutations"`
-	DeclaredBuildTopology    int                               `yaml:"declared_build_topology_cases"`
-	BuildTopologyCases       []openCodeBuildTopologyCase       `yaml:"build_topology_cases"`
-	ProbeCases               []openCodeProbeCase               `yaml:"probe_cases"`
-	DeclaredContinuation     int                               `yaml:"declared_continuation_candidates"`
-	ContinuationCandidates   []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
-	DeclaredClosedSetCases   int                               `yaml:"declared_closed_set_cases"`
-	ClosedSetCases           []openCodeClosedSetCase           `yaml:"closed_set_cases"`
-	DeclaredAdapterDiscovery int                               `yaml:"declared_adapter_discovery_cases"`
-	AdapterDiscoveryCases    []openCodeAdapterDiscoveryCase    `yaml:"adapter_discovery_cases"`
+	RequiredResolutionCases        []string                          `yaml:"required_resolution_cases"`
+	ResolutionCases                []openCodeCandidateResolutionCase `yaml:"resolution_cases"`
+	RequiredProbeFixtures          []string                          `yaml:"required_probe_fixtures"`
+	ForbiddenQueryTokens           []string                          `yaml:"forbidden_query_tokens"`
+	ReadableSessionColumns         []string                          `yaml:"readable_session_columns"`
+	RequiredSessionColumnMutations []string                          `yaml:"required_session_column_mutations"`
+	SessionColumnMutations         []openCodeSessionColumnMutation   `yaml:"session_column_mutations"`
+	ReadableTableColumns           []openCodeReadableTableAllowlist  `yaml:"readable_table_columns"`
+	RequiredTableColumnMutations   []string                          `yaml:"required_table_column_mutations"`
+	TableColumnMutations           []openCodeTableColumnMutation     `yaml:"table_column_mutations"`
+	AllowedQueryStatements         []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
+	RequiredQueryGuardMutations    []string                          `yaml:"required_query_guard_mutations"`
+	QueryGuardMutations            []openCodeQueryGuardMutation      `yaml:"query_guard_mutations"`
+	EntryPathMutations             []openCodeEntryPathMutation       `yaml:"entry_path_mutations"`
+	RequiredIndexEvidenceCases     []string                          `yaml:"required_index_evidence_cases"`
+	IndexEvidenceCases             []openCodeIndexEvidenceCase       `yaml:"index_evidence_cases"`
+	FileInventoryMutations         []openCodeFileInventoryMutation   `yaml:"file_inventory_mutations"`
+	RequiredCoverageGuardMutations []string                          `yaml:"required_coverage_guard_mutations"`
+	CoverageGuardMutations         []openCodeCoverageGuardMutation   `yaml:"coverage_guard_mutations"`
+	BuildTaggedMutations           []openCodeBuildTaggedMutation     `yaml:"build_tagged_mutations"`
+	BuildTopologyCases             []openCodeBuildTopologyCase       `yaml:"build_topology_cases"`
+	ProbeCases                     []openCodeProbeCase               `yaml:"probe_cases"`
+	RequiredContinuationCandidates []string                          `yaml:"required_continuation_candidates"`
+	ContinuationCandidates         []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
+	RequiredClosedSetCases         []string                          `yaml:"required_closed_set_cases"`
+	ClosedSetCases                 []openCodeClosedSetCase           `yaml:"closed_set_cases"`
+	RequiredAdapterDiscoveryCases  []string                          `yaml:"required_adapter_discovery_cases"`
+	AdapterDiscoveryCases          []openCodeAdapterDiscoveryCase    `yaml:"adapter_discovery_cases"`
 }
 
 type openCodeAllowedQueryStatement struct {
@@ -411,15 +393,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("decode OpenCode candidate fixture: expected exactly one YAML document: %v", err)
 	}
-	if fixture.DeclaredResolutionCases != expectedOpenCodeResolutionCases || len(fixture.ResolutionCases) != expectedOpenCodeResolutionCases {
-		t.Fatalf("OpenCode resolution fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredResolutionCases, len(fixture.ResolutionCases), expectedOpenCodeResolutionCases)
-	}
-	if fixture.DeclaredProbeCases != expectedOpenCodeProbeCases || len(fixture.ProbeCases) != expectedOpenCodeProbeCases {
-		t.Fatalf("OpenCode probe fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredProbeCases, len(fixture.ProbeCases), expectedOpenCodeProbeCases)
-	}
-	if fixture.DeclaredAdapterDiscovery != expectedAdapterDiscoveryCases || len(fixture.AdapterDiscoveryCases) != expectedAdapterDiscoveryCases {
-		t.Fatalf("OpenCode adapter discovery fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredAdapterDiscovery, len(fixture.AdapterDiscoveryCases), expectedAdapterDiscoveryCases)
-	}
 	adapterCaseNames := make(map[string]struct{}, len(fixture.AdapterDiscoveryCases))
 	for _, testCase := range fixture.AdapterDiscoveryCases {
 		if strings.TrimSpace(testCase.Name) == "" || strings.TrimSpace(testCase.SourceFixture) == "" {
@@ -447,12 +420,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode adapter discovery fixture %q has a negative expected session count", testCase.Name)
 		}
 	}
-	if fixture.DeclaredContinuation != expectedContinuationCandidates || len(fixture.ContinuationCandidates) != expectedContinuationCandidates {
-		t.Fatalf("OpenCode continuation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredContinuation, len(fixture.ContinuationCandidates), expectedContinuationCandidates)
-	}
-	if fixture.DeclaredClosedSetCases != expectedClosedSetCases || len(fixture.ClosedSetCases) != expectedClosedSetCases {
-		t.Fatalf("OpenCode closed-set fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredClosedSetCases, len(fixture.ClosedSetCases), expectedClosedSetCases)
-	}
 	if len(fixture.ForbiddenQueryTokens) == 0 {
 		t.Fatal("OpenCode probe fixture must declare forbidden query-shape tokens")
 	}
@@ -465,9 +432,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenTokens[token] = true
 	}
-	if len(fixture.ReadableSessionColumns) != expectedReadableSessionColumns {
-		t.Fatalf("OpenCode readable session-column allowlist row guard: actual=%d required=%d", len(fixture.ReadableSessionColumns), expectedReadableSessionColumns)
-	}
 	allowlist := make(map[string]bool, len(fixture.ReadableSessionColumns))
 	for index, column := range fixture.ReadableSessionColumns {
 		column = normalizeOpenCodeQuery(column)
@@ -476,9 +440,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode readable session-column allowlist has an empty or duplicate column %q", column)
 		}
 		allowlist[column] = true
-	}
-	if fixture.DeclaredSessionColumns != expectedSessionColumnMutations || len(fixture.SessionColumnMutations) != expectedSessionColumnMutations {
-		t.Fatalf("OpenCode session-column mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredSessionColumns, len(fixture.SessionColumnMutations), expectedSessionColumnMutations)
 	}
 	seenSessionColumnMutations := make(map[string]bool, len(fixture.SessionColumnMutations))
 	for index, mutation := range fixture.SessionColumnMutations {
@@ -500,9 +461,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenSessionColumnMutations[mutation.Name] = true
 	}
-	if fixture.DeclaredReadableTables != expectedReadableTableAllowlists || len(fixture.ReadableTableColumns) != expectedReadableTableAllowlists {
-		t.Fatalf("OpenCode readable table-allowlist row guard: declared=%d actual=%d required=%d", fixture.DeclaredReadableTables, len(fixture.ReadableTableColumns), expectedReadableTableAllowlists)
-	}
 	tableAllowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
 	for index, entry := range fixture.ReadableTableColumns {
 		entry.Table = normalizeOpenCodeQuery(entry.Table)
@@ -523,9 +481,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			columns[column] = true
 		}
 		tableAllowlists[entry.Table] = columns
-	}
-	if fixture.DeclaredTableColumnMuts != expectedTableColumnMutations || len(fixture.TableColumnMutations) != expectedTableColumnMutations {
-		t.Fatalf("OpenCode table-column mutation row guard: declared=%d actual=%d required=%d", fixture.DeclaredTableColumnMuts, len(fixture.TableColumnMutations), expectedTableColumnMutations)
 	}
 	seenTableColumnMutations := make(map[string]bool, len(fixture.TableColumnMutations))
 	coveredTables := make(map[string]bool, len(fixture.TableColumnMutations))
@@ -559,9 +514,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode readable table %q has no can-go-red mutation proving its allowlist fails closed", table)
 		}
 	}
-	if fixture.DeclaredAllowedQueries != expectedAllowedQueryStatements || len(fixture.AllowedQueryStatements) != expectedAllowedQueryStatements {
-		t.Fatalf("OpenCode allowed-query fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredAllowedQueries, len(fixture.AllowedQueryStatements), expectedAllowedQueryStatements)
-	}
 	seenQueryNames := make(map[string]bool, len(fixture.AllowedQueryStatements))
 	seenQueryStatements := make(map[string]bool, len(fixture.AllowedQueryStatements))
 	for index, allowed := range fixture.AllowedQueryStatements {
@@ -576,9 +528,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		seenQueryNames[allowed.Name] = true
 		seenQueryStatements[allowed.Statement] = true
 	}
-	if fixture.DeclaredQueryMutations != expectedQueryGuardMutations || len(fixture.QueryGuardMutations) != expectedQueryGuardMutations {
-		t.Fatalf("OpenCode query-guard mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredQueryMutations, len(fixture.QueryGuardMutations), expectedQueryGuardMutations)
-	}
 	seenMutationNames := make(map[string]bool, len(fixture.QueryGuardMutations))
 	for index, mutation := range fixture.QueryGuardMutations {
 		mutation.ReplaceStatement = normalizeOpenCodeQuery(mutation.ReplaceStatement)
@@ -589,9 +538,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenMutationNames[mutation.Name] = true
 	}
-	if fixture.DeclaredEntryMutations != expectedEntryPathMutations || len(fixture.EntryPathMutations) != expectedEntryPathMutations {
-		t.Fatalf("OpenCode entry-path mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredEntryMutations, len(fixture.EntryPathMutations), expectedEntryPathMutations)
-	}
 	seenEntryMutationNames := make(map[string]bool, len(fixture.EntryPathMutations))
 	for _, mutation := range fixture.EntryPathMutations {
 		if strings.TrimSpace(mutation.Name) == "" || strings.TrimSpace(mutation.ErrorContains) == "" || seenEntryMutationNames[mutation.Name] || !knownOpenCodeEntryPathKind(mutation.Kind) {
@@ -599,18 +545,12 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenEntryMutationNames[mutation.Name] = true
 	}
-	if fixture.DeclaredIndexCases != expectedIndexEvidenceCases || len(fixture.IndexEvidenceCases) != expectedIndexEvidenceCases {
-		t.Fatalf("OpenCode index-evidence fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredIndexCases, len(fixture.IndexEvidenceCases), expectedIndexEvidenceCases)
-	}
 	seenIndexCases := make(map[string]bool, len(fixture.IndexEvidenceCases))
 	for _, fixtureCase := range fixture.IndexEvidenceCases {
 		if strings.TrimSpace(fixtureCase.Name) == "" || seenIndexCases[fixtureCase.Name] || len(fixtureCase.Keys) != 3 || fixtureCase.ExpectedCapability.Validate() != nil || fixtureCase.ExpectedSupport.Validate() != nil {
 			t.Fatalf("OpenCode index-evidence fixture is incomplete or duplicated: %+v", fixtureCase)
 		}
 		seenIndexCases[fixtureCase.Name] = true
-	}
-	if fixture.DeclaredFileMutations != expectedFileInventoryMutations || len(fixture.FileInventoryMutations) != expectedFileInventoryMutations {
-		t.Fatalf("OpenCode file-inventory mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredFileMutations, len(fixture.FileInventoryMutations), expectedFileInventoryMutations)
 	}
 	seenFileMutationNames := make(map[string]bool, len(fixture.FileInventoryMutations))
 	seenFileMutationSurfaces := make(map[string]bool, len(fixture.FileInventoryMutations))
@@ -622,9 +562,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		seenFileMutationNames[mutation.Name] = true
 		seenFileMutationSurfaces[surface] = true
 	}
-	if fixture.DeclaredCoverageGuards != expectedCoverageGuardMutations || len(fixture.CoverageGuardMutations) != expectedCoverageGuardMutations {
-		t.Fatalf("OpenCode coverage-guard mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredCoverageGuards, len(fixture.CoverageGuardMutations), expectedCoverageGuardMutations)
-	}
 	seenCoverageGuardNames := make(map[string]bool, len(fixture.CoverageGuardMutations))
 	for _, mutation := range fixture.CoverageGuardMutations {
 		if strings.TrimSpace(mutation.Name) == "" || strings.TrimSpace(mutation.ErrorContains) == "" || seenCoverageGuardNames[mutation.Name] || !knownOpenCodeCoverageGuardKind(mutation.Kind) {
@@ -632,14 +569,8 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenCoverageGuardNames[mutation.Name] = true
 	}
-	if fixture.DeclaredBuildTagged != expectedBuildTaggedMutations || len(fixture.BuildTaggedMutations) != expectedBuildTaggedMutations {
-		t.Fatalf("OpenCode build-tagged mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredBuildTagged, len(fixture.BuildTaggedMutations), expectedBuildTaggedMutations)
-	}
 	if err := validateOpenCodeBuildTaggedMutationCoverage(fixture.BuildTaggedMutations); err != nil {
 		t.Fatal(err)
-	}
-	if fixture.DeclaredBuildTopology != expectedBuildTopologyCases || len(fixture.BuildTopologyCases) != expectedBuildTopologyCases {
-		t.Fatalf("OpenCode build-topology fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredBuildTopology, len(fixture.BuildTopologyCases), expectedBuildTopologyCases)
 	}
 	if err := validateOpenCodeBuildTopologyCoverage(fixture.BuildTopologyCases); err != nil {
 		t.Fatal(err)
@@ -703,6 +634,32 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode closed-set fixture %q has unknown field %q", closedCase.Name, closedCase.Field)
 		}
 		seenClosed[closedCase.Name] = true
+	}
+	requiredPresence := []struct {
+		label    string
+		required []string
+		present  func(string) bool
+	}{
+		{"resolution case", fixture.RequiredResolutionCases, func(n string) bool { return seenResolution[n] }},
+		{"probe fixture", fixture.RequiredProbeFixtures, func(n string) bool { return seenProbe[n] }},
+		{"session-column mutation", fixture.RequiredSessionColumnMutations, func(n string) bool { return seenSessionColumnMutations[n] }},
+		{"table-column mutation", fixture.RequiredTableColumnMutations, func(n string) bool { return seenTableColumnMutations[n] }},
+		{"query-guard mutation", fixture.RequiredQueryGuardMutations, func(n string) bool { return seenMutationNames[n] }},
+		{"index-evidence case", fixture.RequiredIndexEvidenceCases, func(n string) bool { return seenIndexCases[n] }},
+		{"coverage-guard mutation", fixture.RequiredCoverageGuardMutations, func(n string) bool { return seenCoverageGuardNames[n] }},
+		{"continuation candidate", fixture.RequiredContinuationCandidates, func(n string) bool { return seenContinuation[n] }},
+		{"closed-set case", fixture.RequiredClosedSetCases, func(n string) bool { return seenClosed[n] }},
+		{"adapter discovery case", fixture.RequiredAdapterDiscoveryCases, func(n string) bool { _, ok := adapterCaseNames[n]; return ok }},
+	}
+	for _, group := range requiredPresence {
+		if len(group.required) == 0 {
+			t.Fatalf("OpenCode candidate fixture declares no required %ss", group.label)
+		}
+		for _, name := range group.required {
+			if !group.present(name) {
+				t.Fatalf("OpenCode candidate fixture is missing required %s %q", group.label, name)
+			}
+		}
 	}
 	return fixture
 }
@@ -947,9 +904,6 @@ func openCodeFileMatrixKind(kind openCodeEntryPathKind) bool {
 }
 
 func validateOpenCodeMutationCoverage(fixture openCodeCandidateFixture) error {
-	if expectedEntryPathMutations != expectedEntryPathKindCount {
-		return fmt.Errorf("OpenCode entry-kind contract is internally inconsistent: rows=%d closed-set=%d", expectedEntryPathMutations, expectedEntryPathKindCount)
-	}
 	entryKinds := make(map[openCodeEntryPathKind]int, len(fixture.EntryPathMutations))
 	for _, mutation := range fixture.EntryPathMutations {
 		entryKinds[mutation.Kind]++
@@ -2568,9 +2522,6 @@ func resolveTypedOpenCodeStatement(expression ast.Expr, info *types.Info) (strin
 }
 
 func validateOpenCodePrivateExecutionStatements(statements []string, fixture openCodeCandidateFixture) error {
-	if len(statements) != fixture.DeclaredAllowedQueries {
-		return fmt.Errorf("OpenCode private execution statement count = %d, want fixture-declared %d", len(statements), fixture.DeclaredAllowedQueries)
-	}
 	allowed := make(map[string]bool, len(fixture.AllowedQueryStatements))
 	for _, query := range fixture.AllowedQueryStatements {
 		allowed[query.Statement] = true
