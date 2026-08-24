@@ -47,16 +47,14 @@ resolution_cases:
     provenance: [environment_override, channel_database, legacy_json_root]
 
 declared_probe_cases: 13
+# The session table is guarded by an explicit allowlist of readable columns
+# (readable_session_columns below), not by a per-column denylist. The shape and
+# foreign-table tokens here still fail closed for every statement: no wildcard
+# projection, no offset pagination, no set operation, and no read of another
+# table's history or payload columns.
 forbidden_query_tokens:
   - "select *"
   - " offset "
-  - title
-  - directory
-  - share_url
-  - summary
-  - metadata
-  - revert
-  - permission
   - event
   - delta
   - input
@@ -65,6 +63,26 @@ forbidden_query_tokens:
   - attach
   - payload
   - " union "
+# readable_session_columns is the exact allowlist of session-table columns a
+# read-only source statement may project. Every other session column, including
+# share_url, summary, metadata, revert, permission, slug, version, workspace_id,
+# path, agent, model, cost, and the token and summary columns, stays unreadable:
+# a statement that reads FROM the session table and names a column outside this
+# set is rejected. directory and title are readable because ingest already
+# carries them through the JSON layout and message data, so the discovery-time
+# read attributes a session to its working directory and title.
+readable_session_columns:
+  - id
+  - parent_id
+  - time_updated
+  - time_created
+  - directory
+  - title
+declared_session_column_mutations: 1
+session_column_mutations:
+  - name: reject-forbidden-session-projection
+    statement: 'select id, parent_id, time_updated, share_url from session order by id limit ?1'
+    forbidden_column: share_url
 declared_allowed_query_statements: 24
 allowed_query_statements:
   - name: enable-query-only
