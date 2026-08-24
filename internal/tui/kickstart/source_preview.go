@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 )
@@ -88,6 +89,8 @@ func sourceDiscoveredSession(listing ftue.SessionListing) (ingest.DiscoveredSess
 // the parsed turns of the last few sessions in memory only.
 type SourceTurns struct {
 	fs      ingest.FileSystem
+	git     ingest.GitResolver
+	salt    salt.Salt
 	byID    map[string]ftue.SessionListing
 	limit   int
 	mu      sync.Mutex
@@ -105,6 +108,22 @@ func WithSourceTurnsCacheSize(limit int) SourceTurnsOption {
 	return func(reader *SourceTurns) { reader.limit = limit }
 }
 
+// WithSourceTurnsGitResolver sets the git resolver the reader gives the
+// materializer that turns a SQLite-discovered session into managed transcript
+// bytes. The discovery path resolves a session's project the same way, so the
+// preview and discovery agree on a session's project attribution.
+func WithSourceTurnsGitResolver(git ingest.GitResolver) SourceTurnsOption {
+	return func(reader *SourceTurns) { reader.git = git }
+}
+
+// WithSourceTurnsSalt sets the per-installation salt the reader gives the
+// materializer. The preview reads a session's transcript, not its project hash,
+// so the zero salt is the correct production default; this option exists so a
+// test can inject a fixed salt.
+func WithSourceTurnsSalt(s salt.Salt) SourceTurnsOption {
+	return func(reader *SourceTurns) { reader.salt = s }
+}
+
 // NewSourceTurns builds the source reader over the discovery listing.
 func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts ...SourceTurnsOption) *SourceTurns {
 	byID := make(map[string]ftue.SessionListing, len(sessions))
@@ -115,6 +134,7 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 	}
 	reader := &SourceTurns{
 		fs:     fs,
+		git:    &ingest.ExecGitResolver{},
 		byID:   byID,
 		limit:  DefaultSourceTurnsCacheSize,
 		cached: make(map[string][]ingest.Turn),
@@ -143,6 +163,31 @@ func (s *SourceTurns) Turns(sessionID string) ([]ingest.Turn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("preview the transcript of session %q from its harness source: %w", sessionID, err)
 	}
+	turns, err := s.readTurns(sessionID, listing, session)
+	if err != nil {
+		return nil, err
+	}
+	s.store(sessionID, turns)
+	return turns, nil
+}
+
+// readTurns produces the turns of one discovered session from its harness
+// source. A SQLite-discovered session's SourcePath is the provider database,
+// not a transcript file, so reading that path directly would load the whole
+// database into memory. The materializer reads only the selected session's rows
+// and returns the small managed projection, which the indexer then folds. A
+// file-origin session keeps the direct path read.
+func (s *SourceTurns) readTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) ([]ingest.Turn, error) {
+	switch session.TranscriptOrigin {
+	case ingest.TranscriptOriginOpenCodeLegacySQLite, ingest.TranscriptOriginOpenCodeCurrentSQLite:
+		return s.materializeTurns(sessionID, listing, session)
+	default:
+		return s.fileTurns(sessionID, listing, session)
+	}
+}
+
+// fileTurns reads a file-origin session's transcript directly at its path.
+func (s *SourceTurns) fileTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) ([]ingest.Turn, error) {
 	// Full content matches what the stored path shows: the session viewer
 	// overlays the untruncated bodies over the database preview, so a source
 	// preview that kept the database limit would cut turns off mid-word.
@@ -156,9 +201,43 @@ func (s *SourceTurns) Turns(sessionID string) ([]ingest.Turn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the harness transcript of session %q at %q: %w", sessionID, listing.Source.Path, err)
 	}
-	turns := transcript.EntriesToTurns(entries)
-	s.store(sessionID, turns)
-	return turns, nil
+	return transcript.EntriesToTurns(entries), nil
+}
+
+// materializeTurns reads a SQLite-discovered session through the production
+// materializer, then folds the managed projection bytes the same way ingest
+// does. It never reads the database file at session.SourcePath directly, so a
+// large provider database cannot exhaust memory. A failed materialization
+// returns an actionable error the preview pane renders; it never aborts the
+// program.
+func (s *SourceTurns) materializeTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) ([]ingest.Turn, error) {
+	factory, ok := ingest.DefaultAdapterRegistry[session.Harness]
+	if !ok {
+		return nil, fmt.Errorf(
+			"preview the SQLite transcript of session %q from its harness source: harness %q has no discovery adapter",
+			sessionID, listing.Harness)
+	}
+	materializer, ok := factory(s.fs, s.git, s.salt).(ingest.TranscriptMaterializer)
+	if !ok {
+		return nil, fmt.Errorf(
+			"preview the SQLite transcript of session %q from its harness source: harness %q cannot materialize a managed transcript",
+			sessionID, listing.Harness)
+	}
+	_, data, err := materializer.MaterializeTranscript(context.Background(), session)
+	if err != nil {
+		return nil, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
+	}
+	indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
+	if !ok {
+		return nil, fmt.Errorf(
+			"preview the SQLite transcript of session %q from its harness source: harness %q has no transcript reader",
+			sessionID, listing.Harness)
+	}
+	entries, err := indexer.IndexTranscriptBytes(context.Background(), session, data)
+	if err != nil {
+		return nil, fmt.Errorf("read the materialized transcript of session %q: %w", sessionID, err)
+	}
+	return transcript.EntriesToTurns(entries), nil
 }
 
 // Previewable reports that discovery recorded a transcript location for the

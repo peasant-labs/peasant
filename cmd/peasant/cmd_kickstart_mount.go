@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -375,7 +376,12 @@ func kickstartPreview(
 			return session.Turns, true, nil
 		}
 	}
-	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions)
+	// The reader materializes a SQLite-discovered session through the same
+	// adapter dependencies the discovery path uses, so the preview reads one
+	// session's rows rather than the whole provider database.
+	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions,
+		kickstart.WithSourceTurnsGitResolver(&ingest.ExecGitResolver{}),
+		kickstart.WithSourceTurnsSalt(salt.Salt{}))
 	turns := kickstart.SessionTurnsFunc(func(sessionID string) ([]ingest.Turn, error) {
 		if storedTurns != nil {
 			recorded, held, err := storedTurns(sessionID)
