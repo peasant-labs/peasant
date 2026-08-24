@@ -1,4 +1,43 @@
-declared_cases: 36
+# required_cases names the cases that must remain present. Removing one goes
+# red by name; adding a new case need not appear here. The list, not a count,
+# is the deletion guard.
+required_cases:
+  - empty-valid
+  - legacy-message-part
+  - current-session-message
+  - legacy-reader-pages
+  - legacy-reader-wal
+  - hybrid-catalog
+  - current-missing-seq
+  - unsupported-schema
+  - current-nullable-seq
+  - corrupt-non-sqlite
+  - wal-capable
+  - repeated-history-distractors
+  - missing-parent
+  - truncated-sqlite-header
+  - catalog-table-overflow
+  - catalog-column-overflow
+  - catalog-index-overflow
+  - legacy-mounted-projection
+  - current-reader-pages
+  - current-reader-wal
+  - current-partial-ordering-index
+  - semantic-parity-legacy
+  - semantic-parity-current
+  - canonical-selection-mixed
+  - hybrid-deleted-sessions-skipped
+  - legacy-orphan-tolerance
+  - session-records-degrade
+  - session-parent-no-clock
+  - session-clock-present-and-absent
+  - session-clock-absent-floor
+  - session-clock-lagging
+  - hybrid-attribution
+  - extended-attribution
+  - legacy-unknown-part-vocabulary
+  - current-control-rows-tolerated
+  - content-aware-selection
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db

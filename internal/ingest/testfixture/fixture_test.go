@@ -57,8 +57,8 @@ func TestEmbeddedCorpusIsStrictAndNonVacuous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load embedded fixture corpus: %v", err)
 	}
-	if fixtures.DeclaredCases != expectedCaseCount || len(fixtures.Cases) != expectedCaseCount {
-		t.Fatalf("embedded fixture count = declared %d actual %d, want %d", fixtures.DeclaredCases, len(fixtures.Cases), expectedCaseCount)
+	if len(fixtures.RequiredCases) == 0 {
+		t.Fatalf("embedded fixture declares no required cases")
 	}
 
 	seenSchemas := make(map[schemaKind]bool)
@@ -567,9 +567,9 @@ func applyMutation(source []byte, mutation loaderMutation) ([]byte, error) {
 	case mutationUnknownField:
 		return append(append([]byte(nil), source...), []byte("unexpected: true\n")...), nil
 	case mutationTrailingDoc:
-		return append(append([]byte(nil), source...), []byte("---\ndeclared_cases: 0\ncases: []\n")...), nil
+		return append(append([]byte(nil), source...), []byte("---\nrequired_cases: []\ncases: []\n")...), nil
 	case mutationDeclaredCount:
-		return replaceOnce("declared_cases: 36", "declared_cases: 31")
+		return replaceOnce("  - empty-valid\n", "  - empty-valid-renamed-away\n")
 	case mutationDuplicateName:
 		return replaceOnce("name: legacy-message-part", "name: empty-valid")
 	case mutationMissingName:

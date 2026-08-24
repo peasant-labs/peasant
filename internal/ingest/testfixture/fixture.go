@@ -15,8 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 36
-
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
 
@@ -91,7 +89,7 @@ const (
 )
 
 type corpus struct {
-	DeclaredCases int        `yaml:"declared_cases"`
+	RequiredCases []string   `yaml:"required_cases"`
 	Cases         []caseSpec `yaml:"cases"`
 }
 
@@ -253,13 +251,8 @@ func loadCorpus(data []byte) (corpus, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return corpus{}, fmt.Errorf("decode synthetic OpenCode source fixtures: expected exactly one YAML document: %w", err)
 	}
-	if expectedCaseCount == 0 || fixtures.DeclaredCases != expectedCaseCount || len(fixtures.Cases) != expectedCaseCount {
-		return corpus{}, fmt.Errorf(
-			"validate synthetic OpenCode source fixture row guard: declared cases=%d, actual=%d, required nonzero count=%d",
-			fixtures.DeclaredCases,
-			len(fixtures.Cases),
-			expectedCaseCount,
-		)
+	if len(fixtures.RequiredCases) == 0 {
+		return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required_cases must name at least one case")
 	}
 
 	names := make(map[string]struct{}, len(fixtures.Cases))
@@ -272,6 +265,19 @@ func loadCorpus(data []byte) (corpus, error) {
 			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixtures: duplicate case name %q", fixtureCase.Name)
 		}
 		names[fixtureCase.Name] = struct{}{}
+	}
+	seenRequired := make(map[string]struct{}, len(fixtures.RequiredCases))
+	for _, required := range fixtures.RequiredCases {
+		if required == "" {
+			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required_cases contains an empty name")
+		}
+		if _, duplicate := seenRequired[required]; duplicate {
+			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required_cases repeats %q", required)
+		}
+		seenRequired[required] = struct{}{}
+		if _, present := names[required]; !present {
+			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required case %q is missing", required)
+		}
 	}
 	return fixtures, nil
 }
