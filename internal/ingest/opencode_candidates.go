@@ -93,12 +93,16 @@ type OpenCodeGraphDiagnosticCode string
 const (
 	OpenCodeGraphMissingParent     OpenCodeGraphDiagnosticCode = "opencode_missing_parent"
 	OpenCodeGraphOrphanPartDropped OpenCodeGraphDiagnosticCode = "opencode_orphan_part_dropped"
+	// OpenCodeUnknownPartType records that a well-formed row carried a type
+	// outside the known transcript vocabulary. It is not corruption: the session
+	// still materializes, and one diagnostic per distinct type names it.
+	OpenCodeUnknownPartType OpenCodeGraphDiagnosticCode = "opencode_unknown_part_type"
 )
 
 // Validate rejects graph diagnostics outside the supported repair contract.
 func (c OpenCodeGraphDiagnosticCode) Validate() error {
 	switch c {
-	case OpenCodeGraphMissingParent, OpenCodeGraphOrphanPartDropped:
+	case OpenCodeGraphMissingParent, OpenCodeGraphOrphanPartDropped, OpenCodeUnknownPartType:
 		return nil
 	default:
 		return fmt.Errorf("OpenCode graph diagnostic code %q is outside the supported closed set", c)

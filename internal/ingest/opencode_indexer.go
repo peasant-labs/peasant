@@ -87,7 +87,7 @@ func (idx *OpenCodeIndexer) indexManagedProjection(session DiscoveredSession, da
 		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while strictly decoding the Peasant-owned envelope: %w; no entry rows were stored; re-run harvest to regenerate the projection", managedOpenCodeProjectionKind(session.TranscriptOrigin), session.SessionID, err)
 	}
 	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)
-	messages, err := parseManagedOpenCodeSemanticMessages(projection, kind)
+	messages, _, err := parseManagedOpenCodeSemanticMessages(projection, kind)
 	if err != nil {
 		return nil, fmt.Errorf("index %s OpenCode projection for session %q failed while decoding its normalized semantic corpus: %w; no partial entry rows were stored, so regenerate the managed artifact from a supported source and retry", kind, session.SessionID, err)
 	}
@@ -116,36 +116,51 @@ func managedOpenCodeProjectionFormat(origin TranscriptOrigin) (string, int, erro
 	}
 }
 
-func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, kind string) ([]openCodeSemanticMessage, error) {
+// parseManagedOpenCodeSemanticMessages decodes the shared semantic corpus. A
+// part whose declared type is outside the known transcript vocabulary no longer
+// fails the session: it is kept as an inert system note when it carries
+// renderable text and dropped when it does not, and each distinct unknown type
+// is counted so one diagnostic per type can name it. An undecodable part, or a
+// message with an invalid role, still fails the session, so corruption stays
+// fatal while merely newer vocabulary becomes tolerant.
+func parseManagedOpenCodeSemanticMessages(projection openCodeLegacyProjection, kind string) ([]openCodeSemanticMessage, map[string]int, error) {
 	messages := make([]openCodeSemanticMessage, 0, len(projection.Messages))
+	unknownPartTypes := make(map[string]int)
 	for _, message := range projection.Messages {
 		semantic, err := parseOpenCodeSemanticMessage(message.ID, message.TimeCreated, message.Data)
 		if err != nil {
-			return nil, fmt.Errorf("decode %s message row %q: %w", kind, message.ID, err)
+			return nil, nil, fmt.Errorf("decode %s message row %q: %w", kind, message.ID, err)
 		}
 		if semantic.Data.Time.Completed <= 0 {
 			semantic.TimeCompleted = message.TimeUpdated
 		}
 		if role := Role(semantic.Data.Role); !role.IsValid() {
-			return nil, fmt.Errorf("decode %s message row %q: role %q is outside the supported closed set", kind, message.ID, semantic.Data.Role)
+			return nil, nil, fmt.Errorf("decode %s message row %q: role %q is outside the supported closed set", kind, message.ID, semantic.Data.Role)
 		}
 		semantic.Orphan = message.Orphan
+		semantic.Control = message.Control
 		for _, part := range message.Parts {
 			semanticPart, partErr := parseOpenCodeSemanticPart(part.ID, part.TimeCreated, part.Data)
 			if partErr != nil {
-				return nil, fmt.Errorf("decode %s part row %q for message %q: %w", kind, part.ID, message.ID, partErr)
+				return nil, nil, fmt.Errorf("decode %s part row %q for message %q: %w", kind, part.ID, message.ID, partErr)
 			}
-			if !isSupportedOpenCodeSemanticPartType(semanticPart.Data.Type) {
-				return nil, fmt.Errorf("decode %s part row %q for message %q: type %q is outside the supported closed set", kind, part.ID, message.ID, semanticPart.Data.Type)
+			if !isKnownOpenCodeSemanticPartType(semanticPart.Data.Type) {
+				unknownPartTypes[semanticPart.Data.Type]++
+				if semanticPart.Data.Text == "" {
+					// No renderable text, so there is nothing to show: drop the
+					// row and let the per-type diagnostic account for it.
+					continue
+				}
+				semanticPart.UnknownType = true
 			}
 			semantic.Parts = append(semantic.Parts, semanticPart)
 		}
 		messages = append(messages, semantic)
 	}
-	return messages, nil
+	return messages, unknownPartTypes, nil
 }
 
-func isSupportedOpenCodeSemanticPartType(partType string) bool {
+func isKnownOpenCodeSemanticPartType(partType string) bool {
 	switch partType {
 	case "text", "reasoning", "tool", "tool_use", "tool_result", "compaction", "subtask", "agent":
 		return true
@@ -354,6 +369,11 @@ type openCodeSemanticMessage struct {
 	// Orphan marks a synthetic message that holds one orphan part whose parent
 	// is absent from the selected source. It replaces the in-band data marker.
 	Orphan bool
+	// Control names a current-schema control record, such as a model switch or
+	// an agent switch, that carries no transcript content of its own. It lets
+	// the indexer carry a model switch onto the following assistant turn as a
+	// model observation while the record itself renders as an inert system note.
+	Control string
 }
 
 type openCodeSemanticPart struct {
@@ -361,6 +381,12 @@ type openCodeSemanticPart struct {
 	TimeCreated int64
 	Raw         []byte
 	Data        openCodeIndexPart
+	// UnknownType marks a well-formed part whose declared type is outside the
+	// known transcript vocabulary. The parser keeps such a part only when it
+	// carries renderable text, and the renderer maps it to an inert system note
+	// rather than a tool, thinking, or text turn, so newer OpenCode part types
+	// never fail a session and never inflate the tool count.
+	UnknownType bool
 }
 
 type openCodeIndexPart struct {
@@ -716,6 +742,11 @@ func openCodeMessageEntry(sessionID SessionID, index int, message openCodeSemant
 func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 	var result partInspection
 	for _, part := range parts {
+		if part.UnknownType {
+			// A tolerated unknown part is an inert note, so it never turns its
+			// message into a tool or skill entry.
+			continue
+		}
 		switch part.Data.Type {
 		case "compaction", "subtask", "agent":
 			result.isSystemEntry = true
@@ -770,6 +801,24 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 	if part.TimeCreated > 0 {
 		timestamp := part.TimeCreated
 		entry.TimestampMs = &timestamp
+	}
+	if part.UnknownType {
+		// A tolerated unknown part carries renderable text but no known role, so
+		// it renders as an inert system note. It never becomes a tool, thinking,
+		// or assistant turn.
+		entry.EntryType, entry.Role = EntryTypeSystem, RoleSystem
+		if part.Data.Text != "" {
+			text := part.Data.Text
+			if !idx.fullContent {
+				text = truncateString(text, defaults.ContentPreviewLimit)
+			}
+			entry.ContentPreview = &text
+		}
+		if part.EntryID != "" {
+			entryID := part.EntryID
+			entry.EntryID = &entryID
+		}
+		return entry, true
 	}
 	switch partType {
 	case "tool":

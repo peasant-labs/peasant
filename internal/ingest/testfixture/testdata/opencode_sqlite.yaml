@@ -1,4 +1,4 @@
-declared_cases: 33
+declared_cases: 34
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -1019,3 +1019,31 @@ cases:
         version: 1.1.40
         slug: silent-pixel
         revert: '{"messageID":"msg_x"}'
+
+  - name: legacy-unknown-part-vocabulary
+    logical_path: legacy-unknown/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 2
+      legacy_parts: 6
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_unkvocab_user, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1000, time_updated: 1000, data: '{"role":"user"}'}
+      - {id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1010, time_updated: 1060, data: '{"role":"assistant"}'}
+    legacy_parts:
+      - {id: prt_unkvocab_text, message_id: msg_unkvocab_user, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1001, time_updated: 1001, data: '{"id":"prt_unkvocab_text","messageID":"msg_unkvocab_user","type":"text","text":"synthetic request","time":{"created":1001}}'}
+      - {id: prt_unkvocab_stepstart, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1011, time_updated: 1011, data: '{"id":"prt_unkvocab_stepstart","messageID":"msg_unkvocab_asst","type":"step-start","snapshot":"deadbeefsnapshot","time":{"created":1011}}'}
+      - {id: prt_unkvocab_reason, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1021, time_updated: 1021, data: '{"id":"prt_unkvocab_reason","messageID":"msg_unkvocab_asst","type":"reasoning","text":"synthetic reasoning","time":{"created":1021}}'}
+      - {id: prt_unkvocab_file, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1031, time_updated: 1031, data: '{"id":"prt_unkvocab_file","messageID":"msg_unkvocab_asst","type":"file","mime":"text/plain","filename":"src/vis/tabular.py","url":"file:///synthetic/src/vis/tabular.py","time":{"created":1031}}'}
+      - {id: prt_unkvocab_notice, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1041, time_updated: 1041, data: '{"id":"prt_unkvocab_notice","messageID":"msg_unkvocab_asst","type":"future-notice","text":"a newer note kind that still carries text","time":{"created":1041}}'}
+      - {id: prt_unkvocab_tool, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1051, time_updated: 1051, data: '{"id":"prt_unkvocab_tool","messageID":"msg_unkvocab_asst","type":"tool","name":"read","state":{"status":"completed","input":{"path":"src/vis/tabular.py"},"result":{"ok":true}},"time":{"created":1051}}'}
+    current_messages: []
+    ignored_history: []

@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -40,6 +41,10 @@ type openCodeLegacyProjectionMessage struct {
 	// message is absent from the selected source. The indexer reads it directly,
 	// so no fabricated parent link is needed.
 	Orphan bool `json:"orphan,omitempty"`
+	// Control names a current-schema control record, such as a model switch or
+	// an agent switch, that carries no upstream message id and no transcript
+	// content. The legacy projection never sets it, so its bytes are unchanged.
+	Control string `json:"control,omitempty"`
 }
 
 type openCodeLegacyProjectionPart struct {
@@ -186,7 +191,7 @@ func unusableOpenCodeOrphanPartReason(data []byte) string {
 	if err != nil {
 		return "its data does not decode as an OpenCode part: " + err.Error()
 	}
-	if !isSupportedOpenCodeSemanticPartType(part.Data.Type) {
+	if !isKnownOpenCodeSemanticPartType(part.Data.Type) {
 		return fmt.Sprintf("its type %q is outside the supported transcript part set", part.Data.Type)
 	}
 	return ""
@@ -202,6 +207,32 @@ func droppedOpenCodeOrphanPartDiagnostics(session DiscoveredSession, dropped []o
 			Location:    fmt.Sprintf("selected OpenCode session %s orphan part %s for absent message %s from %s", session.SessionID, part.partID, part.messageID, session.SourcePath),
 			Message:     fmt.Sprintf("orphan part %s was dropped from the selected transcript because %s; while materializing the selected legacy rows Peasant kept every other message and part, which means the session ingested without this row", part.partID, part.reason),
 			Remediation: "Let OpenCode finish or repair the session, then re-run ingest; if the row stays unusable, export the session through OpenCode rather than editing its database with Peasant.",
+		})
+	}
+	return diagnostics
+}
+
+// openCodeUnknownTypeDiagnostics records one warning per distinct tolerated
+// type, naming the type and how many rows of it the session carried. The
+// subject names what kind of row was tolerated, such as "part" or "control
+// message row". A session with no unknown type produces no warning. The order
+// is stable so the diagnostics do not churn between runs of one session.
+func openCodeUnknownTypeDiagnostics(session DiscoveredSession, counts map[string]int, subject string) []DiagnosticEntry {
+	if len(counts) == 0 {
+		return nil
+	}
+	types := make([]string, 0, len(counts))
+	for typeName := range counts {
+		types = append(types, typeName)
+	}
+	sort.Strings(types)
+	diagnostics := make([]DiagnosticEntry, 0, len(types))
+	for _, typeName := range types {
+		diagnostics = append(diagnostics, DiagnosticEntry{
+			ErrorType:   string(OpenCodeUnknownPartType),
+			Location:    fmt.Sprintf("selected OpenCode session %s from %s", session.SessionID, session.SourcePath),
+			Message:     fmt.Sprintf("%d %s row(s) of type %q are outside the known transcript vocabulary, so Peasant kept the session and every known row and treated the newer %s rows as inert; this is newer OpenCode vocabulary, not corruption", counts[typeName], subject, typeName, subject),
+			Remediation: "No action is required; upgrade Peasant when it adds first-class support for this type if you want it rendered as more than an inert note.",
 		})
 	}
 	return diagnostics
@@ -302,10 +333,11 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	}
 
 	kind := managedOpenCodeProjectionKind(session.TranscriptOrigin)
-	messages, err := parseManagedOpenCodeSemanticMessages(projection, kind)
+	messages, unknownPartTypes, err := parseManagedOpenCodeSemanticMessages(projection, kind)
 	if err != nil {
 		return nil, fmt.Errorf("extract metadata from %s projection for session %q failed while decoding the shared semantic corpus: %w; no managed artifact or store state was committed, so repair the malformed normalized row and retry harvest", kind, session.SessionID, err)
 	}
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknownPartTypes, "part")...)
 	summary := summarizeOpenCodeSemanticMessages(messages)
 	metadata.Stats = StatsInfo{TurnCount: summary.turnCount, ToolCallCount: summary.toolCallCount, TokensIn: summary.tokensIn, TokensOut: summary.tokensOut, DurationMs: summary.endMS - summary.startMS}
 	metadata.Timestamp = TimestampInfo{Start: summary.startMS, End: summary.endMS}
@@ -491,14 +523,14 @@ func decodeManagedOpenCodeProjection(data []byte, expectedFormat string, expecte
 		}
 		projection.Messages = append(projection.Messages, message)
 	}
-	if _, err := parseManagedOpenCodeSemanticMessages(projection, "managed OpenCode"); err != nil {
+	if _, _, err := parseManagedOpenCodeSemanticMessages(projection, "managed OpenCode"); err != nil {
 		return projection, fmt.Errorf("validate managed envelope semantic corpus: %w", err)
 	}
 	return projection, nil
 }
 
 func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID string, identities map[string]string) (openCodeLegacyProjectionMessage, error) {
-	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"}, "orphan")
+	fields, err := decodeOpenCodeProjectionObject(raw, "managed message", []string{"id", "session_id", "time_created", "time_updated", "data", "parts"}, "orphan", "control")
 	if err != nil {
 		return openCodeLegacyProjectionMessage{}, err
 	}
@@ -506,6 +538,11 @@ func decodeManagedOpenCodeProjectionMessage(raw json.RawMessage, sessionID strin
 	if orphanField, present := fields["orphan"]; present {
 		if err := json.Unmarshal(orphanField, &message.Orphan); err != nil {
 			return message, fmt.Errorf("decode orphan: %w", err)
+		}
+	}
+	if controlField, present := fields["control"]; present {
+		if err := json.Unmarshal(controlField, &message.Control); err != nil {
+			return message, fmt.Errorf("decode control: %w", err)
 		}
 	}
 	if err := json.Unmarshal(fields["id"], &message.ID); err != nil {
