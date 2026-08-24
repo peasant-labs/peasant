@@ -453,7 +453,7 @@ func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
 		case persistenceMutationMissingOrderedEntry:
 			mutated = bytes.Replace(mutated, []byte("ordered_entry_ids: [msg_current_all]"), []byte("ordered_entry_ids: []"), 1)
 		case persistenceMutationInvalidMetrics:
-			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 6}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
+			mutated = bytes.Replace(mutated, []byte("expected_metrics: {turn_count: 1, tool_calls: 0, compute_version: 7}"), []byte("expected_metrics: {turn_count: 0, tool_calls: 0, compute_version: 6}"), 1)
 		}
 		if _, err := loadCanonicalPersistenceFixture(mutated); err == nil || strings.TrimSpace(mutation.Name) == "" {
 			t.Errorf("canonical persistence loader mutation %q was accepted", mutation.Name)

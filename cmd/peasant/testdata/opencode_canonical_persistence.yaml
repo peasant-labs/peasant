@@ -1,6 +1,6 @@
-declared_# compute_version in expected_metrics must equal metrics.CurrentComputeVersion
+# compute_version in expected_metrics must equal metrics.CurrentComputeVersion
 # (internal/metrics/engine.go). A metrics bump on develop updates every row here.
-cases: 1
+declared_cases: 1
 cases:
   - name: mixed-canonical-sessions-persist-through-detail-and-analytics
     source_fixture: canonical-selection-mixed
