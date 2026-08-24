@@ -27,11 +27,6 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const (
-	expectedCanonicalSelectionCases     = 9
-	expectedCanonicalSelectionMutations = 7
-)
-
 type canonicalFixtureRepresentation string
 
 const (
@@ -77,7 +72,7 @@ func (kind canonicalSelectionMutationKind) validate() error {
 }
 
 type canonicalSelectionFixture struct {
-	DeclaredCases           int                                `yaml:"declared_cases"`
+	RequiredCases           []string                           `yaml:"required_cases"`
 	SourceFixture           string                             `yaml:"source_fixture"`
 	JSONMTimeMS             int64                              `yaml:"json_mtime_ms"`
 	JSONSessions            []canonicalSelectionJSONSession    `yaml:"json_sessions"`
@@ -86,7 +81,7 @@ type canonicalSelectionFixture struct {
 	Freshness               canonicalSelectionFreshness        `yaml:"freshness"`
 	Cases                   []canonicalSelectionCase           `yaml:"cases"`
 	LoaderMutations         []canonicalSelectionLoaderMutation `yaml:"loader_mutations"`
-	DeclaredLoaderMutations int                                `yaml:"declared_loader_mutations"`
+	RequiredLoaderMutations []string                           `yaml:"required_loader_mutations"`
 }
 
 type canonicalSelectionJSONSession struct {
@@ -167,8 +162,11 @@ func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, erro
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fixture, errors.New("canonical OpenCode selection fixture must contain exactly one YAML document")
 	}
-	if fixture.DeclaredCases != expectedCanonicalSelectionCases || len(fixture.Cases) != expectedCanonicalSelectionCases || fixture.DeclaredLoaderMutations != expectedCanonicalSelectionMutations || len(fixture.LoaderMutations) != expectedCanonicalSelectionMutations || fixture.SourceFixture == "" || fixture.JSONMTimeMS <= 0 {
-		return fixture, errors.New("canonical OpenCode selection fixture count or source guard failed")
+	if fixture.SourceFixture == "" || fixture.JSONMTimeMS <= 0 {
+		return fixture, errors.New("canonical OpenCode selection fixture source guard failed")
+	}
+	if len(fixture.RequiredCases) == 0 || len(fixture.RequiredLoaderMutations) == 0 {
+		return fixture, errors.New("canonical OpenCode selection fixture declares no required cases or loader mutations")
 	}
 	if fixture.Freshness.SelectedSession == "" || fixture.Freshness.NonSelectedRow.ID == "" || fixture.Freshness.SelectedRow.ID == "" || fixture.Freshness.Deletion.ID == "" || fixture.Freshness.Deletion.Session == "" {
 		return fixture, errors.New("canonical OpenCode selection fixture has an incomplete freshness probe")
@@ -209,6 +207,11 @@ func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, erro
 			return fixture, fmt.Errorf("canonical OpenCode selection case %q expects orphan tool entry %q that no stray row defines", testCase.Name, testCase.OrphanToolEntry)
 		}
 	}
+	for _, name := range fixture.RequiredCases {
+		if !seen[name] {
+			return fixture, fmt.Errorf("canonical OpenCode selection fixture is missing required case %q", name)
+		}
+	}
 	for _, session := range fixture.JSONSessions {
 		testCase, known := cases[session.SessionID]
 		if session.SessionID == "" || session.Marker == "" || !known || !hasCanonicalRepresentation(testCase, canonicalFixtureJSON) {
@@ -221,12 +224,19 @@ func loadCanonicalSelectionFixture(data []byte) (canonicalSelectionFixture, erro
 			return fixture, fmt.Errorf("canonical OpenCode selection fixture parent link %+v does not match its case expectation", link)
 		}
 	}
+	mutationNames := make(map[string]bool, len(fixture.LoaderMutations))
 	for _, mutation := range fixture.LoaderMutations {
 		if mutation.Name == "" {
 			return fixture, errors.New("canonical OpenCode selection fixture has an unnamed loader mutation")
 		}
 		if err := mutation.Kind.validate(); err != nil {
 			return fixture, err
+		}
+		mutationNames[mutation.Name] = true
+	}
+	for _, name := range fixture.RequiredLoaderMutations {
+		if !mutationNames[name] {
+			return fixture, fmt.Errorf("canonical OpenCode selection fixture is missing required loader mutation %q", name)
 		}
 	}
 	return fixture, nil
@@ -672,9 +682,9 @@ func TestCanonicalOpenCodeSelectionFixtureRejectsMutations(t *testing.T) {
 		case canonicalMutationUnknownField:
 			mutated = bytes.Replace(mutated, []byte("source_fixture:"), []byte("unexpected:"), 1)
 		case canonicalMutationWrongCount:
-			mutated = bytes.Replace(mutated, []byte("declared_cases: 9"), []byte("declared_cases: 8"), 1)
+			mutated = bytes.Replace(mutated, []byte("\n  - all-three-prefers-current\n"), []byte("\n  - all-three-renamed-away\n"), 1)
 		case canonicalMutationDuplicateName:
-			mutated = bytes.Replace(mutated, []byte("current-and-legacy-prefers-current"), []byte("all-three-prefers-current"), 1)
+			mutated = bytes.Replace(mutated, []byte("name: current-and-legacy-prefers-current"), []byte("name: all-three-prefers-current"), 1)
 		case canonicalMutationUnknownRepresentation:
 			mutated = bytes.Replace(mutated, []byte("current_sqlite"), []byte("event_history"), 1)
 		case canonicalMutationTrailingDocument:
