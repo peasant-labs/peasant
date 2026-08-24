@@ -80,17 +80,17 @@ type DiscoveredSession struct {
 	// the session-level aggregates the harness records on the session row, so
 	// metadata reports them without folding entries. They stay empty or zero when
 	// the source does not expose them.
-	Slug              string
-	Version           string
-	TokensIn          int
-	TokensOut         int
-	Cost              float64
+	Slug      string
+	Version   string
+	TokensIn  int
+	TokensOut int
+	Cost      float64
 	// EventSeq is the session's newest event sequence, a monotonic per-session
 	// counter that advances on every mutation, including an in-place rewrite that
 	// moves no time column. Change detection re-ingests a session whose EventSeq
 	// exceeds the last ingested value. It is zero when the source has no event
 	// sequence to read.
-	EventSeq int64
+	EventSeq          int64
 	CWD               string            // Working directory when session ran (optional, for git resolution fallback)
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction
