@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -15,8 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"gopkg.in/yaml.v3"
 )
-
-const expectedCurrentControlRowsCases = 1
 
 type skippedControlExpectation struct {
 	Type  string `yaml:"type"`
@@ -34,7 +33,7 @@ type currentControlRowsCase struct {
 }
 
 type currentControlRowsDocument struct {
-	DeclaredCases int                      `yaml:"declared_cases"`
+	RequiredCases []string                 `yaml:"required_cases"`
 	Cases         []currentControlRowsCase `yaml:"cases"`
 }
 
@@ -52,8 +51,17 @@ func loadCurrentControlRowsDocument(data []byte) (currentControlRowsDocument, er
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return document, errors.New("expected exactly one YAML document")
 	}
-	if document.DeclaredCases != expectedCurrentControlRowsCases || len(document.Cases) != expectedCurrentControlRowsCases {
-		return document, errors.New("current control rows fixture count guard failed")
+	present := make(map[string]struct{}, len(document.Cases))
+	for _, testCase := range document.Cases {
+		present[testCase.Name] = struct{}{}
+	}
+	if len(document.RequiredCases) == 0 {
+		return document, errors.New("current control rows fixture declares no required cases")
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := present[name]; !ok {
+			return document, fmt.Errorf("current control rows fixture is missing required case %q", name)
+		}
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {

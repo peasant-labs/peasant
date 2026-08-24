@@ -4,7 +4,10 @@
 # switch carries its model id onto the following assistant turn as a model
 # observation; an id-less unknown control row is skipped and named by one
 # diagnostic per type; and the user, assistant, and tool rows still materialize.
-declared_cases: 1
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - model-and-agent-switch-tolerated
 cases:
   - name: model-and-agent-switch-tolerated
     source_fixture: current-control-rows-tolerated
