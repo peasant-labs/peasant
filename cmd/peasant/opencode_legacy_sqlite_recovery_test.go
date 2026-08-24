@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,12 +27,6 @@ import (
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
-)
-
-const (
-	expectedLegacySQLiteFreshnessCases = 1
-	expectedLegacySQLiteCandidateCases = 3
-	expectedLegacySQLiteRecoveryCases  = 5
 )
 
 type legacySQLiteChannelMutation string
@@ -99,11 +94,11 @@ type legacySQLiteRecoveryCase struct {
 }
 
 type legacySQLiteRecoveryDocument struct {
-	DeclaredFreshnessCases int                         `yaml:"declared_freshness_cases"`
+	RequiredFreshnessCases []string                    `yaml:"required_freshness_cases"`
 	FreshnessCases         []legacySQLiteFreshnessCase `yaml:"freshness_cases"`
-	DeclaredCandidateCases int                         `yaml:"declared_candidate_cases"`
+	RequiredCandidateCases []string                    `yaml:"required_candidate_cases"`
 	CandidateCases         []legacySQLiteCandidateCase `yaml:"candidate_cases"`
-	DeclaredRecoveryCases  int                         `yaml:"declared_recovery_cases"`
+	RequiredRecoveryCases  []string                    `yaml:"required_recovery_cases"`
 	RecoveryCases          []legacySQLiteRecoveryCase  `yaml:"recovery_cases"`
 }
 
@@ -121,12 +116,10 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return document, errors.New("legacy SQLite recovery fixture must contain exactly one YAML document")
 	}
-	if document.DeclaredFreshnessCases != expectedLegacySQLiteFreshnessCases || len(document.FreshnessCases) != expectedLegacySQLiteFreshnessCases ||
-		document.DeclaredCandidateCases != expectedLegacySQLiteCandidateCases || len(document.CandidateCases) != expectedLegacySQLiteCandidateCases ||
-		document.DeclaredRecoveryCases != expectedLegacySQLiteRecoveryCases || len(document.RecoveryCases) != expectedLegacySQLiteRecoveryCases {
-		return document, errors.New("legacy SQLite recovery fixture count guard failed")
+	if len(document.RequiredFreshnessCases) == 0 || len(document.RequiredCandidateCases) == 0 || len(document.RequiredRecoveryCases) == 0 {
+		return document, errors.New("legacy SQLite recovery fixture declares an empty required manifest")
 	}
-	seen := make(map[string]struct{}, expectedLegacySQLiteFreshnessCases+expectedLegacySQLiteCandidateCases+expectedLegacySQLiteRecoveryCases)
+	seen := make(map[string]struct{}, len(document.FreshnessCases)+len(document.CandidateCases)+len(document.RecoveryCases))
 	requireUnique := func(name string) error {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("legacy SQLite recovery fixture contains an empty case name")
@@ -203,6 +196,17 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 		}
 		if testCase.ExpectedRecovery != (testCase.ExpectedToolCall != nil) {
 			return document, errors.New("legacy SQLite recovery fixture tool expectation does not match recovery outcome")
+		}
+	}
+	for label, required := range map[string][]string{
+		"freshness case": document.RequiredFreshnessCases,
+		"candidate case": document.RequiredCandidateCases,
+		"recovery case":  document.RequiredRecoveryCases,
+	} {
+		for _, name := range required {
+			if _, ok := seen[name]; !ok {
+				return document, fmt.Errorf("legacy SQLite recovery fixture is missing required %s %q", label, name)
+			}
 		}
 	}
 	return document, nil
@@ -466,9 +470,9 @@ func TestLegacySQLiteRecoveryFixtureLoaderMutationsAreRejected(t *testing.T) {
 	if _, err := loadLegacySQLiteRecoveryDocument(unknownField); err == nil {
 		t.Fatal("legacy SQLite recovery fixture accepted an unknown field mutation")
 	}
-	wrongCount := bytes.Replace(legacySQLiteRecoveryYAML, []byte("declared_recovery_cases: 5"), []byte("declared_recovery_cases: 4"), 1)
+	wrongCount := bytes.Replace(legacySQLiteRecoveryYAML, []byte("\n  - wrong-kind-fails-closed\n"), []byte("\n  - wrong-kind-renamed-away\n"), 1)
 	if _, err := loadLegacySQLiteRecoveryDocument(wrongCount); err == nil {
-		t.Fatal("legacy SQLite recovery fixture accepted an incorrect declared count")
+		t.Fatal("legacy SQLite recovery fixture accepted a deleted required recovery case")
 	}
 	duplicateName := bytes.Replace(legacySQLiteRecoveryYAML, []byte("name: unsupported-override-falls-through"), []byte("name: committed-wal-update"), 1)
 	if _, err := loadLegacySQLiteRecoveryDocument(duplicateName); err == nil {

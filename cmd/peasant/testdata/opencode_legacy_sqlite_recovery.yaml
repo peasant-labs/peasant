@@ -1,4 +1,6 @@
-declared_freshness_cases: 1
+# required_* name entries that must stay present; removing one goes red by name.
+required_freshness_cases:
+  - committed-wal-update
 freshness_cases:
   - name: committed-wal-update
     source_fixture: legacy-mounted-projection
@@ -16,7 +18,10 @@ freshness_cases:
     expected_target_turns: 3
     expected_content: committed WAL update
 
-declared_candidate_cases: 3
+required_candidate_cases:
+  - unsupported-override-falls-through
+  - disjoint-eligible-sources-are-preserved
+  - first-overlapping-eligible-source-wins
 candidate_cases:
   - name: unsupported-override-falls-through
     override_fixture: unsupported-schema
@@ -43,7 +48,12 @@ candidate_cases:
     expected_session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5, ses_4cd91f52effeXd3QAJ54jOyzv6]
     forbidden_artifact_content: CHANNEL_SOURCE_MUST_NOT_APPEAR
 
-declared_recovery_cases: 5
+required_recovery_cases:
+  - missing-metadata-valid-managed-envelope
+  - corrupt-metadata-valid-managed-envelope
+  - arbitrary-json-fails-closed
+  - wrong-version-fails-closed
+  - wrong-kind-fails-closed
 recovery_cases:
   - name: missing-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection
