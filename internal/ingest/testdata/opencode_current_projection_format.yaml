@@ -5,7 +5,12 @@
 # version 2 projection that carries a control field decodes; and a version above
 # the write version is refused. The legacy projection shape is unchanged, so its
 # write version stays 2.
-declared_cases: 3
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - version-one-without-control-still-readable
+  - version-two-with-control-readable
+  - version-above-write-version-refused
 cases:
   - name: version-one-without-control-still-readable
     expect_ok: true

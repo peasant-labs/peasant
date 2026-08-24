@@ -12,8 +12,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedProjectionFormatCases = 3
-
 type projectionFormatCase struct {
 	Name          string `yaml:"name"`
 	Data          string `yaml:"data"`
@@ -22,7 +20,7 @@ type projectionFormatCase struct {
 }
 
 type projectionFormatDocument struct {
-	DeclaredCases int                    `yaml:"declared_cases"`
+	RequiredCases []string               `yaml:"required_cases"`
 	Cases         []projectionFormatCase `yaml:"cases"`
 }
 
@@ -41,8 +39,17 @@ func loadProjectionFormatDocument(t *testing.T) projectionFormatDocument {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("projection format fixture must be exactly one YAML document")
 	}
-	if document.DeclaredCases != expectedProjectionFormatCases || len(document.Cases) != expectedProjectionFormatCases {
-		t.Fatalf("projection format fixture count guard failed: declared=%d actual=%d", document.DeclaredCases, len(document.Cases))
+	presentFormat := make(map[string]struct{}, len(document.Cases))
+	for _, testCase := range document.Cases {
+		presentFormat[testCase.Name] = struct{}{}
+	}
+	if len(document.RequiredCases) == 0 {
+		t.Fatal("projection format fixture declares no required cases")
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := presentFormat[name]; !ok {
+			t.Fatalf("projection format fixture is missing required case %q", name)
+		}
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {
