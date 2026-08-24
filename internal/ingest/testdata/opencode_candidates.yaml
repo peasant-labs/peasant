@@ -51,13 +51,15 @@ declared_probe_cases: 13
 # (readable_session_columns below), not by a per-column denylist. The shape and
 # foreign-table tokens here still fail closed for every statement: no wildcard
 # projection, no offset pagination, no set operation, and no read of another
-# table's history or payload columns.
+# table's history or payload columns. The session-statistics read projects
+# tokens_input, so a bare "input" token would reject a legitimate column; the
+# per-column allowlist, not a coarse substring, is what keeps the event stream's
+# payload columns unreadable.
 forbidden_query_tokens:
   - "select *"
   - " offset "
   - event
   - delta
-  - input
   - context
   - migration
   - attach
@@ -131,7 +133,7 @@ table_column_mutations:
     table: event_sequence
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
-declared_allowed_query_statements: 26
+declared_allowed_query_statements: 28
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -173,6 +175,10 @@ allowed_query_statements:
     statement: 'select id, parent_id, time_updated, directory, title, time_created from session order by id limit ?1'
   - name: session-attribution-after
     statement: 'select id, parent_id, time_updated, directory, title, time_created from session where id > ?1 order by id limit ?2'
+  - name: session-extended-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session order by id limit ?1'
+  - name: session-extended-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session where id > ?1 order by id limit ?2'
   - name: session-parents-first
     statement: 'select id, parent_id from session order by id limit ?1'
   - name: session-parents-after

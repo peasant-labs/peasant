@@ -39,6 +39,8 @@ const (
 	openCodeSessionRecordsAfterStatement             = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionAttributionFirstStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionAttributionAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionExtendedFirstStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionExtendedAfterStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionParentsFirstStatement             = "SELECT id, parent_id FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
@@ -70,12 +72,22 @@ type zombiezenOpenCodeSQLiteSource struct {
 // when all three exist alongside the parent link and clock, so an older layout
 // that lacks any of them simply yields empty attribution rather than failing.
 type openCodeSessionColumnSupport struct {
-	present      bool
-	hasParent    bool
-	hasClock     bool
-	hasDirectory bool
-	hasTitle     bool
-	hasCreated   bool
+	present         bool
+	hasParent       bool
+	hasClock        bool
+	hasDirectory    bool
+	hasTitle        bool
+	hasCreated      bool
+	hasAgent        bool
+	hasTokensInput  bool
+	hasTokensOutput bool
+	hasTokensReason bool
+	hasCacheRead    bool
+	hasCacheWrite   bool
+	hasCost         bool
+	hasVersion      bool
+	hasSlug         bool
+	hasRevert       bool
 }
 
 // attribution reports whether the session table carries the working directory,
@@ -83,6 +95,17 @@ type openCodeSessionColumnSupport struct {
 // read can attribute every session to its directory, title, and creation time.
 func (s openCodeSessionColumnSupport) attribution() bool {
 	return s.hasParent && s.hasClock && s.hasDirectory && s.hasTitle && s.hasCreated
+}
+
+// extendedAttribution reports whether the session table carries every column of
+// the extended record read: the base attribution columns plus the agent label,
+// the five token aggregates, cost, version, slug, and revert. When any of those
+// columns is absent the read falls back to the base attribution statement and
+// the extended fields stay empty or zero, so an older layout never fails.
+func (s openCodeSessionColumnSupport) extendedAttribution() bool {
+	return s.attribution() && s.hasAgent && s.hasTokensInput && s.hasTokensOutput &&
+		s.hasTokensReason && s.hasCacheRead && s.hasCacheWrite && s.hasCost &&
+		s.hasVersion && s.hasSlug && s.hasRevert
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
@@ -460,6 +483,7 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	}
 	hasParent, hasClock := support.hasParent, support.hasClock
 	readAttribution := support.attribution()
+	readExtended := support.extendedAttribution()
 	page := OpenCodeSessionRecordPage{Supported: true, HasParent: hasParent, HasClock: hasClock}
 	if !hasParent && !hasClock {
 		// The session table exists but carries neither the parent link nor the
@@ -538,6 +562,44 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 				record.TimeCreated = stmt.ColumnInt64(5)
 			}
 		}
+		if readExtended {
+			// The extended statement appends agent, the five token aggregates,
+			// cost, version, slug, and revert as columns 6 through 15. Each column
+			// is best effort: a null or type-mismatched value yields the zero field
+			// so a bad extended column never drops a row whose parent link, clock,
+			// and attribution are usable.
+			if stmt.ColumnType(6) == sqlite.TypeText {
+				record.Agent = stmt.ColumnText(6)
+			}
+			if stmt.ColumnType(7) == sqlite.TypeInteger {
+				record.TokensInput = stmt.ColumnInt64(7)
+			}
+			if stmt.ColumnType(8) == sqlite.TypeInteger {
+				record.TokensOutput = stmt.ColumnInt64(8)
+			}
+			if stmt.ColumnType(9) == sqlite.TypeInteger {
+				record.TokensReasoning = stmt.ColumnInt64(9)
+			}
+			if stmt.ColumnType(10) == sqlite.TypeInteger {
+				record.TokensCacheRead = stmt.ColumnInt64(10)
+			}
+			if stmt.ColumnType(11) == sqlite.TypeInteger {
+				record.TokensCacheWrite = stmt.ColumnInt64(11)
+			}
+			switch stmt.ColumnType(12) {
+			case sqlite.TypeFloat, sqlite.TypeInteger:
+				record.Cost = stmt.ColumnFloat(12)
+			}
+			if stmt.ColumnType(13) == sqlite.TypeText {
+				record.Version = stmt.ColumnText(13)
+			}
+			if stmt.ColumnType(14) == sqlite.TypeText {
+				record.Slug = stmt.ColumnText(14)
+			}
+			if stmt.ColumnType(15) == sqlite.TypeText {
+				record.Revert = stmt.ColumnText(15)
+			}
+		}
 		bounded.keep(record)
 		return nil
 	}
@@ -545,6 +607,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// read-only source-statement guard resolves the fixed statement set.
 	projection := "session(id, parent_id, time_updated)"
 	switch {
+	case readExtended:
+		projection = "session(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
 	case readAttribution:
 		projection = "session(id, parent_id, time_updated, directory, title, time_created)"
 		if request.After == nil {
@@ -630,6 +699,26 @@ func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.C
 			support.hasTitle = true
 		case "time_created":
 			support.hasCreated = true
+		case "agent":
+			support.hasAgent = true
+		case "tokens_input":
+			support.hasTokensInput = true
+		case "tokens_output":
+			support.hasTokensOutput = true
+		case "tokens_reasoning":
+			support.hasTokensReason = true
+		case "tokens_cache_read":
+			support.hasCacheRead = true
+		case "tokens_cache_write":
+			support.hasCacheWrite = true
+		case "cost":
+			support.hasCost = true
+		case "version":
+			support.hasVersion = true
+		case "slug":
+			support.hasSlug = true
+		case "revert":
+			support.hasRevert = true
 		}
 	}
 	s.stateMu.Lock()

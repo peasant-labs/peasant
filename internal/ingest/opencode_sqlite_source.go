@@ -358,6 +358,22 @@ type OpenCodeSessionRecord struct {
 	Directory   string
 	Title       string
 	TimeCreated int64
+	// The extended record columns are read together only when the session table
+	// carries every one of them. An older layout that lacks any of them leaves
+	// these fields at their zero value rather than failing the read. Agent labels
+	// a subagent session, the token counts and Cost carry the session-level
+	// aggregates without folding entries, Version is the harness version, Slug is
+	// the display-name fallback, and Revert carries the raw revert marker.
+	Agent            string
+	TokensInput      int64
+	TokensOutput     int64
+	TokensReasoning  int64
+	TokensCacheRead  int64
+	TokensCacheWrite int64
+	Cost             float64
+	Version          string
+	Slug             string
+	Revert           string
 }
 
 // OpenCodeSessionRecordSkip records one session row the bounded read could not
