@@ -1,4 +1,4 @@
-declared_cases: 31
+declared_cases: 32
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -906,3 +906,48 @@ cases:
       - {id: part_lag_a, message_id: msg_lag_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1001, time_updated: 1001, data: '{"id":"part_lag_a","messageID":"msg_lag_a","type":"text","text":"LAG_A","time":{"created":1001}}'}
     current_messages: []
     ignored_history: []
+
+  - name: hybrid-attribution
+    logical_path: hybridattribution/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 1
+      legacy_parts: 1
+      current_messages: 1
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - id: msg_attrib_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzL1
+        time_created: 3000
+        time_updated: 3000
+        data: '{"role":"assistant"}'
+    legacy_parts:
+      - id: part_attrib_1
+        message_id: msg_attrib_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzL1
+        time_created: 3001
+        time_updated: 3001
+        data: '{"type":"text","text":"synthetic legacy projection"}'
+    current_messages:
+      - id: sm_attrib_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzL2
+        type: message
+        time_created: 3010
+        time_updated: 3010
+        data: '{"role":"assistant","parts":[{"type":"text","text":"synthetic current projection"}]}'
+        seq: 0
+    ignored_history: []
+    session_attribution:
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzL1
+        directory: /home/dev/peasant-labs/garden
+        title: legacy winner attribution
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzL2
+        directory: /home/dev/peasant-labs/tool
+        title: current winner attribution

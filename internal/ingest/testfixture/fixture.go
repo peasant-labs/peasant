@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 31
+const expectedCaseCount = 32
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
@@ -116,6 +116,19 @@ type caseSpec struct {
 	// its historical rows linger, so discovery can prove that a deleted session
 	// is skipped rather than resurrected.
 	DeletedSessionRows []string `yaml:"deleted_session_rows"`
+	// SessionAttribution adds the directory and title columns to the session
+	// table and sets them for the named sessions, modelling the real OpenCode
+	// shape whose session row carries its working directory, title, and creation
+	// time. A session that has a row but is absent from this list keeps a null
+	// directory and title, so the reader still yields empty attribution for it.
+	SessionAttribution []sessionAttribution `yaml:"session_attribution"`
+}
+
+// sessionAttribution is the working directory and title of one session row.
+type sessionAttribution struct {
+	SessionID string `yaml:"session_id"`
+	Directory string `yaml:"directory"`
+	Title     string `yaml:"title"`
 }
 
 type catalogPaddingSpec struct {
@@ -297,7 +310,36 @@ func (c caseSpec) validate() error {
 	if err := c.validateRows(); err != nil {
 		return err
 	}
+	if err := c.validateSessionAttribution(); err != nil {
+		return err
+	}
 	return c.validateSchemaRows()
+}
+
+func (c caseSpec) validateSessionAttribution() error {
+	if len(c.SessionAttribution) == 0 {
+		return nil
+	}
+	if c.Format == sourceFormatCorrupt {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources cannot declare session attribution", c.Name)
+	}
+	if c.Schema != schemaLegacy && c.Schema != schemaCurrent && c.Schema != schemaHybrid {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: session attribution requires a legacy, current, or hybrid schema", c.Name)
+	}
+	if c.SessionClock == sessionClockAbsent {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: session attribution requires the session clock column", c.Name)
+	}
+	seen := make(map[string]struct{}, len(c.SessionAttribution))
+	for index, row := range c.SessionAttribution {
+		if err := requiredToken("session attribution session id", row.SessionID); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q session attribution %d: %w", c.Name, index, err)
+		}
+		if _, duplicate := seen[row.SessionID]; duplicate {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: duplicate session attribution for %q", c.Name, row.SessionID)
+		}
+		seen[row.SessionID] = struct{}{}
+	}
+	return nil
 }
 
 func (p catalogPaddingSpec) validate(schema schemaKind) error {

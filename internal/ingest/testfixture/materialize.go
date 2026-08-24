@@ -230,7 +230,7 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return fmt.Errorf("set %s journal mode during setup: %w", fixtureCase.JournalMode, err)
 	}
 
-	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock); err != nil {
+	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0); err != nil {
 		return err
 	}
 	if (fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid) && fixtureCase.SessionClock != sessionClockAbsent {
@@ -284,9 +284,13 @@ func applyCatalogPadding(conn *sqlite.Conn, padding catalogPaddingSpec) error {
 	return nil
 }
 
-func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode) error {
+func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution bool) error {
 	sessionSchema := sessionSchemaSQL
-	if clock == sessionClockAbsent {
+	if attribution {
+		// The session table carries the working directory and title alongside the
+		// parent link, creation time, and clock, mirroring the real OpenCode shape.
+		sessionSchema = sessionSchemaWithAttributionSQL
+	} else if clock == sessionClockAbsent {
 		// A session table without the time_updated column has no usable clock,
 		// so discovery falls back to the database and WAL mtime floor.
 		sessionSchema = sessionSchemaNoClockSQL
@@ -326,6 +330,20 @@ CREATE TABLE session (
   parent_id TEXT,
   time_created INTEGER NOT NULL DEFAULT 0,
   time_updated INTEGER NOT NULL DEFAULT 0
+);
+`
+
+// sessionSchemaWithAttributionSQL adds the working directory and title columns
+// to the session table alongside the parent link, creation time, and clock, so
+// the reader attributes a session to its directory, title, and creation time.
+const sessionSchemaWithAttributionSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0,
+  time_updated INTEGER NOT NULL DEFAULT 0,
+  directory TEXT,
+  title TEXT
 );
 `
 
@@ -472,6 +490,11 @@ func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	for _, row := range fixtureCase.CurrentMessages {
 		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
 	}
+	attribution := make(map[string]sessionAttribution, len(fixtureCase.SessionAttribution))
+	for _, row := range fixtureCase.SessionAttribution {
+		attribution[row.SessionID] = row
+	}
+	hasAttribution := len(fixtureCase.SessionAttribution) > 0
 	for _, sessionID := range order {
 		value := clocks[sessionID]
 		updated := value.updated
@@ -480,11 +503,29 @@ func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
 			// not the clock, is the changed time and a row change is still seen.
 			updated = value.created
 		}
+		if hasAttribution {
+			// A session absent from the attribution list keeps a null directory
+			// and title, so the reader still yields empty attribution for it.
+			row := attribution[sessionID]
+			if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated, directory, title) VALUES (?1, ?2, ?3, ?4, ?5);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated, nullableText(row.Directory), nullableText(row.Title)}}); err != nil {
+				return fmt.Errorf("insert synthetic session %q with attribution columns: %w", sessionID, err)
+			}
+			continue
+		}
 		if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated) VALUES (?1, ?2, ?3);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated}}); err != nil {
 			return fmt.Errorf("insert synthetic session %q with explicit columns: %w", sessionID, err)
 		}
 	}
 	return nil
+}
+
+// nullableText returns nil for an empty attribution value so the session row
+// carries a SQL null, which the reader reports as an empty field.
+func nullableText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 // deleteSessionRows removes the named session rows while leaving their message

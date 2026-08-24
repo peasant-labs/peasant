@@ -83,7 +83,7 @@ session_column_mutations:
   - name: reject-forbidden-session-projection
     statement: 'select id, parent_id, time_updated, share_url from session order by id limit ?1'
     forbidden_column: share_url
-declared_allowed_query_statements: 24
+declared_allowed_query_statements: 26
 allowed_query_statements:
   - name: enable-query-only
     statement: "pragma query_only=on"
@@ -121,6 +121,10 @@ allowed_query_statements:
     statement: 'select id, parent_id, time_updated from session order by id limit ?1'
   - name: session-records-after
     statement: 'select id, parent_id, time_updated from session where id > ?1 order by id limit ?2'
+  - name: session-attribution-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session order by id limit ?1'
+  - name: session-attribution-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session where id > ?1 order by id limit ?2'
   - name: session-parents-first
     statement: 'select id, parent_id from session order by id limit ?1'
   - name: session-parents-after

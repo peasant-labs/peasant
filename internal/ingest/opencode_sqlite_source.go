@@ -348,10 +348,16 @@ type OpenCodeSessionRecordCursor struct{ sessionID OpenCodeSessionLinkID }
 // OpenCodeSessionRecord is one detached session row. ParentID is the zero
 // value for a root session. TimeUpdated is the upstream session clock, which
 // OpenCode moves on every session mutation, including revert and undo.
+// Directory, Title, and TimeCreated carry the session's working directory,
+// title, and creation time when the session table exposes them; they stay
+// empty for an older layout that lacks those columns.
 type OpenCodeSessionRecord struct {
 	SessionID   OpenCodeSessionLinkID
 	ParentID    OpenCodeSessionLinkID
 	TimeUpdated int64
+	Directory   string
+	Title       string
+	TimeCreated int64
 }
 
 // OpenCodeSessionRecordSkip records one session row the bounded read could not

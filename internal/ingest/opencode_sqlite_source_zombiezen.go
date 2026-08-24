@@ -37,6 +37,8 @@ const (
 	openCodeCurrentFreshnessBySessionStatement       = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM session_message GROUP BY session_id"
 	openCodeSessionRecordsFirstStatement             = "SELECT id, parent_id, time_updated FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionRecordsAfterStatement             = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionAttributionFirstStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionAttributionAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionParentsFirstStatement             = "SELECT id, parent_id FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
@@ -63,11 +65,24 @@ type zombiezenOpenCodeSQLiteSource struct {
 }
 
 // openCodeSessionColumnSupport records which session-record columns the session
-// table carries. present is false when the session table is absent.
+// table carries. present is false when the session table is absent. The
+// attribution columns (directory, title, time_created) are read together only
+// when all three exist alongside the parent link and clock, so an older layout
+// that lacks any of them simply yields empty attribution rather than failing.
 type openCodeSessionColumnSupport struct {
-	present   bool
-	hasParent bool
-	hasClock  bool
+	present      bool
+	hasParent    bool
+	hasClock     bool
+	hasDirectory bool
+	hasTitle     bool
+	hasCreated   bool
+}
+
+// attribution reports whether the session table carries the working directory,
+// title, and creation time alongside the parent link and clock, so one bounded
+// read can attribute every session to its directory, title, and creation time.
+func (s openCodeSessionColumnSupport) attribution() bool {
+	return s.hasParent && s.hasClock && s.hasDirectory && s.hasTitle && s.hasCreated
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
@@ -444,6 +459,7 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		return OpenCodeSessionRecordPage{}, nil
 	}
 	hasParent, hasClock := support.hasParent, support.hasClock
+	readAttribution := support.attribution()
 	page := OpenCodeSessionRecordPage{Supported: true, HasParent: hasParent, HasClock: hasClock}
 	if !hasParent && !hasClock {
 		// The session table exists but carries neither the parent link nor the
@@ -505,6 +521,23 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 				return nil
 			}
 		}
+		if readAttribution {
+			// The attribution statement selects directory, title, and time_created
+			// as columns 3, 4, and 5 after id, parent_id, and time_updated.
+			// Attribution is best effort: a null or non-text directory or title
+			// yields an empty field, and a null or non-integer time_created yields
+			// zero, so a bad attribution column never drops a row whose parent link
+			// and clock are usable.
+			if stmt.ColumnType(3) == sqlite.TypeText {
+				record.Directory = stmt.ColumnText(3)
+			}
+			if stmt.ColumnType(4) == sqlite.TypeText {
+				record.Title = stmt.ColumnText(4)
+			}
+			if stmt.ColumnType(5) == sqlite.TypeInteger {
+				record.TimeCreated = stmt.ColumnInt64(5)
+			}
+		}
 		bounded.keep(record)
 		return nil
 	}
@@ -512,6 +545,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	// read-only source-statement guard resolves the fixed statement set.
 	projection := "session(id, parent_id, time_updated)"
 	switch {
+	case readAttribution:
+		projection = "session(id, parent_id, time_updated, directory, title, time_created)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
 	case hasParent && hasClock:
 		if request.After == nil {
 			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
@@ -584,6 +624,12 @@ func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.C
 			support.hasParent = true
 		case "time_updated":
 			support.hasClock = true
+		case "directory":
+			support.hasDirectory = true
+		case "title":
+			support.hasTitle = true
+		case "time_created":
+			support.hasCreated = true
 		}
 	}
 	s.stateMu.Lock()
