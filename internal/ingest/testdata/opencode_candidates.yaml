@@ -64,13 +64,16 @@ forbidden_query_tokens:
   - payload
   - " union "
 # readable_session_columns is the exact allowlist of session-table columns a
-# read-only source statement may project. Every other session column, including
-# share_url, summary, metadata, revert, permission, slug, version, workspace_id,
-# path, agent, model, cost, and the token and summary columns, stays unreadable:
-# a statement that reads FROM the session table and names a column outside this
-# set is rejected. directory and title are readable because ingest already
-# carries them through the JSON layout and message data, so the discovery-time
-# read attributes a session to its working directory and title.
+# read-only source statement may project. It carries the attribution keys the
+# discovery read needs (id, parent_id, time_updated, time_created, directory,
+# title) together with the attribution, statistics, identity, and change columns
+# the record read carries without folding entries: agent labels a subagent
+# session, the token columns and cost fill the session statistics, version fills
+# the harness version, slug is the display-name fallback, and revert exposes the
+# revert marker directly. Every other session column, including share_url,
+# summary, metadata, permission, model, path, workspace_id, time_archived, and
+# time_compacting, stays unreadable: a statement that reads FROM the session
+# table and names a column outside this set is rejected.
 readable_session_columns:
   - id
   - parent_id
@@ -78,11 +81,56 @@ readable_session_columns:
   - time_created
   - directory
   - title
+  - agent
+  - tokens_input
+  - tokens_output
+  - tokens_reasoning
+  - tokens_cache_read
+  - tokens_cache_write
+  - cost
+  - version
+  - slug
+  - revert
 declared_session_column_mutations: 1
 session_column_mutations:
   - name: reject-forbidden-session-projection
     statement: 'select id, parent_id, time_updated, share_url from session order by id limit ?1'
     forbidden_column: share_url
+# readable_table_columns extends the fail-closed allowlist to the project,
+# project_directory, workspace, and event_sequence tables. Each row is the exact
+# set of columns a read-only source statement may project FROM that table; a
+# statement that reads the table and names a column outside its set is rejected,
+# so every new read fails closed on an unlisted column. The event table itself
+# stays payload-unreadable: only a MAX(seq) aggregate over it is allowed, wired
+# in the change-cursor read, and its data and type columns are never projected.
+declared_readable_table_allowlists: 4
+readable_table_columns:
+  - table: project
+    columns: [id, worktree, vcs, name]
+  - table: project_directory
+    columns: [project_id, directory, type]
+  - table: workspace
+    columns: [id, type, name, branch, directory, extra, project_id, time_used]
+  - table: event_sequence
+    columns: [aggregate_id, seq, owner_id]
+declared_table_column_mutations: 4
+table_column_mutations:
+  - name: reject-forbidden-project-projection
+    table: project
+    statement: 'select id, worktree, name, sandboxes from project order by id limit ?1'
+    forbidden_column: sandboxes
+  - name: reject-forbidden-project-directory-projection
+    table: project_directory
+    statement: 'select project_id, directory, type, strategy from project_directory order by project_id limit ?1'
+    forbidden_column: strategy
+  - name: reject-forbidden-workspace-projection
+    table: workspace
+    statement: 'select id, type, name, time_created from workspace order by id limit ?1'
+    forbidden_column: time_created
+  - name: reject-forbidden-event-sequence-projection
+    table: event_sequence
+    statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
+    forbidden_column: data
 declared_allowed_query_statements: 26
 allowed_query_statements:
   - name: enable-query-only

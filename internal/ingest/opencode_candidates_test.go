@@ -41,8 +41,10 @@ const (
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
 	expectedAllowedQueryStatements  = 26
-	expectedReadableSessionColumns  = 6
+	expectedReadableSessionColumns  = 16
 	expectedSessionColumnMutations  = 1
+	expectedReadableTableAllowlists = 4
+	expectedTableColumnMutations    = 4
 	expectedQueryGuardMutations     = 12
 	expectedEntryPathMutations      = 41
 	expectedEntryPathKindCount      = 41
@@ -66,6 +68,10 @@ type openCodeCandidateFixture struct {
 	ReadableSessionColumns   []string                          `yaml:"readable_session_columns"`
 	DeclaredSessionColumns   int                               `yaml:"declared_session_column_mutations"`
 	SessionColumnMutations   []openCodeSessionColumnMutation   `yaml:"session_column_mutations"`
+	DeclaredReadableTables   int                               `yaml:"declared_readable_table_allowlists"`
+	ReadableTableColumns     []openCodeReadableTableAllowlist  `yaml:"readable_table_columns"`
+	DeclaredTableColumnMuts  int                               `yaml:"declared_table_column_mutations"`
+	TableColumnMutations     []openCodeTableColumnMutation     `yaml:"table_column_mutations"`
 	DeclaredAllowedQueries   int                               `yaml:"declared_allowed_query_statements"`
 	AllowedQueryStatements   []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
 	DeclaredQueryMutations   int                               `yaml:"declared_query_guard_mutations"`
@@ -107,6 +113,24 @@ type openCodeQueryGuardMutation struct {
 // readable_session_columns and the statement must be rejected.
 type openCodeSessionColumnMutation struct {
 	Name            string `yaml:"name"`
+	Statement       string `yaml:"statement"`
+	ForbiddenColumn string `yaml:"forbidden_column"`
+}
+
+// openCodeReadableTableAllowlist is the exact set of columns a read-only source
+// statement may project from one non-session table. Every other column of that
+// table stays unreadable, so a new read fails closed on an unlisted column.
+type openCodeReadableTableAllowlist struct {
+	Table   string   `yaml:"table"`
+	Columns []string `yaml:"columns"`
+}
+
+// openCodeTableColumnMutation is one statement that reads a forbidden column of
+// a non-session table, so the per-table allowlist proves it can go red: the
+// named column is outside the table's allowlist and the statement is rejected.
+type openCodeTableColumnMutation struct {
+	Name            string `yaml:"name"`
+	Table           string `yaml:"table"`
 	Statement       string `yaml:"statement"`
 	ForbiddenColumn string `yaml:"forbidden_column"`
 }
@@ -475,6 +499,65 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode session-column mutation %q must project its forbidden column %q so the allowlist can reject it: columns=%v", mutation.Name, mutation.ForbiddenColumn, columns)
 		}
 		seenSessionColumnMutations[mutation.Name] = true
+	}
+	if fixture.DeclaredReadableTables != expectedReadableTableAllowlists || len(fixture.ReadableTableColumns) != expectedReadableTableAllowlists {
+		t.Fatalf("OpenCode readable table-allowlist row guard: declared=%d actual=%d required=%d", fixture.DeclaredReadableTables, len(fixture.ReadableTableColumns), expectedReadableTableAllowlists)
+	}
+	tableAllowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
+	for index, entry := range fixture.ReadableTableColumns {
+		entry.Table = normalizeOpenCodeQuery(entry.Table)
+		fixture.ReadableTableColumns[index].Table = entry.Table
+		if entry.Table == "" || entry.Table == "session" || tableAllowlists[entry.Table] != nil {
+			t.Fatalf("OpenCode readable table-allowlist has an empty, session, or duplicate table %q", entry.Table)
+		}
+		if len(entry.Columns) == 0 {
+			t.Fatalf("OpenCode readable table-allowlist for %q declares no columns", entry.Table)
+		}
+		columns := make(map[string]bool, len(entry.Columns))
+		for columnIndex, column := range entry.Columns {
+			column = normalizeOpenCodeQuery(column)
+			fixture.ReadableTableColumns[index].Columns[columnIndex] = column
+			if column == "" || columns[column] {
+				t.Fatalf("OpenCode readable table-allowlist for %q has an empty or duplicate column %q", entry.Table, column)
+			}
+			columns[column] = true
+		}
+		tableAllowlists[entry.Table] = columns
+	}
+	if fixture.DeclaredTableColumnMuts != expectedTableColumnMutations || len(fixture.TableColumnMutations) != expectedTableColumnMutations {
+		t.Fatalf("OpenCode table-column mutation row guard: declared=%d actual=%d required=%d", fixture.DeclaredTableColumnMuts, len(fixture.TableColumnMutations), expectedTableColumnMutations)
+	}
+	seenTableColumnMutations := make(map[string]bool, len(fixture.TableColumnMutations))
+	coveredTables := make(map[string]bool, len(fixture.TableColumnMutations))
+	for index, mutation := range fixture.TableColumnMutations {
+		mutation.Table = normalizeOpenCodeQuery(mutation.Table)
+		mutation.Statement = normalizeOpenCodeQuery(mutation.Statement)
+		mutation.ForbiddenColumn = normalizeOpenCodeQuery(mutation.ForbiddenColumn)
+		fixture.TableColumnMutations[index] = mutation
+		if strings.TrimSpace(mutation.Name) == "" || seenTableColumnMutations[mutation.Name] || mutation.Statement == "" || mutation.ForbiddenColumn == "" {
+			t.Fatalf("OpenCode table-column mutation is incomplete or duplicated: %+v", mutation)
+		}
+		allowlist, known := tableAllowlists[mutation.Table]
+		if !known {
+			t.Fatalf("OpenCode table-column mutation %q names table %q without a readable allowlist", mutation.Name, mutation.Table)
+		}
+		if allowlist[mutation.ForbiddenColumn] {
+			t.Fatalf("OpenCode table-column mutation %q names forbidden column %q that is in the %q allowlist, so the mutation cannot go red", mutation.Name, mutation.ForbiddenColumn, mutation.Table)
+		}
+		table, columns, recognized := openCodeSelectColumns(mutation.Statement)
+		if !recognized || table != mutation.Table {
+			t.Fatalf("OpenCode table-column mutation %q must read from table %q so its allowlist governs it: %+v", mutation.Name, mutation.Table, mutation)
+		}
+		if !slices.Contains(columns, mutation.ForbiddenColumn) {
+			t.Fatalf("OpenCode table-column mutation %q must project its forbidden column %q so the allowlist can reject it: columns=%v", mutation.Name, mutation.ForbiddenColumn, columns)
+		}
+		seenTableColumnMutations[mutation.Name] = true
+		coveredTables[mutation.Table] = true
+	}
+	for table := range tableAllowlists {
+		if !coveredTables[table] {
+			t.Fatalf("OpenCode readable table %q has no can-go-red mutation proving its allowlist fails closed", table)
+		}
 	}
 	if fixture.DeclaredAllowedQueries != expectedAllowedQueryStatements || len(fixture.AllowedQueryStatements) != expectedAllowedQueryStatements {
 		t.Fatalf("OpenCode allowed-query fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredAllowedQueries, len(fixture.AllowedQueryStatements), expectedAllowedQueryStatements)
@@ -2539,28 +2622,44 @@ func findOpenCodeForbiddenQueryTokens(statements, forbidden []string) []string {
 // pragma; targetsSession is true only for the session table, never for
 // session_message or any other table.
 func openCodeSessionSelectColumns(statement string) (columns []string, targetsSession, recognized bool) {
-	normalized := normalizeOpenCodeQuery(statement)
-	const selectPrefix = "select "
-	if !strings.HasPrefix(normalized, selectPrefix) {
+	table, columns, recognized := openCodeSelectColumns(statement)
+	if !recognized {
 		return nil, false, false
-	}
-	fromIndex := strings.Index(normalized, " from ")
-	if fromIndex < 0 {
-		return nil, false, false
-	}
-	rest := normalized[fromIndex+len(" from "):]
-	table := rest
-	if boundary := strings.IndexAny(rest, " \t"); boundary >= 0 {
-		table = rest[:boundary]
 	}
 	if table != "session" {
 		return nil, false, true
+	}
+	return columns, true, true
+}
+
+// openCodeSelectColumns extracts the target table and projected columns from a
+// simple single-table SELECT. The read-only source statements are fixed
+// compile-time constants of the shape "select <columns> from <table> ...", so
+// the first " from " delimits the table and the projection. recognized is false
+// for a non-SELECT statement such as a pragma, and for a projection that is not
+// a plain comma list of column names (a MAX(seq) aggregate, for instance, is not
+// a column-projection read and is governed by the statement allowlist, not the
+// per-column allowlist).
+func openCodeSelectColumns(statement string) (table string, columns []string, recognized bool) {
+	normalized := normalizeOpenCodeQuery(statement)
+	const selectPrefix = "select "
+	if !strings.HasPrefix(normalized, selectPrefix) {
+		return "", nil, false
+	}
+	fromIndex := strings.Index(normalized, " from ")
+	if fromIndex < 0 {
+		return "", nil, false
+	}
+	rest := normalized[fromIndex+len(" from "):]
+	table = rest
+	if boundary := strings.IndexAny(rest, " \t"); boundary >= 0 {
+		table = rest[:boundary]
 	}
 	projection := strings.TrimSpace(normalized[len(selectPrefix):fromIndex])
 	for _, part := range strings.Split(projection, ",") {
 		columns = append(columns, strings.TrimSpace(part))
 	}
-	return columns, true, true
+	return table, columns, true
 }
 
 func TestOpenCodeSessionStatementsReadOnlyAllowlistedColumns(t *testing.T) {
@@ -2609,6 +2708,76 @@ func TestOpenCodeSessionColumnAllowlistRejectsForbiddenColumns(t *testing.T) {
 			}
 			if !slices.Contains(rejected, mutation.ForbiddenColumn) {
 				t.Fatalf("session-column allowlist accepted forbidden column %q; rejected columns=%v", mutation.ForbiddenColumn, rejected)
+			}
+		})
+	}
+}
+
+// TestOpenCodeTableAllowlistsGovernAllowedStatements proves that every allowed
+// source statement that reads one of the newly readable tables projects only
+// that table's allowlisted columns. It is vacuously satisfied until a read is
+// wired, and it fails closed the moment a wired statement projects an unlisted
+// column.
+func TestOpenCodeTableAllowlistsGovernAllowedStatements(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	allowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
+	for _, entry := range fixture.ReadableTableColumns {
+		columns := make(map[string]bool, len(entry.Columns))
+		for _, column := range entry.Columns {
+			columns[normalizeOpenCodeQuery(column)] = true
+		}
+		allowlists[normalizeOpenCodeQuery(entry.Table)] = columns
+	}
+	for _, allowed := range fixture.AllowedQueryStatements {
+		table, columns, recognized := openCodeSelectColumns(allowed.Statement)
+		if !recognized {
+			continue
+		}
+		allowlist, governed := allowlists[table]
+		if !governed {
+			continue
+		}
+		for _, column := range columns {
+			if !allowlist[column] {
+				t.Fatalf("allowed statement %q reads column %q outside the %q readable allowlist %v", allowed.Name, column, table, allowlist)
+			}
+		}
+	}
+}
+
+// TestOpenCodeTableColumnAllowlistRejectsForbiddenColumns proves each per-table
+// allowlist can go red: a statement that projects a column outside the table's
+// readable set is rejected. One mutation covers every newly readable table.
+func TestOpenCodeTableColumnAllowlistRejectsForbiddenColumns(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	allowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
+	for _, entry := range fixture.ReadableTableColumns {
+		columns := make(map[string]bool, len(entry.Columns))
+		for _, column := range entry.Columns {
+			columns[normalizeOpenCodeQuery(column)] = true
+		}
+		allowlists[normalizeOpenCodeQuery(entry.Table)] = columns
+	}
+	for _, mutation := range fixture.TableColumnMutations {
+		t.Run(mutation.Name, func(t *testing.T) {
+			table, columns, recognized := openCodeSelectColumns(mutation.Statement)
+			if !recognized || table != normalizeOpenCodeQuery(mutation.Table) {
+				t.Fatalf("table-column mutation %q does not read table %q", mutation.Name, mutation.Table)
+			}
+			allowlist, governed := allowlists[table]
+			if !governed {
+				t.Fatalf("table-column mutation %q names table %q without a readable allowlist", mutation.Name, table)
+			}
+			var rejected []string
+			for _, column := range columns {
+				if !allowlist[column] {
+					rejected = append(rejected, column)
+				}
+			}
+			if !slices.Contains(rejected, normalizeOpenCodeQuery(mutation.ForbiddenColumn)) {
+				t.Fatalf("%q allowlist accepted forbidden column %q; rejected columns=%v", table, mutation.ForbiddenColumn, rejected)
 			}
 		})
 	}
