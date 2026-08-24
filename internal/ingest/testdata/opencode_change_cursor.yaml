@@ -4,7 +4,13 @@
 # (tracked=false means no cursor is stored yet); event_seq is the session's
 # current newest sequence. expect is the resulting diff status. One YAML file
 # drives every case.
-declared_cases: 4
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - in-place-rewrite-bumps-seq
+  - clock-and-seq-both-unchanged
+  - clock-moved-is-primary-signal
+  - first-sighting-without-stored-cursor-stays-unchanged
 cases:
   - name: in-place-rewrite-bumps-seq
     ingested_ms: 1000

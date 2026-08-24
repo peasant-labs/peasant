@@ -12,7 +12,7 @@ import (
 var openCodeChangeCursorYAML []byte
 
 type openCodeChangeCursorFixture struct {
-	DeclaredCases int                        `yaml:"declared_cases"`
+	RequiredCases []string                   `yaml:"required_cases"`
 	Cases         []openCodeChangeCursorCase `yaml:"cases"`
 }
 
@@ -36,8 +36,17 @@ func TestOpenCodeChangeCursorTriggersReingest(t *testing.T) {
 	if err := yaml.Unmarshal(openCodeChangeCursorYAML, &fixture); err != nil {
 		t.Fatalf("decode change-cursor fixture: %v", err)
 	}
-	if fixture.DeclaredCases != len(fixture.Cases) || fixture.DeclaredCases != 4 {
-		t.Fatalf("change-cursor fixture row guard: declared=%d actual=%d required=4", fixture.DeclaredCases, len(fixture.Cases))
+	presentCursor := make(map[string]struct{}, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		presentCursor[testCase.Name] = struct{}{}
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("change-cursor fixture declares no required cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if _, ok := presentCursor[name]; !ok {
+			t.Fatalf("change-cursor fixture is missing required case %q", name)
+		}
 	}
 	sessionID := SessionID("ses_3cd91f52effeXd3QAJ54jOyzB1")
 	for _, testCase := range fixture.Cases {
