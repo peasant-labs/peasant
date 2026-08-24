@@ -616,6 +616,7 @@ type OpenCodeSQLiteSource interface {
 	EventSequenceBySession(context.Context) (OpenCodeEventSequence, error)
 	MaxEventSeq(context.Context, OpenCodeSessionLinkID) (OpenCodeSessionSeq, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
+	CurrentSessionHasSubstantive(context.Context, OpenCodeCurrentSessionID) (bool, error)
 	Close(context.Context) error
 }
 

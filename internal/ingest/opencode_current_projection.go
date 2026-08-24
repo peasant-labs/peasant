@@ -278,6 +278,35 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source Open
 	return discovered, nil
 }
 
+// currentControlOnlySessions probes each discovered current session for a
+// substantive row and returns the set that holds only control records. It uses
+// the enumeration source already open for the candidate, so no second database
+// is opened, and each probe is a single bounded existence read keyed on the
+// indexed session_id column rather than a scan. A probe failure fails safe: the
+// session is treated as substantive so a transient read error never demotes a
+// real current conversation to its legacy sibling, and one diagnostic names the
+// affected session.
+func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, sessions []DiscoveredSession) map[SessionID]bool {
+	controlOnly := make(map[SessionID]bool, len(sessions))
+	for _, session := range sessions {
+		currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+		if err != nil {
+			// Enumeration already validated the identifier, so this is
+			// unreachable; treat it as substantive rather than demote it.
+			continue
+		}
+		hasSubstantive, probeErr := source.CurrentSessionHasSubstantive(ctx, currentID)
+		if probeErr != nil {
+			a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("substantive-row probe failed for current session %q; the session stays a current winner rather than deferring to a legacy sibling", session.SessionID), probeErr)
+			continue
+		}
+		if !hasSubstantive {
+			controlOnly[session.SessionID] = true
+		}
+	}
+	return controlOnly
+}
+
 func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
 	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
 	if err != nil {

@@ -40,7 +40,7 @@ const (
 	expectedOpenCodeProbeCases      = 13
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 35
+	expectedAllowedQueryStatements  = 36
 	expectedReadableSessionColumns  = 16
 	expectedSessionColumnMutations  = 1
 	expectedReadableTableAllowlists = 4
@@ -3130,6 +3130,16 @@ func hybridOpenCodeSourceOpener(failCurrent, failLegacy bool) ingest.OpenCodeSQL
 		}
 		return hybridOpenCodeSource{OpenCodeSQLiteSource: source, failCurrent: failCurrent, failLegacy: failLegacy}, nil
 	}
+}
+
+// CurrentSessionHasSubstantive keeps the fabricated current session a
+// substantive winner. This fake enumerates a session id that the real synthetic
+// database does not carry, so the production probe against that database would
+// find no row and demote the current projection. The fake's fiction is a real
+// current conversation, so it reports a substantive row and the hybrid keeps
+// preferring current when the current projection is usable.
+func (source hybridOpenCodeSource) CurrentSessionHasSubstantive(context.Context, ingest.OpenCodeCurrentSessionID) (bool, error) {
+	return true, nil
 }
 
 func (source hybridOpenCodeSource) CurrentSessionIDs(_ context.Context, request ingest.OpenCodeCurrentSessionPageRequest) (ingest.OpenCodeCurrentSessionPage, error) {

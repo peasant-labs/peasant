@@ -739,6 +739,9 @@ func (source semanticNegativeSource) SessionRecords(context.Context, OpenCodeSes
 func (source semanticNegativeSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
 	return OpenCodeCurrentPage{Messages: source.rows}, nil
 }
+func (source semanticNegativeSource) CurrentSessionHasSubstantive(context.Context, OpenCodeCurrentSessionID) (bool, error) {
+	return true, nil
+}
 func (source semanticNegativeSource) ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error) {
 	return OpenCodeProjectAttribution{}, nil
 }

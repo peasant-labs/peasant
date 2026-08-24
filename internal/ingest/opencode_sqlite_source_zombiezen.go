@@ -31,6 +31,7 @@ const (
 	openCodeCurrentSessionsAfterStatement    = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
 	openCodeCurrentMessagesFirstStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
 
 	openCodeLegacyMessageFreshnessBySessionStatement = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM message GROUP BY session_id"
 	openCodeLegacyPartFreshnessBySessionStatement    = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM part GROUP BY session_id"
@@ -1157,6 +1158,32 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 		page.Next = &cursor
 	}
 	return page, nil
+}
+
+// CurrentSessionHasSubstantive reports whether the current session_message
+// projection of one session holds at least one substantive row. A substantive
+// row is any row whose type is not a control record; the two control record
+// types a model or agent switch carries render as inert system context, not a
+// user, assistant, or tool turn. The probe is a single bounded existence read
+// keyed on the indexed session_id column and stops at the first substantive
+// row, so it never scans the whole table. A session that holds only control
+// rows returns false, which lets canonical selection prefer a legacy sibling
+// that still carries the conversation.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionHasSubstantive(ctx context.Context, sessionID OpenCodeCurrentSessionID) (bool, error) {
+	lease, err := s.beginSourceRead(ctx, "probe current session for a substantive row")
+	if err != nil {
+		return false, err
+	}
+	defer lease.release()
+	found := false
+	decode := func(stmt *sqlite.Stmt) error {
+		found = true
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentSubstantiveProbeStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return false, s.sourceReadError(lease.ctx, "probe current session for a substantive row", err, "session_message(session_id, type)", "supported current session_message")
+	}
+	return found, nil
 }
 
 type openCodeReadLease struct {

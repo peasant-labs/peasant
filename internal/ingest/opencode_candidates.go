@@ -120,6 +120,16 @@ type openCodeSessionCandidate struct {
 	// has the session table but no row for it, or whose row has a null or zero
 	// time_updated, has a zero value here and takes the mtime-floor path.
 	sessionUpdatedAt time.Time
+	// currentControlOnly marks a current SQLite candidate whose session_message
+	// projection holds only control records, such as a model or agent switch,
+	// and no substantive user, assistant, or tool row. Such a current candidate
+	// loses canonical selection to a legacy sibling that still carries the
+	// conversation, so the reader renders the real turns instead of one to three
+	// inert control turns. The flag is meaningful only for the current
+	// representation; a legacy representation, once discovered, always carries
+	// substantive rows, and its zero value keeps the pre-existing preference for
+	// a substantive current candidate.
+	currentControlOnly bool
 }
 
 // OpenCodeCandidateProvenance records why a path was considered. Candidate

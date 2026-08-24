@@ -134,8 +134,10 @@ table_column_mutations:
     table: event_sequence
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
-declared_allowed_query_statements: 35
+declared_allowed_query_statements: 36
 allowed_query_statements:
+  - name: current-substantive-probe
+    statement: "select 1 from session_message where session_id = ?1 and type not in ('agent-switched', 'model-switched') limit 1"
   - name: enable-query-only
     statement: "pragma query_only=on"
   - name: read-query-only

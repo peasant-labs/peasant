@@ -307,12 +307,17 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		return nil, nil
 	}
 	candidates := make([]openCodeSessionCandidate, 0)
-	appendRepresentation := func(sessions []DiscoveredSession, representation OpenCodeCanonicalRepresentation) {
+	// controlOnly names, for a current representation, the sessions whose
+	// session_message projection holds only control records. A legacy
+	// representation passes a nil map because a discovered legacy session always
+	// carries substantive rows.
+	appendRepresentation := func(sessions []DiscoveredSession, representation OpenCodeCanonicalRepresentation, controlOnly map[SessionID]bool) {
 		for _, session := range sessions {
 			candidates = append(candidates, openCodeSessionCandidate{
-				session:    session,
-				identity:   OpenCodeSelectedSourceIdentity{SessionID: session.SessionID, Representation: representation, Path: session.SourcePath},
-				provenance: result.Candidate.Provenance,
+				session:            session,
+				identity:           OpenCodeSelectedSourceIdentity{SessionID: session.SessionID, Representation: representation, Path: session.SourcePath},
+				provenance:         result.Candidate.Provenance,
+				currentControlOnly: controlOnly[session.SessionID],
 			})
 		}
 	}
@@ -323,14 +328,14 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "legacy SQLite session enumeration failed", err)
 			return nil, source
 		}
-		appendRepresentation(sessions, OpenCodeRepresentationLegacySQLite)
+		appendRepresentation(sessions, OpenCodeRepresentationLegacySQLite, nil)
 	case OpenCodeCapabilityCurrent:
 		sessions, err := a.discoverCurrentSQLite(ctx, source, result.Candidate)
 		if err != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "current SQLite session enumeration failed", err)
 			return nil, source
 		}
-		appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite)
+		appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite, a.currentControlOnlySessions(ctx, source, result.Candidate, sessions))
 	case OpenCodeCapabilityHybrid:
 		// A hybrid database carries both projections, so enumerate both and let
 		// canonical selection keep one projection per session. Current outranks
@@ -350,8 +355,8 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		if legacyErr != nil {
 			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite legacy projection is unusable; current rows were used", legacyErr)
 		}
-		appendRepresentation(current, OpenCodeRepresentationCurrentSQLite)
-		appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite)
+		appendRepresentation(current, OpenCodeRepresentationCurrentSQLite, a.currentControlOnlySessions(ctx, source, result.Candidate, current))
+		appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite, nil)
 	default:
 		return nil, source
 	}
@@ -875,9 +880,34 @@ func orderCanonicalOpenCodeCandidatesParentsFirst(selected []openCodeSessionCand
 	})
 }
 
+// effectiveOpenCodeCanonicalRank ranks one candidate for canonical selection.
+// It is the representation precedence, except that a current candidate whose
+// projection is control-only drops below every representation that carries
+// substantive content. The result is that a control-only current candidate
+// loses to a legacy sibling, so the legacy conversation renders instead of a
+// handful of inert control turns, while a control-only current candidate with
+// no sibling is still the sole candidate and materializes as before. A
+// substantive current candidate keeps the top rank, so the pre-existing
+// current-over-legacy preference is unchanged for real conversations.
+func effectiveOpenCodeCanonicalRank(candidate openCodeSessionCandidate) uint8 {
+	switch candidate.identity.Representation {
+	case OpenCodeRepresentationCurrentSQLite:
+		if candidate.currentControlOnly {
+			return 1
+		}
+		return 4
+	case OpenCodeRepresentationLegacySQLite:
+		return 3
+	case OpenCodeRepresentationLegacyJSON:
+		return 2
+	default:
+		return 0
+	}
+}
+
 func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCandidate) bool {
-	candidateRank := candidate.identity.Representation.precedence()
-	incumbentRank := incumbent.identity.Representation.precedence()
+	candidateRank := effectiveOpenCodeCanonicalRank(candidate)
+	incumbentRank := effectiveOpenCodeCanonicalRank(incumbent)
 	if candidateRank != incumbentRank {
 		return candidateRank > incumbentRank
 	}
