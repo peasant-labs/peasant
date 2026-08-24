@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
@@ -252,8 +253,9 @@ var (
 // It holds a connection pool, the installation salt (for opaque ID computation),
 // and manages the database lifecycle.
 type Store struct {
-	pool *sqlitex.Pool
-	salt salt.Salt
+	pool   *sqlitex.Pool
+	salt   salt.Salt
+	closed atomic.Bool
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,
@@ -401,11 +403,14 @@ func (s *Store) Pool() *sqlitex.Pool {
 	return s.pool
 }
 
+// Close releases the connection pool. It is idempotent, and it deliberately
+// leaves the pool pointer in place: a background reader that loses the
+// shutdown race then receives a "pool closed" error from Pool.Take instead of
+// dereferencing nil. Writing the field here would also be an unsynchronized
+// write racing those readers.
 func (s *Store) Close() error {
-	if s.pool == nil {
+	if s.pool == nil || !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	err := s.pool.Close()
-	s.pool = nil
-	return err
+	return s.pool.Close()
 }
