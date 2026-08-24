@@ -47,7 +47,7 @@ const (
 	openCodeProjectFirstStatement                    = "SELECT id, worktree, vcs, name FROM project ORDER BY id LIMIT ?1"
 	openCodeProjectAfterStatement                    = "SELECT id, worktree, vcs, name FROM project WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeProjectDirectoryFirstStatement           = "SELECT project_id, directory, type FROM project_directory ORDER BY project_id, directory LIMIT ?1"
-	openCodeProjectDirectoryAfterStatement           = "SELECT project_id, directory, type FROM project_directory WHERE project_id > ?1 OR (project_id = ?1 AND directory > ?2) ORDER BY project_id, directory LIMIT ?2"
+	openCodeProjectDirectoryAfterStatement           = "SELECT project_id, directory, type FROM project_directory WHERE project_id > ?1 OR (project_id = ?1 AND directory > ?2) ORDER BY project_id, directory LIMIT ?3"
 	openCodeSessionParentsFirstStatement             = "SELECT id, parent_id FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"

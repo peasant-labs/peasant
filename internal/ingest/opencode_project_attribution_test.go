@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -80,6 +81,13 @@ CREATE TABLE project_directory (
 	exec(`INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES ('part_proj_1', 'msg_proj_1', ?1, 3001, 3001, '{"type":"text","text":"synthetic legacy projection"}');`, sessionID)
 	exec(`INSERT INTO project (id, worktree, vcs, name, sandboxes) VALUES ('proj_1', ?1, 'git', ?2, 'unreadable');`, projectRoot, projectName)
 	exec(`INSERT INTO project_directory (project_id, directory, type, strategy) VALUES ('proj_1', ?1, 'git_worktree', 'unreadable');`, worktreeDir)
+	// Insert more directory rows than one bounded page holds, so the read must
+	// paginate through the keyset "after" statement to reach every row. This
+	// exercises the multi-page project_directory read the real store needs.
+	for index := 0; index < 200; index++ {
+		exec(`INSERT INTO project_directory (project_id, directory, type, strategy) VALUES ('proj_pad', ?1, '', 'unreadable');`,
+			fmt.Sprintf("/synthetic/padding/dir-%03d", index))
+	}
 }
 
 // TestOpenCodeProjectTablesGroupSessionUnderProjectRoot proves that a session

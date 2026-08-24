@@ -193,7 +193,7 @@ allowed_query_statements:
   - name: project-directory-first
     statement: 'select project_id, directory, type from project_directory order by project_id, directory limit ?1'
   - name: project-directory-after
-    statement: 'select project_id, directory, type from project_directory where project_id > ?1 or (project_id = ?1 and directory > ?2) order by project_id, directory limit ?2'
+    statement: 'select project_id, directory, type from project_directory where project_id > ?1 or (project_id = ?1 and directory > ?2) order by project_id, directory limit ?3'
   - name: session-parents-first
     statement: 'select id, parent_id from session order by id limit ?1'
   - name: session-parents-after
