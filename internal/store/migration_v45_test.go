@@ -17,8 +17,8 @@ import (
 var openCodeSeqCursorFixture []byte
 
 type openCodeSeqCursorFixtureFile struct {
-	DeclaredRecords    int                          `yaml:"declared_records"`
-	DeclaredRejections int                          `yaml:"declared_rejections"`
+	RequiredRecords    []string                     `yaml:"required_records"`
+	RequiredRejections []string                     `yaml:"required_rejections"`
 	Records            []openCodeSeqCursorRecord    `yaml:"records"`
 	Rejections         []openCodeSeqCursorRejection `yaml:"rejections"`
 }
@@ -46,11 +46,26 @@ func loadOpenCodeSeqCursorFixture(t *testing.T) openCodeSeqCursorFixtureFile {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("OpenCode seq cursor fixture must contain exactly one YAML document: %v", err)
 	}
-	if fixture.DeclaredRecords != len(fixture.Records) {
-		t.Fatalf("OpenCode seq cursor record guard failed: declared=%d actual=%d", fixture.DeclaredRecords, len(fixture.Records))
+	presentRecords := make(map[string]struct{}, len(fixture.Records))
+	for _, record := range fixture.Records {
+		presentRecords[record.Name] = struct{}{}
 	}
-	if fixture.DeclaredRejections != len(fixture.Rejections) {
-		t.Fatalf("OpenCode seq cursor rejection guard failed: declared=%d actual=%d", fixture.DeclaredRejections, len(fixture.Rejections))
+	presentRejections := make(map[string]struct{}, len(fixture.Rejections))
+	for _, rejection := range fixture.Rejections {
+		presentRejections[rejection.Name] = struct{}{}
+	}
+	if len(fixture.RequiredRecords) == 0 || len(fixture.RequiredRejections) == 0 {
+		t.Fatal("OpenCode seq cursor fixture declares an empty required manifest")
+	}
+	for _, name := range fixture.RequiredRecords {
+		if _, ok := presentRecords[name]; !ok {
+			t.Fatalf("OpenCode seq cursor fixture is missing required record %q", name)
+		}
+	}
+	for _, name := range fixture.RequiredRejections {
+		if _, ok := presentRejections[name]; !ok {
+			t.Fatalf("OpenCode seq cursor fixture is missing required rejection %q", name)
+		}
 	}
 	return fixture
 }
