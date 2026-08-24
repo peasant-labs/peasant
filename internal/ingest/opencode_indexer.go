@@ -449,6 +449,10 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 	messageIndexes := make(map[string]int, len(messages))
 	messageParents := make(map[int]string, len(messages))
 	entryIndex := 0
+	// pendingObservedModel carries a model switch onto the next assistant turn
+	// that has no model of its own, which is exactly the per-turn model
+	// observation the indexer records elsewhere.
+	pendingObservedModel := ""
 	for _, message := range messages {
 		if isOrphanOpenCodeSemanticMessage(message) && len(message.Parts) == 1 {
 			// Orphan parts follow the same depth gate as ordinary parts.
@@ -472,6 +476,19 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 		}
 		if entry.Role != RoleAssistant {
 			entry.Extra = removeModelObservation(entry.Extra)
+		}
+		if entry.Role == RoleAssistant && pendingObservedModel != "" {
+			// The following assistant turn adopts a preceding model switch only
+			// when it does not already carry its own model observation.
+			if message.Data.semanticModelID() == "" {
+				entry.Extra = addModelObservation(entry.Extra, pendingObservedModel)
+			}
+			pendingObservedModel = ""
+		}
+		if message.Control == "model-switched" {
+			if observed := message.Data.semanticModelID(); observed != "" {
+				pendingObservedModel = observed
+			}
 		}
 		if entry.ContentPreview == nil {
 			if preview := firstOpenCodeSemanticText(message.Parts); preview != "" {

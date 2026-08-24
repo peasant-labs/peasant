@@ -11,8 +11,12 @@ import (
 )
 
 const (
-	openCodeCurrentProjectionFormat  = "peasant.opencode.current-sqlite"
-	openCodeCurrentProjectionVersion = 1
+	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite"
+	// openCodeCurrentProjectionVersion is version 2: a control record now
+	// carries the typed control field and no fabricated part. The shared minimum
+	// readable version stays 1, so a previously persisted version 1 current
+	// projection, which never held a control record, still decodes.
+	openCodeCurrentProjectionVersion = 2
 	openCodeCurrentMaterializePage   = 128
 )
 
@@ -218,6 +222,23 @@ func (base openCodeCurrentBase) validateIdentity(rowID string) error {
 	return nil
 }
 
+// validateControlIdentity is the identity rule for a control record, such as a
+// model switch or an agent switch. A control row legitimately carries no
+// upstream message id, so absence is tolerated; the SQLite row id remains the
+// stable identity. When an id is present it must still match the row id, so a
+// genuine identity conflict stays an error.
+func (base openCodeCurrentBase) validateControlIdentity(rowID string) error {
+	if base.ID != "" && base.ID != rowID {
+		return fmt.Errorf("upstream message id %q conflicts with SQLite row id %q", base.ID, rowID)
+	}
+	return nil
+}
+
+// errOpenCodeSkipControlRow signals that a well-formed current row carried no
+// upstream id and a type outside the known set, so it is a newer control record
+// the caller skips and counts rather than a fatal decode failure.
+var errOpenCodeSkipControlRow = errors.New("skip newer OpenCode control row")
+
 func decodeOpenCodeCurrentJSON(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -267,9 +288,10 @@ func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, sess
 		return nil, nil, err
 	}
 	var projection openCodeCurrentProjection
+	var unknownControlTypes map[string]int
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 		var readErr error
-		projection, readErr = readOpenCodeCurrentProjection(ctx, source, currentID, pageSize)
+		projection, unknownControlTypes, readErr = readOpenCodeCurrentProjection(ctx, source, currentID, pageSize)
 		return readErr
 	}); err != nil {
 		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
@@ -287,25 +309,33 @@ func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, sess
 	if err != nil {
 		return nil, nil, err
 	}
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknownControlTypes, "control message row")...)
 	return metadata, data, nil
 }
 
-func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, error) {
+func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, map[string]int, error) {
 	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
+	unknownControlTypes := make(map[string]int)
 	var cursor *OpenCodeCurrentCursor
 	for {
 		page, err := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
 		if err != nil {
-			return openCodeCurrentProjection{}, err
+			return openCodeCurrentProjection{}, nil, err
 		}
 		for _, row := range page.Messages {
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
-				return openCodeCurrentProjection{}, currentNormalizationError(row, "registering stable identities", err)
+				return openCodeCurrentProjection{}, nil, currentNormalizationError(row, "registering stable identities", err)
 			}
 			message, err := normalizeOpenCodeCurrentRow(row, &registry)
+			if errors.Is(err, errOpenCodeSkipControlRow) {
+				// A newer id-less control record: keep the session, drop the row,
+				// and count its type for one diagnostic per type.
+				unknownControlTypes[row.Type.String()]++
+				continue
+			}
 			if err != nil {
-				return openCodeCurrentProjection{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+				return openCodeCurrentProjection{}, nil, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
 			}
 			projection.Messages = append(projection.Messages, message)
 		}
@@ -314,7 +344,7 @@ func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSou
 		}
 		cursor = page.Next
 	}
-	return projection, nil
+	return projection, unknownControlTypes, nil
 }
 
 func currentNormalizationError(row OpenCodeCurrentMessageRow, operation string, cause error) error {
@@ -484,16 +514,21 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			return message, err
 		}
 	case "agent-switched":
+		// A control record legitimately carries no upstream id, so absence is
+		// tolerated rather than fatal. It renders as a system record naming the
+		// new agent, which is inert transcript context, not a user or assistant
+		// turn.
 		var value openCodeCurrentAgentSwitched
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := value.validateIdentity(message.ID); err != nil {
+		if err := value.validateControlIdentity(message.ID); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "id", "agent", "time"); err != nil {
+		if err := requireOpenCodeCurrentFields(data, "agent", "time"); err != nil {
 			return message, err
 		}
+		message.Control = "agent-switched"
 		if err := messageData(RoleSystem.String(), value.Agent, "", value.Agent, "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
@@ -501,16 +536,21 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			return message, err
 		}
 	case "model-switched":
+		// A control record legitimately carries no upstream id, so absence is
+		// tolerated rather than fatal. A model switch is the same signal the
+		// indexer records as a per-turn model observation, so it carries the
+		// model id and the indexer applies it to the following assistant turn.
 		var value openCodeCurrentModelSwitched
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := value.validateIdentity(message.ID); err != nil {
+		if err := value.validateControlIdentity(message.ID); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "id", "model", "time"); err != nil {
+		if err := requireOpenCodeCurrentFields(data, "model", "time"); err != nil {
 			return message, err
 		}
+		message.Control = "model-switched"
 		if err := messageData(RoleSystem.String(), value.Model.ID, value.Model.ID, "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
@@ -518,6 +558,15 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			return message, err
 		}
 	default:
+		// A well-formed row that carries no upstream id but is control-shaped (it
+		// has a time) is a newer control record: skip it and let the caller count
+		// its type. A row that should carry an id, or is not control-shaped,
+		// stays an error so genuinely malformed content still fails the session.
+		hasID := requireOpenCodeCurrentFields(data, "id") == nil
+		hasTime := requireOpenCodeCurrentFields(data, "time") == nil
+		if !hasID && hasTime {
+			return message, errOpenCodeSkipControlRow
+		}
 		return message, fmt.Errorf("type %q is outside the supported pinned SessionMessage closed set", row.Type.String())
 	}
 	return message, nil

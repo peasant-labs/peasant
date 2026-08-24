@@ -1,0 +1,16 @@
+# Expectations for the tolerated current control rows case. A well-formed
+# current row whose message type is a control record (a model switch, an agent
+# switch, or any id-less control row) no longer fails the session. A model
+# switch carries its model id onto the following assistant turn as a model
+# observation; an id-less unknown control row is skipped and named by one
+# diagnostic per type; and the user, assistant, and tool rows still materialize.
+declared_cases: 1
+cases:
+  - name: model-and-agent-switch-tolerated
+    source_fixture: current-control-rows-tolerated
+    session_id: ses_3cd91f52effeXd3QAJ54jCtrl1
+    expected_observed_model: gpt-5.5
+    expected_tool_name: read
+    expected_known_markers: [synthetic control request]
+    expected_skipped_control_types:
+      - {type: session-title-changed, count: 1}

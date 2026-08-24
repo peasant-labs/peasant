@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 34
+const expectedCaseCount = 35
 
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte

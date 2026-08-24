@@ -1,4 +1,4 @@
-declared_cases: 34
+declared_cases: 35
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -1046,4 +1046,29 @@ cases:
       - {id: prt_unkvocab_notice, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1041, time_updated: 1041, data: '{"id":"prt_unkvocab_notice","messageID":"msg_unkvocab_asst","type":"future-notice","text":"a newer note kind that still carries text","time":{"created":1041}}'}
       - {id: prt_unkvocab_tool, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1051, time_updated: 1051, data: '{"id":"prt_unkvocab_tool","messageID":"msg_unkvocab_asst","type":"tool","name":"read","state":{"status":"completed","input":{"path":"src/vis/tabular.py"},"result":{"ok":true}},"time":{"created":1051}}'}
     current_messages: []
+    ignored_history: []
+
+  - name: current-control-rows-tolerated
+    logical_path: current-control/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 5
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_ctrl_user, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: user, time_created: 3000, time_updated: 3000, seq: 1, data: '{"id":"msg_ctrl_user","text":"synthetic control request","files":[],"agents":[],"time":{"created":3000}}'}
+      - {id: msg_ctrl_model, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: model-switched, time_created: 3002, time_updated: 3002, seq: 2, data: '{"time":{"created":3002},"model":{"id":"gpt-5.5","providerID":"openai","variant":"xhigh"}}'}
+      - {id: msg_ctrl_asst, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: assistant, time_created: 3004, time_updated: 3006, seq: 3, data: '{"id":"msg_ctrl_asst","agent":"build","model":{"id":"","providerID":"openai"},"content":[{"type":"tool","id":"ctrl_tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/x"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":{"ok":true}},"time":{"created":3005,"completed":3006}}],"time":{"created":3004,"completed":3006}}'}
+      - {id: msg_ctrl_agent, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: agent-switched, time_created: 3007, time_updated: 3007, seq: 4, data: '{"time":{"created":3007},"agent":"plan"}'}
+      - {id: msg_ctrl_title, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: session-title-changed, time_created: 3008, time_updated: 3008, seq: 5, data: '{"time":{"created":3008},"title":"synthetic renamed title"}'}
     ignored_history: []
