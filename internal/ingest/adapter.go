@@ -67,9 +67,14 @@ type DiscoveredSession struct {
 	ModTime       time.Time      // Changed time of the source: when its content last changed
 	ActiveModTime time.Time      // Source file/WAL mtime for the staleness (active) gate; zero falls back to ModTime
 	ProjectName   string         // Human-readable project name (optional, populated during discovery when cheap to extract)
-	Title         string         // Session title (optional, populated when available without extra I/O)
-	Branch        string         // Git branch active when session ran (optional, from session data not current repo)
-	Agent         string         // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
+	// ProjectWorktree is the project's canonical root path, resolved from the
+	// OpenCode project tables when present. It refines project naming and worktree
+	// grouping without changing CWD, which stays the session's own directory. It
+	// is empty when the project tables do not attribute the session.
+	ProjectWorktree string
+	Title           string // Session title (optional, populated when available without extra I/O)
+	Branch          string // Git branch active when session ran (optional, from session data not current repo)
+	Agent           string // Agent label for a subagent session (optional; OpenCode records it on the session row, like a Claude teammate's agent type)
 	// Slug is the harness-generated session name, used as the display-name
 	// fallback when Title is empty. Version, TokensIn, TokensOut, and Cost carry
 	// the session-level aggregates the harness records on the session row, so

@@ -463,7 +463,58 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			candidates[index].session.Cost = record.cost
 		}
 	}
+	// The project tables refine project naming and worktree grouping when they
+	// are present. They never change a session's working directory, which stays
+	// the session's own directory; git resolution remains the fallback for a
+	// database without the project tables.
+	if attribution, attrErr := source.ProjectAttribution(ctx); attrErr != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "project attribution could not be read; sessions keep git-based project resolution", attrErr)
+	} else {
+		attributeOpenCodeProjects(candidates, attribution)
+	}
 	return candidates, source
+}
+
+// attributeOpenCodeProjects resolves each session's project name and worktree
+// root from the OpenCode project tables. A session whose working directory is a
+// directory the project_directory table maps to a project groups under that
+// project's root, so worktrees of one project share a project even though their
+// working directories differ. CWD is never changed. When the tables are absent
+// or a session's directory is unmapped, the session keeps its git-based
+// resolution.
+func attributeOpenCodeProjects(candidates []openCodeSessionCandidate, attribution OpenCodeProjectAttribution) {
+	if !attribution.ProjectsPresent || !attribution.DirectoriesPresent {
+		return
+	}
+	projectsByID := make(map[string]OpenCodeProjectRecord, len(attribution.Projects))
+	for _, project := range attribution.Projects {
+		projectsByID[project.ID.String()] = project
+	}
+	projectByDirectory := make(map[string]OpenCodeProjectRecord, len(attribution.Directories))
+	for _, directory := range attribution.Directories {
+		if directory.Directory == "" {
+			continue
+		}
+		if project, known := projectsByID[directory.ProjectID.String()]; known {
+			projectByDirectory[directory.Directory] = project
+		}
+	}
+	for index := range candidates {
+		directory := candidates[index].session.CWD
+		if directory == "" {
+			continue
+		}
+		project, matched := projectByDirectory[directory]
+		if !matched || project.Worktree == "" {
+			continue
+		}
+		candidates[index].session.ProjectWorktree = project.Worktree
+		name := project.Name
+		if name == "" {
+			name = filepath.Base(project.Worktree)
+		}
+		candidates[index].session.ProjectName = name
+	}
 }
 
 // openCodeSessionClock is one session row's parent link, update clock, and

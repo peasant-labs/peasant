@@ -739,6 +739,9 @@ func (source semanticNegativeSource) SessionRecords(context.Context, OpenCodeSes
 func (source semanticNegativeSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
 	return OpenCodeCurrentPage{Messages: source.rows}, nil
 }
+func (source semanticNegativeSource) ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error) {
+	return OpenCodeProjectAttribution{}, nil
+}
 func (source semanticNegativeSource) Close(context.Context) error { return nil }
 
 func TestOpenCodeCurrentNormalizationRejectsStrictNegativeCases(t *testing.T) {

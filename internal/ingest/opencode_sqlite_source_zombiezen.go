@@ -41,6 +41,10 @@ const (
 	openCodeSessionAttributionAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionExtendedFirstStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionExtendedAfterStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeProjectFirstStatement                    = "SELECT id, worktree, vcs, name FROM project ORDER BY id LIMIT ?1"
+	openCodeProjectAfterStatement                    = "SELECT id, worktree, vcs, name FROM project WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeProjectDirectoryFirstStatement           = "SELECT project_id, directory, type FROM project_directory ORDER BY project_id, directory LIMIT ?1"
+	openCodeProjectDirectoryAfterStatement           = "SELECT project_id, directory, type FROM project_directory WHERE project_id > ?1 OR (project_id = ?1 AND directory > ?2) ORDER BY project_id, directory LIMIT ?2"
 	openCodeSessionParentsFirstStatement             = "SELECT id, parent_id FROM session ORDER BY id LIMIT ?1"
 	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
@@ -726,6 +730,131 @@ func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.C
 	s.sessionColumns = support
 	s.stateMu.Unlock()
 	return support, nil
+}
+
+// projectColumnsPresent reports whether a table carries every named column, so
+// an older layout that lacks the project or project_directory shape yields no
+// attribution instead of failing the read.
+func projectColumnsPresent(columns []OpenCodeColumnEvidence, required ...string) bool {
+	if len(columns) == 0 {
+		return false
+	}
+	have := make(map[string]bool, len(columns))
+	for _, column := range columns {
+		have[column.Name] = true
+	}
+	for _, name := range required {
+		if !have[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// ProjectAttribution reads the project and project_directory tables once per
+// database. It pages each table by its key so the read stays bounded, and it
+// reports the tables absent when their required columns are missing, so
+// discovery keeps its git resolution for an older layout. Only the allowlisted
+// columns are projected; the read never touches the event stream.
+func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) (OpenCodeProjectAttribution, error) {
+	lease, err := s.beginSourceRead(ctx, "read project attribution")
+	if err != nil {
+		return OpenCodeProjectAttribution{}, err
+	}
+	defer lease.release()
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return OpenCodeProjectAttribution{}, err
+	}
+	limit := pageSize.value
+	var attribution OpenCodeProjectAttribution
+
+	projectColumns, err := s.columnsLocked(lease.ctx, "project")
+	if err != nil {
+		return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read project columns", err, "pragma_table_info(project)", "supported OpenCode project")
+	}
+	if projectColumnsPresent(projectColumns, "id", "worktree", "name") {
+		attribution.ProjectsPresent = true
+		var cursor *string
+		for {
+			batch := 0
+			var lastID string
+			decode := func(stmt *sqlite.Stmt) error {
+				batch++
+				lastID = stmt.ColumnText(0)
+				projectID, idErr := NewOpenCodeProjectID(stmt.ColumnText(0))
+				if idErr != nil {
+					// A project row whose identifier cannot be validated is skipped;
+					// no session can match it, so it never drives attribution.
+					return nil
+				}
+				attribution.Projects = append(attribution.Projects, OpenCodeProjectRecord{
+					ID:       projectID,
+					Worktree: stmt.ColumnText(1),
+					VCS:      stmt.ColumnText(2),
+					Name:     stmt.ColumnText(3),
+				})
+				return nil
+			}
+			if cursor == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectFirstStatement, []any{limit}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectAfterStatement, []any{*cursor, limit}, decode)
+			}
+			if err != nil || lease.ctx.Err() != nil {
+				return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read bounded project page", err, "project(id, worktree, vcs, name)", "supported OpenCode project")
+			}
+			if batch < limit {
+				break
+			}
+			next := lastID
+			cursor = &next
+		}
+	}
+
+	directoryColumns, err := s.columnsLocked(lease.ctx, "project_directory")
+	if err != nil {
+		return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read project_directory columns", err, "pragma_table_info(project_directory)", "supported OpenCode project_directory")
+	}
+	if projectColumnsPresent(directoryColumns, "project_id", "directory", "type") {
+		attribution.DirectoriesPresent = true
+		var cursorProject, cursorDirectory *string
+		for {
+			batch := 0
+			var lastProject, lastDirectory string
+			decode := func(stmt *sqlite.Stmt) error {
+				batch++
+				lastProject = stmt.ColumnText(0)
+				lastDirectory = stmt.ColumnText(1)
+				projectID, idErr := NewOpenCodeProjectID(stmt.ColumnText(0))
+				if idErr != nil {
+					// A directory row with an unvalidatable project identifier is
+					// skipped; it cannot join to a project, so it never attributes.
+					return nil
+				}
+				attribution.Directories = append(attribution.Directories, OpenCodeProjectDirectoryRecord{
+					ProjectID: projectID,
+					Directory: stmt.ColumnText(1),
+					Type:      stmt.ColumnText(2),
+				})
+				return nil
+			}
+			if cursorProject == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectDirectoryFirstStatement, []any{limit}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectDirectoryAfterStatement, []any{*cursorProject, *cursorDirectory, limit}, decode)
+			}
+			if err != nil || lease.ctx.Err() != nil {
+				return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read bounded project_directory page", err, "project_directory(project_id, directory, type)", "supported OpenCode project_directory")
+			}
+			if batch < limit {
+				break
+			}
+			nextProject, nextDirectory := lastProject, lastDirectory
+			cursorProject, cursorDirectory = &nextProject, &nextDirectory
+		}
+	}
+	return attribution, nil
 }
 
 // openCodeBoundedPage assembles one bounded page of rows for any keyset read.

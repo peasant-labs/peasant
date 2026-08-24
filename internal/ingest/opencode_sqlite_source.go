@@ -612,6 +612,52 @@ type OpenCodeSQLiteSource interface {
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error)
 	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
+	ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
 	Close(context.Context) error
+}
+
+// OpenCodeProjectID is a validated identifier from the project table. It keeps
+// the project surface off bare strings so a raw value never drives a read.
+type OpenCodeProjectID struct{ value string }
+
+// NewOpenCodeProjectID validates one project identifier.
+func NewOpenCodeProjectID(value string) (OpenCodeProjectID, error) {
+	if err := validateOpenCodeCurrentToken("project identifier", value); err != nil {
+		return OpenCodeProjectID{}, err
+	}
+	return OpenCodeProjectID{value: value}, nil
+}
+
+// String returns the validated identifier.
+func (id OpenCodeProjectID) String() string { return id.value }
+
+// OpenCodeProjectRecord is one row of the project table. Worktree is the
+// project's canonical root path and Name is its display name, which OpenCode may
+// leave empty. VCS names the version-control kind. Only the columns the read
+// allowlist permits are carried.
+type OpenCodeProjectRecord struct {
+	ID       OpenCodeProjectID
+	Worktree string
+	VCS      string
+	Name     string
+}
+
+// OpenCodeProjectDirectoryRecord maps one directory to its project. Type is the
+// directory kind, for example git_worktree for a linked worktree of the project.
+type OpenCodeProjectDirectoryRecord struct {
+	ProjectID OpenCodeProjectID
+	Directory string
+	Type      string
+}
+
+// OpenCodeProjectAttribution is the project and directory catalog read once per
+// database. ProjectsPresent and DirectoriesPresent are false when the
+// corresponding table or its required columns are absent, so an older layout
+// yields no project attribution and discovery keeps its git resolution.
+type OpenCodeProjectAttribution struct {
+	ProjectsPresent    bool
+	DirectoriesPresent bool
+	Projects           []OpenCodeProjectRecord
+	Directories        []OpenCodeProjectDirectoryRecord
 }

@@ -354,6 +354,13 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	if gitWorktree != nil {
 		identityPath = *gitWorktree
 	}
+	// The project tables give the canonical project root, so a session grouped
+	// under a project resolves its identity from the project root rather than its
+	// own worktree directory. Worktrees of one project then share a project. Git
+	// worktree resolution, when it succeeds, still refines the root.
+	if session.ProjectWorktree != "" && gitWorktree == nil {
+		identityPath = session.ProjectWorktree
+	}
 	if identityPath == "" {
 		identityPath = session.SourcePath.String()
 	}
@@ -370,6 +377,17 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	if workDir != "" {
 		metadata.Project.FilePath = workDir
 		metadata.Project.Name = filepath.Base(workDir)
+	}
+	// The project tables, when present, name the project and locate its root, so
+	// a session groups under the project root rather than under its own worktree
+	// directory. CWD stays the session directory set above.
+	if session.ProjectWorktree != "" {
+		metadata.Project.FilePath = session.ProjectWorktree
+		if session.ProjectName != "" {
+			metadata.Project.Name = session.ProjectName
+		} else {
+			metadata.Project.Name = filepath.Base(session.ProjectWorktree)
+		}
 	}
 	if gitBranch != nil || gitRemote != nil || gitWorktree != nil || gitTracking != nil {
 		metadata.Git = GitContext{Branch: gitBranch, Remote: gitRemote, Worktree: gitWorktree, Tracking: gitTracking}

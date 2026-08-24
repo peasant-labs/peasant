@@ -40,7 +40,7 @@ const (
 	expectedOpenCodeProbeCases      = 13
 	expectedContinuationCandidates  = 4
 	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 28
+	expectedAllowedQueryStatements  = 32
 	expectedReadableSessionColumns  = 16
 	expectedSessionColumnMutations  = 1
 	expectedReadableTableAllowlists = 4
