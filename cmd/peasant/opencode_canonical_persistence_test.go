@@ -22,11 +22,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	expectedCanonicalPersistenceCases     = 1
-	expectedCanonicalPersistenceSessions  = 7
-	expectedCanonicalPersistenceMutations = 11
-)
+// expectedCanonicalPersistenceSessions is the scenario's own canonical session
+// count, cross-checked against per-case data; it is the contract, not a row tally.
+const expectedCanonicalPersistenceSessions = 7
 
 type canonicalPersistenceCombination string
 
@@ -41,9 +39,9 @@ const (
 )
 
 type canonicalPersistenceFixture struct {
-	DeclaredCases           int                                  `yaml:"declared_cases"`
+	RequiredCases           []string                             `yaml:"required_cases"`
 	Cases                   []canonicalPersistenceCase           `yaml:"cases"`
-	DeclaredLoaderMutations int                                  `yaml:"declared_loader_mutations"`
+	RequiredLoaderMutations []string                             `yaml:"required_loader_mutations"`
 	LoaderMutations         []canonicalPersistenceLoaderMutation `yaml:"loader_mutations"`
 }
 
@@ -132,8 +130,8 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fixture, errors.New("canonical OpenCode persistence fixture must contain exactly one YAML document")
 	}
-	if fixture.DeclaredCases != expectedCanonicalPersistenceCases || len(fixture.Cases) != expectedCanonicalPersistenceCases || fixture.DeclaredLoaderMutations != expectedCanonicalPersistenceMutations || len(fixture.LoaderMutations) != expectedCanonicalPersistenceMutations {
-		return fixture, errors.New("canonical OpenCode persistence fixture count guard failed")
+	if len(fixture.RequiredCases) == 0 || len(fixture.RequiredLoaderMutations) == 0 {
+		return fixture, errors.New("canonical OpenCode persistence fixture declares an empty required manifest")
 	}
 	seen := make(map[string]bool)
 	for _, testCase := range fixture.Cases {
@@ -192,6 +190,16 @@ func loadCanonicalPersistenceFixture(data []byte) (canonicalPersistenceFixture, 
 		seen[mutation.Name] = true
 		if err := mutation.Kind.validate(); err != nil {
 			return fixture, err
+		}
+	}
+	for _, name := range fixture.RequiredCases {
+		if !seen[name] {
+			return fixture, fmt.Errorf("canonical OpenCode persistence fixture is missing required case %q", name)
+		}
+	}
+	for _, name := range fixture.RequiredLoaderMutations {
+		if !seen[name] {
+			return fixture, fmt.Errorf("canonical OpenCode persistence fixture is missing required loader mutation %q", name)
 		}
 	}
 	return fixture, nil
@@ -435,7 +443,7 @@ func TestCanonicalOpenCodePersistenceFixtureRejectsMutations(t *testing.T) {
 		case persistenceMutationUnknownField:
 			mutated = bytes.Replace(mutated, []byte("source_fixture:"), []byte("unexpected:"), 1)
 		case persistenceMutationWrongCount:
-			mutated = bytes.Replace(mutated, []byte("declared_cases: 1"), []byte("declared_cases: 2"), 1)
+			mutated = bytes.Replace(mutated, []byte("\n  - mixed-canonical-sessions-persist-through-detail-and-analytics\n"), []byte("\n  - mixed-canonical-sessions-renamed-away\n"), 1)
 		case persistenceMutationDuplicateName:
 			mutated = bytes.Replace(mutated, []byte("name: trailing-document"), []byte("name: unknown-field"), 1)
 		case persistenceMutationTrailingDocument:

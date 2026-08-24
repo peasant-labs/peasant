@@ -1,6 +1,8 @@
 # compute_version in expected_metrics must equal metrics.CurrentComputeVersion
 # (internal/metrics/engine.go). A metrics bump on develop updates every row here.
-declared_cases: 1
+# required_* name entries that must stay present; removing one goes red by name.
+required_cases:
+  - mixed-canonical-sessions-persist-through-detail-and-analytics
 cases:
   - name: mixed-canonical-sessions-persist-through-detail-and-analytics
     source_fixture: canonical-selection-mixed
@@ -70,7 +72,18 @@ cases:
     orphan_entry: part_legacy_orphan
     orphan_content_contains: LEGACY_ORPHAN_PART
     expected_metrics: {turn_count: 3, tool_calls: 3, compute_version: 7}
-declared_loader_mutations: 11
+required_loader_mutations:
+  - unknown-field
+  - wrong-count
+  - duplicate-name
+  - trailing-document
+  - wrong-session-count
+  - duplicate-session-id
+  - unknown-combination
+  - orphan-json-reference
+  - missing-winning-marker
+  - missing-ordered-entry
+  - invalid-metrics
 loader_mutations:
   - {name: unknown-field, kind: unknown_field}
   - {name: wrong-count, kind: wrong_count}
