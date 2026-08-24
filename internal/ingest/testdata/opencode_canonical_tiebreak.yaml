@@ -1,4 +1,9 @@
-declared_cases: 3
+# required_* lists name entries that must stay present; removing one goes red
+# by name. Adding an entry need not appear here.
+required_cases:
+  - current-sqlite-path-order
+  - legacy-sqlite-path-order
+  - legacy-json-path-order
 cases:
   - name: current-sqlite-path-order
     representation: current_sqlite
@@ -18,7 +23,9 @@ cases:
     expected_path: /synthetic/a/session.json
     expected_clean_path: /synthetic/a/session.json
     permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
-declared_provenance_cases: 2
+required_provenance_cases:
+  - current-override-outranks-channel-despite-path-order
+  - legacy-override-outranks-channel-despite-path-order
 provenance_cases:
   - name: current-override-outranks-channel-despite-path-order
     representation: current_sqlite
@@ -34,7 +41,8 @@ provenance_cases:
       - {path: /synthetic/a-channel.db, provenance: channel_database}
     expected_path: /synthetic/z-override.db
     permutations: [[0, 1], [1, 0]]
-declared_mounted_cases: 1
+required_mounted_cases:
+  - mounted-current-sqlite-lexical-winner
 mounted_cases:
   - name: mounted-current-sqlite-lexical-winner
     source_fixture: semantic-parity-current
@@ -45,7 +53,8 @@ mounted_cases:
     expected_winner_index: 1
     winning_marker: LEXICAL_PATH_WINNER
     losing_marker: ENUMERATION_FIRST_LOSER
-declared_mounted_provenance_cases: 1
+required_mounted_provenance_cases:
+  - mounted-override-outranks-channel-database
 mounted_provenance_cases:
   - name: mounted-override-outranks-channel-database
     source_fixture: semantic-parity-current
@@ -54,7 +63,15 @@ mounted_provenance_cases:
     override_name: z-override.db
     winning_marker: OVERRIDE_WINNER
     losing_marker: CHANNEL_LOSER
-declared_loader_mutations: 8
+required_loader_mutations:
+  - unknown-field
+  - wrong-count
+  - duplicate-name
+  - unknown-representation
+  - wrong-mounted-count
+  - winner-enumerated-first
+  - override-sorts-first
+  - unknown-provenance
 loader_mutations:
   - {name: unknown-field, kind: unknown_field}
   - {name: wrong-count, kind: wrong_count}

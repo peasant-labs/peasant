@@ -18,14 +18,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const (
-	expectedCanonicalTieCases              = 3
-	expectedCanonicalPermutations          = 6
-	expectedCanonicalProvenanceCases       = 2
-	expectedCanonicalMountedCases          = 1
-	expectedCanonicalMountedProvenanceCase = 1
-	expectedCanonicalTieMutations          = 8
-)
+const expectedCanonicalPermutations = 6
 
 type canonicalTieRepresentation string
 
@@ -60,15 +53,15 @@ func (kind canonicalTieMutationKind) validate() error {
 }
 
 type canonicalTieFixture struct {
-	DeclaredCases                  int                                 `yaml:"declared_cases"`
+	RequiredCases                  []string                            `yaml:"required_cases"`
 	Cases                          []canonicalTieCase                  `yaml:"cases"`
-	DeclaredProvenanceCases        int                                 `yaml:"declared_provenance_cases"`
+	RequiredProvenanceCases        []string                            `yaml:"required_provenance_cases"`
 	ProvenanceCases                []canonicalProvenanceTieCase        `yaml:"provenance_cases"`
-	DeclaredMountedCases           int                                 `yaml:"declared_mounted_cases"`
+	RequiredMountedCases           []string                            `yaml:"required_mounted_cases"`
 	MountedCases                   []canonicalMountedTieCase           `yaml:"mounted_cases"`
-	DeclaredMountedProvenanceCases int                                 `yaml:"declared_mounted_provenance_cases"`
+	RequiredMountedProvenanceCases []string                            `yaml:"required_mounted_provenance_cases"`
 	MountedProvenanceCases         []canonicalMountedProvenanceTieCase `yaml:"mounted_provenance_cases"`
-	DeclaredLoaderMutations        int                                 `yaml:"declared_loader_mutations"`
+	RequiredLoaderMutations        []string                            `yaml:"required_loader_mutations"`
 	LoaderMutations                []canonicalTieLoaderMutation        `yaml:"loader_mutations"`
 }
 
@@ -137,8 +130,8 @@ func loadCanonicalTieFixture(data []byte) (canonicalTieFixture, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return fixture, errors.New("canonical OpenCode tie-break fixture must contain exactly one YAML document")
 	}
-	if fixture.DeclaredCases != expectedCanonicalTieCases || len(fixture.Cases) != expectedCanonicalTieCases || fixture.DeclaredProvenanceCases != expectedCanonicalProvenanceCases || len(fixture.ProvenanceCases) != expectedCanonicalProvenanceCases || fixture.DeclaredMountedCases != expectedCanonicalMountedCases || len(fixture.MountedCases) != expectedCanonicalMountedCases || fixture.DeclaredMountedProvenanceCases != expectedCanonicalMountedProvenanceCase || len(fixture.MountedProvenanceCases) != expectedCanonicalMountedProvenanceCase || fixture.DeclaredLoaderMutations != expectedCanonicalTieMutations || len(fixture.LoaderMutations) != expectedCanonicalTieMutations {
-		return fixture, errors.New("canonical OpenCode tie-break fixture count guard failed")
+	if len(fixture.RequiredCases) == 0 || len(fixture.RequiredProvenanceCases) == 0 || len(fixture.RequiredMountedCases) == 0 || len(fixture.RequiredMountedProvenanceCases) == 0 || len(fixture.RequiredLoaderMutations) == 0 {
+		return fixture, errors.New("canonical OpenCode tie-break fixture declares an empty required manifest")
 	}
 	seen := make(map[string]bool, len(fixture.Cases))
 	for _, testCase := range fixture.Cases {
@@ -202,6 +195,19 @@ func loadCanonicalTieFixture(data []byte) (canonicalTieFixture, error) {
 		seen[mutation.Name] = true
 		if err := mutation.Kind.validate(); err != nil {
 			return fixture, err
+		}
+	}
+	for label, required := range map[string][]string{
+		"case":                    fixture.RequiredCases,
+		"provenance case":         fixture.RequiredProvenanceCases,
+		"mounted case":            fixture.RequiredMountedCases,
+		"mounted provenance case": fixture.RequiredMountedProvenanceCases,
+		"loader mutation":         fixture.RequiredLoaderMutations,
+	} {
+		for _, name := range required {
+			if !seen[name] {
+				return fixture, fmt.Errorf("canonical OpenCode tie-break fixture is missing required %s %q", label, name)
+			}
 		}
 	}
 	return fixture, nil
@@ -450,13 +456,13 @@ func TestCanonicalOpenCodeTieFixtureRejectsMutations(t *testing.T) {
 		case canonicalTieMutationUnknownField:
 			mutated = bytes.Replace(mutated, []byte("expected_clean_path:"), []byte("unexpected:"), 1)
 		case canonicalTieMutationWrongCount:
-			mutated = bytes.Replace(mutated, []byte("declared_cases: 3"), []byte("declared_cases: 2"), 1)
+			mutated = bytes.Replace(mutated, []byte("\n  - legacy-json-path-order\n"), []byte("\n  - legacy-json-renamed-away\n"), 1)
 		case canonicalTieMutationDuplicateName:
-			mutated = bytes.Replace(mutated, []byte("legacy-sqlite-path-order"), []byte("current-sqlite-path-order"), 1)
+			mutated = bytes.Replace(mutated, []byte("name: legacy-sqlite-path-order"), []byte("name: current-sqlite-path-order"), 1)
 		case canonicalTieMutationUnknownRepresentation:
 			mutated = bytes.Replace(mutated, []byte("representation: current_sqlite"), []byte("representation: event_history"), 1)
 		case canonicalTieMutationWrongMountedCount:
-			mutated = bytes.Replace(mutated, []byte("declared_mounted_cases: 1"), []byte("declared_mounted_cases: 2"), 1)
+			mutated = bytes.Replace(mutated, []byte("\n  - mounted-current-sqlite-lexical-winner\n"), []byte("\n  - mounted-current-renamed-away\n"), 1)
 		case canonicalTieMutationWinnerEnumeratedFirst:
 			mutated = bytes.Replace(mutated, []byte("enumeration: [0, 1]"), []byte("enumeration: [1, 0]"), 1)
 		case canonicalTieMutationOverrideSortsFirst:
