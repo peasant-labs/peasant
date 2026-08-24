@@ -25,11 +25,9 @@ type openCodeDiagnosticMeaningCase struct {
 }
 
 type openCodeDiagnosticMeaningFixture struct {
-	DeclaredCases int                             `yaml:"declared_cases"`
+	RequiredCases []string                        `yaml:"required_cases"`
 	Cases         []openCodeDiagnosticMeaningCase `yaml:"cases"`
 }
-
-const expectedOpenCodeDiagnosticMeaningCases = 1
 
 func loadOpenCodeDiagnosticMeaningFixture(t testing.TB) openCodeDiagnosticMeaningFixture {
 	t.Helper()
@@ -43,8 +41,17 @@ func loadOpenCodeDiagnosticMeaningFixture(t testing.TB) openCodeDiagnosticMeanin
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("decode OpenCode diagnostic meaning fixture: expected exactly one YAML document: %v", err)
 	}
-	if fixture.DeclaredCases != expectedOpenCodeDiagnosticMeaningCases || len(fixture.Cases) != expectedOpenCodeDiagnosticMeaningCases {
-		t.Fatalf("OpenCode diagnostic meaning fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredCases, len(fixture.Cases), expectedOpenCodeDiagnosticMeaningCases)
+	presentDiag := make(map[string]struct{}, len(fixture.Cases))
+	for _, testCase := range fixture.Cases {
+		presentDiag[testCase.Name] = struct{}{}
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("OpenCode diagnostic meaning fixture declares no required cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if _, ok := presentDiag[name]; !ok {
+			t.Fatalf("OpenCode diagnostic meaning fixture is missing required case %q", name)
+		}
 	}
 	for _, testCase := range fixture.Cases {
 		if strings.TrimSpace(testCase.Name) == "" || strings.TrimSpace(testCase.ExpectedMeaningContains) == "" || strings.TrimSpace(testCase.ForbiddenMeaningContains) == "" || strings.TrimSpace(testCase.ExpectedRemediationContains) == "" {
