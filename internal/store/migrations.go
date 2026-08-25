@@ -297,6 +297,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV42,
 		migrationV43,
 		migrationV44,
+		migrationV45,
 		migrationV46,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
@@ -336,6 +337,7 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V42: recreates sessions + daily_summary_harness
 		nil,                        // V43: publication receipts and attempt diagnostics
 		nil,                        // V44: Claude discovery evidence cache (new table, no FKs)
+		nil,                        // V45: OpenCode change cursor (new table, no FKs)
 		nil,                        // V46: ALTER TABLE ADD COLUMN on sessions + claude_transcript_evidence (no FKs)
 	},
 }

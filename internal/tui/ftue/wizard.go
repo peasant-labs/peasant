@@ -23,6 +23,7 @@ type SessionListing struct {
 	GitRemote   string    `yaml:"gitRemote"`   // git remote URL for project grouping (empty if unknown)
 	Branch      string    `yaml:"branch"`      // git branch or worktree name (empty if unknown/non-git)
 	Title       string    `yaml:"title"`       // session title (empty if unknown)
+	Agent       string    `yaml:"agent"`       // agent label for a subagent session (empty if unknown), like a Claude teammate's agent type
 	Date        time.Time `yaml:"date"`        // creation time when known, otherwise file mod time
 	TurnCount   int       `yaml:"turnCount"`   // may be 0 if unknown from discovery
 	SessionID   string    `yaml:"sessionId"`   // raw session ID string supplied by discovery

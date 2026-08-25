@@ -1,0 +1,49 @@
+# Cases for the extended session-record read. The populated case carries every
+# extended column so the record read fills agent, the five token aggregates,
+# cost, version, slug, and revert. The older-layout case carries only the base
+# attribution columns, so the extended fields stay empty or zero while the base
+# attribution still resolves. One YAML file drives both, never an inline table.
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - populated-extended-layout
+  - older-layout-empty
+cases:
+  - name: populated-extended-layout
+    extended: true
+    rows:
+      - id: ses_3cd91f52effeXd3QAJ54jOyzE1
+        parent_id: ""
+        time_created: 4000
+        time_updated: 5000
+        directory: /home/dev/peasant-labs/orchard
+        title: extended record read
+        agent: reviewer-openai
+        tokens_input: 1200
+        tokens_output: 800
+        tokens_reasoning: 150
+        tokens_cache_read: 640
+        tokens_cache_write: 32
+        cost: 0.0421
+        version: 1.1.53
+        slug: glowing-wizard
+        revert: '{"messageID":"msg_x"}'
+  - name: older-layout-empty
+    extended: false
+    rows:
+      - id: ses_3cd91f52effeXd3QAJ54jOyzE2
+        parent_id: ""
+        time_created: 4000
+        time_updated: 5000
+        directory: /home/dev/peasant-labs/legacy
+        title: base attribution only
+        agent: reviewer-openai
+        tokens_input: 1200
+        tokens_output: 800
+        tokens_reasoning: 150
+        tokens_cache_read: 640
+        tokens_cache_write: 32
+        cost: 0.0421
+        version: 1.1.53
+        slug: glowing-wizard
+        revert: '{"messageID":"msg_x"}'

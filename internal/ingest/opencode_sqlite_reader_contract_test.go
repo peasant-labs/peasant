@@ -17,15 +17,6 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
-const (
-	expectedReaderPageCases          = 3
-	expectedReaderInvalidIdentifiers = 1
-	expectedReaderMethods            = 7
-	expectedReaderSignatureRules     = 5
-	expectedReaderGuardMutations     = 5
-	expectedReaderLoaderMutations    = 4
-)
-
 //go:embed testdata/opencode_sqlite_reader.yaml
 var openCodeSQLiteReaderYAML []byte
 
@@ -70,17 +61,17 @@ const (
 )
 
 type readerContractFixture struct {
-	DeclaredPageCases          int                           `yaml:"declared_page_cases"`
+	RequiredPageCases          []string                      `yaml:"required_page_cases"`
 	PageCases                  []readerPageCase              `yaml:"page_cases"`
-	DeclaredInvalidIdentifiers int                           `yaml:"declared_invalid_identifiers"`
+	RequiredInvalidIdentifiers []string                      `yaml:"required_invalid_identifiers"`
 	InvalidIdentifiers         []readerInvalidIdentifierCase `yaml:"invalid_identifiers"`
-	DeclaredMethods            int                           `yaml:"declared_methods"`
+	RequiredMethods            []string                      `yaml:"required_methods"`
 	Methods                    []readerMethod                `yaml:"methods"`
-	DeclaredSignatureRules     int                           `yaml:"declared_signature_rules"`
+	RequiredSignatureRules     []string                      `yaml:"required_signature_rules"`
 	SignatureRules             []readerSignatureRule         `yaml:"signature_rules"`
-	DeclaredGuardMutations     int                           `yaml:"declared_guard_mutations"`
+	RequiredGuardMutations     []string                      `yaml:"required_guard_mutations"`
 	GuardMutations             []readerGuardMutation         `yaml:"guard_mutations"`
-	DeclaredLoaderMutations    int                           `yaml:"declared_loader_mutations"`
+	RequiredLoaderMutations    []string                      `yaml:"required_loader_mutations"`
 	LoaderMutations            []readerLoaderMutation        `yaml:"loader_mutations"`
 }
 
@@ -152,9 +143,8 @@ func TestOpenCodeLegacyReaderPagesMatchStrictFixture(t *testing.T) {
 				})
 			case readerPageParts:
 				sessionID := mustLegacySessionID(t, fixtureCase.SessionID)
-				messageID := mustLegacyMessageID(t, fixtureCase.MessageID)
 				assertFixturePages(t, fixtureCase, func(cursor *ingest.OpenCodeLegacyPartCursor) (readerFetchedPage[ingest.OpenCodeLegacyPartCursor], error) {
-					page, err := source.LegacyParts(t.Context(), ingest.OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: messageID, PageSize: pageSize, After: cursor})
+					page, err := source.LegacySessionParts(t.Context(), ingest.OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
 					return readerFetchedPage[ingest.OpenCodeLegacyPartCursor]{IDs: legacyPartStrings(page.Parts), Capacity: cap(page.Parts), Next: page.Next}, err
 				})
 			default:
@@ -522,13 +512,8 @@ func parseReaderContractFixture(data []byte) (readerContractFixture, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return readerContractFixture{}, fmt.Errorf("decode strict OpenCode SQLite reader fixture: expected exactly one YAML document: %w", err)
 	}
-	if fixture.DeclaredPageCases != expectedReaderPageCases || len(fixture.PageCases) != expectedReaderPageCases ||
-		fixture.DeclaredInvalidIdentifiers != expectedReaderInvalidIdentifiers || len(fixture.InvalidIdentifiers) != expectedReaderInvalidIdentifiers ||
-		fixture.DeclaredMethods != expectedReaderMethods || len(fixture.Methods) != expectedReaderMethods ||
-		fixture.DeclaredSignatureRules != expectedReaderSignatureRules || len(fixture.SignatureRules) != expectedReaderSignatureRules ||
-		fixture.DeclaredGuardMutations != expectedReaderGuardMutations || len(fixture.GuardMutations) != expectedReaderGuardMutations ||
-		fixture.DeclaredLoaderMutations != expectedReaderLoaderMutations || len(fixture.LoaderMutations) != expectedReaderLoaderMutations {
-		return readerContractFixture{}, fmt.Errorf("strict OpenCode SQLite reader fixture row guard failed: pages=%d/%d invalid=%d/%d methods=%d/%d rules=%d/%d guard_mutations=%d/%d loader_mutations=%d/%d", fixture.DeclaredPageCases, len(fixture.PageCases), fixture.DeclaredInvalidIdentifiers, len(fixture.InvalidIdentifiers), fixture.DeclaredMethods, len(fixture.Methods), fixture.DeclaredSignatureRules, len(fixture.SignatureRules), fixture.DeclaredGuardMutations, len(fixture.GuardMutations), fixture.DeclaredLoaderMutations, len(fixture.LoaderMutations))
+	if len(fixture.RequiredPageCases) == 0 || len(fixture.RequiredInvalidIdentifiers) == 0 || len(fixture.RequiredMethods) == 0 || len(fixture.RequiredSignatureRules) == 0 || len(fixture.RequiredGuardMutations) == 0 || len(fixture.RequiredLoaderMutations) == 0 {
+		return readerContractFixture{}, fmt.Errorf("strict OpenCode SQLite reader fixture declares an empty required manifest")
 	}
 	if err := validateReaderFixture(fixture); err != nil {
 		return readerContractFixture{}, err
@@ -591,6 +576,24 @@ func validateReaderFixture(fixture readerContractFixture) error {
 			return fmt.Errorf("strict reader loader mutation is incomplete: %+v", mutation)
 		}
 	}
+	requiredGroups := []struct {
+		group    string
+		required []string
+	}{
+		{"page", fixture.RequiredPageCases},
+		{"invalid_identifier", fixture.RequiredInvalidIdentifiers},
+		{"method", fixture.RequiredMethods},
+		{"rule", fixture.RequiredSignatureRules},
+		{"guard_mutation", fixture.RequiredGuardMutations},
+		{"loader_mutation", fixture.RequiredLoaderMutations},
+	}
+	for _, entry := range requiredGroups {
+		for _, name := range entry.required {
+			if _, ok := names[entry.group+"\x00"+name]; !ok {
+				return fmt.Errorf("strict OpenCode SQLite reader fixture is missing required %s %q", entry.group, name)
+			}
+		}
+	}
 	return nil
 }
 
@@ -644,9 +647,9 @@ func mutateReaderFixture(source []byte, kind readerLoaderMutationKind) ([]byte, 
 	case readerLoaderUnknownField:
 		return append(append([]byte(nil), source...), []byte("unexpected: true\n")...), nil
 	case readerLoaderTrailingDoc:
-		return append(append([]byte(nil), source...), []byte("---\ndeclared_page_cases: 0\n")...), nil
+		return append(append([]byte(nil), source...), []byte("---\nrequired_page_cases: []\n")...), nil
 	case readerLoaderDeclaredCount:
-		return replaceOnce("declared_methods: 7", "declared_methods: 6")
+		return replaceOnce("\n  - MaxEventSeq\n", "\n  - MaxEventSeqRenamedAway\n")
 	case readerLoaderDuplicateMethod:
 		return replaceOnce("  - name: Close\n", "  - name: Catalog\n")
 	default:

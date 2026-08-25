@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -28,6 +29,108 @@ const (
 	OpenCodeSourceSQLite     OpenCodeSourceKind = "sqlite"
 	OpenCodeSourceLegacyJSON OpenCodeSourceKind = "legacy_json"
 )
+
+// OpenCodeCanonicalRepresentation identifies one materialized transcript
+// representation. The closed set deliberately excludes event, input, context,
+// migration, and external-output storage.
+type OpenCodeCanonicalRepresentation uint8
+
+const (
+	OpenCodeRepresentationLegacyJSON OpenCodeCanonicalRepresentation = iota + 1
+	OpenCodeRepresentationLegacySQLite
+	OpenCodeRepresentationCurrentSQLite
+)
+
+// Validate rejects values outside the selectable transcript representations.
+func (r OpenCodeCanonicalRepresentation) Validate() error {
+	switch r {
+	case OpenCodeRepresentationLegacyJSON, OpenCodeRepresentationLegacySQLite, OpenCodeRepresentationCurrentSQLite:
+		return nil
+	default:
+		return fmt.Errorf("OpenCode canonical representation %d is outside the supported closed set", r)
+	}
+}
+
+func (r OpenCodeCanonicalRepresentation) precedence() uint8 {
+	switch r {
+	case OpenCodeRepresentationCurrentSQLite:
+		return 3
+	case OpenCodeRepresentationLegacySQLite:
+		return 2
+	case OpenCodeRepresentationLegacyJSON:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// OpenCodeSelectedSourceIdentity is the complete freshness identity selected
+// for one raw OpenCode session. Diffing must use only the matching session's
+// freshness evidence from this representation and path.
+type OpenCodeSelectedSourceIdentity struct {
+	SessionID      SessionID
+	Representation OpenCodeCanonicalRepresentation
+	Path           ResolvedPath
+}
+
+// Validate rejects incomplete selected-source identities before diffing.
+func (i OpenCodeSelectedSourceIdentity) Validate() error {
+	if i.SessionID == "" {
+		return errors.New("selected OpenCode source identity has no session ID")
+	}
+	if err := i.Representation.Validate(); err != nil {
+		return err
+	}
+	if i.Path == "" {
+		return errors.New("selected OpenCode source identity has no attributable path")
+	}
+	return nil
+}
+
+// OpenCodeGraphDiagnosticCode identifies a non-fatal selected-graph repair.
+type OpenCodeGraphDiagnosticCode string
+
+const (
+	OpenCodeGraphMissingParent     OpenCodeGraphDiagnosticCode = "opencode_missing_parent"
+	OpenCodeGraphOrphanPartDropped OpenCodeGraphDiagnosticCode = "opencode_orphan_part_dropped"
+	// OpenCodeUnknownPartType records that a well-formed row carried a type
+	// outside the known transcript vocabulary. It is not corruption: the session
+	// still materializes, and one diagnostic per distinct type names it.
+	OpenCodeUnknownPartType OpenCodeGraphDiagnosticCode = "opencode_unknown_part_type"
+)
+
+// Validate rejects graph diagnostics outside the supported repair contract.
+func (c OpenCodeGraphDiagnosticCode) Validate() error {
+	switch c {
+	case OpenCodeGraphMissingParent, OpenCodeGraphOrphanPartDropped, OpenCodeUnknownPartType:
+		return nil
+	default:
+		return fmt.Errorf("OpenCode graph diagnostic code %q is outside the supported closed set", c)
+	}
+}
+
+type openCodeSessionCandidate struct {
+	session    DiscoveredSession
+	identity   OpenCodeSelectedSourceIdentity
+	provenance OpenCodeCandidateProvenance
+	// sessionUpdatedAt is this one session's usable upstream clock
+	// (session.time_updated). It is the single optional clock value per
+	// session: a zero value means the session has no usable clock, so the
+	// database and WAL mtime floor applies instead. A session whose database
+	// has the session table but no row for it, or whose row has a null or zero
+	// time_updated, has a zero value here and takes the mtime-floor path.
+	sessionUpdatedAt time.Time
+	// currentControlOnly marks a current SQLite candidate whose session_message
+	// projection holds only control records, such as a model or agent switch,
+	// and no substantive user, assistant, or tool row. Such a current candidate
+	// loses canonical selection to a legacy sibling that still carries the
+	// conversation, so the reader renders the real turns instead of one to three
+	// inert control turns. The flag is meaningful only for the current
+	// representation; a legacy representation, once discovered, always carries
+	// substantive rows, and its zero value keeps the pre-existing preference for
+	// a substantive current candidate.
+	currentControlOnly bool
+}
 
 // OpenCodeCandidateProvenance records why a path was considered. Candidate
 // order is override database, channel/default database, then legacy JSON root.
@@ -70,6 +173,10 @@ const (
 	OpenCodeProbeHeader   OpenCodeProbeStage = "sniff_header"
 	OpenCodeProbeOpen     OpenCodeProbeStage = "open_source"
 	OpenCodeProbeCatalog  OpenCodeProbeStage = "inspect_catalog"
+	// OpenCodeProbeDiscover covers session enumeration and parent-link reads.
+	OpenCodeProbeDiscover OpenCodeProbeStage = "discover_sessions"
+	// OpenCodeProbeFreshness covers selected-session freshness hydration.
+	OpenCodeProbeFreshness OpenCodeProbeStage = "hydrate_freshness"
 )
 
 // OpenCodeProbeDiagnosticCode is the machine-readable reason for a diagnostic.
@@ -83,6 +190,9 @@ const (
 	OpenCodeDiagnosticCatalogReadFailed OpenCodeProbeDiagnosticCode = "catalog_read_failed"
 	OpenCodeDiagnosticCatalogTruncated  OpenCodeProbeDiagnosticCode = "catalog_truncated"
 	OpenCodeDiagnosticSchemaIncomplete  OpenCodeProbeDiagnosticCode = "schema_incomplete"
+	// OpenCodeDiagnosticDiscoveryFailed marks a supported candidate that was
+	// skipped during one discovery run.
+	OpenCodeDiagnosticDiscoveryFailed OpenCodeProbeDiagnosticCode = "discovery_failed"
 )
 
 // OpenCodeCandidate is one deduplicated source location. SQLite candidates are
@@ -129,6 +239,22 @@ func (k OpenCodeSourceKind) Validate() error {
 		return nil
 	default:
 		return fmt.Errorf("source kind %q is outside the supported closed set", k)
+	}
+}
+
+// precedence ranks provenance for equal-representation tie-breaks. The
+// environment override outranks the channel database, which outranks the
+// legacy JSON root. This mirrors the resolver order.
+func (p OpenCodeCandidateProvenance) precedence() uint8 {
+	switch p {
+	case OpenCodeCandidateOverride:
+		return 3
+	case OpenCodeCandidateChannel:
+		return 2
+	case OpenCodeCandidateLegacyJSONRoot:
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -460,6 +586,8 @@ func actionableOpenCodeDiagnostic(stage OpenCodeProbeStage, what, why, where, wh
 		code = OpenCodeDiagnosticSourceOpenFailed
 	case OpenCodeProbeCatalog:
 		code = OpenCodeDiagnosticCatalogReadFailed
+	case OpenCodeProbeDiscover, OpenCodeProbeFreshness:
+		code = OpenCodeDiagnosticDiscoveryFailed
 	}
 	return OpenCodeProbeDiagnostic{Code: code, Stage: stage, What: what, Why: why, Where: where, When: when, Meaning: meaning, Remediation: fix}
 }

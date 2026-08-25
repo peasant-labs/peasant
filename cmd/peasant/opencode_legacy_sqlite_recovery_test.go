@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,12 +27,6 @@ import (
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
-)
-
-const (
-	expectedLegacySQLiteFreshnessCases = 1
-	expectedLegacySQLiteCandidateCases = 3
-	expectedLegacySQLiteRecoveryCases  = 5
 )
 
 type legacySQLiteChannelMutation string
@@ -99,11 +94,11 @@ type legacySQLiteRecoveryCase struct {
 }
 
 type legacySQLiteRecoveryDocument struct {
-	DeclaredFreshnessCases int                         `yaml:"declared_freshness_cases"`
+	RequiredFreshnessCases []string                    `yaml:"required_freshness_cases"`
 	FreshnessCases         []legacySQLiteFreshnessCase `yaml:"freshness_cases"`
-	DeclaredCandidateCases int                         `yaml:"declared_candidate_cases"`
+	RequiredCandidateCases []string                    `yaml:"required_candidate_cases"`
 	CandidateCases         []legacySQLiteCandidateCase `yaml:"candidate_cases"`
-	DeclaredRecoveryCases  int                         `yaml:"declared_recovery_cases"`
+	RequiredRecoveryCases  []string                    `yaml:"required_recovery_cases"`
 	RecoveryCases          []legacySQLiteRecoveryCase  `yaml:"recovery_cases"`
 }
 
@@ -121,12 +116,10 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return document, errors.New("legacy SQLite recovery fixture must contain exactly one YAML document")
 	}
-	if document.DeclaredFreshnessCases != expectedLegacySQLiteFreshnessCases || len(document.FreshnessCases) != expectedLegacySQLiteFreshnessCases ||
-		document.DeclaredCandidateCases != expectedLegacySQLiteCandidateCases || len(document.CandidateCases) != expectedLegacySQLiteCandidateCases ||
-		document.DeclaredRecoveryCases != expectedLegacySQLiteRecoveryCases || len(document.RecoveryCases) != expectedLegacySQLiteRecoveryCases {
-		return document, errors.New("legacy SQLite recovery fixture count guard failed")
+	if len(document.RequiredFreshnessCases) == 0 || len(document.RequiredCandidateCases) == 0 || len(document.RequiredRecoveryCases) == 0 {
+		return document, errors.New("legacy SQLite recovery fixture declares an empty required manifest")
 	}
-	seen := make(map[string]struct{}, expectedLegacySQLiteFreshnessCases+expectedLegacySQLiteCandidateCases+expectedLegacySQLiteRecoveryCases)
+	seen := make(map[string]struct{}, len(document.FreshnessCases)+len(document.CandidateCases)+len(document.RecoveryCases))
 	requireUnique := func(name string) error {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("legacy SQLite recovery fixture contains an empty case name")
@@ -203,6 +196,17 @@ func loadLegacySQLiteRecoveryDocument(data []byte) (legacySQLiteRecoveryDocument
 		}
 		if testCase.ExpectedRecovery != (testCase.ExpectedToolCall != nil) {
 			return document, errors.New("legacy SQLite recovery fixture tool expectation does not match recovery outcome")
+		}
+	}
+	for label, required := range map[string][]string{
+		"freshness case": document.RequiredFreshnessCases,
+		"candidate case": document.RequiredCandidateCases,
+		"recovery case":  document.RequiredRecoveryCases,
+	} {
+		for _, name := range required {
+			if _, ok := seen[name]; !ok {
+				return document, fmt.Errorf("legacy SQLite recovery fixture is missing required %s %q", label, name)
+			}
 		}
 	}
 	return document, nil
@@ -318,7 +322,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	}
 }
 
-func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
+func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 	document := mustLegacySQLiteRecoveryDocument(t)
 	for _, testCase := range document.CandidateCases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -346,7 +350,7 @@ func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
 				t.Fatalf("discover deterministic candidate sources: %v", err)
 			}
 			if got := discoveredSessionStrings(discovered); !slices.Equal(got, testCase.ExpectedSessionIDs) {
-				t.Fatalf("discovered candidate sessions=%v, want only first eligible source %v; evidence=%+v", got, testCase.ExpectedSessionIDs, adapter.CandidateEvidence())
+				t.Fatalf("discovered candidate sessions=%v, want canonical sessions %v; evidence=%+v", got, testCase.ExpectedSessionIDs, adapter.CandidateEvidence())
 			}
 
 			cfg := mountedOpenCodeConfig(t, root)
@@ -359,7 +363,7 @@ func TestLegacyOpenCodeSQLiteUsesOnlyFirstEligibleCandidate(t *testing.T) {
 			outputRoot := filepath.Join(commandRoot, "managed")
 			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 			if err != nil {
-				t.Fatalf("harvest first eligible candidate: %v\n%s", err, output)
+				t.Fatalf("harvest canonical eligible candidates: %v\n%s", err, output)
 			}
 			managedIDs := managedTranscriptSessionIDs(t, outputRoot)
 			if !slices.Equal(managedIDs, testCase.ExpectedSessionIDs) {
@@ -466,9 +470,9 @@ func TestLegacySQLiteRecoveryFixtureLoaderMutationsAreRejected(t *testing.T) {
 	if _, err := loadLegacySQLiteRecoveryDocument(unknownField); err == nil {
 		t.Fatal("legacy SQLite recovery fixture accepted an unknown field mutation")
 	}
-	wrongCount := bytes.Replace(legacySQLiteRecoveryYAML, []byte("declared_recovery_cases: 5"), []byte("declared_recovery_cases: 4"), 1)
+	wrongCount := bytes.Replace(legacySQLiteRecoveryYAML, []byte("\n  - wrong-kind-fails-closed\n"), []byte("\n  - wrong-kind-renamed-away\n"), 1)
 	if _, err := loadLegacySQLiteRecoveryDocument(wrongCount); err == nil {
-		t.Fatal("legacy SQLite recovery fixture accepted an incorrect declared count")
+		t.Fatal("legacy SQLite recovery fixture accepted a deleted required recovery case")
 	}
 	duplicateName := bytes.Replace(legacySQLiteRecoveryYAML, []byte("name: unsupported-override-falls-through"), []byte("name: committed-wal-update"), 1)
 	if _, err := loadLegacySQLiteRecoveryDocument(duplicateName); err == nil {
@@ -516,7 +520,14 @@ func appendMountedLegacyWALRows(writer *sqlite.Conn, testCase legacySQLiteFreshn
 	if err = sqlitex.ExecuteTransient(writer, "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)", &sqlitex.ExecOptions{Args: []any{testCase.MessageID, testCase.TargetSession, testCase.MessageTimeCreated, testCase.MessageTimeUpdated, testCase.MessageData}}); err != nil {
 		return err
 	}
-	return sqlitex.ExecuteTransient(writer, "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", &sqlitex.ExecOptions{Args: []any{testCase.PartID, testCase.MessageID, testCase.TargetSession, testCase.PartTimeCreated, testCase.PartTimeUpdated, testCase.PartData}})
+	if err = sqlitex.ExecuteTransient(writer, "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", &sqlitex.ExecOptions{Args: []any{testCase.PartID, testCase.MessageID, testCase.TargetSession, testCase.PartTimeCreated, testCase.PartTimeUpdated, testCase.PartData}}); err != nil {
+		return err
+	}
+	// OpenCode moves the session's changed clock in the same commit as the new
+	// content. Freshness is clock-first for a session that has a clock, so the
+	// committed WAL update moves the target session's clock to the new content
+	// time and re-ingests it.
+	return sqlitex.ExecuteTransient(writer, "UPDATE session SET time_updated = ?1 WHERE id = ?2", &sqlitex.ExecOptions{Args: []any{testCase.MessageTimeUpdated, testCase.TargetSession}})
 }
 
 func copySyntheticDatabase(t testing.TB, source, destination string) {
@@ -577,6 +588,13 @@ func rewriteMountedSessionIDs(t testing.TB, path string, originals, replacements
 		if err := sqlitex.ExecuteTransient(connection, "UPDATE part SET session_id = ?1 WHERE session_id = ?2", options); err != nil {
 			_ = connection.Close()
 			t.Fatalf("rewrite synthetic override part session IDs: %v", err)
+		}
+		// The session table is OpenCode's authoritative session list, so rewrite
+		// its identifier too. Otherwise the rewritten sessions have no session
+		// row and discovery treats them as deleted.
+		if err := sqlitex.ExecuteTransient(connection, "UPDATE session SET id = ?1 WHERE id = ?2", options); err != nil {
+			_ = connection.Close()
+			t.Fatalf("rewrite synthetic override session table IDs: %v", err)
 		}
 	}
 	if err := connection.Close(); err != nil {
@@ -669,7 +687,7 @@ func mutateManagedEnvelope(t testing.TB, managedPath string, mutation legacySQLi
 	case legacySQLiteEnvelopeArbitrary:
 		data = []byte("{\"ordinary\":true}\n")
 	case legacySQLiteEnvelopeVersion:
-		data = bytes.Replace(data, []byte("\"version\":1"), []byte("\"version\":2"), 1)
+		data = bytes.Replace(data, []byte("\"version\":2"), []byte("\"version\":9"), 1)
 	case legacySQLiteEnvelopeKind:
 		data = bytes.Replace(data, []byte("peasant.opencode.legacy-sqlite"), []byte("peasant.opencode.other-source"), 1)
 	}

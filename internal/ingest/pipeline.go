@@ -64,6 +64,10 @@ type PipelineResult struct {
 	Sessions []SessionResult
 	Duration time.Duration
 	IndexLog []IndexLogEntry // per-session indexing outcomes (populated during INDEX stage)
+	// DiscoveryDiagnostics names source locations an adapter could not fully
+	// enumerate. Discovery stayed non-fatal per location, so the run continued;
+	// these records make each skipped location visible to the caller.
+	DiscoveryDiagnostics []DiscoveryDiagnostic
 }
 
 // PipelineSummary holds aggregate counts for a pipeline run.
@@ -217,6 +221,18 @@ type Pipeline struct {
 	// run at all and the zero report is the truthful answer.
 	originResolve    ResolveReport
 	originResolveErr error
+
+	// seqCursorCache maps SessionID → the last ingested OpenCode event sequence,
+	// pre-loaded before the DIFF stage when the store records the change cursor. A
+	// session whose current sequence exceeds its cached cursor is re-ingested even
+	// when no time column moved, closing the in-place-rewrite blind spot. Nil when
+	// the store does not record the cursor, which keeps the clock-only behaviour.
+	seqCursorCache map[SessionID]int64
+
+	// discoveryDiagnostics accumulates per-location discovery failures reported
+	// by adapters during discover(), copied into every PipelineResult so a
+	// skipped database is visible even though discovery stayed non-fatal.
+	discoveryDiagnostics []DiscoveryDiagnostic
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -396,6 +412,16 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			p.locationCache = cache
 		}
 		// On error, locationCache stays nil and findMetadataPath falls back to walk.
+
+		// Load the OpenCode change cursor when the store records it, so the DIFF
+		// stage can re-ingest a session whose newest event sequence moved past the
+		// last ingested value even when no time column changed. A store without the
+		// cursor capability keeps the clock-only behaviour.
+		if cursorStore, ok := p.store.(OpenCodeSeqCursorStore); ok {
+			if cursors, cursorErr := cursorStore.BulkLookupOpenCodeSeqCursors(ctx, ids); cursorErr == nil {
+				p.seqCursorCache = cursors
+			}
+		}
 	}
 
 	// Stage 2: DIFF
@@ -553,8 +579,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// that shared FILTER pass and performs no extraction, write, or store action.
 	if p.config.DryRun {
 		result := &PipelineResult{
-			Duration: time.Since(start),
-			Sessions: dryRunSessions,
+			Duration:             time.Since(start),
+			Sessions:             dryRunSessions,
+			DiscoveryDiagnostics: p.discoveryDiagnostics,
 		}
 		result.Summary.ReminedEvidenceRecords = p.reminedEvidence
 		result.Summary.OriginResolve = p.originResolve
@@ -618,8 +645,10 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	staging := NewStagingBuffer(len(toProcessEntries)+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
 	for parentID := range externalParents {
 		// The parent is outside this batch, so DB insertion is the authority on
-		// whether it already exists. Mark it committed only for staging order;
-		// a missing parent still fails the real sessions.parent_id FK actionably.
+		// whether it already exists. Mark it committed only for staging order.
+		// A parent that is neither in this batch nor already stored does not
+		// fail an FK: the store skips the child row instead, so discovery must
+		// not set a ParentUUID whose parent it did not discover.
 		staging.Commit(parentID)
 	}
 
@@ -831,11 +860,22 @@ func (p *Pipeline) drainLoop(
 					// succeeds so the FK constraint on session_commits(session_id) is satisfied.
 					// Called unconditionally (including empty slice) so that a --force re-ingest
 					// that finds 0 commits deletes stale DB rows, keeping JSON and DB in sync.
+					cursorStore, cursorStoreOK := p.store.(OpenCodeSeqCursorStore)
 					for _, entry := range storeBatch {
 						if err := p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits); err != nil {
 							slog.Warn("pipeline: upsert session_commits",
 								"session_id", entry.Metadata.SessionID,
 								"error", err)
+						}
+						// Record the OpenCode change cursor for a session just ingested,
+						// so a later in-place rewrite that bumps the sequence without
+						// moving a time column re-ingests it. Non-fatal.
+						if cursorStoreOK && entry.Session.Harness == HarnessOpenCode {
+							if err := cursorStore.UpsertOpenCodeSeqCursor(ctx, entry.Metadata.SessionID, entry.Session.EventSeq); err != nil {
+								slog.Warn("pipeline: upsert opencode_session_seq_cursor",
+									"session_id", entry.Metadata.SessionID,
+									"error", err)
+							}
 						}
 					}
 				}
@@ -996,6 +1036,12 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 			AttachSessionLocationLookup(adapter, p.store)
 		}
 		sessions, err := adapter.Discover(ctx, cfg)
+		// Per-location discovery failures are collected whether or not the whole
+		// provider errored, so a partially-enumerated provider still reports the
+		// databases it skipped.
+		if reporter, ok := adapter.(DiscoveryDiagnosticReporter); ok {
+			p.discoveryDiagnostics = append(p.discoveryDiagnostics, reporter.DiscoveryDiagnostics()...)
+		}
 		if err != nil {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))
 			continue
@@ -1088,7 +1134,7 @@ func (p *Pipeline) diff(sessions []DiscoveredSession) DiffResult {
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
 func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalenessThreshold time.Duration) DiffStatus {
-	isActive := stalenessThreshold > 0 && time.Since(session.ModTime) < stalenessThreshold
+	isActive := stalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < stalenessThreshold
 
 	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
 		// Source modified more recently than DB ingested_ms: re-ingest.
@@ -1128,7 +1174,7 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 //  5. Source within staleness threshold (still being written): DiffActive
 //  6. Otherwise: DiffUnchanged
 func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
-	isActive := p.config.StalenessThreshold > 0 && time.Since(session.ModTime) < p.config.StalenessThreshold
+	isActive := p.config.StalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold
 
 	// Force: re-ingest, but only if we're also including active sessions (or
 	// the session is not active). With --force and without --include-active,
@@ -1144,7 +1190,21 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	// use DB state to classify the session without reading metadata.json from disk.
 	// This is the primary code path for sessions already in the DB.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
-		return ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		// The change cursor is an additional trigger on top of the clock: a session
+		// the clock reports unchanged is re-ingested when its newest event sequence
+		// moved past the last ingested value, catching an in-place rewrite that
+		// moved no time column. It only fires for a session that already has a
+		// stored cursor, so a first sighting never mass-re-ingests.
+		if status == DiffUnchanged {
+			if storedSeq, tracked := p.seqCursorCache[session.SessionID]; tracked && session.EventSeq > storedSeq {
+				if isActive {
+					return DiffActive
+				}
+				return DiffUpdated
+			}
+		}
+		return status
 	}
 
 	// File fallback: DB has no record for this session (pre-migration data or first run).
@@ -1955,9 +2015,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// REPORT.
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageReport})
 	pipelineResult := &PipelineResult{
-		Sessions: sessionResults,
-		Duration: time.Since(start),
-		IndexLog: indexLogEntries,
+		Sessions:             sessionResults,
+		Duration:             time.Since(start),
+		IndexLog:             indexLogEntries,
+		DiscoveryDiagnostics: p.discoveryDiagnostics,
 	}
 	pipelineResult.Summary.StoreError = storeErr
 	pipelineResult.Summary.Indexed = indexed

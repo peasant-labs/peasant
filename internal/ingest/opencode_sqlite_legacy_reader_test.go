@@ -80,7 +80,7 @@ func TestOpenCodeLegacyReaderUsesOnlyMaterializedTables(t *testing.T) {
 	if len(messages.Messages) != 1 || messages.Messages[0].ID.String() != "msg_latest" || !strings.Contains(messages.Messages[0].Data, `"version":"latest"`) {
 		t.Fatalf("materialized message page = %+v, want only latest primary-table row", messages)
 	}
-	parts, err := source.LegacyParts(t.Context(), ingest.OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: messages.Messages[0].ID, PageSize: mustLegacyPageSize(t, 4)})
+	parts, err := source.LegacySessionParts(t.Context(), ingest.OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: mustLegacyPageSize(t, 4)})
 	if err != nil {
 		t.Fatalf("read materialized part with history distractors: %v", err)
 	}
@@ -176,9 +176,9 @@ func TestOpenCodeLegacyReaderReadsCommittedWALRowsWithoutChangingTransactionCont
 	if !equalStrings(legacyMessageStrings(messages.Messages), []string{"msg_wal_base", "msg_wal_only"}) {
 		t.Fatalf("WAL-aware message IDs = %v, want base and WAL-only rows", legacyMessageStrings(messages.Messages))
 	}
-	parts, err := source.LegacyParts(t.Context(), ingest.OpenCodeLegacyPartPageRequest{SessionID: sessionID, MessageID: mustLegacyMessageID(t, "msg_wal_only"), PageSize: mustLegacyPageSize(t, 2)})
-	if err != nil || !equalStrings(legacyPartStrings(parts.Parts), []string{"part_wal_only"}) {
-		t.Fatalf("WAL-aware part page = %+v error=%v, want WAL-only part", parts, err)
+	parts, err := source.LegacySessionParts(t.Context(), ingest.OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: mustLegacyPageSize(t, 4)})
+	if err != nil || !equalStrings(legacyPartStrings(parts.Parts), []string{"part_wal_base", "part_wal_only"}) {
+		t.Fatalf("WAL-aware session part page = %+v error=%v, want the base part and the WAL-only part", parts, err)
 	}
 	closeSyntheticSource(t, source)
 	assertSyntheticFileEqual(t, materialized.Path, databaseBefore, "main database")

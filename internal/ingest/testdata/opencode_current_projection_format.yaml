@@ -1,0 +1,24 @@
+# Version discipline for the current managed projection. Tolerating current
+# control rows added the typed control field, so the current write version is 2
+# while the shared minimum readable version stays 1. A version 1 projection,
+# which predates the control field, still decodes under the version 2 reader; a
+# version 2 projection that carries a control field decodes; and a version above
+# the write version is refused. The legacy projection shape is unchanged, so its
+# write version stays 2.
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - version-one-without-control-still-readable
+  - version-two-with-control-readable
+  - version-above-write-version-refused
+cases:
+  - name: version-one-without-control-still-readable
+    expect_ok: true
+    data: '{"format":"peasant.opencode.current-sqlite","version":1,"session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","messages":[{"id":"msg_fmt_user","session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","time_created":1,"time_updated":1,"data":{"id":"msg_fmt_user","sessionID":"ses_3cd91f52effeXd3QAJ54jFmt01","role":"user","time":{"created":1}},"parts":[]}]}'
+  - name: version-two-with-control-readable
+    expect_ok: true
+    data: '{"format":"peasant.opencode.current-sqlite","version":2,"session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","messages":[{"id":"msg_fmt_model","session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","time_created":2,"time_updated":2,"control":"model-switched","data":{"id":"msg_fmt_model","sessionID":"ses_3cd91f52effeXd3QAJ54jFmt01","role":"system","modelID":"gpt-5.5","content":"gpt-5.5","time":{"created":2}},"parts":[{"id":"prt_fmt_subtask","message_id":"msg_fmt_model","session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","time_created":2,"time_updated":2,"data":{"id":"prt_fmt_subtask","type":"subtask","name":"gpt-5.5","text":"gpt-5.5","time":{"created":2}}}]}]}'
+  - name: version-above-write-version-refused
+    expect_ok: false
+    error_contains: readable version 1..2
+    data: '{"format":"peasant.opencode.current-sqlite","version":3,"session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","messages":[{"id":"msg_fmt_user","session_id":"ses_3cd91f52effeXd3QAJ54jFmt01","time_created":1,"time_updated":1,"data":{"id":"msg_fmt_user","sessionID":"ses_3cd91f52effeXd3QAJ54jFmt01","role":"user","time":{"created":1}},"parts":[]}]}'

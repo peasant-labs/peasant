@@ -29,10 +29,17 @@ const (
 	// this is what keeps ONE oversized message from stalling a frame.
 	MaxProseBytes = 32768
 
-	// maxCachedTurns bounds the per-turn cache. It is well above
-	// MaxRenderedTurns so one transcript at a couple of settled widths fits
-	// entirely, which is the case the cache exists for.
+	// maxCachedTurns is where the per-turn cache STARTS. It is well above
+	// MaxRenderedTurns so one bounded transcript at a couple of settled widths
+	// fits entirely, which is the case the cache exists for. A document that
+	// draws more than that raises it; see Renderer.raiseCeilingFor.
 	maxCachedTurns = 512
+
+	// cacheWidthsKeptWarm is how many settled widths one document is expected to
+	// be drawn at while a reader works with it - the pane's own width, and the
+	// one it takes after a resize. It is what turns a document's turn count into
+	// a cache ceiling that keeps that document warm rather than thrashing it.
+	cacheWidthsKeptWarm = 2
 )
 
 const (

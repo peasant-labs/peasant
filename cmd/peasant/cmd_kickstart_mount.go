@@ -16,6 +16,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -377,7 +378,12 @@ func kickstartPreview(
 			return session.Turns, true, nil
 		}
 	}
-	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions)
+	// The reader materializes a SQLite-discovered session through the same
+	// adapter dependencies the discovery path uses, so the preview reads one
+	// session's rows rather than the whole provider database.
+	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions,
+		kickstart.WithSourceTurnsGitResolver(&ingest.ExecGitResolver{}),
+		kickstart.WithSourceTurnsSalt(salt.Salt{}))
 	turns := kickstart.SessionTurnsFunc(func(sessionID string) ([]ingest.Turn, error) {
 		if storedTurns != nil {
 			recorded, held, err := storedTurns(sessionID)
@@ -396,7 +402,35 @@ func kickstartPreview(
 		}
 		return sourceTurns.Turns(sessionID)
 	})
-	var opts []kickstart.ListingPreviewOption
+	// The quick leading read the pane paints first. A session the store already
+	// holds is answered whole in one step, so only a harness read is ever split
+	// in two.
+	firstTurns := kickstart.SessionFirstTurnsFunc(func(sessionID string) ([]ingest.Turn, bool, error) {
+		if storedTurns != nil {
+			recorded, held, err := storedTurns(sessionID)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(recorded) > 0 {
+				return recorded, false, nil
+			}
+			if held {
+				return nil, false, nil
+			}
+		}
+		return sourceTurns.FirstTurns(sessionID)
+	})
+	// The notice reports what the bounded harness read left out. A session the
+	// store already answered has no harness read behind it, so its notice is
+	// empty and the pane shows the stored turns alone.
+	opts := []kickstart.ListingPreviewOption{
+		kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
+		kickstart.WithSessionFirstTurns(firstTurns),
+		// The scrolled continuation. A session the store already answered has no
+		// harness read behind it, so it reports nothing more and the pane offers
+		// no continuation for it.
+		kickstart.WithSessionMoreTurns(sourceTurns.MoreTurns, sourceTurns.HasMore),
+	}
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
 	}

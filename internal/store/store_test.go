@@ -156,7 +156,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	//   seed) are data-only. V40 adds the durable association ledger and V41 adds
 	//   its normalized annotation target table. V43 adds the publication receipt
 	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
-	//   cache.
+	//   cache. V45 adds the OpenCode change cursor.
 	var tableCount int
 	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -167,8 +167,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 51 {
-		t.Errorf("expected 51 tables including the Claude discovery evidence cache, got %d", tableCount)
+	if tableCount != 52 {
+		t.Errorf("expected 52 tables including the OpenCode change cursor, got %d", tableCount)
 	}
 
 	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
@@ -205,15 +205,16 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	}
 
 	// Verify user_version was set by the migration framework.
-	// All 45 migrations run, so user_version = 45. (V35 adds the FTS5 virtual
+	// All 46 migrations run, so user_version = 46. (V35 adds the FTS5 virtual
 	// table + shadow tables; V36 seeds the user.custom_label annotation type;
 	// V37/V38 add the sessions/pulled_transcripts license_id columns; V39 seeds
 	// the quality.turn_outcome/quality.turn_flag annotation types. V40/V41 add
 	// the durable association ledger and its annotation target table; V42 admits
 	// Strike in the closed harness mirrors; V43 adds publication receipts and
 	// attempt diagnostics; V44 adds the Claude discovery evidence cache; V45
-	// adds sessions.session_origin/origin_version and widens the evidence
-	// cache with its origin column.)
+	// adds the OpenCode change cursor; V46 adds
+	// sessions.session_origin/origin_version and widens the evidence cache
+	// with its origin column.)
 	var userVersion int
 	err = sqlitex.ExecuteTransient(conn, `PRAGMA user_version;`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -224,8 +225,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
-	if userVersion != 45 {
-		t.Errorf("expected user_version=45 after all migrations, got %d", userVersion)
+	if userVersion != 46 {
+		t.Errorf("expected user_version=46 after all migrations, got %d", userVersion)
 	}
 }
 
@@ -2268,5 +2269,47 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 	}
 	if stale1[0] != sid3 {
 		t.Errorf("ListStaleIndexSessions(1): expected session 33..., got %s", stale1[0])
+	}
+}
+
+// indexVersionBeforeOpenCodeGraph is the index version in force before the
+// OpenCode entry shape changed. A session stored at this version must be re-read
+// as stale under the current version, so the OpenCode indexer output change
+// actually re-indexes existing sessions.
+const indexVersionBeforeOpenCodeGraph = 12
+
+// TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterVersionBump proves that
+// an OpenCode session indexed at the version before the entry shape changed is
+// stale under the current index version, so the version bump re-indexes it.
+func TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterVersionBump(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	hash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const rawSession = "44444444-4444-4444-4444-444444444444"
+	entries := []ingest.StoreEntry{
+		makeStoreEntry(t, rawSession, hash, "github.com-test", defaults.HarnessOpenCode, 1700000000000, 100, 50),
+	}
+	if err := s.InsertSessions(ctx, entries); err != nil {
+		t.Fatalf("InsertSessions: %v", err)
+	}
+	sid, _ := ingest.NewSessionID(rawSession)
+	if err := s.UpdateIndexState(ctx, sid, indexVersionBeforeOpenCodeGraph, 1705276800000); err != nil {
+		t.Fatalf("UpdateIndexState(opencode, pre-graph version): %v", err)
+	}
+
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
+	if err != nil {
+		t.Fatalf("ListStaleIndexSessions(current): %v", err)
+	}
+	found := false
+	for _, staleID := range stale {
+		if staleID == sid {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", indexVersionBeforeOpenCodeGraph, ingest.CurrentIndexVersion)
 	}
 }

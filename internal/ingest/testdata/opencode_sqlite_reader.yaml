@@ -1,4 +1,9 @@
-declared_page_cases: 3
+# required_* lists name entries that must stay present; removing one goes red by
+# name. methods is also checked as an exact set against the production interface.
+required_page_cases:
+  - session-pages-hide-sentinel
+  - message-pages-preserve-tie-break
+  - part-pages-preserve-id-order
 page_cases:
   - name: session-pages-hide-sentinel
     kind: sessions
@@ -34,14 +39,31 @@ page_cases:
       - ids: [part_z]
         has_next: false
 
-declared_invalid_identifiers: 1
+required_invalid_identifiers:
+  - part-id-surrounding-whitespace
 invalid_identifiers:
   - name: part-id-surrounding-whitespace
     kind: part
     value: " bad-part "
     error_contains: before source access
 
-declared_methods: 7
+required_methods:
+  - Catalog
+  - Close
+  - CurrentSessionIDs
+  - CurrentMessages
+  - CurrentSessionHasSubstantive
+  - LegacyMessages
+  - LegacySessionParts
+  - LegacySessionPayloadSize
+  - CurrentSessionPayloadSize
+  - LegacySessionIDs
+  - CurrentFreshnessBySession
+  - LegacyFreshnessBySession
+  - SessionRecords
+  - ProjectAttribution
+  - EventSequenceBySession
+  - MaxEventSeq
 methods:
   - name: Catalog
     signature: "func(context.Context) (ingest.OpenCodeSchemaEvidence, error)"
@@ -51,14 +73,37 @@ methods:
     signature: "func(context.Context, ingest.OpenCodeCurrentSessionPageRequest) (ingest.OpenCodeCurrentSessionPage, error)"
   - name: CurrentMessages
     signature: "func(context.Context, ingest.OpenCodeCurrentPageRequest) (ingest.OpenCodeCurrentPage, error)"
+  - name: CurrentSessionHasSubstantive
+    signature: "func(context.Context, ingest.OpenCodeCurrentSessionID) (bool, error)"
   - name: LegacyMessages
     signature: "func(context.Context, ingest.OpenCodeLegacyMessagePageRequest) (ingest.OpenCodeLegacyMessagePage, error)"
-  - name: LegacyParts
-    signature: "func(context.Context, ingest.OpenCodeLegacyPartPageRequest) (ingest.OpenCodeLegacyPartPage, error)"
+  - name: LegacySessionParts
+    signature: "func(context.Context, ingest.OpenCodeLegacySessionPartPageRequest) (ingest.OpenCodeLegacyPartPage, error)"
+  - name: LegacySessionPayloadSize
+    signature: "func(context.Context, ingest.OpenCodeLegacySessionID) (ingest.OpenCodePayloadSize, error)"
+  - name: CurrentSessionPayloadSize
+    signature: "func(context.Context, ingest.OpenCodeCurrentSessionID) (ingest.OpenCodePayloadSize, error)"
   - name: LegacySessionIDs
     signature: "func(context.Context, ingest.OpenCodeLegacySessionPageRequest) (ingest.OpenCodeLegacySessionPage, error)"
+  - name: CurrentFreshnessBySession
+    signature: "func(context.Context) (map[string]time.Time, error)"
+  - name: LegacyFreshnessBySession
+    signature: "func(context.Context) (map[string]time.Time, error)"
+  - name: SessionRecords
+    signature: "func(context.Context, ingest.OpenCodeSessionRecordPageRequest) (ingest.OpenCodeSessionRecordPage, error)"
+  - name: ProjectAttribution
+    signature: "func(context.Context) (ingest.OpenCodeProjectAttribution, error)"
+  - name: EventSequenceBySession
+    signature: "func(context.Context) (ingest.OpenCodeEventSequence, error)"
+  - name: MaxEventSeq
+    signature: "func(context.Context, ingest.OpenCodeSessionLinkID) (ingest.OpenCodeSessionSeq, error)"
 
-declared_signature_rules: 5
+required_signature_rules:
+  - raw-sqlite-handle
+  - generic-arguments
+  - callback
+  - stringly-identity
+  - bare-sql-string
 signature_rules:
   - name: raw-sqlite-handle
     kind: contains
@@ -76,7 +121,12 @@ signature_rules:
     kind: direct_string
     token: string
 
-declared_guard_mutations: 5
+required_guard_mutations:
+  - reject-raw-sqlite-handle
+  - reject-generic-arguments
+  - reject-callback
+  - reject-bare-sql-string
+  - reject-stringly-identity
 guard_mutations:
   - name: reject-raw-sqlite-handle
     kind: raw_handle
@@ -94,7 +144,11 @@ guard_mutations:
     kind: string_id
     error_contains: stringly-identity
 
-declared_loader_mutations: 4
+required_loader_mutations:
+  - reject-unknown-field
+  - reject-trailing-document
+  - reject-declared-count-drift
+  - reject-duplicate-method
 loader_mutations:
   - name: reject-unknown-field
     kind: unknown_field
@@ -104,7 +158,7 @@ loader_mutations:
     error_contains: exactly one YAML document
   - name: reject-declared-count-drift
     kind: declared_count
-    error_contains: row guard
+    error_contains: missing required method
   - name: reject-duplicate-method
     kind: duplicate_method
     error_contains: duplicates name

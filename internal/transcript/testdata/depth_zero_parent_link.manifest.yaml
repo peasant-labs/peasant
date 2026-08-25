@@ -1,0 +1,5 @@
+expectedCaseCount: 3
+requiredNames:
+  - depth_zero_parent_link_keeps_its_own_turn
+  - overlay_does_not_adopt_a_linked_depth_zero_entry
+  - overlay_still_adopts_a_depth_one_child

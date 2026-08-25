@@ -39,6 +39,17 @@ type SessionLocationLookup interface {
 	LookupSessionLocation(ctx context.Context, sessionID SessionID) (hostSlug string, parentID string, err error)
 }
 
+// OpenCodeSeqCursorStore is the optional store capability that records the
+// OpenCode change cursor: the last ingested newest-event sequence per session.
+// A store that implements it lets the pipeline re-ingest a session whose current
+// sequence moved past the stored value even when no time column changed, closing
+// the in-place-rewrite blind spot. A store that does not implement it keeps the
+// clock-only behaviour.
+type OpenCodeSeqCursorStore interface {
+	BulkLookupOpenCodeSeqCursors(ctx context.Context, sessionIDs []SessionID) (map[SessionID]int64, error)
+	UpsertOpenCodeSeqCursor(ctx context.Context, sessionID SessionID, seq int64) error
+}
+
 // SessionStore abstracts SQLite persistence for the pipeline.
 // Defined in ingest (not store) to maintain the DI direction:
 // store implements this interface; pipeline depends on it.

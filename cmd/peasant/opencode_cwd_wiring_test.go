@@ -19,6 +19,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"zombiezen.com/go/sqlite"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 const mountedOpenCodeRemote = "git@github.com:acme/tool.git"
@@ -458,4 +460,94 @@ func snapshotMountedOpenCodeJSON(t testing.TB, root string) map[string]string {
 		t.Fatalf("snapshot mounted OpenCode JSON source: %v", err)
 	}
 	return snapshot
+}
+
+// setMountedOpenCodeSessionDirectory rewrites every session row's working
+// directory in the synthetic OpenCode database. An empty directory clears the
+// column to null, so discovery yields a session with no working directory.
+func setMountedOpenCodeSessionDirectory(t *testing.T, databasePath, directory string) {
+	t.Helper()
+	connection, err := sqlite.OpenConn(databasePath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("open synthetic OpenCode database for attribution rewrite: %v", err)
+	}
+	var value any
+	if directory != "" {
+		value = directory
+	}
+	updateErr := sqlitex.ExecuteTransient(connection, "UPDATE session SET directory = ?1", &sqlitex.ExecOptions{Args: []any{value}})
+	closeErr := connection.Close()
+	if updateErr != nil || closeErr != nil {
+		t.Fatalf("rewrite synthetic OpenCode session directory: %v", errorsJoin(updateErr, closeErr))
+	}
+}
+
+func errorsJoin(errs ...error) error {
+	var joined []error
+	for _, err := range errs {
+		if err != nil {
+			joined = append(joined, err)
+		}
+	}
+	if len(joined) == 0 {
+		return nil
+	}
+	message := ""
+	for index, err := range joined {
+		if index > 0 {
+			message += "; "
+		}
+		message += err.Error()
+	}
+	return fmt.Errorf("%s", message)
+}
+
+// TestOpenCodeSQLiteSessionDirectoryGroupsUnderProject proves that a
+// SQLite-discovered OpenCode session whose working directory is under a git
+// repository groups under that project in the kickstart selection listing: the
+// git remote is resolved from the session's working directory through the
+// fixture git resolver. Clearing the working directory moves the session to the
+// name-keyed catch-all, so the attribution read is what places it under the
+// project.
+func TestOpenCodeSQLiteSessionDirectoryGroupsUnderProject(t *testing.T) {
+	base := t.TempDir()
+	clone := filepath.Join(base, "team", "tool")
+	if err := os.MkdirAll(clone, 0o755); err != nil {
+		t.Fatalf("create synthetic clone directory: %v", err)
+	}
+
+	t.Run("directory-under-repo-groups-under-project", func(t *testing.T) {
+		materialized := testfixture.MaterializeByName(t, "hybrid-attribution")
+		setMountedOpenCodeSessionDirectory(t, materialized.Path, clone)
+		root := filepath.Dir(materialized.Path)
+		git := newMountedOpenCodeGitResolver(clone)
+		_, listings, _ := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, git, nil, nil, nil)
+		if len(listings) == 0 {
+			t.Fatal("kickstart discovered no OpenCode sessions from the attribution database")
+		}
+		for _, listing := range listings {
+			if listing.GitRemote != mountedOpenCodeRemote {
+				t.Errorf("session %s remote = %q, want the resolved project remote %q, not the catch-all", listing.SessionID, listing.GitRemote, mountedOpenCodeRemote)
+			}
+			if listing.WorkingDir != clone {
+				t.Errorf("session %s working directory = %q, want the session-row directory %q", listing.SessionID, listing.WorkingDir, clone)
+			}
+		}
+	})
+
+	t.Run("cleared-directory-falls-to-catch-all", func(t *testing.T) {
+		materialized := testfixture.MaterializeByName(t, "hybrid-attribution")
+		setMountedOpenCodeSessionDirectory(t, materialized.Path, "")
+		root := filepath.Dir(materialized.Path)
+		git := newMountedOpenCodeGitResolver(clone)
+		_, listings, _ := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, git, nil, nil, nil)
+		if len(listings) == 0 {
+			t.Fatal("kickstart discovered no OpenCode sessions after clearing the working directory")
+		}
+		for _, listing := range listings {
+			if listing.GitRemote != "" || listing.WorkingDir != "" {
+				t.Errorf("session %s with no working directory = remote %q workingDir %q, want the catch-all with an empty remote", listing.SessionID, listing.GitRemote, listing.WorkingDir)
+			}
+		}
+	})
 }

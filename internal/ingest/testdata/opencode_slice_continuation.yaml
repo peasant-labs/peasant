@@ -1,0 +1,146 @@
+# Resumable slice reads of an OpenCode SQLite session, driven by
+# TestOpenCodeSliceContinuation (internal/ingest/opencode_slice_continuation_test.go).
+#
+# A preview extends as the reader scrolls: it reads one budget-sized slice at a
+# time, appends the turns it folds, and asks for the next slice. Every case here
+# reads one synthetic session that way, from the zero cursor to exhaustion, and
+# checks the properties that make appending safe.
+#
+# Four properties every case asserts, whatever its numbers:
+#   - NO MESSAGE IS SLICED TWICE. A message identifier that appeared in one
+#     slice must never appear in another, which is what stops a turn being
+#     duplicated or half-duplicated at the seam.
+#   - NOTHING IS INVENTED. Every identifier a slice emits is one the
+#     whole-session read holds.
+#   - NOTHING IS LOST, for a session whose part identifiers sort in the same
+#     order as the messages they belong to. Real OpenCode part identifiers do:
+#     they are minted as a message streams, so a part of a later message always
+#     sorts later. Measured on a real 2.2 GiB store, 4,559 consecutive part rows
+#     showed ZERO inversions. A case whose synthetic identifiers are hand-written
+#     words rather than minted ones can invert, and declares expect_complete
+#     false plus the exact identifiers it leaves out - see that case's comment.
+#   - THE CHAIN TERMINATES. It reports no more content within max_slices.
+#   - THE COUNTS ARE HONEST. The cursor's consumed byte and row counts never
+#     shrink and never exceed the whole-session totals it carries.
+#
+# budget_bytes is deliberately tiny in most cases so a small synthetic session
+# still needs several slices; a session whose parts all belong to one message
+# additionally exercises the drain that keeps a slice ending on a message
+# boundary.
+#
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - a-legacy-session-read-one-tiny-slice-at-a-time-exhausts-without-repeating-a-message
+  - a-current-session-read-one-tiny-slice-at-a-time-exhausts-without-repeating-a-message
+  - a-legacy-session-whose-budget-cuts-inside-a-multi-part-message-still-ends-on-a-message-boundary
+  - a-legacy-session-read-with-one-generous-slice-finishes-in-that-slice
+  - a-legacy-session-with-an-orphan-part-keeps-the-orphan-exactly-once
+  - a-part-that-sorts-after-a-later-messages-parts-is-left-out-never-shown-twice
+  - a-slice-that-cuts-inside-its-message-window-drops-the-rest-of-the-window-and-reads-it-again
+  - a-part-that-blocks-two-slices-in-a-row-is-stepped-over-so-the-chain-still-finishes
+
+cases:
+  - name: a-legacy-session-read-one-tiny-slice-at-a-time-exhausts-without-repeating-a-message
+    source_fixture: legacy-scrollable-session
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzS1]
+    budget_bytes: 8
+    max_slices: 40
+    expect_multiple_slices: true
+    expect_complete: true
+
+  - name: a-current-session-read-one-tiny-slice-at-a-time-exhausts-without-repeating-a-message
+    source_fixture: semantic-parity-current
+    origin: current
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5]
+    budget_bytes: 8
+    max_slices: 40
+    expect_multiple_slices: true
+    expect_complete: true
+
+  # Four of this session's five parts hang off ONE message. A budget of a single
+  # byte is spent on the first of them, so the slice must drain the other three
+  # rather than stopping between them and handing the next slice a message it
+  # would have to emit a second time.
+  - name: a-legacy-session-whose-budget-cuts-inside-a-multi-part-message-still-ends-on-a-message-boundary
+    source_fixture: legacy-scrollable-session
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzS1]
+    budget_bytes: 4
+    max_slices: 40
+    expect_multiple_slices: true
+    expect_complete: true
+
+  # A budget larger than the whole session is the one-slice case: the first
+  # slice is the entire preview and reports nothing more.
+  - name: a-legacy-session-read-with-one-generous-slice-finishes-in-that-slice
+    source_fixture: legacy-scrollable-session
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzS1]
+    budget_bytes: 1048576
+    max_slices: 4
+    expect_multiple_slices: false
+    expect_complete: true
+
+  # An orphan part has no message row at all. The whole-session read attaches it
+  # to a synthetic root; the sliced read must produce that root exactly once,
+  # never one per slice.
+  - name: a-legacy-session-with-an-orphan-part-keeps-the-orphan-exactly-once
+    source_fixture: canonical-selection-mixed
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzvD]
+    budget_bytes: 1
+    max_slices: 40
+    expect_multiple_slices: false
+    expect_complete: true
+
+  # This session's part identifiers are hand-written words, so they sort against
+  # the messages they belong to rather than with them: `part_user_text` belongs
+  # to the FIRST message but sorts after all three parts of the SECOND. A read
+  # that walks parts in identifier order therefore reaches it only after the
+  # slice holding its message has closed.
+  #
+  # The rule the read holds to is that it never shows a turn twice and never
+  # invents one. The price, on data ordered like this, is that the late part is
+  # left out - the same thing today's single bounded read does to everything
+  # past its bound. Real OpenCode identifiers are minted as a message streams
+  # and do not invert.
+  - name: a-part-that-sorts-after-a-later-messages-parts-is-left-out-never-shown-twice
+    source_fixture: legacy-mounted-projection
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5]
+    budget_bytes: 1
+    max_slices: 40
+    expect_multiple_slices: false
+    expect_complete: false
+    expect_missing_parts: [part_user_text]
+
+  # The budget here lets the message pass take TWO messages but lets the part
+  # pass reach only the first message's parts. The slice must drop the second
+  # message rather than showing it with no content and leaving the next slice to
+  # either show it again or skip its parts; the next slice reads it whole.
+  - name: a-slice-that-cuts-inside-its-message-window-drops-the-rest-of-the-window-and-reads-it-again
+    source_fixture: legacy-scrollable-session
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzS1]
+    budget_bytes: 800
+    max_slices: 40
+    expect_multiple_slices: true
+    expect_complete: true
+
+  # `part_zz_late` belongs to the FIRST message but sorts after the parts of the
+  # two messages that follow it, so it is still unread when its message's slice
+  # has closed and it blocks the slice after that one too. Blocking twice is what
+  # tells the read its message came BEFORE the window rather than after it, so
+  # the slice steps over it and the chain finishes instead of stalling on it
+  # forever. It is the one row the scrolled preview leaves out.
+  - name: a-part-that-blocks-two-slices-in-a-row-is-stepped-over-so-the-chain-still-finishes
+    source_fixture: legacy-out-of-order-parts
+    origin: legacy
+    session_ids: [ses_3cd91f52effeXd3QAJ54jOyzS2]
+    budget_bytes: 8
+    max_slices: 12
+    expect_multiple_slices: true
+    expect_complete: false
+    expect_missing_parts: [part_zz_late]
