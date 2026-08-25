@@ -8,9 +8,10 @@ Release, which holds the signed artifacts and checksums.
 ## [Unreleased]
 
 ### Fixed
-- Session titles now skip three more harness-injected first turns: the Codex
-  plugin catalog and review-action envelope, and a Claude Code agent message.
-  A recompute of stored titles picks the change up (redact v0.1.3-rc1).
+- Session titles now skip four more harness-injected first turns: the Codex
+  plugin catalog and review-action envelope, a Claude Code agent message, and
+  the "Another Claude session sent a message:" turn that delivers one. A
+  recompute of stored titles picks the change up (redact v0.1.3-rc2).
 - A session title is taken from the first user turn that holds real user prose.
   A leading harness-injected turn (a slash command wrapper, local command output,
   a system reminder, an environment context block, or a skill body) is skipped,
