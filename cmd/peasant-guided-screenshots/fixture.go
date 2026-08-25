@@ -15,20 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	requiredSheetCount             = 4
-	requiredGuidedSectionCount     = 6
-	requiredGuidedCaptureCount     = 24
-	requiredSelectionStateCount    = 6
-	requiredSelectionCaptureCount  = 20
-	requiredSelectionSessionCount  = 6
-	requiredSelectionHarnessCount  = 2
-	requiredSelectionIngestedCount = 1
-	requiredPushStateCount         = 5
-	requiredPushCaptureCount       = 20
-	requiredPushSessionCount       = 3
-)
-
 type sheetName string
 
 const (
@@ -229,6 +215,13 @@ type selectionFixture struct {
 	// through the production reader.
 	SourceTranscripts map[string][]string `yaml:"sourceTranscripts"`
 	Ingested          []string            `yaml:"ingested"`
+	// RequiredSessionNames, RequiredHarnessNames, and RequiredIngestedNames
+	// are deletion-protection manifests: every listed name must be present
+	// among Listings' session ids, Listings' harnesses, and Ingested
+	// respectively. None bounds how many rows or distinct values exist.
+	RequiredSessionNames  []string `yaml:"requiredSessionNames"`
+	RequiredHarnessNames  []string `yaml:"requiredHarnessNames"`
+	RequiredIngestedNames []string `yaml:"requiredIngestedNames"`
 }
 
 type selectionRepositoryFixture struct {
@@ -244,26 +237,19 @@ type selectionTurnFixture struct {
 }
 
 type captureDocument struct {
-	ExpectedPushStateCount         int                       `yaml:"expectedPushStateCount"`
-	ExpectedPushCaptureCount       int                       `yaml:"expectedPushCaptureCount"`
-	ExpectedPushSessionCount       int                       `yaml:"expectedPushSessionCount"`
-	PushStates                     []pushStateFixture        `yaml:"pushStates"`
-	PushCaptures                   []pushCaptureFixture      `yaml:"pushCaptures"`
-	Push                           pushFixture               `yaml:"push"`
-	ExpectedSheetCount             int                       `yaml:"expectedSheetCount"`
-	ExpectedGuidedSectionCount     int                       `yaml:"expectedGuidedSectionCount"`
-	ExpectedGuidedCaptureCount     int                       `yaml:"expectedGuidedCaptureCount"`
-	ExpectedSelectionStateCount    int                       `yaml:"expectedSelectionStateCount"`
-	ExpectedSelectionCaptureCount  int                       `yaml:"expectedSelectionCaptureCount"`
-	ExpectedSelectionSessionCount  int                       `yaml:"expectedSelectionSessionCount"`
-	ExpectedSelectionHarnessCount  int                       `yaml:"expectedSelectionHarnessCount"`
-	ExpectedSelectionIngestedCount int                       `yaml:"expectedSelectionIngestedCount"`
-	Sheets                         []sheetFixture            `yaml:"sheets"`
-	GuidedSections                 []guidedSectionFixture    `yaml:"guidedSections"`
-	SelectionStates                []selectionStateFixture   `yaml:"selectionStates"`
-	Selection                      selectionFixture          `yaml:"selection"`
-	GuidedCaptures                 []guidedCaptureFixture    `yaml:"guidedCaptures"`
-	SelectionCaptures              []selectionCaptureFixture `yaml:"selectionCaptures"`
+	// RequiredPushSessionNames is a deletion-protection manifest: every
+	// listed session id must be present in Push.Sessions. It does not bound
+	// how many push sessions exist.
+	RequiredPushSessionNames []string                  `yaml:"requiredPushSessionNames"`
+	PushStates               []pushStateFixture        `yaml:"pushStates"`
+	PushCaptures             []pushCaptureFixture      `yaml:"pushCaptures"`
+	Push                     pushFixture               `yaml:"push"`
+	Sheets                   []sheetFixture            `yaml:"sheets"`
+	GuidedSections           []guidedSectionFixture    `yaml:"guidedSections"`
+	SelectionStates          []selectionStateFixture   `yaml:"selectionStates"`
+	Selection                selectionFixture          `yaml:"selection"`
+	GuidedCaptures           []guidedCaptureFixture    `yaml:"guidedCaptures"`
+	SelectionCaptures        []selectionCaptureFixture `yaml:"selectionCaptures"`
 }
 
 //go:embed testdata/captures.yaml
@@ -283,9 +269,6 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 		}
 		return document, fmt.Errorf("screenshot fixture must contain exactly one YAML document: %w", err)
 	}
-	if err := validateDeclaredCounts(document); err != nil {
-		return document, err
-	}
 	if err := validateSheets(document.Sheets); err != nil {
 		return document, err
 	}
@@ -301,7 +284,7 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 	if err := validatePushMatrix(document.PushStates, document.PushCaptures); err != nil {
 		return document, err
 	}
-	if err := validatePushData(document.Push); err != nil {
+	if err := validatePushData(document.Push, document.RequiredPushSessionNames); err != nil {
 		return document, err
 	}
 	return document, nil
@@ -351,11 +334,7 @@ func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture
 // validatePushData requires a complete candidate inventory: every redaction
 // state a session can carry, plus one session the branch-aware selection
 // withheld, so the captured screens show every row form the wizard renders.
-func validatePushData(fixture pushFixture) error {
-	if len(fixture.Sessions) != requiredPushSessionCount {
-		return fmt.Errorf("screenshot fixture push sessions: actual=%d required=%d",
-			len(fixture.Sessions), requiredPushSessionCount)
-	}
+func validatePushData(fixture pushFixture, requiredSessionNames []string) error {
 	ids := make(map[string]bool, len(fixture.Sessions))
 	states := make(map[pushRedactionState]bool, len(fixture.Sessions))
 	withheld := 0
@@ -370,6 +349,9 @@ func validatePushData(fixture pushFixture) error {
 		if session.Withheld {
 			withheld++
 		}
+	}
+	if err := requireNames("push session", requiredSessionNames, ids); err != nil {
+		return err
 	}
 	if len(states) != 3 {
 		return fmt.Errorf("screenshot fixture push sessions cover %d redaction states, want all 3", len(states))
@@ -401,32 +383,26 @@ func validatePushData(fixture pushFixture) error {
 	return nil
 }
 
-func validateDeclaredCounts(document captureDocument) error {
-	if document.ExpectedSelectionHarnessCount != requiredSelectionHarnessCount {
-		return fmt.Errorf("screenshot fixture selection harnesses: declared=%d required=%d",
-			document.ExpectedSelectionHarnessCount, requiredSelectionHarnessCount)
+// requireNames asserts every name in required is present in present, and
+// that required itself declares no blank or duplicate name. kind identifies
+// the axis (e.g. "selection session", "push session") in failure messages.
+// It is a deletion-protection manifest, not a row count: it never bounds how
+// many rows exist, only that the named ones remain.
+func requireNames(kind string, required []string, present map[string]bool) error {
+	if len(required) == 0 {
+		return fmt.Errorf("screenshot fixture required %s names is empty; list every %s name the fixture must retain", kind, kind)
 	}
-	checks := []struct {
-		name     string
-		declared int
-		actual   int
-		required int
-	}{
-		{name: "sheets", declared: document.ExpectedSheetCount, actual: len(document.Sheets), required: requiredSheetCount},
-		{name: "guided sections", declared: document.ExpectedGuidedSectionCount, actual: len(document.GuidedSections), required: requiredGuidedSectionCount},
-		{name: "guided captures", declared: document.ExpectedGuidedCaptureCount, actual: len(document.GuidedCaptures), required: requiredGuidedCaptureCount},
-		{name: "selection states", declared: document.ExpectedSelectionStateCount, actual: len(document.SelectionStates), required: requiredSelectionStateCount},
-		{name: "selection captures", declared: document.ExpectedSelectionCaptureCount, actual: len(document.SelectionCaptures), required: requiredSelectionCaptureCount},
-		{name: "selection sessions", declared: document.ExpectedSelectionSessionCount, actual: len(document.Selection.Listings), required: requiredSelectionSessionCount},
-		{name: "selection ingested sessions", declared: document.ExpectedSelectionIngestedCount, actual: len(document.Selection.Ingested), required: requiredSelectionIngestedCount},
-		{name: "push states", declared: document.ExpectedPushStateCount, actual: len(document.PushStates), required: requiredPushStateCount},
-		{name: "push captures", declared: document.ExpectedPushCaptureCount, actual: len(document.PushCaptures), required: requiredPushCaptureCount},
-		{name: "push sessions", declared: document.ExpectedPushSessionCount, actual: len(document.Push.Sessions), required: requiredPushSessionCount},
-	}
-	for _, check := range checks {
-		if check.declared != check.required || check.actual != check.required {
-			return fmt.Errorf("screenshot fixture %s: declared=%d actual=%d required=%d",
-				check.name, check.declared, check.actual, check.required)
+	seen := make(map[string]bool, len(required))
+	for _, name := range required {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("screenshot fixture required %s names has a blank entry", kind)
+		}
+		if seen[name] {
+			return fmt.Errorf("screenshot fixture required %s names repeats %q", kind, name)
+		}
+		seen[name] = true
+		if !present[name] {
+			return fmt.Errorf("screenshot fixture is missing required %s %q; restore the row or remove it from the required names list", kind, name)
 		}
 	}
 	return nil
@@ -470,7 +446,7 @@ func validateGuidedMatrix(sections []guidedSectionFixture, captures []guidedCapt
 		sectionRows[section.Key] = section
 	}
 	for _, key := range []guidedSection{
-		guidedSectionAutoIngest, guidedSectionPrivacy, guidedSectionLicense,
+		guidedSectionAutoIngest, guidedSectionPublication, guidedSectionPrivacy, guidedSectionLicense,
 		guidedSectionDestination, guidedSectionRetention,
 	} {
 		if sectionRows[key].Key == "" {
@@ -585,9 +561,11 @@ func validateSelectionData(selection selectionFixture) error {
 			}
 		}
 	}
-	if len(harnesses) != requiredSelectionHarnessCount {
-		return fmt.Errorf("screenshot fixture selection harnesses: actual=%d required=%d",
-			len(harnesses), requiredSelectionHarnessCount)
+	if err := requireNames("selection session", selection.RequiredSessionNames, sessionIDs); err != nil {
+		return err
+	}
+	if err := requireNames("selection harness", selection.RequiredHarnessNames, harnesses); err != nil {
+		return err
 	}
 	for _, listing := range selection.Listings {
 		for _, childID := range listing.SubagentIDs {
@@ -632,6 +610,9 @@ func validateSelectionData(selection selectionFixture) error {
 			return fmt.Errorf("screenshot fixture ingested session %q is unknown or duplicated", sessionID)
 		}
 		seenIngested[sessionID] = true
+	}
+	if err := requireNames("selection ingested session", selection.RequiredIngestedNames, seenIngested); err != nil {
+		return err
 	}
 	return nil
 }

@@ -1,14 +1,7 @@
-expectedSheetCount: 4
-expectedGuidedSectionCount: 6
-expectedGuidedCaptureCount: 24
-expectedSelectionStateCount: 6
-expectedSelectionCaptureCount: 20
-expectedSelectionSessionCount: 6
-expectedSelectionHarnessCount: 2
-expectedSelectionIngestedCount: 1
-expectedPushStateCount: 5
-expectedPushCaptureCount: 20
-expectedPushSessionCount: 3
+requiredPushSessionNames:
+  - push-current-0001
+  - push-stale-0002
+  - push-raw-0003
 
 sheets:
   - name: guided-dark
@@ -126,6 +119,18 @@ selection:
       - '{"type":"user","uuid":"h1","message":{"role":"user","content":"scrubbed-source-body: peasant read in place from the harness file"}}'
       - '{"type":"assistant","uuid":"h2","parentUuid":"h1","message":{"role":"assistant","content":[{"type":"text","text":"peasant copies nothing and imports nothing to show this preview"}]}}'
   ingested: [cc-imported]
+  requiredSessionNames:
+    - cc-parent
+    - cc-child
+    - cc-grandchild
+    - cc-imported
+    - 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
+    - cur-1
+  requiredHarnessNames:
+    - claude-code
+    - cursor
+  requiredIngestedNames:
+    - cc-imported
 
 guidedCaptures:
   - {name: auto-ingest-dark-80x24, section: auto-ingest, theme: dark, width: 80, height: 24}

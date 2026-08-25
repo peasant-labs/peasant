@@ -1,4 +1,22 @@
-expectedCaseCount: 18
+requiredNames:
+  - command_name_only
+  - builtin_full_wrapper
+  - skill_full_wrapper_message_first
+  - name_and_arguments_only
+  - surrounding_and_between_whitespace
+  - leading_user_prose
+  - trailing_user_prose
+  - user_prose_between_wrappers
+  - unknown_wrapper
+  - missing_closing_tag
+  - mismatched_closing_tag
+  - nested_unknown_markup
+  - empty_command_name
+  - command_arguments_without_name
+  - command_name_without_slash
+  - duplicate_command_name
+  - complete_wrapper_at_ambiguous_preview_limit
+  - assistant_role_is_not_reclassified
 cases:
   - name: command_name_only
     harness: claude-code

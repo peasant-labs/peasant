@@ -1,4 +1,15 @@
-declared_rows: 11
+required_names:
+  - exact unique teammate spawn links roots
+  - teammate without matching spawn stays root
+  - duplicate parent identity is ambiguous
+  - repeated spawn from one parent remains linked
+  - duplicate teammate identity is ambiguous
+  - agent call without native spawn stays root
+  - incomplete native spawn stays root
+  - nested spawn shaped tool payload stays root
+  - teammate delivery without native spawn stays root
+  - shutdown event does not remove established link
+  - filesystem nested subagent remains linked
 cases:
   - name: exact unique teammate spawn links roots
     files:

@@ -1,5 +1,14 @@
-declared_records: 4
-declared_rejections: 5
+required_record_names:
+  - root transcript with an identity and two spawns
+  - root transcript with an ambiguous identity keeps no identity
+  - root transcript without a conversation record
+  - subagent transcript carries only the conversation answer
+required_rejection_names:
+  - unknown scope
+  - negative size
+  - conversation flag outside the closed set
+  - spawn list that is not JSON
+  - half an identity
 
 # Records the store must hold and return unchanged.
 records:
