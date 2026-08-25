@@ -245,6 +245,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Branch:        evidence.Branch,
 				CWD:           evidence.CWD,
 				Origin:        evidence.Origin,
+				Signal:        evidence.Signal,
 			}
 			rootIndex[entry.sessionID] = len(sessions)
 			sessions = append(sessions, ds)
@@ -286,6 +287,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				DebugPaths:    []ResolvedPath{},
 				ModTime:       info.ModTime(),
 				Origin:        evidence.Origin,
+				Signal:        evidence.Signal,
 			}
 			sessions = append(sessions, ds)
 		}
@@ -405,7 +407,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 		// carries no evidence, so the rule declares it unknown, which is the
 		// visible answer.
 		evidence.HasConversationRecord = true
-		evidence.Origin, _ = sessionorigin.Classify(sessionorigin.Evidence{})
+		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
 		return evidence, false
 	}
 
@@ -494,7 +496,7 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	// Mining runs before linking, so a root has no known parent yet. A root that
 	// linking later attaches to a spawner already declares the identity that
 	// makes it agent-driven, so nothing is lost by asking the rule here.
-	evidence.Origin, _ = sessionorigin.Classify(
+	evidence.Origin, evidence.Signal = sessionorigin.Classify(
 		ClaudeOriginEvidence(evidence.Identity, entrypoint, promptSource, firstUserText, false),
 	)
 	return evidence, true
@@ -575,7 +577,7 @@ func (a *ClaudeAdapter) mineClaudeSubagentTranscript(path ResolvedPath, info os.
 	// first step of the rule. The rule is asked rather than answered for it, so
 	// that step 1 keeps exactly one definition and a change to it reaches this
 	// path too.
-	evidence.Origin, _ = sessionorigin.Classify(sessionorigin.Evidence{HasParent: true})
+	evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{HasParent: true})
 	return evidence
 }
 

@@ -1,0 +1,1 @@
+{"type":"user","message":{"role":"user","content":"<command-message>run-tests</command-message>\nRun the test suite."}}

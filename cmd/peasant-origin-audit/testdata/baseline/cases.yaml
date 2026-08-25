@@ -1,0 +1,45 @@
+# A hand-counted mix of shapes under testdata/baseline/claude-projects,
+# one per deciding signal the production rule can reach from real evidence,
+# plus a read-failure case. This is the instrument's own baseline: it proves
+# RunAudit can be WRONG (report a distribution other than this one) before
+# anyone trusts it right on a real store. See manifest.yaml for the deletion
+# guard over these names.
+#
+# relative_path is rooted at testdata/baseline/claude-projects. unreadable
+# cases are made unreadable by the test itself (chmod 0000 on a copy in a
+# temp directory) -- the checked-in file stays normal so the fixture survives
+# a git checkout on any OS/filesystem.
+cases:
+  - name: structured_identity_root
+    relative_path: sample-project/11111111-1111-1111-1111-111111111111.jsonl
+    origin: agent
+    signal: structured-identity
+  - name: programmatic_launch_root
+    relative_path: sample-project/22222222-2222-2222-2222-222222222222.jsonl
+    origin: agent
+    signal: programmatic-entry
+  - name: command_wrapper_root
+    relative_path: sample-project/33333333-3333-3333-3333-333333333333.jsonl
+    origin: user
+    signal: command-invocation
+  - name: bootstrap_text_root
+    relative_path: sample-project/44444444-4444-4444-4444-444444444444.jsonl
+    origin: agent
+    signal: bootstrap-text
+  - name: no_evidence_root
+    relative_path: sample-project/55555555-5555-5555-5555-555555555555.jsonl
+    origin: unknown
+    signal: no-evidence
+  - name: parent_root_with_subagent
+    relative_path: sample-project/66666666-6666-6666-6666-666666666666.jsonl
+    origin: unknown
+    signal: no-evidence
+  - name: subagent_child_is_parent_linked
+    relative_path: sample-project/66666666-6666-6666-6666-666666666666/subagents/agent-abc123.jsonl
+    origin: agent
+    signal: parent-linked
+  - name: unreadable_root_fails_open_to_unknown
+    relative_path: sample-project/77777777-7777-7777-7777-777777777777.jsonl
+    origin: unknown
+    signal: no-evidence
+    unreadable: true

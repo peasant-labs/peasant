@@ -1,0 +1,15 @@
+# Deletion guard for testdata/baseline/cases.yaml, decoded through the shared
+# internal/testutil.SemanticManifest helper rather than a bespoke copy of the
+# same required-name check. Removing a case row (or a fixture file it points
+# at) makes the case list disagree with this manifest, which fails the test
+# loudly instead of silently shrinking the baseline's coverage.
+expectedCaseCount: 8
+requiredNames:
+  - structured_identity_root
+  - programmatic_launch_root
+  - command_wrapper_root
+  - bootstrap_text_root
+  - no_evidence_root
+  - parent_root_with_subagent
+  - subagent_child_is_parent_linked
+  - unreadable_root_fails_open_to_unknown

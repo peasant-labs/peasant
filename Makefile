@@ -1,6 +1,6 @@
 # Run release-validate's per-distribution snapshot matrix on release pull
 # requests before a tag is minted.
-.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test
+.PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
 
 VERSION ?= dev
 
@@ -138,6 +138,18 @@ guided-screenshots:
 
 guided-screenshots-test:
 	go test -race -tags=guided_screenshots ./cmd/peasant-guided-screenshots
+
+# Opt-in, read-only measurement harness for acceptance gate G1 (session
+# origin). Runs the production sessionorigin.Classify rule over the
+# operator's OWN ~/.claude/projects and reports counts per deciding signal.
+# It writes nothing anywhere. The build tag keeps it, and its tests, out of
+# `go build ./...`, `make check`, and the shipped peasant binary -- same
+# footing as guided-screenshots above.
+origin-audit:
+	go run -tags=origin_audit ./cmd/peasant-origin-audit
+
+origin-audit-test:
+	go test -race -tags=origin_audit ./cmd/peasant-origin-audit
 
 build: web
 	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$(VERSION)" -o bin/peasant ./cmd/peasant

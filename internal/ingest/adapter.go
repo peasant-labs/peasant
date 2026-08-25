@@ -77,6 +77,10 @@ type DiscoveredSession struct {
 	// it. An adapter that mines no origin evidence leaves it empty, and the
 	// consumer resolves that to the visible fail-safe value.
 	Origin sessionorigin.Origin
+	// Signal names which rule step decided Origin. It exists purely for
+	// explanatory reporting (the origin audit harness); no storage layer
+	// persists it and no other consumer reads it.
+	Signal sessionorigin.Signal
 }
 
 // AdapterFactory creates a SourceAdapter with injected dependencies.
