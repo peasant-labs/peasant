@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -19,8 +20,11 @@ import (
 var claudeTeammateLinkingYAML []byte
 
 type claudeTeammateFixtures struct {
-	DeclaredRows int                     `yaml:"declared_rows"`
-	Cases        []claudeTeammateFixture `yaml:"cases"`
+	// RequiredNames is a deletion-protection manifest: every listed case
+	// name must be present in Cases. It does not bound how many cases
+	// exist, so adding a new case never requires touching this list.
+	RequiredNames []string                `yaml:"required_names"`
+	Cases         []claudeTeammateFixture `yaml:"cases"`
 }
 
 type claudeTeammateFixture struct {
@@ -42,21 +46,78 @@ type claudeExpectedDiscovery struct {
 
 func loadClaudeTeammateFixtures(t *testing.T) claudeTeammateFixtures {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeTeammateLinkingYAML))
+	fixtures, err := decodeClaudeTeammateFixtures(claudeTeammateLinkingYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fixtures
+}
+
+func decodeClaudeTeammateFixtures(source []byte) (claudeTeammateFixtures, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(source))
 	decoder.KnownFields(true)
 	var fixtures claudeTeammateFixtures
 	if err := decoder.Decode(&fixtures); err != nil {
-		t.Fatalf("decode Claude teammate fixtures: %v", err)
+		return claudeTeammateFixtures{}, fmt.Errorf("decode Claude teammate fixtures: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude teammate fixture must contain exactly one YAML document: %v", err)
+		return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture must contain exactly one YAML document: %v", err)
 	}
-	const expectedRows = 11
-	if fixtures.DeclaredRows != expectedRows || len(fixtures.Cases) != expectedRows {
-		t.Fatalf("Claude teammate fixture row guard failed: declared=%d actual=%d expected=%d", fixtures.DeclaredRows, len(fixtures.Cases), expectedRows)
+	if len(fixtures.RequiredNames) == 0 {
+		return claudeTeammateFixtures{}, errors.New("Claude teammate fixture required_names is empty; list every case name the fixture must retain")
 	}
-	return fixtures
+	present := make(map[string]struct{}, len(fixtures.Cases))
+	for _, testCase := range fixtures.Cases {
+		present[testCase.Name] = struct{}{}
+	}
+	seenRequired := make(map[string]struct{}, len(fixtures.RequiredNames))
+	for _, name := range fixtures.RequiredNames {
+		if name == "" {
+			return claudeTeammateFixtures{}, errors.New("Claude teammate fixture required_names has a blank entry")
+		}
+		if _, duplicate := seenRequired[name]; duplicate {
+			return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture required_names repeats %q", name)
+		}
+		seenRequired[name] = struct{}{}
+		if _, ok := present[name]; !ok {
+			return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture is missing required case %q; restore the row or remove it from required_names", name)
+		}
+	}
+	return fixtures, nil
+}
+
+// TestClaudeTeammateFixtureGuardsRequiredCaseDeletion mutation-proves the
+// required-name manifest: deleting a required case's block must fail the
+// load with a message naming the missing case. This replaces the old
+// declared_rows count guard, which would have also failed on any addition
+// to the fixture.
+func TestClaudeTeammateFixtureGuardsRequiredCaseDeletion(t *testing.T) {
+	t.Parallel()
+
+	// Baseline: the real, unmutated fixture must load cleanly first, so a
+	// failure below is known to come from the mutation and not a broken
+	// manifest.
+	if _, err := decodeClaudeTeammateFixtures(claudeTeammateLinkingYAML); err != nil {
+		t.Fatalf("baseline fixture failed to decode before mutation: %v", err)
+	}
+
+	const firstCaseMarker = "  - name: exact unique teammate spawn links roots\n"
+	const secondCaseMarker = "  - name: teammate without matching spawn stays root\n"
+	firstIndex := bytes.Index(claudeTeammateLinkingYAML, []byte(firstCaseMarker))
+	secondIndex := bytes.Index(claudeTeammateLinkingYAML, []byte(secondCaseMarker))
+	if firstIndex < 0 || secondIndex <= firstIndex {
+		t.Fatalf("could not locate the first case block boundaries in the fixture (first=%d second=%d)", firstIndex, secondIndex)
+	}
+
+	mutated := append(append([]byte{}, claudeTeammateLinkingYAML[:firstIndex]...), claudeTeammateLinkingYAML[secondIndex:]...)
+	_, err := decodeClaudeTeammateFixtures(mutated)
+	if err == nil {
+		t.Fatal("fixture decoder accepted a corpus missing a required case block")
+	}
+	if !strings.Contains(err.Error(), `missing required case "exact unique teammate spawn links roots"`) {
+		t.Fatalf("deleted-required-case error = %v, want it to name the missing case", err)
+	}
 }
 
 func TestClaudeAdapter_DiscoverTeammateLineage(t *testing.T) {

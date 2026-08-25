@@ -81,9 +81,6 @@ func loadPolicyFixture(data []byte) (policyFixture, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return policyFixture{}, fmt.Errorf("policy fixture must contain exactly one YAML document: %v", err)
 	}
-	if len(fixture.Cases) != len(requiredPolicyBehaviorNames) {
-		return policyFixture{}, fmt.Errorf("policy fixture has %d cases, want exactly %d", len(fixture.Cases), len(requiredPolicyBehaviorNames))
-	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
 		if tc.Name == "" || (tc.Result != "visible" && tc.Result != "hidden" && tc.Result != "error") {

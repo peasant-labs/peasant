@@ -13,8 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const injectedCommandTurnFixtureCaseCount = 18
-
 // InjectedCommandTurnFixturePath names the shared corpus used by local detail
 // and push projection tests.
 const InjectedCommandTurnFixturePath = "internal/testutil/testdata/injected_command_turns.yaml"
@@ -24,8 +22,12 @@ var injectedCommandTurnFixtureYAML []byte
 
 // InjectedCommandTurnFixture is the strictly decoded command-wrapper corpus.
 type InjectedCommandTurnFixture struct {
-	ExpectedCaseCount int                       `yaml:"expectedCaseCount"`
-	Cases             []InjectedCommandTurnCase `yaml:"cases"`
+	// RequiredNames lists every case name the corpus must retain. It is a
+	// deletion-protection manifest, not a row count: adding a new case does
+	// not require touching this list, but removing a required case (or
+	// renaming it without updating this list) fails the load.
+	RequiredNames []string                  `yaml:"requiredNames"`
+	Cases         []InjectedCommandTurnCase `yaml:"cases"`
 }
 
 // InjectedCommandTurnCase describes one stored entry and its projected role.
@@ -70,14 +72,8 @@ func decodeInjectedCommandTurnFixture(source []byte) (InjectedCommandTurnFixture
 		return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s trailing content: %w; remove or repair the trailing document", InjectedCommandTurnFixturePath, err)
 	}
 
-	if fixture.ExpectedCaseCount != injectedCommandTurnFixtureCaseCount || len(fixture.Cases) != injectedCommandTurnFixtureCaseCount {
-		return InjectedCommandTurnFixture{}, fmt.Errorf(
-			"decode injected command turn fixture %s: case count mismatch: declared=%d rows=%d want=%d; update the fixture rows and exact count together",
-			InjectedCommandTurnFixturePath,
-			fixture.ExpectedCaseCount,
-			len(fixture.Cases),
-			injectedCommandTurnFixtureCaseCount,
-		)
+	if len(fixture.RequiredNames) == 0 {
+		return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: requiredNames is empty; list every case name the corpus must retain", InjectedCommandTurnFixturePath)
 	}
 
 	seenNames := make(map[string]struct{}, len(fixture.Cases))
@@ -103,6 +99,20 @@ func decodeInjectedCommandTurnFixture(source []byte) (InjectedCommandTurnFixture
 		}
 		if testCase.PadToPreviewLimit && len(testCase.Content) >= defaults.ContentPreviewLimit {
 			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: case %q cannot pad content length %d to preview limit %d; shorten the fixture content", InjectedCommandTurnFixturePath, testCase.Name, len(testCase.Content), defaults.ContentPreviewLimit)
+		}
+	}
+
+	seenRequired := make(map[string]struct{}, len(fixture.RequiredNames))
+	for _, requiredName := range fixture.RequiredNames {
+		if strings.TrimSpace(requiredName) == "" {
+			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: requiredNames has a blank entry; name every required case", InjectedCommandTurnFixturePath)
+		}
+		if _, duplicate := seenRequired[requiredName]; duplicate {
+			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: requiredNames repeats %q; list each required case once", InjectedCommandTurnFixturePath, requiredName)
+		}
+		seenRequired[requiredName] = struct{}{}
+		if _, present := seenNames[requiredName]; !present {
+			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: required case %q is missing from cases; restore the row or remove it from requiredNames", InjectedCommandTurnFixturePath, requiredName)
 		}
 	}
 
