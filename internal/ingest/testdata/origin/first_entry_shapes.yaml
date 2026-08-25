@@ -1,0 +1,144 @@
+# Raw Claude transcript lines, and the origin discovery derives from them.
+#
+# This corpus is kept apart from the rule's own corpus on purpose. Here the
+# subject is the capture: which bytes on which line become which evidence field.
+# A parsing defect that made the wrong evidence would otherwise look exactly like
+# a rule defect, and the two would be fixed in the wrong place.
+#
+# The deciding signal is not asserted here, because discovery does not carry one:
+# the signal explains a decision and is never persisted. Every case is written so
+# that its origin alone discriminates, and each ordering case has a control whose
+# only difference is the evidence under test.
+cases:
+  - name: structured_identity_recorded_far_past_the_hint_line_limit
+    arm: first-entry-shape
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"start"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"1"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"2"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"3"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"4"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"5"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"6"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"7"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"8"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"9"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"10"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"11"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"12"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","message":{"role":"assistant","content":"13"}}'
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"assistant","teamName":"migration","agentName":"tests","message":{"role":"assistant","content":"14"}}'
+    expected:
+      - session_id: 11111111-1111-4111-8111-111111111111
+        origin: agent
+
+  - name: programmatic_launch_pair_recorded_far_past_the_hint_line_limit
+    arm: first-entry-shape
+    files:
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","message":{"role":"user","content":"summarise the release"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"1"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"2"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"3"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"4"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"5"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"6"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"7"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"8"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","message":{"role":"assistant","content":"9"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","entrypoint":"sdk-cli","message":{"role":"assistant","content":"10"}}'
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"assistant","promptSource":"sdk","message":{"role":"assistant","content":"11"}}'
+    expected:
+      - session_id: 22222222-2222-4222-8222-222222222222
+        origin: agent
+
+  - name: command_wrapper_as_a_bare_string_first_user_content
+    arm: first-entry-shape
+    files:
+      - path: -workspace/33333333-3333-4333-8333-333333333333.jsonl
+        lines:
+          - '{"sessionId":"33333333-3333-4333-8333-333333333333","type":"user","cwd":"/workspace","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    expected:
+      - session_id: 33333333-3333-4333-8333-333333333333
+        origin: user
+
+  - name: command_wrapper_inside_the_first_user_content_blocks
+    arm: first-entry-shape
+    files:
+      - path: -workspace/44444444-4444-4444-8444-444444444444.jsonl
+        lines:
+          - '{"sessionId":"44444444-4444-4444-8444-444444444444","type":"user","cwd":"/workspace","message":{"role":"user","content":[{"type":"text","text":"<command-message id=\"3\">/review</command-message>"}]}}'
+    expected:
+      - session_id: 44444444-4444-4444-8444-444444444444
+        origin: user
+
+  - name: teammate_brief_opens_the_first_user_text
+    arm: first-entry-shape
+    files:
+      - path: -workspace/55555555-5555-4555-8555-555555555555.jsonl
+        lines:
+          - '{"sessionId":"55555555-5555-4555-8555-555555555555","type":"user","cwd":"/workspace","message":{"role":"user","content":"<teammate-message>implement the capture</teammate-message>"}}'
+    expected:
+      - session_id: 55555555-5555-4555-8555-555555555555
+        origin: agent
+
+  - name: plain_prose_first_user_text_resolves_unknown
+    arm: first-entry-shape
+    files:
+      - path: -workspace/66666666-6666-4666-8666-666666666666.jsonl
+        lines:
+          - '{"sessionId":"66666666-6666-4666-8666-666666666666","type":"user","cwd":"/workspace","message":{"role":"user","content":"Look at the failing migration and tell me what changed."}}'
+    expected:
+      - session_id: 66666666-6666-4666-8666-666666666666
+        origin: unknown
+
+  - name: a_transcript_with_no_user_record_resolves_unknown
+    arm: first-entry-shape
+    files:
+      - path: -workspace/77777777-7777-4777-8777-777777777777.jsonl
+        lines:
+          - '{"sessionId":"77777777-7777-4777-8777-777777777777","type":"assistant","cwd":"/workspace","message":{"role":"assistant","content":"resumed"}}'
+    expected:
+      - session_id: 77777777-7777-4777-8777-777777777777
+        origin: unknown
+
+  - name: structured_identity_outranks_a_command_wrapper_in_the_same_file
+    arm: first-entry-shape
+    files:
+      - path: -workspace/88888888-8888-4888-8888-888888888888.jsonl
+        lines:
+          - '{"sessionId":"88888888-8888-4888-8888-888888888888","type":"user","cwd":"/workspace","teamName":"migration","agentName":"tests","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    expected:
+      - session_id: 88888888-8888-4888-8888-888888888888
+        origin: agent
+
+  - name: only_the_first_user_record_is_read_for_the_prompt
+    arm: first-entry-shape
+    files:
+      - path: -workspace/99999999-9999-4999-8999-999999999999.jsonl
+        lines:
+          - '{"sessionId":"99999999-9999-4999-8999-999999999999","type":"user","cwd":"/workspace","message":{"role":"user","content":"Look at the failing migration."}}'
+          - '{"sessionId":"99999999-9999-4999-8999-999999999999","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    expected:
+      - session_id: 99999999-9999-4999-8999-999999999999
+        origin: unknown
+
+  - name: subagent_transcript_is_classified_agent
+    arm: subagent-classified-agent
+    files:
+      - path: -workspace/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+        lines:
+          - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","cwd":"/workspace","message":{"role":"user","content":"Look at the failing migration."}}'
+      - path: -workspace/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/subagents/agent-b3bee5f.jsonl
+        lines:
+          - '{"sessionId":"agent-b3bee5f","type":"user","message":{"role":"user","content":"Look at the failing migration."}}'
+    expected:
+      # The parent stays a control: identical first user text, no parent of its
+      # own, so the child being hidden cannot be an accident of its content.
+      - session_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+        origin: unknown
+      - session_id: agent-b3bee5f
+        origin: agent

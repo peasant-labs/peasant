@@ -15,6 +15,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
@@ -85,6 +86,10 @@ const (
 	// claudeRecordTypeAssistant marks an assistant record.
 	claudeRecordTypeAssistant claudeRecordType = "assistant"
 )
+
+// claudeContentBlockText names the content block that carries prose. A user
+// record writes its prompt either as a bare string or as blocks of this type.
+const claudeContentBlockText = "text"
 
 // claudeHintLineLimit caps how many leading lines discovery reads for the
 // display hints, so a large transcript never costs a full hint scan.
@@ -239,6 +244,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Title:         evidence.Title,
 				Branch:        evidence.Branch,
 				CWD:           evidence.CWD,
+				Origin:        evidence.Origin,
 			}
 			rootIndex[entry.sessionID] = len(sessions)
 			sessions = append(sessions, ds)
@@ -279,6 +285,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				SubagentPaths: []ResolvedPath{},
 				DebugPaths:    []ResolvedPath{},
 				ModTime:       info.ModTime(),
+				Origin:        evidence.Origin,
 			}
 			sessions = append(sessions, ds)
 		}
@@ -394,8 +401,11 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	data, err := a.fs.ReadFile(path.String())
 	if err != nil {
 		// An unreadable file fails open, exactly as the conversation check does,
-		// so discovery can surface it instead of discarding it silently.
+		// so discovery can surface it instead of discarding it silently. It
+		// carries no evidence, so the rule declares it unknown, which is the
+		// visible answer.
 		evidence.HasConversationRecord = true
+		evidence.Origin, _ = sessionorigin.Classify(sessionorigin.Evidence{})
 		return evidence, false
 	}
 
@@ -406,6 +416,12 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	var invalidIdentity, malformed, conversation bool
 	var validRecords, lineNumber int
 	var hints claudeSessionHints
+	// The origin captures ride this same scan. Like the identity capture above
+	// them they read every line, because a harness is free to record the launch
+	// fields on any record; the hint limit below bounds the display hints alone
+	// and has never bounded identity.
+	var entrypoint, promptSource, firstUserText string
+	var haveFirstUserText bool
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -451,6 +467,18 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 				}
 			}
 		}
+		if entrypoint == "" {
+			entrypoint, _ = value["entrypoint"].(string)
+		}
+		if promptSource == "" {
+			promptSource, _ = value["promptSource"].(string)
+		}
+		if !haveFirstUserText {
+			if text, ok := claudeUserRecordText(value); ok {
+				firstUserText = text
+				haveFirstUserText = true
+			}
+		}
 		if spawn, ok := claudeTeammateSpawn(value); ok {
 			evidence.Spawns = append(evidence.Spawns, spawn)
 		}
@@ -463,7 +491,77 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	evidence.Title = hints.title
 	evidence.Branch = hints.branch
 	evidence.CWD = hints.cwd
+	// Mining runs before linking, so a root has no known parent yet. A root that
+	// linking later attaches to a spawner already declares the identity that
+	// makes it agent-driven, so nothing is lost by asking the rule here.
+	evidence.Origin, _ = sessionorigin.Classify(
+		ClaudeOriginEvidence(evidence.Identity, entrypoint, promptSource, firstUserText, false),
+	)
 	return evidence, true
+}
+
+// ClaudeOriginEvidence assembles the origin evidence for one mined transcript.
+// identity is the value the scan already collected; entrypoint, promptSource and
+// firstUserText are captured in that same pass. hasParent is supplied by the
+// caller because it is Peasant's discovery state rather than harness content.
+func ClaudeOriginEvidence(
+	identity *ClaudeTeammateIdentity,
+	entrypoint, promptSource, firstUserText string,
+	hasParent bool,
+) sessionorigin.Evidence {
+	evidence := sessionorigin.Evidence{
+		HasParent:     hasParent,
+		Entrypoint:    entrypoint,
+		PromptSource:  promptSource,
+		FirstUserText: firstUserText,
+	}
+	if identity != nil {
+		evidence.TeamName = identity.Team
+		evidence.AgentName = identity.Name
+	}
+	return evidence
+}
+
+// claudeUserRecordText returns the text of one user-role record. The second
+// result says whether the record was a user-role record at all, so the caller
+// can stop at the first one even when that first one carries no text.
+func claudeUserRecordText(value map[string]any) (string, bool) {
+	if recordType, ok := value["type"].(string); !ok || claudeRecordType(recordType) != claudeRecordTypeUser {
+		return "", false
+	}
+	message, ok := value["message"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if role, ok := message["role"].(string); !ok || role != "user" {
+		return "", false
+	}
+	switch content := message["content"].(type) {
+	case string:
+		return content, true
+	case []any:
+		var builder strings.Builder
+		for _, block := range content {
+			fields, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			if kind, ok := fields["type"].(string); !ok || kind != claudeContentBlockText {
+				continue
+			}
+			text, ok := fields["text"].(string)
+			if !ok {
+				continue
+			}
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(text)
+		}
+		return builder.String(), true
+	default:
+		return "", true
+	}
 }
 
 // mineClaudeSubagentTranscript checks one subagent transcript for a
@@ -473,6 +571,11 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 func (a *ClaudeAdapter) mineClaudeSubagentTranscript(path ResolvedPath, info os.FileInfo) ClaudeTranscriptEvidence {
 	evidence := newClaudeEvidence(path, ClaudeEvidenceScopeSubagent, info)
 	evidence.HasConversationRecord = a.hasClaudeConversationRecord(path.String())
+	// A subagent transcript is by definition the child of a root, which is the
+	// first step of the rule. The rule is asked rather than answered for it, so
+	// that step 1 keeps exactly one definition and a change to it reaches this
+	// path too.
+	evidence.Origin, _ = sessionorigin.Classify(sessionorigin.Evidence{HasParent: true})
 	return evidence
 }
 

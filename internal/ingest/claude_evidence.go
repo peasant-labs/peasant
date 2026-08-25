@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
 
 // ClaudeTeammateIdentity names one Claude teammate. Claude does not record which
@@ -56,6 +58,10 @@ type ClaudeTranscriptEvidence struct {
 	Title                 string
 	Branch                string
 	CWD                   string
+	// Origin is who drove the session, decided by the one rule at mine time from
+	// the evidence this record was read for. Every mined record carries a menu
+	// value: a root from its content, a subagent because it is a child.
+	Origin sessionorigin.Origin
 }
 
 // Fresh reports whether this record still describes the file that info names.

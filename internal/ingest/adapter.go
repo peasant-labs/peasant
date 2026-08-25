@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
 
 // SourceAdapter abstracts provider-specific session discovery and metadata extraction.
@@ -72,6 +73,10 @@ type DiscoveredSession struct {
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction
 	TranscriptOrigin  TranscriptOrigin  // Typed materialization contract; zero means copy SourcePath as a transcript file.
+	// Origin is who drove the session, as the harness adapter's evidence decided
+	// it. An adapter that mines no origin evidence leaves it empty, and the
+	// consumer resolves that to the visible fail-safe value.
+	Origin sessionorigin.Origin
 }
 
 // AdapterFactory creates a SourceAdapter with injected dependencies.
