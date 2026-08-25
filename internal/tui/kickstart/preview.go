@@ -38,6 +38,24 @@ type SessionTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 // nothing to read for, an error only when the read itself failed.
 type SessionFirstTurnsFunc func(sessionID string) (turns []ingest.Turn, more bool, err error)
 
+// SessionMoreTurnsFunc extends the loaded turns of one session by the next
+// chunk and reports whether the session continues past it.
+//
+// It is what a scroll to the bottom of the preview pane asks for, and it exists
+// because a session too long to read whole would otherwise simply stop at the
+// bound the first read used. It returns EVERYTHING loaded so far, not the chunk
+// alone, so the pane replaces its body and every line already on screen keeps
+// its place.
+//
+// Its error contract matches SessionTurnsFunc: no turns for a session there is
+// nothing more to read for, an error only when the read itself failed.
+type SessionMoreTurnsFunc func(sessionID string) (turns []ingest.Turn, more bool, err error)
+
+// SessionHasMoreFunc reports whether the loaded preview of one session has more
+// of that session behind it. The pane asks on its own goroutine after a load
+// lands, so it must answer from memory and read nothing.
+type SessionHasMoreFunc func(sessionID string) bool
+
 // SessionPreviewNoticeFunc reports a plain sentence the preview must show ABOVE
 // the turns it already loaded, or the empty string when there is nothing to
 // say. It exists because a preview can be complete in itself yet still stand
@@ -117,6 +135,16 @@ func WithSessionFirstTurns(first SessionFirstTurnsFunc) ListingPreviewOption {
 	}
 }
 
+// WithSessionMoreTurns supplies the scrolled continuation. Without it the
+// preview keeps its existing behavior: it stops at what the first read loaded
+// and says so.
+func WithSessionMoreTurns(more SessionMoreTurnsFunc, hasMore SessionHasMoreFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.moreTurns = more
+		preview.hasMore = hasMore
+	}
+}
+
 // WithListingPreviewContextSource enables project and branch detail bodies from
 // the exact scanner forest that supplied the highlighted row.
 func WithListingPreviewContextSource(source ListingPreviewContextSource) ListingPreviewOption {
@@ -164,6 +192,10 @@ type ListingPreview struct {
 	// firstTurns is the optional quick leading read. When it is nil the
 	// preview loads in one step.
 	firstTurns SessionFirstTurnsFunc
+	// moreTurns and hasMore are the optional scrolled continuation. Both nil is
+	// a preview that ends where its first read ended.
+	moreTurns SessionMoreTurnsFunc
+	hasMore   SessionHasMoreFunc
 }
 
 // NewListingPreview builds the selection step's preview over the discovery
@@ -191,6 +223,7 @@ func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns Ses
 var (
 	_ kit.BodySource            = (*ListingPreview)(nil)
 	_ kit.ProgressiveBodySource = (*ListingPreview)(nil)
+	_ kit.ContinuableBodySource = (*ListingPreview)(nil)
 )
 
 // Body implements kit.BodySource. It is called off the UI goroutine, so the
@@ -215,6 +248,40 @@ func (p *ListingPreview) FirstBody(id string) (kit.PreviewBody, bool, error) {
 		return body, false, err
 	}
 	return p.load(id, p.firstTurns)
+}
+
+// Continuable implements kit.ContinuableBodySource. It answers from what the
+// reader already loaded, so it never touches the source.
+func (p *ListingPreview) Continuable(id string) bool {
+	if p.hasMore == nil {
+		return false
+	}
+	if _, ok := p.byID[id]; !ok {
+		return false
+	}
+	return p.hasMore(id)
+}
+
+// MoreBody implements kit.ContinuableBodySource: it extends the preview by the
+// next chunk of the session when the reader scrolls toward the end of it.
+//
+// The body it returns holds every turn loaded so far, so it is the same preview
+// with more below it rather than a different one.
+func (p *ListingPreview) MoreBody(id string) (kit.PreviewBody, bool, error) {
+	if p.moreTurns == nil {
+		body, err := p.Body(id)
+		return body, false, err
+	}
+	var continues bool
+	body, _, err := p.load(id, func(sessionID string) ([]ingest.Turn, bool, error) {
+		turns, more, err := p.moreTurns(sessionID)
+		continues = more
+		// The read reports `more` to THIS function, not to load: load reads it
+		// as "a further step follows within this load", which is the two-step
+		// slice contract, and a continuation is one step on its own.
+		return turns, false, err
+	})
+	return body, continues, err
 }
 
 // load builds one preview for id from the given read, and reports whether that

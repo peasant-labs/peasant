@@ -100,6 +100,29 @@ const OpenCodePreviewMaterializeMaxBytes = OpenCodeManagedProjectionMaxBytes
 // is then the entire session, and no second read runs.
 const OpenCodePreviewFirstPageMaxBytes = 64 << 10 // 64 KiB
 
+// OpenCodePreviewSliceMaxBytes bounds ONE continuation of the kickstart
+// preview: the chunk of a session that loads when the reader scrolls to the
+// bottom of the pane and asks for more. Only the preview path uses it.
+//
+// A very long session does not fit any single bound, so the preview reads it
+// under one and then extends it as the reader scrolls. This value is what each
+// of those extensions costs. It is set from what a real read takes: measured
+// against an OpenCode store holding a session of 2.2 GiB of message and part
+// payload, a continuation at this bound completes in about half a second to a
+// second and adds several turns, which keeps the pane responsive to a held-down
+// scroll while still making real progress through the session.
+//
+// It is far smaller than OpenCodePreviewMaterializeMaxBytes on purpose. That
+// bound governs the FIRST read, which stands alone and should show as much as
+// it safely can; this one governs a read the reader is waiting on, and a
+// continuation that took as long as the first read would feel like the pane had
+// stopped.
+//
+// The live payload of one continuation is bounded by this value plus the
+// message share of it plus one oversized source row, and the turns the preview
+// retains grow only as far as the reader scrolls.
+const OpenCodePreviewSliceMaxBytes = 8 << 20 // 8 MiB
+
 // Scanner buffer sizes for reading large JSONL lines.
 const (
 	ScannerMaxLine = 10 << 20 // 10 MiB

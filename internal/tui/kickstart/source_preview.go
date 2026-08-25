@@ -101,18 +101,32 @@ type SourceTurns struct {
 	// the full bounded read finishes. Zero or less turns the two-step read off,
 	// so every preview waits for the full bounded read.
 	firstPage int64
-	mu        sync.Mutex
-	cached    map[string]sourcePreview
-	recency   []string
+	// slice bounds ONE continuation - the chunk a scroll to the bottom of the
+	// pane loads. Zero or less turns scrolled loading off, so the preview stops
+	// at its first bounded read exactly as it did before.
+	slice   int64
+	mu      sync.Mutex
+	cached  map[string]sourcePreview
+	recency []string
 }
 
 // sourcePreview is one session read from its harness source: the turns to
 // render, and the sentence (empty for most sessions) naming what the read left
 // out. They are cached together because a cache hit must reproduce the whole
 // pane, notice included.
+//
+// For a session read one slice at a time it is what has been loaded SO FAR:
+// every slice appends its turns here and re-states the sentence, and cursor
+// says where the next slice starts. The cache entry therefore grows as the
+// reader scrolls, which is the point - they asked to see more of the session -
+// while each READ stays one bounded slice.
 type sourcePreview struct {
 	turns  []ingest.Turn
 	notice string
+	// cursor continues the session after the turns above it. more reports that
+	// there is something to continue to.
+	cursor ingest.TranscriptSliceCursor
+	more   bool
 }
 
 // SourceTurnsOption configures a SourceTurns reader.
@@ -149,6 +163,13 @@ func WithSourceTurnsFirstPageBudget(budgetBytes int64) SourceTurnsOption {
 	return func(reader *SourceTurns) { reader.firstPage = budgetBytes }
 }
 
+// WithSourceTurnsSliceBudget sets how many payload bytes of one session each
+// scrolled continuation materializes. A value of zero or less turns scrolled
+// loading off, so the preview stops at its first bounded read.
+func WithSourceTurnsSliceBudget(budgetBytes int64) SourceTurnsOption {
+	return func(reader *SourceTurns) { reader.slice = budgetBytes }
+}
+
 // WithSourceTurnsSalt sets the per-installation salt the reader gives the
 // materializer. The preview reads a session's transcript, not its project hash,
 // so the zero salt is the correct production default; this option exists so a
@@ -172,6 +193,7 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 		limit:     DefaultSourceTurnsCacheSize,
 		budget:    defaults.OpenCodePreviewMaterializeMaxBytes,
 		firstPage: defaults.OpenCodePreviewFirstPageMaxBytes,
+		slice:     defaults.OpenCodePreviewSliceMaxBytes,
 		cached:    make(map[string]sourcePreview),
 	}
 	for _, opt := range opts {
@@ -353,21 +375,107 @@ func (s *SourceTurns) materializeTurns(sessionID string, listing ftue.SessionLis
 			sessionID, listing.Harness)
 	}
 	adapter := factory(s.fs, s.git, s.salt)
+	if resumable, ok := adapter.(ingest.ResumableTranscriptMaterializer); ok && s.slice > 0 {
+		// A resumable adapter reads the FIRST slice through the same call every
+		// continuation uses, so the preview the pane starts from and the preview
+		// it scrolls into are one chain rather than two reads that have to agree.
+		return s.sliceTurns(sessionID, listing, session, resumable, sourcePreview{}, s.budget)
+	}
 	data, truncation, err := s.materializeBytes(sessionID, listing, session, adapter)
 	if err != nil {
 		return sourcePreview{}, err
 	}
+	entries, err := s.foldManagedBytes(sessionID, listing, session, data)
+	if err != nil {
+		return sourcePreview{}, err
+	}
+	return sourcePreview{turns: entries, notice: previewTruncationNotice(truncation)}, nil
+}
+
+// sliceTurns reads ONE slice of a session and appends it to what is already
+// loaded. Passing the zero preview reads the first slice.
+//
+// It never re-reads what an earlier slice already showed: a message belongs to
+// exactly one slice, so the turns fold cleanly onto the ones before them.
+func (s *SourceTurns) sliceTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession, resumable ingest.ResumableTranscriptMaterializer, loaded sourcePreview, budgetBytes int64) (sourcePreview, error) {
+	slice, err := resumable.MaterializeTranscriptSlice(context.Background(), session, budgetBytes, loaded.cursor)
+	if err != nil {
+		return sourcePreview{}, fmt.Errorf("materialize a slice of the SQLite transcript of session %q for preview: %w", sessionID, err)
+	}
+	next := sourcePreview{turns: loaded.turns, cursor: slice.Next, more: slice.More}
+	if len(slice.Data) > 0 {
+		turns, err := s.foldManagedBytes(sessionID, listing, session, slice.Data)
+		if err != nil {
+			return sourcePreview{}, err
+		}
+		next.turns = append(append([]ingest.Turn{}, loaded.turns...), turns...)
+	}
+	next.notice = previewSliceNotice(slice.Next, slice.More)
+	return next, nil
+}
+
+// foldManagedBytes folds one managed projection into turns the same way ingest
+// does, so the preview and the imported session read alike.
+func (s *SourceTurns) foldManagedBytes(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession, data []byte) ([]ingest.Turn, error) {
 	indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
 	if !ok {
-		return sourcePreview{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"preview the SQLite transcript of session %q from its harness source: harness %q has no transcript reader",
 			sessionID, listing.Harness)
 	}
 	entries, err := indexer.IndexTranscriptBytes(context.Background(), session, data)
 	if err != nil {
-		return sourcePreview{}, fmt.Errorf("read the materialized transcript of session %q: %w", sessionID, err)
+		return nil, fmt.Errorf("read the materialized transcript of session %q: %w", sessionID, err)
 	}
-	return sourcePreview{turns: transcript.EntriesToTurns(entries), notice: previewTruncationNotice(truncation)}, nil
+	return transcript.EntriesToTurns(entries), nil
+}
+
+// MoreTurns extends the preview of a session by ONE more slice and returns
+// everything loaded so far, plus whether the session continues past it.
+//
+// It is what a scroll to the bottom of the preview pane asks for. The turns the
+// pane retains grow as the reader scrolls, which is what they asked for; each
+// READ stays one bounded slice, so no single call can pull an arbitrary amount
+// of a 2 GiB session into memory.
+//
+// It returns the turns unchanged, and false, for a session that has nothing
+// more to load: one already read whole, one whose origin cannot be continued,
+// or one this reader has not read yet.
+func (s *SourceTurns) MoreTurns(sessionID string) ([]ingest.Turn, bool, error) {
+	listing, ok := s.byID[sessionID]
+	if !ok {
+		return nil, false, nil
+	}
+	loaded, hit := s.lookup(sessionID)
+	if !hit || !loaded.more || s.slice <= 0 {
+		return loaded.turns, false, nil
+	}
+	session, err := sourceDiscoveredSession(listing)
+	if err != nil {
+		return nil, false, fmt.Errorf("preview the transcript of session %q from its harness source: %w", sessionID, err)
+	}
+	factory, ok := ingest.DefaultAdapterRegistry[session.Harness]
+	if !ok {
+		return loaded.turns, false, nil
+	}
+	resumable, ok := factory(s.fs, s.git, s.salt).(ingest.ResumableTranscriptMaterializer)
+	if !ok {
+		return loaded.turns, false, nil
+	}
+	next, err := s.sliceTurns(sessionID, listing, session, resumable, loaded, s.slice)
+	if err != nil {
+		return nil, false, err
+	}
+	s.store(sessionID, next)
+	return next.turns, next.more, nil
+}
+
+// HasMore reports whether the preview of a session, as currently loaded, has
+// more of that session behind it. It reads only what is already in memory, so
+// the pane can ask on its own goroutine.
+func (s *SourceTurns) HasMore(sessionID string) bool {
+	preview, _ := s.lookup(sessionID)
+	return preview.more
 }
 
 // materializeBytes produces the managed transcript bytes the preview folds.
@@ -393,6 +501,27 @@ func (s *SourceTurns) materializeBytes(sessionID string, listing ftue.SessionLis
 		return nil, ingest.MaterializeTruncation{}, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
 	}
 	return data, ingest.MaterializeTruncation{}, nil
+}
+
+// previewSliceNotice writes the sentence the pane shows above the turns of a
+// session it is reading one slice at a time.
+//
+// It is LIVE: every slice re-states it, so the figures follow what is actually
+// on screen instead of describing a bound that was true when the pane first
+// painted. It says what is loaded, what the whole session holds, and how to
+// load more - because a reader who cannot see why the transcript stops has no
+// way to know that scrolling continues it. It keeps the reassurance the fixed
+// note carried, since a cut-off transcript otherwise reads as data loss.
+//
+// A session with nothing more behind it gets no sentence at all: there is
+// nothing to explain.
+func previewSliceNotice(cursor ingest.TranscriptSliceCursor, more bool) string {
+	if !more || cursor.TotalBytes() <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"showing the first %s of this %s session. scroll to the bottom to load more. the full session ingests normally.",
+		previewByteSize(cursor.ConsumedBytes()), previewByteSize(cursor.TotalBytes()))
 }
 
 // previewTruncationNotice writes the sentence the pane shows above the turns of

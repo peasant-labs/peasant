@@ -424,6 +424,10 @@ func kickstartPreview(
 	opts := []kickstart.ListingPreviewOption{
 		kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
 		kickstart.WithSessionFirstTurns(firstTurns),
+		// The scrolled continuation. A session the store already answered has no
+		// harness read behind it, so it reports nothing more and the pane offers
+		// no continuation for it.
+		kickstart.WithSessionMoreTurns(sourceTurns.MoreTurns, sourceTurns.HasMore),
 	}
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))

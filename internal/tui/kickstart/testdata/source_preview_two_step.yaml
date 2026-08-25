@@ -59,14 +59,13 @@ cases:
   # before it must carry none, and the note that finally shows must be the
   # whole read's.
   - name: the-note-of-a-two-step-read-describes-the-whole-read-not-the-slice
-    source_fixture: legacy-mounted-projection
+    source_fixture: legacy-scrollable-session
     origin: opencode-legacy-sqlite
     first_page_budget_bytes: 700
-    preview_budget_bytes: 700
+    preview_budget_bytes: 2000
     min_first_turns: 1
     expect_more: true
     expect_notice_contains:
-      - preview shows the first
-      - rows
+      - showing the first
+      - scroll to the bottom to load more
       - the full session ingests normally
-      - this bound applies to the preview only
