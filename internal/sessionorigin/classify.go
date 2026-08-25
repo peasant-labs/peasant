@@ -2,6 +2,7 @@ package sessionorigin
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/peasant-labs/redact"
@@ -63,12 +64,7 @@ var AllSignals = []Signal{
 
 // Valid reports whether s is one of the deciding signals this build knows.
 func (s Signal) Valid() bool {
-	for _, candidate := range AllSignals {
-		if s == candidate {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(AllSignals, s)
 }
 
 // String returns the reported form of the signal.
