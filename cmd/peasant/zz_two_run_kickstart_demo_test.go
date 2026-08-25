@@ -52,7 +52,7 @@ func TestTwoRunKickstartDemonstration(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatalf("create project directory: %v", err)
 	}
-	transcriptRoot := filepath.Join(dataDir, "claude", "projects")
+	transcriptRoot := filepath.Join(dataDir, string(defaults.HarnessClaudeCode), "projects")
 	slugDir := filepath.Join(transcriptRoot, demoProjectSlug)
 	if err := os.MkdirAll(filepath.Join(slugDir, demoParentRoot, "subagents"), 0o755); err != nil {
 		t.Fatalf("create transcript tree: %v", err)
