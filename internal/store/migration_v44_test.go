@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -74,52 +75,29 @@ func decodeClaudeEvidenceFixture(source []byte) (claudeEvidenceFixtureFile, erro
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return claudeEvidenceFixtureFile{}, fmt.Errorf("Claude evidence fixture must contain exactly one YAML document: %v", err)
 	}
-	if err := requireFixtureNames("record", fixture.RequiredRecordNames, recordNames(fixture.Records)); err != nil {
+	if err := testutil.RequireFixtureNames("Claude evidence fixture", "record", fixture.RequiredRecordNames, recordNames(fixture.Records)); err != nil {
 		return claudeEvidenceFixtureFile{}, err
 	}
-	if err := requireFixtureNames("rejection", fixture.RequiredRejectionNames, rejectionNames(fixture.Rejections)); err != nil {
+	if err := testutil.RequireFixtureNames("Claude evidence fixture", "rejection", fixture.RequiredRejectionNames, rejectionNames(fixture.Rejections)); err != nil {
 		return claudeEvidenceFixtureFile{}, err
 	}
 	return fixture, nil
 }
 
-func recordNames(records []claudeEvidenceFixtureRecord) map[string]struct{} {
-	names := make(map[string]struct{}, len(records))
+func recordNames(records []claudeEvidenceFixtureRecord) map[string]bool {
+	names := make(map[string]bool, len(records))
 	for _, record := range records {
-		names[record.Name] = struct{}{}
+		names[record.Name] = true
 	}
 	return names
 }
 
-func rejectionNames(rejections []claudeEvidenceRejection) map[string]struct{} {
-	names := make(map[string]struct{}, len(rejections))
+func rejectionNames(rejections []claudeEvidenceRejection) map[string]bool {
+	names := make(map[string]bool, len(rejections))
 	for _, rejection := range rejections {
-		names[rejection.Name] = struct{}{}
+		names[rejection.Name] = true
 	}
 	return names
-}
-
-// requireFixtureNames asserts every name in required is present in present,
-// and that required itself declares no blank or duplicate name. kind
-// identifies the axis (e.g. "record", "rejection") in failure messages.
-func requireFixtureNames(kind string, required []string, present map[string]struct{}) error {
-	if len(required) == 0 {
-		return fmt.Errorf("Claude evidence fixture required_%s_names is empty; list every %s name the fixture must retain", kind, kind)
-	}
-	seen := make(map[string]struct{}, len(required))
-	for _, name := range required {
-		if name == "" {
-			return fmt.Errorf("Claude evidence fixture required_%s_names has a blank entry", kind)
-		}
-		if _, duplicate := seen[name]; duplicate {
-			return fmt.Errorf("Claude evidence fixture required_%s_names repeats %q", kind, name)
-		}
-		seen[name] = struct{}{}
-		if _, ok := present[name]; !ok {
-			return fmt.Errorf("Claude evidence fixture is missing required %s %q; restore the row or remove it from required_%s_names", kind, name, kind)
-		}
-	}
-	return nil
 }
 
 // toEvidence converts one fixture row into the discovery record the store writes.

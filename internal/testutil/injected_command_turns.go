@@ -72,10 +72,6 @@ func decodeInjectedCommandTurnFixture(source []byte) (InjectedCommandTurnFixture
 		return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s trailing content: %w; remove or repair the trailing document", InjectedCommandTurnFixturePath, err)
 	}
 
-	if len(fixture.RequiredNames) == 0 {
-		return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: requiredNames is empty; list every case name the corpus must retain", InjectedCommandTurnFixturePath)
-	}
-
 	seenNames := make(map[string]struct{}, len(fixture.Cases))
 	for index, testCase := range fixture.Cases {
 		if strings.TrimSpace(testCase.Name) == "" {
@@ -102,18 +98,12 @@ func decodeInjectedCommandTurnFixture(source []byte) (InjectedCommandTurnFixture
 		}
 	}
 
-	seenRequired := make(map[string]struct{}, len(fixture.RequiredNames))
-	for _, requiredName := range fixture.RequiredNames {
-		if strings.TrimSpace(requiredName) == "" {
-			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: requiredNames has a blank entry; name every required case", InjectedCommandTurnFixturePath)
-		}
-		if _, duplicate := seenRequired[requiredName]; duplicate {
-			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: requiredNames repeats %q; list each required case once", InjectedCommandTurnFixturePath, requiredName)
-		}
-		seenRequired[requiredName] = struct{}{}
-		if _, present := seenNames[requiredName]; !present {
-			return InjectedCommandTurnFixture{}, fmt.Errorf("decode injected command turn fixture %s: required case %q is missing from cases; restore the row or remove it from requiredNames", InjectedCommandTurnFixturePath, requiredName)
-		}
+	presentNames := make(map[string]bool, len(seenNames))
+	for name := range seenNames {
+		presentNames[name] = true
+	}
+	if err := RequireFixtureNames(fmt.Sprintf("injected command turn fixture %s", InjectedCommandTurnFixturePath), "case", fixture.RequiredNames, presentNames); err != nil {
+		return InjectedCommandTurnFixture{}, err
 	}
 
 	return fixture, nil
