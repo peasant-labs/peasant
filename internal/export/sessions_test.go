@@ -534,10 +534,13 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 	}
 
 	// 3. Seed DB entries from the OpenCode session directory (fullDepth=true).
-	// Expected: user (depth=0) + assistant parent (depth=0) + 2 text-part children (depth=1) = 4 entries.
+	// The assistant parent's preview comes from its first text part, so that
+	// part would render the same prose twice and the indexer drops it.
+	// Expected: user (depth=0) + assistant parent (depth=0) + the second
+	// text-part child (depth=1) = 3 entries.
 	seededEntries := seedEntriesFromOpenCode(t, ctx, s, fs, sessionID, sesPath)
-	if len(seededEntries) != 4 {
-		t.Fatalf("seeded entry count: got %d, want 4 (user, asst-parent, 2 part children)", len(seededEntries))
+	if len(seededEntries) != 3 {
+		t.Fatalf("seeded entry count: got %d, want 3 (user, asst-parent, second part child)", len(seededEntries))
 	}
 
 	// 4. Export.
@@ -546,9 +549,8 @@ func TestExportSession_OpenCodeJSON_WithActualPartFiles(t *testing.T) {
 		t.Fatalf("ExportSession: %v", err)
 	}
 
-	// 5. Export applies EntriesToTurns: the assistant parent's content (from
-	// extractPreviewFromParts) matches the first text child, so consecutive dedup
-	// collapses them. Result: user(1) + assistant parent(1) + second text child(1) = 3.
+	// 5. Export applies EntriesToTurns over those entries.
+	// Result: user(1) + assistant parent(1) + second text child(1) = 3.
 	if len(exported.Turns) != 3 {
 		t.Fatalf("Turns length: got %d, want 3 (EntriesToTurns folds/dedupes)", len(exported.Turns))
 	}

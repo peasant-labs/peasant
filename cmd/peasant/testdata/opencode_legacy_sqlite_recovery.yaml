@@ -14,7 +14,10 @@ freshness_cases:
     part_time_updated: 1700000003001
     part_data: '{"type":"text","text":"committed WAL update","time":{"created":1700000003001}}'
     expected_update_count: 1
-    expected_target_entries: 7
+    # The appended assistant message carries no inline content, so its preview
+    # comes from its own text part. That part would render the same prose a
+    # second time, so indexing keeps the message row and drops the part row.
+    expected_target_entries: 6
     expected_target_turns: 3
     expected_content: committed WAL update
 

@@ -408,6 +408,7 @@ type openCodeIndexPart struct {
 		Status  string          `json:"status"`
 		Input   json.RawMessage `json:"input"`
 		Content json.RawMessage `json:"content"`
+		Output  json.RawMessage `json:"output"`
 		Result  json.RawMessage `json:"result"`
 		Error   json.RawMessage `json:"error"`
 	} `json:"state"`
@@ -771,10 +772,7 @@ func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 		case "compaction", "subtask", "agent":
 			result.isSystemEntry = true
 		case "tool", "tool_use":
-			toolName := part.Data.Tool
-			if toolName == "" {
-				toolName = part.Data.Name
-			}
+			toolName := openCodeSemanticToolName(part.Data)
 			if toolName == "skill" {
 				name := ""
 				if part.Data.State != nil {
@@ -796,11 +794,26 @@ func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 			} else {
 				result.toolPartCount++
 			}
+		case "text", "reasoning":
+			// Prose and thinking parts carry no tool call. Counting them here
+			// would relabel an ordinary assistant message as a tool turn and
+			// hide its text behind an empty tool card.
 		default:
 			result.toolPartCount++
 		}
 	}
 	return result
+}
+
+// openCodeSemanticToolName reads the invoked tool's name. OpenCode records it
+// on the part's "tool" field; older rows carry it on "name". Both shapes must
+// resolve to the same name, because the name is what a reader sees on the tool
+// card and what the tool-kind classifier keys on.
+func openCodeSemanticToolName(data openCodeIndexPart) string {
+	if data.Tool != "" {
+		return data.Tool
+	}
+	return data.Name
 }
 
 func firstOpenCodeSemanticText(parts []openCodeSemanticPart) string {
@@ -847,7 +860,12 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 			if value := rawOpenCodeJSON(part.Data.State.Input); value != "" {
 				entry.ToolInput = &value
 			}
-			if value := firstRawOpenCodeJSON(part.Data.State.Result, part.Data.State.Error, part.Data.State.Content); value != "" {
+			// Output precedence: "output" is what a current OpenCode row
+			// writes, "result" is the older alias for the same value, "error"
+			// names a failure that produced no output, and "content" is the
+			// last legacy alias. The first present field wins, so a completed
+			// call always shows its output rather than a stale alias.
+			if value := firstOpenCodeToolOutput(part.Data.State.Output, part.Data.State.Result, part.Data.State.Error, part.Data.State.Content); value != "" {
 				entry.ToolOutput = &value
 			}
 		}
@@ -858,12 +876,15 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 		}
 	case "tool_result":
 		entry.EntryType, entry.Role = EntryTypeToolResult, RoleTool
-		if value := firstRawOpenCodeJSON(part.Data.Content, part.Data.Output); value != "" {
+		if value := firstOpenCodeToolOutput(part.Data.Content, part.Data.Output); value != "" {
 			entry.ToolOutput = &value
 		}
 	case "text":
 		entry.EntryType, entry.Role = EntryTypeText, parentRole
-		if parentRole == RoleUser && parentContent != nil && *parentContent != "" && part.Data.Text == *parentContent {
+		// A text part that repeats its message's own preview would render the
+		// same prose twice: once on the message turn and once on the part turn.
+		// The message turn already carries it, so drop the part.
+		if parentContent != nil && *parentContent != "" && part.Data.Text == *parentContent {
 			return schema.SessionEntry{}, false
 		}
 		if part.Data.Text != "" {
@@ -899,8 +920,11 @@ func (idx *OpenCodeIndexer) openCodePartEntry(sessionID SessionID, part openCode
 			entry.ToolCallID = &callID
 		}
 	}
-	if (partType == "tool" || partType == "tool_use") && part.Data.Name != "" {
-		toolName := part.Data.Name
+	if partType == "tool" || partType == "tool_use" {
+		toolName := openCodeSemanticToolName(part.Data)
+		if toolName == "" {
+			return entry, true
+		}
 		entry.ToolNamesCSV = &toolName
 		if kind := classifyToolKind(toolName); kind != "" {
 			entry.ToolKind = &kind
@@ -920,11 +944,21 @@ func rawOpenCodeJSON(raw json.RawMessage) string {
 	return string(compacted)
 }
 
-func firstRawOpenCodeJSON(values ...json.RawMessage) string {
+// firstOpenCodeToolOutput renders the first present tool output as the text a
+// reader sees. A JSON string output is unwrapped to its plain text, the same
+// shape the Claude reader stores, so one renderer shows both harnesses without
+// escaped newlines or wrapping quotes. Any other JSON shape stays compact JSON.
+func firstOpenCodeToolOutput(values ...json.RawMessage) string {
 	for _, value := range values {
-		if encoded := rawOpenCodeJSON(value); encoded != "" {
-			return encoded
+		encoded := rawOpenCodeJSON(value)
+		if encoded == "" {
+			continue
 		}
+		var text string
+		if json.Unmarshal(value, &text) == nil {
+			return text
+		}
+		return encoded
 	}
 	return ""
 }

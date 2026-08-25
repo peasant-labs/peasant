@@ -71,7 +71,10 @@ cases:
     orphan_session: ses_3cd91f52effeXd3QAJ54jOyzvD
     orphan_entry: part_legacy_orphan
     orphan_content_contains: LEGACY_ORPHAN_PART
-    expected_metrics: {turn_count: 3, tool_calls: 3, compute_version: 7}
+    # The graph session holds one real tool call, counted on the message row and
+    # again on its part row. Its third message carries only a text part and is
+    # not a tool call, so it adds nothing here.
+    expected_metrics: {turn_count: 3, tool_calls: 2, compute_version: 7}
 required_loader_mutations:
   - unknown-field
   - wrong-count
