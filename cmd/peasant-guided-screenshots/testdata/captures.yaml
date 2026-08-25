@@ -18,7 +18,7 @@ sheets:
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 5700}
+    viewport: {width: 1800, height: 6750}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
@@ -58,6 +58,15 @@ selectionStates:
   - key: harness-source-preview
     query: ""
     wantContains: ["harness: claude code", scrubbed-source-body, read in place]
+  - key: origin-hidden
+    query: ""
+    # "user driv" (not the full title) survives the row-label truncation the
+    # narrower 80-column capture applies; the child badge itself is dropped
+    # entirely (not merely truncated) at that width, so it is verified by the
+    # scanner fixture (testdata/child_counts.yaml) and by manual inspection of
+    # the wider capture, not asserted here across both widths.
+    wantContains: ["user driv", "parent ses"]
+    wantAbsent: ["agent driven session"]
 
 selection:
   repositories:
@@ -110,6 +119,22 @@ selection:
       title: cursor session
       workingDir: /fixtures/worktrees/pasture-b
       sessionId: cur-1
+    - harness: claude-code
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: agent driven session
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: origin-agent-hidden
+      origin: agent
+    - harness: claude-code
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: user driven session
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: origin-user-visible
+      origin: user
   transcripts:
     cc-parent:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
@@ -126,6 +151,8 @@ selection:
     - cc-imported
     - 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
     - cur-1
+    - origin-agent-hidden
+    - origin-user-visible
   requiredHarnessNames:
     - claude-code
     - cursor
@@ -179,6 +206,10 @@ selectionCaptures:
   - {name: selection-harness-source-preview-dark-120x40, state: harness-source-preview, theme: dark, width: 120, height: 40}
   - {name: selection-harness-source-preview-light-80x24, state: harness-source-preview, theme: light, width: 80, height: 24}
   - {name: selection-harness-source-preview-light-120x40, state: harness-source-preview, theme: light, width: 120, height: 40}
+  - {name: selection-origin-hidden-dark-80x24, state: origin-hidden, theme: dark, width: 80, height: 24}
+  - {name: selection-origin-hidden-dark-120x40, state: origin-hidden, theme: dark, width: 120, height: 40}
+  - {name: selection-origin-hidden-light-80x24, state: origin-hidden, theme: light, width: 80, height: 24}
+  - {name: selection-origin-hidden-light-120x40, state: origin-hidden, theme: light, width: 120, height: 40}
 
 pushStates:
   - key: start

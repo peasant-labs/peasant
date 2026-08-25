@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
 	"github.com/peasant-labs/peasant/internal/selectionprojection"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -274,13 +275,26 @@ func prepareSessionListings(
 //
 // Only PARENT sessions group into branches: a session whose id appears in
 // another session's SubagentIDs is a child (subagent) and is NOT a row of its
-// own. A parent session stays a LEAF that carries settings.MetaChildCount, the
-// number of subagent sessions discovered transitively beneath it, so its row
-// summarises them as a count instead of opening another level of nesting. The
-// count is display-only: selecting a parent still selects its children for
-// import, which the ingest side expands from the same SubagentIDs. Every
-// session node carries its harness in Meta, plus the settings.MetaIngested flag
-// when the local store already holds that session.
+// own. That exclusion is the CHILD-IDENTIFIER mechanism and fires regardless
+// of origin: a child with a User or Unknown origin is still hidden here,
+// because it is nobody's own top-level row to select. A parent session stays
+// a LEAF that carries settings.MetaChildCount, the number of subagent
+// sessions DISCOVERED transitively beneath it (never the metrics Task-tool
+// heuristic count, which disagrees with discovery today and is out of scope
+// for this fold), so its row summarises them as a count instead of opening
+// another level of nesting. The count is display-only: selecting a parent
+// still selects its children for import, which the ingest side expands from
+// the same SubagentIDs. Every session node carries its harness in Meta, plus
+// the settings.MetaIngested flag when the local store already holds that
+// session.
+//
+// Separately, a top-level row whose OWN origin is Agent is dropped by a
+// second, independent mechanism: positive evidence that a program, not a
+// person, drove it (internal/sessionorigin). User and Unknown origins are
+// always visible; Unknown is the fail-safe and behaves exactly like User.
+// This is a DISCOVERY-scope filter over what the picker lists, never an
+// access-control gate — a session hidden here remains reachable by any path
+// that does not go through this listing.
 //
 // Within a branch the sessions are GROUPED by import state: the not-yet-
 // imported ones first, then the already-imported ones, so a first run reads as
@@ -322,8 +336,14 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 			continue
 		}
 		// A child (subagent) session is summarised on its parent's row, so it
-		// never becomes a row under a branch.
+		// never becomes a row under a branch. This fires regardless of origin.
 		if childIDs[sess.SessionID] {
+			continue
+		}
+		// An agent-driven top-level session is hidden by positive evidence,
+		// independently of the child-identifier check above. User and Unknown
+		// stay visible; Unknown is the fail-safe and behaves like User.
+		if sess.Origin == sessionorigin.Agent {
 			continue
 		}
 		pKey := row.RepositoryIdentity.CohortKey.String()

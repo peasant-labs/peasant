@@ -11,6 +11,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/schema"
 )
 
@@ -27,6 +28,15 @@ type SessionListing struct {
 	SessionID   string    `yaml:"sessionId"`   // raw session ID string supplied by discovery
 	SubagentIDs []string  `yaml:"subagentIds"` // child subagent session IDs (populated from discovery)
 	WorkingDir  string    `yaml:"workingDir"`  // session working directory, used only to focus its containing project
+	// Origin is who drove the session, as discovery's classifier decided it
+	// (internal/sessionorigin). The zero value is the empty string, which is
+	// NOT a menu value: it marks a listing an adapter mined no evidence for,
+	// and callers must resolve it to sessionorigin.Unknown (the visible
+	// fail-safe) before relying on it — never treat empty as User or Agent
+	// directly. Kickstart is the sole consumer that reads this field to hide
+	// agent-driven rows from the picker; it is DISCOVERY scope only and never
+	// gates opening an already-stored session by link.
+	Origin sessionorigin.Origin `yaml:"origin"`
 	// Source locates the transcript the harness wrote. The selection step reads
 	// it to preview a session that Peasant has not imported yet.
 	Source SessionSource `yaml:"source"`

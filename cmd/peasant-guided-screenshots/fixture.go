@@ -76,16 +76,27 @@ const (
 	// selectionStateSourcePreview is a session the local store does not hold,
 	// previewed from the transcript its harness wrote.
 	selectionStateSourcePreview selectionState = "harness-source-preview"
+	// selectionStateOriginHidden is the mounted list with an agent-driven root
+	// hidden, its user-origin control visible, and a visible parent's child
+	// badge reading correctly.
+	selectionStateOriginHidden selectionState = "origin-hidden"
 )
 
 func (s selectionState) valid() bool {
-	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview ||
-		s == selectionStateBranchPreview || s == selectionStateSessionPreview || s == selectionStateSourcePreview
+	switch s {
+	case selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
+		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
+		selectionStateOriginHidden:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s selectionState) requiresBothThemes() bool {
 	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
-		s == selectionStateSessionPreview || s == selectionStateSourcePreview
+		s == selectionStateSessionPreview || s == selectionStateSourcePreview ||
+		s == selectionStateOriginHidden
 }
 
 // pushState is the closed set of push-wizard screens the harness captures: the
@@ -188,6 +199,10 @@ type selectionStateFixture struct {
 	Key          selectionState `yaml:"key"`
 	Query        string         `yaml:"query"`
 	WantContains []string       `yaml:"wantContains"`
+	// WantAbsent names markers that must NOT appear in the rendered view. It
+	// is optional; only the origin-hiding state uses it today, to prove a
+	// row is actually gone rather than merely not asserted present.
+	WantAbsent []string `yaml:"wantAbsent"`
 }
 
 type guidedCaptureFixture struct {
@@ -403,7 +418,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 5700},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
@@ -469,6 +484,7 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	stateRows := make(map[selectionState]selectionStateFixture, len(states))
 	for _, state := range states {
 		if !state.Key.valid() || stateRows[state.Key].Key != "" || !nonEmptyStrings(state.WantContains) ||
+			(len(state.WantAbsent) > 0 && !nonEmptyStrings(state.WantAbsent)) ||
 			(state.Key == selectionStateDefault && state.Query != "") ||
 			(state.Key == selectionStateSearch && strings.TrimSpace(state.Query) == "") {
 			return fmt.Errorf("screenshot fixture has an invalid or duplicate selection state: %#v", state)
@@ -478,10 +494,14 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	for _, state := range []selectionState{
 		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
+		selectionStateOriginHidden,
 	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
 		}
+	}
+	if len(stateRows[selectionStateOriginHidden].WantAbsent) == 0 {
+		return fmt.Errorf("screenshot fixture selection state %q declares no wantAbsent marker, so a broken origin filter would pass unnoticed", selectionStateOriginHidden)
 	}
 
 	seenNames := make(map[string]bool, len(captures))
