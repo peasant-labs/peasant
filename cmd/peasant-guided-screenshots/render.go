@@ -33,6 +33,18 @@ type terminalCapture struct {
 type renderedSheet struct {
 	fixture sheetFixture
 	ansi    string
+	rows    []sheetRow
+}
+
+// sheetRow names one composed contact-sheet row (one guided section, one
+// selection state/theme pair, or one push state/theme pair) and how many
+// lines of the sheet's ANSI content it occupies. validateContentFits uses
+// this to name the first row that would be cropped when content overflows
+// the fixture's declared canvas, rather than reporting only a raw pixel
+// count.
+type sheetRow struct {
+	label string
+	lines int
 }
 
 func renderSheets(document captureDocument) ([]renderedSheet, error) {
@@ -94,20 +106,21 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
+		var rows []sheetRow
 		switch sheet.Kind {
 		case sheetKindGuided:
-			content, err = composeGuidedSheet(sheet, document.GuidedSections, document.GuidedCaptures, guidedCaptures)
+			content, rows, err = composeGuidedSheet(sheet, document.GuidedSections, document.GuidedCaptures, guidedCaptures)
 		case sheetKindSelection:
-			content, err = composeSelectionSheet(sheet, document.SelectionStates, document.SelectionCaptures, selectionCaptures)
+			content, rows, err = composeSelectionSheet(sheet, document.SelectionStates, document.SelectionCaptures, selectionCaptures)
 		case sheetKindPush:
-			content, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
+			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}
 		if err != nil {
 			return nil, err
 		}
-		sheets = append(sheets, renderedSheet{fixture: sheet, ansi: content})
+		sheets = append(sheets, renderedSheet{fixture: sheet, ansi: content, rows: rows})
 	}
 	return sheets, nil
 }
@@ -498,20 +511,26 @@ func composeGuidedSheet(
 	sections []guidedSectionFixture,
 	cases []guidedCaptureFixture,
 	captures map[string]terminalCapture,
-) (string, error) {
+) (string, []sheetRow, error) {
 	rows := make([]string, 0, len(sections))
+	meta := make([]sheetRow, 0, len(sections))
 	for _, section := range sections {
 		left, err := guidedCaptureFor(cases, captures, section.Key, sheet.Theme, 80, 24)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		right, err := guidedCaptureFor(cases, captures, section.Key, sheet.Theme, 120, 40)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		rows = append(rows, joinCapturePair(left, right))
+		row := joinCapturePair(left, right)
+		rows = append(rows, row)
+		meta = append(meta, sheetRow{
+			label: fmt.Sprintf("guided section %q (%s)", section.Key, sheet.Theme),
+			lines: strings.Count(row, "\n") + 1,
+		})
 	}
-	return renderContactSheet(sheet.Title, rows), nil
+	return renderContactSheet(sheet.Title, rows), meta, nil
 }
 
 func composeSelectionSheet(
@@ -519,8 +538,9 @@ func composeSelectionSheet(
 	states []selectionStateFixture,
 	cases []selectionCaptureFixture,
 	captures map[string]terminalCapture,
-) (string, error) {
+) (string, []sheetRow, error) {
 	rows := make([]string, 0, len(states))
+	meta := make([]sheetRow, 0, len(states))
 	for _, state := range states {
 		themes := []captureTheme{captureThemeDark}
 		if state.Key.requiresBothThemes() {
@@ -529,16 +549,21 @@ func composeSelectionSheet(
 		for _, captureTheme := range themes {
 			left, err := selectionCaptureFor(cases, captures, state.Key, captureTheme, 80, 24)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			right, err := selectionCaptureFor(cases, captures, state.Key, captureTheme, 120, 40)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
-			rows = append(rows, joinCapturePair(left, right))
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("selection state %q (%s)", state.Key, captureTheme),
+				lines: strings.Count(row, "\n") + 1,
+			})
 		}
 	}
-	return renderContactSheet(sheet.Title, rows), nil
+	return renderContactSheet(sheet.Title, rows), meta, nil
 }
 
 func composePushSheet(
@@ -546,22 +571,28 @@ func composePushSheet(
 	states []pushStateFixture,
 	cases []pushCaptureFixture,
 	captures map[string]terminalCapture,
-) (string, error) {
+) (string, []sheetRow, error) {
 	rows := make([]string, 0, len(states)*2)
+	meta := make([]sheetRow, 0, len(states)*2)
 	for _, state := range states {
 		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
 			left, err := pushCaptureFor(cases, captures, state.Key, name, 80, 24)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			right, err := pushCaptureFor(cases, captures, state.Key, name, 120, 40)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
-			rows = append(rows, joinCapturePair(left, right))
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("push state %q (%s)", state.Key, name),
+				lines: strings.Count(row, "\n") + 1,
+			})
 		}
 	}
-	return renderContactSheet(sheet.Title, rows), nil
+	return renderContactSheet(sheet.Title, rows), meta, nil
 }
 
 func pushCaptureFor(

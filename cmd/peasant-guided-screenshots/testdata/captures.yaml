@@ -8,12 +8,12 @@ sheets:
     kind: guided
     title: "final guided sections: dark theme"
     theme: dark
-    viewport: {width: 1800, height: 3300}
+    viewport: {width: 1800, height: 3420}
   - name: guided-light
     kind: guided
     title: "final guided sections: light theme"
     theme: light
-    viewport: {width: 1800, height: 3300}
+    viewport: {width: 1800, height: 3420}
   - name: selection
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
