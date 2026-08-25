@@ -7,6 +7,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
 )
@@ -40,6 +41,7 @@ func TestBuildTranscriptContent_UsesCanonicalHistoricalWrapperRoles(t *testing.T
 		entries,
 		defaults.PublishSchemaVersion,
 		config.DefaultPushFieldVisibility(),
+		sessionorigin.User,
 	)
 	if result.SessionDetail == nil {
 		t.Fatal("BuildTranscriptContent returned no session detail payload")

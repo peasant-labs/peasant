@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/projectlabel"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -95,7 +96,7 @@ func (p *StoreDataProvider) Sessions(ctx context.Context) ([]ingest.Session, err
 
 	sessions := make([]ingest.Session, 0, len(rows))
 	for i := range rows {
-		visible, err := p.visibleSessionRow(&rows[i])
+		visible, err := p.discoverableSessionRow(&rows[i])
 		if err != nil {
 			return nil, fmt.Errorf("store adapter: sessions visibility: %w", err)
 		}
@@ -106,7 +107,9 @@ func (p *StoreDataProvider) Sessions(ctx context.Context) ([]ingest.Session, err
 	return sessions, nil
 }
 
-// SessionSummaries returns lightweight session summaries with project names.
+// SessionSummaries returns the lightweight session summaries a person may be
+// OFFERED: the discovery list, scoped by both the persisted kickstart selection
+// and the declared session origin.
 func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSummary, error) {
 	rows, err := p.store.AllSessions(ctx)
 	if err != nil {
@@ -115,7 +118,7 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 
 	visibleRows := make([]store.SessionRow, 0, len(rows))
 	for i := range rows {
-		visible, err := p.visibleSessionRow(&rows[i])
+		visible, err := p.discoverableSessionRow(&rows[i])
 		if err != nil {
 			return nil, fmt.Errorf("store adapter: session summaries visibility: %w", err)
 		}
@@ -124,10 +127,62 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 		}
 	}
 
+	return p.summariesFromRows(ctx, visibleRows)
+}
+
+// SessionSummariesByID returns summaries for exactly the named sessions, in the
+// order they were named. It is the link-resolution path, deliberately OUTSIDE
+// the discovery machinery: it applies NEITHER origin scope NOR selection scope,
+// because the caller is not browsing — it already holds the identifiers.
+// Discovery scope decides what a person is OFFERED; it has never decided what
+// they may OPEN, and this project already settled that rule for stored sessions
+// a narrowed selection hides.
+//
+// An identifier that names no stored session is OMITTED rather than reported as
+// an error, so one stale link inside an evidence set cannot fail the resolution
+// of the sessions that do exist. An empty request returns an empty result.
+//
+// It shares summariesFromRows with the list path, so the two cannot drift in
+// WHAT a summary contains; they differ only in WHICH rows they return.
+func (p *StoreDataProvider) SessionSummariesByID(ctx context.Context, ids []string) ([]SessionSummary, error) {
+	if len(ids) == 0 {
+		return []SessionSummary{}, nil
+	}
+	// Read through the same stored-row query the list path uses, so both paths
+	// see one projection of a session rather than two that can disagree. The
+	// preview lookup below is already scoped to the requested identifiers.
+	rows, err := p.store.AllSessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store adapter: session summaries by id: %w", err)
+	}
+	byID := make(map[string]store.SessionRow, len(rows))
+	for i := range rows {
+		byID[rows[i].SessionID] = rows[i]
+	}
+	requested := make([]store.SessionRow, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		row, ok := byID[id]
+		if !ok {
+			continue
+		}
+		requested = append(requested, row)
+	}
+	return p.summariesFromRows(ctx, requested)
+}
+
+// summariesFromRows is the ONE row-to-summary construction site. Both the
+// discovery list and the by-id link resolution build their payload here, so a
+// field added to one is present in the other by construction.
+func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.SessionRow) ([]SessionSummary, error) {
 	// Collect session IDs for a single bulk preview query.
-	sessionIDs := make([]string, len(visibleRows))
-	for i := range visibleRows {
-		sessionIDs[i] = visibleRows[i].SessionID
+	sessionIDs := make([]string, len(rows))
+	for i := range rows {
+		sessionIDs[i] = rows[i].SessionID
 	}
 
 	// FirstUserMessageBulk issues one IN(...) query for all session IDs.
@@ -137,9 +192,9 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 		return nil, fmt.Errorf("store adapter: session summaries preview: %w", err)
 	}
 
-	summaries := make([]SessionSummary, len(visibleRows))
-	for i := range visibleRows {
-		row := &visibleRows[i]
+	summaries := make([]SessionSummary, len(rows))
+	for i := range rows {
+		row := &rows[i]
 		projectHash, hashErr := schema.NewProjectHash(row.ProjectHash)
 		if hashErr != nil {
 			return nil, fmt.Errorf("store adapter: session summary %q has invalid stored project hash %q while mapping the sessions wire payload: %w; run `peasant ingest verify` and repair the store before retrying", row.SessionID, row.ProjectHash, hashErr)
@@ -155,6 +210,9 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 			Project:       displayProjectName(row.CanonicalRemote, row.ProjectName),
 			ProjectHash:   projectHash,
 			Preview:       previews[row.SessionID],
+			// The producer's declaration travels with the summary, so a consumer
+			// reads a decision instead of re-deriving one from turn shapes.
+			SessionOrigin: schema.SessionOrigin(row.SessionOrigin),
 		}
 		if row.Outcome != nil {
 			s.Outcome = *row.Outcome
@@ -165,7 +223,8 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 	return summaries, nil
 }
 
-func (p *StoreDataProvider) visibleSessionRow(row *store.SessionRow) (bool, error) {
+// sessionCandidate projects a stored row onto the visibility package's input.
+func (p *StoreDataProvider) sessionCandidate(row *store.SessionRow) sessionvisibility.Candidate {
 	remote := ""
 	if row.CanonicalRemote != nil {
 		remote = *row.CanonicalRemote
@@ -174,14 +233,36 @@ func (p *StoreDataProvider) visibleSessionRow(row *store.SessionRow) (bool, erro
 	if row.GitBranch != nil {
 		branch = *row.GitBranch
 	}
-	return p.visibility.Visible(sessionvisibility.Candidate{
-		SessionID:   ingest.SessionID(row.SessionID),
-		Harness:     defaults.Harness(row.ModelHarness),
-		GitRemote:   remote,
-		ProjectName: row.ProjectName,
-		ClonePath:   p.resolveSessionClonePath(row),
-		GitBranch:   branch,
-	})
+	parent := ""
+	if row.ParentID != nil {
+		parent = *row.ParentID
+	}
+	return sessionvisibility.Candidate{
+		SessionID:       ingest.SessionID(row.SessionID),
+		Harness:         defaults.Harness(row.ModelHarness),
+		GitRemote:       remote,
+		ProjectName:     row.ProjectName,
+		ClonePath:       p.resolveSessionClonePath(row),
+		GitBranch:       branch,
+		Origin:          sessionorigin.Origin(row.SessionOrigin),
+		ParentSessionID: ingest.SessionID(parent),
+	}
+}
+
+// visibleSessionRow applies SELECTION scope only. It backs the aggregate
+// surfaces (dashboard totals, trends), which count the work a store holds for
+// the selected projects rather than listing sessions to choose from. Origin
+// scope is a discovery-list boundary and would silently drop agent-driven work
+// out of those totals.
+func (p *StoreDataProvider) visibleSessionRow(row *store.SessionRow) (bool, error) {
+	return p.visibility.Visible(p.sessionCandidate(row))
+}
+
+// discoverableSessionRow applies BOTH scopes. It backs the surfaces a person
+// picks from: the REST sessions list, the WebSocket sessions channel, and
+// therefore the /share chooser.
+func (p *StoreDataProvider) discoverableSessionRow(row *store.SessionRow) (bool, error) {
+	return p.visibility.VisibleForDiscovery(p.sessionCandidate(row))
 }
 
 func (p *StoreDataProvider) resolveSessionClonePath(row *store.SessionRow) ingest.ClonePath {

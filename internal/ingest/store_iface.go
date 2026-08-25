@@ -499,6 +499,11 @@ type PushSessionRow struct {
 	OutputTokens   int
 	TokensTotal    int
 	DurationMs     int64
+	// SessionOrigin is who drove the session, read from the
+	// sessions.session_origin column. It reaches the push wire through the transcript
+	// document, so a Village consumer reads the producer's decision instead of
+	// re-deriving one from turn shapes.
+	SessionOrigin string
 }
 
 // IsSelectedByBranch reports the branch-aware selection result for this row

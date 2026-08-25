@@ -88,6 +88,14 @@ func (p *ProgressiveProvider) SessionSummaries(ctx context.Context) ([]SessionSu
 	return prov.SessionSummaries(ctx)
 }
 
+func (p *ProgressiveProvider) SessionSummariesByID(ctx context.Context, ids []string) ([]SessionSummary, error) {
+	prov, err := p.getProvider(defaults.MockSections.Sessions)
+	if err != nil {
+		return nil, err
+	}
+	return prov.SessionSummariesByID(ctx, ids)
+}
+
 func (p *ProgressiveProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
 	prov, err := p.getProvider(defaults.MockSections.Sessions)
 	if err != nil {

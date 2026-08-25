@@ -71,6 +71,21 @@ func (m *wsMockProvider) SessionSummaries(ctx context.Context) ([]api.SessionSum
 	return m.summaries, nil
 }
 
+func (m *wsMockProvider) SessionSummariesByID(ctx context.Context, ids []string) ([]api.SessionSummary, error) {
+	if err := m.failureFor(api.TopicSessions); err != nil {
+		return nil, err
+	}
+	resolved := make([]api.SessionSummary, 0, len(ids))
+	for _, id := range ids {
+		for i := range m.summaries {
+			if m.summaries[i].ID == id {
+				resolved = append(resolved, m.summaries[i])
+			}
+		}
+	}
+	return resolved, nil
+}
+
 func (m *wsMockProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
 	for i := range m.sessions {
 		if string(m.sessions[i].ID) == id {
