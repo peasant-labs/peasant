@@ -2,10 +2,10 @@
 # BOTH themes (dark, light) at THREE constrained sizes - 80x10, 40x8, and the
 # component's own declared minimum - and its final frame is compared against a
 # banked .golden file. The row-count guards in render_matrix_test.go assert
-# this file stays exhaustive: exactly the ten components, each with exactly its
+# this file stays exhaustive: exactly the listed components, each with exactly its
 # dark+light x three-size rows, and no size dropped.
-expectedCaseCount: 72
-expectedComponentCount: 12
+expectedCaseCount: 78
+expectedComponentCount: 13
 expectedSizesPerComponentTheme: 3
 components:
   - frame
@@ -20,6 +20,7 @@ components:
   - statusbar
   - tree
   - previewsplit
+  - previewsplit-loading-the-rest
 cases:
   # frame
   - name: frame/dark/80x10
@@ -390,6 +391,38 @@ cases:
     height: 8
   - name: previewsplit/light/min
     component: previewsplit
+    theme: light
+    width: 10
+    height: 1
+  # previewsplit-loading-the-rest: the pane showing the quickly-read leading
+  # slice of a two-step preview while the rest is still being read.
+  - name: previewsplit-loading-the-rest/dark/80x10
+    component: previewsplit-loading-the-rest
+    theme: dark
+    width: 80
+    height: 10
+  - name: previewsplit-loading-the-rest/dark/40x8
+    component: previewsplit-loading-the-rest
+    theme: dark
+    width: 40
+    height: 8
+  - name: previewsplit-loading-the-rest/dark/min
+    component: previewsplit-loading-the-rest
+    theme: dark
+    width: 10
+    height: 1
+  - name: previewsplit-loading-the-rest/light/80x10
+    component: previewsplit-loading-the-rest
+    theme: light
+    width: 80
+    height: 10
+  - name: previewsplit-loading-the-rest/light/40x8
+    component: previewsplit-loading-the-rest
+    theme: light
+    width: 40
+    height: 8
+  - name: previewsplit-loading-the-rest/light/min
+    component: previewsplit-loading-the-rest
     theme: light
     width: 10
     height: 1

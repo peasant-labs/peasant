@@ -275,6 +275,26 @@ func buildComponent(t *testing.T, component string, th theme.Theme, width, heigh
 			ps, _ = ps.Update(msg)
 		}
 		return ps.View()
+	case "previewsplit-loading-the-rest":
+		items := []kit.ListItem{
+			kit.StringItem("peasant"),
+			kit.StringItem("village"),
+			kit.StringItem("fairtrade"),
+			kit.StringItem("schema"),
+		}
+		src := &twoStepSource{
+			slice: linesBody{lines: []string{"preview of peasant", "second line", "third line"}},
+			whole: linesBody{lines: []string{"preview of peasant", "second line", "third line", "fourth line"}},
+			more:  true,
+		}
+		ps := kit.NewPreviewSplitWithBodies(th, kit.NewListLeftPane(kit.NewList(th, items)), src)
+		ps.SetSize(width, height)
+		// Apply the FIRST step only, so the golden captures the settled frame
+		// the pane shows while it reads the rest.
+		for _, msg := range collectMsgs(ps.Load()) {
+			ps, _ = ps.Update(msg)
+		}
+		return ps.View()
 	default:
 		t.Fatalf("buildComponent: unknown component %q", component)
 		return ""
