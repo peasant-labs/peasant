@@ -1,15 +1,15 @@
 package store
 
-// V45 CHECK-bijection tests: the two-table origin column addition.
+// V46 CHECK-bijection tests: the two-table origin column addition.
 //
 // This file is package `store` (internal, matching migration_v37_check_test.go
 // and migration_v33_test.go), because it executes the unexported
-// `migrationV45` script directly against a hand-built table, and the parser
+// `migrationV46` script directly against a hand-built table, and the parser
 // below has to select its clause by TABLE NAME first — a naive substring
 // search for the shorter marker `"origin IN ("` would match inside
 // `"session_origin IN ("` first, silently reading the wrong table's clause
 // while claiming to test the other one. The fixture-driven round trip and
-// rejection tests live in migration_v45_test.go (package store_test), which
+// rejection tests live in migration_v46_test.go (package store_test), which
 // needs testutil — importing testutil from THIS package would be a real
 // import cycle (testutil imports store for its mocks).
 
@@ -23,13 +23,13 @@ import (
 )
 
 // originCheckLiteralsForTable extracts the accepted string literals from the
-// `... IN (...)` CHECK that migrationV45 adds to the named table.
+// `... IN (...)` CHECK that migrationV46 adds to the named table.
 //
 // It selects its statement by TABLE NAME FIRST: split the script on `;`, keep
 // only the statement(s) that both alter the named table and declare an
 // `IN (` clause, and require there to be exactly one. Only THEN does it parse
 // the literal list within that one statement. This ordering is the whole
-// point (review B, BLOCKER, carried into this slice): migrationV45 puts the
+// point (review B, BLOCKER, carried into this slice): migrationV46 puts the
 // sessions clause before the evidence clause, and the evidence table's own
 // column is named plain `origin` — the shorter name that
 // `"session_origin IN ("` also ends with. A parser that searched for
@@ -131,7 +131,7 @@ func assertOriginSetsEqual(t *testing.T, label string, got, want map[string]bool
 }
 
 // TestOriginCheckParserIsBaselinedAgainstAMismatchedScript feeds the parser a
-// script whose two clauses DIFFER (migrationV45 itself: sessions accepts three
+// script whose two clauses DIFFER (migrationV46 itself: sessions accepts three
 // literals, claude_transcript_evidence accepts those three plus the empty
 // string) and asserts it returns the right, DIFFERENT set for each table
 // before either set is trusted by the tests below.
@@ -143,8 +143,8 @@ func assertOriginSetsEqual(t *testing.T, label string, got, want map[string]bool
 func TestOriginCheckParserIsBaselinedAgainstAMismatchedScript(t *testing.T) {
 	t.Parallel()
 
-	sessionsSet := originCheckLiteralsForTable(t, migrationV45, "sessions")
-	evidenceSet := originCheckLiteralsForTable(t, migrationV45, "claude_transcript_evidence")
+	sessionsSet := originCheckLiteralsForTable(t, migrationV46, "sessions")
+	evidenceSet := originCheckLiteralsForTable(t, migrationV46, "claude_transcript_evidence")
 
 	wantSessions := sessionOriginMenuSet()
 	wantEvidence := evidenceOriginMenuSet()
@@ -166,7 +166,7 @@ func TestOriginCheckParserIsBaselinedAgainstAMismatchedScript(t *testing.T) {
 	// table's CHECK. Its result therefore disagrees with the real evidence
 	// set, which is exactly the silent-wrong-table failure this file's
 	// parser must not repeat.
-	naive := naiveSubstringOriginLiterals(t, migrationV45)
+	naive := naiveSubstringOriginLiterals(t, migrationV46)
 	if naive[""] {
 		t.Fatal("expected the naive parser to demonstrate the trap by landing on the sessions clause (no empty member); it read the evidence clause instead, so this baseline no longer proves anything")
 	}
@@ -177,39 +177,39 @@ func TestOriginCheckParserIsBaselinedAgainstAMismatchedScript(t *testing.T) {
 	}
 }
 
-// TestMigrationV45SessionOriginCheckBijective proves sessions.session_origin's
+// TestMigrationV46SessionOriginCheckBijective proves sessions.session_origin's
 // CHECK accepts exactly sessionorigin.All — no more (a value the Go menu
 // dropped), no less (a value the Go menu grew to include).
-func TestMigrationV45SessionOriginCheckBijective(t *testing.T) {
+func TestMigrationV46SessionOriginCheckBijective(t *testing.T) {
 	t.Parallel()
 	assertOriginSetsEqual(t, "sessions.session_origin",
-		originCheckLiteralsForTable(t, migrationV45, "sessions"),
+		originCheckLiteralsForTable(t, migrationV46, "sessions"),
 		sessionOriginMenuSet())
 }
 
-// TestMigrationV45EvidenceOriginCheckBijective proves
+// TestMigrationV46EvidenceOriginCheckBijective proves
 // claude_transcript_evidence.origin's CHECK accepts exactly sessionorigin.All
 // plus the empty "record predates the field" marker — no more, no less.
-func TestMigrationV45EvidenceOriginCheckBijective(t *testing.T) {
+func TestMigrationV46EvidenceOriginCheckBijective(t *testing.T) {
 	t.Parallel()
 	assertOriginSetsEqual(t, "claude_transcript_evidence.origin",
-		originCheckLiteralsForTable(t, migrationV45, "claude_transcript_evidence"),
+		originCheckLiteralsForTable(t, migrationV46, "claude_transcript_evidence"),
 		evidenceOriginMenuSet())
 }
 
-func execV45(t *testing.T, conn *sqlite.Conn, sql string) {
+func execV46(t *testing.T, conn *sqlite.Conn, sql string) {
 	t.Helper()
 	if err := sqlitex.ExecuteTransient(conn, sql, nil); err != nil {
 		t.Fatalf("exec %q: %v", sql, err)
 	}
 }
 
-// newV45Conn builds a bare in-memory connection carrying only sessions and
-// claude_transcript_evidence, with migrationV45 applied on top of their base
+// newV46Conn builds a bare in-memory connection carrying only sessions and
+// claude_transcript_evidence, with migrationV46 applied on top of their base
 // (V1 / V44) shapes. Foreign keys are off, matching migration_v37_check_test.go:
 // the base sessions DDL declares FKs to host_slugs/projects this test does not
 // create.
-func newV45Conn(t *testing.T) *sqlite.Conn {
+func newV46Conn(t *testing.T) *sqlite.Conn {
 	t.Helper()
 	conn, err := sqlite.OpenConn(":memory:", sqlite.OpenReadWrite|sqlite.OpenCreate)
 	if err != nil {
@@ -220,25 +220,25 @@ func newV45Conn(t *testing.T) *sqlite.Conn {
 			t.Errorf("close conn: %v", err)
 		}
 	})
-	execV45(t, conn, "PRAGMA foreign_keys = OFF")
-	execV45(t, conn, createSessions)
+	execV46(t, conn, "PRAGMA foreign_keys = OFF")
+	execV46(t, conn, createSessions)
 	if err := sqlitex.ExecuteScript(conn, migrationV44, nil); err != nil {
 		t.Fatalf("apply migrationV44: %v", err)
 	}
-	if err := sqlitex.ExecuteScript(conn, migrationV45, nil); err != nil {
-		t.Fatalf("apply migrationV45: %v", err)
+	if err := sqlitex.ExecuteScript(conn, migrationV46, nil); err != nil {
+		t.Fatalf("apply migrationV46: %v", err)
 	}
 	return conn
 }
 
-// TestMigrationV45SessionOriginColumnAcceptsTheMenu is a direct-SQL sanity
-// check that newV45Conn's sessions table actually carries the migrated
+// TestMigrationV46SessionOriginColumnAcceptsTheMenu is a direct-SQL sanity
+// check that newV46Conn's sessions table actually carries the migrated
 // column (belt-and-suspenders alongside the fixture-driven round trip in
-// migration_v45_test.go, which exercises this same table through the real
+// migration_v46_test.go, which exercises this same table through the real
 // Store instead of a bare connection).
-func TestMigrationV45SessionOriginColumnAcceptsTheMenu(t *testing.T) {
+func TestMigrationV46SessionOriginColumnAcceptsTheMenu(t *testing.T) {
 	t.Parallel()
-	conn := newV45Conn(t)
+	conn := newV46Conn(t)
 	const insertSession = `INSERT INTO sessions
 		(session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, session_origin)
 		VALUES (?, 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', ?)`

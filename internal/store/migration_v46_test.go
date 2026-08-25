@@ -1,7 +1,7 @@
 package store_test
 
-// V45 fixture-driven round trip and rejection tests. See
-// migration_v45_check_test.go (package store) for the CHECK-bijection parser
+// V46 fixture-driven round trip and rejection tests. See
+// migration_v46_check_test.go (package store) for the CHECK-bijection parser
 // and its baseline — this file cannot live in that package, because it needs
 // testutil.RequireFixtureNames and testutil imports store for its mocks,
 // which would be a real import cycle from inside package store's own test
@@ -25,27 +25,27 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-//go:embed testdata/migrations/v45_session_origin.yaml
-var v45SessionOriginFixtureBytes []byte
+//go:embed testdata/migrations/v46_session_origin.yaml
+var v46SessionOriginFixtureBytes []byte
 
-type v45SessionOriginFixture struct {
+type v46SessionOriginFixture struct {
 	RequiredSessionRecordNames     []string            `yaml:"required_session_record_names"`
 	RequiredSessionRejectionNames  []string            `yaml:"required_session_rejection_names"`
 	RequiredEvidenceRecordNames    []string            `yaml:"required_evidence_record_names"`
 	RequiredEvidenceRejectionNames []string            `yaml:"required_evidence_rejection_names"`
-	SessionRecords                 []v45SessionRecord  `yaml:"session_records"`
-	SessionRejections              []v45NamedSQL       `yaml:"session_rejections"`
-	EvidenceRecords                []v45EvidenceRecord `yaml:"evidence_records"`
-	EvidenceRejections             []v45NamedSQL       `yaml:"evidence_rejections"`
+	SessionRecords                 []v46SessionRecord  `yaml:"session_records"`
+	SessionRejections              []v46NamedSQL       `yaml:"session_rejections"`
+	EvidenceRecords                []v46EvidenceRecord `yaml:"evidence_records"`
+	EvidenceRejections             []v46NamedSQL       `yaml:"evidence_rejections"`
 }
 
-type v45SessionRecord struct {
+type v46SessionRecord struct {
 	Name          string `yaml:"name"`
 	SessionID     string `yaml:"session_id"`
 	SessionOrigin string `yaml:"session_origin"`
 }
 
-type v45EvidenceRecord struct {
+type v46EvidenceRecord struct {
 	Name            string                     `yaml:"name"`
 	SourcePath      string                     `yaml:"source_path"`
 	Scope           ingest.ClaudeEvidenceScope `yaml:"scope"`
@@ -55,7 +55,7 @@ type v45EvidenceRecord struct {
 	Origin          string                     `yaml:"origin"`
 }
 
-func (r v45EvidenceRecord) toEvidence() ingest.ClaudeTranscriptEvidence {
+func (r v46EvidenceRecord) toEvidence() ingest.ClaudeTranscriptEvidence {
 	return ingest.ClaudeTranscriptEvidence{
 		SourcePath:            ingest.ResolvedPath(r.SourcePath),
 		Scope:                 r.Scope,
@@ -66,21 +66,21 @@ func (r v45EvidenceRecord) toEvidence() ingest.ClaudeTranscriptEvidence {
 	}
 }
 
-type v45NamedSQL struct {
+type v46NamedSQL struct {
 	Name string `yaml:"name"`
 	SQL  string `yaml:"sql"`
 }
 
-func decodeV45Fixture(source []byte) (v45SessionOriginFixture, error) {
+func decodeV46Fixture(source []byte) (v46SessionOriginFixture, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(source))
 	decoder.KnownFields(true)
-	var fixture v45SessionOriginFixture
+	var fixture v46SessionOriginFixture
 	if err := decoder.Decode(&fixture); err != nil {
-		return v45SessionOriginFixture{}, fmt.Errorf("decode v45 session-origin fixture: %w", err)
+		return v46SessionOriginFixture{}, fmt.Errorf("decode v46 session-origin fixture: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return v45SessionOriginFixture{}, fmt.Errorf("v45 session-origin fixture must contain exactly one YAML document: %v", err)
+		return v46SessionOriginFixture{}, fmt.Errorf("v46 session-origin fixture must contain exactly one YAML document: %v", err)
 	}
 
 	sessionRecordNames := make(map[string]bool, len(fixture.SessionRecords))
@@ -100,45 +100,45 @@ func decodeV45Fixture(source []byte) (v45SessionOriginFixture, error) {
 		evidenceRejectionNames[r.Name] = true
 	}
 
-	if err := testutil.RequireFixtureNames("v45 session-origin fixture", "session record", fixture.RequiredSessionRecordNames, sessionRecordNames); err != nil {
-		return v45SessionOriginFixture{}, err
+	if err := testutil.RequireFixtureNames("v46 session-origin fixture", "session record", fixture.RequiredSessionRecordNames, sessionRecordNames); err != nil {
+		return v46SessionOriginFixture{}, err
 	}
-	if err := testutil.RequireFixtureNames("v45 session-origin fixture", "session rejection", fixture.RequiredSessionRejectionNames, sessionRejectionNames); err != nil {
-		return v45SessionOriginFixture{}, err
+	if err := testutil.RequireFixtureNames("v46 session-origin fixture", "session rejection", fixture.RequiredSessionRejectionNames, sessionRejectionNames); err != nil {
+		return v46SessionOriginFixture{}, err
 	}
-	if err := testutil.RequireFixtureNames("v45 session-origin fixture", "evidence record", fixture.RequiredEvidenceRecordNames, evidenceRecordNames); err != nil {
-		return v45SessionOriginFixture{}, err
+	if err := testutil.RequireFixtureNames("v46 session-origin fixture", "evidence record", fixture.RequiredEvidenceRecordNames, evidenceRecordNames); err != nil {
+		return v46SessionOriginFixture{}, err
 	}
-	if err := testutil.RequireFixtureNames("v45 session-origin fixture", "evidence rejection", fixture.RequiredEvidenceRejectionNames, evidenceRejectionNames); err != nil {
-		return v45SessionOriginFixture{}, err
+	if err := testutil.RequireFixtureNames("v46 session-origin fixture", "evidence rejection", fixture.RequiredEvidenceRejectionNames, evidenceRejectionNames); err != nil {
+		return v46SessionOriginFixture{}, err
 	}
 	return fixture, nil
 }
 
-func loadV45Fixture(t *testing.T) v45SessionOriginFixture {
+func loadV46Fixture(t *testing.T) v46SessionOriginFixture {
 	t.Helper()
-	fixture, err := decodeV45Fixture(v45SessionOriginFixtureBytes)
+	fixture, err := decodeV46Fixture(v46SessionOriginFixtureBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return fixture
 }
 
-// TestMigrationV45SessionOriginRoundTripAndRejections inserts one row per
+// TestMigrationV46SessionOriginRoundTripAndRejections inserts one row per
 // sessions.session_origin menu value directly against a real, fully migrated
 // Store, reads it back, and confirms the stored value survives
 // sessionorigin.Parse — then confirms the CHECK refuses a value outside the
 // menu, and separately refuses the empty string (which IS legal on the
 // evidence cache table but is NOT a fourth sessions origin).
-func TestMigrationV45SessionOriginRoundTripAndRejections(t *testing.T) {
+func TestMigrationV46SessionOriginRoundTripAndRejections(t *testing.T) {
 	t.Parallel()
-	fixture := loadV45Fixture(t)
+	fixture := loadV46Fixture(t)
 	s := openTestStore(t)
 	conn := takeConn(t, s.PoolForTest())
 	defer s.PoolForTest().Put(conn)
 
 	// The real Store enforces the sessions FKs to host_slugs/projects, unlike
-	// the bare in-memory connection migration_v45_check_test.go uses for the
+	// the bare in-memory connection migration_v46_check_test.go uses for the
 	// CHECK-bijection tests. Seed the one host and project row every fixture
 	// record references.
 	if err := sqlitex.ExecuteTransient(conn, `INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('h', 'h')`, nil); err != nil {
@@ -184,7 +184,7 @@ func TestMigrationV45SessionOriginRoundTripAndRejections(t *testing.T) {
 	}
 }
 
-// TestMigrationV45EvidenceOriginRoundTripAndRejections saves and loads every
+// TestMigrationV46EvidenceOriginRoundTripAndRejections saves and loads every
 // evidence fixture record through the REAL ClaudeEvidenceCache (store.Store),
 // not an in-memory fake, so this is the SQL half of the round trip — the
 // adapter half is proven separately in
@@ -192,9 +192,9 @@ func TestMigrationV45SessionOriginRoundTripAndRejections(t *testing.T) {
 // fake cache does not prove the stored form. Both scopes (root and subagent)
 // are exercised, and the empty "predates the field" marker is proven to
 // survive the round trip distinctly from a real menu value.
-func TestMigrationV45EvidenceOriginRoundTripAndRejections(t *testing.T) {
+func TestMigrationV46EvidenceOriginRoundTripAndRejections(t *testing.T) {
 	t.Parallel()
-	fixture := loadV45Fixture(t)
+	fixture := loadV46Fixture(t)
 	ctx := context.Background()
 	s := openTestStore(t)
 
@@ -255,13 +255,13 @@ func TestMigrationV45EvidenceOriginRoundTripAndRejections(t *testing.T) {
 	}
 }
 
-// TestV45FixtureGuardsRequiredRowDeletion mutation-proves the required-name
+// TestV46FixtureGuardsRequiredRowDeletion mutation-proves the required-name
 // manifests for all four rows this fixture carries: deleting any one of them
 // must fail the load with a message naming the missing row.
-func TestV45FixtureGuardsRequiredRowDeletion(t *testing.T) {
+func TestV46FixtureGuardsRequiredRowDeletion(t *testing.T) {
 	t.Parallel()
 
-	if _, err := decodeV45Fixture(v45SessionOriginFixtureBytes); err != nil {
+	if _, err := decodeV46Fixture(v46SessionOriginFixtureBytes); err != nil {
 		t.Fatalf("baseline fixture failed to decode before mutation: %v", err)
 	}
 
@@ -293,7 +293,7 @@ func TestV45FixtureGuardsRequiredRowDeletion(t *testing.T) {
 			marker: []byte("  - name: an evidence origin outside the closed menu is refused\n    sql: >-\n" +
 				"      INSERT INTO claude_transcript_evidence\n" +
 				"      (source_path, scope, mod_time_unix_nano, size_bytes, has_conversation, spawns_json, title, branch, cwd, origin)\n" +
-				"      VALUES ('/tmp/v45-bad.jsonl', 'root', 1, 1, 1, '[]', '', '', '', 'teammate')\n"),
+				"      VALUES ('/tmp/v46-bad.jsonl', 'root', 1, 1, 1, '[]', '', '', '', 'teammate')\n"),
 			wantErr: `missing required evidence rejection "an evidence origin outside the closed menu is refused"`,
 		},
 	}
@@ -302,11 +302,11 @@ func TestV45FixtureGuardsRequiredRowDeletion(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mutated := bytes.Replace(v45SessionOriginFixtureBytes, tc.marker, nil, 1)
-			if bytes.Equal(mutated, v45SessionOriginFixtureBytes) {
+			mutated := bytes.Replace(v46SessionOriginFixtureBytes, tc.marker, nil, 1)
+			if bytes.Equal(mutated, v46SessionOriginFixtureBytes) {
 				t.Fatalf("mutation marker did not match the fixture; the test is out of sync with the fixture file")
 			}
-			_, err := decodeV45Fixture(mutated)
+			_, err := decodeV46Fixture(mutated)
 			if err == nil {
 				t.Fatal("fixture decoder accepted a corpus missing a required row")
 			}

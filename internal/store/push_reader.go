@@ -40,7 +40,7 @@ import (
 //	20: git_remote     (from host_slugs JOIN; COALESCE to '' when unknown)
 //	21: parent_id      (nullable FK; COALESCE to '' — empty for root sessions)
 //	22: project_path   (session worktree, falling back to project canonical cwd)
-//	23: session_origin (NOT NULL over the three-value menu; V45)
+//	23: session_origin (NOT NULL over the three-value menu; V46)
 //
 // Uses JOIN session_metrics (not LEFT JOIN) — sessions without metrics are
 // excluded. This is intentional: sessions held back from push until

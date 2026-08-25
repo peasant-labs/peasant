@@ -1,6 +1,6 @@
 package store
 
-// migrationV45 persists who drove a session, once the classifier has decided
+// migrationV46 persists who drove a session, once the classifier has decided
 // it, so every later run and every downstream surface reads a stored answer
 // instead of re-deriving one.
 //
@@ -23,7 +23,7 @@ package store
 //     row scan resolves that marker to "record incomplete" before it is ever
 //     treated as an Origin, and never calls Origin.Validate on the raw stored
 //     value, so a corrupt token still fails closed through sessionorigin.Parse.
-const migrationV45 = `
+const migrationV46 = `
 ALTER TABLE sessions
   ADD COLUMN session_origin TEXT NOT NULL DEFAULT 'unknown'
   CHECK (session_origin IN ('user', 'agent', 'unknown'));

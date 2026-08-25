@@ -1,4 +1,4 @@
-# V45 adds sessions.session_origin (+ origin_version) and widens
+# V46 adds sessions.session_origin (+ origin_version) and widens
 # claude_transcript_evidence.origin. This fixture round-trips a record through
 # each migrated table and separately proves each CHECK refuses a value outside
 # its menu. Deletion protection is by required NAME, never a declared count.
@@ -93,4 +93,4 @@ evidence_rejections:
     sql: >-
       INSERT INTO claude_transcript_evidence
       (source_path, scope, mod_time_unix_nano, size_bytes, has_conversation, spawns_json, title, branch, cwd, origin)
-      VALUES ('/tmp/v45-bad.jsonl', 'root', 1, 1, 1, '[]', '', '', '', 'teammate')
+      VALUES ('/tmp/v46-bad.jsonl', 'root', 1, 1, 1, '[]', '', '', '', 'teammate')

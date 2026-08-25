@@ -8,7 +8,7 @@ package ingest_test
 // This reuses claudeEvidenceCacheRoot, claudeEvidenceFile, and
 // writeClaudeEvidenceFiles from claude_evidence_cache_test.go (same package),
 // and openEvidenceStore to get a REAL store.Store as the cache — the same
-// discipline as the SQL round trip in internal/store/migration_v45_test.go:
+// discipline as the SQL round trip in internal/store/migration_v46_test.go:
 // this proves the condition against the real Fresh predicate and a real mined
 // record, not a hand-built struct that might not match what discovery
 // actually produces.

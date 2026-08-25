@@ -359,11 +359,11 @@ func TestMigrationV40ReplaysBackfilledAssociations(t *testing.T) {
 	}
 	// The production InsertSessions path below writes through the single,
 	// schema-CURRENT sqlInsertSession statement (it has no per-version
-	// variant), which as of V45 always sets session_origin. A V39-frozen
+	// variant), which as of V46 always sets session_origin. A V39-frozen
 	// table has no such column yet, so add it here as a TEMPORARY column —
 	// user_version is left at 39, untouched — purely so the real write path
 	// can run against this intentionally-old snapshot. It is dropped again
-	// below, before the normal migration resumes, so V45's own ALTER TABLE
+	// below, before the normal migration resumes, so V46's own ALTER TABLE
 	// ADD COLUMN still runs untouched and unaware this ever happened.
 	if err := sqlitex.ExecuteTransient(conn, `ALTER TABLE sessions ADD COLUMN session_origin TEXT NOT NULL DEFAULT 'unknown'`, nil); err != nil {
 		pool.Put(conn)
@@ -406,7 +406,7 @@ func TestMigrationV40ReplaysBackfilledAssociations(t *testing.T) {
 
 	// Drop the temporary column added above, restoring the exact V39 shape
 	// before the real migration path resumes at user_version 39. Without
-	// this, V45's own ALTER TABLE ADD COLUMN session_origin would fail with
+	// this, V46's own ALTER TABLE ADD COLUMN session_origin would fail with
 	// a duplicate-column error when the migration below reaches it.
 	dropConn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
 	if err != nil {
