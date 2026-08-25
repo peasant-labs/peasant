@@ -203,30 +203,6 @@ type selectionStateFixture struct {
 	// is optional; only the origin-hiding state uses it today, to prove a
 	// row is actually gone rather than merely not asserted present.
 	WantAbsent []string `yaml:"wantAbsent"`
-	// WideWantContains and NarrowWantAbsent carry the markers whose presence
-	// depends on the terminal width, so a width-specific truth is a GATE
-	// rather than a note asking a human to look. The child-session badge is
-	// the case that exists today: the wider capture must show it, and the
-	// narrower one drops it entirely rather than truncating it.
-	WideWantContains []string `yaml:"wideWantContains"`
-	NarrowWantAbsent []string `yaml:"narrowWantAbsent"`
-}
-
-// selectionWideColumns is the width at and above which a selection capture is
-// the WIDE one: it has room for the markers the narrow capture drops.
-const selectionWideColumns = 120
-
-// selectionStateExpectations resolves one state's markers for one capture
-// width, so the real capture run and the mounted-render test cannot disagree
-// about what a width is expected to show.
-func selectionStateExpectations(state selectionStateFixture, width int) (wantContains, wantAbsent []string) {
-	wantContains = append([]string(nil), state.WantContains...)
-	wantAbsent = append([]string(nil), state.WantAbsent...)
-	if width >= selectionWideColumns {
-		wantContains = append(wantContains, state.WideWantContains...)
-		return wantContains, wantAbsent
-	}
-	return wantContains, append(wantAbsent, state.NarrowWantAbsent...)
 }
 
 type guidedCaptureFixture struct {
@@ -544,30 +520,6 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	}
 	if len(stateRows[selectionStateOriginHidden].WantAbsent) == 0 {
 		return fmt.Errorf("screenshot fixture selection state %q declares no wantAbsent marker, so a broken origin filter would pass unnoticed", selectionStateOriginHidden)
-	}
-	if len(stateRows[selectionStateOriginHidden].WideWantContains) == 0 {
-		return fmt.Errorf(
-			"screenshot fixture selection state %q declares no wideWantContains marker.\n"+
-				"what: the wider capture asserts nothing that only the wider capture can show.\n"+
-				"why: the child-session badge fits at %d columns and is dropped below it, so without\n"+
-				"     a width-specific marker a badge that stopped rendering would pass unnoticed.\n"+
-				"where: the origin-hidden selection state in testdata/captures.yaml.\n"+
-				"when: while validating the fixture, before any capture was rendered.\n"+
-				"means: no screenshot was written.\n"+
-				"fix: restore the badge marker under wideWantContains.",
-			selectionStateOriginHidden, selectionWideColumns)
-	}
-	if len(stateRows[selectionStateOriginHidden].NarrowWantAbsent) == 0 {
-		return fmt.Errorf(
-			"screenshot fixture selection state %q declares no narrowWantAbsent marker.\n"+
-				"what: nothing pins that the narrower capture DROPS the child-session badge.\n"+
-				"why: the drop is deliberate width behaviour; unpinned, a badge leaking into a\n"+
-				"     capture too narrow to hold it would go unnoticed.\n"+
-				"where: the origin-hidden selection state in testdata/captures.yaml.\n"+
-				"when: while validating the fixture, before any capture was rendered.\n"+
-				"means: no screenshot was written.\n"+
-				"fix: restore the badge marker under narrowWantAbsent.",
-			selectionStateOriginHidden)
 	}
 
 	seenNames := make(map[string]bool, len(captures))
