@@ -72,8 +72,11 @@ renderAssertions:
     - case: global-session-match-dark
       wantContains: ["search: cursor", cursor session]
       wantMissing: [parent session, imported session, "scope:"]
+    # The bottom-overflow glyph marks the last VISIBLE line. A parent's child
+    # count renders on its own line beneath the row, so when that line is the
+    # last one on screen the glyph sits beside it rather than beside a checkbox.
     - case: overflow-middle-dark
-      wantContains: ["↑  ▾", "↓      [✓]"]
+      wantContains: ["↑  ▾", "↓            + 2 child sessions"]
     - case: overflow-bottom-dark
       wantContains: ["↑▾"]
       wantMissing: [↕, "↓ "]

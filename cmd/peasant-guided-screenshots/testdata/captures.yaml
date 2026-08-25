@@ -52,27 +52,31 @@ selectionStates:
   - key: branch-preview
     query: ""
     wantContains: ["project: github:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+  # The row title is a PREFIX marker: with the child-session count moved to its
+  # own line, the parent row carries its tracked chip again, so a narrow split
+  # pane clips the title where it previously had room for all of it.
   - key: session-preview
     query: ""
-    wantContains: ["parent ses", "harness: claude code", scrubbed-body]
+    wantContains: ["parent se", "harness: claude code", scrubbed-body]
   - key: harness-source-preview
     query: ""
     wantContains: ["harness: claude code", scrubbed-source-body, read in place]
   - key: origin-hidden
     query: ""
-    # "user driv" (not the full title) survives the row-label truncation the
-    # narrower 80-column capture applies, so only these markers can be asserted
-    # at BOTH widths.
+    # Every marker here is a PREFIX, because the narrower capture splits its
+    # width between the tree and the preview pane and clips both the row title
+    # and the count line. The kit's own rendered-screen goldens pin the full
+    # text and the exact indentation at each width; these markers pin that the
+    # right things reach the mounted screen.
     #
-    # The child-session badge is width-dependent and is now GATED rather than
-    # left to a human eye: the parent's listing carries subagent ids while the
-    # cohort holds no child at all, exactly as production discovery hands it
-    # over, so the wider capture can only show this count by resolving the
-    # discovered subagent relation. The narrower capture drops the badge
-    # entirely rather than truncating it, which narrowWantAbsent pins.
-    wantContains: ["user driv", "parent ses"]
-    wideWantContains: ["+ 2 child sessions"]
-    narrowWantAbsent: ["child sessions"]
+    # The child-session count is asserted at EVERY width. It renders on its own
+    # line beneath its parent rather than competing with the title for the row,
+    # so it no longer disappears when the terminal is narrow. It is also the
+    # only marker here that the fixture cannot produce by listing: the parent's
+    # listing names subagent ids while the cohort holds no child at all, exactly
+    # as production discovery hands it over, so this count can only come from
+    # resolving the discovered subagent relation.
+    wantContains: ["user driv", "parent se", "+ 2 child"]
     wantAbsent: ["agent driven session"]
 
 selection:

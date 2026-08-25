@@ -202,19 +202,20 @@ func TestCaptureFixtureGuardsRequiredPushStateDeletion(t *testing.T) {
 // without a bare state-count guard.
 func TestCaptureFixtureGuardsRequiredOriginHiddenStateDeletion(t *testing.T) {
 	old := []byte("  - key: origin-hidden\n    query: \"\"\n" +
-		"    # \"user driv\" (not the full title) survives the row-label truncation the\n" +
-		"    # narrower 80-column capture applies, so only these markers can be asserted\n" +
-		"    # at BOTH widths.\n" +
+		"    # Every marker here is a PREFIX, because the narrower capture splits its\n" +
+		"    # width between the tree and the preview pane and clips both the row title\n" +
+		"    # and the count line. The kit's own rendered-screen goldens pin the full\n" +
+		"    # text and the exact indentation at each width; these markers pin that the\n" +
+		"    # right things reach the mounted screen.\n" +
 		"    #\n" +
-		"    # The child-session badge is width-dependent and is now GATED rather than\n" +
-		"    # left to a human eye: the parent's listing carries subagent ids while the\n" +
-		"    # cohort holds no child at all, exactly as production discovery hands it\n" +
-		"    # over, so the wider capture can only show this count by resolving the\n" +
-		"    # discovered subagent relation. The narrower capture drops the badge\n" +
-		"    # entirely rather than truncating it, which narrowWantAbsent pins.\n" +
-		"    wantContains: [\"user driv\", \"parent ses\"]\n" +
-		"    wideWantContains: [\"+ 2 child sessions\"]\n" +
-		"    narrowWantAbsent: [\"child sessions\"]\n" +
+		"    # The child-session count is asserted at EVERY width. It renders on its own\n" +
+		"    # line beneath its parent rather than competing with the title for the row,\n" +
+		"    # so it no longer disappears when the terminal is narrow. It is also the\n" +
+		"    # only marker here that the fixture cannot produce by listing: the parent's\n" +
+		"    # listing names subagent ids while the cohort holds no child at all, exactly\n" +
+		"    # as production discovery hands it over, so this count can only come from\n" +
+		"    # resolving the discovered subagent relation.\n" +
+		"    wantContains: [\"user driv\", \"parent se\", \"+ 2 child\"]\n" +
 		"    wantAbsent: [\"agent driven session\"]\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("origin-hidden state block mutation source occurs %d times, want exactly one", count)
@@ -245,37 +246,6 @@ func TestCaptureFixtureGuardsOriginHiddenWantAbsent(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "declares no wantAbsent marker") {
 		t.Fatalf("missing-wantAbsent error = %v, want it to explain the gap", err)
-	}
-}
-
-// TestCaptureFixtureGuardsOriginHiddenWidthMarkers mutation-proves that decode
-// itself requires BOTH width-specific markers on the origin-hidden state.
-// Without them the child-session badge would be back to a human eyeball: the
-// wider capture would assert nothing only it can show, and nothing would pin
-// that the narrower capture drops the badge instead of truncating it.
-func TestCaptureFixtureGuardsOriginHiddenWidthMarkers(t *testing.T) {
-	for _, probe := range []struct {
-		name   string
-		source string
-		want   string
-	}{
-		{"wide", "    wideWantContains: [\"+ 2 child sessions\"]\n", "declares no wideWantContains marker"},
-		{"narrow", "    narrowWantAbsent: [\"child sessions\"]\n", "declares no narrowWantAbsent marker"},
-	} {
-		t.Run(probe.name, func(t *testing.T) {
-			source := []byte(probe.source)
-			if count := bytes.Count(captureFixtureData, source); count != 1 {
-				t.Fatalf("%s marker mutation source occurs %d times, want exactly one", probe.name, count)
-			}
-			mutated := bytes.Replace(captureFixtureData, source, nil, 1)
-			_, err := decodeCaptureDocument(mutated)
-			if err == nil {
-				t.Fatalf("screenshot fixture accepted an origin-hidden state with no %s marker", probe.name)
-			}
-			if !strings.Contains(err.Error(), probe.want) {
-				t.Fatalf("missing-%s-marker error = %v, want it to explain the gap", probe.name, err)
-			}
-		})
 	}
 }
 
@@ -330,8 +300,7 @@ func TestCaptureFixtureRendersOriginHiddenViewActuallyHidesAgentRow(t *testing.T
 		// Each width is reported on its own: the widths assert DIFFERENT things
 		// about the child-session badge, so stopping at the first failure would
 		// hide whichever one ran second.
-		wantContains, wantAbsent := selectionStateExpectations(state, size.width)
-		if err := validateTerminalCapture(capture.Name, view, size.width, size.height, wantContains, wantAbsent); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, size.width, size.height, state.WantContains, state.WantAbsent); err != nil {
 			t.Errorf("%dx%d: %v", size.width, size.height, err)
 		}
 	}

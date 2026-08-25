@@ -81,8 +81,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		wantContains, wantAbsent := selectionStateExpectations(state, capture.Width)
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, wantContains, wantAbsent); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
 			return nil, err
 		}
 		selectionCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -177,6 +176,10 @@ func renderSelectionCapture(
 		// is what makes the capture evidence that a person sees the badge,
 		// rather than evidence that the renderer can draw one.
 		kickstart.WithSubagentRelation(captureSubagentRelation(selection)),
+		// The cohort above is roots-only, as production's is, so the parent
+		// row's child count can only come from the discovered relation. This
+		// is what makes the capture evidence that a person sees the badge,
+		// rather than evidence that the renderer can draw one.
 		// The cohort above is roots-only, as production's is, so the parent
 		// row's child count can only come from the discovered relation. This
 		// is what makes the capture evidence that a person sees the badge,

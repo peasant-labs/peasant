@@ -604,13 +604,16 @@ func (t Tree) Overflow() TreeOverflow {
 	if t.loading || t.height < 1 {
 		return TreeOverflow{}
 	}
-	count := len(t.visibleRows())
-	if count == 0 {
+	rows := t.visibleRows()
+	if len(rows) == 0 {
 		return TreeOverflow{}
 	}
+	// Measured in LINES: a row carrying a child count needs two of them, so
+	// counting rows would claim everything fits while the last count line is
+	// still off-screen.
 	return TreeOverflow{
 		Top:    t.offset > 0,
-		Bottom: t.offset+t.height < count,
+		Bottom: treeLinesFrom(rows, t.offset) > t.height,
 	}
 }
 
@@ -1471,6 +1474,11 @@ func (t Tree) visibleRows() []treeRow {
 	return rows
 }
 
+// treeIndentStep is how many cells one level of tree depth indents by. The
+// child-count continuation line uses the same step, so "one level deeper"
+// means the same thing for it as it does for a nested row.
+const treeIndentStep = 2
+
 // treeScrollMargin keeps this many rows visible above and below the cursor when
 // the forest is taller than the viewport, so the list scrolls before the cursor
 // reaches the very edge (like a "scrolloff"). It shrinks automatically when the
@@ -1491,7 +1499,8 @@ func flattenLine(s string) string {
 // clampWindow scrolls the visible window so the cursor stays inside it, keeping a
 // treeScrollMargin of context above and below where the forest allows.
 func (t *Tree) clampWindow() {
-	count := len(t.visibleRows())
+	rows := t.visibleRows()
+	count := len(rows)
 	if t.cursor >= count {
 		t.cursor = count - 1
 	}
@@ -1512,16 +1521,19 @@ func (t *Tree) clampWindow() {
 	if t.cursor+margin+1 > t.offset+t.height {
 		t.offset = t.cursor - t.height + margin + 1
 	}
-	// Never scroll past the ends: the window is [0, count-height].
-	maxOffset := count - t.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	// Never scroll past the ends. The furthest offset is measured in LINES,
+	// because a row carrying a child count occupies two of them.
+	maxOffset := maxTreeOffset(rows, t.height)
 	if t.offset > maxOffset {
 		t.offset = maxOffset
 	}
 	if t.offset < 0 {
 		t.offset = 0
+	}
+	// The row-based margin above is an approximation once rows differ in
+	// height, so make the cursor row's own line fit for certain.
+	for t.offset < t.cursor && treeLinesBetween(rows, t.offset, t.cursor+1) > t.height {
+		t.offset++
 	}
 }
 
@@ -1548,30 +1560,70 @@ func (t Tree) View() string {
 		}
 		return fitLine(styles.Muted, empty, t.width)
 	}
-	end := t.offset + t.height
-	if end > len(rows) {
-		end = len(rows)
-	}
+	// Lay the window out in LINES, not rows: a parent row carrying a child
+	// count renders a second, non-selectable continuation line, so the screen
+	// line count and the row index are no longer the same number.
 	overflow := t.Overflow()
+	plan := make([]treeRenderLine, 0, t.height)
+	for i := t.offset; i < len(rows) && len(plan) < t.height; i++ {
+		plan = append(plan, treeRenderLine{row: rows[i], index: i})
+		if childCountLabel(rows[i].node) != "" && len(plan) < t.height {
+			plan = append(plan, treeRenderLine{row: rows[i], index: i, continuation: true})
+		}
+	}
 	out := make([]string, 0, t.height)
-	for i := t.offset; i < end; i++ {
+	for position, line := range plan {
 		edge := ""
-		if i == t.offset && overflow.Top {
+		if position == 0 && overflow.Top {
 			edge = treeOverflowTopGlyph
 		}
-		if i == end-1 && overflow.Bottom {
+		if position == len(plan)-1 && overflow.Bottom {
 			if edge == "" {
 				edge = treeOverflowBottomGlyph
 			} else {
 				edge = treeOverflowBothGlyph
 			}
 		}
-		out = append(out, t.renderRow(styles, rows[i], i == t.cursor, edge))
+		if line.continuation {
+			out = append(out, t.renderChildCountLine(styles, line.row, edge))
+			continue
+		}
+		out = append(out, t.renderRow(styles, line.row, line.index == t.cursor, edge))
 	}
 	for len(out) < t.height {
 		out = append(out, fitLine(styles.Base, "", t.width))
 	}
 	return joinLines(out)
+}
+
+// treeRenderLine is one screen line of the laid-out window: which visible row it
+// belongs to, that row's index (for the cursor), and whether it is the row's
+// own line or its child-count continuation.
+type treeRenderLine struct {
+	row          treeRow
+	index        int
+	continuation bool
+}
+
+// renderChildCountLine renders a parent row's child-session count on its own
+// line, indented ONE level deeper than the parent's own label so it reads as
+// belonging to that row. It is never active and never carries the cursor: it is
+// not a node, so there is nothing here to move onto, toggle, or select.
+func (t Tree) renderChildCountLine(styles theme.Styles, row treeRow, edge string) string {
+	node := row.node
+	label := childCountLabel(node)
+	lead := treeRowLead(styles, false, edge)
+	// Start where the parent's LABEL starts, then one indent level further, so
+	// the count sits under the title rather than under the tree glyphs.
+	expand := expandGlyph(node, t.visibleExpansion(node))
+	box := stateBox(styles, node.State)
+	indent := spaces(row.depth * treeIndentStep)
+	labelColumn := lipgloss.Width(indent+expand+" "+box+" ") + treeIndentStep
+	budget := t.width - lipgloss.Width(noCursorGlyph)
+	if budget < 1 {
+		return styles.Base.Render(truncateLine(treeRowLeadPlain(false, edge)+spaces(labelColumn)+label, t.width))
+	}
+	return lead + fitLine(styles.Muted, spaces(labelColumn)+label, budget)
 }
 
 // minFallback renders one truncation-safe line when the region is below the
@@ -1596,12 +1648,14 @@ func (t Tree) renderRow(styles theme.Styles, row treeRow, active bool, edge stri
 	node := row.node
 	// A label MUST render as exactly one display line: a newline in the label
 	// (e.g. a multi-line first-turn title) would otherwise split one row across
-	// several lines, breaking the row background and the cursor/scroll math that
-	// counts one row per line. The annotations are appended on the SAME line for
-	// the same reason.
+	// several lines, breaking the row background and the window's line
+	// accounting. The tracked and already-imported annotations are appended on
+	// the SAME line for the same reason. The child-session count is the one
+	// thing that renders below the row, and it does so as a line the window
+	// plans for (see treeRowLines), never as a wrap.
 	label := flattenLine(node.Label)
 	cur := treeRowLead(styles, active, edge)
-	indent := spaces(row.depth * 2)
+	indent := spaces(row.depth * treeIndentStep)
 	expand := expandGlyph(node, t.visibleExpansion(node))
 	box := stateBox(styles, node.State)
 	annotation := rowAnnotation(node)
@@ -1664,20 +1718,16 @@ func (t Tree) renderLabel(styles theme.Styles, labelStyle lipgloss.Style, label,
 	return labelStyle.Render(clipped) + annStyle.Render(annotation) + labelStyle.Render(spaces(pad))
 }
 
-// rowAnnotation returns the muted text a node appends to its label: how many
-// child sessions it groups (a parent session summarises its subagents instead
-// of nesting them) and whether the local store already holds it. Both come from
-// display-only Meta a TreeSource attached; a node carrying neither annotates
-// nothing.
+// rowAnnotation returns the muted text a node appends to its label: whether the
+// previous saved selection tracked it, and whether the local store already
+// holds it. Both come from display-only Meta a TreeSource attached; a node
+// carrying neither annotates nothing.
+//
+// The child-session count is NOT here: it renders on its own continuation line
+// under the row (see childCountLabel), so a narrow pane can no longer force a
+// choice between the title and the count.
 func rowAnnotation(node *TreeNode) string {
 	var b strings.Builder
-	if n := childCountOf(node); n > 0 {
-		if n == 1 {
-			b.WriteString(" + 1 child session")
-		} else {
-			fmt.Fprintf(&b, " + %d child sessions", n)
-		}
-	}
 	if node.meta(MetaTracked) == MetaTrackedValue {
 		b.WriteString("  tracked")
 	}
@@ -1685,6 +1735,71 @@ func rowAnnotation(node *TreeNode) string {
 		b.WriteString("  already imported")
 	}
 	return b.String()
+}
+
+// childCountLabel returns the text of a parent row's continuation line: how
+// many subagent sessions were discovered beneath it. A node with no readable
+// count returns the empty string and gets no continuation line.
+//
+// This is PRESENTATION ONLY. The count belongs to the parent row; it is never a
+// node, so it can never take the cursor, be toggled, or enter a selection.
+func childCountLabel(node *TreeNode) string {
+	n := childCountOf(node)
+	switch {
+	case n <= 0:
+		return ""
+	case n == 1:
+		return "+ 1 child session"
+	default:
+		return fmt.Sprintf("+ %d child sessions", n)
+	}
+}
+
+// treeRowLines reports how many display lines one visible row occupies: its own
+// line, plus the child-count continuation line when it carries one. Every place
+// that maps the visible window onto screen lines goes through this, so a row
+// that renders two lines cannot desynchronise the scroll window from what the
+// screen actually shows.
+func treeRowLines(row treeRow) int {
+	if childCountLabel(row.node) != "" {
+		return 2
+	}
+	return 1
+}
+
+// treeLinesFrom counts the display lines rows[from:] occupy.
+func treeLinesFrom(rows []treeRow, from int) int {
+	total := 0
+	for i := from; i < len(rows); i++ {
+		total += treeRowLines(rows[i])
+	}
+	return total
+}
+
+// treeLinesBetween counts the display lines rows[from:to] occupy.
+func treeLinesBetween(rows []treeRow, from, to int) int {
+	total := 0
+	for i := from; i < to && i < len(rows); i++ {
+		total += treeRowLines(rows[i])
+	}
+	return total
+}
+
+// maxTreeOffset is the furthest the window may scroll: the smallest offset
+// whose remaining rows still need more lines than the viewport has. Scrolling
+// past it would leave blank space below the last row.
+func maxTreeOffset(rows []treeRow, height int) int {
+	if height < 1 {
+		return 0
+	}
+	used := 0
+	for i := len(rows) - 1; i >= 0; i-- {
+		used += treeRowLines(rows[i])
+		if used > height {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // childCountOf reports the child-session count a node carries, or 0 when it
