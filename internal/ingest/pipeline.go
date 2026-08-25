@@ -78,6 +78,18 @@ type PipelineSummary struct {
 	StoreError      error // non-nil if DB insert failed; pipeline continued normally
 	IndexVersion    int   // CurrentIndexVersion used this run
 	MetadataVersion int   // CurrentSchemaVersion used this run
+	// ReminedEvidenceRecords is how many cached discovery evidence records this
+	// run had to mine again. It is greater than zero on the first run after an
+	// upgrade that added a field the cached records do not carry, and zero on
+	// every warm run afterwards.
+	ReminedEvidenceRecords int
+	// OriginResolve is what the stored-origin resolve pass did before this run
+	// wrote anything of its own.
+	OriginResolve ResolveReport
+	// OriginResolveError is non-nil when that pass could not finish. The run
+	// continues: an unjudged row keeps the visible fail-safe value and is listed
+	// again next time, so a failure here delays a verdict rather than losing one.
+	OriginResolveError error
 }
 
 // SessionResult records the outcome of processing a single session.
@@ -194,6 +206,17 @@ type Pipeline struct {
 	// in the DB, enabling O(1) fast-path lookups in findMetadataPath without per-session
 	// DB round-trips. Nil before Run() populates it.
 	locationCache map[SessionID]SessionLocation
+
+	// reminedEvidence is how many cached evidence records this run's discovery
+	// had to mine again, collected from the adapters that can report it.
+	reminedEvidence int
+
+	// originResolve and originResolveErr hold what the stored-origin pass did
+	// this run. They live on the pipeline rather than in Run because the report
+	// is assembled by a helper the reindex path shares, where the pass does not
+	// run at all and the zero report is the truthful answer.
+	originResolve    ResolveReport
+	originResolveErr error
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -348,6 +371,17 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
 		}
 	}
+
+	// Fill in the verdict on every session an EARLIER run stored, before this
+	// run writes any session of its own.
+	//
+	// The order is the safety property, not a convenience: the pass sees only
+	// rows a previous run persisted, and a parent identifier is written at
+	// insert time and never updated afterwards, so a row this pass finalises
+	// cannot acquire a parent later. It rides the discovery that has just run,
+	// so the evidence cache it reads is already warm and no transcript is opened
+	// twice.
+	p.originResolve, p.originResolveErr = p.resolveStoredOrigins(ctx)
 
 	// Pre-DIFF: bulk-load session locations from DB to avoid per-session queries
 	// in findMetadataPath. A single SELECT ... WHERE session_id IN (...) replaces
@@ -522,6 +556,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			Duration: time.Since(start),
 			Sessions: dryRunSessions,
 		}
+		result.Summary.ReminedEvidenceRecords = p.reminedEvidence
+		result.Summary.OriginResolve = p.originResolve
+		result.Summary.OriginResolveError = p.originResolveErr
 		for _, session := range dryRunSessions {
 			switch session.Status {
 			case DiffNew:
@@ -963,6 +1000,12 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))
 			continue
 		}
+		// Read the re-mine count immediately after the Discover it describes:
+		// DiscoveryStatistics scopes it to the most recent call, and the next
+		// provider's adapter is a different object with its own count.
+		if stats, ok := adapter.(DiscoveryStatistics); ok {
+			p.reminedEvidence += stats.ReminedCount()
+		}
 		all = append(all, sessions...)
 	}
 	// If all enabled providers failed, return a combined error.
@@ -970,6 +1013,51 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		return nil, fmt.Errorf("all providers failed: %w", errors.Join(providerErrors...))
 	}
 	return all, nil
+}
+
+// resolveStoredOrigins runs the stored-row origin pass for this run.
+//
+// It is best effort, like the other store-backed stages: a store that cannot
+// answer leaves its rows unjudged, and an unjudged row keeps the visible
+// fail-safe value and is listed again on the next run. Losing a verdict is not
+// possible here; only delaying one is.
+func (p *Pipeline) resolveStoredOrigins(ctx context.Context) (ResolveReport, error) {
+	backing, ok := p.store.(OriginResolverStore)
+	if !ok {
+		return ResolveReport{}, nil
+	}
+	cache, _ := p.store.(ClaudeEvidenceCache)
+	resolver, err := NewOriginResolver(backing, cache, p.originEvidenceMiners())
+	if err != nil {
+		return ResolveReport{}, err
+	}
+	report, err := resolver.ResolveStoredOrigins(ctx, OriginRuleVersion)
+	if err != nil {
+		slog.Warn("ingest: resolve stored session origins",
+			"error", err,
+			"what", "some stored sessions did not get an origin verdict this run",
+			"why", "the resolve pass stopped on a store error",
+			"user_impact", "those sessions stay visible in every list, which is the fail-safe value, until a later run judges them",
+			"how_to_fix", "re-run peasant ingest; the pass resumes at the first row it did not reach")
+	}
+	return report, err
+}
+
+// originEvidenceMiners builds the per-harness miners the resolve pass uses to
+// re-read a stored transcript.
+//
+// It walks EVERY registered adapter, not only the enabled ones. A harness whose
+// source is switched off still recorded transcripts that this build knows how to
+// read, and treating those rows as unmineable would finalise them on the stored
+// preview alone - exactly the outcome the degraded watermark exists to prevent.
+func (p *Pipeline) originEvidenceMiners() map[Harness]OriginEvidenceMiner {
+	miners := make(map[Harness]OriginEvidenceMiner, len(p.adapters))
+	for harness, factory := range p.adapters {
+		if miner, ok := factory(p.fs, p.git, p.salt).(OriginEvidenceMiner); ok {
+			miners[harness] = miner
+		}
+	}
+	return miners
 }
 
 // diff categorizes each discovered session.
@@ -1876,6 +1964,9 @@ func (p *Pipeline) indexComputeAndFinalize(
 	pipelineResult.Summary.Computed = computed
 	pipelineResult.Summary.IndexVersion = CurrentIndexVersion
 	pipelineResult.Summary.MetadataVersion = int(CurrentSchemaVersion)
+	pipelineResult.Summary.ReminedEvidenceRecords = p.reminedEvidence
+	pipelineResult.Summary.OriginResolve = p.originResolve
+	pipelineResult.Summary.OriginResolveError = p.originResolveErr
 	for _, sr := range sessionResults {
 		if sr.Error != nil {
 			pipelineResult.Summary.Errors++

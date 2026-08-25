@@ -29,6 +29,24 @@ type TranscriptMaterializer interface {
 	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
 }
 
+// DiscoveryStatistics is an optional capability. An adapter that can report
+// what its last Discover actually did implements it; a caller that cares
+// type-asserts for it, exactly as callers already do for ClaudeEvidenceCaching
+// and for the session-location lookup. Discover's signature is shared by five
+// adapters, four of which have no re-mine concept and nothing to report, so it
+// is deliberately left alone.
+type DiscoveryStatistics interface {
+	// ReminedCount reports how many cached evidence records the MOST RECENT
+	// Discover call on this adapter had to mine again. Zero means every cached
+	// record was reusable.
+	//
+	// The scoping to the most recent call holds by caller discipline and not by
+	// the interface: nothing here stops a caller from reading the count after a
+	// second Discover has already overwritten it. Read it immediately after the
+	// Discover whose work it is meant to describe.
+	ReminedCount() int
+}
+
 // TranscriptOrigin identifies how a discovered session's managed transcript
 // must be obtained. The zero value preserves the existing file-copy behavior.
 type TranscriptOrigin uint8
