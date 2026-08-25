@@ -357,6 +357,19 @@ func TestMigrationV40ReplaysBackfilledAssociations(t *testing.T) {
 		pool.Close()
 		t.Fatalf("migrate through V39: %v", err)
 	}
+	// The production InsertSessions path below writes through the single,
+	// schema-CURRENT sqlInsertSession statement (it has no per-version
+	// variant), which as of V45 always sets session_origin. A V39-frozen
+	// table has no such column yet, so add it here as a TEMPORARY column —
+	// user_version is left at 39, untouched — purely so the real write path
+	// can run against this intentionally-old snapshot. It is dropped again
+	// below, before the normal migration resumes, so V45's own ALTER TABLE
+	// ADD COLUMN still runs untouched and unaware this ever happened.
+	if err := sqlitex.ExecuteTransient(conn, `ALTER TABLE sessions ADD COLUMN session_origin TEXT NOT NULL DEFAULT 'unknown'`, nil); err != nil {
+		pool.Put(conn)
+		pool.Close()
+		t.Fatalf("add temporary session_origin column for the V39 snapshot: %v", err)
+	}
 	pool.Put(conn)
 	pool.Close()
 
@@ -389,6 +402,22 @@ func TestMigrationV40ReplaysBackfilledAssociations(t *testing.T) {
 	beforeSources := migrationV40CommitSources(t, preMigrationStore)
 	if err := preMigrationStore.Close(); err != nil {
 		t.Fatalf("close V39 store: %v", err)
+	}
+
+	// Drop the temporary column added above, restoring the exact V39 shape
+	// before the real migration path resumes at user_version 39. Without
+	// this, V45's own ALTER TABLE ADD COLUMN session_origin would fail with
+	// a duplicate-column error when the migration below reaches it.
+	dropConn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+	if err != nil {
+		t.Fatalf("open connection to drop the temporary column: %v", err)
+	}
+	if err := sqlitex.ExecuteTransient(dropConn, `ALTER TABLE sessions DROP COLUMN session_origin`, nil); err != nil {
+		dropConn.Close()
+		t.Fatalf("drop temporary session_origin column: %v", err)
+	}
+	if err := dropConn.Close(); err != nil {
+		t.Fatalf("close drop-column connection: %v", err)
 	}
 
 	migratedStore, err := Open(dbPath)

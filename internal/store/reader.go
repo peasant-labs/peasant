@@ -61,6 +61,13 @@ type SessionRow struct {
 	// GitWorktree is the session's recorded worktree path. It is empty when the
 	// session predates worktree capture or did not come from Git.
 	GitWorktree string
+
+	// SessionOrigin is who drove the session (sessionorigin.User / Agent /
+	// Unknown, stored as its wire token) — the sessions.session_origin column
+	// written at ingest. Consumers that need the typed value parse it through
+	// sessionorigin.Parse; the raw stored string always round-trips through
+	// that parse, because the column CHECK admits no other token.
+	SessionOrigin string
 }
 
 // DashboardRow holds global aggregate metrics from daily_summary.

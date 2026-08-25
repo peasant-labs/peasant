@@ -244,6 +244,12 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV42 widens the sessions and daily_summary_harness model_harness
 // CHECK constraints to admit Strike. See schema_v42.go for details.
 
+// migrationV45 adds sessions.session_origin (the three-value origin menu,
+// default 'unknown') and sessions.origin_version (an unchecked watermark), and
+// widens claude_transcript_evidence with an origin column whose CHECK also
+// admits the empty string, marking a cache row mined before this field existed.
+// Plain ALTER TABLE ADD COLUMN, no table rebuild. See schema_v45.go.
+
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
 	Migrations: []string{
@@ -291,6 +297,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV42,
 		migrationV43,
 		migrationV44,
+		migrationV45,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -329,5 +336,6 @@ var dbSchema = sqlitemigration.Schema{
 		{DisableForeignKeys: true}, // V42: recreates sessions + daily_summary_harness
 		nil,                        // V43: publication receipts and attempt diagnostics
 		nil,                        // V44: Claude discovery evidence cache (new table, no FKs)
+		nil,                        // V45: ALTER TABLE ADD COLUMN on sessions + claude_transcript_evidence (no FKs)
 	},
 }
