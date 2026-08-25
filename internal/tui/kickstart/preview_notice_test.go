@@ -86,7 +86,7 @@ func TestListingPreview_ShowsTheTruncationNoteWithItsTurns(t *testing.T) {
 	for _, testCase := range doc.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
-			listing := ftue.SessionListing{Harness: "opencode", SessionID: testCase.SessionID, ProjectName: "peasant"}
+			listing := ftue.SessionListing{Harness: string(ingest.HarnessOpenCode), SessionID: testCase.SessionID, ProjectName: "peasant"}
 			// A case with no turns models the un-imported pane, which
 			// testutil.Turns refuses to build because an empty transcript has
 			// nothing to assert on. The pane itself is what this case asserts on.
