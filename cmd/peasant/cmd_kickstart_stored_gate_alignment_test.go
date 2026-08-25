@@ -628,6 +628,7 @@ func TestMountedKickstartStoredGateAlignsViewerAndPush(t *testing.T) {
 				world.ConfigPath,
 				ftue.ProviderInventory{},
 				listings,
+				nil,
 			)
 			if testCase.ExpectedGate == kickstartStoredGateError {
 				assertKickstartStoredGateFailure(t, testCase, err, flowMounted, ingestCalls, before, world.ConfigPath)

@@ -15,6 +15,7 @@ requiredCaseNames:
   - not-yet-imported-sessions-group-before-imported-ones
   - an-agent-origin-root-is-hidden-with-user-and-unknown-controls
   - a-subagent-is-hidden-by-child-identifier-regardless-of-its-own-user-origin
+  - a-roots-only-cohort-still-counts-the-children-discovery-surfaced
 cases:
   - name: a-parent-counts-its-whole-descendant-chain
     ingested: []
@@ -254,4 +255,34 @@ cases:
     expectedRows:
       - sessionId: parent-user-origin
         childCount: "1"
+        ingested: false
+
+  # THE PRODUCTION SHAPE. Kickstart lists ROOTS only, so a subagent session is
+  # never one of the listings the fold sees. Its existence reaches the fold
+  # through the discovered subagent relation instead, which is count-only:
+  # nothing named there is rendered, selectable, or ingestable. c2 is a
+  # grandchild, so the transitive walk still has to run through a session the
+  # cohort does not hold. missing-from-discovery is named by the parent but is
+  # absent from the relation, so the guard against counting a child discovery
+  # never surfaced still has to hold on this path too.
+  - name: a-roots-only-cohort-still-counts-the-children-discovery-surfaced
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: parent session
+        sessionId: p
+        subagentIds: [c1, missing-from-discovery]
+    subagentDiscovery:
+      - sessionId: p
+        subagentIds: [c1, missing-from-discovery]
+      - sessionId: c1
+        subagentIds: [c2]
+      - sessionId: c2
+    expectedRows:
+      - sessionId: p
+        childCount: "2"
         ingested: false

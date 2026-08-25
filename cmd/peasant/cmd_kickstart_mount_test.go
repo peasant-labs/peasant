@@ -190,7 +190,7 @@ func TestRunKickstartFlowPairsRetentionBeforeMount(t *testing.T) {
 			inventory := ftue.ProviderInventory{
 				defaults.HarnessClaudeCode: {SessionCount: 1},
 			}
-			if err := runKickstartFlow(mountTestCmd(t, dir), deps, path, inventory, nil); err != nil {
+			if err := runKickstartFlow(mountTestCmd(t, dir), deps, path, inventory, nil, nil); err != nil {
 				t.Fatalf("run production kickstart Flow: %v", err)
 			}
 			if runnerCalls != 1 {

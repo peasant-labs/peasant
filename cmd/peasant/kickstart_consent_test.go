@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"gopkg.in/yaml.v3"
 )
 
@@ -84,8 +85,8 @@ func TestBuildKickstartCommandMountsDestinationAndExactConsent(t *testing.T) {
 		t.Run(fixture.ID, func(t *testing.T) {
 			var warning, consent string
 			command := buildKickstartCommand(kickstartCommandDeps{
-				discover: func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
-					return ftue.ProviderInventory{defaults.HarnessClaudeCode: {SessionCount: 1, Enabled: true}}, []ftue.SessionListing{{Harness: defaults.HarnessClaudeCode.String(), ProjectName: "tool", GitRemote: "https://github.com/acme/tool.git", Branch: "main", Title: "consent session", SessionID: "session-consent", WorkingDir: "/work/tool"}}
+				discover: func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
+					return ftue.ProviderInventory{defaults.HarnessClaudeCode: {SessionCount: 1, Enabled: true}}, []ftue.SessionListing{{Harness: defaults.HarnessClaudeCode.String(), ProjectName: "tool", GitRemote: "https://github.com/acme/tool.git", Branch: "main", Title: "consent session", SessionID: "session-consent", WorkingDir: "/work/tool"}}, nil
 				},
 				getwd:        func() (string, error) { return "/work/tool", nil },
 				existingUser: func(string) string { return fixture.ExistingUser },

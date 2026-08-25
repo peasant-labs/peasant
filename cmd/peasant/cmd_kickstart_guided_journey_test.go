@@ -150,8 +150,8 @@ func TestKickstartCommandMountsConsentLocalProgressAndPersistentCompletion(t *te
 			}
 
 			deps := defaultKickstartCommandDeps()
-			deps.discover = func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
-				return ftue.ProviderInventory{}, nil
+			deps.discover = func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
+				return ftue.ProviderInventory{}, nil, nil
 			}
 			deps.existingUser = func(string) string { return "" }
 			deps.readRetention = func() (int, bool) { return 90, true }
