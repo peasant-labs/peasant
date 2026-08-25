@@ -23,6 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/perf"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
 	"github.com/peasant-labs/schema"
@@ -952,7 +953,9 @@ func (p *Pipeline) pushSession(
 		string(meta.ModelHarness),
 		time.UnixMilli(meta.Timestamp.Start).UTC().Format("2006-01-02"),
 	)
-	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields)
+	// The session's stored origin travels as a push call option, read from the
+	// sessions row this run selected rather than from the metadata sidecar.
+	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, sessionorigin.Origin(sess.SessionOrigin))
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
 	}

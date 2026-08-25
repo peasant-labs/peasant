@@ -78,11 +78,8 @@ function countByStatus(sessions: ShareSession[]): Record<ShareSession['shareStat
   return counts;
 }
 
-async function fetchRealSessions(): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
-  const [response, metadata] = await Promise.all([
-    fetch(`${getApiBaseUrl()}/api/v1/sessions`),
-    fetchDiscovery(),
-  ]);
+async function fetchSessionSummaries(requestUrl: string, failure: string): Promise<BackendSessionSummary[]> {
+  const response = await fetch(requestUrl);
   if (!response.ok) {
     let detail = `the server returned HTTP ${response.status} without an actionable response body`;
     try {
@@ -92,11 +89,44 @@ async function fetchRealSessions(): Promise<ShareDiscoveryResult<ShareHierarchyS
       const body = await response.text().catch(() => '');
       if (body.trim()) detail = body.trim();
     }
-    throw new Error(`Session discovery failed while loading the Share chooser: ${detail}`);
+    throw new Error(`${failure}: ${detail}`);
   }
   const payload = await response.json();
-  const summaries: BackendSessionSummary[] = payload.sessions ?? [];
-  const sessions: ShareHierarchySession[] = summaries.map((summary) => {
+  return payload.sessions ?? [];
+}
+
+/**
+ * Load the chooser's sessions.
+ *
+ * `GET /api/v1/sessions` is the DISCOVERY list: it is scoped by the saved
+ * kickstart selection and by session origin, so an agent-driven session is not
+ * offered there. When the URL carried linked identifiers, they are resolved
+ * separately through `GET /api/v1/session-summaries?ids=`, which applies
+ * NEITHER scope, and the two results are unioned by id.
+ *
+ * That split is the mechanism behind a rule this project already settled:
+ * hiding a session from a list is discovery scope and never access control, so
+ * a link to a hidden session still opens it. Filtering the discovery endpoint
+ * without it would break every such link.
+ */
+async function fetchRealSessions(linkedIds: readonly string[]): Promise<ShareDiscoveryResult<ShareHierarchySession>> {
+  const [browsable, linked, metadata] = await Promise.all([
+    fetchSessionSummaries(`${getApiBaseUrl()}/api/v1/sessions`, 'Session discovery failed while loading the Share chooser'),
+    linkedIds.length > 0
+      ? fetchSessionSummaries(
+          `${getApiBaseUrl()}/api/v1/session-summaries?ids=${encodeURIComponent(linkedIds.join(','))}`,
+          'Linked session resolution failed while loading the Share chooser',
+        )
+      : Promise.resolve([] as BackendSessionSummary[]),
+    fetchDiscovery(),
+  ]);
+  // The browsable list comes first, so its ordering survives and a linked
+  // session already offered there is not duplicated.
+  const byId = new Map<string, BackendSessionSummary>();
+  for (const summary of [...browsable, ...linked]) {
+    if (!byId.has(summary.id)) byId.set(summary.id, summary);
+  }
+  const sessions: ShareHierarchySession[] = [...byId.values()].map((summary) => {
     const session = mapBackendToShareSession(summary);
     const item = requireDiscoveryItem(metadata, session.id, 'mounted Share chooser');
     return { ...session, locationLabel: item.locationLabel, repositoryLocationId: item.repositoryLocationId, branch: item.branch };
@@ -158,14 +188,17 @@ export function ShareWizardClient() {
   // holds. Cold entry (no param) is unchanged: everything listed, nothing
   // selected.
   const evidenceParam = searchParams?.get('sessions') ?? null;
-  const evidenceIds = useMemo<Set<string> | null>(() => {
-    if (!evidenceParam) return null;
-    const ids = evidenceParam
+  const linkedIds = useMemo<string[]>(() => {
+    if (!evidenceParam) return [];
+    return evidenceParam
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    return ids.length > 0 ? new Set(ids) : null;
   }, [evidenceParam]);
+  const evidenceIds = useMemo<Set<string> | null>(
+    () => (linkedIds.length > 0 ? new Set(linkedIds) : null),
+    [linkedIds],
+  );
 
   // Wizard navigation — visible steps: Choose → Labels → Redact → Submit.
   const [step, setStep] = useState<WizardStep>('select');
@@ -216,7 +249,7 @@ export function ShareWizardClient() {
         const result = fetchMockSessions();
         setDiscovery({ ...result, sessions: result.sessions.map((session) => ({ ...session, locationLabel: 'mock repository', repositoryLocationId: `mock:${session.projectHash || session.projectName}`, branch: 'main' })) });
       } else {
-        fetchRealSessions()
+        fetchRealSessions(linkedIds)
           .then((result) => {
             setFetchError(null);
             setDiscovery(result);
@@ -228,7 +261,7 @@ export function ShareWizardClient() {
           });
       }
     }
-  }, [config, loading, configError, retryCount, useMock]);
+  }, [config, loading, configError, retryCount, useMock, linkedIds]);
 
   // Selection is session-ids (Labels/Redaction/Push keep their props). The
   // Choose starts empty so the user opts in. A ?sessionId= deep-link
@@ -368,6 +401,9 @@ export function ShareWizardClient() {
   // The Choose list, filtered to the evidence set when one rode in on the
   // URL. Labels/Redact/Submit keep the full list — the selection (which only
   // ever contains visible Choose rows) is what scopes them.
+  // The unioned list already carries the linked sessions the discovery list
+  // withheld, so filtering it resolves a link to a hidden session instead of
+  // falling through to the none-were-found state.
   const evidenceSessions = evidenceIds
     ? disc.sessions.filter((s) => evidenceIds.has(s.id))
     : null;

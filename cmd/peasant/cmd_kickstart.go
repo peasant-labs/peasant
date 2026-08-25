@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
@@ -25,7 +26,7 @@ import (
 )
 
 type kickstartCommandDeps struct {
-	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing)
+	discover func(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation)
 	getwd    func() (string, error)
 	// pathResolver and repositoryResolver keep exact worktree identity separate
 	// from transient Git repository topology at the command boundary. Production
@@ -38,7 +39,7 @@ type kickstartCommandDeps struct {
 	// runFlow is the guided orchestration selected by the production builder.
 	// runModel is only its terminal execution boundary, so tests can inspect the
 	// real mounted Program without replacing the production path decision.
-	runFlow  func(*cobra.Command, kickstartCommandDeps, string, ftue.ProviderInventory, []ftue.SessionListing) error
+	runFlow  func(*cobra.Command, kickstartCommandDeps, string, ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) error
 	runModel func(tea.Model) error
 	// readRetention is the external Claude settings read used before Flow mounts.
 	readRetention func() (int, bool)
@@ -134,7 +135,7 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// for every session already recorded and unchanged since.
 			spinner := newDiscoverySpinner(os.Stderr)
 			dbPath := string(defaults.ResolveDBFilePathWith(dataDirOverride(cmd)))
-			inventory, sessions := deps.discover(ctx, configPath, dbPath, spinner)
+			inventory, sessions, subagents := deps.discover(ctx, configPath, dbPath, spinner)
 			spinner.Stop()
 
 			// Mount the rebuilt onboarding: the declarative settings.Flow rendered
@@ -146,7 +147,7 @@ func buildKickstartCommand(deps kickstartCommandDeps) *cobra.Command {
 			// runLegacyFTUEWizard); its view layer is retired in a separate,
 			// user-confirmed step.
 			if deps.runFlow != nil {
-				if err := deps.runFlow(cmd, deps, configPath, inventory, sessions); err != nil {
+				if err := deps.runFlow(cmd, deps, configPath, inventory, sessions, subagents); err != nil {
 					return fmt.Errorf("setup flow failed: %w", err)
 				}
 				return nil
@@ -275,10 +276,10 @@ func removeAllIfExists(path string) error {
 // build's schema, the sessions it recorded are reused instead of being resolved
 // from git again (see loadKnownSessions); a missing or unusable database simply
 // resolves everything.
-func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
+func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
-		return ftue.ProviderInventory{}, nil
+		return ftue.ProviderInventory{}, nil, nil
 	}
 	// One open store answers both questions a scan asks of it: what it already
 	// resolved from git, and what discovery already mined from the transcripts.
@@ -299,6 +300,13 @@ func ftueDiscover(ctx context.Context, configPath, dbPath string, spinner *disco
 // source has not changed. The evidence cache does the same for the transcript
 // mining that links Claude teammate sessions. A nil cache mines every
 // transcript again, which is slower but always correct.
+//
+// It returns three things, and the third is deliberately separate from the
+// second: the provider inventory, the listing the picker and every later stage
+// consume (ROOT sessions only), and the subagent relation over the whole
+// discovered set. The relation resolves a parent row's child count, which the
+// roots-only listing cannot answer on its own. It never widens the listing, so
+// no subagent session becomes selectable or ingestable through it.
 func ftueDiscoverWith(
 	ctx context.Context,
 	cfg *config.Config,
@@ -307,9 +315,10 @@ func ftueDiscoverWith(
 	known knownSessionIndex,
 	evidence ingest.ClaudeEvidenceCache,
 	spinner *discoverySpinner,
-) (ftue.ProviderInventory, []ftue.SessionListing) {
+) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
 	inventory := ftue.ProviderInventory{}
 	var sessions []ftue.SessionListing
+	subagents := kickstart.SubagentRelation{}
 
 	staleness := configStaleness(cfg)
 
@@ -341,6 +350,13 @@ func ftueDiscoverWith(
 		}
 		// Build parent → child session ID map from ALL discovered sessions.
 		childMap := buildChildMap(discovered)
+		// Record the relation for EVERY discovered session, including the
+		// children the listing below drops. A present key is the proof that
+		// discovery surfaced that session, which is what keeps a child count
+		// from being invented out of a bare identifier.
+		for _, d := range discovered {
+			subagents[string(d.SessionID)] = childMap[string(d.SessionID)]
+		}
 
 		roots := filterRootSessions(discovered)
 		rootCount := len(roots)
@@ -405,6 +421,7 @@ func ftueDiscoverWith(
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
 				WorkingDir:  workingDir,
+				Origin:      resolveListingOrigin(d.Origin),
 				// The transcript location travels with the listing so the
 				// selection step can preview a session before any import. The
 				// file stays where the harness wrote it.
@@ -426,7 +443,7 @@ func ftueDiscoverWith(
 		}
 		inventory[provider] = discovery
 	}
-	return inventory, sessions
+	return inventory, sessions, subagents
 }
 
 // resolveSessionGit walks git for one discovered session's remote and branch.
@@ -481,7 +498,33 @@ func resolveSessionGit(
 	return gitRemote, branchName
 }
 
-// filterRootSessions returns only root sessions (no subagents).
+// resolveListingOrigin turns discovery's typed origin evidence into the menu
+// value the kickstart listing carries, re-validated through
+// sessionorigin.Parse at this boundary rather than forwarded as a bare
+// string. An adapter that mined no evidence (every non-Claude adapter today)
+// leaves the field empty; that resolves to the visible fail-safe Unknown,
+// the same rule internal/store/writer.go applies before a session is ever
+// persisted. Parse can only fail here if the classifier produced a token
+// outside its own closed menu — a programming error, not a user one — and
+// kickstart is best-effort discovery, so it fails safe to Unknown (never
+// crashes the picker) rather than propagate a corrupt value.
+func resolveListingOrigin(discovered sessionorigin.Origin) sessionorigin.Origin {
+	token := discovered.String()
+	if token == "" {
+		token = sessionorigin.Unknown.String()
+	}
+	resolved, err := sessionorigin.Parse(token)
+	if err != nil {
+		return sessionorigin.Unknown
+	}
+	return resolved
+}
+
+// filterRootSessions returns only root sessions (no subagents). This is what
+// the picker LISTS and what every later stage consumes, so a subagent session
+// is never selectable or ingestable on its own. The parent-to-subagent relation
+// over the whole discovered set travels separately, so a listed parent can still
+// report how many subagent sessions were found beneath it.
 func filterRootSessions(discovered []ingest.DiscoveredSession) []ingest.DiscoveredSession {
 	var roots []ingest.DiscoveredSession
 	for _, d := range discovered {

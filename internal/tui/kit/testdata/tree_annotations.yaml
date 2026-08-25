@@ -2,7 +2,8 @@
 # row under one project root at the given width and asserts what the row does
 # and does not say. The annotations are display-only Meta a TreeSource attached:
 # childCount summarises the subagent sessions a parent groups (the parent stays
-# a leaf row), ingested marks a session the local store already holds, tracked
+# a leaf row, and the count renders on its own indented line beneath it rather
+# than beside the title), ingested marks a session the local store already holds, tracked
 # records the previous saved selection, and state is the current checkbox.
 # expectedCaseCount is the row-count guard.
 expectedCaseCount: 13
@@ -85,15 +86,17 @@ cases:
       - "child session"
       - "999"
 
-  - name: a-narrow-row-keeps-the-title-and-drops-the-count
+  # The count no longer competes with the title for the row's width: it has its
+  # own line, so a narrow pane keeps BOTH. What a narrow pane does do is clip
+  # that line to the pane width, which is why only the leading text is asserted.
+  - name: a-narrow-row-keeps-the-title-and-still-shows-the-count-line
     label: session title
     childCount: "2"
     ingested: false
     width: 24
     wantContains:
       - "session title"
-    wantMissing:
-      - "child session"
+      - "+ 2 child"
 
   - name: saved-tracked-and-currently-selected-are-separate-signals
     label: saved selected row

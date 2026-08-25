@@ -146,7 +146,7 @@ func TestLegacyOpenCodeSQLiteKickstartEligibilityUsesTypedSessions(t *testing.T)
 					t.Fatalf("direct production OpenCode discovery sessions=%d error=%v evidence=%+v", len(direct), directErr, adapter.CandidateEvidence())
 				}
 			}
-			inventory, listings := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
+			inventory, listings, _ := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
 			if got := inventory[defaults.HarnessOpenCode].SessionCount; got != testCase.ExpectedKickstartSessions || len(listings) != testCase.ExpectedKickstartSessions {
 				t.Fatalf("kickstart SQLite discovery inventory=%d listings=%d, want %d typed sessions", got, len(listings), testCase.ExpectedKickstartSessions)
 			}

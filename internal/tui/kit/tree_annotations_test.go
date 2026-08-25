@@ -112,7 +112,8 @@ func annotatedForest(c treeAnnotationCase) []*kit.TreeNode {
 // TestTree_RowAnnotations proves each row says exactly what its Meta earns it:
 // a parent session summarises its subagents as a correctly-pluralised count, an
 // already-stored session says so, an absent/zero/unreadable count annotates
-// nothing, and a row too narrow to carry the count keeps its title instead.
+// nothing, and a narrow row keeps BOTH its title and its count, because the
+// count has its own line and no longer competes with the title for the width.
 func TestTree_RowAnnotations(t *testing.T) {
 	t.Parallel()
 	doc := loadTreeAnnotations(t)
@@ -135,9 +136,9 @@ func TestTree_RowAnnotations(t *testing.T) {
 }
 
 // TestTree_RowAnnotationsGolden captures each annotated row as a rendered
-// screen, so the muted child-session count, the already-imported marker, and
-// what a row looks like when it is too narrow to carry either are all visible in
-// the test artifact rather than only asserted as substrings.
+// screen, so the muted child-session count on its own indented line, the
+// already-imported marker beside the title, and what both look like in a narrow
+// pane are visible in the test artifact rather than only asserted as substrings.
 func TestTree_RowAnnotationsGolden(t *testing.T) {
 	doc := loadTreeAnnotations(t)
 	for _, c := range doc.Cases {
@@ -162,18 +163,19 @@ func TestTree_AnnotatedRowFitsItsWidth(t *testing.T) {
 	}
 }
 
-// TestTree_AnnotatedRowStaysOneLine proves an annotated row obeys the
-// one-row-per-node invariant: the tree still renders exactly its height in
-// lines, so the annotation never wraps a session onto a second row and never
-// breaks the cursor/scroll math that counts one row per line.
-func TestTree_AnnotatedRowStaysOneLine(t *testing.T) {
+// TestTree_AnnotatedRowFillsExactlyItsHeight proves the viewport still renders
+// exactly the number of lines it was sized to, even though a parent's
+// child-session count now takes a second line. The window is laid out in LINES
+// rather than rows, so a row that renders two of them consumes two of the
+// viewport's lines instead of overflowing it.
+func TestTree_AnnotatedRowFillsExactlyItsHeight(t *testing.T) {
 	t.Parallel()
 	doc := loadTreeAnnotations(t)
 	const height = 4
 	for _, c := range doc.Cases {
 		view := loadStaticTree(t, annotatedForest(c), c.Width, height).View()
 		if got := strings.Count(view, "\n") + 1; got != height {
-			t.Errorf("case %q rendered %d lines at height %d; an annotation split a row", c.Name, got, height)
+			t.Errorf("case %q rendered %d lines at height %d; the window is not laid out in lines", c.Name, got, height)
 		}
 	}
 }

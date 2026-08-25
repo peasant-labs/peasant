@@ -15,18 +15,27 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
+	"github.com/peasant-labs/redact"
 )
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
-	fs       FileSystem
-	git      GitResolver
-	salt     salt.Salt
-	evidence ClaudeEvidenceCache
+	fs             FileSystem
+	git            GitResolver
+	salt           salt.Salt
+	evidence       ClaudeEvidenceCache
+	locationLookup SessionLocationLookup
+	// reminedCount is how many evidence records the most recent Discover had
+	// to mine again. It describes that one call and is overwritten by the next.
+	reminedCount int
 }
 
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
 var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
+var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
+var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
+var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
 func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapter {
@@ -37,6 +46,15 @@ func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapte
 // earlier run. Without a cache the adapter mines every transcript again.
 func (a *ClaudeAdapter) SetClaudeEvidenceCache(cache ClaudeEvidenceCache) {
 	a.evidence = cache
+}
+
+// SetSessionLocationLookup gives the adapter a way to confirm whether a
+// candidate cross-run spawner is already persisted, and what parent it
+// already has, so re-parenting can trust data outside this run's own write
+// batch. Without a lookup, cross-run linking never fires (see
+// claudeSessionAlreadyStored and claudeStoredParent).
+func (a *ClaudeAdapter) SetSessionLocationLookup(lookup SessionLocationLookup) {
+	a.locationLookup = lookup
 }
 
 func (a *ClaudeAdapter) Harness() Harness {
@@ -85,6 +103,10 @@ const (
 	// claudeRecordTypeAssistant marks an assistant record.
 	claudeRecordTypeAssistant claudeRecordType = "assistant"
 )
+
+// claudeContentBlockText names the content block that carries prose. A user
+// record writes its prompt either as a bare string or as blocks of this type.
+const claudeContentBlockText = "text"
 
 // claudeHintLineLimit caps how many leading lines discovery reads for the
 // display hints, so a large transcript never costs a full hint scan.
@@ -239,6 +261,8 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				Title:         evidence.Title,
 				Branch:        evidence.Branch,
 				CWD:           evidence.CWD,
+				Origin:        evidence.Origin,
+				Signal:        evidence.Signal,
 			}
 			rootIndex[entry.sessionID] = len(sessions)
 			sessions = append(sessions, ds)
@@ -279,14 +303,43 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 				SubagentPaths: []ResolvedPath{},
 				DebugPaths:    []ResolvedPath{},
 				ModTime:       info.ModTime(),
+				Origin:        evidence.Origin,
+				Signal:        evidence.Signal,
 			}
 			sessions = append(sessions, ds)
 		}
 	}
 
-	a.linkClaudeTeammates(sessions, mined)
+	a.linkClaudeTeammates(ctx, sessions, cached, mined)
 	a.saveMinedEvidence(ctx, cfg, cached, mined, remined)
+	a.reminedCount = len(remined)
 	return sessions, nil
+}
+
+// ReminedCount reports how many cached evidence records the most recent Discover
+// had to mine again. See DiscoveryStatistics for the scoping rule.
+func (a *ClaudeAdapter) ReminedCount() int { return a.reminedCount }
+
+// MineOriginEvidence re-reads one Claude transcript that is still on disk and
+// returns the origin its content decides, for the stored-row resolve pass.
+//
+// It is the ordinary root miner, not a second one: the same read, the same
+// captures, and the same rule. A transcript that cannot be stat-ed or cannot be
+// read reports false, which is the resolver's degraded case, because the same
+// file may be readable on a later run.
+//
+// A child transcript never reaches here. The resolver decides a row that already
+// carries a parent at rule step one, with no file read at all.
+func (a *ClaudeAdapter) MineOriginEvidence(path ResolvedPath) (sessionorigin.Origin, bool) {
+	info, err := a.fs.Stat(path.String())
+	if err != nil {
+		return "", false
+	}
+	evidence, readable := a.mineClaudeRootTranscript(path, info)
+	if !readable {
+		return "", false
+	}
+	return evidence.Origin, true
 }
 
 // loadCachedEvidence returns the evidence an earlier discovery mined. A missing
@@ -333,51 +386,79 @@ func (a *ClaudeAdapter) saveMinedEvidence(
 
 // linkClaudeTeammates links independently persisted Claude root transcripts.
 // A relationship is accepted only when both sides provide one unambiguous
-// complete identity. Files that cannot be read or parsed simply provide no
-// evidence and do not make discovery fail. The evidence comes from the mined
-// records, so a cached record links exactly as a freshly read file does.
-func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession, mined map[ResolvedPath]ClaudeTranscriptEvidence) {
-	rootByPath := make(map[ResolvedPath]int)
+// complete identity, computed over every piece of root evidence this
+// discovery knows: the records this run mined, plus whatever survives in the
+// persisted evidence cache from an earlier run — so a child discovered in a
+// LATER run still finds a spawner an EARLIER run discovered, not only a
+// spawner in the same batch. Files that cannot be read or parsed simply
+// provide no evidence and do not make discovery fail.
+//
+// A spawner found only in the persisted cache is pointed at ONLY when it is
+// already stored: a parent identifier must never point at a session that is
+// neither in this write batch nor already persisted, because the store's own
+// FK-orphan guard would otherwise silently drop the child at write time,
+// which is worse than leaving it parentless. The extension is one-directional
+// — a later child may find an earlier spawner, never the reverse — and never
+// creates a cycle: any assignment that would place a session among its own
+// ancestors is refused rather than guessed.
+func (a *ClaudeAdapter) linkClaudeTeammates(
+	ctx context.Context,
+	sessions []DiscoveredSession,
+	cached, mined map[ResolvedPath]ClaudeTranscriptEvidence,
+) {
+	rootByPath := make(map[ResolvedPath]int, len(sessions))
 	for i := range sessions {
 		if sessions[i].ParentUUID == nil {
 			rootByPath[sessions[i].SourcePath] = i
 		}
 	}
 
-	identities := make(map[ClaudeTeammateIdentity][]int)
-	spawns := make(map[ClaudeTeammateIdentity]map[int]struct{})
-	for i := range sessions {
-		if _, ok := rootByPath[sessions[i].SourcePath]; !ok {
+	index := buildClaudeSpawnIndex(mergeClaudeEvidence(cached, mined))
+
+	candidates := make(map[SessionID]SessionID, len(index))
+	childIndexBySessionID := make(map[SessionID]int, len(index))
+	parentIndexBySessionID := make(map[SessionID]int, len(index))
+
+	for _, link := range index {
+		childIdx, inBatch := rootByPath[link.Child]
+		if !inBatch {
+			continue // nothing in this write batch to attach a parent to
+		}
+		childID := sessions[childIdx].SessionID
+
+		var parentID SessionID
+		parentIdx, parentInBatch := rootByPath[link.Parent]
+		if parentInBatch {
+			parentID = sessions[parentIdx].SessionID
+		} else {
+			id, ok := claudeSessionIDFromRootPath(link.Parent)
+			if !ok || !a.claudeSessionAlreadyStored(ctx, id) {
+				continue // unresolvable or unverified: leave the child parentless
+			}
+			parentID = id
+		}
+		if parentID == childID {
 			continue
 		}
-		evidence := mined[sessions[i].SourcePath]
-		if evidence.Identity != nil {
-			identity := *evidence.Identity
-			identities[identity] = append(identities[identity], i)
-		}
-		for _, spawn := range evidence.Spawns {
-			if spawns[spawn] == nil {
-				spawns[spawn] = make(map[int]struct{})
-			}
-			spawns[spawn][i] = struct{}{}
+
+		candidates[childID] = parentID
+		childIndexBySessionID[childID] = childIdx
+		if parentInBatch {
+			parentIndexBySessionID[childID] = parentIdx
 		}
 	}
 
-	for identity, children := range identities {
-		parents := spawns[identity]
-		if len(children) != 1 || len(parents) != 1 {
+	cyclic := a.claudeCyclicChildren(ctx, candidates)
+
+	for childID, parentID := range candidates {
+		if cyclic[childID] {
 			continue
 		}
-		child := children[0]
-		var parent int
-		for parent = range parents {
+		childIdx := childIndexBySessionID[childID]
+		sessions[childIdx].ParentUUID = &parentID
+		if parentIdx, ok := parentIndexBySessionID[childID]; ok {
+			sessions[parentIdx].SubagentPaths = append(sessions[parentIdx].SubagentPaths, sessions[childIdx].SourcePath)
 		}
-		if child == parent {
-			continue
-		}
-		parentID := sessions[parent].SessionID
-		sessions[child].ParentUUID = &parentID
-		sessions[parent].SubagentPaths = append(sessions[parent].SubagentPaths, sessions[child].SourcePath)
 	}
 }
 
@@ -394,8 +475,11 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	data, err := a.fs.ReadFile(path.String())
 	if err != nil {
 		// An unreadable file fails open, exactly as the conversation check does,
-		// so discovery can surface it instead of discarding it silently.
+		// so discovery can surface it instead of discarding it silently. It
+		// carries no evidence, so the rule declares it unknown, which is the
+		// visible answer.
 		evidence.HasConversationRecord = true
+		evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{})
 		return evidence, false
 	}
 
@@ -406,6 +490,12 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	var invalidIdentity, malformed, conversation bool
 	var validRecords, lineNumber int
 	var hints claudeSessionHints
+	// The origin captures ride this same scan. Like the identity capture above
+	// them they read every line, because a harness is free to record the launch
+	// fields on any record; the hint limit below bounds the display hints alone
+	// and has never bounded identity.
+	var entrypoint, promptSource, firstUserText string
+	var haveFirstUserText bool
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -451,6 +541,24 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 				}
 			}
 		}
+		if entrypoint == "" {
+			entrypoint, _ = value["entrypoint"].(string)
+		}
+		if promptSource == "" {
+			promptSource, _ = value["promptSource"].(string)
+		}
+		if !haveFirstUserText {
+			// The first REAL user record decides, not the first user record.
+			// Claude Code opens a locally run slash command with a caveat
+			// record, and that record would otherwise become the transcript's
+			// first user text and carry no signal at all. Leading scaffolding
+			// is read past; the first record that is not scaffolding stops the
+			// search, so nothing after it is skipped.
+			if text, ok := claudeUserRecordText(value); ok && !skipClaudeInjectedOnlyUserRecord(text) {
+				firstUserText = text
+				haveFirstUserText = true
+			}
+		}
 		if spawn, ok := claudeTeammateSpawn(value); ok {
 			evidence.Spawns = append(evidence.Spawns, spawn)
 		}
@@ -463,7 +571,144 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 	evidence.Title = hints.title
 	evidence.Branch = hints.branch
 	evidence.CWD = hints.cwd
+	// Mining runs before linking, so a root has no known parent yet. A root that
+	// linking later attaches to a spawner already declares the identity that
+	// makes it agent-driven, so nothing is lost by asking the rule here.
+	evidence.Origin, evidence.Signal = sessionorigin.Classify(
+		ClaudeOriginEvidence(evidence.Identity, entrypoint, promptSource, firstUserText, false),
+	)
 	return evidence, true
+}
+
+// ClaudeOriginEvidence assembles the origin evidence for one mined transcript.
+// identity is the value the scan already collected; entrypoint, promptSource and
+// firstUserText are captured in that same pass. hasParent is supplied by the
+// caller because it is Peasant's discovery state rather than harness content.
+func ClaudeOriginEvidence(
+	identity *ClaudeTeammateIdentity,
+	entrypoint, promptSource, firstUserText string,
+	hasParent bool,
+) sessionorigin.Evidence {
+	evidence := sessionorigin.Evidence{
+		HasParent:     hasParent,
+		Entrypoint:    entrypoint,
+		PromptSource:  promptSource,
+		FirstUserText: firstUserText,
+	}
+	if identity != nil {
+		evidence.TeamName = identity.Team
+		evidence.AgentName = identity.Name
+	}
+	return evidence
+}
+
+// claudeInjectedOnlyUserWrappers is the closed set of Claude Code wrappers that
+// open a user-role record the HARNESS wrote, containing nothing a person typed
+// and nothing an agent authored. A run of these at the head of a transcript is
+// scaffolding in front of the real opening record, so the origin capture reads
+// past them (see skipClaudeInjectedOnlyUserRecord).
+//
+// The names come from the redact wrapper catalog. No markup literal is spelled
+// here, so a harness renaming a wrapper stays one upstream change.
+//
+// Why each member is in the set:
+//
+//   - LocalCommandCaveat: the fixed notice Claude Code emits before a locally
+//     run slash command ("the messages below were generated by the user while
+//     running local commands"). It is boilerplate the harness composes; the
+//     person's actual action is the command wrapper that follows it. This is
+//     the record that motivated reading past the head at all.
+//   - LocalCommandStdout and LocalCommandStderr: captured output of a local
+//     command. Program output, echoed into the turn by the harness.
+//   - SystemReminder: harness-composed reminders and notes injected into a user
+//     turn. Never typed, never authored by an agent.
+//   - TaskNotification: the harness's own report that a background task changed
+//     state. Machine-generated status, not authorship by anyone.
+//   - EnvironmentContext: a harness dump of the working environment.
+//
+// Why the near neighbours are NOT in the set, since a wrong member here is a
+// misclassification with no other symptom:
+//
+//   - CommandName, CommandMessage and CommandArgs are the person's action. A
+//     command wrapper IS the evidence the rule is looking for; skipping one
+//     would delete the very signal this change exists to reach.
+//   - TeammateMessage and AgentMessage carry agent authorship. Skipping either
+//     would let a later, human-looking record decide a session an agent in fact
+//     opened -- the permissive failure, which hides a person's view of who
+//     started what.
+//   - UserQuery wraps the person's own prose.
+//   - SystemContext, RecommendedPlugins and UserAction belong to other
+//     harnesses in the same catalog. This skip runs only inside the Claude
+//     adapter, so including them would add members no Claude transcript can
+//     produce and no test can exercise.
+var claudeInjectedOnlyUserWrappers = []string{
+	redact.WrapperLocalCommandCaveat,
+	redact.WrapperLocalCommandStdout,
+	redact.WrapperLocalCommandStderr,
+	redact.WrapperSystemReminder,
+	redact.WrapperTaskNotification,
+	redact.WrapperEnvironmentContext,
+}
+
+// skipClaudeInjectedOnlyUserRecord reports whether one user-record text is
+// harness scaffolding that the origin capture should read past rather than hand
+// to the rule.
+//
+// Only a LEADING run is ever skipped: the caller stops at the first record this
+// returns false for, so an injected record appearing AFTER the real opening
+// record is never reached, let alone skipped. A transcript whose user records
+// are all injected yields no first user text at all, which is the honest answer
+// -- the rule then reaches no content signal and declares the origin unknown.
+func skipClaudeInjectedOnlyUserRecord(text string) bool {
+	opening := strings.TrimLeft(text, " \t\r\n")
+	for _, name := range claudeInjectedOnlyUserWrappers {
+		if sessionorigin.OpensWithTag(opening, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// claudeUserRecordText returns the text of one user-role record. The second
+// result says whether the record was a user-role record at all, so the caller
+// can stop at the first one even when that first one carries no text.
+func claudeUserRecordText(value map[string]any) (string, bool) {
+	if recordType, ok := value["type"].(string); !ok || claudeRecordType(recordType) != claudeRecordTypeUser {
+		return "", false
+	}
+	message, ok := value["message"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if role, ok := message["role"].(string); !ok || role != "user" {
+		return "", false
+	}
+	switch content := message["content"].(type) {
+	case string:
+		return content, true
+	case []any:
+		var builder strings.Builder
+		for _, block := range content {
+			fields, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			if kind, ok := fields["type"].(string); !ok || kind != claudeContentBlockText {
+				continue
+			}
+			text, ok := fields["text"].(string)
+			if !ok {
+				continue
+			}
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(text)
+		}
+		return builder.String(), true
+	default:
+		return "", true
+	}
 }
 
 // mineClaudeSubagentTranscript checks one subagent transcript for a
@@ -473,6 +718,11 @@ func (a *ClaudeAdapter) mineClaudeRootTranscript(path ResolvedPath, info os.File
 func (a *ClaudeAdapter) mineClaudeSubagentTranscript(path ResolvedPath, info os.FileInfo) ClaudeTranscriptEvidence {
 	evidence := newClaudeEvidence(path, ClaudeEvidenceScopeSubagent, info)
 	evidence.HasConversationRecord = a.hasClaudeConversationRecord(path.String())
+	// A subagent transcript is by definition the child of a root, which is the
+	// first step of the rule. The rule is asked rather than answered for it, so
+	// that step 1 keeps exactly one definition and a change to it reaches this
+	// path too.
+	evidence.Origin, evidence.Signal = sessionorigin.Classify(sessionorigin.Evidence{HasParent: true})
 	return evidence
 }
 

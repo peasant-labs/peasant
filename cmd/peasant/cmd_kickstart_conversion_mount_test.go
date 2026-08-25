@@ -312,6 +312,7 @@ func TestRunKickstartFlowLegacyAllRejectsUnreadableStoredEvidence(t *testing.T) 
 		configPath,
 		nil,
 		nil,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("legacy conversion opened the selection flow without complete stored evidence")
@@ -393,7 +394,7 @@ func TestRunKickstartFlowConvertsLegacyAllFromStoredEvidence(t *testing.T) {
 				return nil
 			}
 
-			if err := runKickstartFlow(cmd, deps, configPath, nil, listings); err != nil {
+			if err := runKickstartFlow(cmd, deps, configPath, nil, listings, nil); err != nil {
 				t.Fatalf("run mounted kickstart flow: %v", err)
 			}
 			if !committed {

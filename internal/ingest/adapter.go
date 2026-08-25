@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
 
 // SourceAdapter abstracts provider-specific session discovery and metadata extraction.
@@ -26,6 +27,24 @@ type SourceAdapter interface {
 // transcript.
 type TranscriptMaterializer interface {
 	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
+}
+
+// DiscoveryStatistics is an optional capability. An adapter that can report
+// what its last Discover actually did implements it; a caller that cares
+// type-asserts for it, exactly as callers already do for ClaudeEvidenceCaching
+// and for the session-location lookup. Discover's signature is shared by five
+// adapters, four of which have no re-mine concept and nothing to report, so it
+// is deliberately left alone.
+type DiscoveryStatistics interface {
+	// ReminedCount reports how many cached evidence records the MOST RECENT
+	// Discover call on this adapter had to mine again. Zero means every cached
+	// record was reusable.
+	//
+	// The scoping to the most recent call holds by caller discipline and not by
+	// the interface: nothing here stops a caller from reading the count after a
+	// second Discover has already overwritten it. Read it immediately after the
+	// Discover whose work it is meant to describe.
+	ReminedCount() int
 }
 
 // BoundedTranscriptMaterializer materializes a preview-only prefix of a session
@@ -181,6 +200,14 @@ type DiscoveredSession struct {
 	CreatedAt         time.Time         // Session creation time when known (zero means use ModTime)
 	DiscoveryWarnings []DiagnosticEntry // Non-fatal relationship issues found before metadata extraction
 	TranscriptOrigin  TranscriptOrigin  // Typed materialization contract; zero means copy SourcePath as a transcript file.
+	// Origin is who drove the session, as the harness adapter's evidence decided
+	// it. An adapter that mines no origin evidence leaves it empty, and the
+	// consumer resolves that to the visible fail-safe value.
+	Origin sessionorigin.Origin
+	// Signal names which rule step decided Origin. It exists purely for
+	// explanatory reporting (the origin audit harness); no storage layer
+	// persists it and no other consumer reads it.
+	Signal sessionorigin.Signal
 }
 
 // stalenessSourceTime returns the source time the staleness (active) gate reads.

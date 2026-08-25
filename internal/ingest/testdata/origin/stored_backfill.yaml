@@ -1,0 +1,364 @@
+# The pass that fills in a verdict on sessions an EARLIER run stored.
+#
+# One arm per evidence source and per hazard. Each case describes a whole store:
+# the transcripts that are still on disk, the evidence cache the discovery this
+# pass rides on has just refreshed, and the rows the pass has to judge. The
+# expectation is per row, and the three report counters are derived from those
+# rows rather than restated, so a counter cannot agree with a fixture that
+# disagrees with the store.
+#
+# Reading the arms:
+#   origin      the session_origin the row must carry when the pass returns
+#   finalised   whether origin_version reached the current rule version, which
+#               is the whole point of the design: a row resolved WITHOUT its
+#               transcript keeps its verdict and stays retryable
+#   examined    whether the pass listed the row at all
+#   written     whether the pass had to persist a change for it
+#
+# Non-vacuity, arm by arm. Every arm is built so that the wrong implementation
+# gives a DIFFERENT answer, not merely a differently-counted one:
+#   - the parent-linked and cached arms hold NO transcript on disk and NO stored
+#     first user message, so an implementation that skipped that evidence source
+#     would fall through to the degraded path and answer unknown, unfinalised
+#   - the live-transcript arm holds no cache row and no stored message, so an
+#     implementation that never mined would answer unknown, unfinalised
+#   - the missing-transcript arm's stored message is a slash command, so the
+#     verdict is user rather than the unknown a blank fall-back would give
+#   - the already-at-version arm's transcript would classify DIFFERENTLY from
+#     its stored verdict, so a pass that listed it would visibly overwrite it
+#   - the unrecoverable-marker arm pairs two rows whose stored messages are
+#     IDENTICAL and differ only in whether the transcript survives
+#   - the present-but-unreadable arm pairs two rows holding the SAME bytes and
+#     the same stored message, differing only in whether the read succeeds
+#   - the no-miner arm pairs a harness this build cannot re-read with a Claude
+#     control that is otherwise identical, so the two must settle differently
+#   - the all-unreadable arm is the trap: an implementation that marked
+#     everything final fails every one of its rows
+
+required_case_names:
+  - parent_linked_row_resolves_without_reading_any_transcript
+  - cached_menu_origin_is_reused_without_reading_the_transcript
+  - live_transcript_is_mined_in_full
+  - missing_transcript_resolves_from_the_stored_first_user_message
+  - a_degraded_row_stays_retryable_while_a_full_row_is_finalised
+  - a_row_already_at_the_current_rule_version_is_skipped
+  - a_settled_store_is_written_to_only_once
+  - an_interrupted_pass_resumes_without_mis_marking
+  - a_degraded_row_never_reaches_agent_on_unrecoverable_markers
+  - every_transcript_unreadable_leaves_every_row_retryable
+  - a_present_but_unreadable_transcript_stays_retryable
+  - a_harness_with_no_origin_miner_is_not_left_retryable_forever
+
+cases:
+  # Source one. The row already carries a parent, which is rule step one. There
+  # is deliberately nothing else to resolve it from: no file, no cache row, no
+  # stored message.
+  - name: parent_linked_row_resolves_without_reading_any_transcript
+    arm: parent-link
+    rows:
+      - session_id: 10000000-0000-4000-8000-000000000001
+        source_path: /claude/10000000-0000-4000-8000-000000000001.jsonl
+      - session_id: 10000000-0000-4000-8000-000000000002
+        parent_id: 10000000-0000-4000-8000-000000000001
+        source_path: /claude/10000000-0000-4000-8000-000000000002.jsonl
+    expected:
+      - session_id: 10000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: true
+        written: true
+      # The parent itself has no evidence at all and is the degraded control
+      # that makes the child's answer attributable to its parent link.
+      - session_id: 10000000-0000-4000-8000-000000000001
+        origin: unknown
+        finalised: false
+        written: false
+
+  # Source two. The transcript is NOT on disk, so only the cache can answer.
+  - name: cached_menu_origin_is_reused_without_reading_the_transcript
+    arm: cached-origin
+    cache:
+      - path: /claude/20000000-0000-4000-8000-000000000001.jsonl
+        origin: user
+      - path: /claude/20000000-0000-4000-8000-000000000002.jsonl
+        origin: agent
+    rows:
+      - session_id: 20000000-0000-4000-8000-000000000001
+        source_path: /claude/20000000-0000-4000-8000-000000000001.jsonl
+      - session_id: 20000000-0000-4000-8000-000000000002
+        source_path: /claude/20000000-0000-4000-8000-000000000002.jsonl
+    expected:
+      - session_id: 20000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: true
+        written: true
+      - session_id: 20000000-0000-4000-8000-000000000002
+        origin: agent
+        finalised: true
+        written: true
+
+  # Source three. No cache row and no stored message, so the verdict can only
+  # come from the transcript, and it comes from a marker the stored entries
+  # could never have carried.
+  - name: live_transcript_is_mined_in_full
+    arm: live-transcript
+    transcripts:
+      - path: /claude/30000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"30000000-0000-4000-8000-000000000001","type":"user","message":{"role":"user","content":"look into the failing build"}}'
+          - '{"sessionId":"30000000-0000-4000-8000-000000000001","type":"assistant","teamName":"migration","agentName":"tests","message":{"role":"assistant","content":"on it"}}'
+      - path: /claude/30000000-0000-4000-8000-000000000002.jsonl
+        lines:
+          - '{"sessionId":"30000000-0000-4000-8000-000000000002","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+          - '{"sessionId":"30000000-0000-4000-8000-000000000002","type":"assistant","message":{"role":"assistant","content":"sharing"}}'
+    rows:
+      - session_id: 30000000-0000-4000-8000-000000000001
+        source_path: /claude/30000000-0000-4000-8000-000000000001.jsonl
+      - session_id: 30000000-0000-4000-8000-000000000002
+        source_path: /claude/30000000-0000-4000-8000-000000000002.jsonl
+    expected:
+      - session_id: 30000000-0000-4000-8000-000000000001
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: 30000000-0000-4000-8000-000000000002
+        origin: user
+        finalised: true
+        written: true
+
+  # Source four. The transcript is gone, so the stored first user message is the
+  # last surviving evidence. A slash command is still recognisable there.
+  - name: missing_transcript_resolves_from_the_stored_first_user_message
+    arm: degraded-stored-message
+    rows:
+      - session_id: 40000000-0000-4000-8000-000000000001
+        source_path: /claude/40000000-0000-4000-8000-000000000001.jsonl
+        first_user_message: <command-name>/review</command-name>
+      - session_id: 40000000-0000-4000-8000-000000000002
+        source_path: /claude/40000000-0000-4000-8000-000000000002.jsonl
+        first_user_message: have a look at the release notes
+    expected:
+      - session_id: 40000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: false
+        written: true
+      - session_id: 40000000-0000-4000-8000-000000000002
+        origin: unknown
+        finalised: false
+        written: false
+
+  # The distinction the whole design exists for, both halves in ONE store so a
+  # pass that treats them alike fails whichever way it leans.
+  - name: a_degraded_row_stays_retryable_while_a_full_row_is_finalised
+    arm: watermark-split
+    transcripts:
+      - path: /claude/50000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"50000000-0000-4000-8000-000000000001","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    rows:
+      - session_id: 50000000-0000-4000-8000-000000000001
+        source_path: /claude/50000000-0000-4000-8000-000000000001.jsonl
+        first_user_message: <command-name>/share</command-name>
+      - session_id: 50000000-0000-4000-8000-000000000002
+        source_path: /claude/50000000-0000-4000-8000-000000000002.jsonl
+        first_user_message: <command-name>/share</command-name>
+    expected:
+      # Same verdict on both rows, reached through different evidence. Only the
+      # version line separates them, which is exactly the property under test.
+      - session_id: 50000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: true
+        written: true
+      - session_id: 50000000-0000-4000-8000-000000000002
+        origin: user
+        finalised: false
+        written: true
+
+  # A row the current rule has already judged is not listed at all. Its
+  # transcript would classify DIFFERENTLY from its stored verdict, so a pass
+  # that listed it would overwrite the verdict and fail this arm.
+  - name: a_row_already_at_the_current_rule_version_is_skipped
+    arm: at-version
+    transcripts:
+      - path: /claude/60000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"60000000-0000-4000-8000-000000000001","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    rows:
+      - session_id: 60000000-0000-4000-8000-000000000001
+        source_path: /claude/60000000-0000-4000-8000-000000000001.jsonl
+        stored_origin: agent
+        at_current_rule_version: true
+    expected:
+      - session_id: 60000000-0000-4000-8000-000000000001
+        origin: agent
+        finalised: true
+        examined: false
+        written: false
+
+  # Every arm runs the pass twice, but this one is named for it: once the
+  # verdicts are right, a further pass persists nothing, including for the rows
+  # it must keep re-examining.
+  - name: a_settled_store_is_written_to_only_once
+    arm: idempotent
+    transcripts:
+      - path: /claude/70000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"70000000-0000-4000-8000-000000000001","type":"user","message":{"role":"user","content":"draft the summary"}}'
+          - '{"sessionId":"70000000-0000-4000-8000-000000000001","type":"assistant","entrypoint":"sdk-cli","promptSource":"sdk","message":{"role":"assistant","content":"drafting"}}'
+    rows:
+      - session_id: 70000000-0000-4000-8000-000000000001
+        source_path: /claude/70000000-0000-4000-8000-000000000001.jsonl
+      # Already carries the verdict its degraded evidence produces, so even the
+      # first pass has nothing to write for it.
+      - session_id: 70000000-0000-4000-8000-000000000002
+        source_path: /claude/70000000-0000-4000-8000-000000000002.jsonl
+        stored_origin: user
+        first_user_message: <command-name>/share</command-name>
+    expected:
+      - session_id: 70000000-0000-4000-8000-000000000001
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: 70000000-0000-4000-8000-000000000002
+        origin: user
+        finalised: false
+        written: false
+
+  # Two rows that both need a write. The pass is interrupted between them, and
+  # the state it leaves behind must be resumable rather than half-marked.
+  - name: an_interrupted_pass_resumes_without_mis_marking
+    arm: interrupted
+    transcripts:
+      - path: /claude/80000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"80000000-0000-4000-8000-000000000001","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"start"}}'
+      - path: /claude/80000000-0000-4000-8000-000000000002.jsonl
+        lines:
+          - '{"sessionId":"80000000-0000-4000-8000-000000000002","type":"user","message":{"role":"user","content":"<command-name>/share</command-name>"}}'
+    rows:
+      - session_id: 80000000-0000-4000-8000-000000000001
+        source_path: /claude/80000000-0000-4000-8000-000000000001.jsonl
+      - session_id: 80000000-0000-4000-8000-000000000002
+        source_path: /claude/80000000-0000-4000-8000-000000000002.jsonl
+    expected:
+      - session_id: 80000000-0000-4000-8000-000000000001
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: 80000000-0000-4000-8000-000000000002
+        origin: user
+        finalised: true
+        written: true
+
+  # The fail-safe direction. Both rows carry the SAME plain-prose stored
+  # message; only the surviving transcript can say agent, and the row that lost
+  # its transcript must not reach that verdict by any other route.
+  - name: a_degraded_row_never_reaches_agent_on_unrecoverable_markers
+    arm: unrecoverable-markers
+    transcripts:
+      - path: /claude/90000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"90000000-0000-4000-8000-000000000001","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"pick up the failing slice"}}'
+    rows:
+      - session_id: 90000000-0000-4000-8000-000000000001
+        source_path: /claude/90000000-0000-4000-8000-000000000001.jsonl
+        first_user_message: pick up the failing slice
+      - session_id: 90000000-0000-4000-8000-000000000002
+        source_path: /claude/90000000-0000-4000-8000-000000000002.jsonl
+        first_user_message: pick up the failing slice
+    expected:
+      - session_id: 90000000-0000-4000-8000-000000000001
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: 90000000-0000-4000-8000-000000000002
+        origin: unknown
+        finalised: false
+        written: false
+
+  # THE TRAP. Every transcript in the store is unreachable, which is what an
+  # unmounted drive looks like. Every row still gets a verdict, and NOT ONE of
+  # them may be marked final, because every one of them can answer better once
+  # the drive comes back.
+  - name: every_transcript_unreadable_leaves_every_row_retryable
+    arm: all-unreadable
+    rows:
+      - session_id: a0000000-0000-4000-8000-000000000001
+        source_path: /claude/a0000000-0000-4000-8000-000000000001.jsonl
+        first_user_message: <command-name>/share</command-name>
+      - session_id: a0000000-0000-4000-8000-000000000002
+        source_path: /claude/a0000000-0000-4000-8000-000000000002.jsonl
+        first_user_message: rewrite the changelog entry
+      - session_id: a0000000-0000-4000-8000-000000000003
+        source_path: /claude/a0000000-0000-4000-8000-000000000003.jsonl
+        first_user_message: <command-message id="2">/review</command-message>
+    expected:
+      - session_id: a0000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: false
+        written: true
+      - session_id: a0000000-0000-4000-8000-000000000002
+        origin: unknown
+        finalised: false
+        written: false
+      - session_id: a0000000-0000-4000-8000-000000000003
+        origin: user
+        finalised: false
+        written: true
+
+  # A transcript that is THERE but cannot be read - a permission change, a drive
+  # that went away between the directory listing and the read - is the same
+  # hazard as a missing one and must be treated the same way. Presence alone is
+  # not evidence; only a successful read is.
+  - name: a_present_but_unreadable_transcript_stays_retryable
+    arm: present-but-unreadable
+    transcripts:
+      - path: /claude/b0000000-0000-4000-8000-000000000001.jsonl
+        lines:
+          - '{"sessionId":"b0000000-0000-4000-8000-000000000001","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"take the slice"}}'
+      - path: /claude/b0000000-0000-4000-8000-000000000002.jsonl
+        lines:
+          - '{"sessionId":"b0000000-0000-4000-8000-000000000002","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"take the slice"}}'
+    unreadable_transcripts:
+      - /claude/b0000000-0000-4000-8000-000000000002.jsonl
+    rows:
+      - session_id: b0000000-0000-4000-8000-000000000001
+        source_path: /claude/b0000000-0000-4000-8000-000000000001.jsonl
+        first_user_message: take the slice
+      - session_id: b0000000-0000-4000-8000-000000000002
+        source_path: /claude/b0000000-0000-4000-8000-000000000002.jsonl
+        first_user_message: take the slice
+    expected:
+      # The control: identical bytes, identical stored message, readable.
+      - session_id: b0000000-0000-4000-8000-000000000001
+        origin: agent
+        finalised: true
+        written: true
+      - session_id: b0000000-0000-4000-8000-000000000002
+        origin: unknown
+        finalised: false
+        written: false
+
+  # Degraded means "better evidence may arrive", not merely "no transcript was
+  # read". A harness this build reads no origin evidence from has already given
+  # everything it will ever give, so its rows must finalise rather than be
+  # re-examined on every run for the life of the store. The Claude row beside it
+  # is the control: same absent transcript, same stored message, still retryable.
+  - name: a_harness_with_no_origin_miner_is_not_left_retryable_forever
+    arm: no-miner-for-this-harness
+    rows:
+      - session_id: c0000000-0000-4000-8000-000000000001
+        harness: opencode
+        source_path: /opencode/c0000000-0000-4000-8000-000000000001.json
+        first_user_message: <command-name>/share</command-name>
+      - session_id: c0000000-0000-4000-8000-000000000002
+        source_path: /claude/c0000000-0000-4000-8000-000000000002.jsonl
+        first_user_message: <command-name>/share</command-name>
+    expected:
+      - session_id: c0000000-0000-4000-8000-000000000001
+        origin: user
+        finalised: true
+        written: true
+      - session_id: c0000000-0000-4000-8000-000000000002
+        origin: user
+        finalised: false
+        written: true

@@ -9,6 +9,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 )
 
 // Error marks a discovery failure caused by invalid persisted selection state.
@@ -26,7 +27,8 @@ func IsError(err error) bool {
 	return errors.As(err, &target)
 }
 
-// Candidate is the selection-relevant identity of one stored session.
+// Candidate is the discovery-relevant identity of one stored session: the
+// selection-scope fields, plus the origin the producer declared for it.
 type Candidate struct {
 	SessionID   ingest.SessionID
 	Harness     ingest.Harness
@@ -34,6 +36,21 @@ type Candidate struct {
 	ProjectName string
 	ClonePath   ingest.ClonePath
 	GitBranch   string
+	// Origin is who drove the session, as recorded in sessions.session_origin.
+	// It is read only by VisibleForDiscovery: selection scope never consults it,
+	// which is what keeps the two scopes independent axes.
+	Origin sessionorigin.Origin
+	// ParentSessionID names the root a subagent transcript belongs to, empty for
+	// a root session.
+	//
+	// It is deliberately NOT an input to any predicate here. A subagent row
+	// leaves a discovery list through its origin, exactly like an agent-driven
+	// root, because this path has no parent filter and must not grow one: a
+	// parent filter would hide the row for a reason origin scope is responsible
+	// for, and the two would then be impossible to tell apart. The field exists
+	// so that a candidate describes the row completely and so the behaviour
+	// fixture can state a subagent-shaped row whose origin alone decides it.
+	ParentSessionID ingest.SessionID
 }
 
 // Policy is an immutable, validated discovery projection.
@@ -115,4 +132,36 @@ func (p Policy) Visible(candidate Candidate) (bool, error) {
 	default:
 		return false, errorf("session visibility: unknown matcher result for session %q in internal/sessionvisibility.Policy.Visible; discovery was stopped to avoid exposing an unselected row; update peasant or rerun kickstart", candidate.SessionID)
 	}
+}
+
+// VisibleForDiscovery reports whether a candidate belongs in a discovery list:
+// a picker, a chooser, a sessions list. It is the conjunction of the configured
+// selection scope and the origin scope, which are separate, independent axes —
+// either one alone can withhold a candidate, and neither can admit one the
+// other withheld.
+//
+// Origin scope withholds exactly one value: a session a program drove
+// (sessionorigin.Agent). user and unknown are both offered, because unknown is
+// the fail-safe value and must behave like a person's own session everywhere in
+// Peasant.
+//
+// Like selection scope, this is a DISCOVERY boundary and NEVER an access control
+// boundary. A direct link to a hidden session still resolves — link resolution
+// runs through a by-id path that applies neither scope, because a caller holding
+// an identifier is not browsing.
+func (p Policy) VisibleForDiscovery(candidate Candidate) (bool, error) {
+	if err := candidate.Origin.Validate(); err != nil {
+		return false, errorf(
+			"session visibility: session %q carries an unusable origin in internal/sessionvisibility.Policy.VisibleForDiscovery while building a discovery list, so the list was withheld rather than guessed at: neither substitution is safe, because treating it as user would offer an agent-driven session and treating it as agent would hide a person's own work; re-ingest the session so sessions.session_origin holds a menu value, then retry: %v",
+			candidate.SessionID, err,
+		)
+	}
+	selected, err := p.Visible(candidate)
+	if err != nil {
+		return false, err
+	}
+	if !selected {
+		return false, nil
+	}
+	return candidate.Origin != sessionorigin.Agent, nil
 }

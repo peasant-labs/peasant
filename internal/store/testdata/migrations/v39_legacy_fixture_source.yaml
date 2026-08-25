@@ -1,0 +1,37 @@
+# The cross-repo e2e builds a pre-V40 database by copying rows out of a source
+# the current build ingested. This fixture seeds that source at the latest
+# schema and names the request the builder receives, so the identifiers live
+# here rather than inline in the test. Deletion protection is by required NAME,
+# never a declared count.
+
+required_seed_names:
+  - one project the session belongs to
+  - one host slug the session was recorded on
+  - one session carrying every column the latest migration added
+
+# The request the e2e hands to the builder, shaped exactly like the JSON the
+# association e2e encodes. session_id must match the seeded session.
+request:
+  session_id: 00000000-0000-4000-8000-00000000e2e1
+  commit_hash: 0123456789abcdef0123456789abcdef01234567
+  subject: seed an observed commit
+  author_time: 4
+  pushed_at: 5
+
+# Rows inserted into the latest-schema source before the builder runs. The
+# session names a declared origin on purpose: it is one of the columns the
+# frozen V39 table lacks and the builder must drop.
+seeds:
+  - name: one project the session belongs to
+    sql: INSERT INTO projects (project_hash) VALUES ('project-e2e')
+  - name: one host slug the session was recorded on
+    sql: INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('host-e2e', 'slug-e2e')
+  - name: one session carrying every column the latest migration added
+    sql: >-
+      INSERT INTO sessions (session_id, model_harness, model_id, opaque_host_id, project_hash,
+      start_ms, end_ms, ingested_ms, source_path, source_format, session_origin)
+      VALUES ('00000000-0000-4000-8000-00000000e2e1', 'claude-code', 'model', 'host-e2e', 'project-e2e',
+      1, 2, 3, '/tmp/e2e.jsonl', 'jsonl', 'agent')
+
+# The column the frozen destination must NOT carry after the copy.
+frozen_must_lack_column: session_origin

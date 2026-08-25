@@ -10,23 +10,10 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"gopkg.in/yaml.v3"
-)
-
-const (
-	requiredSheetCount             = 4
-	requiredGuidedSectionCount     = 6
-	requiredGuidedCaptureCount     = 24
-	requiredSelectionStateCount    = 6
-	requiredSelectionCaptureCount  = 20
-	requiredSelectionSessionCount  = 6
-	requiredSelectionHarnessCount  = 2
-	requiredSelectionIngestedCount = 1
-	requiredPushStateCount         = 5
-	requiredPushCaptureCount       = 20
-	requiredPushSessionCount       = 3
 )
 
 type sheetName string
@@ -89,16 +76,27 @@ const (
 	// selectionStateSourcePreview is a session the local store does not hold,
 	// previewed from the transcript its harness wrote.
 	selectionStateSourcePreview selectionState = "harness-source-preview"
+	// selectionStateOriginHidden is the mounted list with an agent-driven root
+	// hidden, its user-origin control visible, and a visible parent's child
+	// badge reading correctly.
+	selectionStateOriginHidden selectionState = "origin-hidden"
 )
 
 func (s selectionState) valid() bool {
-	return s == selectionStateDefault || s == selectionStateSearch || s == selectionStateProjectPreview ||
-		s == selectionStateBranchPreview || s == selectionStateSessionPreview || s == selectionStateSourcePreview
+	switch s {
+	case selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
+		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
+		selectionStateOriginHidden:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s selectionState) requiresBothThemes() bool {
 	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
-		s == selectionStateSessionPreview || s == selectionStateSourcePreview
+		s == selectionStateSessionPreview || s == selectionStateSourcePreview ||
+		s == selectionStateOriginHidden
 }
 
 // pushState is the closed set of push-wizard screens the harness captures: the
@@ -201,6 +199,10 @@ type selectionStateFixture struct {
 	Key          selectionState `yaml:"key"`
 	Query        string         `yaml:"query"`
 	WantContains []string       `yaml:"wantContains"`
+	// WantAbsent names markers that must NOT appear in the rendered view. It
+	// is optional; only the origin-hiding state uses it today, to prove a
+	// row is actually gone rather than merely not asserted present.
+	WantAbsent []string `yaml:"wantAbsent"`
 }
 
 type guidedCaptureFixture struct {
@@ -220,15 +222,40 @@ type selectionCaptureFixture struct {
 }
 
 type selectionFixture struct {
-	Repositories []selectionRepositoryFixture      `yaml:"repositories"`
-	Listings     []ftue.SessionListing             `yaml:"listings"`
-	Transcripts  map[string][]selectionTurnFixture `yaml:"transcripts"`
+	Repositories []selectionRepositoryFixture `yaml:"repositories"`
+	// Listings is the ROOTS-ONLY cohort the picker lists, exactly what
+	// production discovery hands it. A subagent session is never here.
+	Listings []ftue.SessionListing `yaml:"listings"`
+	// SubagentDiscovery is the parent-to-subagent relation over the whole
+	// discovered set, the second thing production discovery returns. It
+	// resolves a parent row's child count and nothing else: a session named
+	// only here is discovered, counted, and never listed.
+	SubagentDiscovery []selectionSubagentFixture        `yaml:"subagentDiscovery"`
+	Transcripts       map[string][]selectionTurnFixture `yaml:"transcripts"`
 	// SourceTranscripts holds the harness transcript lines for sessions the
 	// local store does not hold. The renderer writes each one to its isolated
 	// workspace and points the listing at it, so the preview reads a real file
 	// through the production reader.
 	SourceTranscripts map[string][]string `yaml:"sourceTranscripts"`
 	Ingested          []string            `yaml:"ingested"`
+	// RequiredSessionNames, RequiredHarnessNames, and RequiredIngestedNames
+	// are deletion-protection manifests: every listed name must be present
+	// among Listings' session ids, Listings' harnesses, and Ingested
+	// respectively. None bounds how many rows or distinct values exist.
+	RequiredSessionNames  []string `yaml:"requiredSessionNames"`
+	RequiredHarnessNames  []string `yaml:"requiredHarnessNames"`
+	RequiredIngestedNames []string `yaml:"requiredIngestedNames"`
+	// RequiredSubagentDiscoveryNames protects the sessions that exist ONLY in
+	// SubagentDiscovery. They are what makes the capture production-shaped, so
+	// deleting one must fail the fixture rather than quietly shrink a count.
+	RequiredSubagentDiscoveryNames []string `yaml:"requiredSubagentDiscoveryNames"`
+}
+
+// selectionSubagentFixture is one entry of the discovered subagent relation:
+// a session discovery surfaced, and the subagent sessions it spawned.
+type selectionSubagentFixture struct {
+	SessionID   string   `yaml:"sessionId"`
+	SubagentIDs []string `yaml:"subagentIds"`
 }
 
 type selectionRepositoryFixture struct {
@@ -244,26 +271,19 @@ type selectionTurnFixture struct {
 }
 
 type captureDocument struct {
-	ExpectedPushStateCount         int                       `yaml:"expectedPushStateCount"`
-	ExpectedPushCaptureCount       int                       `yaml:"expectedPushCaptureCount"`
-	ExpectedPushSessionCount       int                       `yaml:"expectedPushSessionCount"`
-	PushStates                     []pushStateFixture        `yaml:"pushStates"`
-	PushCaptures                   []pushCaptureFixture      `yaml:"pushCaptures"`
-	Push                           pushFixture               `yaml:"push"`
-	ExpectedSheetCount             int                       `yaml:"expectedSheetCount"`
-	ExpectedGuidedSectionCount     int                       `yaml:"expectedGuidedSectionCount"`
-	ExpectedGuidedCaptureCount     int                       `yaml:"expectedGuidedCaptureCount"`
-	ExpectedSelectionStateCount    int                       `yaml:"expectedSelectionStateCount"`
-	ExpectedSelectionCaptureCount  int                       `yaml:"expectedSelectionCaptureCount"`
-	ExpectedSelectionSessionCount  int                       `yaml:"expectedSelectionSessionCount"`
-	ExpectedSelectionHarnessCount  int                       `yaml:"expectedSelectionHarnessCount"`
-	ExpectedSelectionIngestedCount int                       `yaml:"expectedSelectionIngestedCount"`
-	Sheets                         []sheetFixture            `yaml:"sheets"`
-	GuidedSections                 []guidedSectionFixture    `yaml:"guidedSections"`
-	SelectionStates                []selectionStateFixture   `yaml:"selectionStates"`
-	Selection                      selectionFixture          `yaml:"selection"`
-	GuidedCaptures                 []guidedCaptureFixture    `yaml:"guidedCaptures"`
-	SelectionCaptures              []selectionCaptureFixture `yaml:"selectionCaptures"`
+	// RequiredPushSessionNames is a deletion-protection manifest: every
+	// listed session id must be present in Push.Sessions. It does not bound
+	// how many push sessions exist.
+	RequiredPushSessionNames []string                  `yaml:"requiredPushSessionNames"`
+	PushStates               []pushStateFixture        `yaml:"pushStates"`
+	PushCaptures             []pushCaptureFixture      `yaml:"pushCaptures"`
+	Push                     pushFixture               `yaml:"push"`
+	Sheets                   []sheetFixture            `yaml:"sheets"`
+	GuidedSections           []guidedSectionFixture    `yaml:"guidedSections"`
+	SelectionStates          []selectionStateFixture   `yaml:"selectionStates"`
+	Selection                selectionFixture          `yaml:"selection"`
+	GuidedCaptures           []guidedCaptureFixture    `yaml:"guidedCaptures"`
+	SelectionCaptures        []selectionCaptureFixture `yaml:"selectionCaptures"`
 }
 
 //go:embed testdata/captures.yaml
@@ -283,9 +303,6 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 		}
 		return document, fmt.Errorf("screenshot fixture must contain exactly one YAML document: %w", err)
 	}
-	if err := validateDeclaredCounts(document); err != nil {
-		return document, err
-	}
 	if err := validateSheets(document.Sheets); err != nil {
 		return document, err
 	}
@@ -301,7 +318,7 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 	if err := validatePushMatrix(document.PushStates, document.PushCaptures); err != nil {
 		return document, err
 	}
-	if err := validatePushData(document.Push); err != nil {
+	if err := validatePushData(document.Push, document.RequiredPushSessionNames); err != nil {
 		return document, err
 	}
 	return document, nil
@@ -351,11 +368,7 @@ func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture
 // validatePushData requires a complete candidate inventory: every redaction
 // state a session can carry, plus one session the branch-aware selection
 // withheld, so the captured screens show every row form the wizard renders.
-func validatePushData(fixture pushFixture) error {
-	if len(fixture.Sessions) != requiredPushSessionCount {
-		return fmt.Errorf("screenshot fixture push sessions: actual=%d required=%d",
-			len(fixture.Sessions), requiredPushSessionCount)
-	}
+func validatePushData(fixture pushFixture, requiredSessionNames []string) error {
 	ids := make(map[string]bool, len(fixture.Sessions))
 	states := make(map[pushRedactionState]bool, len(fixture.Sessions))
 	withheld := 0
@@ -370,6 +383,9 @@ func validatePushData(fixture pushFixture) error {
 		if session.Withheld {
 			withheld++
 		}
+	}
+	if err := requireNames("push session", requiredSessionNames, ids); err != nil {
+		return err
 	}
 	if len(states) != 3 {
 		return fmt.Errorf("screenshot fixture push sessions cover %d redaction states, want all 3", len(states))
@@ -401,35 +417,15 @@ func validatePushData(fixture pushFixture) error {
 	return nil
 }
 
-func validateDeclaredCounts(document captureDocument) error {
-	if document.ExpectedSelectionHarnessCount != requiredSelectionHarnessCount {
-		return fmt.Errorf("screenshot fixture selection harnesses: declared=%d required=%d",
-			document.ExpectedSelectionHarnessCount, requiredSelectionHarnessCount)
-	}
-	checks := []struct {
-		name     string
-		declared int
-		actual   int
-		required int
-	}{
-		{name: "sheets", declared: document.ExpectedSheetCount, actual: len(document.Sheets), required: requiredSheetCount},
-		{name: "guided sections", declared: document.ExpectedGuidedSectionCount, actual: len(document.GuidedSections), required: requiredGuidedSectionCount},
-		{name: "guided captures", declared: document.ExpectedGuidedCaptureCount, actual: len(document.GuidedCaptures), required: requiredGuidedCaptureCount},
-		{name: "selection states", declared: document.ExpectedSelectionStateCount, actual: len(document.SelectionStates), required: requiredSelectionStateCount},
-		{name: "selection captures", declared: document.ExpectedSelectionCaptureCount, actual: len(document.SelectionCaptures), required: requiredSelectionCaptureCount},
-		{name: "selection sessions", declared: document.ExpectedSelectionSessionCount, actual: len(document.Selection.Listings), required: requiredSelectionSessionCount},
-		{name: "selection ingested sessions", declared: document.ExpectedSelectionIngestedCount, actual: len(document.Selection.Ingested), required: requiredSelectionIngestedCount},
-		{name: "push states", declared: document.ExpectedPushStateCount, actual: len(document.PushStates), required: requiredPushStateCount},
-		{name: "push captures", declared: document.ExpectedPushCaptureCount, actual: len(document.PushCaptures), required: requiredPushCaptureCount},
-		{name: "push sessions", declared: document.ExpectedPushSessionCount, actual: len(document.Push.Sessions), required: requiredPushSessionCount},
-	}
-	for _, check := range checks {
-		if check.declared != check.required || check.actual != check.required {
-			return fmt.Errorf("screenshot fixture %s: declared=%d actual=%d required=%d",
-				check.name, check.declared, check.actual, check.required)
-		}
-	}
-	return nil
+// requireNames asserts every name in required is present in present, and
+// that required itself declares no blank or duplicate name. kind identifies
+// the axis (e.g. "selection session", "push session") in failure messages.
+// It is a deletion-protection manifest, not a row count: it never bounds how
+// many rows exist, only that the named ones remain. It delegates to the one
+// shared checker in internal/testutil so every fixture family in this repo
+// reports the same shape of error for the same mistake.
+func requireNames(kind string, required []string, present map[string]bool) error {
+	return testutil.RequireFixtureNames("screenshot fixture", kind, required, present)
 }
 
 func validateSheets(sheets []sheetFixture) error {
@@ -438,9 +434,9 @@ func validateSheets(sheets []sheetFixture) error {
 		theme         captureTheme
 		width, height int
 	}{
-		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
-		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 5700},
+		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
+		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
@@ -470,7 +466,7 @@ func validateGuidedMatrix(sections []guidedSectionFixture, captures []guidedCapt
 		sectionRows[section.Key] = section
 	}
 	for _, key := range []guidedSection{
-		guidedSectionAutoIngest, guidedSectionPrivacy, guidedSectionLicense,
+		guidedSectionAutoIngest, guidedSectionPublication, guidedSectionPrivacy, guidedSectionLicense,
 		guidedSectionDestination, guidedSectionRetention,
 	} {
 		if sectionRows[key].Key == "" {
@@ -506,6 +502,7 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	stateRows := make(map[selectionState]selectionStateFixture, len(states))
 	for _, state := range states {
 		if !state.Key.valid() || stateRows[state.Key].Key != "" || !nonEmptyStrings(state.WantContains) ||
+			(len(state.WantAbsent) > 0 && !nonEmptyStrings(state.WantAbsent)) ||
 			(state.Key == selectionStateDefault && state.Query != "") ||
 			(state.Key == selectionStateSearch && strings.TrimSpace(state.Query) == "") {
 			return fmt.Errorf("screenshot fixture has an invalid or duplicate selection state: %#v", state)
@@ -515,10 +512,14 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	for _, state := range []selectionState{
 		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
+		selectionStateOriginHidden,
 	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
 		}
+	}
+	if len(stateRows[selectionStateOriginHidden].WantAbsent) == 0 {
+		return fmt.Errorf("screenshot fixture selection state %q declares no wantAbsent marker, so a broken origin filter would pass unnoticed", selectionStateOriginHidden)
 	}
 
 	seenNames := make(map[string]bool, len(captures))
@@ -585,16 +586,83 @@ func validateSelectionData(selection selectionFixture) error {
 			}
 		}
 	}
-	if len(harnesses) != requiredSelectionHarnessCount {
-		return fmt.Errorf("screenshot fixture selection harnesses: actual=%d required=%d",
-			len(harnesses), requiredSelectionHarnessCount)
+	if err := requireNames("selection session", selection.RequiredSessionNames, sessionIDs); err != nil {
+		return err
+	}
+	if err := requireNames("selection harness", selection.RequiredHarnessNames, harnesses); err != nil {
+		return err
+	}
+	// The discovered set is the listed cohort PLUS the sessions that reach the
+	// picker only through the relation. Every child reference must resolve
+	// inside it, exactly as the production count guard requires.
+	discovered := make(map[string]bool, len(sessionIDs)+len(selection.SubagentDiscovery))
+	for sessionID := range sessionIDs {
+		discovered[sessionID] = true
+	}
+	relationNames := make(map[string]bool, len(selection.SubagentDiscovery))
+	for _, entry := range selection.SubagentDiscovery {
+		if strings.TrimSpace(entry.SessionID) == "" || relationNames[entry.SessionID] {
+			return fmt.Errorf("screenshot fixture has an empty or duplicate discovered subagent entry: %#v", entry)
+		}
+		relationNames[entry.SessionID] = true
+		discovered[entry.SessionID] = true
+	}
+	// Production records the relation for EVERY discovered session, so a
+	// fixture that covers only some of them is not the production shape.
+	for _, listing := range selection.Listings {
+		if !relationNames[listing.SessionID] {
+			return fmt.Errorf(
+				"screenshot fixture lists session %q but the discovered subagent relation omits it.\n"+
+					"what: the capture fixture is not in the shape production discovery produces.\n"+
+					"why: production records a relation entry for every session it discovers, listed or not.\n"+
+					"where: the selection fixture in testdata/captures.yaml.\n"+
+					"when: while validating the fixture, before any capture was rendered.\n"+
+					"means: no screenshot was written.\n"+
+					"fix: add a subagentDiscovery entry for %q, with no subagentIds when it spawned none.",
+				listing.SessionID, listing.SessionID)
+		}
 	}
 	for _, listing := range selection.Listings {
 		for _, childID := range listing.SubagentIDs {
-			if !sessionIDs[childID] {
+			if !discovered[childID] {
 				return fmt.Errorf("screenshot fixture session %q references unknown child %q", listing.SessionID, childID)
 			}
 		}
+	}
+	for _, entry := range selection.SubagentDiscovery {
+		for _, childID := range entry.SubagentIDs {
+			if !discovered[childID] {
+				return fmt.Errorf("screenshot fixture discovered session %q references unknown child %q", entry.SessionID, childID)
+			}
+		}
+		// A discovered session that is neither listed nor anybody's subagent
+		// would be a root production WOULD have listed, so the fixture would
+		// no longer describe a reachable state.
+		if sessionIDs[entry.SessionID] {
+			continue
+		}
+		claimed := false
+		for _, other := range selection.SubagentDiscovery {
+			for _, childID := range other.SubagentIDs {
+				if childID == entry.SessionID {
+					claimed = true
+				}
+			}
+		}
+		if !claimed {
+			return fmt.Errorf(
+				"screenshot fixture discovered session %q is neither listed nor named as anybody's subagent.\n"+
+					"what: the fixture describes a session production discovery could not have hidden.\n"+
+					"why: a discovered session with no parent is a ROOT, and roots are listed.\n"+
+					"where: subagentDiscovery in testdata/captures.yaml.\n"+
+					"when: while validating the fixture, before any capture was rendered.\n"+
+					"means: no screenshot was written.\n"+
+					"fix: list %q among the selection listings, or name it as a subagent of a discovered session.",
+				entry.SessionID, entry.SessionID)
+		}
+	}
+	if err := requireNames("selection discovered subagent", selection.RequiredSubagentDiscoveryNames, relationNames); err != nil {
+		return err
 	}
 	if len(selection.SourceTranscripts) == 0 {
 		return fmt.Errorf("screenshot fixture records no harness transcript; the not-yet-imported preview would show nothing")
@@ -632,6 +700,9 @@ func validateSelectionData(selection selectionFixture) error {
 			return fmt.Errorf("screenshot fixture ingested session %q is unknown or duplicated", sessionID)
 		}
 		seenIngested[sessionID] = true
+	}
+	if err := requireNames("selection ingested session", selection.RequiredIngestedNames, seenIngested); err != nil {
+		return err
 	}
 	return nil
 }

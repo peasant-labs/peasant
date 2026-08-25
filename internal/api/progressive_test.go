@@ -42,6 +42,21 @@ func (m *mockDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumma
 	return m.summaries, nil
 }
 
+func (m *mockDataProvider) SessionSummariesByID(ctx context.Context, ids []string) ([]SessionSummary, error) {
+	if m.returnsErr {
+		return nil, context.DeadlineExceeded
+	}
+	resolved := make([]SessionSummary, 0, len(ids))
+	for _, id := range ids {
+		for i := range m.summaries {
+			if m.summaries[i].ID == id {
+				resolved = append(resolved, m.summaries[i])
+			}
+		}
+	}
+	return resolved, nil
+}
+
 func (m *mockDataProvider) SessionByID(ctx context.Context, id string) (*ingest.Session, error) {
 	if m.returnsErr {
 		return nil, context.DeadlineExceeded

@@ -26,20 +26,29 @@ const fixture = loadFixture();
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 
 function installFetch(items: unknown = fixture.items, annotationsGate: Promise<void> = Promise.resolve(), redactionsGate: Promise<void> = Promise.resolve()) {
+  // Routed by EXACT path, never by containment. Containment dispatch is first
+  // match wins, so a sessions-adjacent route would be swallowed by the sessions
+  // arm and answered with the discovery list — and a test asserting the other
+  // route was reached would pass without it existing.
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes('/api/v1/sessions')) return response({ sessions: fixture.sessions });
-    if (url.includes('/api/v1/web/discovery')) return response({ items });
-    if (url.includes('/api/v1/annotations')) {
-      await annotationsGate;
-      return response({ annotations: [] });
+    const { pathname } = new URL(url, 'http://mounted.test');
+    switch (pathname) {
+      case '/api/v1/sessions':
+        return response({ sessions: fixture.sessions });
+      case '/api/v1/web/discovery':
+        return response({ items });
+      case '/api/v1/annotations':
+        await annotationsGate;
+        return response({ annotations: [] });
+      case '/api/v1/sync/redactions':
+        await redactionsGate;
+        return response({ categories: [] });
+      case '/api/v1/sync/push':
+        return response({ new: 4, updated: 0, skipped: 0, errors: 0, sessions: [] });
+      default:
+        throw new Error(`unexpected mounted Share fetch: ${url} ${init?.method ?? 'GET'}`);
     }
-    if (url.includes('/api/v1/sync/redactions')) {
-      await redactionsGate;
-      return response({ categories: [] });
-    }
-    if (url.includes('/api/v1/sync/push')) return response({ new: 4, updated: 0, skipped: 0, errors: 0, sessions: [] });
-    throw new Error(`unexpected mounted Share fetch: ${url} ${init?.method ?? 'GET'}`);
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;

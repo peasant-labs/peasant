@@ -144,6 +144,32 @@ func (p *Provider) SessionSummaries(_ context.Context) ([]api.SessionSummary, er
 	return summaries, nil
 }
 
+// SessionSummariesByID resolves links against the mock corpus with the same
+// contract the real provider honours: exactly the named sessions, in the order
+// named, with an unknown identifier omitted rather than reported as an error.
+func (p *Provider) SessionSummariesByID(ctx context.Context, ids []string) ([]api.SessionSummary, error) {
+	all, err := p.SessionSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]api.SessionSummary, len(all))
+	for _, summary := range all {
+		byID[summary.ID] = summary
+	}
+	resolved := make([]api.SessionSummary, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		if summary, ok := byID[id]; ok {
+			resolved = append(resolved, summary)
+		}
+	}
+	return resolved, nil
+}
+
 // firstUserTurnContent returns the content of the earliest user turn, used as
 // the session preview. Returns "" when there is no user turn.
 func firstUserTurnContent(turns []ingest.Turn) string {

@@ -1,0 +1,13 @@
+# Deletion guard for testdata/baseline/cases.yaml. Removing a case row (or a
+# fixture file it points at) fails the required-names guard, which fails the
+# test loudly instead of silently shrinking the baseline's coverage.
+requiredNames:
+  - structured_identity_root
+  - programmatic_launch_root
+  - command_wrapper_root
+  - caveat_prefixed_command_wrapper_root
+  - bootstrap_text_root
+  - no_evidence_root
+  - parent_root_with_subagent
+  - subagent_child_is_parent_linked
+  - unreadable_root_fails_open_to_unknown

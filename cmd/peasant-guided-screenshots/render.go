@@ -33,6 +33,18 @@ type terminalCapture struct {
 type renderedSheet struct {
 	fixture sheetFixture
 	ansi    string
+	rows    []sheetRow
+}
+
+// sheetRow names one composed contact-sheet row (one guided section, one
+// selection state/theme pair, or one push state/theme pair) and how many
+// lines of the sheet's ANSI content it occupies. validateContentFits uses
+// this to name the first row that would be cropped when content overflows
+// the fixture's declared canvas, rather than reporting only a raw pixel
+// count.
+type sheetRow struct {
+	label string
+	lines int
 }
 
 func renderSheets(document captureDocument) ([]renderedSheet, error) {
@@ -52,7 +64,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, guidedSections[capture.Section].WantContains); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, guidedSections[capture.Section].WantContains, nil); err != nil {
 			return nil, err
 		}
 		guidedCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -69,7 +81,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
 			return nil, err
 		}
 		selectionCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -85,7 +97,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, pushStates[capture.State].WantContains); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, pushStates[capture.State].WantContains, nil); err != nil {
 			return nil, err
 		}
 		pushCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -94,20 +106,21 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
+		var rows []sheetRow
 		switch sheet.Kind {
 		case sheetKindGuided:
-			content, err = composeGuidedSheet(sheet, document.GuidedSections, document.GuidedCaptures, guidedCaptures)
+			content, rows, err = composeGuidedSheet(sheet, document.GuidedSections, document.GuidedCaptures, guidedCaptures)
 		case sheetKindSelection:
-			content, err = composeSelectionSheet(sheet, document.SelectionStates, document.SelectionCaptures, selectionCaptures)
+			content, rows, err = composeSelectionSheet(sheet, document.SelectionStates, document.SelectionCaptures, selectionCaptures)
 		case sheetKindPush:
-			content, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
+			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}
 		if err != nil {
 			return nil, err
 		}
-		sheets = append(sheets, renderedSheet{fixture: sheet, ansi: content})
+		sheets = append(sheets, renderedSheet{fixture: sheet, ansi: content, rows: rows})
 	}
 	return sheets, nil
 }
@@ -158,6 +171,19 @@ func renderSelectionCapture(
 		kickstart.WithPathIdentityResolver(capturePathResolver{}),
 		kickstart.WithRepositoryIdentityResolver(newCaptureRepositoryResolver(selection.Repositories)),
 		kickstart.WithIngestedSessionIDs(selection.Ingested),
+		// The cohort above is roots-only, as production's is, so the parent
+		// row's child count can only come from the discovered relation. This
+		// is what makes the capture evidence that a person sees the badge,
+		// rather than evidence that the renderer can draw one.
+		kickstart.WithSubagentRelation(captureSubagentRelation(selection)),
+		// The cohort above is roots-only, as production's is, so the parent
+		// row's child count can only come from the discovered relation. This
+		// is what makes the capture evidence that a person sees the badge,
+		// rather than evidence that the renderer can draw one.
+		// The cohort above is roots-only, as production's is, so the parent
+		// row's child count can only come from the discovered relation. This
+		// is what makes the capture evidence that a person sees the badge,
+		// rather than evidence that the renderer can draw one.
 	)
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:  th,
@@ -469,7 +495,7 @@ func captureThemeValue(name captureTheme) theme.Theme {
 	return theme.New(theme.ModeDark)
 }
 
-func validateTerminalCapture(name, view string, width, height int, wantContains []string) error {
+func validateTerminalCapture(name, view string, width, height int, wantContains, wantAbsent []string) error {
 	lines := strings.Split(view, "\n")
 	if len(lines) != height {
 		return fmt.Errorf("render terminal capture %q: height=%d, want exactly %d rows", name, len(lines), height)
@@ -485,6 +511,11 @@ func validateTerminalCapture(name, view string, width, height int, wantContains 
 			return fmt.Errorf("render terminal capture %q: mounted view omits required marker %q", name, marker)
 		}
 	}
+	for _, marker := range wantAbsent {
+		if strings.Contains(plain, marker) {
+			return fmt.Errorf("render terminal capture %q: mounted view carries forbidden marker %q, which must stay hidden", name, marker)
+		}
+	}
 	return nil
 }
 
@@ -493,20 +524,26 @@ func composeGuidedSheet(
 	sections []guidedSectionFixture,
 	cases []guidedCaptureFixture,
 	captures map[string]terminalCapture,
-) (string, error) {
+) (string, []sheetRow, error) {
 	rows := make([]string, 0, len(sections))
+	meta := make([]sheetRow, 0, len(sections))
 	for _, section := range sections {
 		left, err := guidedCaptureFor(cases, captures, section.Key, sheet.Theme, 80, 24)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		right, err := guidedCaptureFor(cases, captures, section.Key, sheet.Theme, 120, 40)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		rows = append(rows, joinCapturePair(left, right))
+		row := joinCapturePair(left, right)
+		rows = append(rows, row)
+		meta = append(meta, sheetRow{
+			label: fmt.Sprintf("guided section %q (%s)", section.Key, sheet.Theme),
+			lines: strings.Count(row, "\n") + 1,
+		})
 	}
-	return renderContactSheet(sheet.Title, rows), nil
+	return renderContactSheet(sheet.Title, rows), meta, nil
 }
 
 func composeSelectionSheet(
@@ -514,8 +551,9 @@ func composeSelectionSheet(
 	states []selectionStateFixture,
 	cases []selectionCaptureFixture,
 	captures map[string]terminalCapture,
-) (string, error) {
+) (string, []sheetRow, error) {
 	rows := make([]string, 0, len(states))
+	meta := make([]sheetRow, 0, len(states))
 	for _, state := range states {
 		themes := []captureTheme{captureThemeDark}
 		if state.Key.requiresBothThemes() {
@@ -524,16 +562,21 @@ func composeSelectionSheet(
 		for _, captureTheme := range themes {
 			left, err := selectionCaptureFor(cases, captures, state.Key, captureTheme, 80, 24)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			right, err := selectionCaptureFor(cases, captures, state.Key, captureTheme, 120, 40)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
-			rows = append(rows, joinCapturePair(left, right))
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("selection state %q (%s)", state.Key, captureTheme),
+				lines: strings.Count(row, "\n") + 1,
+			})
 		}
 	}
-	return renderContactSheet(sheet.Title, rows), nil
+	return renderContactSheet(sheet.Title, rows), meta, nil
 }
 
 func composePushSheet(
@@ -541,22 +584,28 @@ func composePushSheet(
 	states []pushStateFixture,
 	cases []pushCaptureFixture,
 	captures map[string]terminalCapture,
-) (string, error) {
+) (string, []sheetRow, error) {
 	rows := make([]string, 0, len(states)*2)
+	meta := make([]sheetRow, 0, len(states)*2)
 	for _, state := range states {
 		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
 			left, err := pushCaptureFor(cases, captures, state.Key, name, 80, 24)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			right, err := pushCaptureFor(cases, captures, state.Key, name, 120, 40)
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
-			rows = append(rows, joinCapturePair(left, right))
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("push state %q (%s)", state.Key, name),
+				lines: strings.Count(row, "\n") + 1,
+			})
 		}
 	}
-	return renderContactSheet(sheet.Title, rows), nil
+	return renderContactSheet(sheet.Title, rows), meta, nil
 }
 
 func pushCaptureFor(
@@ -653,4 +702,14 @@ func collectMessages(command tea.Cmd) []tea.Msg {
 		return nil
 	}
 	return []tea.Msg{message}
+}
+
+// captureSubagentRelation folds the fixture's discovered subagent entries into
+// the relation the picker consumes. Nothing here becomes a listed row.
+func captureSubagentRelation(selection selectionFixture) kickstart.SubagentRelation {
+	relation := make(kickstart.SubagentRelation, len(selection.SubagentDiscovery))
+	for _, entry := range selection.SubagentDiscovery {
+		relation[entry.SessionID] = entry.SubagentIDs
+	}
+	return relation
 }

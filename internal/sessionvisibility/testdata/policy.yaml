@@ -189,3 +189,80 @@ cases:
         sessions: [session-explicit-forms]
     candidate: {harness: claude-code, session_id: session-explicit-forms, project_name: "/home/developer/work/other-project", git_branch: main}
     result: visible
+  # Origin scope. It is a SECOND, INDEPENDENT axis: `result` is what selection
+  # scope alone decides, `discovery_result` is what the two scopes together
+  # decide. An arm whose two values differ is the evidence that origin scope
+  # acts in discovery and only there.
+  #
+  # Every withholding arm below is paired with a control that differs ONLY in
+  # origin. Without the pair an arm proves nothing, because the row could have
+  # been absent for the other scope's reason.
+  - name: origin_scope_alone_hides_an_agent_root
+    mode: all
+    candidate: {harness: claude-code, session_id: session-agent-root, project_name: alpha, git_branch: main, origin: agent}
+    result: visible
+    discovery_result: hidden
+  - name: origin_scope_alone_admits_a_user_root
+    mode: all
+    candidate: {harness: claude-code, session_id: session-agent-root, project_name: alpha, git_branch: main, origin: user}
+    result: visible
+    discovery_result: visible
+  - name: origin_scope_alone_admits_an_unknown_root
+    mode: all
+    candidate: {harness: claude-code, session_id: session-agent-root, project_name: alpha, git_branch: main, origin: unknown}
+    result: visible
+    discovery_result: visible
+  # A subagent transcript is stored as its own sessions row and reaches this
+  # path with no parent filter in front of it. It leaves the list because its
+  # origin is agent, and the control below is what makes that claim falsifiable:
+  # the same parented row with a user origin must stay, so a parent filter added
+  # here in place of origin scope turns this pair red.
+  - name: origin_scope_alone_hides_an_agent_subagent_row
+    mode: all
+    candidate: {harness: claude-code, session_id: session-subagent-row, project_name: alpha, git_branch: main, origin: agent, parent_session_id: session-agent-root}
+    result: visible
+    discovery_result: hidden
+  - name: a_subagent_row_a_person_drove_stays_in_discovery
+    mode: all
+    candidate: {harness: claude-code, session_id: session-subagent-row, project_name: alpha, git_branch: main, origin: user, parent_session_id: session-agent-root}
+    result: visible
+    discovery_result: visible
+  # Selection scope alone: a person's own session in an unselected project is
+  # still withheld, so origin scope cannot admit what selection scope refused.
+  - name: selection_scope_alone_hides_a_user_origin_row
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha}
+    candidate: {harness: claude-code, session_id: session-unselected-user, project_name: beta, git_branch: main, origin: user}
+    result: hidden
+    discovery_result: hidden
+  # Both scopes together, on a project selection that admits the row: the
+  # decision then rests entirely on origin, and the control proves it.
+  - name: both_scopes_together_hide_an_agent_row_in_a_selected_project
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha}
+    candidate: {harness: claude-code, session_id: session-selected-agent, project_name: alpha, git_branch: main, origin: agent}
+    result: visible
+    discovery_result: hidden
+  - name: both_scopes_together_admit_a_user_row_in_a_selected_project
+    mode: selected
+    harnesses:
+      claude-code:
+        projects:
+          - {name: alpha}
+    candidate: {harness: claude-code, session_id: session-selected-agent, project_name: alpha, git_branch: main, origin: user}
+    result: visible
+    discovery_result: visible
+  # An origin outside the stored menu is refused rather than guessed at: both
+  # substitutions are wrong, so the list is withheld.
+  - name: an_unusable_origin_withholds_the_discovery_list
+    mode: all
+    candidate: {harness: claude-code, session_id: session-corrupt-origin, project_name: alpha, git_branch: main, origin: teammate}
+    result: visible
+    discovery_result: error
+    discovery_error_contains: unusable origin

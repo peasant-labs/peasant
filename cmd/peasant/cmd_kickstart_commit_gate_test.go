@@ -645,7 +645,7 @@ func TestMountedKickstartCommitGateFirstAndLaterRuns(t *testing.T) {
 			deps.flowIngest = flowIngest
 			deps.runModel = driveFlow
 			cmd := mountTestCmd(t, t.TempDir())
-			if err := runKickstartFlow(cmd, deps, configPath, ftue.ProviderInventory{}, listings); err != nil {
+			if err := runKickstartFlow(cmd, deps, configPath, ftue.ProviderInventory{}, listings, nil); err != nil {
 				t.Fatalf("run %s mounted kickstart flow: %v", testCase.RunState, err)
 			}
 			program := mounted.Program()

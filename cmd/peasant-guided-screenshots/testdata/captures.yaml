@@ -1,31 +1,24 @@
-expectedSheetCount: 4
-expectedGuidedSectionCount: 6
-expectedGuidedCaptureCount: 24
-expectedSelectionStateCount: 6
-expectedSelectionCaptureCount: 20
-expectedSelectionSessionCount: 6
-expectedSelectionHarnessCount: 2
-expectedSelectionIngestedCount: 1
-expectedPushStateCount: 5
-expectedPushCaptureCount: 20
-expectedPushSessionCount: 3
+requiredPushSessionNames:
+  - push-current-0001
+  - push-stale-0002
+  - push-raw-0003
 
 sheets:
   - name: guided-dark
     kind: guided
     title: "final guided sections: dark theme"
     theme: dark
-    viewport: {width: 1800, height: 3300}
+    viewport: {width: 1800, height: 3420}
   - name: guided-light
     kind: guided
     title: "final guided sections: light theme"
     theme: light
-    viewport: {width: 1800, height: 3300}
+    viewport: {width: 1800, height: 3420}
   - name: selection
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 5700}
+    viewport: {width: 1800, height: 6750}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
@@ -59,12 +52,32 @@ selectionStates:
   - key: branch-preview
     query: ""
     wantContains: ["project: github.com:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+  # The row title is a PREFIX marker: with the child-session count moved to its
+  # own line, the parent row carries its tracked chip again, so a narrow split
+  # pane clips the title where it previously had room for all of it.
   - key: session-preview
     query: ""
-    wantContains: ["parent ses", "harness: claude code", scrubbed-body]
+    wantContains: ["parent se", "harness: claude code", scrubbed-body]
   - key: harness-source-preview
     query: ""
     wantContains: ["harness: claude code", scrubbed-source-body, read in place]
+  - key: origin-hidden
+    query: ""
+    # Every marker here is a PREFIX, because the narrower capture splits its
+    # width between the tree and the preview pane and clips both the row title
+    # and the count line. The kit's own rendered-screen goldens pin the full
+    # text and the exact indentation at each width; these markers pin that the
+    # right things reach the mounted screen.
+    #
+    # The child-session count is asserted at EVERY width. It renders on its own
+    # line beneath its parent rather than competing with the title for the row,
+    # so it no longer disappears when the terminal is narrow. It is also the
+    # only marker here that the fixture cannot produce by listing: the parent's
+    # listing names subagent ids while the cohort holds no child at all, exactly
+    # as production discovery hands it over, so this count can only come from
+    # resolving the discovered subagent relation.
+    wantContains: ["user driv", "parent se", "+ 2 child"]
+    wantAbsent: ["agent driven session"]
 
 selection:
   repositories:
@@ -79,21 +92,6 @@ selection:
       workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-parent
       subagentIds: [cc-child]
-    - harness: claude-code
-      projectName: acme/tool
-      gitRemote: "git@github.com:acme/tool.git"
-      branch: main
-      title: child subagent
-      workingDir: /fixtures/worktrees/pasture-a
-      sessionId: cc-child
-      subagentIds: [cc-grandchild]
-    - harness: claude-code
-      projectName: acme/tool
-      gitRemote: "git@github.com:acme/tool.git"
-      branch: main
-      title: grandchild subagent
-      workingDir: /fixtures/worktrees/pasture-a
-      sessionId: cc-grandchild
     - harness: claude-code
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
@@ -117,6 +115,38 @@ selection:
       title: cursor session
       workingDir: /fixtures/worktrees/pasture-b
       sessionId: cur-1
+    - harness: claude-code
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: agent driven session
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: origin-agent-hidden
+      origin: agent
+    - harness: claude-code
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: user driven session
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: origin-user-visible
+      origin: user
+  # The parent-to-subagent relation over the whole DISCOVERED set, which is
+  # what production discovery hands the picker beside the ROOTS-ONLY listing
+  # above. Naming a session here does NOT put it in the picker: cc-child and
+  # cc-grandchild are the subagent sessions production finds and never shows,
+  # and they exist only here. This is the shape the badge has to survive - a
+  # cohort that holds no child at all - so the capture proves what a person
+  # will actually see, not merely that the renderer can draw a count.
+  subagentDiscovery:
+    - {sessionId: cc-parent, subagentIds: [cc-child]}
+    - {sessionId: cc-child, subagentIds: [cc-grandchild]}
+    - {sessionId: cc-grandchild}
+    - {sessionId: cc-imported}
+    - {sessionId: 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47}
+    - {sessionId: cur-1}
+    - {sessionId: origin-agent-hidden}
+    - {sessionId: origin-user-visible}
   transcripts:
     cc-parent:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
@@ -126,6 +156,24 @@ selection:
       - '{"type":"user","uuid":"h1","message":{"role":"user","content":"scrubbed-source-body: peasant read in place from the harness file"}}'
       - '{"type":"assistant","uuid":"h2","parentUuid":"h1","message":{"role":"assistant","content":[{"type":"text","text":"peasant copies nothing and imports nothing to show this preview"}]}}'
   ingested: [cc-imported]
+  requiredSessionNames:
+    - cc-parent
+    - cc-imported
+    - 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
+    - cur-1
+    - origin-agent-hidden
+    - origin-user-visible
+  requiredHarnessNames:
+    - claude-code
+    - cursor
+  requiredIngestedNames:
+    - cc-imported
+  # Deletion protection for the subagent sessions that exist ONLY in the
+  # relation. They are what makes the capture production-shaped: delete either
+  # and the fixture is rejected rather than quietly rendering a smaller count.
+  requiredSubagentDiscoveryNames:
+    - cc-child
+    - cc-grandchild
 
 guidedCaptures:
   - {name: auto-ingest-dark-80x24, section: auto-ingest, theme: dark, width: 80, height: 24}
@@ -174,6 +222,10 @@ selectionCaptures:
   - {name: selection-harness-source-preview-dark-120x40, state: harness-source-preview, theme: dark, width: 120, height: 40}
   - {name: selection-harness-source-preview-light-80x24, state: harness-source-preview, theme: light, width: 80, height: 24}
   - {name: selection-harness-source-preview-light-120x40, state: harness-source-preview, theme: light, width: 120, height: 40}
+  - {name: selection-origin-hidden-dark-80x24, state: origin-hidden, theme: dark, width: 80, height: 24}
+  - {name: selection-origin-hidden-dark-120x40, state: origin-hidden, theme: dark, width: 120, height: 40}
+  - {name: selection-origin-hidden-light-80x24, state: origin-hidden, theme: light, width: 80, height: 24}
+  - {name: selection-origin-hidden-light-120x40, state: origin-hidden, theme: light, width: 120, height: 40}
 
 pushStates:
   - key: start
