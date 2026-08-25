@@ -55,10 +55,10 @@ selectionStates:
     wantContains: ["search: cursor", harness, "cursor se"]
   - key: project-preview
     query: ""
-    wantContains: ["project: github:acme/tool", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+    wantContains: ["project: github.com:acme/tool", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
   - key: branch-preview
     query: ""
-    wantContains: ["project: github:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+    wantContains: ["project: github.com:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
   - key: session-preview
     query: ""
     wantContains: ["parent ses", "harness: claude code", scrubbed-body]

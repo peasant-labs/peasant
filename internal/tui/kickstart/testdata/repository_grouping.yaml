@@ -168,7 +168,7 @@ cases:
     expectedUnchecked: []
     facet:
       harness: claude-code
-      project: "github:acme/tool"
+      project: "github.com:acme/tool"
       branch: main
       wantSessions: [claude main session]
       wantMissingSessions: [codex main session]

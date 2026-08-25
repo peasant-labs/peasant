@@ -91,7 +91,7 @@ cases:
     expected: {error_kind: missing, error_contains: does not identify a stored project}
 
   # Usability requirement: "We also should be using the Git repo remote
-  # to display them, not the path. e.g. github:example-org/garden-app, ...".
+  # to display them, not the path. e.g. github.com:example-org/garden-app, ...".
   # Resolving by the canonical hash must display the git-remote-derived
   # label, not the recorded canonical_cwd path, whenever a remote is known.
   - name: remote_derived_display_name_github
@@ -103,7 +103,7 @@ cases:
       selection: {mode: all}
       projects:
         - {hash: 2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /home/developer/work/garden-app, remote: "https://github.com/example-org/garden-app.git", session_id: 99999999-9999-9999-9999-999999999999}
-    expected: {project: "github:example-org/garden-app", hash: 2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+    expected: {project: "github.com:example-org/garden-app", hash: 2223456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
 
   - name: remote_derived_display_name_gitlab
     classification: must-pass
@@ -114,7 +114,7 @@ cases:
       selection: {mode: all}
       projects:
         - {hash: 3323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, cwd: /home/developer/work/sample-project, remote: "git@gitlab.com:example-team/sample-project.git", session_id: aaaaaaaa-1111-1111-1111-111111111111}
-    expected: {project: "gitlab:example-team/sample-project", hash: 3323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+    expected: {project: "gitlab.com:example-team/sample-project", hash: 3323456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
 
   # The exact regression the user hit: a project with NO configured remote
   # (e.g. a bare Codex session directory) must fall back to the path, never

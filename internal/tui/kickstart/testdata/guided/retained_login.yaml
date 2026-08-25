@@ -74,7 +74,7 @@ cases:
       - 'share bridge scan'
       # The village root has no tracked or imported session, so it opens
       # collapsed to its project line and its session folds away.
-      - 'github:peasant-labs/village'
+      - 'github.com:peasant-labs/village'
     wantViewMissing:
       - 'scanning projects'
       - 'governance audit trigger'
@@ -105,7 +105,7 @@ cases:
       - 'share bridge scan'
       # The village root has no tracked or imported session, so it opens
       # collapsed to its project line and its session folds away.
-      - 'github:peasant-labs/village'
+      - 'github.com:peasant-labs/village'
     wantViewMissing:
       - 'scanning projects'
       - 'governance audit trigger'
@@ -136,7 +136,7 @@ cases:
       - 'share bridge scan'
       # The village root has no tracked or imported session, so it opens
       # collapsed to its project line and its session folds away.
-      - 'github:peasant-labs/village'
+      - 'github.com:peasant-labs/village'
     wantViewMissing:
       - 'scanning projects'
       - 'governance audit trigger'

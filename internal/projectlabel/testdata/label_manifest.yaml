@@ -1,0 +1,15 @@
+requiredCaseNames:
+  - github_bare_normalized_form
+  - gitlab_bare_normalized_form
+  - peasant_labs_org_repo_github
+  - unknown_host_keeps_full_hostname_prefix
+  - self_hosted_enterprise_host_no_allowlist_cross_repo_agreement
+  - enterprise_host_with_port_is_dropped
+  - https_url_with_git_suffix_is_normalized
+  - ssh_scp_form_is_normalized
+  - empty_remote_falls_back
+  - host_only_remote_with_no_path_falls_back
+  - whitespace_only_remote_falls_back
+  - https_url_with_embedded_credentials_strips_userinfo
+  - https_url_with_plain_userpass_credentials_strips_userinfo
+  - https_url_with_plain_username_only_no_password_strips_userinfo

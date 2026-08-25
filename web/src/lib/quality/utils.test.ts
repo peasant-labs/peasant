@@ -45,12 +45,14 @@ describe('displayProject', () => {
   // contains a "/" between owner and repo, so it must pass through unchanged
   // instead of being truncated down to just the repo name by the path logic.
   it('leaves a github remote-derived label unchanged', () => {
-    expect(displayProject('github:example-org/garden-app')).toBe('github:example-org/garden-app');
+    expect(displayProject('github.com:example-org/garden-app')).toBe(
+      'github.com:example-org/garden-app',
+    );
   });
 
   it('leaves a gitlab remote-derived label unchanged', () => {
-    expect(displayProject('gitlab:example-team/sample-project')).toBe(
-      'gitlab:example-team/sample-project',
+    expect(displayProject('gitlab.com:example-team/sample-project')).toBe(
+      'gitlab.com:example-team/sample-project',
     );
   });
 

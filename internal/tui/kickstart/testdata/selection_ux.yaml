@@ -27,7 +27,7 @@ cases:
   - name: first-run-folds-every-sessionless-root
     ingested: []
     keys: []
-    wantContains: ["github:acme/alpha", "github:acme/beta"]
+    wantContains: ["github.com:acme/alpha", "github.com:acme/beta"]
     wantMissing: [alpha session, beta session]
     footerContains: ["tab: next step", "a: toggle all", "?: help"]
     footerMissing: ["space: select", "down", "select all"]
@@ -37,7 +37,7 @@ cases:
   - name: imported-root-opens-expanded-others-fold
     ingested: [a-1]
     keys: []
-    wantContains: [alpha session, "github:acme/beta"]
+    wantContains: [alpha session, "github.com:acme/beta"]
     wantMissing: [beta session]
 
   # With imported sessions in both roots the footer still shows only the

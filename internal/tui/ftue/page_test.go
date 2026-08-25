@@ -2197,10 +2197,11 @@ func TestTreeSelectPage_GitRemoteGrouping(t *testing.T) {
 	}
 
 	// Sessions with same git remote should be grouped under the display name
-	// (internal/projectlabel.Label's "github:owner/repo" form — the same
-	// short-host-prefix format the Home/Map picker and CLI use).
-	if prov.remotes[0].name != "github:user/my-repo" {
-		t.Errorf("remote[0] name = %q, want %q", prov.remotes[0].name, "github:user/my-repo")
+	// (internal/projectlabel.Label's "host:owner/repo" form, delegating to
+	// the shared cross-repo schema.RemoteLabel rule — the same full-host
+	// format the Home/Map picker and CLI use).
+	if prov.remotes[0].name != "github.com:user/my-repo" {
+		t.Errorf("remote[0] name = %q, want %q", prov.remotes[0].name, "github.com:user/my-repo")
 	}
 	// Each remote has a (default) worktree; check session count there.
 	if len(prov.remotes[0].worktrees) != 1 {
@@ -2210,8 +2211,8 @@ func TestTreeSelectPage_GitRemoteGrouping(t *testing.T) {
 		t.Errorf("remote[0] worktree[0] sessions = %d, want 2", len(prov.remotes[0].worktrees[0].sessions))
 	}
 
-	if prov.remotes[1].name != "github:user/other" {
-		t.Errorf("remote[1] name = %q, want %q", prov.remotes[1].name, "github:user/other")
+	if prov.remotes[1].name != "github.com:user/other" {
+		t.Errorf("remote[1] name = %q, want %q", prov.remotes[1].name, "github.com:user/other")
 	}
 
 	// Session without git remote falls back to ProjectName.
@@ -2628,11 +2629,10 @@ func TestSessionMatchesFilter_GitRemote(t *testing.T) {
 	}
 
 	// Should match on the derived remote label's content. The label is now
-	// internal/projectlabel.Label's "github:owner/repo" short-host-prefix
-	// form (the same one the Home/Map picker and CLI use), so a filter
-	// query must match on "github" rather than the full "github.com"
-	// hostname — a deliberate consequence of unifying the label format
-	// across surfaces, preserving the same project-label fallback everywhere.
+	// internal/projectlabel.Label's "host:owner/repo" full-host form (the
+	// same one the Home/Map picker and CLI use, delegating to the shared
+	// cross-repo schema.RemoteLabel rule), so a filter query on "github"
+	// still matches as a substring of the full "github.com" hostname.
 	if !sessionMatchesFilter(s, "github") {
 		t.Error("expected match on remote-label substring 'github'")
 	}

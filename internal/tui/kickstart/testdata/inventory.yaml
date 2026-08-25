@@ -23,7 +23,7 @@ name: inventory
 expectedNodeCount: 11
 roots:
   - id: git@github.com:acme/tool.git
-    label: "github:acme/tool"
+    label: "github.com:acme/tool"
     meta:
       remote: "git@github.com:acme/tool.git"
       projectName: acme/tool
@@ -58,7 +58,7 @@ roots:
             meta:
               harness: claude-code
   - id: https://github.com/acme/tool.git
-    label: "github:acme/tool"
+    label: "github.com:acme/tool"
     meta:
       remote: "https://github.com/acme/tool.git"
       projectName: acme/tool

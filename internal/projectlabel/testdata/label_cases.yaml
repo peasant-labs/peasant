@@ -4,42 +4,66 @@ cases:
     provenance: {source: requirement, ref: github-remote-label}
     mutation: {description: change the stored owner/repo path so the expected label no longer matches}
     input: {remote: "github.com/example-org/garden-app", fallback: "/home/developer/work/garden-app"}
-    expected: {label: "github:example-org/garden-app"}
+    expected: {label: "github.com:example-org/garden-app"}
 
   - name: gitlab_bare_normalized_form
     classification: must-pass
     provenance: {source: requirement, ref: gitlab-remote-label}
     mutation: {description: change gitlab.com to an unrecognized host so the short prefix would not apply}
     input: {remote: "gitlab.com/example-team/sample-project", fallback: "/home/developer/work/sample-project"}
-    expected: {label: "gitlab:example-team/sample-project"}
+    expected: {label: "gitlab.com:example-team/sample-project"}
 
   - name: peasant_labs_org_repo_github
     classification: must-pass
     provenance: {source: requirement, ref: public-product-remote-example}
     mutation: {description: drop the org segment so the owner/repo path collapses to one segment}
     input: {remote: "github.com/peasant-labs/peasant", fallback: "peasant"}
-    expected: {label: "github:peasant-labs/peasant"}
+    expected: {label: "github.com:peasant-labs/peasant"}
 
   - name: unknown_host_keeps_full_hostname_prefix
     classification: must-pass
     provenance: {source: boundary, ref: unrecognized-remote-host-not-hardcoded-list}
-    mutation: {description: change the host to github.com so it would map to the short prefix instead}
+    mutation: {description: restore a short-prefix table entry for git.example.com so this case's full hostname would collapse to a short prefix instead}
     input: {remote: "git.example.com/acme/widgets", fallback: "widgets"}
     expected: {label: "git.example.com:acme/widgets"}
+
+  # AC7 (village-36 project identity spec): the cross-repo agreement case.
+  # This exact remote/label pair is also asserted in schema's own
+  # testdata/projectlabel/remote-label.yaml and in village's project-page
+  # rendering — the shared corpus proves peasant and village render an
+  # identical label from ONE function, not two independently-maintained
+  # rules that happen to agree today.
+  - name: self_hosted_enterprise_host_no_allowlist_cross_repo_agreement
+    classification: must-pass
+    provenance: {source: requirement, ref: village-36-ac7-cross-repo-label-agreement}
+    mutation: {description: restore a host-shortening table entry so a self-hosted enterprise host would render shortened instead of full}
+    input: {remote: "git@gitlab.example.corp:team/repo.git", fallback: "repo"}
+    expected: {label: "gitlab.example.corp:team/repo"}
+
+  # By design (village-36): a port carried by the remote is dropped from the
+  # rendered label, so two forges reachable at the same host on different
+  # ports are indistinguishable in the label. This is a deliberate collision,
+  # not an oversight.
+  - name: enterprise_host_with_port_is_dropped
+    classification: must-pass
+    provenance: {source: requirement, ref: village-36-port-dropped-by-design}
+    mutation: {description: stop stripping the port so it would leak into the rendered label}
+    input: {remote: "https://gitlab.example.corp:2222/team/repo", fallback: "repo"}
+    expected: {label: "gitlab.example.corp:team/repo"}
 
   - name: https_url_with_git_suffix_is_normalized
     classification: must-pass
     provenance: {source: boundary, ref: defensive-unnormalized-https-remote}
     mutation: {description: remove the .git suffix so the trim-suffix branch is not exercised}
     input: {remote: "https://github.com/example-org/garden-app.git", fallback: "garden-app"}
-    expected: {label: "github:example-org/garden-app"}
+    expected: {label: "github.com:example-org/garden-app"}
 
   - name: ssh_scp_form_is_normalized
     classification: must-pass
     provenance: {source: boundary, ref: defensive-unnormalized-ssh-remote}
     mutation: {description: remove the @ sign so the SSH branch detection no longer fires}
     input: {remote: "git@github.com:example-org/garden-app.git", fallback: "garden-app"}
-    expected: {label: "github:example-org/garden-app"}
+    expected: {label: "github.com:example-org/garden-app"}
 
   - name: empty_remote_falls_back
     classification: must-pass
@@ -72,18 +96,18 @@ cases:
     provenance: {source: bug, ref: credential-leak-in-display-label}
     mutation: {description: remove the userinfo so the credential-stripping branch is not exercised}
     input: {remote: "https://user:glpat-TOKEN@gitlab.com/org/repo", fallback: "repo"}
-    expected: {label: "gitlab:org/repo"}
+    expected: {label: "gitlab.com:org/repo"}
 
   - name: https_url_with_plain_userpass_credentials_strips_userinfo
     classification: must-pass
     provenance: {source: boundary, ref: credential-leak-userpass-form}
     mutation: {description: remove the password segment so the userinfo takes a different shape}
     input: {remote: "https://user:pass@github.com/example-org/garden-app.git", fallback: "garden-app"}
-    expected: {label: "github:example-org/garden-app"}
+    expected: {label: "github.com:example-org/garden-app"}
 
   - name: https_url_with_plain_username_only_no_password_strips_userinfo
     classification: must-pass
     provenance: {source: boundary, ref: credential-leak-username-only-form}
     mutation: {description: remove the "user@" prefix so the userinfo-stripping branch is not exercised}
     input: {remote: "https://user@gitlab.com/org/repo", fallback: "repo"}
-    expected: {label: "gitlab:org/repo"}
+    expected: {label: "gitlab.com:org/repo"}
