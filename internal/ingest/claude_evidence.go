@@ -62,6 +62,12 @@ type ClaudeTranscriptEvidence struct {
 	// the evidence this record was read for. Every mined record carries a menu
 	// value: a root from its content, a subagent because it is a child.
 	Origin sessionorigin.Origin
+	// Signal names which rule step decided Origin. It is not persisted to the
+	// evidence cache — only carried on the in-memory record produced by a fresh
+	// mine — because nothing in production reads it back from storage; its sole
+	// consumer is explanatory reporting (the origin audit harness and the
+	// fixtures), which always mines fresh rather than reading a cached row.
+	Signal sessionorigin.Signal
 }
 
 // Fresh reports whether this record still describes the file that info names.
