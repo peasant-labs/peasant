@@ -81,7 +81,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
+		wantContains, wantAbsent := selectionStateExpectations(state, capture.Width)
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, wantContains, wantAbsent); err != nil {
 			return nil, err
 		}
 		selectionCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -171,6 +172,15 @@ func renderSelectionCapture(
 		kickstart.WithPathIdentityResolver(capturePathResolver{}),
 		kickstart.WithRepositoryIdentityResolver(newCaptureRepositoryResolver(selection.Repositories)),
 		kickstart.WithIngestedSessionIDs(selection.Ingested),
+		// The cohort above is roots-only, as production's is, so the parent
+		// row's child count can only come from the discovered relation. This
+		// is what makes the capture evidence that a person sees the badge,
+		// rather than evidence that the renderer can draw one.
+		kickstart.WithSubagentRelation(captureSubagentRelation(selection)),
+		// The cohort above is roots-only, as production's is, so the parent
+		// row's child count can only come from the discovered relation. This
+		// is what makes the capture evidence that a person sees the badge,
+		// rather than evidence that the renderer can draw one.
 	)
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:  th,
@@ -689,4 +699,14 @@ func collectMessages(command tea.Cmd) []tea.Msg {
 		return nil
 	}
 	return []tea.Msg{message}
+}
+
+// captureSubagentRelation folds the fixture's discovered subagent entries into
+// the relation the picker consumes. Nothing here becomes a listed row.
+func captureSubagentRelation(selection selectionFixture) kickstart.SubagentRelation {
+	relation := make(kickstart.SubagentRelation, len(selection.SubagentDiscovery))
+	for _, entry := range selection.SubagentDiscovery {
+		relation[entry.SessionID] = entry.SubagentIDs
+	}
+	return relation
 }
