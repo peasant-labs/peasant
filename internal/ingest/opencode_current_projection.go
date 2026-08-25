@@ -427,10 +427,28 @@ func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSou
 // name how much it left out. The full-session read and the preview prefix read
 // share this one path.
 func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, error) {
+	projection, unknownControlTypes, truncation, _, err := readOpenCodeCurrentProjectionSlice(ctx, source, sessionID, pageSize, budget, size, nil)
+	return projection, unknownControlTypes, truncation, err
+}
+
+// readOpenCodeCurrentProjectionSlice is the resumable form of the core read: it
+// starts after the given cursor and returns the cursor of the last row it took,
+// so a later call continues exactly where this one stopped.
+//
+// A current message row IS one message, parts nested inside it, and the budget
+// is checked BEFORE a row is taken. A slice boundary therefore always lands on
+// a message boundary, so no message is ever split across two slices and
+// appending one slice's turns to the previous slice's can never duplicate or
+// halve a turn.
+func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize, after *OpenCodeCurrentCursor) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, openCodeCurrentSliceStop, error) {
 	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
 	unknownControlTypes := make(map[string]int)
-	var cursor *OpenCodeCurrentCursor
+	cursor := after
+	// stop is the position of the last row this read took, which is what a
+	// continuation resumes from. It is distinct from cursor, which is the page
+	// cursor and runs ahead of it whenever a page is only partly consumed.
+	stop := after
 	// readBytes is what the read pulled out of the source and is what the budget
 	// governs. includedRows and includedBytes are what reached the projection: a
 	// control row is read and paid for but never shown.
@@ -440,7 +458,7 @@ rowLoop:
 	for {
 		page, err := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
 		if err != nil {
-			return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, err
+			return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
 		}
 		for _, row := range page.Messages {
 			// Every read row, control or substantive, counts toward the budget: the
@@ -453,8 +471,10 @@ rowLoop:
 				break rowLoop
 			}
 			readBytes += int64(len(row.Data))
+			taken := NewOpenCodeCurrentCursor(row.Seq)
+			stop = &taken
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
-				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, currentNormalizationError(row, "registering stable identities", err)
+				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "registering stable identities", err)
 			}
 			message, err := normalizeOpenCodeCurrentRow(row, &registry)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
@@ -464,7 +484,7 @@ rowLoop:
 				continue
 			}
 			if err != nil {
-				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
 			}
 			projection.Messages = append(projection.Messages, message)
 			includedRows++
@@ -479,7 +499,18 @@ rowLoop:
 	if truncated {
 		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitMessages, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
 	}
-	return projection, unknownControlTypes, truncation, nil
+	return projection, unknownControlTypes, truncation, openCodeCurrentSliceStop{cursor: stop, exhausted: !truncated, includedBytes: includedBytes, includedRows: includedRows}, nil
+}
+
+// openCodeCurrentSliceStop is where a resumable current read ended. exhausted
+// reports that the read walked off the end of the session, and the included
+// counters are what THIS slice put into the projection - reported apart from
+// the truncation record, which the last slice of a session never carries.
+type openCodeCurrentSliceStop struct {
+	cursor        *OpenCodeCurrentCursor
+	exhausted     bool
+	includedBytes int64
+	includedRows  int64
 }
 
 func currentNormalizationError(row OpenCodeCurrentMessageRow, operation string, cause error) error {

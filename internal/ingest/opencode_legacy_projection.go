@@ -388,11 +388,80 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 // totals so a truncated result can name how much it left out. The full-session
 // read and the preview prefix read share this one path.
 func readOpenCodeLegacyProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize, budget int64, size OpenCodePayloadSize) (openCodeLegacyProjection, []openCodeDroppedOrphanPart, MaterializeTruncation, error) {
+	projection, dropped, truncation, _, err := readOpenCodeLegacyProjectionSlice(ctx, source, sessionID, pageSize, budget, size, openCodeLegacySliceStart{})
+	return projection, dropped, truncation, err
+}
+
+// openCodeLegacySliceStart is where a resumable legacy read begins: the keyset
+// positions of the two passes, and the part that blocked the previous slice.
+type openCodeLegacySliceStart struct {
+	message *OpenCodeLegacyMessageCursor
+	part    *OpenCodeLegacyPartCursor
+	// blockedPart is the part the PREVIOUS slice stopped at because its message
+	// lay past that slice's message window. See openCodeLegacySliceStop.
+	blockedPart *OpenCodeLegacyPartID
+	// resumable marks a read another read will CONTINUE from. Only such a read
+	// ends on a message boundary, because only such a read can come back for
+	// what the boundary leaves behind. A one-shot bounded read keeps every
+	// window message it took, since dropping one would simply lose it.
+	resumable bool
+}
+
+// openCodeLegacySliceStop is where a resumable legacy read ended, and is what
+// the next slice starts from.
+type openCodeLegacySliceStop struct {
+	message *OpenCodeLegacyMessageCursor
+	part    *OpenCodeLegacyPartCursor
+	// blockedPart names the part the part pass refused to take because its
+	// message is outside this slice's window. The next slice takes that message
+	// into its window, so the part attaches there instead of being lost.
+	//
+	// It is also the TERMINATION guard. A part that blocks two slices in a row
+	// is not merely ahead of the window - it belongs to a message an earlier
+	// slice already emitted - so the second slice steps over it rather than
+	// stalling on it forever. Stepping over it drops that one part from the
+	// preview; it never duplicates a turn, because a message is emitted by
+	// exactly one slice.
+	blockedPart *OpenCodeLegacyPartID
+	// exhausted reports that BOTH passes reached the end of the session, which
+	// is the only state that means there is nothing more to read.
+	exhausted bool
+	// includedBytes and includedRows are what THIS slice put into the
+	// projection. They are reported separately from the truncation record
+	// because the last slice of a session is not truncated and would otherwise
+	// report nothing.
+	includedBytes int64
+	includedRows  int64
+}
+
+// readOpenCodeLegacyProjectionSlice is the resumable form of the core read.
+//
+// The slice contract, which is what makes appending one slice's turns to the
+// previous slice's safe:
+//
+//   - The message pass is a strictly forward keyset walk, and every slice takes
+//     at least one message. A message therefore enters exactly ONE slice, so an
+//     appended slice can never duplicate or halve a turn at the seam.
+//   - The part pass attaches a part ONLY to a message in the CURRENT slice's
+//     window. On reaching a part whose message is outside the window it stops
+//     WITHOUT consuming that part, so the next slice - whose window has moved
+//     forward - sees the same part again and attaches it. The previous
+//     behaviour, skipping such a part, would silently lose it once the read
+//     could continue.
+func readOpenCodeLegacyProjectionSlice(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize, budget int64, size OpenCodePayloadSize, from openCodeLegacySliceStart) (openCodeLegacyProjection, []openCodeDroppedOrphanPart, MaterializeTruncation, openCodeLegacySliceStop, error) {
 	projection := openCodeLegacyProjection{Format: openCodeLegacyProjectionFormat, Version: openCodeLegacyProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	// Read the session's messages first and remember each message's slot, so the
 	// single part pass can attach a part to its message in memory.
 	messageSlot := make(map[string]int)
-	var messageCursor *OpenCodeLegacyMessageCursor
+	// messageCursors[slot] is the continuation cursor of the window message in
+	// that slot, parallel to the leading real-message run of projection.Messages
+	// (an orphan message is appended past that run and has no cursor).
+	var messageCursors []OpenCodeLegacyMessageCursor
+	messageCursor := from.message
+	stop := openCodeLegacySliceStop{message: from.message, part: from.part}
+	// messagesExhausted and partsExhausted record that a pass walked off the end
+	// of the session rather than stopping on its budget or on the window edge.
+	messagesExhausted, partsExhausted := false, false
 	// readBytes is what the read pulled out of the source and is what the budget
 	// governs. includedRows and includedBytes are what reached the projection,
 	// which is what a note about the preview describes: a part of a message the
@@ -405,7 +474,7 @@ messageLoop:
 	for {
 		page, err := source.LegacyMessages(ctx, OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize, After: messageCursor})
 		if err != nil {
-			return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, err
+			return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, err
 		}
 		for _, row := range page.Messages {
 			// The budget is checked BEFORE the row is taken, so a read that spent
@@ -423,73 +492,169 @@ messageLoop:
 			includedBytes += int64(len(row.Data))
 			messageSlot[row.ID.String()] = len(projection.Messages)
 			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Data: json.RawMessage(row.Data), Parts: []openCodeLegacyProjectionPart{}})
+			taken, cursorErr := NewOpenCodeLegacyMessageCursor(row.TimeCreated, row.ID)
+			if cursorErr != nil {
+				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, fmt.Errorf("record the continuation position of legacy OpenCode message %q failed while reading a bounded slice: %w; no partial managed projection was emitted; repair the row identity in OpenCode and retry", row.ID.String(), cursorErr)
+			}
+			// The cursor of every window message is kept beside it, so a slice
+			// that ends inside its window can name the message it cut at.
+			messageCursors = append(messageCursors, taken)
+			stop.message = &taken
 		}
 		if page.Next == nil {
+			messagesExhausted = true
 			break
 		}
 		messageCursor = page.Next
 	}
-	// Read every part of the session once, in identifier order, and partition it
-	// in memory: a part whose message is present attaches to that message; a part
-	// whose message is absent is an orphan. This replaces the per-message part
-	// read plus the correlated orphan scan, which read the part table twice.
+	// Read the session's parts once, in identifier order, and partition them in
+	// memory: a part whose message is in this slice's window attaches to that
+	// message; a part with no message at all, on a read that covered the whole
+	// session, is an orphan.
 	//
-	// The pass keeps running after a truncated message pass, on the remaining
-	// budget, because the transcript content the preview renders lives in these
-	// part rows. What it must not do is treat a part of a message the message
-	// pass simply never reached as an orphan: that message exists, so
-	// synthesizing a root attachment for its part would invent a turn the
-	// session never held.
+	// A SLICE ENDS ON A MESSAGE BOUNDARY. When the budget runs out part-way
+	// through a message the pass keeps taking that message's remaining parts and
+	// stops at the first part of the NEXT message; every window message after
+	// the one it cut at is then dropped from this slice and read again by the
+	// next one. That is what lets a caller simply APPEND one slice's turns to
+	// the previous slice's: a message, and therefore the turn folded from it,
+	// belongs to exactly one slice. The overshoot is bounded by one message's
+	// parts, the same shape of bound the message pass already accepts for one
+	// oversized row.
 	var dropped []openCodeDroppedOrphanPart
-	var partCursor *OpenCodeLegacyPartCursor
+	partCursor := from.part
+	// wholeSession is true only when the message pass covered EVERY message of
+	// the session: it started at the beginning and ran off the end. That is the
+	// one state in which a part with no message in memory is a true orphan.
+	//
+	// On a continuation the map holds this slice's window alone, so an
+	// unattached part is far more likely to belong to a message an adjacent
+	// slice owns. Synthesizing a root attachment for it there would invent a
+	// turn the session never held, and would show a part twice once its real
+	// message arrives.
+	wholeSession := from.message == nil && !messagesTruncated
+	// cutSlot and cutPart name where the slice ends - the last window message
+	// whose parts are fully read, and that message's last part - so a trim can
+	// resume exactly there.
+	cutSlot := -1
+	var cutPart *OpenCodeLegacyPartCursor
+	// partSpend is what the PART pass is charged against the budget.
+	//
+	// A one-shot read charges it the message pass's spend too, so the budget
+	// bounds the whole read's live payload in one number. A RESUMABLE read
+	// cannot: a single legacy message row reaches 25 MiB on a real store, which
+	// alone exceeds a sensible slice budget, so a shared counter would leave
+	// every continuation able to afford exactly one message and turn a 2 GiB
+	// session into thousands of slices. A slice therefore charges the two passes
+	// separately, and its live payload is bounded by the message share plus the
+	// part budget plus one oversized row.
+	partSpend := readBytes
+	if from.resumable {
+		partSpend = 0
+	}
+	lastAttached := ""
+	trimmed := false
 partLoop:
 	for {
 		page, err := source.LegacySessionParts(ctx, OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: partCursor})
 		if err != nil {
-			return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, err
+			return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, err
 		}
 		for _, drop := range page.Dropped {
 			if _, present := messageSlot[drop.MessageID.String()]; present && !drop.MessageID.IsEmpty() {
 				// A part whose message is present must decode. A decode failure
 				// fails the whole session, matching the strict per-message read
 				// this single pass replaces; it is not a tolerable orphan.
-				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, fmt.Errorf("read OpenCode legacy part %q for present message %q failed while partitioning the single part pass: %s; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", drop.PartID.String(), drop.MessageID.String(), drop.Reason)
+				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, fmt.Errorf("read OpenCode legacy part %q for present message %q failed while partitioning the single part pass: %s; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", drop.PartID.String(), drop.MessageID.String(), drop.Reason)
+			}
+			if !wholeSession {
+				// The message is absent from THIS slice's window, which does not
+				// make it absent from the session. Calling it an orphan here would
+				// warn about a row an adjacent slice owns.
+				continue
 			}
 			// A part row whose message is absent is a true orphan. Drop it with a
 			// warning that names the row, never a session failure.
 			dropped = append(dropped, openCodeDroppedOrphanPart{partID: drop.PartID.String(), messageID: drop.MessageID.String(), reason: drop.Reason})
 		}
 		for _, part := range page.Parts {
+			messageID := part.MessageID.String()
+			slot, present := messageSlot[messageID]
+			if !present && !wholeSession {
+				// The part belongs to a message this slice's window stops short
+				// of. Stop WITHOUT consuming it, so the next slice - whose window
+				// has moved forward past that message - sees this same part and
+				// attaches it. Skipping it would drop transcript content the read
+				// is able to come back for.
+				//
+				// Unless the previous slice already stopped on this same part.
+				// Then the window has moved and it still does not attach, which
+				// means its message came BEFORE the window and an earlier slice
+				// already emitted it. Step over it so the read always makes
+				// progress; it is left out of the preview, never shown twice.
+				if from.blockedPart != nil && *from.blockedPart == part.ID {
+					readBytes += int64(len(part.Data))
+					partSpend += int64(len(part.Data))
+					stepped, cursorErr := NewOpenCodeLegacyPartCursor(part.ID)
+					if cursorErr != nil {
+						return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, fmt.Errorf("record the continuation position of legacy OpenCode part %q failed while stepping over an out-of-window row: %w; no partial managed projection was emitted; repair the row identity in OpenCode and retry", part.ID.String(), cursorErr)
+					}
+					stop.part = &stepped
+					cutPart = &stepped
+					continue
+				}
+				blocked := part.ID
+				stop.blockedPart = &blocked
+				partsTruncated = true
+				break partLoop
+			}
 			// Every part row the source returned counts toward the budget, whether
 			// or not it reaches the projection: the budget bounds how much source
 			// payload this read pulls into memory, and a skipped row was already
 			// paid for. Counting only the rows that landed let a session whose
 			// message pass stopped early scan its whole part table.
-			if budget > 0 && readBytes >= budget {
-				partsTruncated = true
-				break partLoop
+			if budget > 0 && partSpend >= budget {
+				if !from.resumable {
+					partsTruncated = true
+					break partLoop
+				}
+				if lastAttached != "" && messageID != lastAttached {
+					// The drain is finished: this part opens a new message, which
+					// is the message boundary the slice ends on.
+					partsTruncated = true
+					trimmed = true
+					break partLoop
+				}
+				// The budget is spent inside this message. Keep taking its parts
+				// so the slice can end after it rather than inside it.
 			}
 			readBytes += int64(len(part.Data))
-			projectionPart := openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}
-			if slot, present := messageSlot[part.MessageID.String()]; present {
+			partSpend += int64(len(part.Data))
+			takenPart, cursorErr := NewOpenCodeLegacyPartCursor(part.ID)
+			if cursorErr != nil {
+				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, fmt.Errorf("record the continuation position of legacy OpenCode part %q failed while reading a bounded slice: %w; no partial managed projection was emitted; repair the row identity in OpenCode and retry", part.ID.String(), cursorErr)
+			}
+			stop.part = &takenPart
+			projectionPart := openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: messageID, SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}
+			if present {
 				// A part whose message is present must carry valid JSON, matching
 				// the strict per-message read this pass replaces.
 				if !json.Valid([]byte(part.Data)) {
-					return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, fmt.Errorf("read OpenCode legacy part %q for message %q failed while partitioning the single part pass: its data is not valid JSON; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", part.ID.String(), part.MessageID.String())
+					return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, fmt.Errorf("read OpenCode legacy part %q for message %q failed while partitioning the single part pass: its data is not valid JSON; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", part.ID.String(), messageID)
 				}
 				projection.Messages[slot].Parts = append(projection.Messages[slot].Parts, projectionPart)
 				includedRows++
 				includedBytes += int64(len(part.Data))
-				continue
-			}
-			if messagesTruncated {
-				// The part belongs to a message this read stopped short of, not to
-				// an absent one. Leave it out rather than call it an orphan.
+				lastAttached = messageID
+				if slot > cutSlot {
+					cutSlot = slot
+				}
+				cutPart = &takenPart
 				continue
 			}
 			if reason := unusableOpenCodeOrphanPartReason([]byte(part.Data)); reason != "" {
 				// An unusable orphan row must not fail the whole session.
-				dropped = append(dropped, openCodeDroppedOrphanPart{partID: part.ID.String(), messageID: part.MessageID.String(), reason: reason})
+				dropped = append(dropped, openCodeDroppedOrphanPart{partID: part.ID.String(), messageID: messageID, reason: reason})
 				continue
 			}
 			syntheticMessageID := "orphan-parent-" + part.ID.String()
@@ -502,7 +667,7 @@ partLoop:
 				"role":      RoleSystem.String(),
 			})
 			if marshalErr != nil {
-				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
+				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, openCodeLegacySliceStop{}, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
 			}
 			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{
 				ID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: data, Orphan: true,
@@ -512,15 +677,40 @@ partLoop:
 			includedBytes += int64(len(part.Data))
 		}
 		if page.Next == nil {
+			partsExhausted = true
 			break
 		}
 		partCursor = page.Next
 	}
+	if trimmed && cutSlot >= 0 && cutSlot+1 < len(projection.Messages) {
+		// End the slice on the message boundary the drain stopped at. The window
+		// messages past the cut were never given their parts, so this slice drops
+		// them whole and the next slice reads them again from the cut cursor.
+		// They were never emitted, so nothing is shown twice.
+		for _, message := range projection.Messages[cutSlot+1:] {
+			includedRows--
+			includedBytes -= int64(len(message.Data))
+			for _, part := range message.Parts {
+				includedRows--
+				includedBytes -= int64(len(part.Data))
+			}
+		}
+		projection.Messages = projection.Messages[:cutSlot+1]
+		if cutSlot < len(messageCursors) {
+			cut := messageCursors[cutSlot]
+			stop.message = &cut
+		}
+		stop.part = cutPart
+		messagesTruncated = true
+	}
+	stop.exhausted = messagesExhausted && partsExhausted && !trimmed
+	stop.includedBytes = includedBytes
+	stop.includedRows = includedRows
 	truncation := MaterializeTruncation{}
 	if messagesTruncated || partsTruncated {
 		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitRows, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
 	}
-	return projection, dropped, truncation, nil
+	return projection, dropped, truncation, stop, nil
 }
 
 func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection) (*UnifiedMetadata, error) {
