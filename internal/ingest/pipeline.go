@@ -952,6 +952,12 @@ func (p *Pipeline) discover(ctx context.Context) ([]DiscoveredSession, error) {
 		if cache, ok := p.store.(ClaudeEvidenceCache); ok {
 			AttachClaudeEvidenceCache(adapter, cache)
 		}
+		// The local store also answers where a session id already lives, so
+		// cross-run linking can confirm a candidate spawner is really
+		// persisted before trusting it.
+		if p.store != nil {
+			AttachSessionLocationLookup(adapter, p.store)
+		}
 		sessions, err := adapter.Discover(ctx, cfg)
 		if err != nil {
 			providerErrors = append(providerErrors, fmt.Errorf("discover %s: %w", provider, err))

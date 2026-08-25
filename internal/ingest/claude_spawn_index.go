@@ -104,43 +104,50 @@ func claudeSessionIDFromRootPath(path ResolvedPath) (SessionID, bool) {
 	return id, true
 }
 
-// claudeStoredSessionLookup is satisfied by an evidence cache that can also
-// answer whether a session id is already persisted. The production cache is
-// the local store, which already exposes this exact lookup for an unrelated
-// reason (pre-populating the diff-stage location cache); reusing it here lets
-// cross-run linking confirm a persisted-only candidate parent is real before
-// pointing a child at it, without adding a new store dependency to the
-// adapter. A cache that offers no such lookup simply cannot confirm a
-// cross-run parent, so cross-run linking never fires for it.
-type claudeStoredSessionLookup interface {
-	LookupSessionLocation(ctx context.Context, sessionID SessionID) (hostSlug string, parentID string, err error)
+// ClaudeSessionLocationLookupCapable is implemented by an adapter that can use
+// a store's session-location lookup to confirm a cross-run linking candidate
+// before trusting it. The adapter factory signature carries only the
+// filesystem, the git resolver, and the salt, so a caller attaches this
+// capability after it builds the adapter — the same optional, type-asserted
+// attach shape ClaudeEvidenceCaching already uses for the evidence cache.
+type ClaudeSessionLocationLookupCapable interface {
+	SetSessionLocationLookup(lookup SessionLocationLookup)
+}
+
+// AttachSessionLocationLookup gives adapter the session-location lookup when
+// the adapter can use one. Adapters that need no such lookup ignore it.
+func AttachSessionLocationLookup(adapter SourceAdapter, lookup SessionLocationLookup) {
+	if adapter == nil || lookup == nil {
+		return
+	}
+	if capable, ok := adapter.(ClaudeSessionLocationLookupCapable); ok {
+		capable.SetSessionLocationLookup(lookup)
+	}
 }
 
 // claudeSessionAlreadyStored reports whether sessionID is already recorded in
-// the store from a prior discovery. It fails closed: any error, or a cache
-// that offers no such lookup, answers false, because a parent identifier must
-// never point at a session that is neither in this write batch nor already
-// stored — the store's own FK-orphan guard would otherwise silently drop the
-// child at write time.
+// the store from a prior discovery. It fails closed: no lookup attached, or
+// any error, answers false, because a parent identifier must never point at a
+// session that is neither in this write batch nor already stored — the
+// store's own FK-orphan guard would otherwise silently drop the child at
+// write time.
 func (a *ClaudeAdapter) claudeSessionAlreadyStored(ctx context.Context, sessionID SessionID) bool {
-	lookup, ok := a.evidence.(claudeStoredSessionLookup)
-	if !ok {
+	if a.locationLookup == nil {
 		return false
 	}
-	hostSlug, _, err := lookup.LookupSessionLocation(ctx, sessionID)
+	hostSlug, _, err := a.locationLookup.LookupSessionLocation(ctx, sessionID)
 	return err == nil && hostSlug != ""
 }
 
 // claudeStoredParent returns the parent id the store already recorded for
 // sessionID, if any, so cycle detection can keep walking an ancestor chain
-// past this discovery's own write batch. It fails closed: any error or an
-// absent parent answers no parent found.
+// past this discovery's own write batch. It fails closed: no lookup attached,
+// any error, or an absent parent answers no parent found.
 func (a *ClaudeAdapter) claudeStoredParent(ctx context.Context, sessionID SessionID) (SessionID, bool) {
-	lookup, ok := a.evidence.(claudeStoredSessionLookup)
-	if !ok {
+	if a.locationLookup == nil {
 		return SessionID(""), false
 	}
-	_, parentID, err := lookup.LookupSessionLocation(ctx, sessionID)
+	_, parentID, err := a.locationLookup.LookupSessionLocation(ctx, sessionID)
 	if err != nil || parentID == "" {
 		return SessionID(""), false
 	}
