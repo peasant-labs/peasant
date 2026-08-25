@@ -73,6 +73,9 @@ const (
 	MaterializeUnitRows
 	// MaterializeUnitMessages counts current message rows.
 	MaterializeUnitMessages
+	// MaterializeUnitLines counts lines of a line-oriented transcript file,
+	// which is what a file-origin slice reads and what its note counts.
+	MaterializeUnitLines
 )
 
 // String renders the unit for a preview note.
@@ -82,6 +85,8 @@ func (u MaterializeTruncationUnit) String() string {
 		return "rows"
 	case MaterializeUnitMessages:
 		return "messages"
+	case MaterializeUnitLines:
+		return "lines"
 	default:
 		return ""
 	}

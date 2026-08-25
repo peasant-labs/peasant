@@ -91,11 +91,16 @@ func sourceDiscoveredSession(listing ftue.SessionListing) (ingest.DiscoveredSess
 // viewer uses. It writes nothing to disk and nothing to the database. It keeps
 // the parsed turns of the last few sessions in memory only.
 type SourceTurns struct {
-	fs     ingest.FileSystem
-	git    ingest.GitResolver
-	salt   salt.Salt
-	byID   map[string]ftue.SessionListing
-	limit  int
+	fs    ingest.FileSystem
+	git   ingest.GitResolver
+	salt  salt.Salt
+	byID  map[string]ftue.SessionListing
+	limit int
+	// budget, firstPage and slice bound the preview reads, and they are SHARED
+	// by every origin on purpose. The file-origin preview deliberately mirrors
+	// the OpenCode preview's bounds rather than choosing its own, by user
+	// decision: the two paths do the same thing for the reader, and a second set
+	// of numbers would be two things to keep in step for no stated benefit.
 	budget int64
 	// firstPage bounds the quickly-read leading slice the pane paints before
 	// the full bounded read finishes. Zero or less turns the two-step read off,
@@ -127,6 +132,27 @@ type sourcePreview struct {
 	// there is something to continue to.
 	cursor ingest.TranscriptSliceCursor
 	more   bool
+	// loaded is the RAW transcript bytes a FILE-origin preview has read so far,
+	// and every slice re-parses and re-folds all of them.
+	//
+	// The obvious cheaper thing - parse each slice on its own and append its
+	// turns - is wrong twice over. A turn folds from entries that span several
+	// LINES: a tool call and the result that answers it are two lines, joined by
+	// their call identifier, so a boundary between them would leave the call
+	// resultless and drop the output entirely, since an orphan result is
+	// suppressed rather than drawn. And every file indexer carries state ACROSS
+	// records while it parses - which calls asked the user a question, which
+	// parent a record belongs to - so a parse that started mid-file would
+	// classify records the whole-file parse classifies differently.
+	//
+	// Re-reading is what a slice avoids; re-PARSING what is already in memory is
+	// cheap by comparison and is what makes a sliced read produce exactly the
+	// whole-file read. Holding the bytes costs no more than the whole-file read
+	// this replaces, and less until the reader has scrolled the whole way.
+	//
+	// The SQLite path does not need any of this: a slice there is a whole
+	// message with its parts, so its turns are final when they are folded.
+	loaded []byte
 }
 
 // SourceTurnsOption configures a SourceTurns reader.
@@ -255,10 +281,29 @@ func (s *SourceTurns) FirstTurns(sessionID string) ([]ingest.Turn, bool, error) 
 	if err != nil {
 		return nil, false, fmt.Errorf("preview the transcript of session %q from its harness source: %w", sessionID, err)
 	}
+	if slicer, ok := s.fileFirstPageSlicer(session); ok {
+		// A line-oriented transcript reads its own leading slice: the first
+		// screenful of a hundreds-of-megabyte file, without touching the rest.
+		preview, err := s.fileSliceTurns(sessionID, listing, session, slicer, sourcePreview{}, s.firstPage)
+		if err != nil {
+			return nil, false, err
+		}
+		if !preview.more {
+			// The slice reached the end of the file, so it IS the whole preview
+			// and carries no note. Caching it is caching a complete result, and
+			// a transcript that fits the first-page bound is read exactly once.
+			s.store(sessionID, sourcePreview{turns: preview.turns, loaded: preview.loaded, cursor: preview.cursor})
+			return preview.turns, false, nil
+		}
+		// A leading slice is never cached: it stands for less than the first
+		// read the pane finally shows, which is read under the larger bound.
+		return preview.turns, true, nil
+	}
 	firstPage, ok := s.firstPageReader(session)
 	if !ok {
-		// A source with no first-page read (a file transcript, or a reader
-		// configured without the bound) has one step only: read it whole.
+		// A source with no first-page read (a reader configured without the
+		// bound, or a filesystem that cannot read a range) has one step only:
+		// read it whole.
 		preview, err := s.readTurns(sessionID, listing, session)
 		if err != nil {
 			return nil, false, err
@@ -279,9 +324,10 @@ func (s *SourceTurns) FirstTurns(sessionID string) ([]ingest.Turn, bool, error) 
 }
 
 // firstPageReader reports the adapter that can read a leading slice of the
-// given session, and false when this session has no two-step read: a file
-// transcript, a harness with no discovery adapter, an adapter that cannot bound
-// a first slice, or a reader configured without a first-page budget.
+// given session, and false when this session has no two-step SQLite read: a
+// file transcript (which has its own leading slice; see fileFirstTurns), a
+// harness with no discovery adapter, an adapter that cannot bound a first
+// slice, or a reader configured without a first-page budget.
 func (s *SourceTurns) firstPageReader(session ingest.DiscoveredSession) (ingest.FirstPageTranscriptMaterializer, bool) {
 	if s.firstPage <= 0 {
 		return nil, false
@@ -297,6 +343,31 @@ func (s *SourceTurns) firstPageReader(session ingest.DiscoveredSession) (ingest.
 	}
 	firstPage, ok := factory(s.fs, s.git, s.salt).(ingest.FirstPageTranscriptMaterializer)
 	return firstPage, ok
+}
+
+// fileFirstPageSlicer reports the slicer that can read a leading slice of a
+// FILE-origin transcript, and false when this session is not one, the reader
+// has no first-page bound, or the filesystem cannot read a byte range.
+func (s *SourceTurns) fileFirstPageSlicer(session ingest.DiscoveredSession) (ingest.FileTranscriptSlicer, bool) {
+	if s.firstPage <= 0 || s.slice <= 0 {
+		return ingest.FileTranscriptSlicer{}, false
+	}
+	switch session.TranscriptOrigin {
+	case ingest.TranscriptOriginOpenCodeLegacySQLite, ingest.TranscriptOriginOpenCodeCurrentSQLite:
+		return ingest.FileTranscriptSlicer{}, false
+	}
+	// Slicing a transcript by lines is only correct for a format that keeps one
+	// record per line, and only an indexer that DECLARES that gets sliced.
+	indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
+	if !ok {
+		return ingest.FileTranscriptSlicer{}, false
+	}
+	lines, ok := indexer.(ingest.LineOrientedTranscriptIndexer)
+	if !ok || !lines.RecordsAreLines() {
+		return ingest.FileTranscriptSlicer{}, false
+	}
+	slicer := ingest.NewFileTranscriptSlicer(s.fs)
+	return slicer, slicer.Supported()
 }
 
 // firstPageTurns materializes the leading slice and folds it the same way the
@@ -343,8 +414,52 @@ func (s *SourceTurns) readTurns(sessionID string, listing ftue.SessionListing, s
 	}
 }
 
-// fileTurns reads a file-origin session's transcript directly at its path.
+// fileTurns reads a file-origin session's transcript.
+//
+// A line-oriented transcript reaches hundreds of megabytes on a real machine,
+// and reading it whole meant indexing every entry and folding every turn before
+// anything appeared in the pane. When the filesystem can read a byte range, the
+// preview takes it one bounded slice at a time instead and extends as the
+// reader scrolls; otherwise it keeps the whole-file read exactly as before.
 func (s *SourceTurns) fileTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) (sourcePreview, error) {
+	if slicer, ok := s.fileFirstPageSlicer(session); ok {
+		return s.fileSliceTurns(sessionID, listing, session, slicer, sourcePreview{}, s.budget)
+	}
+	return s.wholeFileTurns(sessionID, listing, session)
+}
+
+// fileSliceTurns reads ONE slice of a line-oriented transcript and folds it
+// together with everything already loaded. Passing the zero preview reads the
+// first slice.
+func (s *SourceTurns) fileSliceTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession, slicer ingest.FileTranscriptSlicer, loaded sourcePreview, budgetBytes int64) (sourcePreview, error) {
+	slice, err := slicer.MaterializeTranscriptSlice(context.Background(), session, budgetBytes, loaded.cursor)
+	if err != nil {
+		return sourcePreview{}, fmt.Errorf("read the harness transcript of session %q at %q: %w", sessionID, listing.Source.Path, err)
+	}
+	next := sourcePreview{loaded: loaded.loaded, turns: loaded.turns, cursor: slice.Next, more: slice.More}
+	if len(slice.Data) > 0 {
+		indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
+		if !ok {
+			return sourcePreview{}, fmt.Errorf(
+				"preview the transcript of session %q from its harness source: harness %q has no transcript reader",
+				sessionID, listing.Harness)
+		}
+		next.loaded = append(append(make([]byte, 0, len(loaded.loaded)+len(slice.Data)), loaded.loaded...), slice.Data...)
+		// Parse and fold the WHOLE accumulated prefix, never one slice. See the
+		// comment on sourcePreview.loaded for the two ways a per-slice parse
+		// diverges from the read this has to match.
+		entries, err := indexer.IndexTranscriptBytes(context.Background(), session, next.loaded)
+		if err != nil {
+			return sourcePreview{}, fmt.Errorf("read the harness transcript of session %q at %q: %w", sessionID, listing.Source.Path, err)
+		}
+		next.turns = transcript.EntriesToTurns(entries)
+	}
+	next.notice = previewSliceNotice(slice.Next, slice.More)
+	return next, nil
+}
+
+// wholeFileTurns reads a file-origin session's transcript directly at its path.
+func (s *SourceTurns) wholeFileTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) (sourcePreview, error) {
 	// Full content matches what the stored path shows: the session viewer
 	// overlays the untruncated bodies over the database preview, so a source
 	// preview that kept the database limit would cut turns off mid-word.
@@ -454,20 +569,46 @@ func (s *SourceTurns) MoreTurns(sessionID string) ([]ingest.Turn, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("preview the transcript of session %q from its harness source: %w", sessionID, err)
 	}
-	factory, ok := ingest.DefaultAdapterRegistry[session.Harness]
-	if !ok {
-		return loaded.turns, false, nil
-	}
-	resumable, ok := factory(s.fs, s.git, s.salt).(ingest.ResumableTranscriptMaterializer)
-	if !ok {
-		return loaded.turns, false, nil
-	}
-	next, err := s.sliceTurns(sessionID, listing, session, resumable, loaded, s.slice)
+	next, err := s.continueTurns(sessionID, listing, session, loaded)
 	if err != nil {
 		return nil, false, err
 	}
-	s.store(sessionID, next)
+	if next == nil {
+		return loaded.turns, false, nil
+	}
+	s.store(sessionID, *next)
 	return next.turns, next.more, nil
+}
+
+// continueTurns reads one more slice through whichever seam this session's
+// origin is served by, and returns nil when the origin has no continuation.
+func (s *SourceTurns) continueTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession, loaded sourcePreview) (*sourcePreview, error) {
+	switch session.TranscriptOrigin {
+	case ingest.TranscriptOriginOpenCodeLegacySQLite, ingest.TranscriptOriginOpenCodeCurrentSQLite:
+		factory, ok := ingest.DefaultAdapterRegistry[session.Harness]
+		if !ok {
+			return nil, nil
+		}
+		resumable, ok := factory(s.fs, s.git, s.salt).(ingest.ResumableTranscriptMaterializer)
+		if !ok {
+			return nil, nil
+		}
+		next, err := s.sliceTurns(sessionID, listing, session, resumable, loaded, s.slice)
+		if err != nil {
+			return nil, err
+		}
+		return &next, nil
+	default:
+		slicer, ok := s.fileFirstPageSlicer(session)
+		if !ok {
+			return nil, nil
+		}
+		next, err := s.fileSliceTurns(sessionID, listing, session, slicer, loaded, s.slice)
+		if err != nil {
+			return nil, err
+		}
+		return &next, nil
+	}
 }
 
 // HasMore reports whether the preview of a session, as currently loaded, has

@@ -34,6 +34,11 @@ type TranscriptSliceCursor struct {
 
 	current *OpenCodeCurrentCursor
 
+	// fileOffset is where a FILE-origin slice read stopped: the byte after the
+	// last complete line it took. A line-oriented transcript needs nothing else
+	// to be resumed, so the other fields stay zero for it.
+	fileOffset int64
+
 	// consumedBytes and consumedRows accumulate across slices: what every slice
 	// so far put into the preview. total* are the whole-session figures, read
 	// once by the first bounded read and carried, so a continuation never pays
@@ -82,6 +87,10 @@ type TranscriptSlice struct {
 	// More reports that the session continues past this slice.
 	More bool
 }
+
+// FileOffset reports where a file-origin slice read stopped, as a byte offset
+// into the transcript.
+func (c TranscriptSliceCursor) FileOffset() int64 { return c.fileOffset }
 
 // ResumableTranscriptMaterializer is the OPTIONAL capability of a source
 // adapter that can read ONE budget-sized slice of a session starting where a
