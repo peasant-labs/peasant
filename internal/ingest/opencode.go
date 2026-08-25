@@ -34,6 +34,7 @@ type OpenCodeAdapter struct {
 
 var _ SourceAdapter = (*OpenCodeAdapter)(nil)
 var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
+var _ BoundedTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
 func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {

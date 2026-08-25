@@ -28,6 +28,68 @@ type TranscriptMaterializer interface {
 	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
 }
 
+// BoundedTranscriptMaterializer materializes a preview-only prefix of a session
+// under a byte budget. The kickstart preview uses it so an especially long
+// session cannot exhaust memory: the materializer probes the session's payload
+// size first, materializes the whole session when it fits the budget, and
+// otherwise stops after the budget is reached and reports the truncation. It is
+// distinct from TranscriptMaterializer because ingest and harvest always
+// materialize the whole session, never a bounded prefix.
+type BoundedTranscriptMaterializer interface {
+	MaterializeTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error)
+}
+
+// MaterializeTruncationUnit names what a bounded materialization counted toward
+// its budget, so a truncation note can say "parts" for a legacy session and
+// "messages" for a current one.
+type MaterializeTruncationUnit uint8
+
+const (
+	// MaterializeUnitNone is the zero unit of an untruncated result.
+	MaterializeUnitNone MaterializeTruncationUnit = iota
+	// MaterializeUnitRows counts legacy source rows. A legacy session carries
+	// payload in both its message and its part table, and a materialization
+	// reads both, so its budget counts rows of either kind rather than parts
+	// alone.
+	MaterializeUnitRows
+	// MaterializeUnitMessages counts current message rows.
+	MaterializeUnitMessages
+)
+
+// String renders the unit for a preview note.
+func (u MaterializeTruncationUnit) String() string {
+	switch u {
+	case MaterializeUnitRows:
+		return "rows"
+	case MaterializeUnitMessages:
+		return "messages"
+	default:
+		return ""
+	}
+}
+
+// MaterializeTruncation reports whether a bounded materialization stopped early
+// and, when it did, how much of the session it left out. Truncated is false for
+// a session that fit the budget, and the remaining fields are then zero. When
+// Truncated is true, IncludedRows of TotalRows of the counted Unit were
+// materialized, TotalBytes is the whole session's measured payload size, and
+// BudgetBytes
+// is the bound that stopped it. The preview renders these into a plain note; the
+// full session still ingests normally.
+type MaterializeTruncation struct {
+	Truncated bool
+	Unit      MaterializeTruncationUnit
+	// BudgetBytes is the bound the read ran under. IncludedBytes is what the
+	// read actually took, which can be less: a read that reserves part of its
+	// budget for one kind of row stops the other kind short of the bound.
+	// A note about what the reader SEES quotes IncludedBytes.
+	BudgetBytes   int64
+	IncludedBytes int64
+	TotalBytes    int64
+	IncludedRows  int64
+	TotalRows     int64
+}
+
 // TranscriptOrigin identifies how a discovered session's managed transcript
 // must be obtained. The zero value preserves the existing file-copy behavior.
 type TranscriptOrigin uint8

@@ -320,11 +320,18 @@ func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, sess
 	var unknownControlTypes map[string]int
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 		var readErr error
-		projection, unknownControlTypes, readErr = readOpenCodeCurrentProjection(ctx, source, currentID, pageSize)
+		projection, unknownControlTypes, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
 		return readErr
 	}); err != nil {
 		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
+	return a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+}
+
+// finishCurrentManagedProjection encodes a read current projection into the
+// managed JSON bytes and derives its metadata. The full-session and preview
+// prefix reads share it.
+func (a *OpenCodeAdapter) finishCurrentManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeCurrentProjection, unknownControlTypes map[string]int) (*UnifiedMetadata, []byte, error) {
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q from %q produced no semantic messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
 	}
@@ -342,19 +349,81 @@ func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, sess
 	return metadata, data, nil
 }
 
+func (a *OpenCodeAdapter) materializeCurrentTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error) {
+	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	var projection openCodeCurrentProjection
+	var unknownControlTypes map[string]int
+	var truncation MaterializeTruncation
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		size, sizeErr := source.CurrentSessionPayloadSize(ctx, currentID)
+		if sizeErr != nil {
+			return sizeErr
+		}
+		budget := int64(0)
+		if budgetBytes > 0 && size.Bytes > budgetBytes {
+			budget = budgetBytes
+		}
+		var readErr error
+		projection, unknownControlTypes, truncation, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, budget, size)
+		return readErr
+	}); err != nil {
+		return nil, nil, MaterializeTruncation{}, fmt.Errorf("materialize bounded current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
+	}
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	return metadata, data, truncation, nil
+}
+
 func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, map[string]int, error) {
+	projection, unknownControlTypes, _, err := readOpenCodeCurrentProjectionCore(ctx, source, sessionID, pageSize, 0, OpenCodePayloadSize{})
+	return projection, unknownControlTypes, err
+}
+
+// readOpenCodeCurrentProjectionCore reads the session's current message rows in
+// seq order and normalizes each. When budget is positive it stops accumulating
+// once the summed message payload byte length reaches the budget and reports the
+// truncation; a non-positive budget reads the whole session and reports no
+// truncation. size carries the whole-session totals so a truncated result can
+// name how much it left out. The full-session read and the preview prefix read
+// share this one path.
+func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, error) {
 	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
 	unknownControlTypes := make(map[string]int)
 	var cursor *OpenCodeCurrentCursor
+	// readBytes is what the read pulled out of the source and is what the budget
+	// governs. includedRows and includedBytes are what reached the projection: a
+	// control row is read and paid for but never shown.
+	var readBytes, includedBytes, includedRows int64
+	truncated := false
+rowLoop:
 	for {
 		page, err := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
 		if err != nil {
-			return openCodeCurrentProjection{}, nil, err
+			return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, err
 		}
 		for _, row := range page.Messages {
+			// Every read row, control or substantive, counts toward the budget: the
+			// budget bounds how much source payload the read pulls into memory, not
+			// how many rows survive normalization. The budget is checked BEFORE the
+			// row is taken, so a read that spent its budget exactly on the last row
+			// of the session reports no truncation: nothing was left out.
+			if budget > 0 && readBytes >= budget {
+				truncated = true
+				break rowLoop
+			}
+			readBytes += int64(len(row.Data))
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
-				return openCodeCurrentProjection{}, nil, currentNormalizationError(row, "registering stable identities", err)
+				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, currentNormalizationError(row, "registering stable identities", err)
 			}
 			message, err := normalizeOpenCodeCurrentRow(row, &registry)
 			if errors.Is(err, errOpenCodeSkipControlRow) {
@@ -364,16 +433,22 @@ func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSou
 				continue
 			}
 			if err != nil {
-				return openCodeCurrentProjection{}, nil, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
 			}
 			projection.Messages = append(projection.Messages, message)
+			includedRows++
+			includedBytes += int64(len(row.Data))
 		}
 		if page.Next == nil {
 			break
 		}
 		cursor = page.Next
 	}
-	return projection, unknownControlTypes, nil
+	truncation := MaterializeTruncation{}
+	if truncated {
+		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitMessages, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
+	}
+	return projection, unknownControlTypes, truncation, nil
 }
 
 func currentNormalizationError(row OpenCodeCurrentMessageRow, operation string, cause error) error {

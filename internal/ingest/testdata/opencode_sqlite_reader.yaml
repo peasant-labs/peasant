@@ -55,6 +55,8 @@ required_methods:
   - CurrentSessionHasSubstantive
   - LegacyMessages
   - LegacySessionParts
+  - LegacySessionPayloadSize
+  - CurrentSessionPayloadSize
   - LegacySessionIDs
   - CurrentFreshnessBySession
   - LegacyFreshnessBySession
@@ -77,6 +79,10 @@ methods:
     signature: "func(context.Context, ingest.OpenCodeLegacyMessagePageRequest) (ingest.OpenCodeLegacyMessagePage, error)"
   - name: LegacySessionParts
     signature: "func(context.Context, ingest.OpenCodeLegacySessionPartPageRequest) (ingest.OpenCodeLegacyPartPage, error)"
+  - name: LegacySessionPayloadSize
+    signature: "func(context.Context, ingest.OpenCodeLegacySessionID) (ingest.OpenCodePayloadSize, error)"
+  - name: CurrentSessionPayloadSize
+    signature: "func(context.Context, ingest.OpenCodeCurrentSessionID) (ingest.OpenCodePayloadSize, error)"
   - name: LegacySessionIDs
     signature: "func(context.Context, ingest.OpenCodeLegacySessionPageRequest) (ingest.OpenCodeLegacySessionPage, error)"
   - name: CurrentFreshnessBySession

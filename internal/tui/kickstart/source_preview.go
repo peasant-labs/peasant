@@ -3,8 +3,11 @@ package kickstart
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -93,9 +96,19 @@ type SourceTurns struct {
 	salt    salt.Salt
 	byID    map[string]ftue.SessionListing
 	limit   int
+	budget  int64
 	mu      sync.Mutex
-	cached  map[string][]ingest.Turn
+	cached  map[string]sourcePreview
 	recency []string
+}
+
+// sourcePreview is one session read from its harness source: the turns to
+// render, and the sentence (empty for most sessions) naming what the read left
+// out. They are cached together because a cache hit must reproduce the whole
+// pane, notice included.
+type sourcePreview struct {
+	turns  []ingest.Turn
+	notice string
 }
 
 // SourceTurnsOption configures a SourceTurns reader.
@@ -114,6 +127,14 @@ func WithSourceTurnsCacheSize(limit int) SourceTurnsOption {
 // preview and discovery agree on a session's project attribution.
 func WithSourceTurnsGitResolver(git ingest.GitResolver) SourceTurnsOption {
 	return func(reader *SourceTurns) { reader.git = git }
+}
+
+// WithSourceTurnsPreviewBudget sets how many payload bytes of one session the
+// reader materializes before it stops and reports the rest as left out. A value
+// of zero or less removes the bound, which is only safe for a source whose
+// sessions are known to be small.
+func WithSourceTurnsPreviewBudget(budgetBytes int64) SourceTurnsOption {
+	return func(reader *SourceTurns) { reader.budget = budgetBytes }
 }
 
 // WithSourceTurnsSalt sets the per-installation salt the reader gives the
@@ -137,7 +158,8 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 		git:    &ingest.ExecGitResolver{},
 		byID:   byID,
 		limit:  DefaultSourceTurnsCacheSize,
-		cached: make(map[string][]ingest.Turn),
+		budget: defaults.OpenCodePreviewMaterializeMaxBytes,
+		cached: make(map[string]sourcePreview),
 	}
 	for _, opt := range opts {
 		opt(reader)
@@ -156,19 +178,27 @@ func (s *SourceTurns) Turns(sessionID string) ([]ingest.Turn, error) {
 	if !ok {
 		return nil, nil
 	}
-	if turns, hit := s.lookup(sessionID); hit {
-		return turns, nil
+	if preview, hit := s.lookup(sessionID); hit {
+		return preview.turns, nil
 	}
 	session, err := sourceDiscoveredSession(listing)
 	if err != nil {
 		return nil, fmt.Errorf("preview the transcript of session %q from its harness source: %w", sessionID, err)
 	}
-	turns, err := s.readTurns(sessionID, listing, session)
+	preview, err := s.readTurns(sessionID, listing, session)
 	if err != nil {
 		return nil, err
 	}
-	s.store(sessionID, turns)
-	return turns, nil
+	s.store(sessionID, preview)
+	return preview.turns, nil
+}
+
+// Notice implements SessionPreviewNoticeFunc over the harness transcript. It
+// reports what the last read of the session left out, so it is meaningful only
+// after Turns has read that session; the preview calls it in that order.
+func (s *SourceTurns) Notice(sessionID string) string {
+	preview, _ := s.lookup(sessionID)
+	return preview.notice
 }
 
 // readTurns produces the turns of one discovered session from its harness
@@ -177,7 +207,7 @@ func (s *SourceTurns) Turns(sessionID string) ([]ingest.Turn, error) {
 // database into memory. The materializer reads only the selected session's rows
 // and returns the small managed projection, which the indexer then folds. A
 // file-origin session keeps the direct path read.
-func (s *SourceTurns) readTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) ([]ingest.Turn, error) {
+func (s *SourceTurns) readTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) (sourcePreview, error) {
 	switch session.TranscriptOrigin {
 	case ingest.TranscriptOriginOpenCodeLegacySQLite, ingest.TranscriptOriginOpenCodeCurrentSQLite:
 		return s.materializeTurns(sessionID, listing, session)
@@ -187,21 +217,21 @@ func (s *SourceTurns) readTurns(sessionID string, listing ftue.SessionListing, s
 }
 
 // fileTurns reads a file-origin session's transcript directly at its path.
-func (s *SourceTurns) fileTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) ([]ingest.Turn, error) {
+func (s *SourceTurns) fileTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) (sourcePreview, error) {
 	// Full content matches what the stored path shows: the session viewer
 	// overlays the untruncated bodies over the database preview, so a source
 	// preview that kept the database limit would cut turns off mid-word.
 	indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
 	if !ok {
-		return nil, fmt.Errorf(
+		return sourcePreview{}, fmt.Errorf(
 			"preview the transcript of session %q from its harness source: harness %q has no transcript reader",
 			sessionID, listing.Harness)
 	}
 	entries, err := indexer.IndexTranscript(context.Background(), session)
 	if err != nil {
-		return nil, fmt.Errorf("read the harness transcript of session %q at %q: %w", sessionID, listing.Source.Path, err)
+		return sourcePreview{}, fmt.Errorf("read the harness transcript of session %q at %q: %w", sessionID, listing.Source.Path, err)
 	}
-	return transcript.EntriesToTurns(entries), nil
+	return sourcePreview{turns: transcript.EntriesToTurns(entries)}, nil
 }
 
 // materializeTurns reads a SQLite-discovered session through the production
@@ -210,34 +240,103 @@ func (s *SourceTurns) fileTurns(sessionID string, listing ftue.SessionListing, s
 // large provider database cannot exhaust memory. A failed materialization
 // returns an actionable error the preview pane renders; it never aborts the
 // program.
-func (s *SourceTurns) materializeTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) ([]ingest.Turn, error) {
+func (s *SourceTurns) materializeTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession) (sourcePreview, error) {
 	factory, ok := ingest.DefaultAdapterRegistry[session.Harness]
 	if !ok {
-		return nil, fmt.Errorf(
+		return sourcePreview{}, fmt.Errorf(
 			"preview the SQLite transcript of session %q from its harness source: harness %q has no discovery adapter",
 			sessionID, listing.Harness)
 	}
-	materializer, ok := factory(s.fs, s.git, s.salt).(ingest.TranscriptMaterializer)
-	if !ok {
-		return nil, fmt.Errorf(
-			"preview the SQLite transcript of session %q from its harness source: harness %q cannot materialize a managed transcript",
-			sessionID, listing.Harness)
-	}
-	_, data, err := materializer.MaterializeTranscript(context.Background(), session)
+	adapter := factory(s.fs, s.git, s.salt)
+	data, truncation, err := s.materializeBytes(sessionID, listing, session, adapter)
 	if err != nil {
-		return nil, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
+		return sourcePreview{}, err
 	}
 	indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
 	if !ok {
-		return nil, fmt.Errorf(
+		return sourcePreview{}, fmt.Errorf(
 			"preview the SQLite transcript of session %q from its harness source: harness %q has no transcript reader",
 			sessionID, listing.Harness)
 	}
 	entries, err := indexer.IndexTranscriptBytes(context.Background(), session, data)
 	if err != nil {
-		return nil, fmt.Errorf("read the materialized transcript of session %q: %w", sessionID, err)
+		return sourcePreview{}, fmt.Errorf("read the materialized transcript of session %q: %w", sessionID, err)
 	}
-	return transcript.EntriesToTurns(entries), nil
+	return sourcePreview{turns: transcript.EntriesToTurns(entries), notice: previewTruncationNotice(truncation)}, nil
+}
+
+// materializeBytes produces the managed transcript bytes the preview folds.
+// It prefers the bounded materialization, so one very long session cannot pull
+// its whole payload into memory; an adapter that cannot bound itself falls back
+// to the whole-session read it already supported.
+func (s *SourceTurns) materializeBytes(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession, adapter ingest.SourceAdapter) ([]byte, ingest.MaterializeTruncation, error) {
+	if bounded, ok := adapter.(ingest.BoundedTranscriptMaterializer); ok && s.budget > 0 {
+		_, data, truncation, err := bounded.MaterializeTranscriptBounded(context.Background(), session, s.budget)
+		if err != nil {
+			return nil, ingest.MaterializeTruncation{}, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
+		}
+		return data, truncation, nil
+	}
+	materializer, ok := adapter.(ingest.TranscriptMaterializer)
+	if !ok {
+		return nil, ingest.MaterializeTruncation{}, fmt.Errorf(
+			"preview the SQLite transcript of session %q from its harness source: harness %q cannot materialize a managed transcript",
+			sessionID, listing.Harness)
+	}
+	_, data, err := materializer.MaterializeTranscript(context.Background(), session)
+	if err != nil {
+		return nil, ingest.MaterializeTruncation{}, fmt.Errorf("materialize the SQLite transcript of session %q for preview: %w", sessionID, err)
+	}
+	return data, ingest.MaterializeTruncation{}, nil
+}
+
+// previewTruncationNotice writes the sentence the pane shows above the turns of
+// a session it read only in part. It states what is on screen, what the whole
+// session holds, that the bound is a preview bound alone, and that ingest still
+// takes the whole session, because a reader who sees a cut-off transcript would
+// otherwise read it as data loss.
+func previewTruncationNotice(truncation ingest.MaterializeTruncation) string {
+	if !truncation.Truncated {
+		return ""
+	}
+	return fmt.Sprintf(
+		"preview shows the first %s of this %s session (%s of %s %s). the full session ingests normally. this bound applies to the preview only.",
+		previewByteSize(truncation.IncludedBytes), previewByteSize(truncation.TotalBytes),
+		previewCount(truncation.IncludedRows), previewCount(truncation.TotalRows), truncation.Unit)
+}
+
+// previewByteSize renders a byte count the way the note reads it aloud: whole
+// mebibytes past a mebibyte, kibibytes below that.
+func previewByteSize(size int64) string {
+	switch {
+	case size >= 1<<20:
+		return fmt.Sprintf("%d MiB", size/(1<<20))
+	case size >= 1<<10:
+		return fmt.Sprintf("%d KiB", size/(1<<10))
+	default:
+		return fmt.Sprintf("%d bytes", size)
+	}
+}
+
+// previewCount groups a row count in thousands so a six-figure count stays
+// readable in one glance.
+func previewCount(count int64) string {
+	digits := strconv.FormatInt(count, 10)
+	if len(digits) <= 3 {
+		return digits
+	}
+	var grouped strings.Builder
+	lead := len(digits) % 3
+	if lead > 0 {
+		grouped.WriteString(digits[:lead])
+	}
+	for index := lead; index < len(digits); index += 3 {
+		if grouped.Len() > 0 {
+			grouped.WriteByte(',')
+		}
+		grouped.WriteString(digits[index : index+3])
+	}
+	return grouped.String()
 }
 
 // Previewable reports that discovery recorded a transcript location for the
@@ -248,19 +347,19 @@ func (s *SourceTurns) Previewable(sessionID string) bool {
 	return ok
 }
 
-func (s *SourceTurns) lookup(sessionID string) ([]ingest.Turn, bool) {
+func (s *SourceTurns) lookup(sessionID string) (sourcePreview, bool) {
 	if s.limit <= 0 {
-		return nil, false
+		return sourcePreview{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	turns, ok := s.cached[sessionID]
-	return turns, ok
+	preview, ok := s.cached[sessionID]
+	return preview, ok
 }
 
 // store keeps the parsed turns and drops the oldest entry once the cache is
 // full, so a long scan cannot grow the memory of the wizard without a bound.
-func (s *SourceTurns) store(sessionID string, turns []ingest.Turn) {
+func (s *SourceTurns) store(sessionID string, preview sourcePreview) {
 	if s.limit <= 0 {
 		return
 	}
@@ -269,7 +368,7 @@ func (s *SourceTurns) store(sessionID string, turns []ingest.Turn) {
 	if _, ok := s.cached[sessionID]; !ok {
 		s.recency = append(s.recency, sessionID)
 	}
-	s.cached[sessionID] = turns
+	s.cached[sessionID] = preview
 	for len(s.recency) > s.limit {
 		oldest := s.recency[0]
 		s.recency = s.recency[1:]

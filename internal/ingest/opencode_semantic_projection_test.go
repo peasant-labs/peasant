@@ -733,6 +733,12 @@ func (source semanticNegativeSource) LegacyMessages(context.Context, OpenCodeLeg
 func (source semanticNegativeSource) LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error) {
 	return OpenCodeLegacyPartPage{}, nil
 }
+func (source semanticNegativeSource) LegacySessionPayloadSize(context.Context, OpenCodeLegacySessionID) (OpenCodePayloadSize, error) {
+	return OpenCodePayloadSize{}, nil
+}
+func (source semanticNegativeSource) CurrentSessionPayloadSize(context.Context, OpenCodeCurrentSessionID) (OpenCodePayloadSize, error) {
+	return OpenCodePayloadSize{}, nil
+}
 func (source semanticNegativeSource) SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
 	return OpenCodeSessionRecordPage{}, nil
 }

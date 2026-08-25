@@ -32,6 +32,19 @@ const (
 	openCodeCurrentMessagesFirstStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
 	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
 	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
+	// The payload-size probes count one session's payload-bearing rows and sum
+	// their data length. LENGTH() computes from the record header, so a probe
+	// never reads the payloads it measures; the session_id index keeps the read
+	// bounded by the session's own rows.
+	//
+	// A legacy session carries payload in BOTH of its tables, so it needs both
+	// probes. Measured on a real OpenCode store, one legacy session held 1.5 GiB
+	// across 2586 message rows and 786 MiB across 13486 part rows, with single
+	// message rows past 36 MiB. A bound that counted parts alone would have let
+	// the message read pull gigabytes before the part budget ever applied.
+	openCodeLegacySessionPartPayloadSizeStatement    = "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM part WHERE session_id = ?1"
+	openCodeLegacySessionMessagePayloadSizeStatement = "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM message WHERE session_id = ?1"
+	openCodeCurrentSessionPayloadSizeStatement       = "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM session_message WHERE session_id = ?1"
 
 	openCodeLegacyMessageFreshnessBySessionStatement = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM message GROUP BY session_id"
 	openCodeLegacyPartFreshnessBySessionStatement    = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM part GROUP BY session_id"
@@ -1184,6 +1197,70 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionHasSubstantive(ctx context
 		return false, s.sourceReadError(lease.ctx, "probe current session for a substantive row", err, "session_message(session_id, type)", "supported current session_message")
 	}
 	return found, nil
+}
+
+// LegacySessionPayloadSize counts one legacy session's message and part rows
+// and sums their data length in two bounded aggregates keyed on the indexed
+// session_id column. Neither read projects the data payloads, so both stay
+// cheap on a session whose rows are hundreds of megabytes. The preview uses the
+// total to decide whether it must bound its materialization, and a legacy
+// materialization reads both tables, so both must be counted.
+func (s *zombiezenOpenCodeSQLiteSource) LegacySessionPayloadSize(ctx context.Context, sessionID OpenCodeLegacySessionID) (OpenCodePayloadSize, error) {
+	if err := validateOpenCodeLegacyIdentifier("session", sessionID.value); err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read legacy session payload size")
+	if err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	defer lease.release()
+	var messages, parts OpenCodePayloadSize
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacySessionMessagePayloadSizeStatement, []any{sessionID.value}, newOpenCodePayloadSizeDecoder(&messages)); err != nil || lease.ctx.Err() != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read legacy session payload size", err, "message(session_id, length(data))", "supported legacy message/part")
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacySessionPartPayloadSizeStatement, []any{sessionID.value}, newOpenCodePayloadSizeDecoder(&parts)); err != nil || lease.ctx.Err() != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read legacy session payload size", err, "part(session_id, length(data))", "supported legacy message/part")
+	}
+	return OpenCodePayloadSize{Rows: messages.Rows + parts.Rows, Bytes: messages.Bytes + parts.Bytes}, nil
+}
+
+// CurrentSessionPayloadSize counts one current session's message rows and sums
+// their data byte length in a single bounded aggregate keyed on the indexed
+// session_id column. The read never projects the data payloads. The preview
+// uses it to decide whether it must bound its materialization.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionPayloadSize(ctx context.Context, sessionID OpenCodeCurrentSessionID) (OpenCodePayloadSize, error) {
+	if err := validateOpenCodeCurrentToken("session identifier", sessionID.value); err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read current session payload size")
+	if err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	defer lease.release()
+	var size OpenCodePayloadSize
+	decode := newOpenCodePayloadSizeDecoder(&size)
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentSessionPayloadSizeStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read current session payload size", err, "session_message(session_id, length(data))", "supported current session_message")
+	}
+	return size, nil
+}
+
+// newOpenCodePayloadSizeDecoder decodes one (COUNT, COALESCE(SUM(LENGTH),0)) row
+// into the payload size. Both columns are non-null integers because COUNT and
+// the COALESCE guarantee it, so a non-integer column is a schema fault the read
+// reports rather than silently treating as zero.
+func newOpenCodePayloadSizeDecoder(size *OpenCodePayloadSize) func(*sqlite.Stmt) error {
+	return func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeInteger {
+			return fmt.Errorf("decode payload size: row count has SQLite type %s instead of integer", stmt.ColumnType(0))
+		}
+		if stmt.ColumnType(1) != sqlite.TypeInteger {
+			return fmt.Errorf("decode payload size: summed byte length has SQLite type %s instead of integer", stmt.ColumnType(1))
+		}
+		size.Rows = stmt.ColumnInt64(0)
+		size.Bytes = stmt.ColumnInt64(1)
+		return nil
+	}
 }
 
 type openCodeReadLease struct {

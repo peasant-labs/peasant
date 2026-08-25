@@ -232,6 +232,12 @@ allowed_query_statements:
     statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by id limit ?2'
   - name: legacy-session-parts-after
     statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and id > ?2 order by id limit ?3'
+  - name: legacy-session-part-payload-size
+    statement: 'select count(*), coalesce(sum(length(data)), 0) from part where session_id = ?1'
+  - name: legacy-session-message-payload-size
+    statement: 'select count(*), coalesce(sum(length(data)), 0) from message where session_id = ?1'
+  - name: current-session-payload-size
+    statement: 'select count(*), coalesce(sum(length(data)), 0) from session_message where session_id = ?1'
 required_query_guard_mutations:
   - payload-table-scope
   - keyset-predicate

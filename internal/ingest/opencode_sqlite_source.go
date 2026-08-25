@@ -599,6 +599,17 @@ func (systemOpenCodeSQLiteDeadlineClock) WithTimeout(parent context.Context, tim
 	return context.WithTimeout(parent, timeout)
 }
 
+// OpenCodePayloadSize is one session's payload cost, read without reading the
+// payloads themselves. Rows is the number of payload-bearing rows the session
+// carries (legacy part rows, or current message rows), and Bytes is the summed
+// byte length of their data columns. The preview reads it before materializing
+// so it can bound an especially long session. SQLite computes LENGTH from a
+// record header, so this read never loads the payloads into memory.
+type OpenCodePayloadSize struct {
+	Rows  int64
+	Bytes int64
+}
+
 // OpenCodeSQLiteSource exposes bounded, detached catalog and transcript
 // pages plus bounded cleanup. It deliberately provides no raw connection, SQL,
 // arguments, transactions, query kinds, table names, writable surfaces, or
@@ -611,6 +622,8 @@ type OpenCodeSQLiteSource interface {
 	LegacyFreshnessBySession(context.Context) (map[string]time.Time, error)
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
 	LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error)
+	LegacySessionPayloadSize(context.Context, OpenCodeLegacySessionID) (OpenCodePayloadSize, error)
+	CurrentSessionPayloadSize(context.Context, OpenCodeCurrentSessionID) (OpenCodePayloadSize, error)
 	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
 	ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error)
 	EventSequenceBySession(context.Context) (OpenCodeEventSequence, error)

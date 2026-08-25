@@ -57,6 +57,25 @@ const ContentPreviewLimit = 2000
 // that would exhaust memory.
 const OpenCodeManagedProjectionMaxBytes = 64 << 20 // 64 MiB
 
+// OpenCodePreviewMaterializeMaxBytes bounds how much OpenCode session payload
+// the kickstart preview materializes before it stops and marks the result
+// truncated. Only the preview path uses this bound; ingest and harvest still
+// materialize the whole session.
+//
+// The preview reads a session directly from the provider database, so an
+// especially long session can hold hundreds of megabytes of part or message
+// payload. Without a bound the preview accumulates every row, marshals the
+// whole projection, and re-parses it, which multiplies one session into
+// several gigabytes of live heap. This bound stops that: the preview shows a
+// prefix and names how much of the session it left out.
+//
+// The value equals OpenCodeManagedProjectionMaxBytes on purpose. That constant
+// is the largest managed projection the indexer will read from disk, so a
+// preview that shows at most this many payload bytes never renders more than a
+// valid managed projection could hold. A single, shared 64 MiB ceiling keeps
+// the preview and the stored-projection paths consistent.
+const OpenCodePreviewMaterializeMaxBytes = OpenCodeManagedProjectionMaxBytes
+
 // Scanner buffer sizes for reading large JSONL lines.
 const (
 	ScannerMaxLine = 10 << 20 // 10 MiB

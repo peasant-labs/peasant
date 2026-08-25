@@ -4,11 +4,19 @@
 # that session through the transcript materializer. A SQLite session's source
 # path is the provider database, so the preview must never read that path
 # directly; it must materialize the one selected session's rows instead.
+#
+# preview_budget_bytes bounds how much of the session the preview materializes.
+# A case that leaves it unset previews the whole session and must show no
+# notice. A case that sets a tiny budget forces the bound and must show the
+# notice naming what the preview left out, WITH the turns it did read.
+#
 # required_cases names the cases that must stay present; removing one goes red
 # by name. Adding a case need not appear here.
 required_cases:
   - legacy-sqlite-session-previews-through-the-materializer
   - current-sqlite-session-previews-through-the-materializer
+  - legacy-sqlite-session-over-budget-previews-a-prefix-with-a-notice
+  - current-sqlite-session-over-budget-previews-a-prefix-with-a-notice
 cases:
   - name: legacy-sqlite-session-previews-through-the-materializer
     source_fixture: legacy-mounted-projection
@@ -18,3 +26,27 @@ cases:
     source_fixture: semantic-parity-current
     origin: opencode-current-sqlite
     min_turns: 1
+
+  - name: legacy-sqlite-session-over-budget-previews-a-prefix-with-a-notice
+    source_fixture: legacy-mounted-projection
+    origin: opencode-legacy-sqlite
+    min_turns: 1
+    # Enough for the session's message rows and part of its part rows, so the
+    # preview still shows a turn while the bound cuts the rest away.
+    preview_budget_bytes: 700
+    expect_notice_contains:
+      - preview shows the first
+      - rows
+      - the full session ingests normally
+      - this bound applies to the preview only
+
+  - name: current-sqlite-session-over-budget-previews-a-prefix-with-a-notice
+    source_fixture: semantic-parity-current
+    origin: opencode-current-sqlite
+    min_turns: 1
+    preview_budget_bytes: 1
+    expect_notice_contains:
+      - preview shows the first
+      - messages
+      - the full session ingests normally
+      - this bound applies to the preview only

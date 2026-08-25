@@ -25,6 +25,15 @@ import (
 // recorded turns directly.
 type SessionTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 
+// SessionPreviewNoticeFunc reports a plain sentence the preview must show ABOVE
+// the turns it already loaded, or the empty string when there is nothing to
+// say. It exists because a preview can be complete in itself yet still stand
+// for less than the whole session: a very long session is read under a byte
+// bound, so the pane must name what it left out rather than silently showing a
+// prefix. It is read only after the turns load, so the sentence always
+// describes the turns on screen.
+type SessionPreviewNoticeFunc func(sessionID string) string
+
 // EmptySessionPreview is the imported-but-empty session state. SourceJSON is a
 // bounded JSONL excerpt that ListingPreview renders through the JSON highlighter.
 type EmptySessionPreview struct {
@@ -78,6 +87,14 @@ func WithEmptySessionBody(body EmptySessionBodyFunc) ListingPreviewOption {
 	}
 }
 
+// WithSessionPreviewNotice supplies the sentence the preview shows above the
+// turns of a session it could only read in part.
+func WithSessionPreviewNotice(notice SessionPreviewNoticeFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.notice = notice
+	}
+}
+
 // WithListingPreviewContextSource enables project and branch detail bodies from
 // the exact scanner forest that supplied the highlighted row.
 func WithListingPreviewContextSource(source ListingPreviewContextSource) ListingPreviewOption {
@@ -121,6 +138,7 @@ type ListingPreview struct {
 	renderer  *transcriptview.Renderer
 	th        theme.Theme
 	contexts  ListingPreviewContextSource
+	notice    SessionPreviewNoticeFunc
 }
 
 // NewListingPreview builds the selection step's preview over the discovery
@@ -186,6 +204,9 @@ func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
 		return body, nil
 	}
 	body.transcript = p.renderer.Document(recorded)
+	if p.notice != nil {
+		body.notice = p.notice(id)
+	}
 	return body, nil
 }
 
@@ -309,8 +330,11 @@ type sessionBody struct {
 	th         theme.Theme
 	header     []string
 	transcript transcriptview.Document
-	note       string
-	rawJSON    string
+	// notice stands WITH the transcript rather than instead of it: it says what
+	// the loaded turns leave out. note replaces a transcript that is not there.
+	notice  string
+	note    string
+	rawJSON string
 }
 
 var _ kit.PreviewBody = sessionBody{}
@@ -333,6 +357,9 @@ func (b sessionBody) Render(width int) string {
 			head = append(head, styles.Muted.Render(ansi.Truncate(line, width, "")))
 		}
 		parts = append(parts, strings.Join(head, "\n"))
+	}
+	if b.notice != "" {
+		parts = append(parts, styles.Muted.Render(ansi.Wrap(b.notice, width, "")))
 	}
 	if body := b.transcript.Render(width); body != "" {
 		parts = append(parts, body)
@@ -357,6 +384,9 @@ func (b sessionBody) plain() string {
 	var parts []string
 	if len(b.header) > 0 {
 		parts = append(parts, strings.Join(b.header, "\n"))
+	}
+	if b.notice != "" {
+		parts = append(parts, b.notice)
 	}
 	if body := b.transcript.Render(0); body != "" {
 		parts = append(parts, body)

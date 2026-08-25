@@ -21,6 +21,17 @@ const (
 	openCodeLegacyProjectionVersion            = 2
 	openCodeLegacyProjectionMinReadableVersion = 1
 	openCodeLegacyMaterializePage              = 128
+	// openCodeLegacyMessageBudgetShare is the fraction of a bounded read's byte
+	// budget the message pass may spend before it stops and leaves the rest to
+	// the part pass.
+	//
+	// A legacy session keeps its RENDERABLE content in part rows; a message row
+	// carries the role, the timing, and whatever metadata the harness attached,
+	// which on a real store reaches 36 MiB for a single row. A bound that let
+	// the message pass spend the whole budget therefore produced a preview of
+	// dozens of turns with no content in any of them. Reserving most of the
+	// budget for parts keeps a bounded preview readable.
+	openCodeLegacyMessageBudgetShare = 4
 )
 
 type openCodeLegacyProjection struct {
@@ -150,6 +161,14 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	}); err != nil {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
 	}
+	return a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+}
+
+// finishLegacyManagedProjection encodes a read legacy projection into the
+// managed JSON bytes and derives its metadata. The full-session and preview
+// prefix reads share it, so both encode and attribute the projection the same
+// way; the prefix read simply hands it a projection bounded by the budget.
+func (a *OpenCodeAdapter) finishLegacyManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection, dropped []openCodeDroppedOrphanPart) (*UnifiedMetadata, []byte, error) {
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q from %q produced no messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
 	}
@@ -164,6 +183,61 @@ func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session Dis
 	}
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, droppedOpenCodeOrphanPartDiagnostics(session, dropped)...)
 	return metadata, data, nil
+}
+
+// MaterializeTranscriptBounded materializes a preview-only prefix of a session
+// under budgetBytes. It first probes the session's payload size. When the
+// payload fits the budget it materializes the whole session and reports no
+// truncation, so a short session previews exactly as it ingests. When the
+// payload is over the budget it materializes a prefix, stopping once the summed
+// part or message payload reaches the budget, and reports how much it left out.
+// The whole session still ingests normally through MaterializeTranscript; this
+// bound applies only to the preview.
+func (a *OpenCodeAdapter) MaterializeTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error) {
+	switch session.TranscriptOrigin {
+	case TranscriptOriginOpenCodeCurrentSQLite:
+		return a.materializeCurrentTranscriptBounded(ctx, session, budgetBytes)
+	case TranscriptOriginOpenCodeLegacySQLite:
+		return a.materializeLegacyTranscriptBounded(ctx, session, budgetBytes)
+	default:
+		return nil, nil, MaterializeTruncation{}, fmt.Errorf("materialize bounded OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
+	}
+}
+
+func (a *OpenCodeAdapter) materializeLegacyTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error) {
+	legacyID, err := NewOpenCodeLegacySessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	var projection openCodeLegacyProjection
+	var dropped []openCodeDroppedOrphanPart
+	var truncation MaterializeTruncation
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		size, sizeErr := source.LegacySessionPayloadSize(ctx, legacyID)
+		if sizeErr != nil {
+			return sizeErr
+		}
+		budget := int64(0)
+		if budgetBytes > 0 && size.Bytes > budgetBytes {
+			// Only bound the read when the session is genuinely over the budget, so
+			// a session that fits materializes exactly as it ingests.
+			budget = budgetBytes
+		}
+		var readErr error
+		projection, dropped, truncation, readErr = readOpenCodeLegacyProjectionCore(ctx, source, legacyID, pageSize, budget, size)
+		return readErr
+	}); err != nil {
+		return nil, nil, MaterializeTruncation{}, fmt.Errorf("materialize bounded legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
+	}
+	metadata, data, err := a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	return metadata, data, truncation, nil
 }
 
 // openCodeDroppedOrphanPart records one selected orphan part row that the
@@ -239,17 +313,58 @@ func openCodeUnknownTypeDiagnostics(session DiscoveredSession, counts map[string
 }
 
 func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize) (openCodeLegacyProjection, []openCodeDroppedOrphanPart, error) {
+	// A zero budget and zero payload size read the whole session: the part loop
+	// never crosses an unset budget, so no truncation is possible.
+	projection, dropped, _, err := readOpenCodeLegacyProjectionCore(ctx, source, sessionID, pageSize, 0, OpenCodePayloadSize{})
+	return projection, dropped, err
+}
+
+// readOpenCodeLegacyProjectionCore reads the session's messages and then its
+// parts in one pass, partitioning each part into its message or into an orphan.
+//
+// When budget is positive it stops accumulating once the summed payload byte
+// length of the rows it took reaches the budget, and reports the truncation. It
+// counts message rows and part rows alike, because a legacy session carries
+// payload in both tables and a materialization reads both, and it caps the
+// message pass at a share of the budget so the part rows that hold the
+// transcript content always have room left. A non-positive budget reads the
+// whole session and reports no truncation. size carries the whole-session
+// totals so a truncated result can name how much it left out. The full-session
+// read and the preview prefix read share this one path.
+func readOpenCodeLegacyProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeLegacySessionID, pageSize OpenCodeLegacyPageSize, budget int64, size OpenCodePayloadSize) (openCodeLegacyProjection, []openCodeDroppedOrphanPart, MaterializeTruncation, error) {
 	projection := openCodeLegacyProjection{Format: openCodeLegacyProjectionFormat, Version: openCodeLegacyProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	// Read the session's messages first and remember each message's slot, so the
 	// single part pass can attach a part to its message in memory.
 	messageSlot := make(map[string]int)
 	var messageCursor *OpenCodeLegacyMessageCursor
+	// readBytes is what the read pulled out of the source and is what the budget
+	// governs. includedRows and includedBytes are what reached the projection,
+	// which is what a note about the preview describes: a part of a message the
+	// read stopped short of was paid for but is not shown.
+	var readBytes, includedBytes, includedRows int64
+	messagesTruncated := false
+	partsTruncated := false
+	messageBudget := budget / openCodeLegacyMessageBudgetShare
+messageLoop:
 	for {
 		page, err := source.LegacyMessages(ctx, OpenCodeLegacyMessagePageRequest{SessionID: sessionID, PageSize: pageSize, After: messageCursor})
 		if err != nil {
-			return openCodeLegacyProjection{}, nil, err
+			return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, err
 		}
 		for _, row := range page.Messages {
+			// The budget is checked BEFORE the row is taken, so a read that spent
+			// its budget exactly on the last row of the session reports no
+			// truncation: there was nothing left to leave out.
+			if messageBudget > 0 && readBytes >= messageBudget {
+				messagesTruncated = true
+				break messageLoop
+			}
+			// A legacy message row carries payload of its own, past 36 MiB on a
+			// real store, so the budget must count it. Counting parts alone let a
+			// message read pull gigabytes before any bound applied.
+			readBytes += int64(len(row.Data))
+			includedRows++
+			includedBytes += int64(len(row.Data))
 			messageSlot[row.ID.String()] = len(projection.Messages)
 			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{ID: row.ID.String(), SessionID: row.SessionID.String(), TimeCreated: row.TimeCreated, TimeUpdated: row.TimeUpdated, Data: json.RawMessage(row.Data), Parts: []openCodeLegacyProjectionPart{}})
 		}
@@ -262,33 +377,58 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 	// in memory: a part whose message is present attaches to that message; a part
 	// whose message is absent is an orphan. This replaces the per-message part
 	// read plus the correlated orphan scan, which read the part table twice.
+	//
+	// The pass keeps running after a truncated message pass, on the remaining
+	// budget, because the transcript content the preview renders lives in these
+	// part rows. What it must not do is treat a part of a message the message
+	// pass simply never reached as an orphan: that message exists, so
+	// synthesizing a root attachment for its part would invent a turn the
+	// session never held.
 	var dropped []openCodeDroppedOrphanPart
 	var partCursor *OpenCodeLegacyPartCursor
+partLoop:
 	for {
 		page, err := source.LegacySessionParts(ctx, OpenCodeLegacySessionPartPageRequest{SessionID: sessionID, PageSize: pageSize, After: partCursor})
 		if err != nil {
-			return openCodeLegacyProjection{}, nil, err
+			return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, err
 		}
 		for _, drop := range page.Dropped {
 			if _, present := messageSlot[drop.MessageID.String()]; present && !drop.MessageID.IsEmpty() {
 				// A part whose message is present must decode. A decode failure
 				// fails the whole session, matching the strict per-message read
 				// this single pass replaces; it is not a tolerable orphan.
-				return openCodeLegacyProjection{}, nil, fmt.Errorf("read OpenCode legacy part %q for present message %q failed while partitioning the single part pass: %s; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", drop.PartID.String(), drop.MessageID.String(), drop.Reason)
+				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, fmt.Errorf("read OpenCode legacy part %q for present message %q failed while partitioning the single part pass: %s; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", drop.PartID.String(), drop.MessageID.String(), drop.Reason)
 			}
 			// A part row whose message is absent is a true orphan. Drop it with a
 			// warning that names the row, never a session failure.
 			dropped = append(dropped, openCodeDroppedOrphanPart{partID: drop.PartID.String(), messageID: drop.MessageID.String(), reason: drop.Reason})
 		}
 		for _, part := range page.Parts {
+			// Every part row the source returned counts toward the budget, whether
+			// or not it reaches the projection: the budget bounds how much source
+			// payload this read pulls into memory, and a skipped row was already
+			// paid for. Counting only the rows that landed let a session whose
+			// message pass stopped early scan its whole part table.
+			if budget > 0 && readBytes >= budget {
+				partsTruncated = true
+				break partLoop
+			}
+			readBytes += int64(len(part.Data))
 			projectionPart := openCodeLegacyProjectionPart{ID: part.ID.String(), MessageID: part.MessageID.String(), SessionID: part.SessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}
 			if slot, present := messageSlot[part.MessageID.String()]; present {
 				// A part whose message is present must carry valid JSON, matching
 				// the strict per-message read this pass replaces.
 				if !json.Valid([]byte(part.Data)) {
-					return openCodeLegacyProjection{}, nil, fmt.Errorf("read OpenCode legacy part %q for message %q failed while partitioning the single part pass: its data is not valid JSON; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", part.ID.String(), part.MessageID.String())
+					return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, fmt.Errorf("read OpenCode legacy part %q for message %q failed while partitioning the single part pass: its data is not valid JSON; no partial managed projection was emitted; repair the malformed part in OpenCode and retry", part.ID.String(), part.MessageID.String())
 				}
 				projection.Messages[slot].Parts = append(projection.Messages[slot].Parts, projectionPart)
+				includedRows++
+				includedBytes += int64(len(part.Data))
+				continue
+			}
+			if messagesTruncated {
+				// The part belongs to a message this read stopped short of, not to
+				// an absent one. Leave it out rather than call it an orphan.
 				continue
 			}
 			if reason := unusableOpenCodeOrphanPartReason([]byte(part.Data)); reason != "" {
@@ -306,19 +446,25 @@ func readOpenCodeLegacyProjectionWithDiagnostics(ctx context.Context, source Ope
 				"role":      RoleSystem.String(),
 			})
 			if marshalErr != nil {
-				return openCodeLegacyProjection{}, nil, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
+				return openCodeLegacyProjection{}, nil, MaterializeTruncation{}, fmt.Errorf("normalize orphan legacy part %q failed while encoding its root attachment: %w; the selected row was not dropped and no partial projection was emitted; report the unsupported row identity", part.ID.String(), marshalErr)
 			}
 			projection.Messages = append(projection.Messages, openCodeLegacyProjectionMessage{
 				ID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: data, Orphan: true,
 				Parts: []openCodeLegacyProjectionPart{{ID: part.ID.String(), MessageID: syntheticMessageID, SessionID: sessionID.String(), TimeCreated: part.TimeCreated, TimeUpdated: part.TimeUpdated, Data: json.RawMessage(part.Data)}},
 			})
+			includedRows++
+			includedBytes += int64(len(part.Data))
 		}
 		if page.Next == nil {
 			break
 		}
 		partCursor = page.Next
 	}
-	return projection, dropped, nil
+	truncation := MaterializeTruncation{}
+	if messagesTruncated || partsTruncated {
+		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitRows, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
+	}
+	return projection, dropped, truncation, nil
 }
 
 func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeLegacyProjection) (*UnifiedMetadata, error) {

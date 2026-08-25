@@ -1,0 +1,38 @@
+# Cases for the per-session payload-size probe the bounded preview reads first.
+#
+# Each case names a materialized source, one session in it, and whether the
+# session holds payload rows. The probe result is compared against the same rows
+# read through the paged reader, so the probe cannot drift from what a
+# materialization would actually load.
+#
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - legacy-session-payload-size-matches-its-paged-parts
+  - legacy-unknown-session-reports-no-payload
+  - current-session-payload-size-matches-its-paged-messages
+  - current-unknown-session-reports-no-payload
+cases:
+  - name: legacy-session-payload-size-matches-its-paged-parts
+    origin: legacy
+    fixture: legacy-reader-pages
+    session_id: ses_reader_a
+    expect_payload: true
+
+  - name: legacy-unknown-session-reports-no-payload
+    origin: legacy
+    fixture: legacy-reader-pages
+    session_id: ses_absent_from_source
+    expect_payload: false
+
+  - name: current-session-payload-size-matches-its-paged-messages
+    origin: current
+    fixture: current-reader-pages
+    session_id: ses_current_reader_a
+    expect_payload: true
+
+  - name: current-unknown-session-reports-no-payload
+    origin: current
+    fixture: current-reader-pages
+    session_id: ses_absent_from_source
+    expect_payload: false

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -30,6 +31,12 @@ type sourcePreviewSQLiteCase struct {
 	SourceFixture string                   `yaml:"source_fixture"`
 	Origin        ftue.SessionSourceOrigin `yaml:"origin"`
 	MinTurns      int                      `yaml:"min_turns"`
+	// PreviewBudgetBytes bounds the preview materialization. Zero previews the
+	// whole session, which is what a case without a bound asserts.
+	PreviewBudgetBytes int64 `yaml:"preview_budget_bytes"`
+	// ExpectNoticeContains lists the phrases the truncation note must carry. An
+	// empty list means the preview must show no note at all.
+	ExpectNoticeContains []string `yaml:"expect_notice_contains"`
 }
 
 type sourcePreviewSQLiteDoc struct {
@@ -129,9 +136,14 @@ func TestSourceTurns_PreviewsUningestedSQLiteSessionThroughMaterializer(t *testi
 			if listing.Source.Origin != c.Origin {
 				t.Fatalf("listing origin %q, want %q", listing.Source.Origin, c.Origin)
 			}
-			reader := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing},
+			options := []kickstart.SourceTurnsOption{
 				kickstart.WithSourceTurnsGitResolver(testutil.NoGitResolver()),
-				kickstart.WithSourceTurnsSalt(salt.Salt{}))
+				kickstart.WithSourceTurnsSalt(salt.Salt{}),
+			}
+			if c.PreviewBudgetBytes > 0 {
+				options = append(options, kickstart.WithSourceTurnsPreviewBudget(c.PreviewBudgetBytes))
+			}
+			reader := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, []ftue.SessionListing{listing}, options...)
 
 			turns, err := reader.Turns(listing.SessionID)
 			if err != nil {
@@ -139,6 +151,18 @@ func TestSourceTurns_PreviewsUningestedSQLiteSessionThroughMaterializer(t *testi
 			}
 			if len(turns) < c.MinTurns {
 				t.Fatalf("preview produced %d turns, want at least %d", len(turns), c.MinTurns)
+			}
+			notice := reader.Notice(listing.SessionID)
+			if len(c.ExpectNoticeContains) == 0 {
+				if notice != "" {
+					t.Fatalf("preview of a whole session showed the note %q, want none", notice)
+				}
+				return
+			}
+			for _, phrase := range c.ExpectNoticeContains {
+				if !strings.Contains(notice, phrase) {
+					t.Errorf("truncation note %q does not name %q", notice, phrase)
+				}
 			}
 		})
 	}

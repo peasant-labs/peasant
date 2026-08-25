@@ -400,7 +400,10 @@ func kickstartPreview(
 		}
 		return sourceTurns.Turns(sessionID)
 	})
-	var opts []kickstart.ListingPreviewOption
+	// The notice reports what the bounded harness read left out. A session the
+	// store already answered has no harness read behind it, so its notice is
+	// empty and the pane shows the stored turns alone.
+	opts := []kickstart.ListingPreviewOption{kickstart.WithSessionPreviewNotice(sourceTurns.Notice)}
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
 	}
