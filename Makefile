@@ -139,8 +139,9 @@ guided-screenshots:
 guided-screenshots-test:
 	go test -race -tags=guided_screenshots ./cmd/peasant-guided-screenshots
 
-# Opt-in, read-only measurement harness for acceptance gate G1 (session
-# origin). Runs the production sessionorigin.Classify rule over the
+# Opt-in, read-only measurement harness that checks the production
+# session-origin classifier's signal distribution against a real transcript
+# history. Runs the production sessionorigin.Classify rule over the
 # operator's OWN ~/.claude/projects and reports counts per deciding signal.
 # It writes nothing anywhere. The build tag keeps it, and its tests, out of
 # `go build ./...`, `make check`, and the shipped peasant binary -- same

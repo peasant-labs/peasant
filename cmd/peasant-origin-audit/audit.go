@@ -20,7 +20,7 @@ import (
 
 // Report is the tallied result of one read-only pass of the production
 // session-origin rule over a Claude Code harness directory. It is the
-// evidence for acceptance gate G1: does the rule, run over a real person's
+// real-store measurement: does the rule, run over a real person's
 // real transcript history, produce the distribution the plan predicted.
 type Report struct {
 	SourcePath       string

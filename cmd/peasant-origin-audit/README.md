@@ -1,9 +1,9 @@
 # Session-origin real-store audit
 
-This manually invoked, read-only harness is the measuring instrument for acceptance gate G1 of the
-session-origin epoch: does `sessionorigin.Classify` -- the one production classification rule --
-produce the distribution the implementation plan predicted when it is run over a real person's own
-harness history?
+This manually invoked, read-only harness checks the real-store measurement question: does
+`sessionorigin.Classify` -- the one production classification rule -- produce the signal
+distribution the implementation plan predicted, when it is run over a real person's own harness
+history?
 
 It walks the operator's own Claude Code projects directory through the same production discovery
 path Peasant's ingest pipeline uses (`ingest.NewClaudeAdapter(...).Discover`), and tallies how many

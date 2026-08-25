@@ -4,7 +4,7 @@
 // runs the production session-origin classification rule
 // (sessionorigin.Classify, via the real Claude Code discovery/mining path)
 // over one operator's own harness transcripts and reports how many landed in
-// each deciding signal. It is the evidence for acceptance gate G1: whether the
+// each deciding signal. It is the real-store measurement that checks whether the
 // rule, run over a real transcript history, produces the distribution the
 // implementation plan predicted.
 //
@@ -80,7 +80,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 func printActionable(writer io.Writer, what string, cause error, fix string) {
 	fmt.Fprintf(
 		writer,
-		"peasant origin audit failed\nwhat: %s.\nwhy: %v.\nwhere: cmd/peasant-origin-audit.\nwhen: measuring the production session-origin classifier against real harness transcripts.\nmeans: the acceptance-gate measurement in G1 could not be produced.\nfix: %s.\n",
+		"peasant origin audit failed\nwhat: %s.\nwhy: %v.\nwhere: cmd/peasant-origin-audit.\nwhen: measuring the production session-origin classifier against real harness transcripts.\nmeans: the real-store signal-distribution measurement could not be produced.\nfix: %s.\n",
 		what, cause, fix,
 	)
 }
