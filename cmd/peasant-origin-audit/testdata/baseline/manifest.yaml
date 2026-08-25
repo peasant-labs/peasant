@@ -1,9 +1,6 @@
-# Deletion guard for testdata/baseline/cases.yaml, decoded through the shared
-# internal/testutil.SemanticManifest helper rather than a bespoke copy of the
-# same required-name check. Removing a case row (or a fixture file it points
-# at) makes the case list disagree with this manifest, which fails the test
-# loudly instead of silently shrinking the baseline's coverage.
-expectedCaseCount: 8
+# Deletion guard for testdata/baseline/cases.yaml. Removing a case row (or a
+# fixture file it points at) fails the required-names guard, which fails the
+# test loudly instead of silently shrinking the baseline's coverage.
 requiredNames:
   - structured_identity_root
   - programmatic_launch_root
