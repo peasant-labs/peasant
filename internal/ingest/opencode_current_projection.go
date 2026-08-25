@@ -383,6 +383,37 @@ func (a *OpenCodeAdapter) materializeCurrentTranscriptBounded(ctx context.Contex
 	return metadata, data, truncation, nil
 }
 
+func (a *OpenCodeAdapter) materializeCurrentTranscriptFirstPage(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, bool, error) {
+	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, false, err
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if budgetBytes <= 0 {
+		return nil, nil, false, fmt.Errorf("materialize the first page of current OpenCode SQLite session %q failed before source access: the byte budget %d is not positive; no managed state was written; pass the preview first-page budget", session.SessionID, budgetBytes)
+	}
+	var projection openCodeCurrentProjection
+	var unknownControlTypes map[string]int
+	var truncation MaterializeTruncation
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		// The zero payload size is deliberate: it fills only the totals a
+		// truncation note quotes, and the first-page read writes no note.
+		var readErr error
+		projection, unknownControlTypes, truncation, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, budgetBytes, OpenCodePayloadSize{})
+		return readErr
+	}); err != nil {
+		return nil, nil, false, fmt.Errorf("materialize the first page of current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
+	}
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return metadata, data, truncation.Truncated, nil
+}
+
 func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, map[string]int, error) {
 	projection, unknownControlTypes, _, err := readOpenCodeCurrentProjectionCore(ctx, source, sessionID, pageSize, 0, OpenCodePayloadSize{})
 	return projection, unknownControlTypes, err

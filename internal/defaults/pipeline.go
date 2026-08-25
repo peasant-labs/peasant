@@ -76,6 +76,30 @@ const OpenCodeManagedProjectionMaxBytes = 64 << 20 // 64 MiB
 // the preview and the stored-projection paths consistent.
 const OpenCodePreviewMaterializeMaxBytes = OpenCodeManagedProjectionMaxBytes
 
+// OpenCodePreviewFirstPageMaxBytes bounds the first, quickly-read slice of an
+// OpenCode session the kickstart preview paints before the full bounded read
+// finishes. Only the preview path uses this bound.
+//
+// The whole bound exists to put turns on screen fast, so it is set from what a
+// larger bound actually buys. Measured against a real OpenCode store holding a
+// session of 2.2 GiB of message and part payload:
+//
+//	64 KiB   about 0.44 s   34 turns
+//	128 KiB  about 1.37 s   48 turns
+//	1 MiB    about 1.32 s   48 turns
+//
+// The cliff between the first two rows is one single message row of 25 MiB. A
+// bound is spent BEFORE a row is taken, not after, so any bound past the point
+// where that row is reached pays for the whole row - to read it, and again to
+// parse it - and every larger bound then costs the same. 64 KiB stops short of
+// it and returns several screenfuls of turns in under half a second, which is
+// the point of the slice. The turns the larger bounds add arrive moments later
+// anyway, in the full bounded read this slice is only covering for.
+//
+// A session whose whole payload fits inside this bound is read ONCE: the slice
+// is then the entire session, and no second read runs.
+const OpenCodePreviewFirstPageMaxBytes = 64 << 10 // 64 KiB
+
 // Scanner buffer sizes for reading large JSONL lines.
 const (
 	ScannerMaxLine = 10 << 20 // 10 MiB

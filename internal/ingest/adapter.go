@@ -39,6 +39,25 @@ type BoundedTranscriptMaterializer interface {
 	MaterializeTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error)
 }
 
+// FirstPageTranscriptMaterializer materializes a small LEADING slice of a
+// session under a byte budget, without first measuring the whole session. The
+// kickstart preview uses it to paint turns while the full bounded read is still
+// running: measuring an especially long session costs seconds on its own,
+// because summing the payload length of rows held on overflow pages reads those
+// pages, so a read that skips the measurement returns in a fraction of the time.
+//
+// It is distinct from BoundedTranscriptMaterializer for exactly that reason.
+// The bounded read measures first so it can NAME what it left out; the
+// first-page read cannot name anything and does not try. It reports only
+// whether the session continues past the slice it returned, which is what a
+// caller needs to decide whether a fuller read must follow.
+type FirstPageTranscriptMaterializer interface {
+	// MaterializeTranscriptFirstPage returns the managed bytes of the leading
+	// slice, and reports whether the session holds more rows past it. A false
+	// more means the slice IS the whole session.
+	MaterializeTranscriptFirstPage(ctx context.Context, session DiscoveredSession, budgetBytes int64) (metadata *UnifiedMetadata, data []byte, more bool, err error)
+}
+
 // MaterializeTruncationUnit names what a bounded materialization counted toward
 // its budget, so a truncation note can say "parts" for a legacy session and
 // "messages" for a current one.

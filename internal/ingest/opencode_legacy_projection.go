@@ -204,6 +204,62 @@ func (a *OpenCodeAdapter) MaterializeTranscriptBounded(ctx context.Context, sess
 	}
 }
 
+// MaterializeTranscriptFirstPage materializes the leading slice of a session
+// under budgetBytes and reports whether the session continues past it.
+//
+// It differs from MaterializeTranscriptBounded in one deliberate way: it does
+// NOT probe the session's payload size first. That probe sums the payload
+// length of every row of the session, which on a multi-gigabyte session reads
+// the overflow pages of every row and costs seconds, and its only product is
+// the total a truncation note quotes. This read writes no note, so it skips the
+// probe and reads rows straight away.
+//
+// The whole session still ingests normally; this slice is a preview slice
+// alone.
+func (a *OpenCodeAdapter) MaterializeTranscriptFirstPage(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, bool, error) {
+	switch session.TranscriptOrigin {
+	case TranscriptOriginOpenCodeCurrentSQLite:
+		return a.materializeCurrentTranscriptFirstPage(ctx, session, budgetBytes)
+	case TranscriptOriginOpenCodeLegacySQLite:
+		return a.materializeLegacyTranscriptFirstPage(ctx, session, budgetBytes)
+	default:
+		return nil, nil, false, fmt.Errorf("materialize the first page of OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
+	}
+}
+
+func (a *OpenCodeAdapter) materializeLegacyTranscriptFirstPage(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, bool, error) {
+	legacyID, err := NewOpenCodeLegacySessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, false, err
+	}
+	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if budgetBytes <= 0 {
+		return nil, nil, false, fmt.Errorf("materialize the first page of legacy OpenCode SQLite session %q failed before source access: the byte budget %d is not positive; no managed state was written; pass the preview first-page budget", session.SessionID, budgetBytes)
+	}
+	var projection openCodeLegacyProjection
+	var dropped []openCodeDroppedOrphanPart
+	var truncation MaterializeTruncation
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		// The zero payload size is correct here, not a missing measurement: the
+		// core reads it only to fill the totals a truncation note quotes, and
+		// this read reports no note. Truncated is decided by the read loops
+		// alone, so it stays honest under a zero size.
+		var readErr error
+		projection, dropped, truncation, readErr = readOpenCodeLegacyProjectionCore(ctx, source, legacyID, pageSize, budgetBytes, OpenCodePayloadSize{})
+		return readErr
+	}); err != nil {
+		return nil, nil, false, fmt.Errorf("materialize the first page of legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
+	}
+	metadata, data, err := a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return metadata, data, truncation.Truncated, nil
+}
+
 func (a *OpenCodeAdapter) materializeLegacyTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error) {
 	legacyID, err := NewOpenCodeLegacySessionID(string(session.SessionID))
 	if err != nil {
