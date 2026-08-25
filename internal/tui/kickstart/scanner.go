@@ -63,6 +63,7 @@ type RepositoryIdentity = ingest.RepositoryIdentity
 type ScannerTreeSource struct {
 	sessions           []ftue.SessionListing
 	ingested           map[string]bool
+	subagents          SubagentRelation
 	resolver           ingest.PathIdentityResolver
 	repositoryResolver ingest.RepositoryIdentityResolver
 	previewMu          sync.RWMutex
@@ -87,6 +88,39 @@ func WithIngestedSessionIDs(ids []string) ScannerOption {
 				s.ingested[id] = true
 			}
 		}
+	}
+}
+
+// SubagentRelation is the parent-to-subagent relation over the FULL discovered
+// set, including the subagent sessions the picker never lists. It exists for a
+// single purpose: to resolve a parent row's child COUNT on the production path,
+// where the listing cohort holds root sessions only and therefore holds no
+// child to count. Nothing named in the relation is rendered, becomes a
+// selectable row, or reaches ingest; the cohort alone decides that.
+//
+// A key is present for EVERY session discovery surfaced, with an empty value
+// when that session spawned nothing. Presence is therefore the existence proof
+// countSubagents needs: a lookup miss still means "discovery never surfaced
+// this session", so a bare identifier can never invent a child.
+type SubagentRelation map[string][]string
+
+// WithSubagentRelation supplies the discovered subagent relation used only to
+// resolve child counts. Callers that list an already-complete cohort (every
+// child present among the listings) can omit it: the cohort's own listings
+// remain the fallback index, so the fold behaves identically without it.
+func WithSubagentRelation(relation SubagentRelation) ScannerOption {
+	return func(s *ScannerTreeSource) {
+		if len(relation) == 0 {
+			return
+		}
+		copied := make(SubagentRelation, len(relation))
+		for parentID, childIDs := range relation {
+			if parentID == "" {
+				continue
+			}
+			copied[parentID] = append([]string(nil), childIDs...)
+		}
+		s.subagents = copied
 	}
 }
 
@@ -141,7 +175,7 @@ var _ ListingPreviewContextSource = (*ScannerTreeSource)(nil)
 // forest still loads, and saved unavailable choices remain in the editor's
 // unmatched baseline.
 func (s *ScannerTreeSource) Load(ctx context.Context) ([]*kit.TreeNode, error) {
-	roots := buildForest(prepareSessionListings(ctx, s.sessions, s.resolver, s.repositoryResolver), s.ingested)
+	roots := buildForest(prepareSessionListings(ctx, s.sessions, s.resolver, s.repositoryResolver), s.ingested, s.subagents)
 	contexts := scannerPreviewContexts(roots)
 	s.previewMu.Lock()
 	s.previewContexts = contexts
@@ -282,9 +316,12 @@ func prepareSessionListings(
 // sessions DISCOVERED transitively beneath it (never the metrics Task-tool
 // heuristic count, which disagrees with discovery today and is out of scope
 // for this fold), so its row summarises them as a count instead of opening
-// another level of nesting. The count is display-only: selecting a parent
-// still selects its children for import, which the ingest side expands from
-// the same SubagentIDs. Every session node carries its harness in Meta, plus
+// another level of nesting. The count resolves against the discovered subagent
+// relation when the caller supplies one, because the production cohort holds
+// root sessions ONLY and therefore holds no child to count; the cohort's own
+// listings are the fallback index. The count is display-only: selecting a
+// parent still selects its children for import, which the ingest side expands
+// from the same SubagentIDs. Every session node carries its harness in Meta, plus
 // the settings.MetaIngested flag when the local store already holds that
 // session.
 //
@@ -303,23 +340,24 @@ func prepareSessionListings(
 // Ordering is deterministic (lexicographic within each level, sessions by
 // import state then date then ID) so the rendered tree and any golden capture
 // are stable across runs.
-func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*kit.TreeNode {
-	// Index every session by id, and record which ids are children so a session
-	// is added as a top-level node only when it is nobody's subagent.
-	byID := make(map[string]ftue.SessionListing, len(cohort))
+func buildForest(cohort []PreparedSessionListing, ingested map[string]bool, relation SubagentRelation) []*kit.TreeNode {
+	// Record which ids are children so a session is added as a top-level node
+	// only when it is nobody's subagent. This reads the COHORT alone: what the
+	// picker lists is decided by what the picker was given, never by the
+	// count-only relation.
 	childIDs := map[string]bool{}
 	for _, row := range cohort {
 		sess := row.Listing
 		if sess.SessionID == "" {
 			continue
 		}
-		byID[sess.SessionID] = sess
 		for _, childID := range sess.SubagentIDs {
 			if childID != "" {
 				childIDs[childID] = true
 			}
 		}
 	}
+	counts := subagentCountIndex(cohort, relation)
 
 	projectOrder := []string{}
 	projects := map[string]*scannerProjectAgg{}
@@ -392,7 +430,7 @@ func buildForest(cohort []PreparedSessionListing, ingested map[string]bool) []*k
 			sortListings(b.sessions)
 			annotateScannerScopeMeta(b.node, p.identity, b.sessions)
 			for _, row := range groupByImportState(b.sessions, ingested) {
-				b.node.Children = append(b.node.Children, sessionNode(row, byID, ingested))
+				b.node.Children = append(b.node.Children, sessionNode(row, counts, ingested))
 			}
 			pNode.Children = append(pNode.Children, b.node)
 		}
@@ -674,7 +712,7 @@ func groupByImportState(sessions []PreparedSessionListing, ingested map[string]b
 // Meta, the settings.MetaIngested flag when the store already holds it, and
 // settings.MetaChildCount when the session spawned subagents, so the row
 // summarises its children as a count rather than nesting another level.
-func sessionNode(row PreparedSessionListing, byID map[string]ftue.SessionListing, ingested map[string]bool) *kit.TreeNode {
+func sessionNode(row PreparedSessionListing, counts SubagentRelation, ingested map[string]bool) *kit.TreeNode {
 	sess := row.Listing
 	meta := map[string]string{
 		settings.MetaHarness:            sess.Harness,
@@ -693,7 +731,7 @@ func sessionNode(row PreparedSessionListing, byID map[string]ftue.SessionListing
 	if ingested[sess.SessionID] {
 		meta[settings.MetaIngested] = settings.MetaIngestedValue
 	}
-	if n := countSubagents(sess, byID, map[string]bool{sess.SessionID: true}); n > 0 {
+	if n := countSubagents(sess.SubagentIDs, counts, map[string]bool{sess.SessionID: true}); n > 0 {
 		meta[settings.MetaChildCount] = strconv.Itoa(n)
 	}
 	return &kit.TreeNode{
@@ -721,24 +759,50 @@ func repositoryIdentityAvailable(identity ingest.RepositoryIdentity) bool {
 	return identity.CohortKey != "" && identity.GitDirectory != ""
 }
 
-// countSubagents counts the subagent sessions discovered transitively beneath
-// sess: it walks SubagentIDs through byID, so a subagent that itself spawned
-// subagents contributes its whole descendant set. A child id with no matching
-// listing is not counted (discovery may not have surfaced it), and the seen set
-// - which is never unwound - both terminates a cyclic subagent reference and
-// keeps a session reachable by two paths from counting twice.
-func countSubagents(sess ftue.SessionListing, byID map[string]ftue.SessionListing, seen map[string]bool) int {
+// subagentCountIndex is the index countSubagents walks: session id to the
+// subagent ids that session spawned, over every session DISCOVERY surfaced.
+// The discovered relation comes first because it is the fuller truth - on the
+// production path the cohort is roots-only and holds no child at all - and the
+// cohort's own listings then fill in any id the relation does not carry, which
+// keeps a caller that supplies no relation behaving exactly as before.
+func subagentCountIndex(cohort []PreparedSessionListing, relation SubagentRelation) SubagentRelation {
+	counts := make(SubagentRelation, len(relation)+len(cohort))
+	for parentID, childIDs := range relation {
+		if parentID != "" {
+			counts[parentID] = childIDs
+		}
+	}
+	for _, row := range cohort {
+		sess := row.Listing
+		if sess.SessionID == "" {
+			continue
+		}
+		if _, indexed := counts[sess.SessionID]; !indexed {
+			counts[sess.SessionID] = sess.SubagentIDs
+		}
+	}
+	return counts
+}
+
+// countSubagents counts the subagent sessions discovered transitively beneath a
+// session: it walks childIDs through counts, so a subagent that itself spawned
+// subagents contributes its whole descendant set. A child id absent from counts
+// is not counted - discovery never surfaced that session, and counting a bare
+// identifier would invent a child - and the seen set, which is never unwound,
+// both terminates a cyclic subagent reference and keeps a session reachable by
+// two paths from counting twice.
+func countSubagents(childIDs []string, counts SubagentRelation, seen map[string]bool) int {
 	total := 0
-	for _, childID := range sess.SubagentIDs {
+	for _, childID := range childIDs {
 		if childID == "" || seen[childID] {
 			continue
 		}
-		child, ok := byID[childID]
-		if !ok {
+		grandchildren, discovered := counts[childID]
+		if !discovered {
 			continue
 		}
 		seen[childID] = true
-		total += 1 + countSubagents(child, byID, seen)
+		total += 1 + countSubagents(grandchildren, counts, seen)
 	}
 	return total
 }

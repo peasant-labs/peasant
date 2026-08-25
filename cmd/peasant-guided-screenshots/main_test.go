@@ -203,11 +203,18 @@ func TestCaptureFixtureGuardsRequiredPushStateDeletion(t *testing.T) {
 func TestCaptureFixtureGuardsRequiredOriginHiddenStateDeletion(t *testing.T) {
 	old := []byte("  - key: origin-hidden\n    query: \"\"\n" +
 		"    # \"user driv\" (not the full title) survives the row-label truncation the\n" +
-		"    # narrower 80-column capture applies; the child badge itself is dropped\n" +
-		"    # entirely (not merely truncated) at that width, so it is verified by the\n" +
-		"    # scanner fixture (testdata/child_counts.yaml) and by manual inspection of\n" +
-		"    # the wider capture, not asserted here across both widths.\n" +
+		"    # narrower 80-column capture applies, so only these markers can be asserted\n" +
+		"    # at BOTH widths.\n" +
+		"    #\n" +
+		"    # The child-session badge is width-dependent and is now GATED rather than\n" +
+		"    # left to a human eye: the parent's listing carries subagent ids while the\n" +
+		"    # cohort holds no child at all, exactly as production discovery hands it\n" +
+		"    # over, so the wider capture can only show this count by resolving the\n" +
+		"    # discovered subagent relation. The narrower capture drops the badge\n" +
+		"    # entirely rather than truncating it, which narrowWantAbsent pins.\n" +
 		"    wantContains: [\"user driv\", \"parent ses\"]\n" +
+		"    wideWantContains: [\"+ 2 child sessions\"]\n" +
+		"    narrowWantAbsent: [\"child sessions\"]\n" +
 		"    wantAbsent: [\"agent driven session\"]\n")
 	if count := bytes.Count(captureFixtureData, old); count != 1 {
 		t.Fatalf("origin-hidden state block mutation source occurs %d times, want exactly one", count)
@@ -238,6 +245,37 @@ func TestCaptureFixtureGuardsOriginHiddenWantAbsent(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "declares no wantAbsent marker") {
 		t.Fatalf("missing-wantAbsent error = %v, want it to explain the gap", err)
+	}
+}
+
+// TestCaptureFixtureGuardsOriginHiddenWidthMarkers mutation-proves that decode
+// itself requires BOTH width-specific markers on the origin-hidden state.
+// Without them the child-session badge would be back to a human eyeball: the
+// wider capture would assert nothing only it can show, and nothing would pin
+// that the narrower capture drops the badge instead of truncating it.
+func TestCaptureFixtureGuardsOriginHiddenWidthMarkers(t *testing.T) {
+	for _, probe := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"wide", "    wideWantContains: [\"+ 2 child sessions\"]\n", "declares no wideWantContains marker"},
+		{"narrow", "    narrowWantAbsent: [\"child sessions\"]\n", "declares no narrowWantAbsent marker"},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			source := []byte(probe.source)
+			if count := bytes.Count(captureFixtureData, source); count != 1 {
+				t.Fatalf("%s marker mutation source occurs %d times, want exactly one", probe.name, count)
+			}
+			mutated := bytes.Replace(captureFixtureData, source, nil, 1)
+			_, err := decodeCaptureDocument(mutated)
+			if err == nil {
+				t.Fatalf("screenshot fixture accepted an origin-hidden state with no %s marker", probe.name)
+			}
+			if !strings.Contains(err.Error(), probe.want) {
+				t.Fatalf("missing-%s-marker error = %v, want it to explain the gap", probe.name, err)
+			}
+		})
 	}
 }
 
@@ -289,8 +327,12 @@ func TestCaptureFixtureRendersOriginHiddenViewActuallyHidesAgentRow(t *testing.T
 		if err != nil {
 			t.Fatalf("render selection capture at %dx%d: %v", size.width, size.height, err)
 		}
-		if err := validateTerminalCapture(capture.Name, view, size.width, size.height, state.WantContains, state.WantAbsent); err != nil {
-			t.Fatalf("%dx%d: %v", size.width, size.height, err)
+		// Each width is reported on its own: the widths assert DIFFERENT things
+		// about the child-session badge, so stopping at the first failure would
+		// hide whichever one ran second.
+		wantContains, wantAbsent := selectionStateExpectations(state, size.width)
+		if err := validateTerminalCapture(capture.Name, view, size.width, size.height, wantContains, wantAbsent); err != nil {
+			t.Errorf("%dx%d: %v", size.width, size.height, err)
 		}
 	}
 }

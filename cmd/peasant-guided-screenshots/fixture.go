@@ -203,6 +203,30 @@ type selectionStateFixture struct {
 	// is optional; only the origin-hiding state uses it today, to prove a
 	// row is actually gone rather than merely not asserted present.
 	WantAbsent []string `yaml:"wantAbsent"`
+	// WideWantContains and NarrowWantAbsent carry the markers whose presence
+	// depends on the terminal width, so a width-specific truth is a GATE
+	// rather than a note asking a human to look. The child-session badge is
+	// the case that exists today: the wider capture must show it, and the
+	// narrower one drops it entirely rather than truncating it.
+	WideWantContains []string `yaml:"wideWantContains"`
+	NarrowWantAbsent []string `yaml:"narrowWantAbsent"`
+}
+
+// selectionWideColumns is the width at and above which a selection capture is
+// the WIDE one: it has room for the markers the narrow capture drops.
+const selectionWideColumns = 120
+
+// selectionStateExpectations resolves one state's markers for one capture
+// width, so the real capture run and the mounted-render test cannot disagree
+// about what a width is expected to show.
+func selectionStateExpectations(state selectionStateFixture, width int) (wantContains, wantAbsent []string) {
+	wantContains = append([]string(nil), state.WantContains...)
+	wantAbsent = append([]string(nil), state.WantAbsent...)
+	if width >= selectionWideColumns {
+		wantContains = append(wantContains, state.WideWantContains...)
+		return wantContains, wantAbsent
+	}
+	return wantContains, append(wantAbsent, state.NarrowWantAbsent...)
 }
 
 type guidedCaptureFixture struct {
@@ -222,9 +246,16 @@ type selectionCaptureFixture struct {
 }
 
 type selectionFixture struct {
-	Repositories []selectionRepositoryFixture      `yaml:"repositories"`
-	Listings     []ftue.SessionListing             `yaml:"listings"`
-	Transcripts  map[string][]selectionTurnFixture `yaml:"transcripts"`
+	Repositories []selectionRepositoryFixture `yaml:"repositories"`
+	// Listings is the ROOTS-ONLY cohort the picker lists, exactly what
+	// production discovery hands it. A subagent session is never here.
+	Listings []ftue.SessionListing `yaml:"listings"`
+	// SubagentDiscovery is the parent-to-subagent relation over the whole
+	// discovered set, the second thing production discovery returns. It
+	// resolves a parent row's child count and nothing else: a session named
+	// only here is discovered, counted, and never listed.
+	SubagentDiscovery []selectionSubagentFixture        `yaml:"subagentDiscovery"`
+	Transcripts       map[string][]selectionTurnFixture `yaml:"transcripts"`
 	// SourceTranscripts holds the harness transcript lines for sessions the
 	// local store does not hold. The renderer writes each one to its isolated
 	// workspace and points the listing at it, so the preview reads a real file
@@ -238,6 +269,17 @@ type selectionFixture struct {
 	RequiredSessionNames  []string `yaml:"requiredSessionNames"`
 	RequiredHarnessNames  []string `yaml:"requiredHarnessNames"`
 	RequiredIngestedNames []string `yaml:"requiredIngestedNames"`
+	// RequiredSubagentDiscoveryNames protects the sessions that exist ONLY in
+	// SubagentDiscovery. They are what makes the capture production-shaped, so
+	// deleting one must fail the fixture rather than quietly shrink a count.
+	RequiredSubagentDiscoveryNames []string `yaml:"requiredSubagentDiscoveryNames"`
+}
+
+// selectionSubagentFixture is one entry of the discovered subagent relation:
+// a session discovery surfaced, and the subagent sessions it spawned.
+type selectionSubagentFixture struct {
+	SessionID   string   `yaml:"sessionId"`
+	SubagentIDs []string `yaml:"subagentIds"`
 }
 
 type selectionRepositoryFixture struct {
@@ -503,6 +545,30 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	if len(stateRows[selectionStateOriginHidden].WantAbsent) == 0 {
 		return fmt.Errorf("screenshot fixture selection state %q declares no wantAbsent marker, so a broken origin filter would pass unnoticed", selectionStateOriginHidden)
 	}
+	if len(stateRows[selectionStateOriginHidden].WideWantContains) == 0 {
+		return fmt.Errorf(
+			"screenshot fixture selection state %q declares no wideWantContains marker.\n"+
+				"what: the wider capture asserts nothing that only the wider capture can show.\n"+
+				"why: the child-session badge fits at %d columns and is dropped below it, so without\n"+
+				"     a width-specific marker a badge that stopped rendering would pass unnoticed.\n"+
+				"where: the origin-hidden selection state in testdata/captures.yaml.\n"+
+				"when: while validating the fixture, before any capture was rendered.\n"+
+				"means: no screenshot was written.\n"+
+				"fix: restore the badge marker under wideWantContains.",
+			selectionStateOriginHidden, selectionWideColumns)
+	}
+	if len(stateRows[selectionStateOriginHidden].NarrowWantAbsent) == 0 {
+		return fmt.Errorf(
+			"screenshot fixture selection state %q declares no narrowWantAbsent marker.\n"+
+				"what: nothing pins that the narrower capture DROPS the child-session badge.\n"+
+				"why: the drop is deliberate width behaviour; unpinned, a badge leaking into a\n"+
+				"     capture too narrow to hold it would go unnoticed.\n"+
+				"where: the origin-hidden selection state in testdata/captures.yaml.\n"+
+				"when: while validating the fixture, before any capture was rendered.\n"+
+				"means: no screenshot was written.\n"+
+				"fix: restore the badge marker under narrowWantAbsent.",
+			selectionStateOriginHidden)
+	}
 
 	seenNames := make(map[string]bool, len(captures))
 	pairs := make(map[string]int, len(captures))
@@ -574,12 +640,77 @@ func validateSelectionData(selection selectionFixture) error {
 	if err := requireNames("selection harness", selection.RequiredHarnessNames, harnesses); err != nil {
 		return err
 	}
+	// The discovered set is the listed cohort PLUS the sessions that reach the
+	// picker only through the relation. Every child reference must resolve
+	// inside it, exactly as the production count guard requires.
+	discovered := make(map[string]bool, len(sessionIDs)+len(selection.SubagentDiscovery))
+	for sessionID := range sessionIDs {
+		discovered[sessionID] = true
+	}
+	relationNames := make(map[string]bool, len(selection.SubagentDiscovery))
+	for _, entry := range selection.SubagentDiscovery {
+		if strings.TrimSpace(entry.SessionID) == "" || relationNames[entry.SessionID] {
+			return fmt.Errorf("screenshot fixture has an empty or duplicate discovered subagent entry: %#v", entry)
+		}
+		relationNames[entry.SessionID] = true
+		discovered[entry.SessionID] = true
+	}
+	// Production records the relation for EVERY discovered session, so a
+	// fixture that covers only some of them is not the production shape.
+	for _, listing := range selection.Listings {
+		if !relationNames[listing.SessionID] {
+			return fmt.Errorf(
+				"screenshot fixture lists session %q but the discovered subagent relation omits it.\n"+
+					"what: the capture fixture is not in the shape production discovery produces.\n"+
+					"why: production records a relation entry for every session it discovers, listed or not.\n"+
+					"where: the selection fixture in testdata/captures.yaml.\n"+
+					"when: while validating the fixture, before any capture was rendered.\n"+
+					"means: no screenshot was written.\n"+
+					"fix: add a subagentDiscovery entry for %q, with no subagentIds when it spawned none.",
+				listing.SessionID, listing.SessionID)
+		}
+	}
 	for _, listing := range selection.Listings {
 		for _, childID := range listing.SubagentIDs {
-			if !sessionIDs[childID] {
+			if !discovered[childID] {
 				return fmt.Errorf("screenshot fixture session %q references unknown child %q", listing.SessionID, childID)
 			}
 		}
+	}
+	for _, entry := range selection.SubagentDiscovery {
+		for _, childID := range entry.SubagentIDs {
+			if !discovered[childID] {
+				return fmt.Errorf("screenshot fixture discovered session %q references unknown child %q", entry.SessionID, childID)
+			}
+		}
+		// A discovered session that is neither listed nor anybody's subagent
+		// would be a root production WOULD have listed, so the fixture would
+		// no longer describe a reachable state.
+		if sessionIDs[entry.SessionID] {
+			continue
+		}
+		claimed := false
+		for _, other := range selection.SubagentDiscovery {
+			for _, childID := range other.SubagentIDs {
+				if childID == entry.SessionID {
+					claimed = true
+				}
+			}
+		}
+		if !claimed {
+			return fmt.Errorf(
+				"screenshot fixture discovered session %q is neither listed nor named as anybody's subagent.\n"+
+					"what: the fixture describes a session production discovery could not have hidden.\n"+
+					"why: a discovered session with no parent is a ROOT, and roots are listed.\n"+
+					"where: subagentDiscovery in testdata/captures.yaml.\n"+
+					"when: while validating the fixture, before any capture was rendered.\n"+
+					"means: no screenshot was written.\n"+
+					"fix: list %q among the selection listings, or name it as a subagent of a discovered session.",
+				entry.SessionID, entry.SessionID)
+		}
+	}
+	if err := requireNames("selection discovered subagent", selection.RequiredSubagentDiscoveryNames, relationNames); err != nil {
+		return err
 	}
 	if len(selection.SourceTranscripts) == 0 {
 		return fmt.Errorf("screenshot fixture records no harness transcript; the not-yet-imported preview would show nothing")

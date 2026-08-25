@@ -34,7 +34,7 @@ func TestKickstartRescan_ReusesMinedTranscriptEvidence(t *testing.T) {
 
 	git := newDirCountingGitResolver(fixtures.ResolvedRemote, fixtures.ResolvedBranch)
 
-	_, first := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, nil, database, nil)
+	_, first, _ := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, nil, database, nil)
 	if len(first) == 0 {
 		t.Fatal("the first scan listed no session, so the cache measurement proves nothing")
 	}
@@ -43,7 +43,7 @@ func TestKickstartRescan_ReusesMinedTranscriptEvidence(t *testing.T) {
 	}
 
 	fs.ResetCounts()
-	_, second := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, nil, database, nil)
+	_, second, _ := ftueDiscoverWith(t.Context(), rescanConfig(t), fs, git, nil, database, nil)
 
 	if got := fs.TotalReads(); got != 0 {
 		t.Errorf("the second scan read transcripts %d times, want 0 for an unchanged corpus", got)

@@ -48,11 +48,13 @@ func defaultConfigCommandDeps() configCommandDeps {
 	return configCommandDeps{
 		discover: func(ctx context.Context, configPath, dbPath string) configDiscovery {
 			spinner := newDiscoverySpinner(os.Stderr)
-			inventory, sessions := ftueDiscover(ctx, configPath, dbPath, spinner)
+			inventory, sessions, subagents := ftueDiscover(ctx, configPath, dbPath, spinner)
 			spinner.Stop()
 			return configDiscovery{
 				inventory: inventory,
-				source:    kickstart.NewScannerTreeSource(sessions),
+				// The same construction the guided flow mounts, so both surfaces
+				// list the same rows and count the same children.
+				source: newKickstartScannerSource(sessions, subagents, nil, nil, nil),
 			}
 		},
 		openRetention: func() (configRetentionFile, error) {

@@ -16,7 +16,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	kit "github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"zombiezen.com/go/sqlite"
@@ -142,10 +141,18 @@ func TestTwoRunKickstartDemonstration(t *testing.T) {
 		}
 		sort.Strings(hidden)
 
-		_, listings := ftueDiscoverWith(ctx, cfg, filesystem, git, nil, database, nil)
-		source := kickstart.NewScannerTreeSource(listings,
-			kickstart.WithPathIdentityResolver(ingest.NewPhysicalPathResolver()),
-			kickstart.WithRepositoryIdentityResolver(demoRepoResolver{}),
+		_, listings, subagents := ftueDiscoverWith(ctx, cfg, filesystem, git, nil, database, nil)
+		// The PRODUCTION construction, not a hand-assembled one: the guided flow
+		// builds its picker through exactly this function, so an option left
+		// unwired there fails this demonstration instead of passing unnoticed.
+		// Only the repository resolver is substituted, to keep the fixture
+		// deterministic.
+		source := newKickstartScannerSource(
+			listings,
+			subagents,
+			ingest.NewPhysicalPathResolver(),
+			demoRepoResolver{},
+			nil,
 		)
 		roots, err := source.Load(ctx)
 		if err != nil {
@@ -201,15 +208,32 @@ func TestTwoRunKickstartDemonstration(t *testing.T) {
 			t.Errorf("the agent-driven root %s is still listed", id)
 		}
 	}
-	// OBSERVATION, recorded rather than asserted: the production kickstart
-	// discovery builds listings from ROOTS only (filterRootSessions in
-	// cmd_kickstart.go), so a child session never enters the cohort that
-	// buildForest indexes. countSubagents therefore finds no listing for any
-	// SubagentIDs entry and the child badge stays empty on this path. That is
-	// the behaviour on the unchanged base commit too, so it is pre-existing and
-	// not introduced here. The gate above still holds: both runs agree row by
-	// row on whatever badge the path produces.
-	t.Logf("parent row %s carries SubagentIDs but its rendered child badge is %q", demoParentRoot, one.badges[demoParentRoot])
+	// The badge is asserted against a KNOWN value, not only compared between the
+	// runs. Agreement alone would hold even if every badge were empty, which is
+	// what this path produced while the listing cohort was the only thing the
+	// count could be resolved from. The parent below has exactly two subagent
+	// sessions on disk, and the discovered subagent relation now carries them,
+	// so the count the row renders is a real number both runs must reach.
+	const wantParentBadge = "2"
+	for _, run := range []struct {
+		label string
+		got   observation
+	}{{"run one", one}, {"run two", two}} {
+		if got := run.got.badges[demoParentRoot]; got != wantParentBadge {
+			t.Errorf("%s: parent row %s child badge = %q, want %q from its two discovered subagent sessions",
+				run.label, demoParentRoot, got, wantParentBadge)
+		}
+	}
+	// The children are counted, and the listed rows are pinned to a known set
+	// rather than only compared between the runs. This is what keeps the
+	// count-only promise honest: the two subagent sessions contribute to the
+	// badge above and must still be absent from the rows a user can select and
+	// import, and no other session may appear either.
+	wantRows := []string{demoUserRoot, demoParentRoot}
+	sort.Strings(wantRows)
+	if !reflect.DeepEqual(one.rows, wantRows) {
+		t.Errorf("the listed rows are %v, want exactly %v: the user root and the parent root, and no subagent session", one.rows, wantRows)
+	}
 }
 
 func mustSource(t *testing.T, cfg *config.Config) ingest.SourceConfig {

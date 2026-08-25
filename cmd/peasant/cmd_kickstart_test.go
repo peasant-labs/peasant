@@ -15,6 +15,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +31,7 @@ func TestKickstartDiscoveryMountsCurrentOnlyOpenCodeSession(t *testing.T) {
 	cfg.Sources.Cursor.Paths = nil
 	cfg.Sources.Strike.Paths = nil
 
-	inventory, sessions := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
+	inventory, sessions, _ := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
 	discovery := inventory[defaults.HarnessOpenCode]
 	if discovery.SessionCount != 1 || discovery.State == ftue.DiscoveryFailed {
 		t.Fatalf("kickstart current-only inventory = %+v, want one available OpenCode session", discovery)
@@ -57,8 +58,8 @@ func TestBuildKickstartCommandMountsProjectFirstScope(t *testing.T) {
 	}
 	var projectFrame, scopeFrame, filteredScopeFrame, nextFrame, destinationFrame, consentFrame string
 	deps := kickstartCommandDeps{
-		discover: func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
-			return inventory, sessions
+		discover: func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
+			return inventory, sessions, nil
 		},
 		getwd: func() (string, error) { return "/work/acme/tool", nil },
 		run: func(model ftue.WizardModel) error {
@@ -199,7 +200,7 @@ func TestFtueDiscover_EmptyOnMissingConfig(t *testing.T) {
 	t.Parallel()
 	// HOME/XDG are isolated to a throwaway dir by TestMain, so discovery finds no
 	// local transcript store or db. This exercises the empty case deterministically.
-	inventory, sessions := ftueDiscover(t.Context(), t.TempDir()+"/nonexistent/config.yaml", t.TempDir()+"/nonexistent/peasant.db", nil)
+	inventory, sessions, _ := ftueDiscover(t.Context(), t.TempDir()+"/nonexistent/config.yaml", t.TempDir()+"/nonexistent/peasant.db", nil)
 	if inventory == nil {
 		t.Error("provider inventory should never be nil")
 	}
@@ -236,7 +237,7 @@ func TestFtueDiscover_FindsStrikeBeforeOptIn(t *testing.T) {
 		t.Fatalf("write isolated Strike fixture: %v", err)
 	}
 
-	inventory, sessions := ftueDiscover(t.Context(), filepath.Join(home, "missing-config.yaml"), filepath.Join(home, "missing-peasant.db"), nil)
+	inventory, sessions, _ := ftueDiscover(t.Context(), filepath.Join(home, "missing-config.yaml"), filepath.Join(home, "missing-peasant.db"), nil)
 	strike := inventory[defaults.HarnessStrike]
 	if strike.SessionCount != 1 {
 		t.Fatalf("Kickstart Strike count = %d, want 1 available session before opt-in", strike.SessionCount)

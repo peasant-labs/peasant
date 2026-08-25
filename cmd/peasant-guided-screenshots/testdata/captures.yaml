@@ -61,11 +61,18 @@ selectionStates:
   - key: origin-hidden
     query: ""
     # "user driv" (not the full title) survives the row-label truncation the
-    # narrower 80-column capture applies; the child badge itself is dropped
-    # entirely (not merely truncated) at that width, so it is verified by the
-    # scanner fixture (testdata/child_counts.yaml) and by manual inspection of
-    # the wider capture, not asserted here across both widths.
+    # narrower 80-column capture applies, so only these markers can be asserted
+    # at BOTH widths.
+    #
+    # The child-session badge is width-dependent and is now GATED rather than
+    # left to a human eye: the parent's listing carries subagent ids while the
+    # cohort holds no child at all, exactly as production discovery hands it
+    # over, so the wider capture can only show this count by resolving the
+    # discovered subagent relation. The narrower capture drops the badge
+    # entirely rather than truncating it, which narrowWantAbsent pins.
     wantContains: ["user driv", "parent ses"]
+    wideWantContains: ["+ 2 child sessions"]
+    narrowWantAbsent: ["child sessions"]
     wantAbsent: ["agent driven session"]
 
 selection:
@@ -81,21 +88,6 @@ selection:
       workingDir: /fixtures/worktrees/pasture-a
       sessionId: cc-parent
       subagentIds: [cc-child]
-    - harness: claude-code
-      projectName: acme/tool
-      gitRemote: "git@github.com:acme/tool.git"
-      branch: main
-      title: child subagent
-      workingDir: /fixtures/worktrees/pasture-a
-      sessionId: cc-child
-      subagentIds: [cc-grandchild]
-    - harness: claude-code
-      projectName: acme/tool
-      gitRemote: "git@github.com:acme/tool.git"
-      branch: main
-      title: grandchild subagent
-      workingDir: /fixtures/worktrees/pasture-a
-      sessionId: cc-grandchild
     - harness: claude-code
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
@@ -135,6 +127,22 @@ selection:
       workingDir: /fixtures/worktrees/pasture-a
       sessionId: origin-user-visible
       origin: user
+  # The parent-to-subagent relation over the whole DISCOVERED set, which is
+  # what production discovery hands the picker beside the ROOTS-ONLY listing
+  # above. Naming a session here does NOT put it in the picker: cc-child and
+  # cc-grandchild are the subagent sessions production finds and never shows,
+  # and they exist only here. This is the shape the badge has to survive - a
+  # cohort that holds no child at all - so the capture proves what a person
+  # will actually see, not merely that the renderer can draw a count.
+  subagentDiscovery:
+    - {sessionId: cc-parent, subagentIds: [cc-child]}
+    - {sessionId: cc-child, subagentIds: [cc-grandchild]}
+    - {sessionId: cc-grandchild}
+    - {sessionId: cc-imported}
+    - {sessionId: 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47}
+    - {sessionId: cur-1}
+    - {sessionId: origin-agent-hidden}
+    - {sessionId: origin-user-visible}
   transcripts:
     cc-parent:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
@@ -146,8 +154,6 @@ selection:
   ingested: [cc-imported]
   requiredSessionNames:
     - cc-parent
-    - cc-child
-    - cc-grandchild
     - cc-imported
     - 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
     - cur-1
@@ -158,6 +164,12 @@ selection:
     - cursor
   requiredIngestedNames:
     - cc-imported
+  # Deletion protection for the subagent sessions that exist ONLY in the
+  # relation. They are what makes the capture production-shaped: delete either
+  # and the fixture is rejected rather than quietly rendering a smaller count.
+  requiredSubagentDiscoveryNames:
+    - cc-child
+    - cc-grandchild
 
 guidedCaptures:
   - {name: auto-ingest-dark-80x24, section: auto-ingest, theme: dark, width: 80, height: 24}
