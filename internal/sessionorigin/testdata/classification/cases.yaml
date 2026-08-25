@@ -1,0 +1,171 @@
+# Behaviour cases for the session-origin rule.
+#
+# Each case names the evidence the rule reads and the decision it must reach.
+# The arm names the deciding signal family, so every value in the Go signal set
+# has to appear here at least once, and the orderings that matter get their own
+# rows rather than hiding inside a family.
+cases:
+  # --- parent-linked ------------------------------------------------------
+  - name: child_transcript_is_agent_driven
+    arm: parent-linked
+    evidence:
+      has_parent: true
+    origin: agent
+    signal: parent-linked
+
+  - name: parent_link_outranks_a_command_wrapper
+    arm: parent-linked
+    evidence:
+      has_parent: true
+      first_user_text: "<command-message>run the audit</command-message>"
+    origin: agent
+    signal: parent-linked
+
+  # --- structured-identity ------------------------------------------------
+  - name: structured_identity_from_agent_name
+    arm: structured-identity
+    evidence:
+      agent_name: "reviewer"
+    origin: agent
+    signal: structured-identity
+
+  - name: structured_identity_from_team_name_alone
+    arm: structured-identity
+    evidence:
+      team_name: "session-e66bdec1"
+    origin: agent
+    signal: structured-identity
+
+  - name: structured_identity_beside_plain_prose
+    arm: structured-identity
+    evidence:
+      agent_name: "worker-rule"
+      team_name: "session-e66bdec1"
+      first_user_text: "Please look at the failing migration and tell me what changed."
+    origin: agent
+    signal: structured-identity
+
+  # --- programmatic-entry -------------------------------------------------
+  - name: programmatic_entry_from_the_sdk_pair
+    arm: programmatic-entry
+    evidence:
+      entrypoint: "sdk-cli"
+      prompt_source: "sdk"
+    origin: agent
+    signal: programmatic-entry
+
+  # --- command-invocation -------------------------------------------------
+  - name: command_message_wrapper_is_a_person
+    arm: command-invocation
+    evidence:
+      first_user_text: "<command-message>share</command-message>"
+    origin: user
+    signal: command-invocation
+
+  - name: command_name_wrapper_is_a_person
+    arm: command-invocation
+    evidence:
+      first_user_text: "<command-name>/share</command-name>"
+    origin: user
+    signal: command-invocation
+
+  - name: attributed_command_wrapper_is_still_a_person
+    arm: command-invocation
+    evidence:
+      first_user_text: "<command-message id=\"7\" source=\"slash\">/review</command-message>"
+    origin: user
+    signal: command-invocation
+
+  - name: self_closing_command_wrapper_is_still_a_person
+    arm: command-invocation
+    evidence:
+      first_user_text: "<command-name/>"
+    origin: user
+    signal: command-invocation
+
+  - name: command_wrapper_wins_over_bootstrap_text_in_its_body
+    arm: command-invocation
+    evidence:
+      first_user_text: "<command-message>\n<teammate-message>Skill(/worker) then report</teammate-message>\n</command-message>"
+    origin: user
+    signal: command-invocation
+
+  - name: command_wrapper_behind_leading_whitespace_is_still_a_person
+    arm: command-invocation
+    evidence:
+      first_user_text: "\n  <command-message>/kickstart</command-message>"
+    origin: user
+    signal: command-invocation
+
+  # --- bootstrap-text -----------------------------------------------------
+  - name: teammate_message_opener_is_a_bootstrap
+    arm: bootstrap-text
+    evidence:
+      first_user_text: "<teammate-message from=\"supervisor\">implement the slice</teammate-message>"
+    origin: agent
+    signal: bootstrap-text
+
+  - name: skill_invocation_opener_with_no_wrapper_tag
+    arm: bootstrap-text
+    evidence:
+      first_user_text: "Skill(/pasture:worker) FIRST, then implement your assigned slice."
+    origin: agent
+    signal: bootstrap-text
+
+  - name: numbered_skill_invocation_opener
+    arm: bootstrap-text
+    evidence:
+      first_user_text: "1. First invoke Skill(/pasture:reviewer) and read the standing checklist."
+    origin: agent
+    signal: bootstrap-text
+
+  - name: use_skill_invocation_opener
+    arm: bootstrap-text
+    evidence:
+      first_user_text: "Use Skill(/pasture:architect) to draft the proposal."
+    origin: agent
+    signal: bootstrap-text
+
+  # --- no-evidence --------------------------------------------------------
+  - name: zero_evidence_resolves_unknown
+    arm: no-evidence
+    evidence: {}
+    origin: unknown
+    signal: no-evidence
+
+  - name: plain_prose_is_never_declared_a_person
+    arm: no-evidence
+    evidence:
+      first_user_text: "Review the failing migration, and then use Skill(/reviewer) if you need a second pass."
+    origin: unknown
+    signal: no-evidence
+
+  - name: unlisted_tag_sharing_a_listed_prefix_decides_nothing
+    arm: no-evidence
+    evidence:
+      first_user_text: "<command-message-log>replayed 3 commands</command-message-log>"
+    origin: unknown
+    signal: no-evidence
+
+  - name: unlisted_tag_sharing_the_bootstrap_prefix_decides_nothing
+    arm: no-evidence
+    evidence:
+      first_user_text: "<teammate-messages>two briefs were sent</teammate-messages>"
+    origin: unknown
+    signal: no-evidence
+
+  - name: a_programmatic_entrypoint_alone_decides_nothing
+    arm: no-evidence
+    evidence:
+      entrypoint: "sdk-cli"
+      first_user_text: "Summarise the last release."
+    origin: unknown
+    signal: no-evidence
+
+  - name: a_programmatic_prompt_source_alone_decides_nothing
+    arm: no-evidence
+    evidence:
+      prompt_source: "sdk"
+      first_user_text: "Summarise the last release."
+    origin: unknown
+    signal: no-evidence

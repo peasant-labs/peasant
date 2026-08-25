@@ -1,0 +1,46 @@
+# Boundary cases for the closed origin menu.
+#
+# The error needles are authored here independently of the production messages.
+# A needle copied from the code under test cannot detect that code changing.
+cases:
+  - name: user_is_on_the_menu
+    value: "user"
+    valid: true
+
+  - name: agent_is_on_the_menu
+    value: "agent"
+    valid: true
+
+  - name: unknown_is_on_the_menu
+    value: "unknown"
+    valid: true
+
+  - name: the_empty_string_is_not_an_origin
+    value: ""
+    valid: false
+    error_contains: "empty session origin rejected"
+
+  - name: the_empty_string_error_says_no_default_may_be_substituted
+    value: ""
+    valid: false
+    error_contains: "no default may be substituted"
+
+  - name: an_unlisted_token_is_refused
+    value: "human"
+    valid: false
+    error_contains: "outside the closed menu"
+
+  - name: casing_is_not_forgiven
+    value: "User"
+    valid: false
+    error_contains: "outside the closed menu"
+
+  - name: a_padded_token_is_refused
+    value: " user"
+    valid: false
+    error_contains: "outside the closed menu"
+
+  - name: a_refusal_names_the_accepted_menu
+    value: "probably-agent"
+    valid: false
+    error_contains: "user, agent, unknown"
