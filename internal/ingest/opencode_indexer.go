@@ -3,7 +3,9 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -431,6 +433,7 @@ func parseOpenCodeSemanticPart(entryID string, outerTimeCreated int64, raw []byt
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return openCodeSemanticPart{}, err
 	}
+	data.Text = unwrapOpenCodeDoubleEncodedText(data.Text)
 	timestamp := outerTimeCreated
 	if timestamp <= 0 {
 		timestamp = data.Time.Created
@@ -952,6 +955,90 @@ func classifyOpenCodeEntry(role Role) EntryType {
 	}
 }
 
+// unwrapOpenCodeDoubleEncodedText decodes a text value that is itself one JSON
+// string literal, and returns every other value unchanged.
+//
+// Some launchers hand OpenCode a prompt that has already been JSON-encoded, so
+// the stored part holds {"type":"text","text":"\"Run /reviewer first. ...\""}.
+// The text VALUE is then a quoted literal with escaped newlines rather than the
+// prompt itself, which renders as a quote-wrapped turn whose markdown is broken
+// by literal backslash-n. Decoding it once at indexing time restores the prompt,
+// so the preview, the stored transcript, and a push all carry the same text.
+//
+// The unwrap is deliberately narrow and never recursive:
+//   - the whole value must be exactly one JSON string, so text that merely
+//     CONTAINS quotes, and text that looks like a JSON object or array, is left
+//     alone;
+//   - a value that decodes to the empty string is left alone, because emptying
+//     a turn loses more than the quotes cost;
+//   - the decoded result is returned as-is, so a prompt that a launcher encoded
+//     twice keeps one visible layer rather than being silently unwrapped again.
+func unwrapOpenCodeDoubleEncodedText(text string) string {
+	if len(text) < 2 || text[0] != '"' || text[len(text)-1] != '"' {
+		return text
+	}
+	if decoded, ok := decodeOneJSONStringLiteral(text); ok {
+		return decoded
+	}
+	// A launcher that wrapped a MULTI-LINE prompt left the newlines raw inside
+	// the quotes, and no JSON string literal may hold a raw control character,
+	// so the value above did not parse. On the real store 31 of the 32 wrapped
+	// prompts are of this kind, so the narrow parse alone would have left almost
+	// every affected turn quote-wrapped. Escaping exactly the whitespace control
+	// characters and parsing once more accepts them and nothing else: a value
+	// holding any other control character is still left alone.
+	escaped, ok := escapeRawWhitespaceControls(text)
+	if !ok {
+		return text
+	}
+	if decoded, ok := decodeOneJSONStringLiteral(escaped); ok {
+		return decoded
+	}
+	return text
+}
+
+// decodeOneJSONStringLiteral decodes text when the WHOLE of it is exactly one
+// JSON string literal that stands for a non-empty string. A trailing token
+// means the value was not one literal on its own, so decoding it would drop
+// whatever followed. An empty result is refused because emptying a turn loses
+// more than the quotes cost.
+func decodeOneJSONStringLiteral(text string) (string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	var decoded string
+	if err := decoder.Decode(&decoded); err != nil || decoded == "" {
+		return "", false
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return "", false
+	}
+	return decoded, true
+}
+
+// escapeRawWhitespaceControls rewrites raw newline, carriage return, and tab
+// bytes as their JSON escapes and reports whether it could. It reports false
+// for any other control character, so a value carrying one is never coerced
+// into parsing.
+func escapeRawWhitespaceControls(text string) (string, bool) {
+	var builder strings.Builder
+	builder.Grow(len(text))
+	for index := 0; index < len(text); index++ {
+		switch character := text[index]; character {
+		case '\n':
+			builder.WriteString(`\n`)
+		case '\r':
+			builder.WriteString(`\r`)
+		case '\t':
+			builder.WriteString(`\t`)
+		default:
+			if character < 0x20 {
+				return "", false
+			}
+			builder.WriteByte(character)
+		}
+	}
+	return builder.String(), true
+}
+
 // extractOpenCodePreview tries to extract preview text from message content.
 // Content can be a string, an array of blocks, or absent.
 func extractOpenCodePreview(raw json.RawMessage) string {
@@ -962,7 +1049,7 @@ func extractOpenCodePreview(raw json.RawMessage) string {
 	// Try as plain string.
 	var s string
 	if json.Unmarshal(raw, &s) == nil && s != "" {
-		return s
+		return unwrapOpenCodeDoubleEncodedText(s)
 	}
 
 	// Try as array of content blocks.
@@ -973,7 +1060,7 @@ func extractOpenCodePreview(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &blocks) == nil {
 		for _, b := range blocks {
 			if b.Type == "text" && b.Text != "" {
-				return b.Text
+				return unwrapOpenCodeDoubleEncodedText(b.Text)
 			}
 		}
 	}
