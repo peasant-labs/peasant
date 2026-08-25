@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -26,13 +27,14 @@ const (
     spawns_json,
     title,
     branch,
-    cwd
+    cwd,
+    origin
 FROM claude_transcript_evidence`
 
 	sqlUpsertClaudeEvidence = `INSERT OR REPLACE INTO claude_transcript_evidence (
     source_path, scope, mod_time_unix_nano, size_bytes, has_conversation,
-    identity_team, identity_name, spawns_json, title, branch, cwd
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    identity_team, identity_name, spawns_json, title, branch, cwd, origin
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	sqlDeleteClaudeEvidence = `DELETE FROM claude_transcript_evidence WHERE source_path = ?`
 )
@@ -82,6 +84,13 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 	if err := json.Unmarshal([]byte(stmt.ColumnText(7)), &spawnRows); err != nil {
 		return ingest.ClaudeTranscriptEvidence{}, false
 	}
+	// Column 11 (origin) is read as raw text and assigned directly, never
+	// through sessionorigin.Parse or Origin.Validate. The empty string is a
+	// legal stored value on THIS table only — it means the row predates the
+	// origin field — and Fresh (internal/ingest/claude_evidence.go) resolves
+	// that marker to "record incomplete" before anything treats the value as
+	// a decided Origin. Calling Validate here would reject a legitimate,
+	// pre-upgrade cache row instead of letting discovery re-mine it.
 	record := ingest.ClaudeTranscriptEvidence{
 		SourcePath:            ingest.ResolvedPath(stmt.ColumnText(0)),
 		Scope:                 scope,
@@ -91,6 +100,7 @@ func scanClaudeEvidence(stmt *sqlite.Stmt) (ingest.ClaudeTranscriptEvidence, boo
 		Title:                 stmt.ColumnText(8),
 		Branch:                stmt.ColumnText(9),
 		CWD:                   stmt.ColumnText(10),
+		Origin:                sessionorigin.Origin(stmt.ColumnText(11)),
 	}
 	if stmt.ColumnType(5) != sqlite.TypeNull && stmt.ColumnType(6) != sqlite.TypeNull {
 		record.Identity = &ingest.ClaudeTeammateIdentity{
@@ -152,6 +162,7 @@ func (s *Store) SaveClaudeEvidence(ctx context.Context, upserts []ingest.ClaudeT
 				record.Title,
 				record.Branch,
 				record.CWD,
+				record.Origin.String(),
 			},
 		}); err != nil {
 			return fmt.Errorf("store.SaveClaudeEvidence: write evidence for transcript %q: %w", record.SourcePath, err)

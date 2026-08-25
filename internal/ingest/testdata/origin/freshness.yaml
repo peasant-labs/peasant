@@ -1,0 +1,55 @@
+# The one freshness condition this slice adds to Fresh (claude_evidence.go):
+# a cache row whose origin is the empty "predates the field" marker is never
+# fresh, whatever its size and modification time. Four cases, one per
+# (root|subagent) x (classified-stays-fresh|pre-origin-is-stale) pairing, so
+# a bug that only shows up for one scope cannot hide behind the other. Every
+# case holds SizeBytes/ModTimeUnixNano exactly equal to the file that
+# produced them (mined once, then only the origin is ever mutated), so the
+# empty origin is the ONLY possible cause of a "stale" verdict.
+
+required_case_names:
+  - root_transcript_classified_cache_row_stays_fresh
+  - root_transcript_pre_origin_cache_row_is_stale
+  - subagent_transcript_classified_cache_row_stays_fresh
+  - subagent_transcript_pre_origin_cache_row_is_stale
+
+cases:
+  - name: root_transcript_classified_cache_row_stays_fresh
+    scope: root
+    corrupt_origin: false
+    want_fresh: true
+    source_path: /claude/-workspace/11111111-1111-4111-8111-111111111111.jsonl
+    files:
+      - path: -workspace/11111111-1111-4111-8111-111111111111.jsonl
+        lines:
+          - '{"sessionId":"11111111-1111-4111-8111-111111111111","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate work"}}'
+
+  - name: root_transcript_pre_origin_cache_row_is_stale
+    scope: root
+    corrupt_origin: true
+    want_fresh: false
+    source_path: /claude/-workspace/22222222-2222-4222-8222-222222222222.jsonl
+    files:
+      - path: -workspace/22222222-2222-4222-8222-222222222222.jsonl
+        lines:
+          - '{"sessionId":"22222222-2222-4222-8222-222222222222","type":"user","cwd":"/workspace","message":{"role":"user","content":"coordinate work"}}'
+
+  - name: subagent_transcript_classified_cache_row_stays_fresh
+    scope: subagent
+    corrupt_origin: false
+    want_fresh: true
+    source_path: /claude/-workspace/33333333-3333-4333-8333-333333333333/subagents/agent-a3aee4f.jsonl
+    files:
+      - path: -workspace/33333333-3333-4333-8333-333333333333/subagents/agent-a3aee4f.jsonl
+        lines:
+          - '{"type":"user","message":{"role":"user","content":"child transcript"}}'
+
+  - name: subagent_transcript_pre_origin_cache_row_is_stale
+    scope: subagent
+    corrupt_origin: true
+    want_fresh: false
+    source_path: /claude/-workspace/44444444-4444-4444-8444-444444444444/subagents/agent-b3aee4f.jsonl
+    files:
+      - path: -workspace/44444444-4444-4444-8444-444444444444/subagents/agent-b3aee4f.jsonl
+        lines:
+          - '{"type":"user","message":{"role":"user","content":"child transcript"}}'

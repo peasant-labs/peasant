@@ -205,12 +205,15 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	}
 
 	// Verify user_version was set by the migration framework.
-	// All 44 migrations run, so user_version = 44. (V35 adds the FTS5 virtual
+	// All 45 migrations run, so user_version = 45. (V35 adds the FTS5 virtual
 	// table + shadow tables; V36 seeds the user.custom_label annotation type;
 	// V37/V38 add the sessions/pulled_transcripts license_id columns; V39 seeds
 	// the quality.turn_outcome/quality.turn_flag annotation types. V40/V41 add
 	// the durable association ledger and its annotation target table; V42 admits
-	// Strike in the closed harness mirrors.)
+	// Strike in the closed harness mirrors; V43 adds publication receipts and
+	// attempt diagnostics; V44 adds the Claude discovery evidence cache; V45
+	// adds sessions.session_origin/origin_version and widens the evidence
+	// cache with its origin column.)
 	var userVersion int
 	err = sqlitex.ExecuteTransient(conn, `PRAGMA user_version;`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -221,8 +224,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
-	if userVersion != 44 {
-		t.Errorf("expected user_version=44 after all migrations, got %d", userVersion)
+	if userVersion != 45 {
+		t.Errorf("expected user_version=45 after all migrations, got %d", userVersion)
 	}
 }
 

@@ -73,8 +73,22 @@ type ClaudeTranscriptEvidence struct {
 // Fresh reports whether this record still describes the file that info names.
 // A record is fresh only when the scope, the size, and the modification time all
 // agree, so any edit to a transcript makes discovery mine it again.
+//
+// A record mined before this build knew about origin carries the empty origin
+// (the storage-layer marker described on ClaudeTranscriptEvidence.Origin). It
+// is missing a field this build needs, so it is not fresh whatever its size and
+// mod time. Re-mining is work discovery already does for a changed file, so the
+// upgrade needs no separate pass.
+//
+// Scope-independent on purpose: EVERY mined record now carries a menu value —
+// a root from its content, a subagent because it is classified Agent at mine
+// time as the child of a root. If a future field ever needs this same
+// treatment, do NOT add a second clause here: two clauses would mean this
+// predicate has silently become "the record is complete", which deserves its
+// own name. Add a record schema-version column instead, which covers every
+// future field at once.
 func (e ClaudeTranscriptEvidence) Fresh(scope ClaudeEvidenceScope, info os.FileInfo) bool {
-	if info == nil || !scope.IsValid() || e.Scope != scope {
+	if info == nil || !scope.IsValid() || e.Scope != scope || e.Origin == "" {
 		return false
 	}
 	return e.SizeBytes == info.Size() && e.ModTimeUnixNano == info.ModTime().UnixNano()
