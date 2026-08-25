@@ -47,39 +47,45 @@ type baselineCase struct {
 }
 
 // loadBaselineCases decodes the baseline corpus, enforces the deletion guard
-// through the SHARED internal/testutil.SemanticManifest helper -- not a
-// second, bespoke required-name check -- and refuses a case that declares an
-// origin or signal outside the production closed sets.
+// through the SHARED internal/testutil.RequireFixtureNames helper, and refuses
+// a case that declares an origin or signal outside the production closed sets.
 func loadBaselineCases(t *testing.T) []baselineCase {
 	t.Helper()
 
-	manifest, err := testutil.DecodeSemanticManifest(baselineManifestBytes, "origin-audit-baseline")
-	if err != nil {
+	// Decode the manifest to extract required case names.
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(baselineManifestBytes))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
 		t.Fatalf("decode baseline manifest: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		t.Fatalf("baseline manifest must contain exactly one YAML document: %v", err)
 	}
 
 	var fixture baselineCaseFile
-	decoder := yaml.NewDecoder(bytes.NewReader(baselineCasesBytes))
+	decoder = yaml.NewDecoder(bytes.NewReader(baselineCasesBytes))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatalf("decode baseline cases: %v", err)
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+	var caseTrailing any
+	if err := decoder.Decode(&caseTrailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("baseline cases fixture must contain exactly one YAML document: %v", err)
 	}
 
-	names := make([]string, 0, len(fixture.Cases))
-	seen := make(map[string]struct{}, len(fixture.Cases))
+	present := make(map[string]bool, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
 		if tc.Name == "" {
 			t.Fatalf("baseline cases fixture holds a case with no name")
 		}
-		if _, duplicate := seen[tc.Name]; duplicate {
+		if present[tc.Name] {
 			t.Fatalf("baseline cases fixture repeats case name %q", tc.Name)
 		}
-		seen[tc.Name] = struct{}{}
-		names = append(names, tc.Name)
+		present[tc.Name] = true
 
 		if _, err := sessionorigin.Parse(tc.Origin); err != nil {
 			t.Fatalf("baseline case %q declares origin %q: %v", tc.Name, tc.Origin, err)
@@ -91,7 +97,7 @@ func loadBaselineCases(t *testing.T) []baselineCase {
 			t.Fatalf("baseline case %q has no relative_path", tc.Name)
 		}
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "origin-audit-baseline"); err != nil {
+	if err := testutil.RequireFixtureNames("origin-audit-baseline", "case", manifest.RequiredNames, present); err != nil {
 		t.Fatalf("baseline cases fixture failed the deletion guard: %v", err)
 	}
 
