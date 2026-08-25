@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -30,14 +31,18 @@ import (
 // downgrade-emits (CLI-ahead). The envelope's ContractVersion and the embedded
 // SessionDetailPayload.SchemaVersion are both stamped from emit in lockstep
 // (envelope wins on any future disagreement; see schema.TranscriptContent).
-func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) schema.TranscriptContent {
-	content, _ := BuildTranscriptContentValidated(meta, entries, emit, fields)
+func BuildTranscriptContent(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility, origin sessionorigin.Origin) schema.TranscriptContent {
+	content, _ := BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
 	return content
 }
 
 // BuildTranscriptContentValidated builds content through the producer trust
 // boundary and returns attribution failures to outward-facing callers.
-func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility) (schema.TranscriptContent, error) {
+//
+// origin is the session's stored origin, a push CALL OPTION read from
+// sessions.session_origin rather than from the metadata document, which is an
+// alias to the external contract module and is not Peasant's to extend.
+func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []schema.SessionEntry, emit schema.PushContractVersion, fields config.PushFieldVisibility, origin sessionorigin.Origin) (schema.TranscriptContent, error) {
 	session := metadataToSession(meta, fields)
 	turns, err := transcript.EntriesToTurnsValidated(entries)
 	if err != nil {
@@ -51,6 +56,18 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 	}
 	payload.TurnCount = len(payload.Turns)
 	payload.SchemaVersion = emit
+	// Peasant ALWAYS declares, for all three stored values, and never refuses a
+	// session on account of its origin. The stored menu and the wire menu are
+	// the same three tokens, so there is no mapping step and no case where the
+	// field is deliberately dropped; a published document carrying no origin can
+	// only come from a build older than this one.
+	//
+	// It is NOT gated by push field visibility: origin names no person, path,
+	// host, or repository, so gating it would defeat grouping at the server for
+	// no privacy gain. It carries no per-field redaction handling either — the
+	// assembled document is redacted whole (marshalBuiltTranscriptContent), which
+	// is what covers a field nobody remembered to add a rule for.
+	payload.SessionOrigin = declaredOrigin(origin)
 
 	return schema.TranscriptContent{
 		ContractVersion: emit,
@@ -237,9 +254,10 @@ func marshalTranscriptContent(
 	entries []schema.SessionEntry,
 	emit schema.PushContractVersion,
 	fields config.PushFieldVisibility,
+	origin sessionorigin.Origin,
 	redactor redact.JSONRedactor,
 ) ([]byte, error) {
-	content, err := BuildTranscriptContentValidated(meta, entries, emit, fields)
+	content, err := BuildTranscriptContentValidated(meta, entries, emit, fields, origin)
 	if err != nil {
 		return nil, err
 	}
@@ -349,4 +367,19 @@ func metadataToSession(meta *ingest.UnifiedMetadata, fields config.PushFieldVisi
 		session.GitRemote = *meta.Git.Remote
 	}
 	return session
+}
+
+// declaredOrigin converts a stored origin into the wire declaration.
+//
+// A push NEVER fails on account of origin, so a value the stored menu cannot
+// produce — which the sessions.session_origin CHECK makes unreachable from any
+// row this build wrote — is declared as unknown rather than refused. Under the
+// contract that is the honest answer for a value this producer cannot vouch
+// for: it returns the decision to the consumer's own rule instead of asserting
+// something false, and the session is still published.
+func declaredOrigin(origin sessionorigin.Origin) schema.SessionOrigin {
+	if !origin.Valid() {
+		return schema.SessionOriginUnknown
+	}
+	return schema.SessionOrigin(origin)
 }

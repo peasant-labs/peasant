@@ -33,18 +33,25 @@ const (
 	RouteConfigMock         Route = "/api/v1/config/mock"
 	RouteConfigCapabilities Route = "/api/v1/config/capabilities"
 	RouteSessions           Route = "/api/v1/sessions"
-	RouteAnnotations        Route = "/api/v1/annotations"
-	RouteAnnotationsBatch   Route = "/api/v1/annotations/batch"
-	RouteAnnotationTypes    Route = "/api/v1/annotation-types"
-	RouteSessionTranscript  Route = "/api/v1/sessions/{id}/transcript"
-	RouteLocalFeedback      Route = "/api/v1/local/feedback"
-	RouteSyncSessions       Route = "/api/v1/sync/sessions"
-	RouteSyncAuth           Route = "/api/v1/sync/auth"
-	RouteSyncRedactions     Route = "/api/v1/sync/redactions"
-	RouteSyncPush           Route = "/api/v1/sync/push"
-	RouteSyncLogin          Route = "/api/v1/sync/login"
-	RouteSyncIngest         Route = "/api/v1/sync/ingest"
-	RouteSyncIngestStatus   Route = "/api/v1/sync/ingest/status"
+	// RouteSessionSummaries resolves links: it returns summaries for an explicit
+	// set of session identifiers named in ?ids=, applying neither origin scope
+	// nor selection scope. A sibling RESOURCE rather than a path under
+	// /api/v1/sessions, because /api/v1/sessions/{id} is already the single
+	// session operation and a by-id collection nested there would be ambiguous
+	// against it — the same reason annotation types sit beside annotations.
+	RouteSessionSummaries  Route = "/api/v1/session-summaries"
+	RouteAnnotations       Route = "/api/v1/annotations"
+	RouteAnnotationsBatch  Route = "/api/v1/annotations/batch"
+	RouteAnnotationTypes   Route = "/api/v1/annotation-types"
+	RouteSessionTranscript Route = "/api/v1/sessions/{id}/transcript"
+	RouteLocalFeedback     Route = "/api/v1/local/feedback"
+	RouteSyncSessions      Route = "/api/v1/sync/sessions"
+	RouteSyncAuth          Route = "/api/v1/sync/auth"
+	RouteSyncRedactions    Route = "/api/v1/sync/redactions"
+	RouteSyncPush          Route = "/api/v1/sync/push"
+	RouteSyncLogin         Route = "/api/v1/sync/login"
+	RouteSyncIngest        Route = "/api/v1/sync/ingest"
+	RouteSyncIngestStatus  Route = "/api/v1/sync/ingest/status"
 
 	// Map / Review surfaces. Path params use Go 1.22 ServeMux
 	// {wildcard} syntax; commit/path/file/branch arrive as query params.

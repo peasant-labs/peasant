@@ -35,6 +35,9 @@ func (batchTestProvider) Sessions(_ context.Context) ([]ingest.Session, error) {
 func (batchTestProvider) SessionSummaries(_ context.Context) ([]api.SessionSummary, error) {
 	return nil, nil
 }
+func (batchTestProvider) SessionSummariesByID(_ context.Context, _ []string) ([]api.SessionSummary, error) {
+	return nil, nil
+}
 func (batchTestProvider) SessionByID(_ context.Context, _ string) (*ingest.Session, error) {
 	return nil, nil
 }

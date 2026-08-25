@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -388,7 +389,12 @@ func TestPushContent_RedactsContentWithoutBreakingIdentifiers(t *testing.T) {
 		t.Fatalf("build the redactor the push path uses: %v", err)
 	}
 	fields := config.PushFieldVisibility{ProjectPath: true}
-	body, err := marshalTranscriptContent(meta, entries, emit, fields, redactor)
+	// A DECLARED origin, so the document actually carries the field the walk
+	// below compares. It is agent rather than unknown because unknown is also
+	// what a build with no opinion sends, and a fixture that cannot tell the two
+	// apart would pass whether or not the declaration was ever set.
+	const declared = sessionorigin.Agent
+	body, err := marshalTranscriptContent(meta, entries, emit, fields, declared, redactor)
 	if err != nil {
 		t.Fatalf("marshal the outward body: %v", err)
 	}
@@ -458,7 +464,7 @@ func TestPushContent_RedactsContentWithoutBreakingIdentifiers(t *testing.T) {
 	// So the same body is marshalled twice, once with the redactor and once
 	// without, and every string is compared path by path. A string carrying a
 	// plant must change; a string carrying none must be byte-identical.
-	unredactedBody, err := marshalTranscriptContent(meta, entries, emit, fields, nil)
+	unredactedBody, err := marshalTranscriptContent(meta, entries, emit, fields, declared, nil)
 	if err != nil {
 		t.Fatalf("marshal the outward body without a redactor: %v", err)
 	}
@@ -524,6 +530,13 @@ func TestPushContent_RedactsContentWithoutBreakingIdentifiers(t *testing.T) {
 		string(defaults.HarnessClaudeCode),
 		string(schema.RoleAssistant),
 		string(testutil.TestModel),
+		// The declared origin is covered here BY CONSTRUCTION, not by a rule of
+		// its own: it is walked by the two halves above like every other string,
+		// so a redaction rule that rewrote it would fail the untouched half, and
+		// a build that stopped declaring it fails here. Adding per-field handling
+		// for it would reintroduce the per-source form that kept leaving new
+		// fields uncovered.
+		string(schema.SessionOriginAgent),
 	} {
 		found := false
 		for _, publishedValue := range asPublished {
@@ -624,6 +637,7 @@ func TestPushContent_IsUnredactedOnlyWithNoRedactor(t *testing.T) {
 		[]schema.SessionEntry{{EntryIndex: 1, Role: schema.RoleAssistant, ContentPreview: &preview}},
 		schema.PushContractVersion("0.1.1"),
 		config.DefaultPushFieldVisibility(),
+		sessionorigin.Unknown,
 		nil,
 	)
 	if err != nil {
