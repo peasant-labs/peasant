@@ -25,11 +25,16 @@ type ClaudeAdapter struct {
 	salt           salt.Salt
 	evidence       ClaudeEvidenceCache
 	locationLookup SessionLocationLookup
+	// reminedCount is how many evidence records the most recent Discover had
+	// to mine again. It describes that one call and is overwritten by the next.
+	reminedCount int
 }
 
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
 var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
 var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
+var _ DiscoveryStatistics = (*ClaudeAdapter)(nil)
+var _ OriginEvidenceMiner = (*ClaudeAdapter)(nil)
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
 func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapter {
@@ -306,7 +311,34 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 
 	a.linkClaudeTeammates(ctx, sessions, cached, mined)
 	a.saveMinedEvidence(ctx, cfg, cached, mined, remined)
+	a.reminedCount = len(remined)
 	return sessions, nil
+}
+
+// ReminedCount reports how many cached evidence records the most recent Discover
+// had to mine again. See DiscoveryStatistics for the scoping rule.
+func (a *ClaudeAdapter) ReminedCount() int { return a.reminedCount }
+
+// MineOriginEvidence re-reads one Claude transcript that is still on disk and
+// returns the origin its content decides, for the stored-row resolve pass.
+//
+// It is the ordinary root miner, not a second one: the same read, the same
+// captures, and the same rule. A transcript that cannot be stat-ed or cannot be
+// read reports false, which is the resolver's degraded case, because the same
+// file may be readable on a later run.
+//
+// A child transcript never reaches here. The resolver decides a row that already
+// carries a parent at rule step one, with no file read at all.
+func (a *ClaudeAdapter) MineOriginEvidence(path ResolvedPath) (sessionorigin.Origin, bool) {
+	info, err := a.fs.Stat(path.String())
+	if err != nil {
+		return "", false
+	}
+	evidence, readable := a.mineClaudeRootTranscript(path, info)
+	if !readable {
+		return "", false
+	}
+	return evidence.Origin, true
 }
 
 // loadCachedEvidence returns the evidence an earlier discovery mined. A missing
