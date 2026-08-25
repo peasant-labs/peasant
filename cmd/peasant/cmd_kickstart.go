@@ -17,6 +17,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
@@ -404,6 +405,7 @@ func ftueDiscoverWith(
 				SessionID:   string(d.SessionID),
 				SubagentIDs: childMap[string(d.SessionID)],
 				WorkingDir:  workingDir,
+				Origin:      resolveListingOrigin(d.Origin),
 				// The transcript location travels with the listing so the
 				// selection step can preview a session before any import. The
 				// file stays where the harness wrote it.
@@ -466,6 +468,28 @@ func resolveSessionGit(
 		}
 	}
 	return gitRemote, branchName
+}
+
+// resolveListingOrigin turns discovery's typed origin evidence into the menu
+// value the kickstart listing carries, re-validated through
+// sessionorigin.Parse at this boundary rather than forwarded as a bare
+// string. An adapter that mined no evidence (every non-Claude adapter today)
+// leaves the field empty; that resolves to the visible fail-safe Unknown,
+// the same rule internal/store/writer.go applies before a session is ever
+// persisted. Parse can only fail here if the classifier produced a token
+// outside its own closed menu — a programming error, not a user one — and
+// kickstart is best-effort discovery, so it fails safe to Unknown (never
+// crashes the picker) rather than propagate a corrupt value.
+func resolveListingOrigin(discovered sessionorigin.Origin) sessionorigin.Origin {
+	token := discovered.String()
+	if token == "" {
+		token = sessionorigin.Unknown.String()
+	}
+	resolved, err := sessionorigin.Parse(token)
+	if err != nil {
+		return sessionorigin.Unknown
+	}
+	return resolved
 }
 
 // filterRootSessions returns only root sessions (no subagents).

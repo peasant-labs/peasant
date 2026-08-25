@@ -197,6 +197,104 @@ func TestCaptureFixtureGuardsRequiredPushStateDeletion(t *testing.T) {
 	}
 }
 
+// TestCaptureFixtureGuardsRequiredOriginHiddenStateDeletion mutation-proves
+// that the closed set of selection states still requires origin-hidden even
+// without a bare state-count guard.
+func TestCaptureFixtureGuardsRequiredOriginHiddenStateDeletion(t *testing.T) {
+	old := []byte("  - key: origin-hidden\n    query: \"\"\n" +
+		"    # \"user driv\" (not the full title) survives the row-label truncation the\n" +
+		"    # narrower 80-column capture applies; the child badge itself is dropped\n" +
+		"    # entirely (not merely truncated) at that width, so it is verified by the\n" +
+		"    # scanner fixture (testdata/child_counts.yaml) and by manual inspection of\n" +
+		"    # the wider capture, not asserted here across both widths.\n" +
+		"    wantContains: [\"user driv\", \"parent ses\"]\n" +
+		"    wantAbsent: [\"agent driven session\"]\n")
+	if count := bytes.Count(captureFixtureData, old); count != 1 {
+		t.Fatalf("origin-hidden state block mutation source occurs %d times, want exactly one", count)
+	}
+	mutated := bytes.Replace(captureFixtureData, old, nil, 1)
+	_, err := decodeCaptureDocument(mutated)
+	if err == nil {
+		t.Fatal("screenshot fixture accepted a corpus missing the required origin-hidden selection state")
+	}
+	if !strings.Contains(err.Error(), `omits selection state "origin-hidden"`) {
+		t.Fatalf("deleted-required-state error = %v, want it to name the missing state", err)
+	}
+}
+
+// TestCaptureFixtureGuardsOriginHiddenWantAbsent mutation-proves that
+// decode itself requires the origin-hidden state to declare a wantAbsent
+// marker: a state with no forbidden marker would let a broken origin filter
+// (one that stopped hiding agent rows) pass unnoticed.
+func TestCaptureFixtureGuardsOriginHiddenWantAbsent(t *testing.T) {
+	old := []byte("    wantAbsent: [\"agent driven session\"]\n")
+	if bytes.Count(captureFixtureData, old) != 1 {
+		t.Fatalf("origin-hidden wantAbsent mutation source occurs %d times, want exactly one", bytes.Count(captureFixtureData, old))
+	}
+	mutated := bytes.Replace(captureFixtureData, old, nil, 1)
+	_, err := decodeCaptureDocument(mutated)
+	if err == nil {
+		t.Fatal("screenshot fixture accepted an origin-hidden state with no wantAbsent marker")
+	}
+	if !strings.Contains(err.Error(), "declares no wantAbsent marker") {
+		t.Fatalf("missing-wantAbsent error = %v, want it to explain the gap", err)
+	}
+}
+
+// TestCaptureFixtureGuardsRequiredOriginSessionDeletion mutation-proves the
+// origin-agent-hidden and origin-user-visible required-name entries: deleting
+// either listing must fail decode naming it, so the hiding capture cannot
+// silently lose its subject or its control.
+func TestCaptureFixtureGuardsRequiredOriginSessionDeletion(t *testing.T) {
+	old := []byte("    - harness: claude-code\n      projectName: acme/tool\n      gitRemote: \"git@github.com:acme/tool.git\"\n      branch: main\n      title: agent driven session\n      workingDir: /fixtures/worktrees/pasture-a\n      sessionId: origin-agent-hidden\n      origin: agent\n")
+	if count := bytes.Count(captureFixtureData, old); count != 1 {
+		t.Fatalf("origin-agent-hidden session mutation source occurs %d times, want exactly one", count)
+	}
+	mutated := bytes.Replace(captureFixtureData, old, nil, 1)
+	_, err := decodeCaptureDocument(mutated)
+	if err == nil {
+		t.Fatal("screenshot fixture accepted a corpus missing the required origin-agent-hidden session")
+	}
+	if !strings.Contains(err.Error(), `missing required selection session "origin-agent-hidden"`) {
+		t.Fatalf("deleted-required-session error = %v, want it to name the missing session", err)
+	}
+}
+
+// TestCaptureFixtureRendersOriginHiddenViewActuallyHidesAgentRow is a
+// production render (not just decode validation): it mounts the real
+// selection tree over the fixture listings and asserts the agent-driven
+// session is genuinely absent from the rendered screen while its user-origin
+// control is present, at both terminal widths.
+func TestCaptureFixtureRendersOriginHiddenViewActuallyHidesAgentRow(t *testing.T) {
+	document, err := decodeCaptureDocument(captureFixtureData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state selectionStateFixture
+	for _, candidate := range document.SelectionStates {
+		if candidate.Key == selectionStateOriginHidden {
+			state = candidate
+		}
+	}
+	if state.Key == "" {
+		t.Fatal("origin-hidden selection state not found in fixture")
+	}
+	workingDirectory := t.TempDir()
+	for _, size := range []struct{ width, height int }{{80, 24}, {120, 40}} {
+		capture := selectionCaptureFixture{
+			Name: "mutation-check", State: selectionStateOriginHidden, Theme: captureThemeDark,
+			Width: size.width, Height: size.height,
+		}
+		view, err := renderSelectionCapture(workingDirectory, 0, document.Selection, capture, state)
+		if err != nil {
+			t.Fatalf("render selection capture at %dx%d: %v", size.width, size.height, err)
+		}
+		if err := validateTerminalCapture(capture.Name, view, size.width, size.height, state.WantContains, state.WantAbsent); err != nil {
+			t.Fatalf("%dx%d: %v", size.width, size.height, err)
+		}
+	}
+}
+
 func TestCaptureFixturePinsTheGuidedCrossProduct(t *testing.T) {
 	row := []byte("  - {name: retention-light-120x40, section: retention, theme: light, width: 120, height: 40}\n")
 	if count := bytes.Count(captureFixtureData, row); count != 1 {

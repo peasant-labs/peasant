@@ -52,7 +52,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, guidedSections[capture.Section].WantContains); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, guidedSections[capture.Section].WantContains, nil); err != nil {
 			return nil, err
 		}
 		guidedCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -69,7 +69,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, state.WantContains, state.WantAbsent); err != nil {
 			return nil, err
 		}
 		selectionCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -85,7 +85,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		if renderErr != nil {
 			return nil, renderErr
 		}
-		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, pushStates[capture.State].WantContains); err != nil {
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, pushStates[capture.State].WantContains, nil); err != nil {
 			return nil, err
 		}
 		pushCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
@@ -469,7 +469,7 @@ func captureThemeValue(name captureTheme) theme.Theme {
 	return theme.New(theme.ModeDark)
 }
 
-func validateTerminalCapture(name, view string, width, height int, wantContains []string) error {
+func validateTerminalCapture(name, view string, width, height int, wantContains, wantAbsent []string) error {
 	lines := strings.Split(view, "\n")
 	if len(lines) != height {
 		return fmt.Errorf("render terminal capture %q: height=%d, want exactly %d rows", name, len(lines), height)
@@ -483,6 +483,11 @@ func validateTerminalCapture(name, view string, width, height int, wantContains 
 	for _, marker := range wantContains {
 		if !strings.Contains(plain, marker) {
 			return fmt.Errorf("render terminal capture %q: mounted view omits required marker %q", name, marker)
+		}
+	}
+	for _, marker := range wantAbsent {
+		if strings.Contains(plain, marker) {
+			return fmt.Errorf("render terminal capture %q: mounted view carries forbidden marker %q, which must stay hidden", name, marker)
 		}
 	}
 	return nil

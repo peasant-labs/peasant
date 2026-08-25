@@ -37,9 +37,11 @@ type childCountCase struct {
 	ExpectedRows []childCountRow       `yaml:"expectedRows"`
 }
 
-// childCountDocument is the whole fixture plus its row-count guard.
+// childCountDocument is the whole fixture plus its deletion-protection
+// manifest. RequiredCaseNames is not a row count: it names every case that
+// must remain present, and adding a new case never requires touching it.
 type childCountDocument struct {
-	ExpectedCaseCount int              `yaml:"expectedCaseCount"`
+	RequiredCaseNames []string         `yaml:"requiredCaseNames"`
 	Cases             []childCountCase `yaml:"cases"`
 }
 
@@ -58,8 +60,12 @@ func loadChildCounts(t *testing.T) childCountDocument {
 		}
 		t.Fatalf("child_counts.yaml must hold exactly one document: %v", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))
+	present := make(map[string]bool, len(doc.Cases))
+	for _, c := range doc.Cases {
+		present[c.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("child count fixture", "case", doc.RequiredCaseNames, present); err != nil {
+		t.Fatal(err)
 	}
 	for _, c := range doc.Cases {
 		if len(c.ExpectedRows) == 0 {
