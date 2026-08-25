@@ -5,10 +5,13 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -17,10 +20,14 @@ import (
 var claudeEvidenceFixture []byte
 
 type claudeEvidenceFixtureFile struct {
-	DeclaredRecords    int                           `yaml:"declared_records"`
-	DeclaredRejections int                           `yaml:"declared_rejections"`
-	Records            []claudeEvidenceFixtureRecord `yaml:"records"`
-	Rejections         []claudeEvidenceRejection     `yaml:"rejections"`
+	// RequiredRecordNames and RequiredRejectionNames are deletion-protection
+	// manifests: every listed name must be present among Records /
+	// Rejections respectively. They do not bound how many rows exist, so
+	// adding a new record or rejection never requires touching them.
+	RequiredRecordNames    []string                      `yaml:"required_record_names"`
+	RequiredRejectionNames []string                      `yaml:"required_rejection_names"`
+	Records                []claudeEvidenceFixtureRecord `yaml:"records"`
+	Rejections             []claudeEvidenceRejection     `yaml:"rejections"`
 }
 
 type claudeEvidenceFixtureRecord struct {
@@ -50,23 +57,47 @@ type claudeEvidenceRejection struct {
 
 func loadClaudeEvidenceFixture(t *testing.T) claudeEvidenceFixtureFile {
 	t.Helper()
-	decoder := yaml.NewDecoder(bytes.NewReader(claudeEvidenceFixture))
+	fixture, err := decodeClaudeEvidenceFixture(claudeEvidenceFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+func decodeClaudeEvidenceFixture(source []byte) (claudeEvidenceFixtureFile, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(source))
 	decoder.KnownFields(true)
 	var fixture claudeEvidenceFixtureFile
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode Claude evidence fixture: %v", err)
+		return claudeEvidenceFixtureFile{}, fmt.Errorf("decode Claude evidence fixture: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		t.Fatalf("Claude evidence fixture must contain exactly one YAML document: %v", err)
+		return claudeEvidenceFixtureFile{}, fmt.Errorf("Claude evidence fixture must contain exactly one YAML document: %v", err)
 	}
-	if fixture.DeclaredRecords != len(fixture.Records) {
-		t.Fatalf("Claude evidence record guard failed: declared=%d actual=%d", fixture.DeclaredRecords, len(fixture.Records))
+	if err := testutil.RequireFixtureNames("Claude evidence fixture", "record", fixture.RequiredRecordNames, recordNames(fixture.Records)); err != nil {
+		return claudeEvidenceFixtureFile{}, err
 	}
-	if fixture.DeclaredRejections != len(fixture.Rejections) {
-		t.Fatalf("Claude evidence rejection guard failed: declared=%d actual=%d", fixture.DeclaredRejections, len(fixture.Rejections))
+	if err := testutil.RequireFixtureNames("Claude evidence fixture", "rejection", fixture.RequiredRejectionNames, rejectionNames(fixture.Rejections)); err != nil {
+		return claudeEvidenceFixtureFile{}, err
 	}
-	return fixture
+	return fixture, nil
+}
+
+func recordNames(records []claudeEvidenceFixtureRecord) map[string]bool {
+	names := make(map[string]bool, len(records))
+	for _, record := range records {
+		names[record.Name] = true
+	}
+	return names
+}
+
+func rejectionNames(rejections []claudeEvidenceRejection) map[string]bool {
+	names := make(map[string]bool, len(rejections))
+	for _, rejection := range rejections {
+		names[rejection.Name] = true
+	}
+	return names
 }
 
 // toEvidence converts one fixture row into the discovery record the store writes.
@@ -145,6 +176,56 @@ func TestMigrationV44ClaudeEvidenceRoundTrip(t *testing.T) {
 			t.Errorf("the table accepted %s, want a constraint failure", rejection.Name)
 		}
 	}
+}
+
+// TestClaudeEvidenceFixtureGuardsRequiredRowDeletion mutation-proves the
+// required-name manifests: deleting a required record row, or a required
+// rejection row, must fail the load with a message naming the missing row.
+// This replaces the old declared_records/declared_rejections count guard,
+// which would have also failed on any addition to the fixture.
+func TestClaudeEvidenceFixtureGuardsRequiredRowDeletion(t *testing.T) {
+	t.Parallel()
+
+	// Baseline: the real, unmutated fixture must load cleanly first, so a
+	// failure below is known to come from the mutation and not a broken
+	// manifest.
+	if _, err := decodeClaudeEvidenceFixture(claudeEvidenceFixture); err != nil {
+		t.Fatalf("baseline fixture failed to decode before mutation: %v", err)
+	}
+
+	t.Run("deleted required record", func(t *testing.T) {
+		t.Parallel()
+		mutated := bytes.Replace(
+			claudeEvidenceFixture,
+			[]byte("  - name: subagent transcript carries only the conversation answer\n    source_path: /home/example/.claude/projects/-workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl\n    scope: subagent\n    mod_time_unix_nano: 1750000000000000004\n    size_bytes: 512\n    has_conversation: true\n    spawns: []\n    title: \"\"\n    branch: \"\"\n    cwd: \"\"\n"),
+			nil,
+			1,
+		)
+		_, err := decodeClaudeEvidenceFixture(mutated)
+		if err == nil {
+			t.Fatal("fixture decoder accepted a corpus missing a required record row")
+		}
+		if !strings.Contains(err.Error(), `missing required record "subagent transcript carries only the conversation answer"`) {
+			t.Fatalf("deleted-required-record error = %v, want it to name the missing record", err)
+		}
+	})
+
+	t.Run("deleted required rejection", func(t *testing.T) {
+		t.Parallel()
+		mutated := bytes.Replace(
+			claudeEvidenceFixture,
+			[]byte("  - name: half an identity\n    sql: >-\n      INSERT INTO claude_transcript_evidence\n      (source_path, scope, mod_time_unix_nano, size_bytes, has_conversation, identity_team, spawns_json, title, branch, cwd)\n      VALUES ('/tmp/e.jsonl', 'root', 1, 1, 1, 'migration', '[]', '', '', '')\n"),
+			nil,
+			1,
+		)
+		_, err := decodeClaudeEvidenceFixture(mutated)
+		if err == nil {
+			t.Fatal("fixture decoder accepted a corpus missing a required rejection row")
+		}
+		if !strings.Contains(err.Error(), `missing required rejection "half an identity"`) {
+			t.Fatalf("deleted-required-rejection error = %v, want it to name the missing rejection", err)
+		}
+	})
 }
 
 // TestClaudeEvidenceRejectsUnknownScope proves the write boundary fails closed

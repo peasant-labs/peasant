@@ -1,0 +1,37 @@
+# Rendered-screen cases for the child-session COUNT LINE.
+#
+# A parent session summarises its subagents as a count. That count renders on
+# its OWN line directly under the parent, indented one level deeper than the
+# parent's title, at EVERY terminal width. It is presentation only: it is not a
+# node, so it can never take the cursor, be toggled, or enter a selection.
+#
+# Each case renders the same small forest at one terminal size in one theme and
+# captures the whole screen, so the layout is readable in the test artifact
+# rather than only asserted as substrings. requiredCaseNames is a
+# deletion-protection manifest, not a case count: it names every case that must
+# remain, and adding a case never requires touching it.
+requiredCaseNames:
+  - the-count-sits-under-its-parent-at-80-columns-dark
+  - the-count-sits-under-its-parent-at-80-columns-light
+  - the-count-sits-under-its-parent-at-120-columns-dark
+  - the-count-sits-under-its-parent-at-120-columns-light
+cases:
+  - name: the-count-sits-under-its-parent-at-80-columns-dark
+    theme: dark
+    width: 80
+    height: 24
+
+  - name: the-count-sits-under-its-parent-at-80-columns-light
+    theme: light
+    width: 80
+    height: 24
+
+  - name: the-count-sits-under-its-parent-at-120-columns-dark
+    theme: dark
+    width: 120
+    height: 40
+
+  - name: the-count-sits-under-its-parent-at-120-columns-light
+    theme: light
+    width: 120
+    height: 40

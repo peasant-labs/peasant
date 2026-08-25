@@ -16,7 +16,7 @@ func TestOpenCodeSlugFallbackReachesKickstartListing(t *testing.T) {
 	materialized := testfixture.MaterializeByName(t, "extended-attribution")
 	root := filepath.Dir(materialized.Path)
 	git := newMountedOpenCodeGitResolver()
-	_, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, git, nil, nil, nil)
+	_, listings, _ := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, git, nil, nil, nil)
 	titles := make(map[string]string, len(listings))
 	for _, listing := range listings {
 		titles[listing.SessionID] = listing.Title

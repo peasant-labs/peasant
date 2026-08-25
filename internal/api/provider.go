@@ -14,6 +14,10 @@ import (
 type DataProvider interface {
 	Sessions(ctx context.Context) ([]ingest.Session, error)
 	SessionSummaries(ctx context.Context) ([]SessionSummary, error)
+	// SessionSummariesByID resolves links: it returns summaries for exactly the
+	// named sessions, applying neither origin scope nor selection scope, and
+	// omitting an identifier that names no session rather than failing the batch.
+	SessionSummariesByID(ctx context.Context, ids []string) ([]SessionSummary, error)
 	SessionByID(ctx context.Context, id string) (*ingest.Session, error)
 	DashboardMetrics(ctx context.Context) (*DashboardPayload, error)
 	TrendsData(ctx context.Context) (*TrendsPayload, error)

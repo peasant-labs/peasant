@@ -28,18 +28,31 @@ type childCountRow struct {
 	Ingested   bool   `yaml:"ingested"`
 }
 
+// childCountLink is one entry of the discovered subagent relation: a session
+// discovery surfaced, together with the subagent session ids it spawned. A case
+// that declares this relation reproduces the PRODUCTION shape, where the picker
+// lists root sessions only and a subagent reaches the fold through the relation
+// alone.
+type childCountLink struct {
+	SessionID   string   `yaml:"sessionId"`
+	SubagentIDs []string `yaml:"subagentIds"`
+}
+
 // childCountCase is one whole discovery listing and the branch rows BuildForest
 // must fold it into, in render order.
 type childCountCase struct {
-	Name         string                `yaml:"name"`
-	Ingested     []string              `yaml:"ingested"`
-	Listings     []ftue.SessionListing `yaml:"listings"`
-	ExpectedRows []childCountRow       `yaml:"expectedRows"`
+	Name              string                `yaml:"name"`
+	Ingested          []string              `yaml:"ingested"`
+	Listings          []ftue.SessionListing `yaml:"listings"`
+	SubagentDiscovery []childCountLink      `yaml:"subagentDiscovery"`
+	ExpectedRows      []childCountRow       `yaml:"expectedRows"`
 }
 
-// childCountDocument is the whole fixture plus its row-count guard.
+// childCountDocument is the whole fixture plus its deletion-protection
+// manifest. RequiredCaseNames is not a row count: it names every case that
+// must remain present, and adding a new case never requires touching it.
 type childCountDocument struct {
-	ExpectedCaseCount int              `yaml:"expectedCaseCount"`
+	RequiredCaseNames []string         `yaml:"requiredCaseNames"`
 	Cases             []childCountCase `yaml:"cases"`
 }
 
@@ -58,8 +71,12 @@ func loadChildCounts(t *testing.T) childCountDocument {
 		}
 		t.Fatalf("child_counts.yaml must hold exactly one document: %v", err)
 	}
-	if doc.ExpectedCaseCount != len(doc.Cases) || len(doc.Cases) == 0 {
-		t.Fatalf("expectedCaseCount=%d but %d cases present", doc.ExpectedCaseCount, len(doc.Cases))
+	present := make(map[string]bool, len(doc.Cases))
+	for _, c := range doc.Cases {
+		present[c.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("child count fixture", "case", doc.RequiredCaseNames, present); err != nil {
+		t.Fatal(err)
 	}
 	for _, c := range doc.Cases {
 		if len(c.ExpectedRows) == 0 {
@@ -82,17 +99,25 @@ func loadChildCounts(t *testing.T) childCountDocument {
 // session stays a LEAF row carrying the number of subagent sessions discovered
 // transitively beneath it (never another level of nesting), an undiscovered or
 // cyclic subagent reference cannot inflate or hang that count, and a branch
-// lists its not-yet-imported sessions before its already-imported ones.
+// lists its not-yet-imported sessions before its already-imported ones. One
+// case supplies the PRODUCTION shape - a roots-only cohort whose children reach
+// the fold through the discovered subagent relation alone - so the count is no
+// longer proved only against a listing shape production cannot produce.
 func TestBuildForest_ChildCountsAndImportGrouping(t *testing.T) {
 	t.Parallel()
 	doc := loadChildCounts(t)
 	for _, c := range doc.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
+			relation := kickstart.SubagentRelation{}
+			for _, link := range c.SubagentDiscovery {
+				relation[link.SessionID] = link.SubagentIDs
+			}
 			source := kickstart.NewScannerTreeSource(
 				c.Listings,
 				withFixturePathResolver(),
 				kickstart.WithIngestedSessionIDs(c.Ingested),
+				kickstart.WithSubagentRelation(relation),
 			)
 			roots, err := source.Load(context.Background())
 			if err != nil {

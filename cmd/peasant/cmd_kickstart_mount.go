@@ -43,6 +43,7 @@ func runKickstartFlow(
 	configPath string,
 	inventory ftue.ProviderInventory,
 	sessions []ftue.SessionListing,
+	subagents kickstart.SubagentRelation,
 ) error {
 	ctx := cmd.Context()
 
@@ -97,11 +98,12 @@ func runKickstartFlow(
 		return err
 	}
 
-	source := kickstart.NewScannerTreeSource(
+	source := newKickstartScannerSource(
 		sessions,
-		kickstart.WithPathIdentityResolver(identityResolver),
-		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
-		kickstart.WithIngestedSessionIDs(ingestedSessionIDs(cmd, db)),
+		subagents,
+		identityResolver,
+		repositoryResolver,
+		ingestedSessionIDs(cmd, db),
 	)
 	commitGateCandidates, err := source.CommitGateCandidates(storedSessions)
 	if err != nil {
@@ -642,4 +644,33 @@ func deriveKickstartAnswers(
 		ProviderSelections: provs,
 		SelectedSessions:   selected,
 	}
+}
+
+// newKickstartScannerSource is the ONE place a kickstart session picker is
+// constructed, so every surface that lists sessions agrees on what it lists and
+// on what it counts.
+//
+// sessions is the listed cohort: ROOT sessions only, and the only thing that
+// can become a selectable, ingestable row. subagents is the parent-to-subagent
+// relation over the whole discovered set, and it is COUNT-ONLY: it lets a
+// listed parent report how many subagent sessions discovery found beneath it,
+// which the roots-only cohort cannot answer on its own. Nothing named in the
+// relation is rendered, selected, or imported.
+//
+// A nil resolver or an empty id set is accepted; each option ignores it and the
+// source keeps its own default.
+func newKickstartScannerSource(
+	sessions []ftue.SessionListing,
+	subagents kickstart.SubagentRelation,
+	identityResolver ingest.PathIdentityResolver,
+	repositoryResolver ingest.RepositoryIdentityResolver,
+	ingestedIDs []string,
+) *kickstart.ScannerTreeSource {
+	return kickstart.NewScannerTreeSource(
+		sessions,
+		kickstart.WithPathIdentityResolver(identityResolver),
+		kickstart.WithRepositoryIdentityResolver(repositoryResolver),
+		kickstart.WithIngestedSessionIDs(ingestedIDs),
+		kickstart.WithSubagentRelation(subagents),
+	)
 }

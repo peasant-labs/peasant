@@ -410,7 +410,7 @@ func runMountedLegacySelectedJourney(
 		}
 		return nil
 	}
-	if err := runKickstartFlow(mountTestCmd(t, dataHome), deps, configPath, nil, listings); err != nil {
+	if err := runKickstartFlow(mountTestCmd(t, dataHome), deps, configPath, nil, listings, nil); err != nil {
 		t.Fatalf("run mounted selected legacy flow: %v", err)
 	}
 	return mounted, ingestCalls

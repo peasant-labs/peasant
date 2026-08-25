@@ -373,8 +373,8 @@ func assertSelectionParityView(t *testing.T, surface, view string, rows []select
 func selectionKickstartDeps(t *testing.T, c selectionCommandCase, runModel func(tea.Model) error) kickstartCommandDeps {
 	t.Helper()
 	deps := defaultKickstartCommandDeps()
-	deps.discover = func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing) {
-		return ftue.ProviderInventory{}, c.Listings
+	deps.discover = func(context.Context, string, string, *discoverySpinner) (ftue.ProviderInventory, []ftue.SessionListing, kickstart.SubagentRelation) {
+		return ftue.ProviderInventory{}, c.Listings, nil
 	}
 	deps.existingUser = func(string) string { return "" }
 	deps.readRetention = func() (int, bool) { return 0, false }

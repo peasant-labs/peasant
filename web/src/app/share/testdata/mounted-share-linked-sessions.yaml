@@ -1,0 +1,42 @@
+# A sibling corpus for the linked-session deep link, deliberately separate from
+# mounted-share.yaml so this behaviour is not coupled to that corpus.
+#
+# Two roles, and the pairing is what makes the claim falsifiable:
+#   browsable-user-session  the discovery list offers it.
+#   hidden-agent-session    the discovery list withholds it, because a program
+#                           drove it. A link naming it must still resolve it and
+#                           it must still be selectable.
+#
+# The control run mounts the same surface with NO link and asserts the hidden
+# session is absent from the chooser, so "it resolved" cannot pass on a session
+# that was simply listed all along.
+linkedSessionId: sess-agent-linked
+discoveryOnly:
+  - id: sess-user-browsable
+    harness: claude-code
+    project: alpha
+    projectHash: hash-alpha
+    startTime: '2026-08-20T09:00:00Z'
+    durationMins: 3
+    totalTokens: 300
+    turnCount: 3
+    toolCallCount: 1
+    preview: a person typed this
+    shareStatus: new
+    sessionOrigin: user
+linkedOnly:
+  - id: sess-agent-linked
+    harness: claude-code
+    project: alpha
+    projectHash: hash-alpha
+    startTime: '2026-08-20T08:00:00Z'
+    durationMins: 2
+    totalTokens: 200
+    turnCount: 2
+    toolCallCount: 1
+    preview: a program started this
+    shareStatus: new
+    sessionOrigin: agent
+items:
+  - { sessionId: sess-user-browsable, locationLabel: alpha location, repositoryLocationId: location-a, branch: main, selectionStatus: selected }
+  - { sessionId: sess-agent-linked, locationLabel: alpha location, repositoryLocationId: location-a, branch: main, selectionStatus: selected }

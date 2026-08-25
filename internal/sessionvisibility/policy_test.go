@@ -13,6 +13,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +47,19 @@ var requiredPolicyBehaviorNames = []string{
 	"project_name_config_matches_path_shaped_stored_name",
 	"unselected_project_with_real_forms_stays_hidden",
 	"explicit_session_still_works_alongside_real_form_project_rules",
+	// Origin scope. Every withholding arm is paired with a control that differs
+	// only in origin, so an arm cannot pass because the row would have been
+	// absent anyway. The two scopes are exercised alone and together, so a later
+	// change cannot let one absorb the other.
+	"origin_scope_alone_hides_an_agent_root",
+	"origin_scope_alone_admits_a_user_root",
+	"origin_scope_alone_admits_an_unknown_root",
+	"origin_scope_alone_hides_an_agent_subagent_row",
+	"a_subagent_row_a_person_drove_stays_in_discovery",
+	"selection_scope_alone_hides_a_user_origin_row",
+	"both_scopes_together_hide_an_agent_row_in_a_selected_project",
+	"both_scopes_together_admit_a_user_row_in_a_selected_project",
+	"an_unusable_origin_withholds_the_discovery_list",
 }
 
 type policyFixture struct {
@@ -53,21 +67,30 @@ type policyFixture struct {
 }
 
 type policyCase struct {
-	Name          string                                   `yaml:"name"`
-	Mode          config.SelectionMode                     `yaml:"mode"`
-	Harnesses     map[string]config.SelectionHarnessConfig `yaml:"harnesses"`
-	Candidate     candidateFixture                         `yaml:"candidate"`
-	Result        string                                   `yaml:"result"`
-	ErrorContains string                                   `yaml:"error_contains"`
+	Name      string                                   `yaml:"name"`
+	Mode      config.SelectionMode                     `yaml:"mode"`
+	Harnesses map[string]config.SelectionHarnessConfig `yaml:"harnesses"`
+	Candidate candidateFixture                         `yaml:"candidate"`
+	// Result is what selection scope alone decides, through Policy.Visible.
+	Result        string `yaml:"result"`
+	ErrorContains string `yaml:"error_contains"`
+	// DiscoveryResult is what the two scopes together decide, through
+	// Policy.VisibleForDiscovery. Empty on the arms that predate origin scope,
+	// which state selection scope only. An arm that names an origin must state
+	// it, so an origin arm can never be silently non-asserting.
+	DiscoveryResult        string `yaml:"discovery_result"`
+	DiscoveryErrorContains string `yaml:"discovery_error_contains"`
 }
 
 type candidateFixture struct {
-	Harness     string `yaml:"harness"`
-	SessionID   string `yaml:"session_id"`
-	ProjectName string `yaml:"project_name"`
-	GitRemote   string `yaml:"git_remote"`
-	GitBranch   string `yaml:"git_branch"`
-	ClonePath   string `yaml:"clone_path"`
+	Harness         string `yaml:"harness"`
+	SessionID       string `yaml:"session_id"`
+	ProjectName     string `yaml:"project_name"`
+	GitRemote       string `yaml:"git_remote"`
+	GitBranch       string `yaml:"git_branch"`
+	ClonePath       string `yaml:"clone_path"`
+	Origin          string `yaml:"origin"`
+	ParentSessionID string `yaml:"parent_session_id"`
 }
 
 func loadPolicyFixture(data []byte) (policyFixture, error) {
@@ -80,9 +103,6 @@ func loadPolicyFixture(data []byte) (policyFixture, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return policyFixture{}, fmt.Errorf("policy fixture must contain exactly one YAML document: %v", err)
-	}
-	if len(fixture.Cases) != len(requiredPolicyBehaviorNames) {
-		return policyFixture{}, fmt.Errorf("policy fixture has %d cases, want exactly %d", len(fixture.Cases), len(requiredPolicyBehaviorNames))
 	}
 	names := make(map[string]struct{}, len(fixture.Cases))
 	for _, tc := range fixture.Cases {
@@ -98,6 +118,15 @@ func loadPolicyFixture(data []byte) (policyFixture, error) {
 		}
 		if tc.Candidate.ClonePath != "" && (!filepath.IsAbs(tc.Candidate.ClonePath) || filepath.Clean(tc.Candidate.ClonePath) != tc.Candidate.ClonePath) {
 			return policyFixture{}, fmt.Errorf("policy fixture case %q has non-exact clone_path %q", tc.Name, tc.Candidate.ClonePath)
+		}
+		if tc.DiscoveryResult != "" && tc.DiscoveryResult != "visible" && tc.DiscoveryResult != "hidden" && tc.DiscoveryResult != "error" {
+			return policyFixture{}, fmt.Errorf("policy fixture case %q has discovery_result %q: it must be exactly visible, hidden, or error when set", tc.Name, tc.DiscoveryResult)
+		}
+		if (tc.Candidate.Origin != "") != (tc.DiscoveryResult != "") {
+			return policyFixture{}, fmt.Errorf("policy fixture case %q must state discovery_result if and only if the candidate names an origin", tc.Name)
+		}
+		if (tc.DiscoveryResult == "error") != (tc.DiscoveryErrorContains != "") {
+			return policyFixture{}, fmt.Errorf("policy fixture case %q must set discovery_error_contains if and only if discovery_result is error", tc.Name)
 		}
 	}
 	for _, required := range requiredPolicyBehaviorNames {
@@ -119,14 +148,18 @@ func TestPolicyFixture(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
-			visible, err := policy.Visible(sessionvisibility.Candidate{
-				SessionID:   ingest.SessionID(tc.Candidate.SessionID),
-				Harness:     defaults.Harness(tc.Candidate.Harness),
-				GitRemote:   tc.Candidate.GitRemote,
-				ProjectName: tc.Candidate.ProjectName,
-				ClonePath:   ingest.ClonePath(tc.Candidate.ClonePath),
-				GitBranch:   tc.Candidate.GitBranch,
-			})
+			candidate := sessionvisibility.Candidate{
+				SessionID:       ingest.SessionID(tc.Candidate.SessionID),
+				Harness:         defaults.Harness(tc.Candidate.Harness),
+				GitRemote:       tc.Candidate.GitRemote,
+				ProjectName:     tc.Candidate.ProjectName,
+				ClonePath:       ingest.ClonePath(tc.Candidate.ClonePath),
+				GitBranch:       tc.Candidate.GitBranch,
+				Origin:          sessionorigin.Origin(tc.Candidate.Origin),
+				ParentSessionID: ingest.SessionID(tc.Candidate.ParentSessionID),
+			}
+			assertDiscoveryScope(t, policy, candidate, tc)
+			visible, err := policy.Visible(candidate)
 			if tc.Result == "error" {
 				if err == nil || !strings.Contains(err.Error(), tc.ErrorContains) {
 					t.Fatalf("Visible error = %v, want containing %q", err, tc.ErrorContains)
@@ -183,5 +216,39 @@ func TestZeroPolicyProjectionInputsFailClosed(t *testing.T) {
 	mode, matcher, err := (sessionvisibility.Policy{}).ProjectionInputs()
 	if err == nil || mode != "" || matcher != nil {
 		t.Fatalf("zero policy ProjectionInputs = %q, %v, %v; want empty mode, nil matcher, and actionable error", mode, matcher, err)
+	}
+}
+
+// assertDiscoveryScope checks the conjunction of the two scopes for the arms
+// that state one. Every arm still checks selection scope alone through
+// Policy.Visible, so a case whose two expectations DIFFER is what proves origin
+// scope acts in discovery and nowhere else.
+func assertDiscoveryScope(t *testing.T, policy sessionvisibility.Policy, candidate sessionvisibility.Candidate, tc policyCase) {
+	t.Helper()
+	if tc.DiscoveryResult == "" {
+		return
+	}
+	visible, err := policy.VisibleForDiscovery(candidate)
+	if tc.DiscoveryResult == "error" {
+		if err == nil || !strings.Contains(err.Error(), tc.DiscoveryErrorContains) {
+			t.Fatalf("VisibleForDiscovery error = %v, want containing %q", err, tc.DiscoveryErrorContains)
+		}
+		if visible {
+			t.Fatalf("VisibleForDiscovery = true alongside an error; it must withhold the row")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("VisibleForDiscovery: %v", err)
+	}
+	if want := tc.DiscoveryResult == "visible"; visible != want {
+		t.Fatalf("VisibleForDiscovery = %v, want %v", visible, want)
+	}
+}
+
+func TestZeroPolicyDiscoveryFailsClosed(t *testing.T) {
+	visible, err := (sessionvisibility.Policy{}).VisibleForDiscovery(sessionvisibility.Candidate{Origin: sessionorigin.User})
+	if err == nil || visible {
+		t.Fatalf("zero policy VisibleForDiscovery = %v, %v; want false and actionable error", visible, err)
 	}
 }

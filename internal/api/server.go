@@ -118,6 +118,7 @@ func (s *Server) Listen(ctx context.Context) error {
 	mux.HandleFunc("GET "+defaults.RouteConfigMock.String(), s.handleMockConfig)
 	mux.HandleFunc("GET "+defaults.RouteConfigCapabilities.String(), s.handleUICapabilities)
 	mux.HandleFunc("GET "+defaults.RouteSessions.String(), s.handleSessions)
+	mux.HandleFunc("GET "+defaults.RouteSessionSummaries.String(), s.handleSessionSummariesByID)
 	mux.HandleFunc("GET /api/v1/web/discovery", s.handleWebDiscovery)
 	mux.HandleFunc("GET "+defaults.RouteSessionTranscript.String(), s.handleSessionTranscript)
 	mux.HandleFunc("GET /api/v1/annotations/review-sessions", s.handleReviewSessions)
@@ -328,6 +329,54 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 	// Wrap in the same envelope shape as the WebSocket ChannelSessions payload
 	// so REST and WS consumers share a single response contract.
+	type sessionsEnvelope struct {
+		Sessions any `json:"sessions"`
+	}
+	data, err := json.Marshal(sessionsEnvelope{Sessions: summaries})
+	if err != nil {
+		http.Error(w, `{"error":"failed to marshal sessions"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Write(data)
+}
+
+// handleSessionSummariesByID resolves links. It answers with summaries for
+// exactly the identifiers named in ?ids=, applying neither origin scope nor
+// selection scope, because a caller holding identifiers is not browsing.
+// Hiding a session from a list is discovery scope and never access control.
+//
+// An identifier that names no stored session is omitted from the answer, so a
+// partially stale link still resolves the sessions that do exist.
+func (s *Server) handleSessionSummariesByID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(defaults.HeaderContentType, defaults.ContentJSON.String())
+
+	if s.cfg.Provider == nil {
+		http.Error(w, `{"error":"data provider not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	raw := r.URL.Query().Get("ids")
+	ids := make([]string, 0, strings.Count(raw, ",")+1)
+	for _, id := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
+	if len(ids) == 0 {
+		writeAPIError(w, http.StatusBadRequest,
+			"Session summaries could not be resolved because the request named no session identifiers in internal/api.handleSessionSummariesByID, which ran while a linked evidence set was being opened. Nothing was returned, because an empty link is a caller mistake rather than an empty machine. Send GET "+defaults.RouteSessionSummaries.String()+"?ids=<comma-separated session ids> with at least one identifier, then retry.",
+			"session_summaries_ids_required")
+		return
+	}
+
+	summaries, err := s.cfg.Provider.SessionSummariesByID(r.Context(), ids)
+	if err != nil {
+		writeDiscoveryError(w, "failed to resolve linked sessions", err)
+		return
+	}
+
+	// The same envelope shape the discovery list and the WebSocket sessions
+	// channel use, so every sessions consumer shares one response contract.
 	type sessionsEnvelope struct {
 		Sessions any `json:"sessions"`
 	}

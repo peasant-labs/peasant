@@ -16,7 +16,7 @@ func TestOpenCodeAgentLabelReachesKickstartListing(t *testing.T) {
 	materialized := testfixture.MaterializeByName(t, "extended-attribution")
 	root := filepath.Dir(materialized.Path)
 	git := newMountedOpenCodeGitResolver()
-	_, listings := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, git, nil, nil, nil)
+	_, listings, _ := ftueDiscoverWith(t.Context(), mountedOpenCodeConfig(t, root), &ingest.OSFileSystem{}, git, nil, nil, nil)
 	if len(listings) != 2 {
 		t.Fatalf("kickstart listed %d OpenCode sessions, want 2 from the extended attribution database", len(listings))
 	}

@@ -3,8 +3,19 @@
 # case is a whole listing; expectedRows are the session rows of the single
 # branch, IN RENDER ORDER, so the fixture pins both the count fold and the
 # not-yet-imported-first grouping. Every case shares one project and branch.
-# expectedCaseCount is the row-count guard.
-expectedCaseCount: 6
+# requiredCaseNames is a deletion-protection manifest, not a row count: it
+# names every case that must remain present, and adding a new case never
+# requires touching this list.
+requiredCaseNames:
+  - a-parent-counts-its-whole-descendant-chain
+  - a-lone-subagent-counts-one
+  - a-session-with-no-subagents-carries-no-count
+  - an-undiscovered-subagent-id-is-not-counted
+  - a-cyclic-or-shared-subagent-counts-once
+  - not-yet-imported-sessions-group-before-imported-ones
+  - an-agent-origin-root-is-hidden-with-user-and-unknown-controls
+  - a-subagent-is-hidden-by-child-identifier-regardless-of-its-own-user-origin
+  - a-roots-only-cohort-still-counts-the-children-discovery-surfaced
 cases:
   - name: a-parent-counts-its-whole-descendant-chain
     ingested: []
@@ -175,3 +186,103 @@ cases:
       - sessionId: c
         childCount: ""
         ingested: true
+
+  # Three top-level sessions, identical shape except origin: the agent-driven
+  # one must be dropped, and both the user and the unknown controls (unknown
+  # is the fail-safe and behaves exactly like user) must remain. Pairing the
+  # hiding arm with these controls means a broken filter that hid everything,
+  # or hid nothing, or inverted the polarity would all fail this case.
+  - name: an-agent-origin-root-is-hidden-with-user-and-unknown-controls
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: agent driven session
+        sessionId: origin-agent-hidden
+        origin: agent
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: user driven session
+        sessionId: origin-user-visible
+        origin: user
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: unresolved origin session
+        sessionId: origin-unknown-visible
+        origin: unknown
+    expectedRows:
+      - sessionId: origin-unknown-visible
+        childCount: ""
+        ingested: false
+      - sessionId: origin-user-visible
+        childCount: ""
+        ingested: false
+
+  # The subagent's OWN origin is user, not agent: if the child-identifier
+  # mechanism were silently relying on origin (or absent, and only origin
+  # filtering ran), this user-origin child would stay visible, since user is
+  # never hidden by origin. Its absence here proves exclusion still comes from
+  # being nobody's-own-row (a SubagentIDs member), independent of origin.
+  - name: a-subagent-is-hidden-by-child-identifier-regardless-of-its-own-user-origin
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: parent with user origin
+        sessionId: parent-user-origin
+        origin: user
+        subagentIds: [child-user-origin]
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: child with user origin
+        sessionId: child-user-origin
+        origin: user
+    expectedRows:
+      - sessionId: parent-user-origin
+        childCount: "1"
+        ingested: false
+
+  # THE PRODUCTION SHAPE. Kickstart lists ROOTS only, so a subagent session is
+  # never one of the listings the fold sees. Its existence reaches the fold
+  # through the discovered subagent relation instead, which is count-only:
+  # nothing named there is rendered, selectable, or ingestable. c2 is a
+  # grandchild, so the transitive walk still has to run through a session the
+  # cohort does not hold. missing-from-discovery is named by the parent but is
+  # absent from the relation, so the guard against counting a child discovery
+  # never surfaced still has to hold on this path too.
+  - name: a-roots-only-cohort-still-counts-the-children-discovery-surfaced
+    ingested: []
+    listings:
+      - harness: claude-code
+        projectName: acme/tool
+        gitRemote: "git@github.com:acme/tool.git"
+        branch: main
+        workingDir: /fixtures/claude/acme-tool
+        title: parent session
+        sessionId: p
+        subagentIds: [c1, missing-from-discovery]
+    subagentDiscovery:
+      - sessionId: p
+        subagentIds: [c1, missing-from-discovery]
+      - sessionId: c1
+        subagentIds: [c2]
+      - sessionId: c2
+    expectedRows:
+      - sessionId: p
+        childCount: "2"
+        ingested: false

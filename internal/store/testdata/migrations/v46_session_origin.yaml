@@ -1,0 +1,96 @@
+# V46 adds sessions.session_origin (+ origin_version) and widens
+# claude_transcript_evidence.origin. This fixture round-trips a record through
+# each migrated table and separately proves each CHECK refuses a value outside
+# its menu. Deletion protection is by required NAME, never a declared count.
+
+required_session_record_names:
+  - a user-declared session round-trips
+  - an agent-declared session round-trips
+  - an unknown-declared session round-trips
+
+required_session_rejection_names:
+  - a session origin outside the closed menu is refused
+  - the empty string is not a legal sessions.session_origin
+
+required_evidence_record_names:
+  - a root record with a user origin round-trips through the real cache
+  - a root record with an agent origin round-trips through the real cache
+  - a subagent record with an agent origin round-trips through the real cache
+  - a record mined before the origin field existed keeps the empty marker
+
+required_evidence_rejection_names:
+  - an evidence origin outside the closed menu is refused
+
+# sessions.session_origin: one row per menu value, inserted directly and read
+# back. Every non-origin column is filled with the minimum sessions requires.
+session_records:
+  - name: a user-declared session round-trips
+    session_id: 11111111-1111-4111-8111-111111111111
+    session_origin: user
+
+  - name: an agent-declared session round-trips
+    session_id: 22222222-2222-4222-8222-222222222222
+    session_origin: agent
+
+  - name: an unknown-declared session round-trips
+    session_id: 33333333-3333-4333-8333-333333333333
+    session_origin: unknown
+
+# Rows the sessions CHECK must refuse outright, so a bad token can never be
+# stored, let alone reach a list or the wire.
+session_rejections:
+  - name: a session origin outside the closed menu is refused
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, session_origin)
+      VALUES ('bad-1', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', 'teammate')
+  - name: the empty string is not a legal sessions.session_origin
+    sql: >-
+      INSERT INTO sessions
+      (session_id, model_harness, model_id, opaque_host_id, project_hash, start_ms, end_ms, ingested_ms, source_path, source_format, session_origin)
+      VALUES ('bad-2', 'claude-code', 'm', 'h', 'p', 1, 2, 3, '/x.jsonl', 'jsonl', '')
+
+# claude_transcript_evidence.origin: one record per menu value plus the empty
+# "record predates the field" marker, saved and loaded through the REAL
+# ClaudeEvidenceCache (store.Store), for both scopes.
+evidence_records:
+  - name: a root record with a user origin round-trips through the real cache
+    source_path: /home/example/.claude/projects/-workspace/44444444-4444-4444-8444-444444444444.jsonl
+    scope: root
+    mod_time_unix_nano: 1750000000000000010
+    size_bytes: 100
+    has_conversation: true
+    origin: user
+
+  - name: a root record with an agent origin round-trips through the real cache
+    source_path: /home/example/.claude/projects/-workspace/55555555-5555-4555-8555-555555555555.jsonl
+    scope: root
+    mod_time_unix_nano: 1750000000000000011
+    size_bytes: 200
+    has_conversation: true
+    origin: agent
+
+  - name: a subagent record with an agent origin round-trips through the real cache
+    source_path: /home/example/.claude/projects/-workspace/44444444-4444-4444-8444-444444444444/subagents/agent-a3aee4f.jsonl
+    scope: subagent
+    mod_time_unix_nano: 1750000000000000012
+    size_bytes: 50
+    has_conversation: true
+    origin: agent
+
+  - name: a record mined before the origin field existed keeps the empty marker
+    source_path: /home/example/.claude/projects/-workspace/66666666-6666-4666-8666-666666666666.jsonl
+    scope: root
+    mod_time_unix_nano: 1750000000000000013
+    size_bytes: 300
+    has_conversation: true
+    origin: ""
+
+# A row the evidence CHECK must refuse: not one of the three menu values and
+# not the empty marker either.
+evidence_rejections:
+  - name: an evidence origin outside the closed menu is refused
+    sql: >-
+      INSERT INTO claude_transcript_evidence
+      (source_path, scope, mod_time_unix_nano, size_bytes, has_conversation, spawns_json, title, branch, cwd, origin)
+      VALUES ('/tmp/v46-bad.jsonl', 'root', 1, 1, 1, '[]', '', '', '', 'teammate')

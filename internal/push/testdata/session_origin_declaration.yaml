@@ -1,0 +1,24 @@
+# What a push declares about who drove the session, for every value the store
+# can hold.
+#
+# Peasant ALWAYS declares and NEVER refuses a session on account of origin, so
+# each arm states the wire value AND that the push was still built. The unusable
+# arm is the one that would catch a refusal: the store's CHECK makes that value
+# unreachable from any row this build wrote, so the only way it can appear is a
+# corrupt row, and a corrupt row must still publish.
+cases:
+  - name: a session a person drove is declared user
+    stored_origin: user
+    want_declared: user
+  - name: a session a program started is declared agent
+    stored_origin: agent
+    want_declared: agent
+  - name: a session whose origin could not be established is declared unknown
+    stored_origin: unknown
+    want_declared: unknown
+  - name: an unusable stored value is declared unknown rather than refused
+    stored_origin: teammate
+    want_declared: unknown
+  - name: an empty stored value is declared unknown rather than refused
+    stored_origin: ""
+    want_declared: unknown

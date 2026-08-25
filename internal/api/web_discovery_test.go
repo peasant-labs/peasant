@@ -164,7 +164,10 @@ func TestMountedHTTPContractsWithStoredSelectionData(t *testing.T) {
 	if len(sessionRows) != 1 || stringField(t, sessionRows[0], "id") != fixture.Sessions[0].ID {
 		t.Fatalf("sessions visibility changed: %+v", sessionRows)
 	}
-	assertExactKeys(t, sessionRows[0], "durationMins", "harness", "id", "preview", "project", "projectHash", "startTime", "toolCallCount", "totalTokens", "turnCount")
+	// sessionOrigin is the producer's declaration of who drove the session. It
+	// is always present on a stored row, because sessions.session_origin is NOT
+	// NULL over the three-value menu.
+	assertExactKeys(t, sessionRows[0], "durationMins", "harness", "id", "preview", "project", "projectHash", "sessionOrigin", "startTime", "toolCallCount", "totalTokens", "turnCount")
 	assertNoHostileEvidence(t, sessions, fixture.Forbidden)
 }
 

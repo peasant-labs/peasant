@@ -24,6 +24,21 @@ type SessionLocation struct {
 	SchemaVersion int    // 0 if unknown; populated from DB schema_version column
 }
 
+// SessionLocationLookup is satisfied by anything that can answer where a
+// session id already lives in the store: its host slug and parent id, or
+// that it is not stored yet. It names exactly the one method SessionStore
+// and MetricsStore below both already declare for their own reasons; this
+// narrow form lets a consumer that needs only this one capability (for
+// example, confirming a cross-run linking candidate is really persisted
+// before pointing a child at it) depend on that capability alone, without
+// pulling in either wider store interface.
+type SessionLocationLookup interface {
+	// LookupSessionLocation returns the host_slug and parent_id for a known
+	// session. Returns empty strings and nil error if the session is not in
+	// the DB yet.
+	LookupSessionLocation(ctx context.Context, sessionID SessionID) (hostSlug string, parentID string, err error)
+}
+
 // OpenCodeSeqCursorStore is the optional store capability that records the
 // OpenCode change cursor: the last ingested newest-event sequence per session.
 // A store that implements it lets the pipeline re-ingest a session whose current
@@ -495,6 +510,11 @@ type PushSessionRow struct {
 	OutputTokens   int
 	TokensTotal    int
 	DurationMs     int64
+	// SessionOrigin is who drove the session, read from the
+	// sessions.session_origin column. It reaches the push wire through the transcript
+	// document, so a Village consumer reads the producer's decision instead of
+	// re-deriving one from turn shapes.
+	SessionOrigin string
 }
 
 // IsSelectedByBranch reports the branch-aware selection result for this row

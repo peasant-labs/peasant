@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -68,8 +69,8 @@ VALUES (?, ?, ?, ?)`
 	sqlInsertSession = `INSERT OR REPLACE INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
-    schema_version, git_branch, git_worktree, git_tracking, tool_version
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 
@@ -272,6 +273,17 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 				continue // parent not in batch or DB; skip orphan child
 			}
 		}
+		// sessionOrigin is who drove the session, as the harness adapter's
+		// evidence decided it (sorted[i].Session.Origin). An adapter that mines
+		// no origin evidence — every non-Claude adapter today — leaves it
+		// empty; the store resolves that to Unknown, because sessions never
+		// carries the cache table's "record incomplete" empty-string marker
+		// (internal/ingest/claude_evidence.go).
+		sessionOrigin := sorted[i].Session.Origin
+		if sessionOrigin == "" {
+			sessionOrigin = sessionorigin.Unknown
+		}
+
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
 		if err = sqlitex.ExecuteTransient(conn, sqlInsertSession, &sqlitex.ExecOptions{
 			Args: []any{
@@ -291,6 +303,7 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 				derefString(m.Git.Worktree),
 				derefString(m.Git.Tracking),
 				m.Version,
+				sessionOrigin.String(),
 			},
 		}); err != nil {
 			return fmt.Errorf("store: insert session %s: %w", m.SessionID, err)
