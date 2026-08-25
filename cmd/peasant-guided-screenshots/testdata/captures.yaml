@@ -18,7 +18,7 @@ sheets:
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 5700}
+    viewport: {width: 1800, height: 6750}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"

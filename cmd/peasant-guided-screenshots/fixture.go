@@ -418,7 +418,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3300},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3300},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 5700},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
