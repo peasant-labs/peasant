@@ -38,6 +38,8 @@ required_cases:
   - legacy-unknown-part-vocabulary
   - current-control-rows-tolerated
   - content-aware-selection
+  - legacy-scrollable-session
+  - legacy-out-of-order-parts
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -1133,4 +1135,161 @@ cases:
       - {id: sm_sub_ctrl_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzS1, type: model-switched, time_created: 2000, time_updated: 2000, seq: 1, data: '{"time":{"created":2000},"model":{"id":"synthetic-model","providerID":"synthetic-provider"}}'}
       - {id: sm_sub_ctrl_b, session_id: ses_3cd91f52effeXd3QAJ54jOyzS2, type: model-switched, time_created: 2100, time_updated: 2100, seq: 1, data: '{"time":{"created":2100},"model":{"id":"synthetic-model","providerID":"synthetic-provider"}}'}
       - {id: sm_sub_user_c, session_id: ses_3cd91f52effeXd3QAJ54jOyzS3, type: user, time_created: 2200, time_updated: 2210, seq: 1, data: '{"id":"sm_sub_user_c","text":"CURRENT_CONVERSATION_C","files":[],"agents":[],"metadata":{"cwd":"/synthetic/contentaware"},"time":{"created":2200}}'}
+    ignored_history: []
+
+  # A legacy session built for the scrolled preview: several messages, one of
+  # them carrying three parts, and part identifiers minted in message order the
+  # way OpenCode mints them as a message streams. A small slice budget therefore
+  # walks it in several slices, and the three-part message exercises the drain
+  # that keeps a slice ending on a message boundary.
+  - name: legacy-scrollable-session
+    logical_path: scrollable/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 4
+      legacy_parts: 7
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_scroll_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000000
+        time_updated: 1700000000010
+        data: '{"role":"user","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000000,"completed":1700000000010}}'
+      - id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000100
+        time_updated: 1700000000110
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000100,"completed":1700000000110}}'
+      - id: msg_scroll_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000200
+        time_updated: 1700000000210
+        data: '{"role":"user","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000200,"completed":1700000000210}}'
+      - id: msg_scroll_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000300
+        time_updated: 1700000000310
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000300,"completed":1700000000310}}'
+    legacy_parts:
+      - id: part_scroll_01_0
+        message_id: msg_scroll_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000001
+        time_updated: 1700000000001
+        data: '{"type":"text","text":"scrollable synthetic turn 01 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000001}}'
+      - id: part_scroll_02_0
+        message_id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000101
+        time_updated: 1700000000101
+        data: '{"type":"text","text":"scrollable synthetic turn 02 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000101}}'
+      - id: part_scroll_02_1
+        message_id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000102
+        time_updated: 1700000000102
+        data: '{"type":"text","text":"scrollable synthetic turn 02 part 1 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000102}}'
+      - id: part_scroll_02_2
+        message_id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000103
+        time_updated: 1700000000103
+        data: '{"type":"text","text":"scrollable synthetic turn 02 part 2 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000103}}'
+      - id: part_scroll_03_0
+        message_id: msg_scroll_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000201
+        time_updated: 1700000000201
+        data: '{"type":"text","text":"scrollable synthetic turn 03 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000201}}'
+      - id: part_scroll_04_0
+        message_id: msg_scroll_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000301
+        time_updated: 1700000000301
+        data: '{"type":"text","text":"scrollable synthetic turn 04 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000301}}'
+      - id: part_scroll_04_1
+        message_id: msg_scroll_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000302
+        time_updated: 1700000000302
+        data: '{"type":"text","text":"scrollable synthetic turn 04 part 1 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000302}}'
+    current_messages: []
+    ignored_history: []
+
+  # A legacy session whose part identifiers sort AGAINST the messages they belong
+  # to: the first message's part sorts third, after the parts of two later
+  # messages. Real OpenCode identifiers are minted as a message streams and do
+  # not do this, but a read that walks parts in identifier order must still
+  # terminate on data that does. It is what exercises the step-over that keeps a
+  # part which blocked two slices in a row from stalling the chain forever.
+  - name: legacy-out-of-order-parts
+    logical_path: outoforder/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 4
+      legacy_parts: 4
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_ooo_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000000
+        time_updated: 1700000000010
+        data: '{"role":"user","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000000,"completed":1700000000010}}'
+      - id: msg_ooo_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000100
+        time_updated: 1700000000110
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000100,"completed":1700000000110}}'
+      - id: msg_ooo_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000200
+        time_updated: 1700000000210
+        data: '{"role":"user","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000200,"completed":1700000000210}}'
+      - id: msg_ooo_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000300
+        time_updated: 1700000000310
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000300,"completed":1700000000310}}'
+    legacy_parts:
+      - id: part_zz_late
+        message_id: msg_ooo_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000001
+        time_updated: 1700000000001
+        data: '{"type":"text","text":"out of order synthetic turn 01","time":{"created":1700000000001}}'
+      - id: part_aa_two
+        message_id: msg_ooo_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000101
+        time_updated: 1700000000101
+        data: '{"type":"text","text":"out of order synthetic turn 02","time":{"created":1700000000101}}'
+      - id: part_bb_three
+        message_id: msg_ooo_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000201
+        time_updated: 1700000000201
+        data: '{"type":"text","text":"out of order synthetic turn 03","time":{"created":1700000000201}}'
+      - id: part_zzz_four
+        message_id: msg_ooo_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000301
+        time_updated: 1700000000301
+        data: '{"type":"text","text":"out of order synthetic turn 04","time":{"created":1700000000301}}'
+    current_messages: []
     ignored_history: []
