@@ -12,7 +12,7 @@ Release, which holds the signed artifacts and checksums.
   plugin catalog and review-action envelope, a Claude Code agent message, the
   "Another Claude session sent a message:" turn that delivers one, and the
   "[Request interrupted by user" turn. A recompute of stored titles picks the
-  change up (redact v0.1.3-rc3).
+  change up (redact v0.1.3).
 - A session title is taken from the first user turn that holds real user prose.
   A leading harness-injected turn (a slash command wrapper, local command output,
   a system reminder, an environment context block, or a skill body) is skipped,
