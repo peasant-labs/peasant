@@ -10,6 +10,11 @@ required_names:
   - teammate delivery without native spawn stays root
   - shutdown event does not remove established link
   - filesystem nested subagent remains linked
+  - cross-run spawner link finds an earlier discovered root
+  - cross-run identity claimed by two children stays unlinked
+  - cross-run identity spawned by two earlier parents stays unlinked
+  - cross-run spawner not yet stored stays unlinked
+  - mutual spawn between two roots does not create a cycle
 cases:
   - name: exact unique teammate spawn links roots
     files:
@@ -151,3 +156,92 @@ cases:
           - /claude/-workspace/11111111-1111-4111-8111-111111111111/subagents/agent-a3aee4f.jsonl
       - session_id: agent-a3aee4f
         parent_uuid: 11111111-1111-4111-8111-111111111111
+  # The five cases below extend linking across discovery runs: a spawner
+  # mined and stored in an earlier run must still be found by a child
+  # discovered in a later run, but only when doing so stays safe. Cases use
+  # the "runs" shape (a sequence of Discover calls sharing one evidence
+  # cache) instead of "files"/"expected" directly.
+  - name: cross-run spawner link finds an earlier discovered root
+    runs:
+      - paths: [/claude/host-a]
+        files:
+          - path: host-a/-workspace/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+            lines:
+              - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn in an earlier run"}}'
+        stored_sessions:
+          - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+      - paths: [/claude/host-b]
+        files:
+          - path: host-b/-workspace/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl
+            lines:
+              - '{"sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests in a later run"}}'
+    expected:
+      - session_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+        parent_uuid: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+  - name: cross-run identity claimed by two children stays unlinked
+    runs:
+      - paths: [/claude/host-a]
+        files:
+          - path: host-a/-workspace/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+            lines:
+              - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn in an earlier run"}}'
+        stored_sessions:
+          - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+      - paths: [/claude/host-b]
+        files:
+          - path: host-b/-workspace-one/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl
+            lines:
+              - '{"sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"first claimant"}}'
+          - path: host-b/-workspace-two/cccccccc-cccc-4ccc-8ccc-cccccccccccc.jsonl
+            lines:
+              - '{"sessionId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"second claimant"}}'
+    expected:
+      - session_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+      - session_id: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+  - name: cross-run identity spawned by two earlier parents stays unlinked
+    runs:
+      - paths: [/claude/host-a]
+        files:
+          - path: host-a/-workspace-one/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+            lines:
+              - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"first spawn"}}'
+          - path: host-a/-workspace-two/dddddddd-dddd-4ddd-8ddd-dddddddddddd.jsonl
+            lines:
+              - '{"sessionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"second spawn"}}'
+        stored_sessions:
+          - aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          - dddddddd-dddd-4ddd-8ddd-dddddddddddd
+      - paths: [/claude/host-b]
+        files:
+          - path: host-b/-workspace/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl
+            lines:
+              - '{"sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests"}}'
+    expected:
+      - session_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+  - name: cross-run spawner not yet stored stays unlinked
+    runs:
+      - paths: [/claude/host-a]
+        files:
+          - path: host-a/-workspace/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+            lines:
+              - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"tests"},"message":{"role":"user","content":"spawn in an earlier run, never written to the store"}}'
+      - paths: [/claude/host-b]
+        files:
+          - path: host-b/-workspace/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl
+            lines:
+              - '{"sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"user","teamName":"migration","agentName":"tests","message":{"role":"user","content":"write tests in a later run"}}'
+    expected:
+      - session_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+  - name: mutual spawn between two roots does not create a cycle
+    files:
+      - path: -workspace-a/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl
+        lines:
+          - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","teamName":"migration","agentName":"z-teammate","message":{"role":"user","content":"A is z-teammate"}}'
+          - '{"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"y-teammate"},"message":{"role":"user","content":"A spawns y-teammate"}}'
+      - path: -workspace-b/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl
+        lines:
+          - '{"sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"user","teamName":"migration","agentName":"y-teammate","message":{"role":"user","content":"B is y-teammate"}}'
+          - '{"sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","type":"user","toolUseResult":{"status":"teammate_spawned","team_name":"migration","name":"z-teammate"},"message":{"role":"user","content":"B spawns z-teammate"}}'
+    expected:
+      - session_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+      - session_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb

@@ -28,14 +28,32 @@ type claudeTeammateFixtures struct {
 }
 
 type claudeTeammateFixture struct {
-	Name     string                    `yaml:"name"`
+	Name string `yaml:"name"`
+	// Files and Expected describe a single Discover call (same-batch linking).
 	Files    []claudeTeammateFile      `yaml:"files"`
 	Expected []claudeExpectedDiscovery `yaml:"expected"`
+	// Runs describes a sequence of Discover calls sharing one evidence cache,
+	// for cross-run linking cases. When present, Files/Expected above are
+	// unused: Expected below describes the outcome of the LAST run.
+	Runs []claudeTeammateRun `yaml:"runs"`
 }
 
 type claudeTeammateFile struct {
 	Path  string   `yaml:"path"`
 	Lines []string `yaml:"lines"`
+}
+
+// claudeTeammateRun is one Discover call in a cross-run fixture. Paths sets
+// the source roots THIS call walks, so a root written in an earlier run but
+// absent from this run's Paths is visible only through the persisted
+// evidence cache, exactly as a differently-scoped later ingest would see it.
+// StoredSessions names the session ids that become "already stored" once this
+// run completes, simulating the write stage a real pipeline run performs
+// after Discover returns.
+type claudeTeammateRun struct {
+	Paths          []string             `yaml:"paths"`
+	Files          []claudeTeammateFile `yaml:"files"`
+	StoredSessions []string             `yaml:"stored_sessions"`
 }
 
 type claudeExpectedDiscovery struct {
@@ -111,6 +129,9 @@ func TestClaudeAdapter_DiscoverTeammateLineage(t *testing.T) {
 	fixtures := loadClaudeTeammateFixtures(t)
 	for _, fixture := range fixtures.Cases {
 		fixture := fixture
+		if len(fixture.Runs) > 0 {
+			continue // covered by TestClaudeAdapter_DiscoverTeammateLineageAcrossRuns
+		}
 		t.Run(fixture.Name, func(t *testing.T) {
 			mfs := testutil.NewMemFS()
 			for _, file := range fixture.Files {
@@ -127,34 +148,150 @@ func TestClaudeAdapter_DiscoverTeammateLineage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("discover Claude fixture: %v", err)
 			}
-			if len(sessions) != len(fixture.Expected) {
-				t.Fatalf("discovered %d sessions, want %d", len(sessions), len(fixture.Expected))
+			assertClaudeTeammateDiscovery(t, sessions, fixture.Expected)
+		})
+	}
+}
+
+// assertClaudeTeammateDiscovery checks discovered sessions against the expectations
+// one fixture case names, shared by the same-batch and cross-run test
+// functions so both hold discovered sessions to the identical contract.
+func assertClaudeTeammateDiscovery(t *testing.T, sessions []ingest.DiscoveredSession, expected []claudeExpectedDiscovery) {
+	t.Helper()
+	if len(sessions) != len(expected) {
+		t.Fatalf("discovered %d sessions, want %d", len(sessions), len(expected))
+	}
+
+	byID := make(map[string]ingest.DiscoveredSession, len(sessions))
+	for _, session := range sessions {
+		byID[string(session.SessionID)] = session
+	}
+	for _, want := range expected {
+		session, ok := byID[want.SessionID]
+		if !ok {
+			t.Fatalf("session %q not discovered", want.SessionID)
+		}
+		gotParent := ""
+		if session.ParentUUID != nil {
+			gotParent = string(*session.ParentUUID)
+		}
+		if gotParent != want.ParentUUID {
+			t.Errorf("session %q parent = %q, want %q", want.SessionID, gotParent, want.ParentUUID)
+		}
+		gotPaths := make([]string, len(session.SubagentPaths))
+		for index, path := range session.SubagentPaths {
+			gotPaths[index] = string(path)
+		}
+		if strings.Join(gotPaths, "\n") != strings.Join(want.SubagentPaths, "\n") {
+			t.Errorf("session %q subagent paths = %q, want %q", want.SessionID, gotPaths, want.SubagentPaths)
+		}
+	}
+}
+
+// fakeClaudeStoreCache is a minimal in-memory double for the evidence cache
+// the real local store provides. It also answers LookupSessionLocation, the
+// exact method the store already exposes for an unrelated reason (pre-
+// populating the diff-stage location cache), which cross-run linking reuses
+// to confirm a persisted-only candidate parent is really stored before
+// pointing a child at it. markStored simulates the write stage a real
+// pipeline run performs after Discover returns.
+type fakeClaudeStoreCache struct {
+	evidence map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence
+	stored   map[ingest.SessionID]string // session id -> its stored parent id ("" for a stored root)
+}
+
+func newFakeClaudeStoreCache() *fakeClaudeStoreCache {
+	return &fakeClaudeStoreCache{
+		evidence: make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence),
+		stored:   make(map[ingest.SessionID]string),
+	}
+}
+
+func (f *fakeClaudeStoreCache) LoadClaudeEvidence(context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+	out := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, len(f.evidence))
+	for path, record := range f.evidence {
+		out[path] = record
+	}
+	return out, nil
+}
+
+func (f *fakeClaudeStoreCache) SaveClaudeEvidence(_ context.Context, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) error {
+	for _, record := range upserts {
+		f.evidence[record.SourcePath] = record
+	}
+	for _, path := range deletes {
+		delete(f.evidence, path)
+	}
+	return nil
+}
+
+// LookupSessionLocation mirrors the store's contract: an unknown session id
+// answers empty strings and no error.
+func (f *fakeClaudeStoreCache) LookupSessionLocation(_ context.Context, sessionID ingest.SessionID) (string, string, error) {
+	parentID, ok := f.stored[sessionID]
+	if !ok {
+		return "", "", nil
+	}
+	return "fake-host", parentID, nil
+}
+
+func (f *fakeClaudeStoreCache) markStored(sessionID ingest.SessionID, parentID string) {
+	f.stored[sessionID] = parentID
+}
+
+// TestClaudeAdapter_DiscoverTeammateLineageAcrossRuns runs each fixture's Runs
+// sequence against ONE adapter sharing ONE evidence cache, so the second (and
+// later) Discover calls see whatever the earlier calls persisted — exactly
+// the cross-run linking path the same-batch test above cannot exercise.
+func TestClaudeAdapter_DiscoverTeammateLineageAcrossRuns(t *testing.T) {
+	fixtures := loadClaudeTeammateFixtures(t)
+	for _, fixture := range fixtures.Cases {
+		fixture := fixture
+		if len(fixture.Runs) == 0 {
+			continue // covered by TestClaudeAdapter_DiscoverTeammateLineage
+		}
+		t.Run(fixture.Name, func(t *testing.T) {
+			mfs := testutil.NewMemFS()
+			cache := newFakeClaudeStoreCache()
+			adapter := ingest.NewClaudeAdapter(mfs, testutil.DefaultGitResolver(), salt.Salt{})
+			ingest.AttachClaudeEvidenceCache(adapter, cache)
+
+			var sessions []ingest.DiscoveredSession
+			for runIndex, run := range fixture.Runs {
+				for _, file := range run.Files {
+					if err := mfs.WriteFile("/claude/"+file.Path, []byte(strings.Join(file.Lines, "\n")+"\n"), 0o644); err != nil {
+						t.Fatalf("run %d: write transcript fixture %q: %v", runIndex, file.Path, err)
+					}
+				}
+
+				paths := make([]ingest.ResolvedPath, len(run.Paths))
+				for i, p := range run.Paths {
+					paths[i] = ingest.ResolvedPath(p)
+				}
+
+				var err error
+				sessions, err = adapter.Discover(context.Background(), ingest.SourceConfig{
+					Paths:   paths,
+					Enabled: true,
+				})
+				if err != nil {
+					t.Fatalf("run %d: discover Claude fixture: %v", runIndex, err)
+				}
+
+				byID := make(map[string]ingest.DiscoveredSession, len(sessions))
+				for _, session := range sessions {
+					byID[string(session.SessionID)] = session
+				}
+				for _, sid := range run.StoredSessions {
+					parentID := ""
+					if session, ok := byID[sid]; ok && session.ParentUUID != nil {
+						parentID = string(*session.ParentUUID)
+					}
+					cache.markStored(ingest.SessionID(sid), parentID)
+				}
 			}
 
-			byID := make(map[string]ingest.DiscoveredSession, len(sessions))
-			for _, session := range sessions {
-				byID[string(session.SessionID)] = session
-			}
-			for _, expected := range fixture.Expected {
-				session, ok := byID[expected.SessionID]
-				if !ok {
-					t.Fatalf("session %q not discovered", expected.SessionID)
-				}
-				gotParent := ""
-				if session.ParentUUID != nil {
-					gotParent = string(*session.ParentUUID)
-				}
-				if gotParent != expected.ParentUUID {
-					t.Errorf("session %q parent = %q, want %q", expected.SessionID, gotParent, expected.ParentUUID)
-				}
-				gotPaths := make([]string, len(session.SubagentPaths))
-				for index, path := range session.SubagentPaths {
-					gotPaths[index] = string(path)
-				}
-				if strings.Join(gotPaths, "\n") != strings.Join(expected.SubagentPaths, "\n") {
-					t.Errorf("session %q subagent paths = %q, want %q", expected.SessionID, gotPaths, expected.SubagentPaths)
-				}
-			}
+			assertClaudeTeammateDiscovery(t, sessions, fixture.Expected)
 		})
 	}
 }
