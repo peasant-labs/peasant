@@ -1,22 +1,30 @@
-declared_freshness_cases: 1
+# required_* name entries that must stay present; removing one goes red by name.
+required_freshness_cases:
+  - committed-wal-update
 freshness_cases:
   - name: committed-wal-update
     source_fixture: legacy-mounted-projection
     target_session: ses_3cd91f52effeXd3QAJ54jOyzv5
     message_id: msg_wal_update
     part_id: part_wal_update
-    message_time_created: 1700000000300
-    message_time_updated: 1700000000310
-    message_data: '{"role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000300,"completed":1700000000310}}'
-    part_time_created: 1700000000301
-    part_time_updated: 1700000000301
-    part_data: '{"type":"text","text":"committed WAL update","time":{"created":1700000000301}}'
-    expected_update_count: 2
-    expected_target_entries: 7
+    message_time_created: 1700000003000
+    message_time_updated: 1700000003010
+    message_data: '{"role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000003000,"completed":1700000003010}}'
+    part_time_created: 1700000003001
+    part_time_updated: 1700000003001
+    part_data: '{"type":"text","text":"committed WAL update","time":{"created":1700000003001}}'
+    expected_update_count: 1
+    # The appended assistant message carries no inline content, so its preview
+    # comes from its own text part. That part would render the same prose a
+    # second time, so indexing keeps the message row and drops the part row.
+    expected_target_entries: 6
     expected_target_turns: 3
     expected_content: committed WAL update
 
-declared_candidate_cases: 3
+required_candidate_cases:
+  - unsupported-override-falls-through
+  - disjoint-eligible-sources-are-preserved
+  - first-overlapping-eligible-source-wins
 candidate_cases:
   - name: unsupported-override-falls-through
     override_fixture: unsupported-schema
@@ -26,14 +34,14 @@ candidate_cases:
     channel_mutation: none
     expected_session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5, ses_4cd91f52effeXd3QAJ54jOyzv6]
     forbidden_artifact_content: ""
-  - name: first-disjoint-eligible-source-wins
+  - name: disjoint-eligible-sources-are-preserved
     override_fixture: legacy-mounted-projection
     channel_fixture: legacy-mounted-projection
     original_session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5, ses_4cd91f52effeXd3QAJ54jOyzv6]
     override_session_ids: [ses_6cd91f52effeXd3QAJ54jOyzv8, ses_7cd91f52effeXd3QAJ54jOyzv9]
     channel_mutation: replace_question
-    expected_session_ids: [ses_6cd91f52effeXd3QAJ54jOyzv8, ses_7cd91f52effeXd3QAJ54jOyzv9]
-    forbidden_artifact_content: CHANNEL_DISJOINT_SOURCE_MUST_NOT_APPEAR
+    expected_session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5, ses_4cd91f52effeXd3QAJ54jOyzv6, ses_6cd91f52effeXd3QAJ54jOyzv8, ses_7cd91f52effeXd3QAJ54jOyzv9]
+    forbidden_artifact_content: ""
   - name: first-overlapping-eligible-source-wins
     override_fixture: legacy-mounted-projection
     channel_fixture: legacy-mounted-projection
@@ -43,7 +51,12 @@ candidate_cases:
     expected_session_ids: [ses_3cd91f52effeXd3QAJ54jOyzv5, ses_4cd91f52effeXd3QAJ54jOyzv6]
     forbidden_artifact_content: CHANNEL_SOURCE_MUST_NOT_APPEAR
 
-declared_recovery_cases: 5
+required_recovery_cases:
+  - missing-metadata-valid-managed-envelope
+  - corrupt-metadata-valid-managed-envelope
+  - arbitrary-json-fails-closed
+  - wrong-version-fails-closed
+  - wrong-kind-fails-closed
 recovery_cases:
   - name: missing-metadata-valid-managed-envelope
     source_fixture: legacy-mounted-projection

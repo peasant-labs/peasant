@@ -245,7 +245,11 @@ type IndexLogEntry struct {
 //
 // v12: preserve exact assistant model observations during Claude indexing and
 // retain observation boundaries through transcript suppression and deduplication.
-const CurrentIndexVersion = 12
+//
+// v13: carry the OpenCode message graph on ParentEntryID at depth 0 and render
+// orphan parts as root-level system entries, so already-indexed OpenCode
+// sessions are re-indexed to the new entry shape.
+const CurrentIndexVersion = 13
 
 // --- PruneFilter ---
 

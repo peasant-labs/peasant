@@ -9,27 +9,63 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 const (
-	openCodeEnableQueryOnlyStatement      = "PRAGMA query_only=ON"
-	openCodeReadQueryOnlyStatement        = "PRAGMA query_only"
-	openCodeCatalogTablesStatement        = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
-	openCodeCatalogColumnsStatement       = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
-	openCodeCatalogIndexesStatement       = "SELECT il.name, il.\"unique\", il.partial, xi.seqno, xi.cid, xi.name, xi.desc, xi.coll, xi.key FROM pragma_index_list(?1) AS il JOIN pragma_index_xinfo(il.name) AS xi ORDER BY il.name, xi.seqno LIMIT 65"
-	openCodeLegacySessionsFirstStatement  = "SELECT DISTINCT session_id FROM message ORDER BY session_id LIMIT ?1"
-	openCodeLegacySessionsAfterStatement  = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
-	openCodeLegacyMessagesFirstStatement  = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created, id LIMIT ?2"
-	openCodeLegacyMessagesAfterStatement  = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 AND (time_created > ?2 OR (time_created = ?2 AND id > ?3)) ORDER BY time_created, id LIMIT ?4"
-	openCodeLegacyPartsFirstStatement     = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 ORDER BY id LIMIT ?3"
-	openCodeLegacyPartsAfterStatement     = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND message_id = ?2 AND id > ?3 ORDER BY id LIMIT ?4"
-	openCodeCurrentSessionsFirstStatement = "SELECT DISTINCT session_id FROM session_message ORDER BY session_id LIMIT ?1"
-	openCodeCurrentSessionsAfterStatement = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
-	openCodeCurrentMessagesFirstStatement = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
-	openCodeCurrentMessagesAfterStatement = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+	openCodeEnableQueryOnlyStatement         = "PRAGMA query_only=ON"
+	openCodeReadQueryOnlyStatement           = "PRAGMA query_only"
+	openCodeCatalogTablesStatement           = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
+	openCodeCatalogColumnsStatement          = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
+	openCodeCatalogIndexesStatement          = "SELECT il.name, il.\"unique\", il.partial, xi.seqno, xi.cid, xi.name, xi.desc, xi.coll, xi.key FROM pragma_index_list(?1) AS il JOIN pragma_index_xinfo(il.name) AS xi ORDER BY il.name, xi.seqno LIMIT 65"
+	openCodeLegacySessionsFirstStatement     = "SELECT DISTINCT session_id FROM message ORDER BY session_id LIMIT ?1"
+	openCodeLegacySessionsAfterStatement     = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
+	openCodeLegacyMessagesFirstStatement     = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 ORDER BY time_created, id LIMIT ?2"
+	openCodeLegacyMessagesAfterStatement     = "SELECT id, session_id, time_created, time_updated, data FROM message WHERE session_id = ?1 AND (time_created > ?2 OR (time_created = ?2 AND id > ?3)) ORDER BY time_created, id LIMIT ?4"
+	openCodeLegacySessionPartsFirstStatement = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 ORDER BY id LIMIT ?2"
+	openCodeLegacySessionPartsAfterStatement = "SELECT id, message_id, session_id, time_created, time_updated, data FROM part WHERE session_id = ?1 AND id > ?2 ORDER BY id LIMIT ?3"
+	openCodeCurrentSessionsFirstStatement    = "SELECT DISTINCT session_id FROM session_message ORDER BY session_id LIMIT ?1"
+	openCodeCurrentSessionsAfterStatement    = "SELECT DISTINCT session_id FROM session_message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
+	openCodeCurrentMessagesFirstStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 ORDER BY seq LIMIT ?2"
+	openCodeCurrentMessagesAfterStatement    = "SELECT id, session_id, type, time_created, time_updated, data, seq FROM session_message WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3"
+	openCodeCurrentSubstantiveProbeStatement = "SELECT 1 FROM session_message WHERE session_id = ?1 AND type NOT IN ('agent-switched', 'model-switched') LIMIT 1"
+	// The payload-size probes count one session's payload-bearing rows and sum
+	// their data length. LENGTH() computes from the record header, so a probe
+	// never reads the payloads it measures; the session_id index keeps the read
+	// bounded by the session's own rows.
+	//
+	// A legacy session carries payload in BOTH of its tables, so it needs both
+	// probes. Measured on a real OpenCode store, one legacy session held 1.5 GiB
+	// across 2586 message rows and 786 MiB across 13486 part rows, with single
+	// message rows past 36 MiB. A bound that counted parts alone would have let
+	// the message read pull gigabytes before the part budget ever applied.
+	openCodeLegacySessionPartPayloadSizeStatement    = "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM part WHERE session_id = ?1"
+	openCodeLegacySessionMessagePayloadSizeStatement = "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM message WHERE session_id = ?1"
+	openCodeCurrentSessionPayloadSizeStatement       = "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM session_message WHERE session_id = ?1"
+
+	openCodeLegacyMessageFreshnessBySessionStatement = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM message GROUP BY session_id"
+	openCodeLegacyPartFreshnessBySessionStatement    = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM part GROUP BY session_id"
+	openCodeCurrentFreshnessBySessionStatement       = "SELECT session_id, MAX(MAX(time_created, time_updated)) FROM session_message GROUP BY session_id"
+	openCodeSessionRecordsFirstStatement             = "SELECT id, parent_id, time_updated FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionRecordsAfterStatement             = "SELECT id, parent_id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionAttributionFirstStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionAttributionAfterStatement         = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionExtendedFirstStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionExtendedAfterStatement            = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeEventSequenceFirstStatement              = "SELECT aggregate_id, seq FROM event_sequence ORDER BY aggregate_id LIMIT ?1"
+	openCodeEventSequenceAfterStatement              = "SELECT aggregate_id, seq FROM event_sequence WHERE aggregate_id > ?1 ORDER BY aggregate_id LIMIT ?2"
+	openCodeEventMaxSeqStatement                     = "SELECT MAX(seq) FROM event WHERE aggregate_id = ?1"
+	openCodeProjectFirstStatement                    = "SELECT id, worktree, vcs, name FROM project ORDER BY id LIMIT ?1"
+	openCodeProjectAfterStatement                    = "SELECT id, worktree, vcs, name FROM project WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeProjectDirectoryFirstStatement           = "SELECT project_id, directory, type FROM project_directory ORDER BY project_id, directory LIMIT ?1"
+	openCodeProjectDirectoryAfterStatement           = "SELECT project_id, directory, type FROM project_directory WHERE project_id > ?1 OR (project_id = ?1 AND directory > ?2) ORDER BY project_id, directory LIMIT ?3"
+	openCodeSessionParentsFirstStatement             = "SELECT id, parent_id FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionParentsAfterStatement             = "SELECT id, parent_id FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionClockFirstStatement               = "SELECT id, time_updated FROM session ORDER BY id LIMIT ?1"
+	openCodeSessionClockAfterStatement               = "SELECT id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 )
 
 type zombiezenOpenCodeSQLiteSource struct {
@@ -43,6 +79,54 @@ type zombiezenOpenCodeSQLiteSource struct {
 	connClosed   bool
 	activeCancel context.CancelFunc
 	denied       string
+
+	// sessionColumns caches the session table's column support. The schema of a
+	// read-only source never changes, so the pragma runs once instead of on
+	// every session-record page.
+	sessionColumnsChecked bool
+	sessionColumns        openCodeSessionColumnSupport
+}
+
+// openCodeSessionColumnSupport records which session-record columns the session
+// table carries. present is false when the session table is absent. The
+// attribution columns (directory, title, time_created) are read together only
+// when all three exist alongside the parent link and clock, so an older layout
+// that lacks any of them simply yields empty attribution rather than failing.
+type openCodeSessionColumnSupport struct {
+	present         bool
+	hasParent       bool
+	hasClock        bool
+	hasDirectory    bool
+	hasTitle        bool
+	hasCreated      bool
+	hasAgent        bool
+	hasTokensInput  bool
+	hasTokensOutput bool
+	hasTokensReason bool
+	hasCacheRead    bool
+	hasCacheWrite   bool
+	hasCost         bool
+	hasVersion      bool
+	hasSlug         bool
+	hasRevert       bool
+}
+
+// attribution reports whether the session table carries the working directory,
+// title, and creation time alongside the parent link and clock, so one bounded
+// read can attribute every session to its directory, title, and creation time.
+func (s openCodeSessionColumnSupport) attribution() bool {
+	return s.hasParent && s.hasClock && s.hasDirectory && s.hasTitle && s.hasCreated
+}
+
+// extendedAttribution reports whether the session table carries every column of
+// the extended record read: the base attribution columns plus the agent label,
+// the five token aggregates, cost, version, slug, and revert. When any of those
+// columns is absent the read falls back to the base attribution statement and
+// the extended fields stay empty or zero, so an older layout never fails.
+func (s openCodeSessionColumnSupport) extendedAttribution() bool {
+	return s.attribution() && s.hasAgent && s.hasTokensInput && s.hasTokensOutput &&
+		s.hasTokensReason && s.hasCacheRead && s.hasCacheWrite && s.hasCost &&
+		s.hasVersion && s.hasSlug && s.hasRevert
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
@@ -278,6 +362,723 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionIDs(ctx context.Context, r
 	return page, nil
 }
 
+// LegacyFreshnessBySession returns the newest row time of every legacy session
+// in one database with one GROUP BY aggregate per table, so freshness reads are
+// bounded by table count rather than by session count. A session absent from
+// the result has no legacy rows and is left to the caller's floor.
+func (s *zombiezenOpenCodeSQLiteSource) LegacyFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
+	lease, err := s.beginSourceRead(ctx, "read legacy freshness by session")
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	result := make(map[string]time.Time)
+	decode := newFreshnessBySessionDecoder(result)
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyMessageFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read legacy message freshness by session", err, "message(session_id,time_created,time_updated)", "supported legacy message/part")
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacyPartFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read legacy part freshness by session", err, "part(session_id,time_created,time_updated)", "supported legacy message/part")
+	}
+	return result, nil
+}
+
+// CurrentFreshnessBySession returns the newest row time of every current session
+// in one database with one GROUP BY aggregate, so freshness reads are bounded by
+// table count rather than by session count. A session absent from the result has
+// no current rows and is left to the caller's floor.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentFreshnessBySession(ctx context.Context) (map[string]time.Time, error) {
+	lease, err := s.beginSourceRead(ctx, "read current freshness by session")
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	result := make(map[string]time.Time)
+	decode := newFreshnessBySessionDecoder(result)
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentFreshnessBySessionStatement, nil, decode); err != nil || lease.ctx.Err() != nil {
+		return nil, s.sourceReadError(lease.ctx, "read current freshness by session", err, "session_message(session_id,time_created,time_updated)", "supported current session_message")
+	}
+	return result, nil
+}
+
+// newFreshnessBySessionDecoder returns a row decoder for a
+// (session_id, MAX(MAX(time_created,time_updated))) GROUP BY aggregate. It keeps
+// the newest millisecond per session across every statement it decodes, so the
+// legacy message and part statements merge into one map. A null aggregate
+// contributes nothing.
+func newFreshnessBySessionDecoder(result map[string]time.Time) func(*sqlite.Stmt) error {
+	return func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeText {
+			return fmt.Errorf("decode freshness by session: session_id has SQLite type %s instead of text", stmt.ColumnType(0))
+		}
+		sessionID := stmt.ColumnText(0)
+		if sessionID == "" {
+			return fmt.Errorf("decode freshness by session: session_id is empty")
+		}
+		switch stmt.ColumnType(1) {
+		case sqlite.TypeNull:
+			return nil
+		case sqlite.TypeInteger:
+			candidate := time.UnixMilli(stmt.ColumnInt64(1))
+			if existing, ok := result[sessionID]; !ok || candidate.After(existing) {
+				result[sessionID] = candidate
+			}
+			return nil
+		default:
+			return fmt.Errorf("decode freshness by session %q: aggregate has SQLite type %s instead of integer", sessionID, stmt.ColumnType(1))
+		}
+	}
+}
+
+// LegacySessionParts returns every part row of one session in identifier order,
+// so the projection reads a session's parts once and partitions them into
+// message parts and orphans in memory instead of scanning parts per message and
+// again for orphans. It tolerates a row it cannot decode by dropping it, so one
+// malformed part never fails the read.
+func (s *zombiezenOpenCodeSQLiteSource) LegacySessionParts(ctx context.Context, request OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error) {
+	if err := validateLegacySessionPartPageRequest(request); err != nil {
+		return OpenCodeLegacyPartPage{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read bounded legacy session part page")
+	if err != nil {
+		return OpenCodeLegacyPartPage{}, err
+	}
+	defer lease.release()
+	collector := newTolerantLegacyPartPageCollector(request.PageSize.value, func(row OpenCodeLegacyPartRow) error {
+		if row.SessionID != request.SessionID {
+			return fmt.Errorf("decode legacy session part row %q: projected session %q differs from requested session %q", row.ID.String(), row.SessionID.String(), request.SessionID.String())
+		}
+		return nil
+	})
+	if request.After == nil {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacySessionPartsFirstStatement, []any{request.SessionID.value, request.PageSize.value + 1}, collector.decode)
+	} else {
+		err = s.executeRowsLocked(lease.ctx, openCodeLegacySessionPartsAfterStatement, []any{request.SessionID.value, request.After.partID.value, request.PageSize.value + 1}, collector.decode)
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy session part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
+	}
+	return collector.page(), nil
+}
+
+func validateLegacySessionPartPageRequest(request OpenCodeLegacySessionPartPageRequest) error {
+	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
+		return fmt.Errorf("validate OpenCode legacy session part page request: %w", err)
+	}
+	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
+		return err
+	}
+	if request.After != nil {
+		if err := validateOpenCodeLegacyIdentifier("part cursor", request.After.partID.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SessionRecords returns session rows in identifier order with their parent
+// link and update clock. A database without a session table, or without the
+// parent_id and time_updated columns, reports Supported=false with no rows, so
+// older layouts stay discoverable as roots with file-based freshness.
+func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
+	var cursor *string
+	if request.After != nil {
+		cursor = &request.After.sessionID.value
+	}
+	if err := validateOpenCodeCurrentBoundedPage(request.PageSize.value, cursor, "session record cursor"); err != nil {
+		return OpenCodeSessionRecordPage{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read bounded session record page")
+	if err != nil {
+		return OpenCodeSessionRecordPage{}, err
+	}
+	defer lease.release()
+	support, err := s.sessionColumnSupportLocked(lease.ctx)
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session)", "supported OpenCode session")
+	}
+	if !support.present {
+		// The session table is absent, so there is nothing to read. Older
+		// layouts stay discoverable as roots with file-based freshness.
+		return OpenCodeSessionRecordPage{}, nil
+	}
+	hasParent, hasClock := support.hasParent, support.hasClock
+	readAttribution := support.attribution()
+	readExtended := support.extendedAttribution()
+	page := OpenCodeSessionRecordPage{Supported: true, HasParent: hasParent, HasClock: hasClock}
+	if !hasParent && !hasClock {
+		// The session table exists but carries neither the parent link nor the
+		// changed clock, so it can supply nothing. The caller records a
+		// diagnostic and keeps the sessions as roots.
+		return page, nil
+	}
+	bounded := newOpenCodeBoundedPage[OpenCodeSessionRecord](request.PageSize.value)
+	var skipped []OpenCodeSessionRecordSkip
+	var present []OpenCodeSessionLinkID
+	var cursorID *OpenCodeSessionLinkID
+	// An undecodable row is dropped with a skip note rather than failing the
+	// whole read, so one bad row never loses every session's parent link and
+	// clock. A row whose identifier is valid still advances the cursor even when
+	// the rest of the row is dropped, so pagination makes progress.
+	decode := func(stmt *sqlite.Stmt) error {
+		bounded.observe()
+		if stmt.ColumnType(0) != sqlite.TypeText {
+			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id has SQLite type %s instead of text", stmt.ColumnType(0))})
+			return nil
+		}
+		rawID := stmt.ColumnText(0)
+		sessionID, err := NewOpenCodeSessionLinkID(rawID)
+		if err != nil {
+			skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("a session row was dropped because id %q is not a valid identifier: %v", rawID, err)})
+			return nil
+		}
+		linkID := sessionID
+		cursorID = &linkID
+		// The row exists, so record its identifier before any column-level drop.
+		// A session whose row is present is not deleted, even when its parent
+		// link or clock cannot be decoded.
+		present = append(present, sessionID)
+		record := OpenCodeSessionRecord{SessionID: sessionID}
+		// The parent link is column 1 whenever it is selected. The clock is the
+		// last selected column: column 2 when both are present, otherwise
+		// column 1.
+		if hasParent {
+			if stmt.ColumnType(1) == sqlite.TypeText && stmt.ColumnText(1) != "" {
+				parentID, err := NewOpenCodeSessionLinkID(stmt.ColumnText(1))
+				if err != nil {
+					skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("session row %q was dropped because parent_id is not a valid identifier: %v", rawID, err)})
+					return nil
+				}
+				record.ParentID = parentID
+			}
+		}
+		if hasClock {
+			clockColumn := 1
+			if hasParent {
+				clockColumn = 2
+			}
+			switch stmt.ColumnType(clockColumn) {
+			case sqlite.TypeNull:
+			case sqlite.TypeInteger:
+				record.TimeUpdated = stmt.ColumnInt64(clockColumn)
+			default:
+				skipped = append(skipped, OpenCodeSessionRecordSkip{Reason: fmt.Sprintf("session row %q was dropped because time_updated has SQLite type %s instead of integer", rawID, stmt.ColumnType(clockColumn))})
+				return nil
+			}
+		}
+		if readAttribution {
+			// The attribution statement selects directory, title, and time_created
+			// as columns 3, 4, and 5 after id, parent_id, and time_updated.
+			// Attribution is best effort: a null or non-text directory or title
+			// yields an empty field, and a null or non-integer time_created yields
+			// zero, so a bad attribution column never drops a row whose parent link
+			// and clock are usable.
+			if stmt.ColumnType(3) == sqlite.TypeText {
+				record.Directory = stmt.ColumnText(3)
+			}
+			if stmt.ColumnType(4) == sqlite.TypeText {
+				record.Title = stmt.ColumnText(4)
+			}
+			if stmt.ColumnType(5) == sqlite.TypeInteger {
+				record.TimeCreated = stmt.ColumnInt64(5)
+			}
+		}
+		if readExtended {
+			// The extended statement appends agent, the five token aggregates,
+			// cost, version, slug, and revert as columns 6 through 15. Each column
+			// is best effort: a null or type-mismatched value yields the zero field
+			// so a bad extended column never drops a row whose parent link, clock,
+			// and attribution are usable.
+			if stmt.ColumnType(6) == sqlite.TypeText {
+				record.Agent = stmt.ColumnText(6)
+			}
+			if stmt.ColumnType(7) == sqlite.TypeInteger {
+				record.TokensInput = stmt.ColumnInt64(7)
+			}
+			if stmt.ColumnType(8) == sqlite.TypeInteger {
+				record.TokensOutput = stmt.ColumnInt64(8)
+			}
+			if stmt.ColumnType(9) == sqlite.TypeInteger {
+				record.TokensReasoning = stmt.ColumnInt64(9)
+			}
+			if stmt.ColumnType(10) == sqlite.TypeInteger {
+				record.TokensCacheRead = stmt.ColumnInt64(10)
+			}
+			if stmt.ColumnType(11) == sqlite.TypeInteger {
+				record.TokensCacheWrite = stmt.ColumnInt64(11)
+			}
+			switch stmt.ColumnType(12) {
+			case sqlite.TypeFloat, sqlite.TypeInteger:
+				record.Cost = stmt.ColumnFloat(12)
+			}
+			if stmt.ColumnType(13) == sqlite.TypeText {
+				record.Version = stmt.ColumnText(13)
+			}
+			if stmt.ColumnType(14) == sqlite.TypeText {
+				record.Slug = stmt.ColumnText(14)
+			}
+			if stmt.ColumnType(15) == sqlite.TypeText {
+				record.Revert = stmt.ColumnText(15)
+			}
+		}
+		bounded.keep(record)
+		return nil
+	}
+	// The statements stay compile-time constants at each call site so the
+	// read-only source-statement guard resolves the fixed statement set.
+	projection := "session(id, parent_id, time_updated)"
+	switch {
+	case readExtended:
+		projection = "session(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	case readAttribution:
+		projection = "session(id, parent_id, time_updated, directory, title, time_created)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	case hasParent && hasClock:
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	case hasParent:
+		projection = "session(id, parent_id)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	default:
+		projection = "session(id, time_updated)"
+		if request.After == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionClockFirstStatement, []any{request.PageSize.value + 1}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeSessionClockAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+		}
+	}
+	if err != nil || lease.ctx.Err() != nil {
+		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, projection, "supported OpenCode session")
+	}
+	// The shared bounded page counts every row seen, valid or skipped, so dropped
+	// rows never shrink a page below its bound and hide later sessions.
+	records, hasNext := bounded.assemble()
+	page.Records = records
+	page.PresentSessionIDs = present
+	page.Skipped = skipped
+	if hasNext {
+		switch {
+		case bounded.overflowKept():
+			// Every fetched row was kept and one was trimmed, so re-fetch from the
+			// last kept record. The trimmed row returns on the next page and is
+			// never lost. No row was dropped on this page.
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: records[len(records)-1].SessionID}
+		case cursorID != nil:
+			// A row was dropped, so advance past the last identifier this page
+			// observed. A dropped tail row is not re-fetched, so each dropped row
+			// is reported once rather than again on the next page.
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: *cursorID}
+		case len(records) > 0:
+			page.Next = &OpenCodeSessionRecordCursor{sessionID: records[len(records)-1].SessionID}
+		}
+	}
+	return page, nil
+}
+
+// sessionColumnSupportLocked returns the session table's column support and
+// caches it after the first read, so the pragma runs once per source rather
+// than on every session-record page. The caller holds the single connection.
+func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.Context) (openCodeSessionColumnSupport, error) {
+	s.stateMu.Lock()
+	if s.sessionColumnsChecked {
+		support := s.sessionColumns
+		s.stateMu.Unlock()
+		return support, nil
+	}
+	s.stateMu.Unlock()
+
+	columns, err := s.columnsLocked(ctx, "session")
+	if err != nil {
+		return openCodeSessionColumnSupport{}, err
+	}
+	support := openCodeSessionColumnSupport{present: len(columns) > 0}
+	for _, column := range columns {
+		switch column.Name {
+		case "parent_id":
+			support.hasParent = true
+		case "time_updated":
+			support.hasClock = true
+		case "directory":
+			support.hasDirectory = true
+		case "title":
+			support.hasTitle = true
+		case "time_created":
+			support.hasCreated = true
+		case "agent":
+			support.hasAgent = true
+		case "tokens_input":
+			support.hasTokensInput = true
+		case "tokens_output":
+			support.hasTokensOutput = true
+		case "tokens_reasoning":
+			support.hasTokensReason = true
+		case "tokens_cache_read":
+			support.hasCacheRead = true
+		case "tokens_cache_write":
+			support.hasCacheWrite = true
+		case "cost":
+			support.hasCost = true
+		case "version":
+			support.hasVersion = true
+		case "slug":
+			support.hasSlug = true
+		case "revert":
+			support.hasRevert = true
+		}
+	}
+	s.stateMu.Lock()
+	s.sessionColumnsChecked = true
+	s.sessionColumns = support
+	s.stateMu.Unlock()
+	return support, nil
+}
+
+// projectColumnsPresent reports whether a table carries every named column, so
+// an older layout that lacks the project or project_directory shape yields no
+// attribution instead of failing the read.
+func projectColumnsPresent(columns []OpenCodeColumnEvidence, required ...string) bool {
+	if len(columns) == 0 {
+		return false
+	}
+	have := make(map[string]bool, len(columns))
+	for _, column := range columns {
+		have[column.Name] = true
+	}
+	for _, name := range required {
+		if !have[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// ProjectAttribution reads the project and project_directory tables once per
+// database. It pages each table by its key so the read stays bounded, and it
+// reports the tables absent when their required columns are missing, so
+// discovery keeps its git resolution for an older layout. Only the allowlisted
+// columns are projected; the read never touches the event stream.
+func (s *zombiezenOpenCodeSQLiteSource) ProjectAttribution(ctx context.Context) (OpenCodeProjectAttribution, error) {
+	lease, err := s.beginSourceRead(ctx, "read project attribution")
+	if err != nil {
+		return OpenCodeProjectAttribution{}, err
+	}
+	defer lease.release()
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return OpenCodeProjectAttribution{}, err
+	}
+	limit := pageSize.value
+	var attribution OpenCodeProjectAttribution
+
+	projectColumns, err := s.columnsLocked(lease.ctx, "project")
+	if err != nil {
+		return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read project columns", err, "pragma_table_info(project)", "supported OpenCode project")
+	}
+	if projectColumnsPresent(projectColumns, "id", "worktree", "name") {
+		attribution.ProjectsPresent = true
+		var cursor *string
+		for {
+			batch := 0
+			var lastID string
+			decode := func(stmt *sqlite.Stmt) error {
+				batch++
+				lastID = stmt.ColumnText(0)
+				projectID, idErr := NewOpenCodeProjectID(stmt.ColumnText(0))
+				if idErr != nil {
+					// A project row whose identifier cannot be validated is skipped;
+					// no session can match it, so it never drives attribution.
+					return nil
+				}
+				attribution.Projects = append(attribution.Projects, OpenCodeProjectRecord{
+					ID:       projectID,
+					Worktree: stmt.ColumnText(1),
+					VCS:      stmt.ColumnText(2),
+					Name:     stmt.ColumnText(3),
+				})
+				return nil
+			}
+			if cursor == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectFirstStatement, []any{limit}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectAfterStatement, []any{*cursor, limit}, decode)
+			}
+			if err != nil || lease.ctx.Err() != nil {
+				return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read bounded project page", err, "project(id, worktree, vcs, name)", "supported OpenCode project")
+			}
+			if batch < limit {
+				break
+			}
+			next := lastID
+			cursor = &next
+		}
+	}
+
+	directoryColumns, err := s.columnsLocked(lease.ctx, "project_directory")
+	if err != nil {
+		return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read project_directory columns", err, "pragma_table_info(project_directory)", "supported OpenCode project_directory")
+	}
+	if projectColumnsPresent(directoryColumns, "project_id", "directory", "type") {
+		attribution.DirectoriesPresent = true
+		var cursorProject, cursorDirectory *string
+		for {
+			batch := 0
+			var lastProject, lastDirectory string
+			decode := func(stmt *sqlite.Stmt) error {
+				batch++
+				lastProject = stmt.ColumnText(0)
+				lastDirectory = stmt.ColumnText(1)
+				projectID, idErr := NewOpenCodeProjectID(stmt.ColumnText(0))
+				if idErr != nil {
+					// A directory row with an unvalidatable project identifier is
+					// skipped; it cannot join to a project, so it never attributes.
+					return nil
+				}
+				attribution.Directories = append(attribution.Directories, OpenCodeProjectDirectoryRecord{
+					ProjectID: projectID,
+					Directory: stmt.ColumnText(1),
+					Type:      stmt.ColumnText(2),
+				})
+				return nil
+			}
+			if cursorProject == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectDirectoryFirstStatement, []any{limit}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeProjectDirectoryAfterStatement, []any{*cursorProject, *cursorDirectory, limit}, decode)
+			}
+			if err != nil || lease.ctx.Err() != nil {
+				return OpenCodeProjectAttribution{}, s.sourceReadError(lease.ctx, "read bounded project_directory page", err, "project_directory(project_id, directory, type)", "supported OpenCode project_directory")
+			}
+			if batch < limit {
+				break
+			}
+			nextProject, nextDirectory := lastProject, lastDirectory
+			cursorProject, cursorDirectory = &nextProject, &nextDirectory
+		}
+	}
+	return attribution, nil
+}
+
+// EventSequenceBySession reads the newest event sequence for every session from
+// the event_sequence table in one bounded pass. It never touches the event table
+// or its payload. When the event_sequence table or its required columns are
+// absent it reports Present false, so the caller falls back to the per-session
+// MAX(seq) seek.
+func (s *zombiezenOpenCodeSQLiteSource) EventSequenceBySession(ctx context.Context) (OpenCodeEventSequence, error) {
+	lease, err := s.beginSourceRead(ctx, "read event sequence by session")
+	if err != nil {
+		return OpenCodeEventSequence{}, err
+	}
+	defer lease.release()
+	columns, err := s.columnsLocked(lease.ctx, "event_sequence")
+	if err != nil {
+		return OpenCodeEventSequence{}, s.sourceReadError(lease.ctx, "read event_sequence columns", err, "pragma_table_info(event_sequence)", "supported OpenCode event_sequence")
+	}
+	if !projectColumnsPresent(columns, "aggregate_id", "seq") {
+		return OpenCodeEventSequence{}, nil
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return OpenCodeEventSequence{}, err
+	}
+	limit := pageSize.value
+	result := OpenCodeEventSequence{Present: true, BySession: make(map[string]int64)}
+	var cursor *string
+	for {
+		batch := 0
+		var lastAggregate string
+		decode := func(stmt *sqlite.Stmt) error {
+			batch++
+			lastAggregate = stmt.ColumnText(0)
+			result.BySession[stmt.ColumnText(0)] = stmt.ColumnInt64(1)
+			return nil
+		}
+		if cursor == nil {
+			err = s.executeRowsLocked(lease.ctx, openCodeEventSequenceFirstStatement, []any{limit}, decode)
+		} else {
+			err = s.executeRowsLocked(lease.ctx, openCodeEventSequenceAfterStatement, []any{*cursor, limit}, decode)
+		}
+		if err != nil || lease.ctx.Err() != nil {
+			return OpenCodeEventSequence{}, s.sourceReadError(lease.ctx, "read bounded event_sequence page", err, "event_sequence(aggregate_id, seq)", "supported OpenCode event_sequence")
+		}
+		if batch < limit {
+			break
+		}
+		next := lastAggregate
+		cursor = &next
+	}
+	return result, nil
+}
+
+// MaxEventSeq reads one session's newest event sequence directly from the event
+// table with the payload-free indexed MAX(seq) aggregate. It projects no payload
+// column. Present is false when the session has no event rows, so the caller
+// keeps the clock-only signal for it. This is the fallback for a database with no
+// event_sequence table.
+func (s *zombiezenOpenCodeSQLiteSource) MaxEventSeq(ctx context.Context, sessionID OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
+	lease, err := s.beginSourceRead(ctx, "read max event sequence for session")
+	if err != nil {
+		return OpenCodeSessionSeq{}, err
+	}
+	defer lease.release()
+	columns, err := s.columnsLocked(lease.ctx, "event")
+	if err != nil {
+		return OpenCodeSessionSeq{}, s.sourceReadError(lease.ctx, "read event columns", err, "pragma_table_info(event)", "supported OpenCode event")
+	}
+	if !projectColumnsPresent(columns, "aggregate_id", "seq") {
+		// No event table to seek, so the session keeps its clock-only signal.
+		return OpenCodeSessionSeq{}, nil
+	}
+	result := OpenCodeSessionSeq{}
+	decode := func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) == sqlite.TypeInteger {
+			result.Present = true
+			result.Seq = stmt.ColumnInt64(0)
+		}
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeEventMaxSeqStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodeSessionSeq{}, s.sourceReadError(lease.ctx, "read max event sequence", err, "event(seq) where aggregate_id", "supported OpenCode event")
+	}
+	return result, nil
+}
+
+// openCodeBoundedPage assembles one bounded page of rows for any keyset read.
+// It counts every row observed, valid or dropped, so a dropped row never shrinks
+// a page below its bound and hides a later page, then trims the kept rows to the
+// requested size. The legacy part reads and the session-record read share it.
+type openCodeBoundedPage[Row any] struct {
+	pageSize int
+	seen     int
+	rows     []Row
+}
+
+func newOpenCodeBoundedPage[Row any](pageSize int) *openCodeBoundedPage[Row] {
+	return &openCodeBoundedPage[Row]{pageSize: pageSize, rows: make([]Row, 0, pageSize+1)}
+}
+
+// observe counts one row read from the source, whether or not it is kept.
+func (p *openCodeBoundedPage[Row]) observe() { p.seen++ }
+
+// keep retains one decoded row for the page.
+func (p *openCodeBoundedPage[Row]) keep(row Row) { p.rows = append(p.rows, row) }
+
+// overflowKept reports whether more valid rows were kept than the page bound, so
+// a kept row was trimmed and must be re-fetched on the next page. It is only
+// true when every fetched row was kept, so no row was dropped on this page.
+func (p *openCodeBoundedPage[Row]) overflowKept() bool { return len(p.rows) > p.pageSize }
+
+// assemble returns the kept rows trimmed to the page bound and whether a further
+// page exists.
+func (p *openCodeBoundedPage[Row]) assemble() ([]Row, bool) {
+	hasNext := p.seen > p.pageSize
+	rows := p.rows
+	if len(rows) > p.pageSize {
+		rows = rows[:p.pageSize]
+	}
+	return rows[:len(rows):len(rows)], hasNext
+}
+
+// legacyPartPageCollector decodes part rows, checks their scope, and
+// assembles one bounded page with its continuation cursor. LegacyParts and
+// LegacyOrphanParts share it; each keeps its constant statements in its body.
+type legacyPartPageCollector struct {
+	bounded     *openCodeBoundedPage[OpenCodeLegacyPartRow]
+	requireJSON bool
+	tolerant    bool
+	check       func(OpenCodeLegacyPartRow) error
+	dropped     []OpenCodeOrphanPartDrop
+	cursorID    *OpenCodeLegacyPartID
+}
+
+func newLegacyPartPageCollector(pageSize int, requireJSON bool, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
+	return &legacyPartPageCollector{bounded: newOpenCodeBoundedPage[OpenCodeLegacyPartRow](pageSize), requireJSON: requireJSON, check: check}
+}
+
+// newTolerantLegacyPartPageCollector collects orphan part rows and drops any
+// row it cannot decode or scope instead of failing the whole read, so one
+// malformed orphan row never fails the session.
+func newTolerantLegacyPartPageCollector(pageSize int, check func(OpenCodeLegacyPartRow) error) *legacyPartPageCollector {
+	collector := newLegacyPartPageCollector(pageSize, false, check)
+	collector.tolerant = true
+	return collector
+}
+
+func (c *legacyPartPageCollector) decode(stmt *sqlite.Stmt) error {
+	c.bounded.observe()
+	rawPartID, rawMessageID := bestEffortLegacyPartIdentifiers(stmt)
+	// A row whose part id is a valid identifier advances the cursor even when the
+	// rest of the row is dropped, so a page of all-dropped rows still makes
+	// progress instead of ending pagination.
+	if rawPartID != "" {
+		if partID, idErr := NewOpenCodeLegacyPartID(rawPartID); idErr == nil {
+			c.cursorID = &partID
+		}
+	}
+	row, err := decodeLegacyPartRow(stmt, c.requireJSON)
+	if err != nil {
+		if c.tolerant {
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: NewOpenCodeRawRowIdentifier(rawPartID), MessageID: NewOpenCodeRawRowIdentifier(rawMessageID), Reason: fmt.Sprintf("part row with id %q could not be decoded: %v", rawPartID, err)})
+			return nil
+		}
+		return err
+	}
+	if err := c.check(row); err != nil {
+		if c.tolerant {
+			c.dropped = append(c.dropped, OpenCodeOrphanPartDrop{PartID: NewOpenCodeRawRowIdentifier(row.ID.String()), MessageID: NewOpenCodeRawRowIdentifier(row.MessageID.String()), Reason: fmt.Sprintf("part row %q was out of scope: %v", row.ID.String(), err)})
+			return nil
+		}
+		return err
+	}
+	c.bounded.keep(row)
+	return nil
+}
+
+// bestEffortLegacyPartIdentifiers reads the part and message identifiers
+// directly from their text columns, so a dropped row still names its message.
+// Either identifier is empty when its column is not text.
+func bestEffortLegacyPartIdentifiers(stmt *sqlite.Stmt) (partID string, messageID string) {
+	if stmt.ColumnType(0) == sqlite.TypeText {
+		partID = stmt.ColumnText(0)
+	}
+	if stmt.ColumnType(1) == sqlite.TypeText {
+		messageID = stmt.ColumnText(1)
+	}
+	return partID, messageID
+}
+
+func (c *legacyPartPageCollector) page() OpenCodeLegacyPartPage {
+	rows, hasNext := c.bounded.assemble()
+	page := OpenCodeLegacyPartPage{Parts: rows, Dropped: c.dropped}
+	if hasNext {
+		// Prefer the last kept row so the sentinel row beyond it is re-fetched on
+		// the next page. When a page keeps no valid row, advance past the last
+		// decodable part id so a page of all-dropped rows still moves.
+		switch {
+		case len(rows) > 0:
+			page.Next = &OpenCodeLegacyPartCursor{partID: rows[len(rows)-1].ID}
+		case c.cursorID != nil:
+			page.Next = &OpenCodeLegacyPartCursor{partID: *c.cursorID}
+		}
+	}
+	return page
+}
+
 // LegacyMessages returns one session's current materialized legacy messages in
 // canonical (time_created, id) order.
 func (s *zombiezenOpenCodeSQLiteSource) LegacyMessages(ctx context.Context, request OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error) {
@@ -319,51 +1120,6 @@ func (s *zombiezenOpenCodeSQLiteSource) LegacyMessages(ctx context.Context, requ
 	if hasNext {
 		last := page.Messages[len(page.Messages)-1]
 		cursor := OpenCodeLegacyMessageCursor{timeCreated: last.TimeCreated, messageID: last.ID}
-		page.Next = &cursor
-	}
-	return page, nil
-}
-
-// LegacyParts returns one message's current materialized legacy parts in part
-// identifier order while retaining both session and message scope.
-func (s *zombiezenOpenCodeSQLiteSource) LegacyParts(ctx context.Context, request OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error) {
-	if err := validateLegacyPartPageRequest(request); err != nil {
-		return OpenCodeLegacyPartPage{}, err
-	}
-	lease, err := s.beginSourceRead(ctx, "read bounded legacy part page")
-	if err != nil {
-		return OpenCodeLegacyPartPage{}, err
-	}
-	defer lease.release()
-
-	rows := make([]OpenCodeLegacyPartRow, 0, request.PageSize.value+1)
-	decode := func(stmt *sqlite.Stmt) error {
-		row, decodeErr := decodeLegacyPartRow(stmt)
-		if decodeErr != nil {
-			return decodeErr
-		}
-		if row.SessionID != request.SessionID || row.MessageID != request.MessageID {
-			return fmt.Errorf("decode legacy part row %q: projected session/message %q/%q differs from requested scope %q/%q", row.ID.String(), row.SessionID.String(), row.MessageID.String(), request.SessionID.String(), request.MessageID.String())
-		}
-		rows = append(rows, row)
-		return nil
-	}
-	if request.After == nil {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsFirstStatement, []any{request.SessionID.value, request.MessageID.value, request.PageSize.value + 1}, decode)
-	} else {
-		err = s.executeRowsLocked(lease.ctx, openCodeLegacyPartsAfterStatement, []any{request.SessionID.value, request.MessageID.value, request.After.partID.value, request.PageSize.value + 1}, decode)
-	}
-	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeLegacyPartPage{}, s.sourceReadError(lease.ctx, "read bounded legacy part page", err, "part(id, message_id, session_id, time_created, time_updated, data)", "supported legacy message/part")
-	}
-	hasNext := len(rows) > request.PageSize.value
-	if hasNext {
-		rows = rows[:request.PageSize.value]
-	}
-	rows = rows[:len(rows):len(rows)]
-	page := OpenCodeLegacyPartPage{Parts: rows}
-	if hasNext {
-		cursor := OpenCodeLegacyPartCursor{partID: page.Parts[len(page.Parts)-1].ID}
 		page.Next = &cursor
 	}
 	return page, nil
@@ -415,6 +1171,96 @@ func (s *zombiezenOpenCodeSQLiteSource) CurrentMessages(ctx context.Context, req
 		page.Next = &cursor
 	}
 	return page, nil
+}
+
+// CurrentSessionHasSubstantive reports whether the current session_message
+// projection of one session holds at least one substantive row. A substantive
+// row is any row whose type is not a control record; the two control record
+// types a model or agent switch carries render as inert system context, not a
+// user, assistant, or tool turn. The probe is a single bounded existence read
+// keyed on the indexed session_id column and stops at the first substantive
+// row, so it never scans the whole table. A session that holds only control
+// rows returns false, which lets canonical selection prefer a legacy sibling
+// that still carries the conversation.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionHasSubstantive(ctx context.Context, sessionID OpenCodeCurrentSessionID) (bool, error) {
+	lease, err := s.beginSourceRead(ctx, "probe current session for a substantive row")
+	if err != nil {
+		return false, err
+	}
+	defer lease.release()
+	found := false
+	decode := func(stmt *sqlite.Stmt) error {
+		found = true
+		return nil
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentSubstantiveProbeStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return false, s.sourceReadError(lease.ctx, "probe current session for a substantive row", err, "session_message(session_id, type)", "supported current session_message")
+	}
+	return found, nil
+}
+
+// LegacySessionPayloadSize counts one legacy session's message and part rows
+// and sums their data length in two bounded aggregates keyed on the indexed
+// session_id column. Neither read projects the data payloads, so both stay
+// cheap on a session whose rows are hundreds of megabytes. The preview uses the
+// total to decide whether it must bound its materialization, and a legacy
+// materialization reads both tables, so both must be counted.
+func (s *zombiezenOpenCodeSQLiteSource) LegacySessionPayloadSize(ctx context.Context, sessionID OpenCodeLegacySessionID) (OpenCodePayloadSize, error) {
+	if err := validateOpenCodeLegacyIdentifier("session", sessionID.value); err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read legacy session payload size")
+	if err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	defer lease.release()
+	var messages, parts OpenCodePayloadSize
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacySessionMessagePayloadSizeStatement, []any{sessionID.value}, newOpenCodePayloadSizeDecoder(&messages)); err != nil || lease.ctx.Err() != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read legacy session payload size", err, "message(session_id, length(data))", "supported legacy message/part")
+	}
+	if err := s.executeRowsLocked(lease.ctx, openCodeLegacySessionPartPayloadSizeStatement, []any{sessionID.value}, newOpenCodePayloadSizeDecoder(&parts)); err != nil || lease.ctx.Err() != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read legacy session payload size", err, "part(session_id, length(data))", "supported legacy message/part")
+	}
+	return OpenCodePayloadSize{Rows: messages.Rows + parts.Rows, Bytes: messages.Bytes + parts.Bytes}, nil
+}
+
+// CurrentSessionPayloadSize counts one current session's message rows and sums
+// their data byte length in a single bounded aggregate keyed on the indexed
+// session_id column. The read never projects the data payloads. The preview
+// uses it to decide whether it must bound its materialization.
+func (s *zombiezenOpenCodeSQLiteSource) CurrentSessionPayloadSize(ctx context.Context, sessionID OpenCodeCurrentSessionID) (OpenCodePayloadSize, error) {
+	if err := validateOpenCodeCurrentToken("session identifier", sessionID.value); err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	lease, err := s.beginSourceRead(ctx, "read current session payload size")
+	if err != nil {
+		return OpenCodePayloadSize{}, err
+	}
+	defer lease.release()
+	var size OpenCodePayloadSize
+	decode := newOpenCodePayloadSizeDecoder(&size)
+	if err := s.executeRowsLocked(lease.ctx, openCodeCurrentSessionPayloadSizeStatement, []any{sessionID.value}, decode); err != nil || lease.ctx.Err() != nil {
+		return OpenCodePayloadSize{}, s.sourceReadError(lease.ctx, "read current session payload size", err, "session_message(session_id, length(data))", "supported current session_message")
+	}
+	return size, nil
+}
+
+// newOpenCodePayloadSizeDecoder decodes one (COUNT, COALESCE(SUM(LENGTH),0)) row
+// into the payload size. Both columns are non-null integers because COUNT and
+// the COALESCE guarantee it, so a non-integer column is a schema fault the read
+// reports rather than silently treating as zero.
+func newOpenCodePayloadSizeDecoder(size *OpenCodePayloadSize) func(*sqlite.Stmt) error {
+	return func(stmt *sqlite.Stmt) error {
+		if stmt.ColumnType(0) != sqlite.TypeInteger {
+			return fmt.Errorf("decode payload size: row count has SQLite type %s instead of integer", stmt.ColumnType(0))
+		}
+		if stmt.ColumnType(1) != sqlite.TypeInteger {
+			return fmt.Errorf("decode payload size: summed byte length has SQLite type %s instead of integer", stmt.ColumnType(1))
+		}
+		size.Rows = stmt.ColumnInt64(0)
+		size.Bytes = stmt.ColumnInt64(1)
+		return nil
+	}
 }
 
 type openCodeReadLease struct {
@@ -485,11 +1331,23 @@ func validateCurrentPageRequest(request OpenCodeCurrentPageRequest) error {
 }
 
 func validateCurrentSessionPageRequest(request OpenCodeCurrentSessionPageRequest) error {
-	if request.PageSize.value <= 0 || request.PageSize.value > MaxOpenCodeCurrentPageSize {
-		return fmt.Errorf("validate OpenCode current session page request failed before source access: page size %d was not created by NewOpenCodeCurrentPageSize, so enumeration cannot be proven bounded; construct the page size with the validator", request.PageSize.value)
-	}
+	var cursor *string
 	if request.After != nil {
-		if err := validateOpenCodeCurrentToken("session cursor", request.After.sessionID.value); err != nil {
+		cursor = &request.After.sessionID.value
+	}
+	return validateOpenCodeCurrentBoundedPage(request.PageSize.value, cursor, "session cursor")
+}
+
+// validateOpenCodeCurrentBoundedPage validates the shared bounds every current
+// page request has: a page size within the fixed maximum and, when present, a
+// keyset cursor token. Current session enumeration and session-record
+// enumeration both delegate to it instead of duplicating the checks.
+func validateOpenCodeCurrentBoundedPage(pageSize int, cursor *string, cursorKind string) error {
+	if pageSize <= 0 || pageSize > MaxOpenCodeCurrentPageSize {
+		return fmt.Errorf("validate OpenCode bounded page request failed before source access: page size %d was not created by NewOpenCodeCurrentPageSize, so enumeration cannot be proven bounded; construct the page size with the validator", pageSize)
+	}
+	if cursor != nil {
+		if err := validateOpenCodeCurrentToken(cursorKind, *cursor); err != nil {
 			return err
 		}
 	}
@@ -558,24 +1416,6 @@ func validateLegacyMessagePageRequest(request OpenCodeLegacyMessagePageRequest) 
 	return nil
 }
 
-func validateLegacyPartPageRequest(request OpenCodeLegacyPartPageRequest) error {
-	if err := validateLegacySessionPageRequest(OpenCodeLegacySessionPageRequest{PageSize: request.PageSize}); err != nil {
-		return fmt.Errorf("validate OpenCode legacy part page request: %w", err)
-	}
-	if err := validateOpenCodeLegacyIdentifier("session", request.SessionID.value); err != nil {
-		return err
-	}
-	if err := validateOpenCodeLegacyIdentifier("message", request.MessageID.value); err != nil {
-		return err
-	}
-	if request.After != nil {
-		if err := validateOpenCodeLegacyIdentifier("part cursor", request.After.partID.value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func decodeLegacyMessageRow(stmt *sqlite.Stmt) (OpenCodeLegacyMessageRow, error) {
 	if err := requireOpenCodeColumnTypes(stmt, []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger, sqlite.TypeText}); err != nil {
 		return OpenCodeLegacyMessageRow{}, fmt.Errorf("decode legacy message row: %w", err)
@@ -595,8 +1435,18 @@ func decodeLegacyMessageRow(stmt *sqlite.Stmt) (OpenCodeLegacyMessageRow, error)
 	return OpenCodeLegacyMessageRow{ID: messageID, SessionID: sessionID, TimeCreated: stmt.ColumnInt64(2), TimeUpdated: stmt.ColumnInt64(3), Data: data}, nil
 }
 
-func decodeLegacyPartRow(stmt *sqlite.Stmt) (OpenCodeLegacyPartRow, error) {
-	if err := requireOpenCodeColumnTypes(stmt, []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger, sqlite.TypeText}); err != nil {
+// decodeLegacyPartRow decodes one part row. Ordinary parts require valid JSON
+// data in a text column. Orphan parts (requireJSON false) keep malformed or
+// non-text data so the projection can drop them with a warning instead of
+// failing the whole session.
+func decodeLegacyPartRow(stmt *sqlite.Stmt, requireJSON bool) (OpenCodeLegacyPartRow, error) {
+	expected := []sqlite.ColumnType{sqlite.TypeText, sqlite.TypeText, sqlite.TypeText, sqlite.TypeInteger, sqlite.TypeInteger}
+	if requireJSON {
+		// Only ordinary parts require a text data column; an orphan row with BLOB
+		// data is tolerated and dropped later with a warning.
+		expected = append(expected, sqlite.TypeText)
+	}
+	if err := requireOpenCodeColumnTypes(stmt, expected); err != nil {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row: %w", err)
 	}
 	partID, err := NewOpenCodeLegacyPartID(stmt.ColumnText(0))
@@ -612,7 +1462,7 @@ func decodeLegacyPartRow(stmt *sqlite.Stmt) (OpenCodeLegacyPartRow, error) {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row session: %w", err)
 	}
 	data := stmt.ColumnText(5)
-	if !json.Valid([]byte(data)) {
+	if requireJSON && !json.Valid([]byte(data)) {
 		return OpenCodeLegacyPartRow{}, fmt.Errorf("decode legacy part row %q: data is not valid JSON", partID.String())
 	}
 	return OpenCodeLegacyPartRow{ID: partID, MessageID: messageID, SessionID: sessionID, TimeCreated: stmt.ColumnInt64(3), TimeUpdated: stmt.ColumnInt64(4), Data: data}, nil

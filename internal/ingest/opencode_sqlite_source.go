@@ -309,12 +309,101 @@ type OpenCodeLegacyMessagePageRequest struct {
 	After     *OpenCodeLegacyMessageCursor
 }
 
-// OpenCodeLegacyPartPageRequest requests one bounded page for one message.
-type OpenCodeLegacyPartPageRequest struct {
+// OpenCodeLegacySessionPartPageRequest requests every part row of one session in
+// part identifier order, so the projection reads a session's parts once and
+// partitions them into message parts and orphans in memory.
+type OpenCodeLegacySessionPartPageRequest struct {
 	SessionID OpenCodeLegacySessionID
-	MessageID OpenCodeLegacyMessageID
 	PageSize  OpenCodeLegacyPageSize
 	After     *OpenCodeLegacyPartCursor
+}
+
+// OpenCodeSessionRecordPageRequest requests bounded session records from the
+// upstream session table. Parent links and the per-session update clock are
+// shared by every representation.
+type OpenCodeSessionRecordPageRequest struct {
+	PageSize OpenCodeCurrentPageSize
+	After    *OpenCodeSessionRecordCursor
+}
+
+// OpenCodeSessionLinkID is a validated identifier from the shared session
+// table. It names either a session or its parent.
+type OpenCodeSessionLinkID struct{ value string }
+
+// NewOpenCodeSessionLinkID validates one session table identifier.
+func NewOpenCodeSessionLinkID(value string) (OpenCodeSessionLinkID, error) {
+	if err := validateOpenCodeCurrentToken("session link identifier", value); err != nil {
+		return OpenCodeSessionLinkID{}, err
+	}
+	return OpenCodeSessionLinkID{value: value}, nil
+}
+
+// String returns the validated identifier.
+func (id OpenCodeSessionLinkID) String() string { return id.value }
+
+// OpenCodeSessionRecordCursor continues session record enumeration after one
+// session identifier.
+type OpenCodeSessionRecordCursor struct{ sessionID OpenCodeSessionLinkID }
+
+// OpenCodeSessionRecord is one detached session row. ParentID is the zero
+// value for a root session. TimeUpdated is the upstream session clock, which
+// OpenCode moves on every session mutation, including revert and undo.
+// Directory, Title, and TimeCreated carry the session's working directory,
+// title, and creation time when the session table exposes them; they stay
+// empty for an older layout that lacks those columns.
+type OpenCodeSessionRecord struct {
+	SessionID   OpenCodeSessionLinkID
+	ParentID    OpenCodeSessionLinkID
+	TimeUpdated int64
+	Directory   string
+	Title       string
+	TimeCreated int64
+	// The extended record columns are read together only when the session table
+	// carries every one of them. An older layout that lacks any of them leaves
+	// these fields at their zero value rather than failing the read. Agent labels
+	// a subagent session, the token counts and Cost carry the session-level
+	// aggregates without folding entries, Version is the harness version, Slug is
+	// the display-name fallback, and Revert carries the raw revert marker.
+	Agent            string
+	TokensInput      int64
+	TokensOutput     int64
+	TokensReasoning  int64
+	TokensCacheRead  int64
+	TokensCacheWrite int64
+	Cost             float64
+	Version          string
+	Slug             string
+	Revert           string
+}
+
+// OpenCodeSessionRecordSkip records one session row the bounded read could not
+// decode. Reason explains why the row was dropped and names the row's
+// best-effort raw identifier when the identifier itself decoded.
+type OpenCodeSessionRecordSkip struct {
+	Reason string
+}
+
+// OpenCodeSessionRecordPage is one bounded page of session records. Supported
+// is false when the database has no session table at all; the page is then
+// empty. HasParent and HasClock report which of the parent_id and time_updated
+// columns the session table carries, so parent links are read whether or not the
+// clock column exists. When the session table exists but carries neither column,
+// Supported is true while HasParent and HasClock are both false and the page is
+// empty. Skipped names the rows that could not be decoded; an undecodable row is
+// dropped rather than failing the whole read.
+type OpenCodeSessionRecordPage struct {
+	Supported bool
+	HasParent bool
+	HasClock  bool
+	Records   []OpenCodeSessionRecord
+	// PresentSessionIDs names every row on this page whose identifier decoded,
+	// including a row whose parent link or clock was dropped. A session that
+	// still has a row here exists in OpenCode; a discovered session missing from
+	// every page was deleted from the session table and its historical message
+	// or session_message rows are stale.
+	PresentSessionIDs []OpenCodeSessionLinkID
+	Skipped           []OpenCodeSessionRecordSkip
+	Next              *OpenCodeSessionRecordCursor
 }
 
 // OpenCodeLegacyMessageRow is one detached current row from legacy message.
@@ -348,10 +437,42 @@ type OpenCodeLegacyMessagePage struct {
 	Next     *OpenCodeLegacyMessageCursor
 }
 
-// OpenCodeLegacyPartPage is a detached bounded part page.
+// OpenCodeRawRowIdentifier is a best-effort identifier read directly from a text
+// column of a row the bounded read could not decode. It is deliberately not
+// validated, so it stays distinct from the validated identity handles and never
+// drives a read; it only names a dropped row in a diagnostic.
+type OpenCodeRawRowIdentifier struct{ value string }
+
+// NewOpenCodeRawRowIdentifier wraps a raw column value with no validation.
+func NewOpenCodeRawRowIdentifier(value string) OpenCodeRawRowIdentifier {
+	return OpenCodeRawRowIdentifier{value: value}
+}
+
+// String returns the raw identifier text, which may be empty.
+func (r OpenCodeRawRowIdentifier) String() string { return r.value }
+
+// IsEmpty reports whether the source column was absent or not text.
+func (r OpenCodeRawRowIdentifier) IsEmpty() bool { return r.value == "" }
+
+// OpenCodeOrphanPartDrop records one part row the bounded read could not decode
+// into a typed row. PartID and MessageID are the row's best-effort raw
+// identifiers, read directly from the text columns even when the rest of the
+// row does not decode; either is empty when its column is not text. Reason
+// explains why the row was dropped. The read always drops such a row rather
+// than failing; the caller decides whether the drop is tolerable, because a
+// part whose message is present is a session failure, not an orphan.
+type OpenCodeOrphanPartDrop struct {
+	PartID    OpenCodeRawRowIdentifier
+	MessageID OpenCodeRawRowIdentifier
+	Reason    string
+}
+
+// OpenCodeLegacyPartPage is a detached bounded part page. Dropped is populated
+// only by the orphan read and names orphan rows that could not be decoded.
 type OpenCodeLegacyPartPage struct {
-	Parts []OpenCodeLegacyPartRow
-	Next  *OpenCodeLegacyPartCursor
+	Parts   []OpenCodeLegacyPartRow
+	Dropped []OpenCodeOrphanPartDrop
+	Next    *OpenCodeLegacyPartCursor
 }
 
 // OpenCodeSQLiteSourcePath is an absolute path to an OpenCode-owned SQLite
@@ -478,6 +599,17 @@ func (systemOpenCodeSQLiteDeadlineClock) WithTimeout(parent context.Context, tim
 	return context.WithTimeout(parent, timeout)
 }
 
+// OpenCodePayloadSize is one session's payload cost, read without reading the
+// payloads themselves. Rows is the number of payload-bearing rows the session
+// carries (legacy part rows, or current message rows), and Bytes is the summed
+// byte length of their data columns. The preview reads it before materializing
+// so it can bound an especially long session. SQLite computes LENGTH from a
+// record header, so this read never loads the payloads into memory.
+type OpenCodePayloadSize struct {
+	Rows  int64
+	Bytes int64
+}
+
 // OpenCodeSQLiteSource exposes bounded, detached catalog and transcript
 // pages plus bounded cleanup. It deliberately provides no raw connection, SQL,
 // arguments, transactions, query kinds, table names, writable surfaces, or
@@ -486,8 +618,79 @@ type OpenCodeSQLiteSource interface {
 	Catalog(context.Context) (OpenCodeSchemaEvidence, error)
 	CurrentSessionIDs(context.Context, OpenCodeCurrentSessionPageRequest) (OpenCodeCurrentSessionPage, error)
 	LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error)
+	CurrentFreshnessBySession(context.Context) (map[string]time.Time, error)
+	LegacyFreshnessBySession(context.Context) (map[string]time.Time, error)
 	LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error)
-	LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error)
+	LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error)
+	LegacySessionPayloadSize(context.Context, OpenCodeLegacySessionID) (OpenCodePayloadSize, error)
+	CurrentSessionPayloadSize(context.Context, OpenCodeCurrentSessionID) (OpenCodePayloadSize, error)
+	SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error)
+	ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error)
+	EventSequenceBySession(context.Context) (OpenCodeEventSequence, error)
+	MaxEventSeq(context.Context, OpenCodeSessionLinkID) (OpenCodeSessionSeq, error)
 	CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error)
+	CurrentSessionHasSubstantive(context.Context, OpenCodeCurrentSessionID) (bool, error)
 	Close(context.Context) error
+}
+
+// OpenCodeEventSequence is the newest event sequence per session, read once from
+// the event_sequence table. Present is false when the table is absent, so the
+// caller falls back to the per-session MAX(seq) seek. BySession maps a session
+// identifier to its newest sequence.
+type OpenCodeEventSequence struct {
+	Present   bool
+	BySession map[string]int64
+}
+
+// OpenCodeSessionSeq is one session's newest event sequence read from the event
+// table by the fallback seek. Present is false when the session has no event
+// rows, so the caller keeps the clock-only signal for it.
+type OpenCodeSessionSeq struct {
+	Present bool
+	Seq     int64
+}
+
+// OpenCodeProjectID is a validated identifier from the project table. It keeps
+// the project surface off bare strings so a raw value never drives a read.
+type OpenCodeProjectID struct{ value string }
+
+// NewOpenCodeProjectID validates one project identifier.
+func NewOpenCodeProjectID(value string) (OpenCodeProjectID, error) {
+	if err := validateOpenCodeCurrentToken("project identifier", value); err != nil {
+		return OpenCodeProjectID{}, err
+	}
+	return OpenCodeProjectID{value: value}, nil
+}
+
+// String returns the validated identifier.
+func (id OpenCodeProjectID) String() string { return id.value }
+
+// OpenCodeProjectRecord is one row of the project table. Worktree is the
+// project's canonical root path and Name is its display name, which OpenCode may
+// leave empty. VCS names the version-control kind. Only the columns the read
+// allowlist permits are carried.
+type OpenCodeProjectRecord struct {
+	ID       OpenCodeProjectID
+	Worktree string
+	VCS      string
+	Name     string
+}
+
+// OpenCodeProjectDirectoryRecord maps one directory to its project. Type is the
+// directory kind, for example git_worktree for a linked worktree of the project.
+type OpenCodeProjectDirectoryRecord struct {
+	ProjectID OpenCodeProjectID
+	Directory string
+	Type      string
+}
+
+// OpenCodeProjectAttribution is the project and directory catalog read once per
+// database. ProjectsPresent and DirectoriesPresent are false when the
+// corresponding table or its required columns are absent, so an older layout
+// yields no project attribution and discovery keeps its git resolution.
+type OpenCodeProjectAttribution struct {
+	ProjectsPresent    bool
+	DirectoriesPresent bool
+	Projects           []OpenCodeProjectRecord
+	Directories        []OpenCodeProjectDirectoryRecord
 }

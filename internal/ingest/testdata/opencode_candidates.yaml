@@ -1,4 +1,12 @@
-declared_resolution_cases: 8
+required_resolution_cases:
+  - production-channel
+  - local-channel
+  - sanitized-channel
+  - disabled-channel
+  - disable-flag-is-upstream-case-sensitive
+  - relative-override-deduplicates-default
+  - absolute-override-precedes-default
+  - memory-override-is-preserved-as-evidence-only
 resolution_cases:
   - name: production-channel
     channel: prod
@@ -46,21 +54,114 @@ resolution_cases:
     paths: [":memory:", opencode.db, .]
     provenance: [environment_override, channel_database, legacy_json_root]
 
-declared_probe_cases: 13
+required_probe_fixtures:
+  - empty-valid
+  - legacy-message-part
+  - current-session-message
+  - hybrid-catalog
+  - current-missing-seq
+  - current-nullable-seq
+  - unsupported-schema
+  - corrupt-non-sqlite
+  - wal-capable
+  - catalog-table-overflow
+  - catalog-column-overflow
+  - catalog-index-overflow
+  - current-partial-ordering-index
+# The session table is guarded by an explicit allowlist of readable columns
+# (readable_session_columns below), not by a per-column denylist. The shape and
+# foreign-table tokens here still fail closed for every statement: no wildcard
+# projection, no offset pagination, no set operation, and no read of another
+# table's history or payload columns. The session-statistics read projects
+# tokens_input, so a bare "input" token would reject a legitimate column, and
+# the change-cursor reads project event_sequence and a payload-free MAX(seq)
+# aggregate over event, so a bare "event" token would reject them too. The exact
+# statement allowlist plus the per-column allowlist, not a coarse substring, is
+# what keeps the event stream's data and type payload columns unreadable.
 forbidden_query_tokens:
   - "select *"
   - " offset "
-  - " from session "
-  - event
   - delta
-  - input
   - context
   - migration
   - attach
   - payload
   - " union "
-declared_allowed_query_statements: 15
+# readable_session_columns is the exact allowlist of session-table columns a
+# read-only source statement may project. It carries the attribution keys the
+# discovery read needs (id, parent_id, time_updated, time_created, directory,
+# title) together with the attribution, statistics, identity, and change columns
+# the record read carries without folding entries: agent labels a subagent
+# session, the token columns and cost fill the session statistics, version fills
+# the harness version, slug is the display-name fallback, and revert exposes the
+# revert marker directly. Every other session column, including share_url,
+# summary, metadata, permission, model, path, workspace_id, time_archived, and
+# time_compacting, stays unreadable: a statement that reads FROM the session
+# table and names a column outside this set is rejected.
+readable_session_columns:
+  - id
+  - parent_id
+  - time_updated
+  - time_created
+  - directory
+  - title
+  - agent
+  - tokens_input
+  - tokens_output
+  - tokens_reasoning
+  - tokens_cache_read
+  - tokens_cache_write
+  - cost
+  - version
+  - slug
+  - revert
+required_session_column_mutations:
+  - reject-forbidden-session-projection
+session_column_mutations:
+  - name: reject-forbidden-session-projection
+    statement: 'select id, parent_id, time_updated, share_url from session order by id limit ?1'
+    forbidden_column: share_url
+# readable_table_columns extends the fail-closed allowlist to the project,
+# project_directory, workspace, and event_sequence tables. Each row is the exact
+# set of columns a read-only source statement may project FROM that table; a
+# statement that reads the table and names a column outside its set is rejected,
+# so every new read fails closed on an unlisted column. The event table itself
+# stays payload-unreadable: only a MAX(seq) aggregate over it is allowed, wired
+# in the change-cursor read, and its data and type columns are never projected.
+readable_table_columns:
+  - table: project
+    columns: [id, worktree, vcs, name]
+  - table: project_directory
+    columns: [project_id, directory, type]
+  - table: workspace
+    columns: [id, type, name, branch, directory, extra, project_id, time_used]
+  - table: event_sequence
+    columns: [aggregate_id, seq, owner_id]
+required_table_column_mutations:
+  - reject-forbidden-project-projection
+  - reject-forbidden-project-directory-projection
+  - reject-forbidden-workspace-projection
+  - reject-forbidden-event-sequence-projection
+table_column_mutations:
+  - name: reject-forbidden-project-projection
+    table: project
+    statement: 'select id, worktree, name, sandboxes from project order by id limit ?1'
+    forbidden_column: sandboxes
+  - name: reject-forbidden-project-directory-projection
+    table: project_directory
+    statement: 'select project_id, directory, type, strategy from project_directory order by project_id limit ?1'
+    forbidden_column: strategy
+  - name: reject-forbidden-workspace-projection
+    table: workspace
+    statement: 'select id, type, name, time_created from workspace order by id limit ?1'
+    forbidden_column: time_created
+  - name: reject-forbidden-event-sequence-projection
+    table: event_sequence
+    statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
+    forbidden_column: data
 allowed_query_statements:
+  - name: current-substantive-probe
+    statement: "select 1 from session_message where session_id = ?1 and type not in ('agent-switched', 'model-switched') limit 1"
   - name: enable-query-only
     statement: "pragma query_only=on"
   - name: read-query-only
@@ -79,10 +180,6 @@ allowed_query_statements:
     statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?2'
   - name: legacy-messages-after
     statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 and (time_created > ?2 or (time_created = ?2 and id > ?3)) order by time_created, id limit ?4'
-  - name: legacy-parts-first
-    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by id limit ?3'
-  - name: legacy-parts-after
-    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 and id > ?3 order by id limit ?4'
   - name: current-sessions-first
     statement: 'select distinct session_id from session_message order by session_id limit ?1'
   - name: current-sessions-after
@@ -91,7 +188,69 @@ allowed_query_statements:
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 order by seq limit ?2'
   - name: current-messages-after
     statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
-declared_query_guard_mutations: 12
+  - name: legacy-message-freshness-by-session
+    statement: 'select session_id, max(max(time_created, time_updated)) from message group by session_id'
+  - name: legacy-part-freshness-by-session
+    statement: 'select session_id, max(max(time_created, time_updated)) from part group by session_id'
+  - name: current-freshness-by-session
+    statement: 'select session_id, max(max(time_created, time_updated)) from session_message group by session_id'
+  - name: session-records-first
+    statement: 'select id, parent_id, time_updated from session order by id limit ?1'
+  - name: session-records-after
+    statement: 'select id, parent_id, time_updated from session where id > ?1 order by id limit ?2'
+  - name: session-attribution-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session order by id limit ?1'
+  - name: session-attribution-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session where id > ?1 order by id limit ?2'
+  - name: session-extended-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session order by id limit ?1'
+  - name: session-extended-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session where id > ?1 order by id limit ?2'
+  - name: event-sequence-first
+    statement: 'select aggregate_id, seq from event_sequence order by aggregate_id limit ?1'
+  - name: event-sequence-after
+    statement: 'select aggregate_id, seq from event_sequence where aggregate_id > ?1 order by aggregate_id limit ?2'
+  - name: event-max-seq
+    statement: 'select max(seq) from event where aggregate_id = ?1'
+  - name: project-first
+    statement: 'select id, worktree, vcs, name from project order by id limit ?1'
+  - name: project-after
+    statement: 'select id, worktree, vcs, name from project where id > ?1 order by id limit ?2'
+  - name: project-directory-first
+    statement: 'select project_id, directory, type from project_directory order by project_id, directory limit ?1'
+  - name: project-directory-after
+    statement: 'select project_id, directory, type from project_directory where project_id > ?1 or (project_id = ?1 and directory > ?2) order by project_id, directory limit ?3'
+  - name: session-parents-first
+    statement: 'select id, parent_id from session order by id limit ?1'
+  - name: session-parents-after
+    statement: 'select id, parent_id from session where id > ?1 order by id limit ?2'
+  - name: session-clock-first
+    statement: 'select id, time_updated from session order by id limit ?1'
+  - name: session-clock-after
+    statement: 'select id, time_updated from session where id > ?1 order by id limit ?2'
+  - name: legacy-session-parts-first
+    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by id limit ?2'
+  - name: legacy-session-parts-after
+    statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and id > ?2 order by id limit ?3'
+  - name: legacy-session-part-payload-size
+    statement: 'select count(*), coalesce(sum(length(data)), 0) from part where session_id = ?1'
+  - name: legacy-session-message-payload-size
+    statement: 'select count(*), coalesce(sum(length(data)), 0) from message where session_id = ?1'
+  - name: current-session-payload-size
+    statement: 'select count(*), coalesce(sum(length(data)), 0) from session_message where session_id = ?1'
+required_query_guard_mutations:
+  - payload-table-scope
+  - keyset-predicate
+  - canonical-order
+  - bound-parameter
+  - forbidden-history
+  - generic-offset-escape
+  - current-unscoped-scan
+  - current-session-enumeration-offset
+  - current-session-enumeration-history
+  - current-offset-pagination
+  - current-timestamp-order
+  - current-wildcard-projection
 query_guard_mutations:
   - name: payload-table-scope
     replace_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?2'
@@ -100,14 +259,14 @@ query_guard_mutations:
     replace_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 and (time_created > ?2 or (time_created = ?2 and id > ?3)) order by time_created, id limit ?4'
     replacement_statement: 'select id, session_id, time_created, time_updated, data from message where session_id = ?1 order by time_created, id limit ?4'
   - name: canonical-order
-    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by id limit ?3'
-    replacement_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 order by time_created limit ?3'
+    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by id limit ?2'
+    replacement_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 order by time_created limit ?2'
   - name: bound-parameter
     replace_statement: 'select distinct session_id from message order by session_id limit ?1'
     replacement_statement: 'select distinct session_id from message order by session_id limit 129'
   - name: forbidden-history
-    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and message_id = ?2 and id > ?3 order by id limit ?4'
-    replacement_statement: 'select id, stable_id, session_id, time_created, time_created, data from event where session_id = ?1 and stable_id = ?2 and id > ?3 order by id limit ?4'
+    replace_statement: 'select id, message_id, session_id, time_created, time_updated, data from part where session_id = ?1 and id > ?2 order by id limit ?3'
+    replacement_statement: 'select id, stable_id, session_id, time_created, time_created, data from event where session_id = ?1 and id > ?2 order by id limit ?3'
   - name: generic-offset-escape
     replace_statement: 'select distinct session_id from message where session_id > ?1 order by session_id limit ?2'
     replacement_statement: 'select distinct session_id from message order by session_id limit ?2 offset ?1'
@@ -129,7 +288,6 @@ query_guard_mutations:
   - name: current-wildcard-projection
     replace_statement: 'select id, session_id, type, time_created, time_updated, data, seq from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
     replacement_statement: 'select * from session_message where session_id = ?1 and seq > ?2 order by seq limit ?3'
-declared_entry_path_mutations: 41
 entry_path_mutations:
   - {name: reject-sqlitex-execute-bypass, kind: sqlitex_execute, error_contains: unapproved SQLite entry path}
   - {name: reject-direct-prepare-bypass, kind: prepare, error_contains: unapproved SQLite entry path}
@@ -172,7 +330,6 @@ entry_path_mutations:
   - {name: reject-session-table-diff, kind: session_diff, error_contains: direct-data entry path}
   - {name: reject-session-changeset-output, kind: session_changeset, error_contains: direct-data entry path}
   - {name: reject-interface-prepare-inside-exact-executor, kind: executor_prepare_interface, error_contains: direct preparation is permitted only once for exact PrepareTransient}
-declared_file_inventory_mutations: 46
 file_inventory_mutations:
   - {name: reject-exec-in-existing-opencode-source, filename: opencode.go, kind: sqlitex_exec, error_contains: unapproved SQLite entry path}
   - {name: reject-exec-in-new-opencode-source, filename: opencode_future_exec.go, kind: sqlitex_exec, error_contains: unapproved SQLite entry path}
@@ -220,7 +377,16 @@ file_inventory_mutations:
   - {name: reject-backup-step-value-in-new-opencode-source, filename: opencode_future_backup_step_alias.go, kind: backup_step_alias, error_contains: first-class SQLite callable}
   - {name: reject-blob-read-value-in-existing-opencode-source, filename: opencode.go, kind: blob_read_alias, error_contains: first-class SQLite callable}
   - {name: reject-blob-read-value-in-new-opencode-source, filename: opencode_future_blob_read_alias.go, kind: blob_read_alias, error_contains: first-class SQLite callable}
-declared_coverage_guard_mutations: 9
+required_coverage_guard_mutations:
+  - reject-required-entry-kind-replacement
+  - reject-file-matrix-kind-substitution
+  - reject-file-matrix-existing-class-omission
+  - reject-build-tagged-kind-substitution
+  - reject-build-tagged-class-substitution
+  - reject-build-tagged-name-substitution
+  - reject-topology-tag-substitution
+  - reject-topology-expression-substitution
+  - reject-topology-outcome-substitution
 coverage_guard_mutations:
   - {name: reject-required-entry-kind-replacement, kind: entry_kind_replacement, error_contains: want exactly one}
   - {name: reject-file-matrix-kind-substitution, kind: file_kind_substitution, error_contains: want 23 exact existing/new families}
@@ -231,7 +397,6 @@ coverage_guard_mutations:
   - {name: reject-topology-tag-substitution, kind: topology_tag_substitution, error_contains: build-topology custom tags}
   - {name: reject-topology-expression-substitution, kind: topology_expression_substitution, error_contains: activated in}
   - {name: reject-topology-outcome-substitution, kind: topology_outcome_substitution, error_contains: enumerate build-topology configurations}
-declared_build_tagged_mutations: 7
 build_tagged_mutations:
   - {name: reject-build-tagged-direct-executor, filename: sqlite_tagged_direct.go, build_tags: [evidence_negative_indexer], kind: direct_execute, class: direct, error_contains: unapproved SQLite entry path}
   - {name: reject-build-tagged-callable-alias, filename: sqlite_tagged_alias.go, build_tags: [evidence_negative_indexer], kind: callable_alias, class: alias, error_contains: first-class SQLite callable}
@@ -240,7 +405,6 @@ build_tagged_mutations:
   - {name: reject-build-tagged-struct-field, filename: sqlite_tagged_field.go, build_tags: [evidence_negative_indexer], kind: struct_field, class: field, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-returned-callable, filename: sqlite_tagged_return.go, build_tags: [evidence_negative_indexer], kind: returned_callable, class: return, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-blob-callable-aliases, filename: sqlite_tagged_blob.go, build_tags: [evidence_negative_indexer], kind: blob_callable_aliases, class: direct_data, error_contains: first-class SQLite callable}
-declared_build_topology_cases: 3
 build_topology_cases:
   - name: discover-independent-custom-tags
     sources:
@@ -269,7 +433,13 @@ build_topology_cases:
     expected_forbidden_configurations: 0
     expected_outcome: unreachable_file
     error_contains: never activated production source
-declared_index_evidence_cases: 6
+required_index_evidence_cases:
+  - full-binary-ascending-key
+  - reject-partial-key
+  - reject-expression-key
+  - accept-reversible-descending-sequence
+  - reject-incompatible-collation
+  - reject-nonunique-key
 index_evidence_cases:
   - name: full-binary-ascending-key
     unique: true
@@ -375,7 +545,11 @@ probe_cases:
     capability: none
     support: partial
 
-declared_continuation_candidates: 4
+required_continuation_candidates:
+  - memory-is-not-file-evidence
+  - missing-candidate-remains-local
+  - valid-candidate-after-failures
+  - legacy-root-after-failures
 continuation_candidates:
   - name: memory-is-not-file-evidence
     path_template: memory
@@ -403,7 +577,13 @@ continuation_candidates:
     expected_support: supported
     expected_capability: none
 
-declared_adapter_discovery_cases: 5
+required_adapter_discovery_cases:
+  - capable-probe-init-failure-surfaces
+  - incapable-filesystem-remains-legacy-only
+  - hybrid-prefers-current-projection
+  - hybrid-falls-back-to-legacy-when-current-is-unusable
+  - hybrid-surfaces-both-projection-failures
+  - errored-supported-sqlite-keeps-json-sessions
 adapter_discovery_cases:
   - name: capable-probe-init-failure-surfaces
     source_fixture: legacy-message-part
@@ -435,8 +615,21 @@ adapter_discovery_cases:
     expected_origin: none
     expected_sessions: 0
     error_contains: "current projection is unusable"
+  - name: errored-supported-sqlite-keeps-json-sessions
+    source_fixture: legacy-message-part
+    mode: sqlite_failure_keeps_json
+    expected_origin: none
+    expected_sessions: 1
+    error_contains: "synthetic legacy projection unavailable"
 
-declared_closed_set_cases: 7
+required_closed_set_cases:
+  - empty-kind
+  - unknown-kind
+  - empty-path
+  - empty-provenance
+  - unknown-provenance
+  - empty-support
+  - unknown-support
 closed_set_cases:
   - name: empty-kind
     field: kind

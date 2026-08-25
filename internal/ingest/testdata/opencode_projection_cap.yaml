@@ -1,0 +1,21 @@
+# Cap cases for the OpenCode managed-projection read in IndexTranscript. Each
+# case sizes a synthetic file relative to the managed-projection bound through a
+# filesystem double, so no real large file is written. A file past the bound is
+# refused before any read; a file within the bound is read. size = bound +
+# offset_from_bound.
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - oversized-projection-is-refused-before-any-read
+  - within-bound-projection-is-read
+cases:
+  - name: oversized-projection-is-refused-before-any-read
+    origin: opencode-legacy-sqlite
+    offset_from_bound: 1
+    expect_refused: true
+    expect_read_attempts: 0
+  - name: within-bound-projection-is-read
+    origin: opencode-current-sqlite
+    offset_from_bound: -1048576
+    expect_refused: false
+    expect_read_attempts: 1

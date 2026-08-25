@@ -1,0 +1,83 @@
+# required_* lists name entries that must stay present; removing one goes red
+# by name. Adding an entry need not appear here.
+required_cases:
+  - current-sqlite-path-order
+  - legacy-sqlite-path-order
+  - legacy-json-path-order
+cases:
+  - name: current-sqlite-path-order
+    representation: current_sqlite
+    paths: [/synthetic/z-current.db, /synthetic/a-current.db, /synthetic/m-current.db]
+    expected_path: /synthetic/a-current.db
+    expected_clean_path: /synthetic/a-current.db
+    permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  - name: legacy-sqlite-path-order
+    representation: legacy_sqlite
+    paths: [/synthetic/z-legacy.db, /synthetic/b/../a-legacy.db, /synthetic/a-legacy.db]
+    expected_path: /synthetic/a-legacy.db
+    expected_clean_path: /synthetic/a-legacy.db
+    permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  - name: legacy-json-path-order
+    representation: legacy_json
+    paths: [/synthetic/z/session.json, /synthetic/a/session.json, /synthetic/m/session.json]
+    expected_path: /synthetic/a/session.json
+    expected_clean_path: /synthetic/a/session.json
+    permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+required_provenance_cases:
+  - current-override-outranks-channel-despite-path-order
+  - legacy-override-outranks-channel-despite-path-order
+provenance_cases:
+  - name: current-override-outranks-channel-despite-path-order
+    representation: current_sqlite
+    candidates:
+      - {path: /synthetic/z-override.db, provenance: environment_override}
+      - {path: /synthetic/a-channel.db, provenance: channel_database}
+    expected_path: /synthetic/z-override.db
+    permutations: [[0, 1], [1, 0]]
+  - name: legacy-override-outranks-channel-despite-path-order
+    representation: legacy_sqlite
+    candidates:
+      - {path: /synthetic/z-override.db, provenance: environment_override}
+      - {path: /synthetic/a-channel.db, provenance: channel_database}
+    expected_path: /synthetic/z-override.db
+    permutations: [[0, 1], [1, 0]]
+required_mounted_cases:
+  - mounted-current-sqlite-lexical-winner
+mounted_cases:
+  - name: mounted-current-sqlite-lexical-winner
+    source_fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    marker_row_id: msg_01_user
+    root_names: [z-enumerated-first, a-lexical-winner]
+    enumeration: [0, 1]
+    expected_winner_index: 1
+    winning_marker: LEXICAL_PATH_WINNER
+    losing_marker: ENUMERATION_FIRST_LOSER
+required_mounted_provenance_cases:
+  - mounted-override-outranks-channel-database
+mounted_provenance_cases:
+  - name: mounted-override-outranks-channel-database
+    source_fixture: semantic-parity-current
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
+    marker_row_id: msg_01_user
+    override_name: z-override.db
+    winning_marker: OVERRIDE_WINNER
+    losing_marker: CHANNEL_LOSER
+required_loader_mutations:
+  - unknown-field
+  - wrong-count
+  - duplicate-name
+  - unknown-representation
+  - wrong-mounted-count
+  - winner-enumerated-first
+  - override-sorts-first
+  - unknown-provenance
+loader_mutations:
+  - {name: unknown-field, kind: unknown_field}
+  - {name: wrong-count, kind: wrong_count}
+  - {name: duplicate-name, kind: duplicate_name}
+  - {name: unknown-representation, kind: unknown_representation}
+  - {name: wrong-mounted-count, kind: wrong_mounted_count}
+  - {name: winner-enumerated-first, kind: winner_enumerated_first}
+  - {name: override-sorts-first, kind: override_sorts_first}
+  - {name: unknown-provenance, kind: unknown_provenance}

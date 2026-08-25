@@ -480,6 +480,9 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if result.Summary.StoreError != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", result.Summary.StoreError)
 	}
+	for _, diagnostic := range result.DiscoveryDiagnostics {
+		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary)
+	}
 	if flags.jsonOutput {
 		return printJSON(cmd.OutOrStdout(), result)
 	}
@@ -886,10 +889,11 @@ func parseSinceDuration(s string) (time.Time, error) {
 // jsonPipelineResult is the JSON-safe equivalent of ingest.PipelineResult.
 // SessionResult.Error (type error) does not serialize; we convert it to a string.
 type jsonPipelineResult struct {
-	Summary  ingest.PipelineSummary `json:"summary"`
-	Sessions []jsonSessionResult    `json:"sessions"`
-	Duration string                 `json:"duration"`
-	IndexLog []ingest.IndexLogEntry `json:"indexLog,omitempty"`
+	Summary              ingest.PipelineSummary       `json:"summary"`
+	Sessions             []jsonSessionResult          `json:"sessions"`
+	Duration             string                       `json:"duration"`
+	IndexLog             []ingest.IndexLogEntry       `json:"indexLog,omitempty"`
+	DiscoveryDiagnostics []ingest.DiscoveryDiagnostic `json:"discoveryDiagnostics,omitempty"`
 }
 
 // jsonSessionResult is the JSON-safe equivalent of ingest.SessionResult.
@@ -905,9 +909,10 @@ type jsonSessionResult struct {
 // The error field in SessionResult is serialized as a string to ensure JSON compatibility.
 func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 	out := jsonPipelineResult{
-		Summary:  result.Summary,
-		Duration: result.Duration.Round(100 * time.Millisecond).String(),
-		IndexLog: result.IndexLog,
+		Summary:              result.Summary,
+		Duration:             result.Duration.Round(100 * time.Millisecond).String(),
+		IndexLog:             result.IndexLog,
+		DiscoveryDiagnostics: result.DiscoveryDiagnostics,
 	}
 	for _, sr := range result.Sessions {
 		js := jsonSessionResult{

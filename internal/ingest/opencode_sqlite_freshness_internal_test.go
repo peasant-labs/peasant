@@ -138,7 +138,7 @@ func TestLegacySQLiteContentModTimeUsesDatabaseAndWALOnly(t *testing.T) {
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			filesystem := &openCodeSQLiteFreshnessFS{databasePath: databasePath, testCase: testCase}
-			modified, statErr := legacySQLiteContentModTime(filesystem, databasePath)
+			modified, statErr := sqliteContentModTime(filesystem, databasePath)
 			if testCase.ExpectedErrorContains != "" {
 				if statErr == nil || !strings.Contains(statErr.Error(), testCase.ExpectedErrorContains) {
 					t.Fatalf("freshness error=%v, want actionable diagnostic containing %q", statErr, testCase.ExpectedErrorContains)

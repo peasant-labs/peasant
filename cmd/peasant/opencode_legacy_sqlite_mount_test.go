@@ -29,8 +29,6 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const expectedLegacySQLiteMountCases = 9
-
 type legacySQLiteHarvestExpectation string
 
 const (
@@ -80,7 +78,7 @@ type legacySQLiteToolExpectation struct {
 }
 
 type legacySQLiteMountDocument struct {
-	DeclaredCases int                     `yaml:"declared_cases"`
+	RequiredCases []string                `yaml:"required_cases"`
 	Cases         []legacySQLiteMountCase `yaml:"cases"`
 }
 
@@ -99,8 +97,8 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("legacy SQLite mounted expectations must contain exactly one document: %v", err)
 	}
-	if document.DeclaredCases != expectedLegacySQLiteMountCases || len(document.Cases) != expectedLegacySQLiteMountCases {
-		t.Fatalf("legacy SQLite mounted expectation row guard: declared=%d actual=%d expected=%d", document.DeclaredCases, len(document.Cases), expectedLegacySQLiteMountCases)
+	if len(document.RequiredCases) == 0 {
+		t.Fatal("legacy SQLite mounted expectation fixture declares no required cases")
 	}
 	seen := make(map[string]struct{}, len(document.Cases))
 	for _, testCase := range document.Cases {
@@ -123,6 +121,11 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 		case legacySQLiteMutationNone, legacySQLiteMutationMalformedMessage, legacySQLiteMutationMixedJSON:
 		default:
 			t.Fatalf("legacy SQLite mounted expectation %q has unknown mutation %q", testCase.Name, testCase.Mutation)
+		}
+	}
+	for _, name := range document.RequiredCases {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("legacy SQLite mounted expectation is missing required case %q", name)
 		}
 	}
 	return document
@@ -315,8 +318,8 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if err != nil {
 				t.Fatalf("harvest changed synthetic source: %v\n%s", err, output)
 			}
-			if !strings.Contains(output, "2 updated") {
-				t.Fatalf("shared SQLite source change did not report only its two expected session updates:\n%s", output)
+			if !strings.Contains(output, "1 updated") || !strings.Contains(output, "1 unchanged") {
+				t.Fatalf("selected SQLite session change did not isolate freshness from the unchanged sibling session:\n%s", output)
 			}
 			changedStore, err := store.Open(databasePath, store.WithPoolSize(1))
 			if err != nil {
@@ -428,7 +431,14 @@ func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
 	if err != nil {
 		t.Fatalf("open synthetic source-change control: %v", err)
 	}
-	updateErr := sqlitex.ExecuteTransient(connection, `UPDATE message SET data = '{"role":"user","version":"changed-source","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700000000010}}' WHERE id = 'msg_equal_a'`, nil)
+	updateErr := sqlitex.ExecuteTransient(connection, `UPDATE message SET data = '{"role":"user","version":"changed-source","path":{"cwd":"/synthetic/work/project"},"time":{"created":1700000000000,"completed":1700002000010}}', time_updated = 1700002000010 WHERE id = 'msg_equal_a'`, nil)
+	if updateErr == nil {
+		// OpenCode moves the owning session's changed clock in the same flow as a
+		// content edit, and freshness is clock-first for a session that has a
+		// clock. Move the clock so the edited session re-ingests while its
+		// sibling session, whose clock is untouched, stays unchanged.
+		updateErr = sqlitex.ExecuteTransient(connection, `UPDATE session SET time_updated = 1700002000010 WHERE id = (SELECT session_id FROM message WHERE id = 'msg_equal_a')`, nil)
+	}
 	closeErr := connection.Close()
 	if updateErr != nil || closeErr != nil {
 		t.Fatalf("prepare synthetic source change: %v", errors.Join(updateErr, closeErr))

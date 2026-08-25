@@ -11,8 +11,12 @@ import (
 )
 
 const (
-	openCodeCurrentProjectionFormat  = "peasant.opencode.current-sqlite"
-	openCodeCurrentProjectionVersion = 1
+	openCodeCurrentProjectionFormat = "peasant.opencode.current-sqlite"
+	// openCodeCurrentProjectionVersion is version 2: a control record now
+	// carries the typed control field and no fabricated part. The shared minimum
+	// readable version stays 1, so a previously persisted version 1 current
+	// projection, which never held a control record, still decodes.
+	openCodeCurrentProjectionVersion = 2
 	openCodeCurrentMaterializePage   = 128
 )
 
@@ -81,6 +85,7 @@ type openCodeCurrentUser struct {
 
 type openCodeCurrentAssistant struct {
 	openCodeCurrentBase
+	ParentID string                       `json:"parentID,omitempty"`
 	Agent    string                       `json:"agent"`
 	Model    openCodeCurrentModel         `json:"model"`
 	Content  []json.RawMessage            `json:"content"`
@@ -217,6 +222,23 @@ func (base openCodeCurrentBase) validateIdentity(rowID string) error {
 	return nil
 }
 
+// validateControlIdentity is the identity rule for a control record, such as a
+// model switch or an agent switch. A control row legitimately carries no
+// upstream message id, so absence is tolerated; the SQLite row id remains the
+// stable identity. When an id is present it must still match the row id, so a
+// genuine identity conflict stays an error.
+func (base openCodeCurrentBase) validateControlIdentity(rowID string) error {
+	if base.ID != "" && base.ID != rowID {
+		return fmt.Errorf("upstream message id %q conflicts with SQLite row id %q", base.ID, rowID)
+	}
+	return nil
+}
+
+// errOpenCodeSkipControlRow signals that a well-formed current row carried no
+// upstream id and a type outside the known set, so it is a newer control record
+// the caller skips and counts rather than a fatal decode failure.
+var errOpenCodeSkipControlRow = errors.New("skip newer OpenCode control row")
+
 func decodeOpenCodeCurrentJSON(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -230,23 +252,7 @@ func decodeOpenCodeCurrentJSON(raw []byte, target any) error {
 	return nil
 }
 
-func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, candidate OpenCodeCandidate) (discovered []DiscoveredSession, err error) {
-	if a.candidateOpener == nil {
-		return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed before row enumeration: source opener is nil, so typed reads cannot run; no session was exposed; construct the adapter with OpenOpenCodeSQLiteSource", candidate.Path)
-	}
-	path, err := NewOpenCodeSQLiteSourcePath(candidate.Path)
-	if err != nil {
-		return nil, err
-	}
-	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
-	if err != nil {
-		return nil, fmt.Errorf("discover current OpenCode SQLite candidate %q failed while opening the restrictive source: %w; no session was exposed; verify source readability and retry without modifying the database", candidate.Path, err)
-	}
-	defer func() {
-		if closeErr := source.Close(ctx); err == nil && closeErr != nil {
-			err = fmt.Errorf("discover current OpenCode SQLite candidate %q failed while closing its bounded read connection: %w; no partial discovery result is eligible; retry after the source lock clears", candidate.Path, closeErr)
-		}
-	}()
+func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate) (discovered []DiscoveredSession, err error) {
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
 		return nil, err
@@ -269,16 +275,36 @@ func (a *OpenCodeAdapter) discoverCurrentSQLite(ctx context.Context, candidate O
 		}
 		cursor = page.Next
 	}
-	if len(discovered) > 0 {
-		contentModTime, statErr := legacySQLiteContentModTime(a.fs, candidate.Path)
-		if statErr != nil {
-			return nil, statErr
+	return discovered, nil
+}
+
+// currentControlOnlySessions probes each discovered current session for a
+// substantive row and returns the set that holds only control records. It uses
+// the enumeration source already open for the candidate, so no second database
+// is opened, and each probe is a single bounded existence read keyed on the
+// indexed session_id column rather than a scan. A probe failure fails safe: the
+// session is treated as substantive so a transient read error never demotes a
+// real current conversation to its legacy sibling, and one diagnostic names the
+// affected session.
+func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, sessions []DiscoveredSession) map[SessionID]bool {
+	controlOnly := make(map[SessionID]bool, len(sessions))
+	for _, session := range sessions {
+		currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+		if err != nil {
+			// Enumeration already validated the identifier, so this is
+			// unreachable; treat it as substantive rather than demote it.
+			continue
 		}
-		for index := range discovered {
-			discovered[index].ModTime = contentModTime
+		hasSubstantive, probeErr := source.CurrentSessionHasSubstantive(ctx, currentID)
+		if probeErr != nil {
+			a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("substantive-row probe failed for current session %q; the session stays a current winner rather than deferring to a legacy sibling", session.SessionID), probeErr)
+			continue
+		}
+		if !hasSubstantive {
+			controlOnly[session.SessionID] = true
 		}
 	}
-	return discovered, nil
+	return controlOnly
 }
 
 func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
@@ -286,27 +312,26 @@ func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, sess
 	if err != nil {
 		return nil, nil, err
 	}
-	path, err := NewOpenCodeSQLiteSourcePath(session.SourcePath.String())
-	if err != nil {
-		return nil, nil, err
-	}
-	if a.candidateOpener == nil {
-		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed before source access: source opener is nil; raw database bytes were not read and no managed state was written; construct the production adapter with OpenOpenCodeSQLiteSource", session.SessionID)
-	}
-	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
-	if err != nil {
-		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while opening %q read-only: %w; no managed artifact or store row was written; verify the selected database remains readable and retry", session.SessionID, session.SourcePath, err)
-	}
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
-		_ = source.Close(context.Background())
 		return nil, nil, err
 	}
-	projection, readErr := readOpenCodeCurrentProjection(ctx, source, currentID, pageSize)
-	closeErr := source.Close(ctx)
-	if readErr != nil || closeErr != nil {
-		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, errors.Join(readErr, closeErr))
+	var projection openCodeCurrentProjection
+	var unknownControlTypes map[string]int
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		var readErr error
+		projection, unknownControlTypes, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
+		return readErr
+	}); err != nil {
+		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
+	return a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+}
+
+// finishCurrentManagedProjection encodes a read current projection into the
+// managed JSON bytes and derives its metadata. The full-session and preview
+// prefix reads share it.
+func (a *OpenCodeAdapter) finishCurrentManagedProjection(ctx context.Context, session DiscoveredSession, projection openCodeCurrentProjection, unknownControlTypes map[string]int) (*UnifiedMetadata, []byte, error) {
 	if len(projection.Messages) == 0 {
 		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q from %q produced no semantic messages even though discovery enumerated it; no empty managed artifact was written; retry after OpenCode finishes its transaction or remove the stale source row", session.SessionID, session.SourcePath)
 	}
@@ -320,34 +345,172 @@ func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, sess
 	if err != nil {
 		return nil, nil, err
 	}
+	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, openCodeUnknownTypeDiagnostics(session, unknownControlTypes, "control message row")...)
 	return metadata, data, nil
 }
 
-func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, error) {
+func (a *OpenCodeAdapter) materializeCurrentTranscriptBounded(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, MaterializeTruncation, error) {
+	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	var projection openCodeCurrentProjection
+	var unknownControlTypes map[string]int
+	var truncation MaterializeTruncation
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		size, sizeErr := source.CurrentSessionPayloadSize(ctx, currentID)
+		if sizeErr != nil {
+			return sizeErr
+		}
+		budget := int64(0)
+		if budgetBytes > 0 && size.Bytes > budgetBytes {
+			budget = budgetBytes
+		}
+		var readErr error
+		projection, unknownControlTypes, truncation, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, budget, size)
+		return readErr
+	}); err != nil {
+		return nil, nil, MaterializeTruncation{}, fmt.Errorf("materialize bounded current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
+	}
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	if err != nil {
+		return nil, nil, MaterializeTruncation{}, err
+	}
+	return metadata, data, truncation, nil
+}
+
+func (a *OpenCodeAdapter) materializeCurrentTranscriptFirstPage(ctx context.Context, session DiscoveredSession, budgetBytes int64) (*UnifiedMetadata, []byte, bool, error) {
+	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+	if err != nil {
+		return nil, nil, false, err
+	}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if budgetBytes <= 0 {
+		return nil, nil, false, fmt.Errorf("materialize the first page of current OpenCode SQLite session %q failed before source access: the byte budget %d is not positive; no managed state was written; pass the preview first-page budget", session.SessionID, budgetBytes)
+	}
+	var projection openCodeCurrentProjection
+	var unknownControlTypes map[string]int
+	var truncation MaterializeTruncation
+	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+		// The zero payload size is deliberate: it fills only the totals a
+		// truncation note quotes, and the first-page read writes no note.
+		var readErr error
+		projection, unknownControlTypes, truncation, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, budgetBytes, OpenCodePayloadSize{})
+		return readErr
+	}); err != nil {
+		return nil, nil, false, fmt.Errorf("materialize the first page of current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
+	}
+	metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return metadata, data, truncation.Truncated, nil
+}
+
+func readOpenCodeCurrentProjection(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize) (openCodeCurrentProjection, map[string]int, error) {
+	projection, unknownControlTypes, _, err := readOpenCodeCurrentProjectionCore(ctx, source, sessionID, pageSize, 0, OpenCodePayloadSize{})
+	return projection, unknownControlTypes, err
+}
+
+// readOpenCodeCurrentProjectionCore reads the session's current message rows in
+// seq order and normalizes each. When budget is positive it stops accumulating
+// once the summed message payload byte length reaches the budget and reports the
+// truncation; a non-positive budget reads the whole session and reports no
+// truncation. size carries the whole-session totals so a truncated result can
+// name how much it left out. The full-session read and the preview prefix read
+// share this one path.
+func readOpenCodeCurrentProjectionCore(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, error) {
+	projection, unknownControlTypes, truncation, _, err := readOpenCodeCurrentProjectionSlice(ctx, source, sessionID, pageSize, budget, size, nil)
+	return projection, unknownControlTypes, truncation, err
+}
+
+// readOpenCodeCurrentProjectionSlice is the resumable form of the core read: it
+// starts after the given cursor and returns the cursor of the last row it took,
+// so a later call continues exactly where this one stopped.
+//
+// A current message row IS one message, parts nested inside it, and the budget
+// is checked BEFORE a row is taken. A slice boundary therefore always lands on
+// a message boundary, so no message is ever split across two slices and
+// appending one slice's turns to the previous slice's can never duplicate or
+// halve a turn.
+func readOpenCodeCurrentProjectionSlice(ctx context.Context, source OpenCodeSQLiteSource, sessionID OpenCodeCurrentSessionID, pageSize OpenCodeCurrentPageSize, budget int64, size OpenCodePayloadSize, after *OpenCodeCurrentCursor) (openCodeCurrentProjection, map[string]int, MaterializeTruncation, openCodeCurrentSliceStop, error) {
 	projection := openCodeCurrentProjection{Format: openCodeCurrentProjectionFormat, Version: openCodeCurrentProjectionVersion, SessionID: sessionID.String(), Messages: []openCodeLegacyProjectionMessage{}}
 	registry := openCodeCurrentIdentityRegistry{kinds: make(map[string]string)}
-	var cursor *OpenCodeCurrentCursor
+	unknownControlTypes := make(map[string]int)
+	cursor := after
+	// stop is the position of the last row this read took, which is what a
+	// continuation resumes from. It is distinct from cursor, which is the page
+	// cursor and runs ahead of it whenever a page is only partly consumed.
+	stop := after
+	// readBytes is what the read pulled out of the source and is what the budget
+	// governs. includedRows and includedBytes are what reached the projection: a
+	// control row is read and paid for but never shown.
+	var readBytes, includedBytes, includedRows int64
+	truncated := false
+rowLoop:
 	for {
 		page, err := source.CurrentMessages(ctx, OpenCodeCurrentPageRequest{SessionID: sessionID, PageSize: pageSize, After: cursor})
 		if err != nil {
-			return openCodeCurrentProjection{}, err
+			return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, err
 		}
 		for _, row := range page.Messages {
+			// Every read row, control or substantive, counts toward the budget: the
+			// budget bounds how much source payload the read pulls into memory, not
+			// how many rows survive normalization. The budget is checked BEFORE the
+			// row is taken, so a read that spent its budget exactly on the last row
+			// of the session reports no truncation: nothing was left out.
+			if budget > 0 && readBytes >= budget {
+				truncated = true
+				break rowLoop
+			}
+			readBytes += int64(len(row.Data))
+			taken := NewOpenCodeCurrentCursor(row.Seq)
+			stop = &taken
 			if err := registry.add(row.ID.String(), "message row"); err != nil {
-				return openCodeCurrentProjection{}, currentNormalizationError(row, "registering stable identities", err)
+				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "registering stable identities", err)
 			}
 			message, err := normalizeOpenCodeCurrentRow(row, &registry)
+			if errors.Is(err, errOpenCodeSkipControlRow) {
+				// A newer id-less control record: keep the session, drop the row,
+				// and count its type for one diagnostic per type.
+				unknownControlTypes[row.Type.String()]++
+				continue
+			}
 			if err != nil {
-				return openCodeCurrentProjection{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
+				return openCodeCurrentProjection{}, nil, MaterializeTruncation{}, openCodeCurrentSliceStop{}, currentNormalizationError(row, "decoding the pinned SessionMessage shape", err)
 			}
 			projection.Messages = append(projection.Messages, message)
+			includedRows++
+			includedBytes += int64(len(row.Data))
 		}
 		if page.Next == nil {
 			break
 		}
 		cursor = page.Next
 	}
-	return projection, nil
+	truncation := MaterializeTruncation{}
+	if truncated {
+		truncation = MaterializeTruncation{Truncated: true, Unit: MaterializeUnitMessages, BudgetBytes: budget, IncludedBytes: includedBytes, TotalBytes: size.Bytes, IncludedRows: includedRows, TotalRows: size.Rows}
+	}
+	return projection, unknownControlTypes, truncation, openCodeCurrentSliceStop{cursor: stop, exhausted: !truncated, includedBytes: includedBytes, includedRows: includedRows}, nil
+}
+
+// openCodeCurrentSliceStop is where a resumable current read ended. exhausted
+// reports that the read walked off the end of the session, and the included
+// counters are what THIS slice put into the projection - reported apart from
+// the truncation record, which the last slice of a session never carries.
+type openCodeCurrentSliceStop struct {
+	cursor        *OpenCodeCurrentCursor
+	exhausted     bool
+	includedBytes int64
+	includedRows  int64
 }
 
 func currentNormalizationError(row OpenCodeCurrentMessageRow, operation string, cause error) error {
@@ -369,7 +532,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		message.Parts = append(message.Parts, openCodeLegacyProjectionPart{ID: id, MessageID: message.ID, SessionID: message.SessionID, TimeCreated: created, TimeUpdated: created, Data: raw})
 		return nil
 	}
-	messageData := func(role, text, model, agent string, metadata map[string]json.RawMessage, time openCodeCurrentTime, tokens *openCodeCurrentTokens) error {
+	messageData := func(role, text, model, agent, parentID string, metadata map[string]json.RawMessage, time openCodeCurrentTime, tokens *openCodeCurrentTokens) error {
 		cwd, err := currentMetadataString(metadata, "cwd")
 		if err != nil {
 			return err
@@ -383,6 +546,9 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 		if agent != "" {
 			value["agent"] = agent
+		}
+		if parentID != "" {
+			value["parentID"] = parentID
 		}
 		if cwd != "" {
 			value["cwd"] = cwd
@@ -407,7 +573,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "text", "files", "agents", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleUser.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleUser.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		for _, agent := range value.Agents {
@@ -429,7 +595,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "agent", "model", "content", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.Metadata, value.Time, value.Tokens); err != nil {
+		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.ParentID, value.Metadata, value.Time, value.Tokens); err != nil {
 			return message, err
 		}
 		for _, content := range value.Content {
@@ -451,7 +617,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := registry.add(value.CallID, "shell tool call"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleAssistant.String(), "", "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleAssistant.String(), "", "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"id": value.CallID, "type": "tool_use", "name": "shell", "input": map[string]any{"command": value.Command}, "time": map[string]any{"created": value.Time.Created}}); err != nil {
@@ -476,7 +642,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if value.SessionID != message.SessionID {
 			return message, errors.New("synthetic sessionID must match SQLite row session")
 		}
-		if err := messageData(RoleSystem.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 	case "system":
@@ -490,7 +656,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "id", "text", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleSystem.String(), value.Text, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 	case "compaction":
@@ -507,47 +673,66 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if value.Reason != "auto" && value.Reason != "manual" {
 			return message, errors.New("compaction reason must be auto or manual")
 		}
-		if err := messageData(RoleSystem.String(), value.Summary, "", "", value.Metadata, value.Time, nil); err != nil {
+		if err := messageData(RoleSystem.String(), value.Summary, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "compaction", "text": value.Summary, "content": value.Recent, "time": map[string]any{"created": value.Time.Created}}); err != nil {
 			return message, err
 		}
 	case "agent-switched":
+		// A control record legitimately carries no upstream id, so absence is
+		// tolerated rather than fatal. It renders as a system record naming the
+		// new agent, which is inert transcript context, not a user or assistant
+		// turn.
 		var value openCodeCurrentAgentSwitched
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := value.validateIdentity(message.ID); err != nil {
+		if err := value.validateControlIdentity(message.ID); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "id", "agent", "time"); err != nil {
+		if err := requireOpenCodeCurrentFields(data, "agent", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleSystem.String(), value.Agent, "", value.Agent, value.Metadata, value.Time, nil); err != nil {
+		message.Control = "agent-switched"
+		if err := messageData(RoleSystem.String(), value.Agent, "", value.Agent, "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "agent", "name": value.Agent, "text": value.Agent}); err != nil {
 			return message, err
 		}
 	case "model-switched":
+		// A control record legitimately carries no upstream id, so absence is
+		// tolerated rather than fatal. A model switch is the same signal the
+		// indexer records as a per-turn model observation, so it carries the
+		// model id and the indexer applies it to the following assistant turn.
 		var value openCodeCurrentModelSwitched
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := value.validateIdentity(message.ID); err != nil {
+		if err := value.validateControlIdentity(message.ID); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "id", "model", "time"); err != nil {
+		if err := requireOpenCodeCurrentFields(data, "model", "time"); err != nil {
 			return message, err
 		}
-		if err := messageData(RoleSystem.String(), value.Model.ID, value.Model.ID, "", value.Metadata, value.Time, nil); err != nil {
+		message.Control = "model-switched"
+		if err := messageData(RoleSystem.String(), value.Model.ID, value.Model.ID, "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "subtask", "name": value.Model.ID, "text": value.Model.ID}); err != nil {
 			return message, err
 		}
 	default:
+		// A well-formed row that carries no upstream id but is control-shaped (it
+		// has a time) is a newer control record: skip it and let the caller count
+		// its type. A row that should carry an id, or is not control-shaped,
+		// stays an error so genuinely malformed content still fails the session.
+		hasID := requireOpenCodeCurrentFields(data, "id") == nil
+		hasTime := requireOpenCodeCurrentFields(data, "time") == nil
+		if !hasID && hasTime {
+			return message, errOpenCodeSkipControlRow
+		}
 		return message, fmt.Errorf("type %q is outside the supported pinned SessionMessage closed set", row.Type.String())
 	}
 	return message, nil

@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
@@ -204,7 +205,7 @@ func TestOpenCodeCurrentPinnedSessionMessageVariants(t *testing.T) {
 	rows := semanticCurrentRows(t, fixture.CurrentVariants)
 	sessionID, _ := NewOpenCodeCurrentSessionID("ses_3cd91f52effeXd3QAJ54jOyzv5")
 	pageSize, _ := NewOpenCodeCurrentPageSize(32)
-	projection, err := readOpenCodeCurrentProjection(t.Context(), semanticNegativeSource{rows: rows}, sessionID, pageSize)
+	projection, _, err := readOpenCodeCurrentProjection(t.Context(), semanticNegativeSource{rows: rows}, sessionID, pageSize)
 	if err != nil {
 		t.Fatalf("normalize pinned upstream SessionMessage variants: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestOpenCodeSemanticParityMutantsChangeOwnedAxis(t *testing.T) {
 	source := openSemanticSource(t, materialized.Path)
 	currentID, _ := NewOpenCodeCurrentSessionID(testCase.SessionID)
 	pageSize, _ := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
-	projection, err := readOpenCodeCurrentProjection(t.Context(), source, currentID, pageSize)
+	projection, _, err := readOpenCodeCurrentProjection(t.Context(), source, currentID, pageSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +426,7 @@ func TestOpenCodeThreeSourceSemanticProjectionParity(t *testing.T) {
 			currentSource := openSemanticSource(t, currentMaterialized.Path)
 			currentID, _ := NewOpenCodeCurrentSessionID(testCase.SessionID)
 			currentPageSize, _ := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
-			currentProjection, err := readOpenCodeCurrentProjection(t.Context(), currentSource, currentID, currentPageSize)
+			currentProjection, _, err := readOpenCodeCurrentProjection(t.Context(), currentSource, currentID, currentPageSize)
 			if err != nil {
 				t.Fatalf("load production current projection: %v", err)
 			}
@@ -545,7 +546,7 @@ func indexSemanticParityCurrent(t testing.TB, path string, sessionID SessionID, 
 	source := openSemanticSource(t, path)
 	currentID, _ := NewOpenCodeCurrentSessionID(rawSessionID)
 	pageSize, _ := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
-	projection, err := readOpenCodeCurrentProjection(context.Background(), source, currentID, pageSize)
+	projection, _, err := readOpenCodeCurrentProjection(context.Background(), source, currentID, pageSize)
 	if closeErr := source.Close(context.Background()); err == nil {
 		err = closeErr
 	}
@@ -709,6 +710,8 @@ func assertSemanticEntries(t testing.TB, testCase openCodeSemanticCase, entries 
 
 type semanticNegativeSource struct{ rows []OpenCodeCurrentMessageRow }
 
+var _ OpenCodeSQLiteSource = semanticNegativeSource{}
+
 func (source semanticNegativeSource) Catalog(context.Context) (OpenCodeSchemaEvidence, error) {
 	return OpenCodeSchemaEvidence{}, nil
 }
@@ -718,14 +721,41 @@ func (source semanticNegativeSource) CurrentSessionIDs(context.Context, OpenCode
 func (source semanticNegativeSource) LegacySessionIDs(context.Context, OpenCodeLegacySessionPageRequest) (OpenCodeLegacySessionPage, error) {
 	return OpenCodeLegacySessionPage{}, nil
 }
+func (source semanticNegativeSource) CurrentFreshnessBySession(context.Context) (map[string]time.Time, error) {
+	return nil, nil
+}
+func (source semanticNegativeSource) LegacyFreshnessBySession(context.Context) (map[string]time.Time, error) {
+	return nil, nil
+}
 func (source semanticNegativeSource) LegacyMessages(context.Context, OpenCodeLegacyMessagePageRequest) (OpenCodeLegacyMessagePage, error) {
 	return OpenCodeLegacyMessagePage{}, nil
 }
-func (source semanticNegativeSource) LegacyParts(context.Context, OpenCodeLegacyPartPageRequest) (OpenCodeLegacyPartPage, error) {
+func (source semanticNegativeSource) LegacySessionParts(context.Context, OpenCodeLegacySessionPartPageRequest) (OpenCodeLegacyPartPage, error) {
 	return OpenCodeLegacyPartPage{}, nil
+}
+func (source semanticNegativeSource) LegacySessionPayloadSize(context.Context, OpenCodeLegacySessionID) (OpenCodePayloadSize, error) {
+	return OpenCodePayloadSize{}, nil
+}
+func (source semanticNegativeSource) CurrentSessionPayloadSize(context.Context, OpenCodeCurrentSessionID) (OpenCodePayloadSize, error) {
+	return OpenCodePayloadSize{}, nil
+}
+func (source semanticNegativeSource) SessionRecords(context.Context, OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
+	return OpenCodeSessionRecordPage{}, nil
 }
 func (source semanticNegativeSource) CurrentMessages(context.Context, OpenCodeCurrentPageRequest) (OpenCodeCurrentPage, error) {
 	return OpenCodeCurrentPage{Messages: source.rows}, nil
+}
+func (source semanticNegativeSource) CurrentSessionHasSubstantive(context.Context, OpenCodeCurrentSessionID) (bool, error) {
+	return true, nil
+}
+func (source semanticNegativeSource) ProjectAttribution(context.Context) (OpenCodeProjectAttribution, error) {
+	return OpenCodeProjectAttribution{}, nil
+}
+func (source semanticNegativeSource) EventSequenceBySession(context.Context) (OpenCodeEventSequence, error) {
+	return OpenCodeEventSequence{}, nil
+}
+func (source semanticNegativeSource) MaxEventSeq(context.Context, OpenCodeSessionLinkID) (OpenCodeSessionSeq, error) {
+	return OpenCodeSessionSeq{}, nil
 }
 func (source semanticNegativeSource) Close(context.Context) error { return nil }
 
@@ -739,7 +769,7 @@ func TestOpenCodeCurrentNormalizationRejectsStrictNegativeCases(t *testing.T) {
 	for _, testCase := range fixture.NegativeCases {
 		testCase := testCase
 		t.Run(testCase.Name, func(t *testing.T) {
-			_, err := readOpenCodeCurrentProjection(t.Context(), semanticNegativeSource{rows: semanticCurrentRows(t, testCase.Rows)}, sessionID, pageSize)
+			_, _, err := readOpenCodeCurrentProjection(t.Context(), semanticNegativeSource{rows: semanticCurrentRows(t, testCase.Rows)}, sessionID, pageSize)
 			if err == nil || !strings.Contains(err.Error(), testCase.ErrorContains) {
 				t.Fatalf("error=%v want substring %q", err, testCase.ErrorContains)
 			}

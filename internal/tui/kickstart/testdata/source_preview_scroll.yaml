@@ -1,0 +1,78 @@
+# Scrolled continuation of an OpenCode SQLite session preview, driven by
+# TestSourceTurns_ExtendsAPreviewAsTheReaderScrolls
+# (internal/tui/kickstart/source_preview_scroll_test.go).
+#
+# The preview of a session too long to read whole stops at the bound its first
+# read used and then EXTENDS: a scroll to the bottom of the pane loads the next
+# slice and appends it. Each case names a synthetic database, discovers one
+# session from it, reads that session's first slice, and then continues it until
+# there is nothing left.
+#
+# Four rules every case asserts, because they are what makes an appended
+# preview trustworthy:
+#   - EVERY CONTINUATION APPENDS. The turns already loaded stay where they are,
+#     in order, and the new ones arrive after them - never before, never in
+#     place of one.
+#   - NOTHING IS SHOWN TWICE. No turn's role and content repeat a turn an
+#     earlier slice already put on screen.
+#   - THE CHAIN ENDS. It reports nothing more within max_scrolls, and the
+#     sentence above the turns disappears when it does - unless the case turned
+#     scrolled loading off, which keeps the fixed sentence it names.
+#   - THE SENTENCE FOLLOWS THE SCREEN. While there is more to load it names how
+#     much is loaded, says how to load more, and keeps the reassurance about
+#     ingest; its loaded figure never goes backwards.
+#
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - a-legacy-session-loads-a-further-slice-on-every-scroll-until-it-ends
+  - a-current-session-loads-a-further-slice-on-every-scroll-until-it-ends
+  - a-session-that-fits-its-first-read-offers-nothing-to-scroll-for
+  - a-reader-configured-without-a-slice-bound-never-offers-more
+
+cases:
+  - name: a-legacy-session-loads-a-further-slice-on-every-scroll-until-it-ends
+    source_fixture: legacy-scrollable-session
+    origin: opencode-legacy-sqlite
+    preview_budget_bytes: 2000
+    slice_budget_bytes: 2000
+    max_scrolls: 20
+    expect_more_after_first_read: true
+    expect_notice_contains:
+      - showing the first
+      - scroll to the bottom to load more
+      - the full session ingests normally
+
+  - name: a-current-session-loads-a-further-slice-on-every-scroll-until-it-ends
+    source_fixture: semantic-parity-current
+    origin: opencode-current-sqlite
+    preview_budget_bytes: 1
+    slice_budget_bytes: 1
+    max_scrolls: 40
+    expect_more_after_first_read: true
+    expect_notice_contains:
+      - showing the first
+      - scroll to the bottom to load more
+      - the full session ingests normally
+
+  # A bound larger than the session reads it whole, so the pane has nothing to
+  # offer and says nothing about a bound.
+  - name: a-session-that-fits-its-first-read-offers-nothing-to-scroll-for
+    source_fixture: legacy-scrollable-session
+    origin: opencode-legacy-sqlite
+    preview_budget_bytes: 1048576
+    slice_budget_bytes: 1048576
+    max_scrolls: 4
+    expect_more_after_first_read: false
+
+  # Turning the slice bound off restores the behavior the preview had before it
+  # could be scrolled: it stops where its first read stopped, and says so in the
+  # fixed sentence that behavior always carried.
+  - name: a-reader-configured-without-a-slice-bound-never-offers-more
+    source_fixture: legacy-scrollable-session
+    origin: opencode-legacy-sqlite
+    preview_budget_bytes: 2000
+    slice_budget_bytes: 0
+    max_scrolls: 4
+    expect_more_after_first_read: false
+    expect_final_notice_contains: this bound applies to the preview only

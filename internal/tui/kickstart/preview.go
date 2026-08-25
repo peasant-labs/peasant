@@ -25,6 +25,46 @@ import (
 // recorded turns directly.
 type SessionTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 
+// SessionFirstTurnsFunc reads a quickly-available LEADING slice of one
+// session's turns and reports whether more of the session follows.
+//
+// It is the two-step half of [SessionTurnsFunc], and it exists because reading
+// a very long session out of a provider database takes seconds while reading
+// the first part of it takes a fraction of one. The preview paints the slice at
+// once and then asks SessionTurnsFunc for the result it finally shows.
+//
+// A false more means the slice IS the whole preview, so no second read runs.
+// Its error contract matches SessionTurnsFunc: no turns for a session there is
+// nothing to read for, an error only when the read itself failed.
+type SessionFirstTurnsFunc func(sessionID string) (turns []ingest.Turn, more bool, err error)
+
+// SessionMoreTurnsFunc extends the loaded turns of one session by the next
+// chunk and reports whether the session continues past it.
+//
+// It is what a scroll to the bottom of the preview pane asks for, and it exists
+// because a session too long to read whole would otherwise simply stop at the
+// bound the first read used. It returns EVERYTHING loaded so far, not the chunk
+// alone, so the pane replaces its body and every line already on screen keeps
+// its place.
+//
+// Its error contract matches SessionTurnsFunc: no turns for a session there is
+// nothing more to read for, an error only when the read itself failed.
+type SessionMoreTurnsFunc func(sessionID string) (turns []ingest.Turn, more bool, err error)
+
+// SessionHasMoreFunc reports whether the loaded preview of one session has more
+// of that session behind it. The pane asks on its own goroutine after a load
+// lands, so it must answer from memory and read nothing.
+type SessionHasMoreFunc func(sessionID string) bool
+
+// SessionPreviewNoticeFunc reports a plain sentence the preview must show ABOVE
+// the turns it already loaded, or the empty string when there is nothing to
+// say. It exists because a preview can be complete in itself yet still stand
+// for less than the whole session: a very long session is read under a byte
+// bound, so the pane must name what it left out rather than silently showing a
+// prefix. It is read only after the turns load, so the sentence always
+// describes the turns on screen.
+type SessionPreviewNoticeFunc func(sessionID string) string
+
 // EmptySessionPreview is the imported-but-empty session state. SourceJSON is a
 // bounded JSONL excerpt that ListingPreview renders through the JSON highlighter.
 type EmptySessionPreview struct {
@@ -78,6 +118,33 @@ func WithEmptySessionBody(body EmptySessionBodyFunc) ListingPreviewOption {
 	}
 }
 
+// WithSessionPreviewNotice supplies the sentence the preview shows above the
+// turns of a session it could only read in part.
+func WithSessionPreviewNotice(notice SessionPreviewNoticeFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.notice = notice
+	}
+}
+
+// WithSessionFirstTurns supplies the quick leading read the preview paints
+// before the whole session is read. Without it the preview keeps its
+// single-step behavior: the pane shows nothing until the whole read finishes.
+func WithSessionFirstTurns(first SessionFirstTurnsFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.firstTurns = first
+	}
+}
+
+// WithSessionMoreTurns supplies the scrolled continuation. Without it the
+// preview keeps its existing behavior: it stops at what the first read loaded
+// and says so.
+func WithSessionMoreTurns(more SessionMoreTurnsFunc, hasMore SessionHasMoreFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.moreTurns = more
+		preview.hasMore = hasMore
+	}
+}
+
 // WithListingPreviewContextSource enables project and branch detail bodies from
 // the exact scanner forest that supplied the highlighted row.
 func WithListingPreviewContextSource(source ListingPreviewContextSource) ListingPreviewOption {
@@ -121,6 +188,19 @@ type ListingPreview struct {
 	renderer  *transcriptview.Renderer
 	th        theme.Theme
 	contexts  ListingPreviewContextSource
+	notice    SessionPreviewNoticeFunc
+	// firstTurns is the optional quick leading read. When it is nil the
+	// preview loads in one step.
+	firstTurns SessionFirstTurnsFunc
+	// moreTurns and hasMore are the optional scrolled continuation. Both nil is
+	// a preview that ends where its first read ended.
+	moreTurns SessionMoreTurnsFunc
+	hasMore   SessionHasMoreFunc
+	// extended names the sessions the reader has actually scrolled. It keeps a
+	// preview drawing every turn once it runs out of session to load: without
+	// it, the last chunk landing would take the draw bound back and hide most of
+	// what the reader had just spent scrolls loading.
+	extended map[string]bool
 }
 
 // NewListingPreview builds the selection step's preview over the discovery
@@ -138,6 +218,7 @@ func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns Ses
 		turns:    turns,
 		renderer: transcriptview.New(th),
 		th:       th,
+		extended: map[string]bool{},
 	}
 	for _, opt := range opts {
 		opt(preview)
@@ -145,48 +226,137 @@ func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns Ses
 	return preview
 }
 
-var _ kit.BodySource = (*ListingPreview)(nil)
+var (
+	_ kit.BodySource            = (*ListingPreview)(nil)
+	_ kit.ProgressiveBodySource = (*ListingPreview)(nil)
+	_ kit.ContinuableBodySource = (*ListingPreview)(nil)
+)
 
 // Body implements kit.BodySource. It is called off the UI goroutine, so the
 // store read here never blocks tree navigation.
 func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
+	body, _, err := p.load(id, func(sessionID string) ([]ingest.Turn, bool, error) {
+		recorded, err := p.turns(sessionID)
+		return recorded, false, err
+	})
+	return body, err
+}
+
+// FirstBody implements kit.ProgressiveBodySource: it paints the quick leading
+// slice of a session while the whole read is still running.
+//
+// Without a first-turns reader it is the single-step load, so mounting this
+// preview over a source that cannot read a slice costs nothing and changes
+// nothing.
+func (p *ListingPreview) FirstBody(id string) (kit.PreviewBody, bool, error) {
+	if p.firstTurns == nil {
+		body, err := p.Body(id)
+		return body, false, err
+	}
+	return p.load(id, p.firstTurns)
+}
+
+// Continuable implements kit.ContinuableBodySource. It answers from what the
+// reader already loaded, so it never touches the source.
+func (p *ListingPreview) Continuable(id string) bool {
+	if p.hasMore == nil {
+		return false
+	}
+	if _, ok := p.byID[id]; !ok {
+		return false
+	}
+	return p.hasMore(id)
+}
+
+// MoreBody implements kit.ContinuableBodySource: it extends the preview by the
+// next chunk of the session when the reader scrolls toward the end of it.
+//
+// The body it returns holds every turn loaded so far, so it is the same preview
+// with more below it rather than a different one.
+func (p *ListingPreview) MoreBody(id string) (kit.PreviewBody, bool, error) {
+	if p.moreTurns == nil {
+		body, err := p.Body(id)
+		return body, false, err
+	}
+	var continues bool
+	p.extended[id] = true
+	body, _, err := p.load(id, func(sessionID string) ([]ingest.Turn, bool, error) {
+		turns, more, err := p.moreTurns(sessionID)
+		continues = more
+		// The read reports `more` to THIS function, not to load: load reads it
+		// as "a further step follows within this load", which is the two-step
+		// slice contract, and a continuation is one step on its own.
+		return turns, false, err
+	})
+	return body, continues, err
+}
+
+// load builds one preview for id from the given read, and reports whether that
+// read left more of the session to come.
+//
+// The truncation notice is attached ONLY to a body no further read follows.
+// The notice names what the WHOLE preview read left out, so putting it on a
+// leading slice would state a bound the slice was not read under.
+func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool, error)) (kit.PreviewBody, bool, error) {
 	sess, ok := p.byID[id]
 	if !ok {
 		if p.contexts != nil {
 			if context, found := p.contexts.ListingPreviewContext(id); found {
-				return listingContextBody{th: p.th, lines: listingContextLines(context)}, nil
+				return listingContextBody{th: p.th, lines: listingContextLines(context)}, false, nil
 			}
 		}
-		return sessionBody{th: p.th, note: notASessionBody}, nil
+		return sessionBody{th: p.th, note: notASessionBody}, false, nil
 	}
 	body := sessionBody{th: p.th, header: headerLines(sess)}
 	if p.turns == nil {
 		// No reader at all: nothing can say more than that the store does not
 		// hold the session yet.
 		body.note = notImportedBody
-		return body, nil
+		return body, false, nil
 	}
-	recorded, err := p.turns(id)
+	recorded, more, err := read(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(recorded) == 0 {
 		if p.emptyBody != nil {
 			preview, imported, err := p.emptyBody(id)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if imported {
 				body.note = preview.Note
 				body.rawJSON = preview.SourceJSON
-				return body, nil
+				return body, false, nil
 			}
 		}
 		body.note = emptyNote(sess)
-		return body, nil
+		return body, false, nil
 	}
-	body.transcript = p.renderer.Document(recorded)
-	return body, nil
+	body.transcript = p.document(id, recorded)
+	if p.notice != nil && !more {
+		body.notice = p.notice(id)
+	}
+	return body, more, nil
+}
+
+// document binds the loaded turns to the renderer, choosing the draw bound by
+// how those turns got here.
+//
+// A preview that can be EXTENDED holds turns because the reader scrolled for
+// them, so every one of them is drawn: bounding the draw would make the pane
+// stop growing while the loader kept working, which is the same thing as the
+// feature not working. A preview handed a whole recorded session keeps the
+// standing bound, because nothing there was asked for turn by turn.
+//
+// The choice is made per session rather than per preview: a store-backed
+// session in the same list is bounded even while a harness-read one beside it
+// is not.
+func (p *ListingPreview) document(id string, turns []ingest.Turn) transcriptview.Document {
+	if p.Continuable(id) || p.extended[id] {
+		return p.renderer.UnboundedDocument(turns)
+	}
+	return p.renderer.Document(turns)
 }
 
 // emptyNote explains a session that produced no turns. A session whose harness
@@ -309,8 +479,11 @@ type sessionBody struct {
 	th         theme.Theme
 	header     []string
 	transcript transcriptview.Document
-	note       string
-	rawJSON    string
+	// notice stands WITH the transcript rather than instead of it: it says what
+	// the loaded turns leave out. note replaces a transcript that is not there.
+	notice  string
+	note    string
+	rawJSON string
 }
 
 var _ kit.PreviewBody = sessionBody{}
@@ -333,6 +506,9 @@ func (b sessionBody) Render(width int) string {
 			head = append(head, styles.Muted.Render(ansi.Truncate(line, width, "")))
 		}
 		parts = append(parts, strings.Join(head, "\n"))
+	}
+	if b.notice != "" {
+		parts = append(parts, styles.Muted.Render(ansi.Wrap(b.notice, width, "")))
 	}
 	if body := b.transcript.Render(width); body != "" {
 		parts = append(parts, body)
@@ -357,6 +533,9 @@ func (b sessionBody) plain() string {
 	var parts []string
 	if len(b.header) > 0 {
 		parts = append(parts, strings.Join(b.header, "\n"))
+	}
+	if b.notice != "" {
+		parts = append(parts, b.notice)
 	}
 	if body := b.transcript.Render(0); body != "" {
 		parts = append(parts, body)

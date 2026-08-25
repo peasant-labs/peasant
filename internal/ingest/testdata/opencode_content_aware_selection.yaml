@@ -1,0 +1,23 @@
+# Content-aware canonical selection. A hybrid session prefers its current
+# session_message projection only when that projection holds a substantive turn.
+# A current projection that carries only control records loses to a legacy
+# sibling that still holds the conversation, so the reader renders the real
+# turns instead of a handful of inert control turns.
+source_fixture: content-aware-selection
+required_cases:
+  - control-only-current-defers-to-legacy
+  - control-only-current-without-legacy-materializes
+  - substantive-current-still-wins
+cases:
+  - name: control-only-current-defers-to-legacy
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+    expected_origin: legacy_sqlite
+    expected_content: LEGACY_CONVERSATION_KEPT
+  - name: control-only-current-without-legacy-materializes
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+    expected_origin: current_sqlite
+    expected_content: synthetic-model
+  - name: substantive-current-still-wins
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzS3
+    expected_origin: current_sqlite
+    expected_content: CURRENT_CONVERSATION_C

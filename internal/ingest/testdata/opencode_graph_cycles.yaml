@@ -1,0 +1,54 @@
+# Message parent graphs that the OpenCode indexer must normalize the same way on
+# every run. Messages stay at Depth 0 with a nil ParentIndex; parts stay at
+# Depth 1. Each expected link is the native parent id the indexer records on the
+# child message ParentEntryID. A parent reference that would close a cycle stays
+# at the root (empty parent); children are linked in entry order.
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - two-cycle-pins-later-entry-to-root
+  - three-cycle-pins-last-entry-to-root
+  - chain-links-every-message-at-depth-zero
+  - self-and-missing-parents-stay-at-root
+repeat_runs: 25
+cases:
+  - name: two-cycle-pins-later-entry-to-root
+    messages:
+      - {id: msg_a, parent_id: msg_b, role: user}
+      - {id: msg_b, parent_id: msg_a, role: assistant}
+    expected_links:
+      - {id: msg_a, parent: msg_b}
+      - {id: msg_b, parent: ""}
+    expected_cycle_diagnostics: [msg_b]
+    expected_missing_diagnostics: []
+  - name: three-cycle-pins-last-entry-to-root
+    messages:
+      - {id: msg_a, parent_id: msg_c, role: user}
+      - {id: msg_b, parent_id: msg_a, role: assistant}
+      - {id: msg_c, parent_id: msg_b, role: assistant}
+    expected_links:
+      - {id: msg_a, parent: msg_c}
+      - {id: msg_b, parent: msg_a}
+      - {id: msg_c, parent: ""}
+    expected_cycle_diagnostics: [msg_c]
+    expected_missing_diagnostics: []
+  - name: chain-links-every-message-at-depth-zero
+    messages:
+      - {id: msg_root, parent_id: "", role: user}
+      - {id: msg_child, parent_id: msg_root, role: assistant}
+      - {id: msg_grandchild, parent_id: msg_child, role: assistant}
+    expected_links:
+      - {id: msg_root, parent: ""}
+      - {id: msg_child, parent: msg_root}
+      - {id: msg_grandchild, parent: msg_child}
+    expected_cycle_diagnostics: []
+    expected_missing_diagnostics: []
+  - name: self-and-missing-parents-stay-at-root
+    messages:
+      - {id: msg_self, parent_id: msg_self, role: user}
+      - {id: msg_missing, parent_id: msg_absent, role: assistant}
+    expected_links:
+      - {id: msg_self, parent: ""}
+      - {id: msg_missing, parent: ""}
+    expected_cycle_diagnostics: [msg_self]
+    expected_missing_diagnostics: [msg_missing]
