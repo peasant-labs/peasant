@@ -293,7 +293,7 @@ func (a *ClaudeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Disco
 		}
 	}
 
-	a.linkClaudeTeammates(sessions, mined)
+	a.linkClaudeTeammates(ctx, sessions, cached, mined)
 	a.saveMinedEvidence(ctx, cfg, cached, mined, remined)
 	return sessions, nil
 }
@@ -342,51 +342,79 @@ func (a *ClaudeAdapter) saveMinedEvidence(
 
 // linkClaudeTeammates links independently persisted Claude root transcripts.
 // A relationship is accepted only when both sides provide one unambiguous
-// complete identity. Files that cannot be read or parsed simply provide no
-// evidence and do not make discovery fail. The evidence comes from the mined
-// records, so a cached record links exactly as a freshly read file does.
-func (a *ClaudeAdapter) linkClaudeTeammates(sessions []DiscoveredSession, mined map[ResolvedPath]ClaudeTranscriptEvidence) {
-	rootByPath := make(map[ResolvedPath]int)
+// complete identity, computed over every piece of root evidence this
+// discovery knows: the records this run mined, plus whatever survives in the
+// persisted evidence cache from an earlier run — so a child discovered in a
+// LATER run still finds a spawner an EARLIER run discovered, not only a
+// spawner in the same batch. Files that cannot be read or parsed simply
+// provide no evidence and do not make discovery fail.
+//
+// A spawner found only in the persisted cache is pointed at ONLY when it is
+// already stored: a parent identifier must never point at a session that is
+// neither in this write batch nor already persisted, because the store's own
+// FK-orphan guard would otherwise silently drop the child at write time,
+// which is worse than leaving it parentless. The extension is one-directional
+// — a later child may find an earlier spawner, never the reverse — and never
+// creates a cycle: any assignment that would place a session among its own
+// ancestors is refused rather than guessed.
+func (a *ClaudeAdapter) linkClaudeTeammates(
+	ctx context.Context,
+	sessions []DiscoveredSession,
+	cached, mined map[ResolvedPath]ClaudeTranscriptEvidence,
+) {
+	rootByPath := make(map[ResolvedPath]int, len(sessions))
 	for i := range sessions {
 		if sessions[i].ParentUUID == nil {
 			rootByPath[sessions[i].SourcePath] = i
 		}
 	}
 
-	identities := make(map[ClaudeTeammateIdentity][]int)
-	spawns := make(map[ClaudeTeammateIdentity]map[int]struct{})
-	for i := range sessions {
-		if _, ok := rootByPath[sessions[i].SourcePath]; !ok {
+	index := buildClaudeSpawnIndex(mergeClaudeEvidence(cached, mined))
+
+	candidates := make(map[SessionID]SessionID, len(index))
+	childIndexBySessionID := make(map[SessionID]int, len(index))
+	parentIndexBySessionID := make(map[SessionID]int, len(index))
+
+	for _, link := range index {
+		childIdx, inBatch := rootByPath[link.Child]
+		if !inBatch {
+			continue // nothing in this write batch to attach a parent to
+		}
+		childID := sessions[childIdx].SessionID
+
+		var parentID SessionID
+		parentIdx, parentInBatch := rootByPath[link.Parent]
+		if parentInBatch {
+			parentID = sessions[parentIdx].SessionID
+		} else {
+			id, ok := claudeSessionIDFromRootPath(link.Parent)
+			if !ok || !a.claudeSessionAlreadyStored(ctx, id) {
+				continue // unresolvable or unverified: leave the child parentless
+			}
+			parentID = id
+		}
+		if parentID == childID {
 			continue
 		}
-		evidence := mined[sessions[i].SourcePath]
-		if evidence.Identity != nil {
-			identity := *evidence.Identity
-			identities[identity] = append(identities[identity], i)
-		}
-		for _, spawn := range evidence.Spawns {
-			if spawns[spawn] == nil {
-				spawns[spawn] = make(map[int]struct{})
-			}
-			spawns[spawn][i] = struct{}{}
+
+		candidates[childID] = parentID
+		childIndexBySessionID[childID] = childIdx
+		if parentInBatch {
+			parentIndexBySessionID[childID] = parentIdx
 		}
 	}
 
-	for identity, children := range identities {
-		parents := spawns[identity]
-		if len(children) != 1 || len(parents) != 1 {
+	cyclic := a.claudeCyclicChildren(ctx, candidates)
+
+	for childID, parentID := range candidates {
+		if cyclic[childID] {
 			continue
 		}
-		child := children[0]
-		var parent int
-		for parent = range parents {
+		childIdx := childIndexBySessionID[childID]
+		sessions[childIdx].ParentUUID = &parentID
+		if parentIdx, ok := parentIndexBySessionID[childID]; ok {
+			sessions[parentIdx].SubagentPaths = append(sessions[parentIdx].SubagentPaths, sessions[childIdx].SourcePath)
 		}
-		if child == parent {
-			continue
-		}
-		parentID := sessions[parent].SessionID
-		sessions[child].ParentUUID = &parentID
-		sessions[parent].SubagentPaths = append(sessions[parent].SubagentPaths, sessions[child].SourcePath)
 	}
 }
 
