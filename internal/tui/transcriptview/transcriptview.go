@@ -55,12 +55,16 @@ type Renderer struct {
 	th    theme.Theme
 	md    mdrender.Renderer
 	cache map[turnKey]string
+	// ceiling is how many finished blocks the cache may hold. It starts at
+	// maxCachedTurns and RISES to cover the largest document actually drawn, so
+	// the working set never exceeds it. See raiseCeilingFor.
+	ceiling int
 }
 
 // New builds a Renderer that draws in t's mode, using t's palette for the role
 // colors, the gutters, and the code highlighting alike.
 func New(t theme.Theme) *Renderer {
-	return &Renderer{th: t, md: mdrender.New(t), cache: map[turnKey]string{}}
+	return &Renderer{th: t, md: mdrender.New(t), cache: map[turnKey]string{}, ceiling: maxCachedTurns}
 }
 
 // Document is a loaded transcript bound to the renderer that draws it: a
@@ -73,16 +77,44 @@ func New(t theme.Theme) *Renderer {
 type Document struct {
 	r     *Renderer
 	turns []ingest.Turn
+	// drawAll lifts the [MaxRenderedTurns] draw bound for turns the READER
+	// explicitly asked for. The zero value keeps the bound, so a Document built
+	// any other way is bounded exactly as before.
+	drawAll bool
 }
 
-// Document binds turns to r for later rendering. It copies nothing and renders
-// nothing: the cost is paid at draw time, per turn, once per width.
+// Document binds turns to r for later rendering, under the [MaxRenderedTurns]
+// draw bound. It copies nothing and renders nothing: the cost is paid at draw
+// time, per turn, once per width.
 func (r *Renderer) Document(turns []ingest.Turn) Document {
 	return Document{r: r, turns: turns}
 }
 
+// UnboundedDocument binds turns the READER EXPLICITLY ASKED FOR and draws every
+// one of them.
+//
+// [MaxRenderedTurns] bounds the cost of drawing turns nobody asked to see: a
+// caller hands the renderer a whole recorded session, and the first draw would
+// otherwise lay out far more than a person reads before scrolling. A preview
+// that EXTENDS as the reader scrolls inverts that. Its turns are there because
+// the reader scrolled for them, and bounding the draw makes the pane stop
+// growing while the loader keeps working - the reader scrolls, more loads, and
+// the transcript on screen does not change.
+//
+// The cost stays proportional to what was asked for, because the renderer
+// caches per turn and width: an appended chunk pays a cold render for its own
+// new turns only. Measured against a real session, appending a chunk of
+// twenty-odd turns to a hundred already drawn costs single-digit milliseconds.
+//
+// Use it only where every turn is there by request. [Renderer.Document] remains
+// the right call for a transcript handed over whole.
+func (r *Renderer) UnboundedDocument(turns []ingest.Turn) Document {
+	return Document{r: r, turns: turns, drawAll: true}
+}
+
 // TurnCount reports how many turns the document holds, INCLUDING any past
-// [MaxRenderedTurns] that Render will summarize rather than draw.
+// [MaxRenderedTurns] that Render will summarize rather than draw (an unbounded
+// document summarizes none).
 func (d Document) TurnCount() int { return len(d.turns) }
 
 // Render lays the whole transcript out for a pane of width cells. Every
@@ -98,7 +130,11 @@ func (d Document) Render(width int) string {
 	if width < minRenderWidth {
 		width = minRenderWidth
 	}
-	shown, omitted := boundTurns(d.turns)
+	shown, omitted := d.turns, 0
+	if !d.drawAll {
+		shown, omitted = boundTurns(d.turns)
+	}
+	d.r.raiseCeilingFor(len(shown))
 	blocks := make([]string, 0, len(shown)+1)
 	for i := range shown {
 		if block := d.r.turnBlock(shown[i], width); block != "" {
@@ -109,6 +145,28 @@ func (d Document) Render(width int) string {
 		blocks = append(blocks, d.r.note(fmt.Sprintf(moreTurnsFormat, omitted), width))
 	}
 	return strings.Join(blocks, blockSeparator)
+}
+
+// raiseCeilingFor makes sure the cache can hold a document of blocks turns at
+// the couple of widths a pane settles between.
+//
+// A fixed ceiling is a CLIFF, not a bound. The cache is dropped whole when it
+// is exceeded, so a working set one entry too large clears the map part-way
+// through every single draw and turns a warm render into a fully cold one. A
+// preview that grows as the reader scrolls walks straight into that: measured
+// against a real session, the redraw cost went from 2ms at 200 turns to 563ms
+// at 883 - on EVERY frame, so on every keystroke.
+//
+// The ceiling therefore follows the largest document the renderer is actually
+// asked to draw. It only ever rises, and it rises only for a caller that has
+// already chosen to hold that many turns, so the memory it allows is
+// proportional to what the reader asked to see. A bounded document never
+// reaches it: [MaxRenderedTurns] at these widths sits below the starting
+// ceiling, so every existing caller keeps the bound it has today.
+func (r *Renderer) raiseCeilingFor(blocks int) {
+	if want := blocks * cacheWidthsKeptWarm; want > r.ceiling {
+		r.ceiling = want
+	}
 }
 
 // turnKey identifies one finished turn block. The turn's IDENTITY is a
@@ -129,7 +187,7 @@ func (r *Renderer) turnBlock(turn ingest.Turn, width int) string {
 		return out
 	}
 	out := r.renderTurn(turn, width)
-	if len(r.cache) >= maxCachedTurns {
+	if len(r.cache) >= r.ceiling {
 		// Dropped whole rather than evicted one at a time: the cache exists to
 		// absorb re-draws of ONE transcript at a handful of widths, and past the
 		// bound the cheapest correct thing is to start over.

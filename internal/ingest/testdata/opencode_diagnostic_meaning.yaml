@@ -1,0 +1,9 @@
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - dangling-parent-ingested-as-roots
+cases:
+  - name: dangling-parent-ingested-as-roots
+    expected_meaning_contains: "were ingested as roots because this run did not discover their parent"
+    forbidden_meaning_contains: "were skipped"
+    expected_remediation_contains: "discover the parent to restore the link"

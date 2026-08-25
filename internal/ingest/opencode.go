@@ -3,8 +3,11 @@ package ingest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,9 +16,8 @@ import (
 	"github.com/peasant-labs/peasant/internal/salt"
 )
 
-// OpenCodeAdapter discovers OpenCode's legacy JSON sessions first. When JSON
-// yields no sessions, it may ingest the first eligible legacy SQLite candidate.
-// Mixed-representation precedence and session deduplication are deferred.
+// OpenCodeAdapter discovers every supported materialized representation and
+// selects one canonical source per raw OpenCode session ID.
 type OpenCodeAdapter struct {
 	fs                   FileSystem
 	git                  GitResolver
@@ -32,6 +34,8 @@ type OpenCodeAdapter struct {
 
 var _ SourceAdapter = (*OpenCodeAdapter)(nil)
 var _ TranscriptMaterializer = (*OpenCodeAdapter)(nil)
+var _ BoundedTranscriptMaterializer = (*OpenCodeAdapter)(nil)
+var _ FirstPageTranscriptMaterializer = (*OpenCodeAdapter)(nil)
 
 // NewOpenCodeAdapter constructs an OpenCodeAdapter with injected dependencies.
 func NewOpenCodeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *OpenCodeAdapter {
@@ -77,9 +81,7 @@ func newOpenCodeAdapter(
 }
 
 // NewOpenCodeAdapterWithCandidateProbe constructs the production adapter with
-// explicit candidate-resolution dependencies. Legacy JSON remains the first
-// discovery path; only a JSON-empty result activates the first eligible legacy
-// SQLite candidate in deterministic resolver order.
+// explicit candidate-resolution dependencies.
 func NewOpenCodeAdapterWithCandidateProbe(
 	fs FileSystem,
 	git GitResolver,
@@ -117,13 +119,9 @@ func (a *OpenCodeAdapter) Harness() Harness {
 	return HarnessOpenCode
 }
 
-// Discover reads legacy project/session JSON first. If that produces no
-// sessions, it searches candidate evidence in deterministic order and discovers
-// sessions from exactly the first eligible SQLite source. Hybrid databases prefer
-// their current projection and fall back to legacy only if current discovery is
-// unusable. It does not
-// union or deduplicate representations; broader mixed-source selection remains
-// deferred until a canonical cross-representation policy is implemented.
+// Discover enumerates all supported representations, deduplicates by raw
+// OpenCode session ID, and selects current SQLite, then legacy SQLite, then
+// legacy JSON. Transcript streams are never unioned or interleaved.
 //
 // For each path in cfg.Paths it expects an OpenCode storage layout:
 //
@@ -136,7 +134,7 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 		return nil, a.candidateInitErr
 	}
 	evidence := a.inspectCandidates(ctx, cfg.Paths)
-	var discovered []DiscoveredSession
+	candidates := make([]openCodeSessionCandidate, 0)
 
 	for _, root := range cfg.Paths {
 		rootStr := root.String()
@@ -182,17 +180,14 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					continue
 				}
 
-				// Resolve ModTime from file stat.
-				fi, err := a.fs.Stat(sesPath)
-				var modTime time.Time
-				if err == nil {
-					modTime = fi.ModTime()
-				}
-
 				// Build DiscoveredSession.
 				var createdAt time.Time
 				if ses.Time.Created > 0 {
 					createdAt = time.UnixMilli(ses.Time.Created)
+				}
+				title := ses.Title
+				if title == "" {
+					title = ses.Slug
 				}
 				ds := DiscoveredSession{
 					SessionID:    sessionID,
@@ -200,8 +195,10 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					SourcePath:   ResolvedPath(sesPath),
 					SourceFormat: SourceFormatJSON,
 					OriginalRoot: root,
-					ModTime:      modTime,
-					Title:        ses.Title,
+					Title:        title,
+					Agent:        ses.Agent,
+					Slug:         ses.Slug,
+					Version:      ses.Version,
 					ProjectName:  filepath.Base(ses.Directory),
 					CWD:          ses.Directory,
 					CreatedAt:    createdAt,
@@ -215,38 +212,915 @@ func (a *OpenCodeAdapter) Discover(ctx context.Context, cfg SourceConfig) ([]Dis
 					}
 				}
 
-				discovered = append(discovered, ds)
+				candidates = append(candidates, openCodeSessionCandidate{session: ds, identity: OpenCodeSelectedSourceIdentity{SessionID: sessionID, Representation: OpenCodeRepresentationLegacyJSON, Path: ResolvedPath(sesPath)}, provenance: OpenCodeCandidateLegacyJSONRoot})
 			}
 		}
 	}
-	// Preserve the established JSON result unchanged whenever a valid JSON layout
-	// exists. Only a JSON-empty result activates the narrow legacy SQLite fallback.
-	if len(discovered) > 0 {
-		return discovered, nil
-	}
+	// Each supported SQLite candidate is opened once here and the one source is
+	// reused for its enumerations, its session-record read, and freshness
+	// hydration, so a single Discover never opens the same database repeatedly
+	// and enumeration, records, and freshness observe one consistent snapshot.
+	// The sources stay open until hydration finishes and are then closed once.
+	sqliteSources := make(map[string]OpenCodeSQLiteSource)
+	defer func() {
+		for path, source := range sqliteSources {
+			if closeErr := closeDeferredOpenCodeSource(ctx, source, a.candidateOptions.queryTimeout); closeErr != nil {
+				a.recordCandidateFailure(path, OpenCodeProbeFreshness, "selected SQLite source did not close cleanly after discovery and freshness reads", closeErr)
+			}
+		}
+	}()
 	for _, result := range evidence {
 		if result.Candidate.Kind != OpenCodeSourceSQLite || result.Support != OpenCodeSupportSupported {
 			continue
 		}
-		var sessions []DiscoveredSession
-		var err error
-		switch result.Capability {
-		case OpenCodeCapabilityLegacy:
-			sessions, err = a.discoverLegacySQLite(ctx, result.Candidate)
-		case OpenCodeCapabilityCurrent:
-			sessions, err = a.discoverCurrentSQLite(ctx, result.Candidate)
-		case OpenCodeCapabilityHybrid:
-			sessions, err = a.discoverHybridSQLite(ctx, result.Candidate)
-		default:
+		sqliteCandidates, source := a.discoverSQLiteCandidate(ctx, result)
+		candidates = append(candidates, sqliteCandidates...)
+		if source != nil {
+			sqliteSources[filepath.Clean(result.Candidate.Path)] = source
+		}
+	}
+	selected, err := selectCanonicalOpenCodeCandidates(candidates)
+	if err != nil {
+		return nil, err
+	}
+	return a.hydrateCanonicalOpenCodeFreshness(ctx, selected, sqliteSources), nil
+}
+
+// closeDeferredOpenCodeSource closes a source that stayed open for the whole
+// Discover. It derives the close context from context.Background rather than the
+// caller context, so an already-cancelled discovery context cannot make Close
+// take its cancellation branch and skip releasing the single connection. That
+// skip would leak the connection in the long-lived web process. The close stays
+// bounded by the source query timeout, so a genuinely stuck cleanup still ends.
+// The caller context is intentionally not passed through.
+func closeDeferredOpenCodeSource(callerCtx context.Context, source OpenCodeSQLiteSource, bound time.Duration) error {
+	_ = callerCtx
+	if bound <= 0 {
+		bound = defaultOpenCodeSQLiteQueryTimeout
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	return source.Close(closeCtx)
+}
+
+// openOpenCodeSQLiteSource opens one restrictive read-only source for a
+// candidate path. It centralizes the nil-opener guard and the source path
+// validation that every open site needs, so an open never runs without the
+// injected opener.
+func (a *OpenCodeAdapter) openOpenCodeSQLiteSource(ctx context.Context, candidatePath string) (OpenCodeSQLiteSource, error) {
+	if a.candidateOpener == nil {
+		return nil, fmt.Errorf("open OpenCode SQLite source for %q failed before source access: source opener is nil, so typed reads cannot run; no database was accessed; construct the adapter with OpenOpenCodeSQLiteSource", candidatePath)
+	}
+	path, err := NewOpenCodeSQLiteSourcePath(candidatePath)
+	if err != nil {
+		return nil, err
+	}
+	source, err := a.candidateOpener(ctx, path, a.candidateOptions)
+	if err != nil {
+		return nil, fmt.Errorf("open OpenCode SQLite source %q failed while opening the restrictive read-only source: %w; no session was exposed; verify source readability and retry without modifying the database", candidatePath, err)
+	}
+	return source, nil
+}
+
+// withOpenCodeSQLiteSource opens one restrictive source for a candidate path,
+// runs fn against it, and closes it once. It is the scoped open site used where
+// the source does not need to outlive the call.
+func (a *OpenCodeAdapter) withOpenCodeSQLiteSource(ctx context.Context, candidatePath string, fn func(OpenCodeSQLiteSource) error) error {
+	source, err := a.openOpenCodeSQLiteSource(ctx, candidatePath)
+	if err != nil {
+		return err
+	}
+	fnErr := fn(source)
+	closeErr := source.Close(ctx)
+	return errors.Join(fnErr, closeErr)
+}
+
+// discoverSQLiteCandidate enumerates one supported SQLite candidate against a
+// single read-only source that it opens once. The one source is returned to the
+// caller so freshness hydration can reuse it and close it once, which removes
+// the snapshot skew between enumeration, records, and freshness. A failure is
+// local to that candidate: the failure is recorded on its evidence and the
+// other candidates still contribute sessions. The returned source is nil only
+// when the database could not be opened.
+func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result OpenCodeProbeResult) ([]openCodeSessionCandidate, OpenCodeSQLiteSource) {
+	source, err := a.openOpenCodeSQLiteSource(ctx, result.Candidate.Path)
+	if err != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "SQLite session enumeration could not open the restrictive source", err)
+		return nil, nil
+	}
+	candidates := make([]openCodeSessionCandidate, 0)
+	// controlOnly names, for a current representation, the sessions whose
+	// session_message projection holds only control records. A legacy
+	// representation passes a nil map because a discovered legacy session always
+	// carries substantive rows.
+	appendRepresentation := func(sessions []DiscoveredSession, representation OpenCodeCanonicalRepresentation, controlOnly map[SessionID]bool) {
+		for _, session := range sessions {
+			candidates = append(candidates, openCodeSessionCandidate{
+				session:            session,
+				identity:           OpenCodeSelectedSourceIdentity{SessionID: session.SessionID, Representation: representation, Path: session.SourcePath},
+				provenance:         result.Candidate.Provenance,
+				currentControlOnly: controlOnly[session.SessionID],
+			})
+		}
+	}
+	switch result.Capability {
+	case OpenCodeCapabilityLegacy:
+		sessions, err := a.discoverLegacySQLite(ctx, source, result.Candidate)
+		if err != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "legacy SQLite session enumeration failed", err)
+			return nil, source
+		}
+		appendRepresentation(sessions, OpenCodeRepresentationLegacySQLite, nil)
+	case OpenCodeCapabilityCurrent:
+		sessions, err := a.discoverCurrentSQLite(ctx, source, result.Candidate)
+		if err != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "current SQLite session enumeration failed", err)
+			return nil, source
+		}
+		appendRepresentation(sessions, OpenCodeRepresentationCurrentSQLite, a.currentControlOnlySessions(ctx, source, result.Candidate, sessions))
+	case OpenCodeCapabilityHybrid:
+		// A hybrid database carries both projections, so enumerate both and let
+		// canonical selection keep one projection per session. Current outranks
+		// legacy, so a session in both is a current winner while a session only
+		// in the legacy tables is a legacy winner. A session the current
+		// projection dropped but the legacy tables still hold is handled by the
+		// session-table deletion rule below, not by hiding the legacy tables.
+		current, currentErr := a.discoverCurrentSQLite(ctx, source, result.Candidate)
+		legacy, legacyErr := a.discoverLegacySQLite(ctx, source, result.Candidate)
+		if currentErr != nil && legacyErr != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite session enumeration failed", fmt.Errorf("current projection is unusable (%w) and legacy fallback also failed (%v)", currentErr, legacyErr))
+			return nil, source
+		}
+		if currentErr != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite current projection is unusable; legacy rows were used", currentErr)
+		}
+		if legacyErr != nil {
+			a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "hybrid SQLite legacy projection is unusable; current rows were used", legacyErr)
+		}
+		appendRepresentation(current, OpenCodeRepresentationCurrentSQLite, a.currentControlOnlySessions(ctx, source, result.Candidate, current))
+		appendRepresentation(legacy, OpenCodeRepresentationLegacySQLite, nil)
+	default:
+		return nil, source
+	}
+	if len(candidates) == 0 {
+		// No session was enumerated from this database, so the session table has
+		// no parent link or clock to attach. Skip the whole session-table read.
+		return candidates, source
+	}
+	discoveredIDs := make(map[SessionID]struct{}, len(candidates))
+	for index := range candidates {
+		discoveredIDs[candidates[index].session.SessionID] = struct{}{}
+	}
+	records, err := a.discoverSQLiteSessionRecords(ctx, source, result.Candidate, discoveredIDs)
+	if err != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session records could not be read; sessions stay discoverable as roots with file-based freshness", err)
+		return candidates, source
+	}
+	// A session table that carries neither the parent link nor the changed clock
+	// supplies nothing, so name it. A table that has only the parent link, or
+	// only the clock, is used for whichever it has and is not a failure.
+	if records.present && !records.hasParent && !records.hasClock {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session table carries neither parent_id nor time_updated, so parent links and the changed clock are unavailable; sessions stay discoverable as roots with file-based freshness", errors.New("session table lacks both parent_id and time_updated"))
+	}
+	if len(records.skipped) > 0 {
+		// One diagnostic names every dropped row, so the good rows keep their
+		// parent link and clock while the bad ones are visible.
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session row(s) were dropped while keeping the others: %s", len(records.skipped), strings.Join(records.skipped, "; ")), errors.New("one or more session rows were undecodable"))
+	}
+	// OpenCode keeps its authoritative session list in the session table; the
+	// message and session_message rows are historical. When the session table
+	// carries the changed clock, which is the real OpenCode shape, a discovered
+	// session with no row there was deleted from OpenCode, so it is skipped
+	// rather than resurrected from stale rows. A session table without the clock
+	// column is a degraded or synthetic shape, so the rule fails safe and keeps
+	// every discovered session as a root rather than risk skipping a live one.
+	if records.present && records.hasClock {
+		surviving := candidates[:0]
+		survivingIDs := make(map[SessionID]struct{}, len(candidates))
+		var deleted []string
+		for index := range candidates {
+			sessionID := candidates[index].session.SessionID
+			if _, kept := records.rowIDs[sessionID]; kept {
+				surviving = append(surviving, candidates[index])
+				survivingIDs[sessionID] = struct{}{}
+				continue
+			}
+			deleted = append(deleted, fmt.Sprintf("session %q has no row in the session table", sessionID))
+		}
+		candidates = surviving
+		// A parent the deletion rule removed can no longer satisfy the parent
+		// link, so clear the link and name the child. The child stays a
+		// discovered root instead of pointing at a deleted session.
+		for index := range candidates {
+			record, known := records.bySession[candidates[index].session.SessionID]
+			if !known || record.parent == "" {
+				continue
+			}
+			if _, present := survivingIDs[record.parent]; !present {
+				records.danglingParents = append(records.danglingParents, fmt.Sprintf("session %q references parent %q, which this run did not discover", candidates[index].session.SessionID, record.parent))
+				record.parent = ""
+				records.bySession[candidates[index].session.SessionID] = record
+			}
+		}
+		if len(deleted) > 0 {
+			a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeDeleted, fmt.Sprintf("%d session(s) were skipped because they were deleted from OpenCode and have no row in the session table: %s", len(deleted), strings.Join(deleted, "; ")), errors.New("one or more sessions were deleted from the session table"))
+		}
+	}
+	if len(records.danglingParents) > 0 {
+		// The children are ingested as roots and the missing links are named, so
+		// a parent this run did not discover never silently skips its child.
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeIngestedAsRoots, fmt.Sprintf("%d session(s) were ingested as roots because their parent was not discovered in this run: %s", len(records.danglingParents), strings.Join(records.danglingParents, "; ")), errors.New("one or more parent sessions were absent from discovery"))
+	}
+	for index := range candidates {
+		record, known := records.bySession[candidates[index].session.SessionID]
+		if known && record.parent != "" {
+			parentID := record.parent
+			candidates[index].session.ParentUUID = &parentID
+		}
+		// The clock is per session, not per database. A supported database
+		// with no row for this session, or a row without a usable
+		// time_updated, leaves sessionUpdatedAt zero, so the session takes the
+		// mtime-floor path and a row deletion still moves its freshness.
+		if known {
+			candidates[index].sessionUpdatedAt = record.updatedAt
+			// Attribute the SQLite-discovered session to its working directory,
+			// title, and creation time from the session row. The JSON path sets
+			// these from the session file; the SQLite path reads them from the
+			// session table so kickstart groups the session under the project its
+			// working directory resolves to. An older session table without those
+			// columns leaves the fields empty.
+			candidates[index].session.CWD = record.directory
+			// Slug is the display-name fallback: a session whose row carries no
+			// title shows its harness-generated slug in the listing and metadata.
+			title := record.title
+			if title == "" {
+				title = record.slug
+			}
+			candidates[index].session.Title = title
+			candidates[index].session.Slug = record.slug
+			candidates[index].session.CreatedAt = record.createdAt
+			// The agent label carries a subagent OpenCode session's agent type so
+			// the kickstart listing can show it, mirroring a Claude teammate.
+			candidates[index].session.Agent = record.agent
+			// The session row aggregates fill the metadata statistics and version
+			// without folding entries.
+			candidates[index].session.Version = record.version
+			candidates[index].session.TokensIn = int(record.tokensIn)
+			candidates[index].session.TokensOut = int(record.tokensOut)
+			candidates[index].session.Cost = record.cost
+		}
+	}
+	// The project tables refine project naming and worktree grouping when they
+	// are present. They never change a session's working directory, which stays
+	// the session's own directory; git resolution remains the fallback for a
+	// database without the project tables.
+	if attribution, attrErr := source.ProjectAttribution(ctx); attrErr != nil {
+		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "project attribution could not be read; sessions keep git-based project resolution", attrErr)
+	} else {
+		attributeOpenCodeProjects(candidates, attribution)
+	}
+	// Read the newest event sequence per session so a rescan detects an in-place
+	// rewrite that moves no time column. The change cursor is an additional
+	// trigger; the session clock stays the primary changed signal.
+	a.attributeOpenCodeEventSequences(ctx, source, result.Candidate, candidates)
+	return candidates, source
+}
+
+// attributeOpenCodeEventSequences sets each discovered session's newest event
+// sequence. It reads the event_sequence table once per database; a database
+// without that table falls back to the payload-free per-session MAX(seq) seek
+// over the event table. The event payload is never read. A read failure leaves
+// the sequence zero, so the session keeps its clock-only changed signal.
+func (a *OpenCodeAdapter) attributeOpenCodeEventSequences(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, candidates []openCodeSessionCandidate) {
+	sequence, err := source.EventSequenceBySession(ctx)
+	if err != nil {
+		a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, "event sequence could not be read; sessions keep the clock-only changed signal", err)
+		return
+	}
+	if sequence.Present {
+		for index := range candidates {
+			if seq, known := sequence.BySession[string(candidates[index].session.SessionID)]; known {
+				candidates[index].session.EventSeq = seq
+			}
+		}
+		return
+	}
+	// The event_sequence table is absent, so seek each discovered session's newest
+	// sequence directly from the event table with the payload-free MAX(seq).
+	for index := range candidates {
+		linkID, linkErr := NewOpenCodeSessionLinkID(string(candidates[index].session.SessionID))
+		if linkErr != nil {
 			continue
 		}
-		if err != nil {
-			return nil, err
+		maxSeq, seekErr := source.MaxEventSeq(ctx, linkID)
+		if seekErr != nil {
+			a.recordCandidateFailure(candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("event sequence seek failed for session %q; it keeps the clock-only changed signal", candidates[index].session.SessionID), seekErr)
+			continue
 		}
-		return sessions, nil
+		if maxSeq.Present {
+			candidates[index].session.EventSeq = maxSeq.Seq
+		}
+	}
+}
+
+// attributeOpenCodeProjects resolves each session's project name and worktree
+// root from the OpenCode project tables. A session whose working directory is a
+// directory the project_directory table maps to a project groups under that
+// project's root, so worktrees of one project share a project even though their
+// working directories differ. CWD is never changed. When the tables are absent
+// or a session's directory is unmapped, the session keeps its git-based
+// resolution.
+func attributeOpenCodeProjects(candidates []openCodeSessionCandidate, attribution OpenCodeProjectAttribution) {
+	if !attribution.ProjectsPresent || !attribution.DirectoriesPresent {
+		return
+	}
+	projectsByID := make(map[string]OpenCodeProjectRecord, len(attribution.Projects))
+	for _, project := range attribution.Projects {
+		projectsByID[project.ID.String()] = project
+	}
+	projectByDirectory := make(map[string]OpenCodeProjectRecord, len(attribution.Directories))
+	for _, directory := range attribution.Directories {
+		if directory.Directory == "" {
+			continue
+		}
+		if project, known := projectsByID[directory.ProjectID.String()]; known {
+			projectByDirectory[directory.Directory] = project
+		}
+	}
+	for index := range candidates {
+		directory := candidates[index].session.CWD
+		if directory == "" {
+			continue
+		}
+		project, matched := projectByDirectory[directory]
+		if !matched || project.Worktree == "" {
+			continue
+		}
+		candidates[index].session.ProjectWorktree = project.Worktree
+		name := project.Name
+		if name == "" {
+			name = filepath.Base(project.Worktree)
+		}
+		candidates[index].session.ProjectName = name
+	}
+}
+
+// openCodeSessionClock is one session row's parent link, update clock, and
+// attribution. directory, title, and createdAt come from the session row when
+// the session table exposes them and stay empty for an older layout, so
+// discovery attributes a session to its working directory, title, and creation
+// time without a second read.
+type openCodeSessionClock struct {
+	parent    SessionID
+	updatedAt time.Time
+	directory string
+	title     string
+	createdAt time.Time
+	agent     string
+	slug      string
+	version   string
+	tokensIn  int64
+	tokensOut int64
+	cost      float64
+}
+
+// openCodeSessionRecords holds every session row of one database. present is
+// false when the database has no session table. hasParent and hasClock report
+// which of the parent link and changed clock columns the session table carries,
+// so parent links are read whether or not the clock column exists.
+type openCodeSessionRecords struct {
+	present   bool
+	hasParent bool
+	hasClock  bool
+	bySession map[SessionID]openCodeSessionClock
+	// rowIDs names every session that still has a row in the session table,
+	// including a row whose parent link or clock could not be decoded. A
+	// discovered session missing from rowIDs while the table is present and
+	// enumerable was deleted from OpenCode, so it is skipped rather than
+	// resurrected from its historical message or session_message rows.
+	rowIDs map[SessionID]struct{}
+	// skipped names the rows the read could not use, so one bad row is dropped
+	// with a diagnostic while the others keep their parent link and clock.
+	skipped []string
+	// danglingParents names discovered sessions whose parent this run did not
+	// discover. The child is ingested as a root and the missing link is named,
+	// so a dangling parent_id never skips the child at store time.
+	danglingParents []string
+}
+
+// discoverSQLiteSessionRecords reads session.parent_id and session.time_updated
+// from the already-open source for one supported database. The parent link is
+// read whether or not the clock column exists. A database without a session
+// table yields an empty result with present false.
+func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, discoveredIDs map[SessionID]struct{}) (openCodeSessionRecords, error) {
+	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock, len(discoveredIDs)), rowIDs: make(map[SessionID]struct{}, len(discoveredIDs))}
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return records, err
+	}
+	var cursor *OpenCodeSessionRecordCursor
+	for {
+		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{PageSize: pageSize, After: cursor})
+		if readErr != nil {
+			return records, fmt.Errorf("read OpenCode session records from %q failed while enumerating a bounded session page: %w; sessions remain discoverable as roots; verify the session table and retry", candidate.Path, readErr)
+		}
+		records.present = page.Supported
+		records.hasParent = page.HasParent
+		records.hasClock = page.HasClock
+		for _, skip := range page.Skipped {
+			records.skipped = append(records.skipped, skip.Reason)
+		}
+		for _, rowID := range page.PresentSessionIDs {
+			// A row whose stored identifier is valid marks the session present.
+			// An identifier Peasant cannot store cannot match a discovered
+			// candidate, so it never affects the deletion decision.
+			if sessionID, sessionErr := NewSessionID(rowID.String()); sessionErr == nil {
+				records.rowIDs[sessionID] = struct{}{}
+			}
+		}
+		for _, row := range page.Records {
+			sessionID, sessionErr := NewSessionID(row.SessionID.String())
+			if sessionErr != nil {
+				// A source-valid identifier that Peasant cannot store is dropped
+				// with a diagnostic rather than a silent continue.
+				records.skipped = append(records.skipped, fmt.Sprintf("session row %q was dropped because its identifier cannot be stored: %v", row.SessionID.String(), sessionErr))
+				continue
+			}
+			// Retain only the rows for sessions this database actually discovered,
+			// so freshness and parent links are read for the discovered ids only.
+			if _, discovered := discoveredIDs[sessionID]; !discovered {
+				continue
+			}
+			clock := openCodeSessionClock{directory: row.Directory, title: row.Title, agent: row.Agent, slug: row.Slug, version: row.Version, tokensIn: row.TokensInput, tokensOut: row.TokensOutput, cost: row.Cost}
+			if row.TimeUpdated > 0 {
+				clock.updatedAt = time.UnixMilli(row.TimeUpdated)
+			}
+			if row.TimeCreated > 0 {
+				clock.createdAt = time.UnixMilli(row.TimeCreated)
+			}
+			if row.ParentID.String() != "" {
+				if parentID, parentErr := NewSessionID(row.ParentID.String()); parentErr != nil {
+					records.skipped = append(records.skipped, fmt.Sprintf("parent link for session %q was dropped because the parent identifier cannot be stored: %v", sessionID, parentErr))
+				} else if parentID != sessionID {
+					// The parent link is kept only when this run discovered the
+					// parent session. A parent the run never discovered cannot
+					// satisfy the sessions.parent_id relationship, so the child is
+					// left a root and the missing link is named. The store has no
+					// role at discovery, so the discovered set is the only
+					// authority here.
+					if _, discovered := discoveredIDs[parentID]; discovered {
+						clock.parent = parentID
+					} else {
+						records.danglingParents = append(records.danglingParents, fmt.Sprintf("session %q references parent %q, which this run did not discover", sessionID, parentID))
+					}
+				}
+			}
+			records.bySession[sessionID] = clock
+		}
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+	}
+	return records, nil
+}
+
+// resolveCandidateEvidenceIndex returns the index of the SQLite evidence entry
+// for one path, or -1 when none matches. A caller that records several
+// diagnostics for the same path resolves the index once instead of scanning the
+// evidence slice for every diagnostic.
+func (a *OpenCodeAdapter) resolveCandidateEvidenceIndex(path string) int {
+	cleanPath := filepath.Clean(path)
+	a.candidateMu.Lock()
+	defer a.candidateMu.Unlock()
+	for index := range a.candidateEvidence {
+		if a.candidateEvidence[index].Candidate.Kind == OpenCodeSourceSQLite && filepath.Clean(a.candidateEvidence[index].Candidate.Path) == cleanPath {
+			return index
+		}
+	}
+	return -1
+}
+
+// openCodeDiagnosticOutcome names what happened to the sessions a discovery
+// diagnostic describes, so the diagnostic's meaning and remediation match the
+// event rather than assuming every diagnostic skipped its sessions.
+type openCodeDiagnosticOutcome int
+
+const (
+	// openCodeOutcomeSkipped is the default: the candidate could not contribute
+	// some or all of its sessions this run.
+	openCodeOutcomeSkipped openCodeDiagnosticOutcome = iota
+	// openCodeOutcomeIngestedAsRoots names sessions kept as roots because this
+	// run did not discover their parent. Nothing was skipped.
+	openCodeOutcomeIngestedAsRoots
+	// openCodeOutcomeFloorFallback names sessions whose freshness fell back to
+	// the database and write-ahead-log file time. Nothing was skipped.
+	openCodeOutcomeFloorFallback
+	// openCodeOutcomeDeleted names sessions removed from OpenCode and skipped so
+	// a deleted session does not reappear from its historical rows.
+	openCodeOutcomeDeleted
+)
+
+// meaningAndRemediation returns the Meaning and Remediation text for the
+// outcome. Keeping them beside the outcome constant means one diagnostic can no
+// longer report that sessions were skipped when they were ingested as roots or
+// only fell back for freshness.
+func (o openCodeDiagnosticOutcome) meaningAndRemediation() (string, string) {
+	switch o {
+	case openCodeOutcomeIngestedAsRoots:
+		return "the named sessions were ingested as roots because this run did not discover their parent; no session was skipped and every other session was still discovered",
+			"discover the parent to restore the link, for example by widening the selection or ingesting the parent's source; if the parent no longer exists in OpenCode, the root attachment is correct and no action is needed"
+	case openCodeOutcomeFloorFallback:
+		return "the named sessions used the database and write-ahead-log file time as a freshness floor; no session was skipped and every session was still discovered",
+			"no action is needed; the file time still moves a session when its rows change"
+	case openCodeOutcomeDeleted:
+		return "the named sessions were deleted from OpenCode and were skipped so a removed session does not reappear from its historical rows; every session OpenCode still keeps was discovered",
+			"no action is needed; the sessions were deleted in OpenCode"
+	default:
+		return "sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
+			"retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant"
+	}
+}
+
+// logSummary is the one-line slog message for the outcome.
+func (o openCodeDiagnosticOutcome) logSummary() string {
+	switch o {
+	case openCodeOutcomeIngestedAsRoots:
+		return "opencode discovery: sessions ingested as roots"
+	case openCodeOutcomeFloorFallback:
+		return "opencode discovery: freshness used the file-time floor"
+	case openCodeOutcomeDeleted:
+		return "opencode discovery: deleted sessions skipped"
+	default:
+		return "opencode discovery: candidate skipped"
+	}
+}
+
+// recordCandidateFailure attaches a skip diagnostic to the failing candidate's
+// evidence and logs it. Discovery continues for other candidates.
+func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProbeStage, what string, cause error) {
+	a.recordCandidateOutcomeAt(a.resolveCandidateEvidenceIndex(path), path, stage, openCodeOutcomeSkipped, what, cause)
+}
+
+// recordCandidateOutcome attaches a diagnostic whose meaning matches the given
+// outcome, so a non-skip event such as a root-attached session or a freshness
+// floor fallback no longer reports that sessions were skipped.
+func (a *OpenCodeAdapter) recordCandidateOutcome(path string, stage OpenCodeProbeStage, outcome openCodeDiagnosticOutcome, what string, cause error) {
+	a.recordCandidateOutcomeAt(a.resolveCandidateEvidenceIndex(path), path, stage, outcome, what, cause)
+}
+
+// recordCandidateFailureAt records a skip diagnostic against a pre-resolved
+// evidence index.
+func (a *OpenCodeAdapter) recordCandidateFailureAt(evidenceIndex int, path string, stage OpenCodeProbeStage, what string, cause error) {
+	a.recordCandidateOutcomeAt(evidenceIndex, path, stage, openCodeOutcomeSkipped, what, cause)
+}
+
+// recordCandidateOutcomeAt records the outcome-specific diagnostic against a
+// pre-resolved evidence index, so a per-session loop does not rescan the
+// evidence slice for every session on one path. A negative index records
+// nothing on the evidence and only logs.
+func (a *OpenCodeAdapter) recordCandidateOutcomeAt(evidenceIndex int, path string, stage OpenCodeProbeStage, outcome openCodeDiagnosticOutcome, what string, cause error) {
+	meaning, remediation := outcome.meaningAndRemediation()
+	diagnostic := actionableOpenCodeDiagnostic(
+		stage,
+		what,
+		cause.Error(),
+		path,
+		"during OpenCode discovery after the candidate probe reported a supported schema",
+		meaning,
+		remediation,
+	)
+	if evidenceIndex >= 0 {
+		a.candidateMu.Lock()
+		if evidenceIndex < len(a.candidateEvidence) {
+			a.candidateEvidence[evidenceIndex].Diagnostics = append(a.candidateEvidence[evidenceIndex].Diagnostics, diagnostic)
+		}
+		a.candidateMu.Unlock()
+	}
+	slog.Warn(outcome.logSummary(),
+		"what", diagnostic.What,
+		"why", diagnostic.Why,
+		"where", diagnostic.Where,
+		"when", diagnostic.When,
+		"meaning", diagnostic.Meaning,
+		"fix", diagnostic.Remediation,
+	)
+}
+
+// selectCanonicalOpenCodeCandidates applies representation precedence first,
+// then candidate provenance, then normalized and raw attributable-path
+// tie-breaks. The winners are ordered parents before children, then by raw
+// session ID, so both winner choice and output are independent of enumeration.
+func selectCanonicalOpenCodeCandidates(candidates []openCodeSessionCandidate) ([]openCodeSessionCandidate, error) {
+	selected := make([]openCodeSessionCandidate, 0, len(candidates))
+	positions := make(map[SessionID]int, len(candidates))
+	for _, candidate := range candidates {
+		if err := candidate.identity.Validate(); err != nil {
+			return nil, fmt.Errorf("select canonical OpenCode session failed before freshness diffing: %w; the candidate cannot enter the mounted pipeline; fix candidate construction and retry", err)
+		}
+		// precedence() ranks an unknown provenance as zero, which would silently
+		// misrank a winner, so reject an unknown value at the selection boundary.
+		if err := candidate.provenance.Validate(); err != nil {
+			return nil, fmt.Errorf("select canonical OpenCode session %q failed before freshness diffing: %w; the candidate cannot enter the mounted pipeline; construct provenance through the resolver and retry", candidate.identity.SessionID, err)
+		}
+		position, exists := positions[candidate.identity.SessionID]
+		if !exists {
+			positions[candidate.identity.SessionID] = len(selected)
+			selected = append(selected, candidate)
+			continue
+		}
+		if canonicalOpenCodeCandidatePrecedes(candidate, selected[position]) {
+			selected[position] = candidate
+		}
+	}
+	orderCanonicalOpenCodeCandidatesParentsFirst(selected)
+	return selected, nil
+}
+
+// orderCanonicalOpenCodeCandidatesParentsFirst sorts winners so a parent
+// always precedes its children, then by raw session ID within one depth.
+// OpenCode session IDs are time-descending, so a child can sort before its
+// parent by raw ID. The pipeline parent gate admits a subagent only after its
+// root passed, so a child emitted first is wrongly marked unchanged in
+// selected mode. Depth from the nearest selected ancestor gives a stable
+// parents-first order; a child whose parent is not selected is treated as a
+// root, and a cyclic link stops at the in-progress ancestor.
+func orderCanonicalOpenCodeCandidatesParentsFirst(selected []openCodeSessionCandidate) {
+	positions := make(map[SessionID]int, len(selected))
+	for index := range selected {
+		positions[selected[index].session.SessionID] = index
+	}
+	depthOf := make(map[SessionID]int, len(selected))
+	var depth func(id SessionID) int
+	depth = func(id SessionID) int {
+		if value, computed := depthOf[id]; computed {
+			return value
+		}
+		// Mark in progress as a root so a cycle terminates.
+		depthOf[id] = 0
+		candidate := selected[positions[id]]
+		result := 0
+		if candidate.session.ParentUUID != nil {
+			parent := *candidate.session.ParentUUID
+			if _, present := positions[parent]; present && parent != id {
+				result = depth(parent) + 1
+			}
+		}
+		depthOf[id] = result
+		return result
+	}
+	for index := range selected {
+		depth(selected[index].session.SessionID)
+	}
+	sort.SliceStable(selected, func(left, right int) bool {
+		leftID := selected[left].session.SessionID
+		rightID := selected[right].session.SessionID
+		if depthOf[leftID] != depthOf[rightID] {
+			return depthOf[leftID] < depthOf[rightID]
+		}
+		return string(leftID) < string(rightID)
+	})
+}
+
+// effectiveOpenCodeCanonicalRank ranks one candidate for canonical selection.
+// It is the representation precedence, except that a current candidate whose
+// projection is control-only drops below every representation that carries
+// substantive content. The result is that a control-only current candidate
+// loses to a legacy sibling, so the legacy conversation renders instead of a
+// handful of inert control turns, while a control-only current candidate with
+// no sibling is still the sole candidate and materializes as before. A
+// substantive current candidate keeps the top rank, so the pre-existing
+// current-over-legacy preference is unchanged for real conversations.
+func effectiveOpenCodeCanonicalRank(candidate openCodeSessionCandidate) uint8 {
+	switch candidate.identity.Representation {
+	case OpenCodeRepresentationCurrentSQLite:
+		if candidate.currentControlOnly {
+			return 1
+		}
+		return 4
+	case OpenCodeRepresentationLegacySQLite:
+		return 3
+	case OpenCodeRepresentationLegacyJSON:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func canonicalOpenCodeCandidatePrecedes(candidate, incumbent openCodeSessionCandidate) bool {
+	candidateRank := effectiveOpenCodeCanonicalRank(candidate)
+	incumbentRank := effectiveOpenCodeCanonicalRank(incumbent)
+	if candidateRank != incumbentRank {
+		return candidateRank > incumbentRank
+	}
+	candidateProvenance := candidate.provenance.precedence()
+	incumbentProvenance := incumbent.provenance.precedence()
+	if candidateProvenance != incumbentProvenance {
+		return candidateProvenance > incumbentProvenance
+	}
+	candidateClean := filepath.Clean(candidate.identity.Path.String())
+	incumbentClean := filepath.Clean(incumbent.identity.Path.String())
+	if candidateClean != incumbentClean {
+		return candidateClean < incumbentClean
+	}
+	return candidate.identity.Path.String() < incumbent.identity.Path.String()
+}
+
+// hydrateCanonicalOpenCodeFreshness sets ModTime for every winner. A JSON
+// winner uses its file mtime and degrades to zero when stat fails. A SQLite
+// winner with a usable clock (session.time_updated) uses that clock as its
+// changed time and reads no row aggregate. OpenCode moves that clock on revert
+// and undo, so a row deletion still moves freshness without touching sibling
+// sessions. A session with no usable clock reads the per-table row aggregate
+// and falls back to the database and WAL mtime as a floor, so a row deletion is
+// still seen. The active (staleness) time is always the database and WAL mtime.
+//
+// The row aggregate is read only for the clockless sessions of a database, so a
+// database whose sessions all carry a clock reads no freshness aggregate at all
+// and a very large legacy table is never scanned for a session that already has
+// a clock. A failed aggregate read therefore demotes only the clockless
+// sessions to the mtime floor; a clock-bearing session keeps its clock.
+//
+// The changed clock reports content edits and deletions, not the raw file
+// mtime. An in-place row rewrite that moves no time column and no session
+// clock therefore is not detected as a change for a session that has a usable
+// clock; only the floor path, used when a session has no usable clock, tracks
+// the file and WAL mtime. A clockless SQLite candidate whose freshness cannot
+// be read is skipped and recorded; other winners stay.
+func (a *OpenCodeAdapter) hydrateCanonicalOpenCodeFreshness(ctx context.Context, selected []openCodeSessionCandidate, sources map[string]OpenCodeSQLiteSource) []DiscoveredSession {
+	bySQLitePath := make(map[string][]int)
+	keep := make([]bool, len(selected))
+	for index := range selected {
+		candidate := &selected[index]
+		if candidate.identity.Representation == OpenCodeRepresentationLegacyJSON {
+			keep[index] = true
+			if info, err := a.fs.Stat(candidate.identity.Path.String()); err == nil {
+				candidate.session.ModTime = info.ModTime()
+			}
+			continue
+		}
+		path := filepath.Clean(candidate.identity.Path.String())
+		bySQLitePath[path] = append(bySQLitePath[path], index)
 	}
 
-	return discovered, nil
+	paths := make([]string, 0, len(bySQLitePath))
+	for path := range bySQLitePath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, rawPath := range paths {
+		// The source was opened once during discovery and reused here, so
+		// freshness observes the same snapshot as enumeration and no second open
+		// is needed. The caller closes every source exactly once.
+		source, opened := sources[rawPath]
+		if !opened || source == nil {
+			a.recordCandidateFailure(rawPath, OpenCodeProbeFreshness, "selected SQLite source was not available for freshness because discovery did not open it", fmt.Errorf("no open source for %q", rawPath))
+			continue
+		}
+		// A session with a usable clock (session.time_updated) uses that clock as
+		// its changed time and reads no row aggregate, so only the clockless
+		// sessions on this database need the per-table freshness read. Collect
+		// them first. A database whose sessions all carry a clock reads no
+		// freshness aggregate at all, so a very large legacy table is never
+		// scanned for a session that already has a clock.
+		var clockless []int
+		for _, index := range bySQLitePath[rawPath] {
+			if selected[index].sessionUpdatedAt.IsZero() {
+				clockless = append(clockless, index)
+			}
+		}
+		// Read the newest row time of every clockless session on this database
+		// with at most one GROUP BY aggregate per table they use, so freshness
+		// reads stay bounded by table count and never grow with the number of
+		// sessions. An empty clockless set reads nothing.
+		rowFreshness := a.batchOpenCodeSQLiteRowFreshness(ctx, source, selected, clockless)
+		// The database and WAL mtime is the active (staleness) time for every
+		// session on this database, independent of the changed clock. It is also
+		// the freshness floor for a session with no usable clock.
+		floor, floorErr := sqliteContentModTime(a.fs, rawPath)
+		// Resolve the evidence entry for this path once, so a per-session
+		// diagnostic does not rescan the evidence slice for every session.
+		evidenceIndex := a.resolveCandidateEvidenceIndex(rawPath)
+		// Accumulate the affected sessions per outcome, so a database whose reads
+		// all fail records one diagnostic and one warn line per outcome naming the
+		// sessions, not one per session.
+		var freshnessSkipped, floorFallback, clocklessSkipped []string
+		var freshnessCause, floorFallbackCause, clocklessCause error
+		for _, index := range bySQLitePath[rawPath] {
+			candidate := &selected[index]
+			if !candidate.sessionUpdatedAt.IsZero() {
+				// Clock-first: the session clock is the changed time and the
+				// database and WAL mtime is the active time. No row aggregate is
+				// read, so a failed aggregate read never demotes this session.
+				candidate.session.ModTime = candidate.sessionUpdatedAt
+				if floorErr == nil {
+					candidate.session.ActiveModTime = floor
+				}
+				keep[index] = true
+				continue
+			}
+			// Clockless: the row aggregate and the mtime floor decide freshness.
+			newest, hydrationErr := rowFreshness(candidate.identity)
+			if hydrationErr != nil {
+				// Canonical selection already discarded the losing
+				// representations, so dropping the winner here would drop a
+				// session that had a readable representation. Fall back to the
+				// database and WAL mtime floor and keep the session. Only skip
+				// it when the floor is also unreadable, and name it either way.
+				if floorErr != nil {
+					freshnessSkipped = append(freshnessSkipped, string(candidate.identity.SessionID))
+					freshnessCause = hydrationErr
+					continue
+				}
+				floorFallback = append(floorFallback, string(candidate.identity.SessionID))
+				floorFallbackCause = hydrationErr
+				candidate.session.ModTime = floor
+				candidate.session.ActiveModTime = floor
+				keep[index] = true
+				continue
+			}
+			if floorErr == nil {
+				candidate.session.ActiveModTime = floor
+			}
+			if floorErr != nil {
+				// The floor is this one session's freshness. Skip only this
+				// session, so the other sessions on the same database are still
+				// hydrated.
+				clocklessSkipped = append(clocklessSkipped, string(candidate.identity.SessionID))
+				clocklessCause = floorErr
+				continue
+			}
+			if newest.Before(floor) {
+				newest = floor
+			}
+			candidate.session.ModTime = newest
+			keep[index] = true
+		}
+		if len(freshnessSkipped) > 0 {
+			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected freshness could not be read and the mtime floor was unavailable, so %d session(s) were skipped: %s", len(freshnessSkipped), strings.Join(freshnessSkipped, ", ")), freshnessCause)
+		}
+		if len(floorFallback) > 0 {
+			a.recordCandidateOutcomeAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, openCodeOutcomeFloorFallback, fmt.Sprintf("selected freshness could not be read, so %d session(s) fell back to the database and WAL mtime floor: %s", len(floorFallback), strings.Join(floorFallback, ", ")), floorFallbackCause)
+		}
+		if len(clocklessSkipped) > 0 {
+			a.recordCandidateFailureAt(evidenceIndex, rawPath, OpenCodeProbeFreshness, fmt.Sprintf("selected SQLite content freshness could not be read, so %d clockless session(s) were skipped: %s", len(clocklessSkipped), strings.Join(clocklessSkipped, ", ")), clocklessCause)
+		}
+	}
+
+	discovered := make([]DiscoveredSession, 0, len(selected))
+	for index, candidate := range selected {
+		if keep[index] {
+			discovered = append(discovered, candidate.session)
+		}
+	}
+	return discovered
+}
+
+// batchOpenCodeSQLiteRowFreshness reads the newest row time of the passed
+// sessions on one database with at most one GROUP BY aggregate per table, then
+// returns a lookup that resolves a single winner's row freshness from the
+// shared result. Only the tables that a passed session actually uses are read,
+// so an empty index set reads nothing and a set of clockless sessions costs at
+// most one statement per present table, never one per session.
+// A read failure for a table is returned to every winner of that
+// representation, so a caller can fail closed per session without dropping
+// winners of the other representation. A session absent from a table's result
+// has no rows there and resolves to the zero time, leaving the caller's clock
+// or floor to decide freshness.
+func (a *OpenCodeAdapter) batchOpenCodeSQLiteRowFreshness(ctx context.Context, source OpenCodeSQLiteSource, selected []openCodeSessionCandidate, indexes []int) func(OpenCodeSelectedSourceIdentity) (time.Time, error) {
+	needLegacy, needCurrent := false, false
+	for _, index := range indexes {
+		switch selected[index].identity.Representation {
+		case OpenCodeRepresentationLegacySQLite:
+			needLegacy = true
+		case OpenCodeRepresentationCurrentSQLite:
+			needCurrent = true
+		}
+	}
+	var legacyBySession, currentBySession map[string]time.Time
+	var legacyErr, currentErr error
+	if needLegacy {
+		legacyBySession, legacyErr = source.LegacyFreshnessBySession(ctx)
+	}
+	if needCurrent {
+		currentBySession, currentErr = source.CurrentFreshnessBySession(ctx)
+	}
+	return func(identity OpenCodeSelectedSourceIdentity) (time.Time, error) {
+		switch identity.Representation {
+		case OpenCodeRepresentationCurrentSQLite:
+			if currentErr != nil {
+				return time.Time{}, currentErr
+			}
+			return currentBySession[string(identity.SessionID)], nil
+		case OpenCodeRepresentationLegacySQLite:
+			if legacyErr != nil {
+				return time.Time{}, legacyErr
+			}
+			return legacyBySession[string(identity.SessionID)], nil
+		default:
+			return time.Time{}, fmt.Errorf("selected representation %d cannot use SQLite freshness", identity.Representation)
+		}
+	}
 }
 
 // CandidateEvidence returns a detached snapshot from the most recent discovery.
@@ -255,6 +1129,48 @@ func (a *OpenCodeAdapter) CandidateEvidence() []OpenCodeProbeResult {
 	a.candidateMu.Lock()
 	defer a.candidateMu.Unlock()
 	return cloneOpenCodeProbeResults(a.candidateEvidence)
+}
+
+var _ DiscoveryDiagnosticReporter = (*OpenCodeAdapter)(nil)
+
+// DiscoveryDiagnostics flattens the candidate evidence from the most recent
+// discovery into provider-agnostic records for the pipeline result. Only the
+// failures that skipped or degraded a candidate are surfaced, so a caller sees
+// a database that could not be fully enumerated rather than an unexplained
+// short session count. A healthy candidate contributes nothing here.
+func (a *OpenCodeAdapter) DiscoveryDiagnostics() []DiscoveryDiagnostic {
+	a.candidateMu.Lock()
+	defer a.candidateMu.Unlock()
+	var diagnostics []DiscoveryDiagnostic
+	for _, result := range a.candidateEvidence {
+		for _, diagnostic := range result.Diagnostics {
+			if !openCodeDiscoveryDiagnosticSurfaces(diagnostic.Code) {
+				continue
+			}
+			diagnostics = append(diagnostics, DiscoveryDiagnostic{
+				Provider: HarnessOpenCode,
+				Code:     string(diagnostic.Code),
+				Location: result.Candidate.Path,
+				Summary:  diagnostic.What,
+				Detail:   diagnostic.Why,
+			})
+		}
+	}
+	return diagnostics
+}
+
+// openCodeDiscoveryDiagnosticSurfaces reports whether a probe diagnostic names a
+// candidate that failed to contribute its sessions, as opposed to a path that
+// was simply not an OpenCode database.
+func openCodeDiscoveryDiagnosticSurfaces(code OpenCodeProbeDiagnosticCode) bool {
+	switch code {
+	case OpenCodeDiagnosticSourceOpenFailed, OpenCodeDiagnosticCatalogReadFailed,
+		OpenCodeDiagnosticCatalogTruncated, OpenCodeDiagnosticSchemaIncomplete,
+		OpenCodeDiagnosticDiscoveryFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *OpenCodeAdapter) inspectCandidates(ctx context.Context, roots []ResolvedPath) []OpenCodeProbeResult {
@@ -303,18 +1219,6 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 		}
 	}
 	return cloned
-}
-
-func (a *OpenCodeAdapter) discoverHybridSQLite(ctx context.Context, candidate OpenCodeCandidate) ([]DiscoveredSession, error) {
-	currentSessions, currentErr := a.discoverCurrentSQLite(ctx, candidate)
-	if currentErr == nil {
-		return currentSessions, nil
-	}
-	legacySessions, legacyErr := a.discoverLegacySQLite(ctx, candidate)
-	if legacyErr == nil {
-		return legacySessions, nil
-	}
-	return nil, fmt.Errorf("discover hybrid OpenCode SQLite candidate %q failed: current projection is unusable (%w) and legacy fallback also failed (%v); no partial discovery result is eligible; verify the supported OpenCode database and retry without modifying it", candidate.Path, currentErr, legacyErr)
 }
 
 // ExtractMetadata builds UnifiedMetadata from session + message files.
@@ -492,6 +1396,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 			Remediation: "Check if the OpenCode session has assistant messages with model information.",
 		})
 	}
+	md.Diagnostics.Warnings = append(md.Diagnostics.Warnings, missingOpenCodeParentDiagnostics(session, semanticMessages)...)
 
 	return &md, nil
 }
@@ -514,6 +1419,7 @@ type openCodeSession struct {
 	ID        string `json:"id"`
 	Slug      string `json:"slug"`
 	Version   string `json:"version"`
+	Agent     string `json:"agent"`
 	ProjectID string `json:"projectID"`
 	Directory string `json:"directory"`
 	ParentID  string `json:"parentID"`

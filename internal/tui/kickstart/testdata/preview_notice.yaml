@@ -1,0 +1,49 @@
+# Cases for the note the session preview shows ABOVE the turns it loaded.
+#
+# The note says what the loaded turns leave out, so it must stand WITH them: a
+# case that declares turns and a note must render both. A pane that swapped the
+# turns for the note, or dropped the note, would tell the reader that a bounded
+# preview is the whole session.
+#
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - a-note-renders-above-the-turns-it-describes
+  - no-note-renders-the-turns-alone
+  - a-session-without-turns-shows-no-note
+cases:
+  - name: a-note-renders-above-the-turns-it-describes
+    session_id: ses_noticed
+    turns:
+      - role: user
+        entryType: text
+        content: rename the temp file into place
+      - role: assistant
+        entryType: text
+        content: write to a temp directory first
+    notice: preview shows the first 64 MiB of this 786 MiB session (1,024 of 13,486 parts). the full session ingests normally. this bound applies to the preview only.
+    want_contains:
+      - preview shows the first 64 MiB
+      - 1,024 of 13,486 parts
+      - this bound applies to the preview only
+      - rename the temp file into place
+      - write to a temp directory first
+
+  - name: no-note-renders-the-turns-alone
+    session_id: ses_whole
+    turns:
+      - role: user
+        entryType: text
+        content: rename the temp file into place
+    notice: ""
+    want_contains:
+      - rename the temp file into place
+    want_missing:
+      - this bound applies to the preview only
+
+  - name: a-session-without-turns-shows-no-note
+    session_id: ses_empty
+    turns: []
+    notice: preview shows the first 64 MiB of this 786 MiB session (1,024 of 13,486 parts). the full session ingests normally. this bound applies to the preview only.
+    want_missing:
+      - this bound applies to the preview only

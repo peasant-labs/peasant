@@ -1,0 +1,67 @@
+# What the preview pane DRAWS as the reader scrolls, driven by
+# TestListingPreview_TheDrawnBodyGrowsWithEveryScroll
+# (internal/tui/kickstart/preview_growth_test.go).
+#
+# This file exists because of a defect every other gate missed. The scrolled
+# continuation was correct - it loaded the next chunk, appended it, and reported
+# honest counts - while the pane DREW only the first MaxRenderedTurns of what it
+# held. Past that point the reader scrolled, the loader worked, and the
+# transcript on screen never changed. Measured against a real 2.2 GiB session,
+# the body froze at 4,717 lines while the loaded turns went on to 883.
+#
+# So every case here asserts the RENDERED BODY, not the turn slice behind it: the
+# text a reader would actually see, and specific turns named by content.
+#
+# chunkTurns is how many turns each scroll adds, and scrolls is how many are
+# taken; together they decide whether the run crosses the draw bound. A case that
+# does not cross it is here to prove the pane is unchanged below it.
+#
+# requiredCases names the cases that must stay present; removing one goes red by
+# name. Adding a case need not appear here.
+requiredCases:
+  - a-preview-scrolled-past-the-draw-bound-keeps-drawing-every-turn-it-loads
+  - a-preview-scrolled-under-the-draw-bound-draws-every-turn-as-it-always-did
+  - a-preview-that-runs-out-of-session-keeps-drawing-what-the-reader-loaded
+  - a-session-handed-over-whole-keeps-the-draw-bound-it-has-today
+
+cases:
+  # The regression. Six scrolls of sixty turns reaches 420, well past the
+  # two-hundred draw bound, and every one of them must be on screen.
+  - name: a-preview-scrolled-past-the-draw-bound-keeps-drawing-every-turn-it-loads
+    firstTurns: 60
+    chunkTurns: 60
+    scrolls: 6
+    continuable: true
+    wantDrawnTurns: [0, 59, 200, 300, 419]
+    wantBodyGrowsEveryScroll: true
+
+  - name: a-preview-scrolled-under-the-draw-bound-draws-every-turn-as-it-always-did
+    firstTurns: 20
+    chunkTurns: 20
+    scrolls: 3
+    continuable: true
+    wantDrawnTurns: [0, 19, 40, 79]
+    wantBodyGrowsEveryScroll: true
+
+  # The last chunk lands and the session is exhausted. The pane must not take
+  # the draw bound back at that moment and hide most of what the reader just
+  # spent six scrolls loading.
+  - name: a-preview-that-runs-out-of-session-keeps-drawing-what-the-reader-loaded
+    firstTurns: 60
+    chunkTurns: 60
+    scrolls: 6
+    continuable: true
+    exhaustAfterLastScroll: true
+    wantDrawnTurns: [0, 200, 419]
+    wantBodyGrowsEveryScroll: true
+
+  # A session the store answered whole was never asked for turn by turn, so it
+  # keeps the standing bound and says what it left out.
+  - name: a-session-handed-over-whole-keeps-the-draw-bound-it-has-today
+    firstTurns: 420
+    chunkTurns: 0
+    scrolls: 0
+    continuable: false
+    wantDrawnTurns: [0, 199]
+    wantNotDrawnTurns: [200, 419]
+    wantOmissionNotice: true

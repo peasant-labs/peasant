@@ -1,0 +1,19 @@
+# Mounted-harvest re-ingest cases for the two OpenCode session-clock fixtures.
+# Each case names the source fixture and the freshness mutation applied before
+# the second harvest. The mtime-floor mutation moves the content mtime forward
+# for a database with no session clock; the session-clock mutation moves one
+# session's changed clock forward while keeping the floor old, so freshness is
+# clock-first and the moved clock drives the change.
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - absent-clock-re-ingests-when-the-mtime-floor-moves
+  - clock-bearing-session-re-ingests-when-its-session-clock-moves
+cases:
+  - name: absent-clock-re-ingests-when-the-mtime-floor-moves
+    fixture: session-clock-absent-floor
+    mutation: mtime-floor
+  - name: clock-bearing-session-re-ingests-when-its-session-clock-moves
+    fixture: session-clock-lagging
+    mutation: session-clock
+    sessionID: ses_3cd91f52effeXd3QAJ54jOyzGB

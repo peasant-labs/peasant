@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -34,55 +35,48 @@ import (
 	"zombiezen.com/go/sqlite"
 )
 
+// These closed-set coverage counts are the contract itself: the fixture must
+// cover every value of an enum exactly once, so the number equals the enum
+// size rather than a churny row tally.
 const (
-	expectedOpenCodeResolutionCases = 8
-	expectedOpenCodeProbeCases      = 13
-	expectedContinuationCandidates  = 4
-	expectedClosedSetCases          = 7
-	expectedAllowedQueryStatements  = 15
-	expectedQueryGuardMutations     = 12
-	expectedEntryPathMutations      = 41
-	expectedEntryPathKindCount      = 41
-	expectedIndexEvidenceCases      = 6
-	expectedFileInventoryMutations  = 46
-	expectedFileMatrixKindCount     = 23
-	expectedCoverageGuardMutations  = 9
-	expectedBuildTaggedMutations    = 7
-	expectedBuildTopologyCases      = 3
-	expectedAdapterDiscoveryCases   = 5
+	expectedEntryPathKindCount   = 41
+	expectedFileMatrixKindCount  = 23
+	expectedBuildTaggedMutations = 7
+	expectedBuildTopologyCases   = 3
 )
 
 //go:embed testdata/opencode_candidates.yaml
 var openCodeCandidateFixtureYAML []byte
 
 type openCodeCandidateFixture struct {
-	DeclaredResolutionCases  int                               `yaml:"declared_resolution_cases"`
-	ResolutionCases          []openCodeCandidateResolutionCase `yaml:"resolution_cases"`
-	DeclaredProbeCases       int                               `yaml:"declared_probe_cases"`
-	ForbiddenQueryTokens     []string                          `yaml:"forbidden_query_tokens"`
-	DeclaredAllowedQueries   int                               `yaml:"declared_allowed_query_statements"`
-	AllowedQueryStatements   []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
-	DeclaredQueryMutations   int                               `yaml:"declared_query_guard_mutations"`
-	QueryGuardMutations      []openCodeQueryGuardMutation      `yaml:"query_guard_mutations"`
-	DeclaredEntryMutations   int                               `yaml:"declared_entry_path_mutations"`
-	EntryPathMutations       []openCodeEntryPathMutation       `yaml:"entry_path_mutations"`
-	DeclaredIndexCases       int                               `yaml:"declared_index_evidence_cases"`
-	IndexEvidenceCases       []openCodeIndexEvidenceCase       `yaml:"index_evidence_cases"`
-	DeclaredFileMutations    int                               `yaml:"declared_file_inventory_mutations"`
-	FileInventoryMutations   []openCodeFileInventoryMutation   `yaml:"file_inventory_mutations"`
-	DeclaredCoverageGuards   int                               `yaml:"declared_coverage_guard_mutations"`
-	CoverageGuardMutations   []openCodeCoverageGuardMutation   `yaml:"coverage_guard_mutations"`
-	DeclaredBuildTagged      int                               `yaml:"declared_build_tagged_mutations"`
-	BuildTaggedMutations     []openCodeBuildTaggedMutation     `yaml:"build_tagged_mutations"`
-	DeclaredBuildTopology    int                               `yaml:"declared_build_topology_cases"`
-	BuildTopologyCases       []openCodeBuildTopologyCase       `yaml:"build_topology_cases"`
-	ProbeCases               []openCodeProbeCase               `yaml:"probe_cases"`
-	DeclaredContinuation     int                               `yaml:"declared_continuation_candidates"`
-	ContinuationCandidates   []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
-	DeclaredClosedSetCases   int                               `yaml:"declared_closed_set_cases"`
-	ClosedSetCases           []openCodeClosedSetCase           `yaml:"closed_set_cases"`
-	DeclaredAdapterDiscovery int                               `yaml:"declared_adapter_discovery_cases"`
-	AdapterDiscoveryCases    []openCodeAdapterDiscoveryCase    `yaml:"adapter_discovery_cases"`
+	RequiredResolutionCases        []string                          `yaml:"required_resolution_cases"`
+	ResolutionCases                []openCodeCandidateResolutionCase `yaml:"resolution_cases"`
+	RequiredProbeFixtures          []string                          `yaml:"required_probe_fixtures"`
+	ForbiddenQueryTokens           []string                          `yaml:"forbidden_query_tokens"`
+	ReadableSessionColumns         []string                          `yaml:"readable_session_columns"`
+	RequiredSessionColumnMutations []string                          `yaml:"required_session_column_mutations"`
+	SessionColumnMutations         []openCodeSessionColumnMutation   `yaml:"session_column_mutations"`
+	ReadableTableColumns           []openCodeReadableTableAllowlist  `yaml:"readable_table_columns"`
+	RequiredTableColumnMutations   []string                          `yaml:"required_table_column_mutations"`
+	TableColumnMutations           []openCodeTableColumnMutation     `yaml:"table_column_mutations"`
+	AllowedQueryStatements         []openCodeAllowedQueryStatement   `yaml:"allowed_query_statements"`
+	RequiredQueryGuardMutations    []string                          `yaml:"required_query_guard_mutations"`
+	QueryGuardMutations            []openCodeQueryGuardMutation      `yaml:"query_guard_mutations"`
+	EntryPathMutations             []openCodeEntryPathMutation       `yaml:"entry_path_mutations"`
+	RequiredIndexEvidenceCases     []string                          `yaml:"required_index_evidence_cases"`
+	IndexEvidenceCases             []openCodeIndexEvidenceCase       `yaml:"index_evidence_cases"`
+	FileInventoryMutations         []openCodeFileInventoryMutation   `yaml:"file_inventory_mutations"`
+	RequiredCoverageGuardMutations []string                          `yaml:"required_coverage_guard_mutations"`
+	CoverageGuardMutations         []openCodeCoverageGuardMutation   `yaml:"coverage_guard_mutations"`
+	BuildTaggedMutations           []openCodeBuildTaggedMutation     `yaml:"build_tagged_mutations"`
+	BuildTopologyCases             []openCodeBuildTopologyCase       `yaml:"build_topology_cases"`
+	ProbeCases                     []openCodeProbeCase               `yaml:"probe_cases"`
+	RequiredContinuationCandidates []string                          `yaml:"required_continuation_candidates"`
+	ContinuationCandidates         []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
+	RequiredClosedSetCases         []string                          `yaml:"required_closed_set_cases"`
+	ClosedSetCases                 []openCodeClosedSetCase           `yaml:"closed_set_cases"`
+	RequiredAdapterDiscoveryCases  []string                          `yaml:"required_adapter_discovery_cases"`
+	AdapterDiscoveryCases          []openCodeAdapterDiscoveryCase    `yaml:"adapter_discovery_cases"`
 }
 
 type openCodeAllowedQueryStatement struct {
@@ -94,6 +88,33 @@ type openCodeQueryGuardMutation struct {
 	Name                 string `yaml:"name"`
 	ReplaceStatement     string `yaml:"replace_statement"`
 	ReplacementStatement string `yaml:"replacement_statement"`
+}
+
+// openCodeSessionColumnMutation is one statement that reads a forbidden session
+// column, so the allowlist proves it can go red: the named column is outside
+// readable_session_columns and the statement must be rejected.
+type openCodeSessionColumnMutation struct {
+	Name            string `yaml:"name"`
+	Statement       string `yaml:"statement"`
+	ForbiddenColumn string `yaml:"forbidden_column"`
+}
+
+// openCodeReadableTableAllowlist is the exact set of columns a read-only source
+// statement may project from one non-session table. Every other column of that
+// table stays unreadable, so a new read fails closed on an unlisted column.
+type openCodeReadableTableAllowlist struct {
+	Table   string   `yaml:"table"`
+	Columns []string `yaml:"columns"`
+}
+
+// openCodeTableColumnMutation is one statement that reads a forbidden column of
+// a non-session table, so the per-table allowlist proves it can go red: the
+// named column is outside the table's allowlist and the statement is rejected.
+type openCodeTableColumnMutation struct {
+	Name            string `yaml:"name"`
+	Table           string `yaml:"table"`
+	Statement       string `yaml:"statement"`
+	ForbiddenColumn string `yaml:"forbidden_column"`
 }
 
 type openCodeEntryPathKind string
@@ -303,6 +324,7 @@ const (
 	openCodeAdapterHybridCurrent           openCodeAdapterDiscoveryMode = "hybrid_current_success"
 	openCodeAdapterHybridLegacyFallback    openCodeAdapterDiscoveryMode = "hybrid_legacy_fallback"
 	openCodeAdapterHybridFailure           openCodeAdapterDiscoveryMode = "hybrid_fallback_error"
+	openCodeAdapterSQLiteFailureKeepsJSON  openCodeAdapterDiscoveryMode = "sqlite_failure_keeps_json"
 )
 
 type openCodeAdapterDiscoveryCase struct {
@@ -371,15 +393,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("decode OpenCode candidate fixture: expected exactly one YAML document: %v", err)
 	}
-	if fixture.DeclaredResolutionCases != expectedOpenCodeResolutionCases || len(fixture.ResolutionCases) != expectedOpenCodeResolutionCases {
-		t.Fatalf("OpenCode resolution fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredResolutionCases, len(fixture.ResolutionCases), expectedOpenCodeResolutionCases)
-	}
-	if fixture.DeclaredProbeCases != expectedOpenCodeProbeCases || len(fixture.ProbeCases) != expectedOpenCodeProbeCases {
-		t.Fatalf("OpenCode probe fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredProbeCases, len(fixture.ProbeCases), expectedOpenCodeProbeCases)
-	}
-	if fixture.DeclaredAdapterDiscovery != expectedAdapterDiscoveryCases || len(fixture.AdapterDiscoveryCases) != expectedAdapterDiscoveryCases {
-		t.Fatalf("OpenCode adapter discovery fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredAdapterDiscovery, len(fixture.AdapterDiscoveryCases), expectedAdapterDiscoveryCases)
-	}
 	adapterCaseNames := make(map[string]struct{}, len(fixture.AdapterDiscoveryCases))
 	for _, testCase := range fixture.AdapterDiscoveryCases {
 		if strings.TrimSpace(testCase.Name) == "" || strings.TrimSpace(testCase.SourceFixture) == "" {
@@ -390,7 +403,7 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		adapterCaseNames[testCase.Name] = struct{}{}
 		switch testCase.Mode {
-		case openCodeAdapterCapableProbeInitFailure, openCodeAdapterIncapableLegacyOnly, openCodeAdapterHybridCurrent, openCodeAdapterHybridLegacyFallback, openCodeAdapterHybridFailure:
+		case openCodeAdapterCapableProbeInitFailure, openCodeAdapterIncapableLegacyOnly, openCodeAdapterHybridCurrent, openCodeAdapterHybridLegacyFallback, openCodeAdapterHybridFailure, openCodeAdapterSQLiteFailureKeepsJSON:
 		default:
 			t.Fatalf("OpenCode adapter discovery fixture %q has unknown mode %q", testCase.Name, testCase.Mode)
 		}
@@ -400,18 +413,12 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 				t.Fatalf("OpenCode adapter discovery fixture %q has invalid expected origin %q: %v", testCase.Name, testCase.ExpectedOrigin, err)
 			}
 		}
-		if testCase.ErrorContains == "" && (testCase.Mode == openCodeAdapterCapableProbeInitFailure || testCase.Mode == openCodeAdapterHybridFailure) {
+		if testCase.ErrorContains == "" && (testCase.Mode == openCodeAdapterCapableProbeInitFailure || testCase.Mode == openCodeAdapterHybridFailure || testCase.Mode == openCodeAdapterSQLiteFailureKeepsJSON) {
 			t.Fatalf("OpenCode adapter discovery fixture %q must pin its actionable error", testCase.Name)
 		}
 		if testCase.ExpectedSessions < 0 {
 			t.Fatalf("OpenCode adapter discovery fixture %q has a negative expected session count", testCase.Name)
 		}
-	}
-	if fixture.DeclaredContinuation != expectedContinuationCandidates || len(fixture.ContinuationCandidates) != expectedContinuationCandidates {
-		t.Fatalf("OpenCode continuation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredContinuation, len(fixture.ContinuationCandidates), expectedContinuationCandidates)
-	}
-	if fixture.DeclaredClosedSetCases != expectedClosedSetCases || len(fixture.ClosedSetCases) != expectedClosedSetCases {
-		t.Fatalf("OpenCode closed-set fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredClosedSetCases, len(fixture.ClosedSetCases), expectedClosedSetCases)
 	}
 	if len(fixture.ForbiddenQueryTokens) == 0 {
 		t.Fatal("OpenCode probe fixture must declare forbidden query-shape tokens")
@@ -425,8 +432,87 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenTokens[token] = true
 	}
-	if fixture.DeclaredAllowedQueries != expectedAllowedQueryStatements || len(fixture.AllowedQueryStatements) != expectedAllowedQueryStatements {
-		t.Fatalf("OpenCode allowed-query fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredAllowedQueries, len(fixture.AllowedQueryStatements), expectedAllowedQueryStatements)
+	allowlist := make(map[string]bool, len(fixture.ReadableSessionColumns))
+	for index, column := range fixture.ReadableSessionColumns {
+		column = normalizeOpenCodeQuery(column)
+		fixture.ReadableSessionColumns[index] = column
+		if column == "" || allowlist[column] {
+			t.Fatalf("OpenCode readable session-column allowlist has an empty or duplicate column %q", column)
+		}
+		allowlist[column] = true
+	}
+	seenSessionColumnMutations := make(map[string]bool, len(fixture.SessionColumnMutations))
+	for index, mutation := range fixture.SessionColumnMutations {
+		mutation.Statement = normalizeOpenCodeQuery(mutation.Statement)
+		mutation.ForbiddenColumn = normalizeOpenCodeQuery(mutation.ForbiddenColumn)
+		fixture.SessionColumnMutations[index] = mutation
+		if strings.TrimSpace(mutation.Name) == "" || seenSessionColumnMutations[mutation.Name] || mutation.Statement == "" || mutation.ForbiddenColumn == "" {
+			t.Fatalf("OpenCode session-column mutation is incomplete or duplicated: %+v", mutation)
+		}
+		if allowlist[mutation.ForbiddenColumn] {
+			t.Fatalf("OpenCode session-column mutation %q names forbidden column %q that is in the readable allowlist, so the mutation cannot go red", mutation.Name, mutation.ForbiddenColumn)
+		}
+		columns, targetsSession, recognized := openCodeSessionSelectColumns(mutation.Statement)
+		if !recognized || !targetsSession {
+			t.Fatalf("OpenCode session-column mutation %q must read from the session table so the allowlist governs it: %+v", mutation.Name, mutation)
+		}
+		if !slices.Contains(columns, mutation.ForbiddenColumn) {
+			t.Fatalf("OpenCode session-column mutation %q must project its forbidden column %q so the allowlist can reject it: columns=%v", mutation.Name, mutation.ForbiddenColumn, columns)
+		}
+		seenSessionColumnMutations[mutation.Name] = true
+	}
+	tableAllowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
+	for index, entry := range fixture.ReadableTableColumns {
+		entry.Table = normalizeOpenCodeQuery(entry.Table)
+		fixture.ReadableTableColumns[index].Table = entry.Table
+		if entry.Table == "" || entry.Table == "session" || tableAllowlists[entry.Table] != nil {
+			t.Fatalf("OpenCode readable table-allowlist has an empty, session, or duplicate table %q", entry.Table)
+		}
+		if len(entry.Columns) == 0 {
+			t.Fatalf("OpenCode readable table-allowlist for %q declares no columns", entry.Table)
+		}
+		columns := make(map[string]bool, len(entry.Columns))
+		for columnIndex, column := range entry.Columns {
+			column = normalizeOpenCodeQuery(column)
+			fixture.ReadableTableColumns[index].Columns[columnIndex] = column
+			if column == "" || columns[column] {
+				t.Fatalf("OpenCode readable table-allowlist for %q has an empty or duplicate column %q", entry.Table, column)
+			}
+			columns[column] = true
+		}
+		tableAllowlists[entry.Table] = columns
+	}
+	seenTableColumnMutations := make(map[string]bool, len(fixture.TableColumnMutations))
+	coveredTables := make(map[string]bool, len(fixture.TableColumnMutations))
+	for index, mutation := range fixture.TableColumnMutations {
+		mutation.Table = normalizeOpenCodeQuery(mutation.Table)
+		mutation.Statement = normalizeOpenCodeQuery(mutation.Statement)
+		mutation.ForbiddenColumn = normalizeOpenCodeQuery(mutation.ForbiddenColumn)
+		fixture.TableColumnMutations[index] = mutation
+		if strings.TrimSpace(mutation.Name) == "" || seenTableColumnMutations[mutation.Name] || mutation.Statement == "" || mutation.ForbiddenColumn == "" {
+			t.Fatalf("OpenCode table-column mutation is incomplete or duplicated: %+v", mutation)
+		}
+		allowlist, known := tableAllowlists[mutation.Table]
+		if !known {
+			t.Fatalf("OpenCode table-column mutation %q names table %q without a readable allowlist", mutation.Name, mutation.Table)
+		}
+		if allowlist[mutation.ForbiddenColumn] {
+			t.Fatalf("OpenCode table-column mutation %q names forbidden column %q that is in the %q allowlist, so the mutation cannot go red", mutation.Name, mutation.ForbiddenColumn, mutation.Table)
+		}
+		table, columns, recognized := openCodeSelectColumns(mutation.Statement)
+		if !recognized || table != mutation.Table {
+			t.Fatalf("OpenCode table-column mutation %q must read from table %q so its allowlist governs it: %+v", mutation.Name, mutation.Table, mutation)
+		}
+		if !slices.Contains(columns, mutation.ForbiddenColumn) {
+			t.Fatalf("OpenCode table-column mutation %q must project its forbidden column %q so the allowlist can reject it: columns=%v", mutation.Name, mutation.ForbiddenColumn, columns)
+		}
+		seenTableColumnMutations[mutation.Name] = true
+		coveredTables[mutation.Table] = true
+	}
+	for table := range tableAllowlists {
+		if !coveredTables[table] {
+			t.Fatalf("OpenCode readable table %q has no can-go-red mutation proving its allowlist fails closed", table)
+		}
 	}
 	seenQueryNames := make(map[string]bool, len(fixture.AllowedQueryStatements))
 	seenQueryStatements := make(map[string]bool, len(fixture.AllowedQueryStatements))
@@ -442,9 +528,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		seenQueryNames[allowed.Name] = true
 		seenQueryStatements[allowed.Statement] = true
 	}
-	if fixture.DeclaredQueryMutations != expectedQueryGuardMutations || len(fixture.QueryGuardMutations) != expectedQueryGuardMutations {
-		t.Fatalf("OpenCode query-guard mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredQueryMutations, len(fixture.QueryGuardMutations), expectedQueryGuardMutations)
-	}
 	seenMutationNames := make(map[string]bool, len(fixture.QueryGuardMutations))
 	for index, mutation := range fixture.QueryGuardMutations {
 		mutation.ReplaceStatement = normalizeOpenCodeQuery(mutation.ReplaceStatement)
@@ -455,9 +538,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenMutationNames[mutation.Name] = true
 	}
-	if fixture.DeclaredEntryMutations != expectedEntryPathMutations || len(fixture.EntryPathMutations) != expectedEntryPathMutations {
-		t.Fatalf("OpenCode entry-path mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredEntryMutations, len(fixture.EntryPathMutations), expectedEntryPathMutations)
-	}
 	seenEntryMutationNames := make(map[string]bool, len(fixture.EntryPathMutations))
 	for _, mutation := range fixture.EntryPathMutations {
 		if strings.TrimSpace(mutation.Name) == "" || strings.TrimSpace(mutation.ErrorContains) == "" || seenEntryMutationNames[mutation.Name] || !knownOpenCodeEntryPathKind(mutation.Kind) {
@@ -465,18 +545,12 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenEntryMutationNames[mutation.Name] = true
 	}
-	if fixture.DeclaredIndexCases != expectedIndexEvidenceCases || len(fixture.IndexEvidenceCases) != expectedIndexEvidenceCases {
-		t.Fatalf("OpenCode index-evidence fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredIndexCases, len(fixture.IndexEvidenceCases), expectedIndexEvidenceCases)
-	}
 	seenIndexCases := make(map[string]bool, len(fixture.IndexEvidenceCases))
 	for _, fixtureCase := range fixture.IndexEvidenceCases {
 		if strings.TrimSpace(fixtureCase.Name) == "" || seenIndexCases[fixtureCase.Name] || len(fixtureCase.Keys) != 3 || fixtureCase.ExpectedCapability.Validate() != nil || fixtureCase.ExpectedSupport.Validate() != nil {
 			t.Fatalf("OpenCode index-evidence fixture is incomplete or duplicated: %+v", fixtureCase)
 		}
 		seenIndexCases[fixtureCase.Name] = true
-	}
-	if fixture.DeclaredFileMutations != expectedFileInventoryMutations || len(fixture.FileInventoryMutations) != expectedFileInventoryMutations {
-		t.Fatalf("OpenCode file-inventory mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredFileMutations, len(fixture.FileInventoryMutations), expectedFileInventoryMutations)
 	}
 	seenFileMutationNames := make(map[string]bool, len(fixture.FileInventoryMutations))
 	seenFileMutationSurfaces := make(map[string]bool, len(fixture.FileInventoryMutations))
@@ -488,9 +562,6 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		seenFileMutationNames[mutation.Name] = true
 		seenFileMutationSurfaces[surface] = true
 	}
-	if fixture.DeclaredCoverageGuards != expectedCoverageGuardMutations || len(fixture.CoverageGuardMutations) != expectedCoverageGuardMutations {
-		t.Fatalf("OpenCode coverage-guard mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredCoverageGuards, len(fixture.CoverageGuardMutations), expectedCoverageGuardMutations)
-	}
 	seenCoverageGuardNames := make(map[string]bool, len(fixture.CoverageGuardMutations))
 	for _, mutation := range fixture.CoverageGuardMutations {
 		if strings.TrimSpace(mutation.Name) == "" || strings.TrimSpace(mutation.ErrorContains) == "" || seenCoverageGuardNames[mutation.Name] || !knownOpenCodeCoverageGuardKind(mutation.Kind) {
@@ -498,14 +569,8 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 		}
 		seenCoverageGuardNames[mutation.Name] = true
 	}
-	if fixture.DeclaredBuildTagged != expectedBuildTaggedMutations || len(fixture.BuildTaggedMutations) != expectedBuildTaggedMutations {
-		t.Fatalf("OpenCode build-tagged mutation fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredBuildTagged, len(fixture.BuildTaggedMutations), expectedBuildTaggedMutations)
-	}
 	if err := validateOpenCodeBuildTaggedMutationCoverage(fixture.BuildTaggedMutations); err != nil {
 		t.Fatal(err)
-	}
-	if fixture.DeclaredBuildTopology != expectedBuildTopologyCases || len(fixture.BuildTopologyCases) != expectedBuildTopologyCases {
-		t.Fatalf("OpenCode build-topology fixture row guard: declared=%d actual=%d required=%d", fixture.DeclaredBuildTopology, len(fixture.BuildTopologyCases), expectedBuildTopologyCases)
 	}
 	if err := validateOpenCodeBuildTopologyCoverage(fixture.BuildTopologyCases); err != nil {
 		t.Fatal(err)
@@ -569,6 +634,32 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 			t.Fatalf("OpenCode closed-set fixture %q has unknown field %q", closedCase.Name, closedCase.Field)
 		}
 		seenClosed[closedCase.Name] = true
+	}
+	requiredPresence := []struct {
+		label    string
+		required []string
+		present  func(string) bool
+	}{
+		{"resolution case", fixture.RequiredResolutionCases, func(n string) bool { return seenResolution[n] }},
+		{"probe fixture", fixture.RequiredProbeFixtures, func(n string) bool { return seenProbe[n] }},
+		{"session-column mutation", fixture.RequiredSessionColumnMutations, func(n string) bool { return seenSessionColumnMutations[n] }},
+		{"table-column mutation", fixture.RequiredTableColumnMutations, func(n string) bool { return seenTableColumnMutations[n] }},
+		{"query-guard mutation", fixture.RequiredQueryGuardMutations, func(n string) bool { return seenMutationNames[n] }},
+		{"index-evidence case", fixture.RequiredIndexEvidenceCases, func(n string) bool { return seenIndexCases[n] }},
+		{"coverage-guard mutation", fixture.RequiredCoverageGuardMutations, func(n string) bool { return seenCoverageGuardNames[n] }},
+		{"continuation candidate", fixture.RequiredContinuationCandidates, func(n string) bool { return seenContinuation[n] }},
+		{"closed-set case", fixture.RequiredClosedSetCases, func(n string) bool { return seenClosed[n] }},
+		{"adapter discovery case", fixture.RequiredAdapterDiscoveryCases, func(n string) bool { _, ok := adapterCaseNames[n]; return ok }},
+	}
+	for _, group := range requiredPresence {
+		if len(group.required) == 0 {
+			t.Fatalf("OpenCode candidate fixture declares no required %ss", group.label)
+		}
+		for _, name := range group.required {
+			if !group.present(name) {
+				t.Fatalf("OpenCode candidate fixture is missing required %s %q", group.label, name)
+			}
+		}
 	}
 	return fixture
 }
@@ -813,9 +904,6 @@ func openCodeFileMatrixKind(kind openCodeEntryPathKind) bool {
 }
 
 func validateOpenCodeMutationCoverage(fixture openCodeCandidateFixture) error {
-	if expectedEntryPathMutations != expectedEntryPathKindCount {
-		return fmt.Errorf("OpenCode entry-kind contract is internally inconsistent: rows=%d closed-set=%d", expectedEntryPathMutations, expectedEntryPathKindCount)
-	}
 	entryKinds := make(map[openCodeEntryPathKind]int, len(fixture.EntryPathMutations))
 	for _, mutation := range fixture.EntryPathMutations {
 		entryKinds[mutation.Kind]++
@@ -2434,9 +2522,6 @@ func resolveTypedOpenCodeStatement(expression ast.Expr, info *types.Info) (strin
 }
 
 func validateOpenCodePrivateExecutionStatements(statements []string, fixture openCodeCandidateFixture) error {
-	if len(statements) != fixture.DeclaredAllowedQueries {
-		return fmt.Errorf("OpenCode private execution statement count = %d, want fixture-declared %d", len(statements), fixture.DeclaredAllowedQueries)
-	}
 	allowed := make(map[string]bool, len(fixture.AllowedQueryStatements))
 	for _, query := range fixture.AllowedQueryStatements {
 		allowed[query.Statement] = true
@@ -2478,6 +2563,175 @@ func findOpenCodeForbiddenQueryTokens(statements, forbidden []string) []string {
 		}
 	}
 	return violations
+}
+
+// openCodeSessionSelectColumns extracts the projected columns from a simple
+// single-table SELECT and reports whether it reads FROM the session table. The
+// read-only source statements are fixed compile-time constants of the shape
+// "select <columns> from <table> ...", so the first " from " delimits the table
+// and the projection. recognized is false for a non-SELECT statement such as a
+// pragma; targetsSession is true only for the session table, never for
+// session_message or any other table.
+func openCodeSessionSelectColumns(statement string) (columns []string, targetsSession, recognized bool) {
+	table, columns, recognized := openCodeSelectColumns(statement)
+	if !recognized {
+		return nil, false, false
+	}
+	if table != "session" {
+		return nil, false, true
+	}
+	return columns, true, true
+}
+
+// openCodeSelectColumns extracts the target table and projected columns from a
+// simple single-table SELECT. The read-only source statements are fixed
+// compile-time constants of the shape "select <columns> from <table> ...", so
+// the first " from " delimits the table and the projection. recognized is false
+// for a non-SELECT statement such as a pragma, and for a projection that is not
+// a plain comma list of column names (a MAX(seq) aggregate, for instance, is not
+// a column-projection read and is governed by the statement allowlist, not the
+// per-column allowlist).
+func openCodeSelectColumns(statement string) (table string, columns []string, recognized bool) {
+	normalized := normalizeOpenCodeQuery(statement)
+	const selectPrefix = "select "
+	if !strings.HasPrefix(normalized, selectPrefix) {
+		return "", nil, false
+	}
+	fromIndex := strings.Index(normalized, " from ")
+	if fromIndex < 0 {
+		return "", nil, false
+	}
+	rest := normalized[fromIndex+len(" from "):]
+	table = rest
+	if boundary := strings.IndexAny(rest, " \t"); boundary >= 0 {
+		table = rest[:boundary]
+	}
+	projection := strings.TrimSpace(normalized[len(selectPrefix):fromIndex])
+	for _, part := range strings.Split(projection, ",") {
+		columns = append(columns, strings.TrimSpace(part))
+	}
+	return table, columns, true
+}
+
+func TestOpenCodeSessionStatementsReadOnlyAllowlistedColumns(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	allowlist := make(map[string]bool, len(fixture.ReadableSessionColumns))
+	for _, column := range fixture.ReadableSessionColumns {
+		allowlist[column] = true
+	}
+	sessionStatements := 0
+	for _, allowed := range fixture.AllowedQueryStatements {
+		columns, targetsSession, recognized := openCodeSessionSelectColumns(allowed.Statement)
+		if !recognized || !targetsSession {
+			continue
+		}
+		sessionStatements++
+		for _, column := range columns {
+			if !allowlist[column] {
+				t.Fatalf("allowed session statement %q reads column %q outside the readable allowlist %v", allowed.Name, column, fixture.ReadableSessionColumns)
+			}
+		}
+	}
+	if sessionStatements == 0 {
+		t.Fatal("no allowed statement reads the session table, so the readable-column allowlist governs nothing")
+	}
+}
+
+func TestOpenCodeSessionColumnAllowlistRejectsForbiddenColumns(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	allowlist := make(map[string]bool, len(fixture.ReadableSessionColumns))
+	for _, column := range fixture.ReadableSessionColumns {
+		allowlist[column] = true
+	}
+	for _, mutation := range fixture.SessionColumnMutations {
+		t.Run(mutation.Name, func(t *testing.T) {
+			columns, targetsSession, recognized := openCodeSessionSelectColumns(mutation.Statement)
+			if !recognized || !targetsSession {
+				t.Fatalf("session-column mutation %q does not read the session table", mutation.Name)
+			}
+			var rejected []string
+			for _, column := range columns {
+				if !allowlist[column] {
+					rejected = append(rejected, column)
+				}
+			}
+			if !slices.Contains(rejected, mutation.ForbiddenColumn) {
+				t.Fatalf("session-column allowlist accepted forbidden column %q; rejected columns=%v", mutation.ForbiddenColumn, rejected)
+			}
+		})
+	}
+}
+
+// TestOpenCodeTableAllowlistsGovernAllowedStatements proves that every allowed
+// source statement that reads one of the newly readable tables projects only
+// that table's allowlisted columns. It is vacuously satisfied until a read is
+// wired, and it fails closed the moment a wired statement projects an unlisted
+// column.
+func TestOpenCodeTableAllowlistsGovernAllowedStatements(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	allowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
+	for _, entry := range fixture.ReadableTableColumns {
+		columns := make(map[string]bool, len(entry.Columns))
+		for _, column := range entry.Columns {
+			columns[normalizeOpenCodeQuery(column)] = true
+		}
+		allowlists[normalizeOpenCodeQuery(entry.Table)] = columns
+	}
+	for _, allowed := range fixture.AllowedQueryStatements {
+		table, columns, recognized := openCodeSelectColumns(allowed.Statement)
+		if !recognized {
+			continue
+		}
+		allowlist, governed := allowlists[table]
+		if !governed {
+			continue
+		}
+		for _, column := range columns {
+			if !allowlist[column] {
+				t.Fatalf("allowed statement %q reads column %q outside the %q readable allowlist %v", allowed.Name, column, table, allowlist)
+			}
+		}
+	}
+}
+
+// TestOpenCodeTableColumnAllowlistRejectsForbiddenColumns proves each per-table
+// allowlist can go red: a statement that projects a column outside the table's
+// readable set is rejected. One mutation covers every newly readable table.
+func TestOpenCodeTableColumnAllowlistRejectsForbiddenColumns(t *testing.T) {
+	t.Parallel()
+	fixture := loadOpenCodeCandidateFixture(t)
+	allowlists := make(map[string]map[string]bool, len(fixture.ReadableTableColumns))
+	for _, entry := range fixture.ReadableTableColumns {
+		columns := make(map[string]bool, len(entry.Columns))
+		for _, column := range entry.Columns {
+			columns[normalizeOpenCodeQuery(column)] = true
+		}
+		allowlists[normalizeOpenCodeQuery(entry.Table)] = columns
+	}
+	for _, mutation := range fixture.TableColumnMutations {
+		t.Run(mutation.Name, func(t *testing.T) {
+			table, columns, recognized := openCodeSelectColumns(mutation.Statement)
+			if !recognized || table != normalizeOpenCodeQuery(mutation.Table) {
+				t.Fatalf("table-column mutation %q does not read table %q", mutation.Name, mutation.Table)
+			}
+			allowlist, governed := allowlists[table]
+			if !governed {
+				t.Fatalf("table-column mutation %q names table %q without a readable allowlist", mutation.Name, table)
+			}
+			var rejected []string
+			for _, column := range columns {
+				if !allowlist[column] {
+					rejected = append(rejected, column)
+				}
+			}
+			if !slices.Contains(rejected, normalizeOpenCodeQuery(mutation.ForbiddenColumn)) {
+				t.Fatalf("%q allowlist accepted forbidden column %q; rejected columns=%v", table, mutation.ForbiddenColumn, rejected)
+			}
+		})
+	}
 }
 
 func TestResolveOpenCodeCandidatesMatchesUpstreamPrecedence(t *testing.T) {
@@ -2756,20 +3010,31 @@ func TestOpenCodeAdapterDiscoveryCapabilities(t *testing.T) {
 				opener = hybridOpenCodeSourceOpener(true, false)
 			case openCodeAdapterHybridFailure:
 				opener = hybridOpenCodeSourceOpener(true, true)
+			case openCodeAdapterSQLiteFailureKeepsJSON:
+				writeLegacyOnlyOpenCodeSession(t, root.String())
+				opener = hybridOpenCodeSourceOpener(true, true)
 			}
 			adapter, adapterErr := ingest.NewOpenCodeAdapterWithCandidateProbe(filesystem, testutil.NoGitResolver(), salt.Salt{}, "latest", environment, filesystem, opener, ingest.DefaultOpenCodeSQLiteSourceOptions())
 			if adapterErr != nil {
 				t.Fatalf("construct candidate-capable adapter: %v", adapterErr)
 			}
 			discovered, discoverErr := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
-			if fixtureCase.Mode == openCodeAdapterHybridFailure {
-				if discoverErr == nil || !strings.Contains(discoverErr.Error(), fixtureCase.ErrorContains) {
-					t.Fatalf("hybrid discovery error = %v, want actionable %q", discoverErr, fixtureCase.ErrorContains)
+			if discoverErr != nil {
+				t.Fatalf("candidate-capable discovery failed: %v", discoverErr)
+			}
+			if fixtureCase.Mode == openCodeAdapterHybridFailure || fixtureCase.Mode == openCodeAdapterSQLiteFailureKeepsJSON {
+				// A failing supported candidate is skipped and recorded. It never
+				// removes the sessions that other candidates discovered.
+				assertOpenCodeDiscoveryFailureRecorded(t, adapter.CandidateEvidence(), materialized.Path, fixtureCase.ErrorContains)
+				if len(discovered) != fixtureCase.ExpectedSessions {
+					t.Fatalf("discovery with a failing SQLite candidate = %+v, want %d sessions from the remaining candidates", discovered, fixtureCase.ExpectedSessions)
+				}
+				for _, session := range discovered {
+					if session.TranscriptOrigin != ingest.TranscriptOriginFile {
+						t.Fatalf("discovery with a failing SQLite candidate exposed %+v from the failed candidate", session)
+					}
 				}
 				return
-			}
-			if discoverErr != nil {
-				t.Fatalf("hybrid discovery failed: %v", discoverErr)
 			}
 			wantOrigin, originErr := fixtureCase.ExpectedOrigin.transcriptOrigin()
 			if originErr != nil {
@@ -2818,6 +3083,16 @@ func hybridOpenCodeSourceOpener(failCurrent, failLegacy bool) ingest.OpenCodeSQL
 	}
 }
 
+// CurrentSessionHasSubstantive keeps the fabricated current session a
+// substantive winner. This fake enumerates a session id that the real synthetic
+// database does not carry, so the production probe against that database would
+// find no row and demote the current projection. The fake's fiction is a real
+// current conversation, so it reports a substantive row and the hybrid keeps
+// preferring current when the current projection is usable.
+func (source hybridOpenCodeSource) CurrentSessionHasSubstantive(context.Context, ingest.OpenCodeCurrentSessionID) (bool, error) {
+	return true, nil
+}
+
 func (source hybridOpenCodeSource) CurrentSessionIDs(_ context.Context, request ingest.OpenCodeCurrentSessionPageRequest) (ingest.OpenCodeCurrentSessionPage, error) {
 	if source.failCurrent {
 		return ingest.OpenCodeCurrentSessionPage{}, errors.New("synthetic current projection unavailable")
@@ -2830,6 +3105,20 @@ func (source hybridOpenCodeSource) CurrentSessionIDs(_ context.Context, request 
 		return ingest.OpenCodeCurrentSessionPage{}, err
 	}
 	return ingest.OpenCodeCurrentSessionPage{SessionIDs: []ingest.OpenCodeCurrentSessionID{id}}, nil
+}
+
+// SessionRecords keeps the fake session table aligned with the projected
+// session id, so the deletion rule that skips a session absent from the session
+// table does not drop the mocked session that both projections return.
+func (source hybridOpenCodeSource) SessionRecords(_ context.Context, request ingest.OpenCodeSessionRecordPageRequest) (ingest.OpenCodeSessionRecordPage, error) {
+	if request.After != nil {
+		return ingest.OpenCodeSessionRecordPage{Supported: true, HasParent: true, HasClock: true}, nil
+	}
+	id, err := ingest.NewOpenCodeSessionLinkID("ses_3cd91f52effeXd3QAJ54jOyzv5")
+	if err != nil {
+		return ingest.OpenCodeSessionRecordPage{}, err
+	}
+	return ingest.OpenCodeSessionRecordPage{Supported: true, HasParent: true, HasClock: true, PresentSessionIDs: []ingest.OpenCodeSessionLinkID{id}}, nil
 }
 
 func (source hybridOpenCodeSource) LegacySessionIDs(_ context.Context, request ingest.OpenCodeLegacySessionPageRequest) (ingest.OpenCodeLegacySessionPage, error) {
@@ -2987,3 +3276,21 @@ func (syntheticRegularFileInfo) Mode() os.FileMode  { return 0o600 }
 func (syntheticRegularFileInfo) ModTime() time.Time { return time.Time{} }
 func (syntheticRegularFileInfo) IsDir() bool        { return false }
 func (syntheticRegularFileInfo) Sys() any           { return nil }
+
+// assertOpenCodeDiscoveryFailureRecorded checks that the failing SQLite
+// candidate carries an actionable discovery diagnostic on its evidence.
+func assertOpenCodeDiscoveryFailureRecorded(t testing.TB, evidence []ingest.OpenCodeProbeResult, databasePath, errorContains string) {
+	t.Helper()
+	for _, result := range evidence {
+		if result.Candidate.Kind != ingest.OpenCodeSourceSQLite || filepath.Clean(result.Candidate.Path) != filepath.Clean(databasePath) {
+			continue
+		}
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == ingest.OpenCodeDiagnosticDiscoveryFailed && diagnostic.Stage == ingest.OpenCodeProbeDiscover && strings.Contains(diagnostic.Why, errorContains) && diagnostic.What != "" && diagnostic.Where == databasePath && diagnostic.When != "" && diagnostic.Meaning != "" && diagnostic.Remediation != "" {
+				return
+			}
+		}
+		t.Fatalf("failing SQLite candidate %q has no actionable discovery diagnostic containing %q: %+v", databasePath, errorContains, result.Diagnostics)
+	}
+	t.Fatalf("failing SQLite candidate %q is absent from discovery evidence: %+v", databasePath, evidence)
+}

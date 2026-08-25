@@ -1,0 +1,76 @@
+# Cases for the text a launcher handed OpenCode already JSON-encoded.
+#
+# `stored` is the exact text VALUE the part row holds, written here as a YAML
+# string. A case with unwrap: true must decode to `want` once; every other case
+# must reach the indexer unchanged, so `want` repeats the stored value.
+#
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - a-json-encoded-prompt-is-unwrapped-once
+  - escaped-newlines-become-real-newlines
+  - a-clean-prompt-is-unchanged
+  - a-prompt-that-quotes-something-mid-text-is-unchanged
+  - a-prompt-wrapped-in-quotes-that-are-not-json-is-unchanged
+  - an-encoded-empty-string-does-not-empty-the-turn
+  - a-json-object-is-unchanged
+  - a-json-array-is-unchanged
+  - a-doubly-encoded-prompt-keeps-one-visible-layer
+  - a-multi-line-wrapped-prompt-is-unwrapped
+  - a-wrapped-value-holding-another-control-character-is-unchanged
+cases:
+  - name: a-json-encoded-prompt-is-unwrapped-once
+    stored: "\"Run /reviewer first. Then review the diff.\""
+    unwrap: true
+    want: "Run /reviewer first. Then review the diff."
+
+  - name: escaped-newlines-become-real-newlines
+    stored: "\"Run /reviewer first.\\n\\n- read the diff\\n- report findings\""
+    unwrap: true
+    want: "Run /reviewer first.\n\n- read the diff\n- report findings"
+
+  - name: a-clean-prompt-is-unchanged
+    stored: "Run /reviewer first. Then review the diff."
+    unwrap: false
+    want: "Run /reviewer first. Then review the diff."
+
+  - name: a-prompt-that-quotes-something-mid-text-is-unchanged
+    stored: "the flag is \"--license\" and it is required"
+    unwrap: false
+    want: "the flag is \"--license\" and it is required"
+
+  - name: a-prompt-wrapped-in-quotes-that-are-not-json-is-unchanged
+    stored: "\"first\" and \"second\""
+    unwrap: false
+    want: "\"first\" and \"second\""
+
+  - name: an-encoded-empty-string-does-not-empty-the-turn
+    stored: "\"\""
+    unwrap: false
+    want: "\"\""
+
+  - name: a-json-object-is-unchanged
+    stored: "{\"type\":\"text\",\"text\":\"nested\"}"
+    unwrap: false
+    want: "{\"type\":\"text\",\"text\":\"nested\"}"
+
+  - name: a-json-array-is-unchanged
+    stored: "[\"one\",\"two\"]"
+    unwrap: false
+    want: "[\"one\",\"two\"]"
+
+  - name: a-doubly-encoded-prompt-keeps-one-visible-layer
+    stored: "\"\\\"Run /reviewer first.\\\"\""
+    unwrap: true
+    want: "\"Run /reviewer first.\""
+
+
+  - name: a-multi-line-wrapped-prompt-is-unwrapped
+    stored: "\"Run /reviewer first.\n\n- read the diff\n- report findings\""
+    unwrap: true
+    want: "Run /reviewer first.\n\n- read the diff\n- report findings"
+
+  - name: a-wrapped-value-holding-another-control-character-is-unchanged
+    stored: "\"Run /reviewer\x01first.\""
+    unwrap: false
+    want: "\"Run /reviewer\x01first.\""

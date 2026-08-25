@@ -1,0 +1,167 @@
+# Scroll-triggered continuation for kit.PreviewSplit, driven by
+# TestPreviewSplit_ContinuesOnScroll (internal/tui/kit/previewsplit_continue_test.go).
+#
+# A source that implements kit.ContinuableBodySource can EXTEND its preview. The
+# split asks for the next chunk when the viewport comes within three rows of the
+# end of the body, shows one line of its own chrome at the bottom while the
+# chunk is being read, and replaces the body with the extended one when it
+# arrives.
+#
+# The body is a run of numbered lines, `body-00` upward, and a continuation
+# lengthens that run without changing anything already in it. Every assertion
+# below therefore names a specific line, so "the reader's place was kept" is a
+# claim about which line is on the pane's first row rather than about how much
+# is on screen.
+#
+# Each case mounts a split, focuses the preview pane, applies `presses`, then
+# applies `midPresses` while the continuation is in flight, then delivers it.
+#
+# moreRequests counts calls into the source's continuation. The count IS the
+# contract here: a case is asserting whether the pane asked at all, and whether
+# it asked once rather than repeatedly for the same scroll.
+#
+# requiredCases names the cases that must stay present; removing one goes red by
+# name. Adding a case need not appear here.
+requiredCases:
+  - scrolling-to-within-three-rows-of-the-end-asks-for-the-next-chunk
+  - scrolling-well-short-of-the-end-asks-for-nothing
+  - the-appended-chunk-leaves-the-readers-line-exactly-where-it-was
+  - a-source-with-nothing-more-behind-it-is-never-asked
+  - a-plain-body-source-is-never-asked
+  - a-highlight-change-discards-a-chunk-still-being-read
+  - the-pane-says-it-is-loading-more-only-while-a-chunk-is-in-flight
+  - a-session-whose-last-chunk-has-landed-is-never-asked-again
+  - scrolling-to-exactly-the-threshold-asks-once-without-reaching-the-end
+  - scrolling-again-while-a-chunk-is-in-flight-does-not-ask-twice
+
+width: 40
+height: 6
+# The first body must overflow the pane so a case can scroll inside it, and by
+# enough that a case can also stop well short of the end.
+initialLines: 20
+chunkLines: 10
+
+cases:
+  - name: scrolling-to-within-three-rows-of-the-end-asks-for-the-next-chunk
+    continuable: true
+    chunks: 2
+    presses: [shift+g]
+    wantLoadingMoreInFlight: true
+    moreRequests: 1
+    wantVisibleAfter: [body-20]
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  # The reader is three rows into a twenty-row body, which is nowhere near its
+  # end, so nothing is fetched on their behalf.
+  - name: scrolling-well-short-of-the-end-asks-for-nothing
+    continuable: true
+    chunks: 2
+    presses: [down, down, down]
+    wantLoadingMoreInFlight: false
+    moreRequests: 0
+    wantVisibleAfter: [body-03]
+    wantMissingAfter: [body-20]
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  # The whole point of appending: the reader is at the end of the body, on
+  # `body-15`, the chunk lands, and they are still on `body-15` - with the new
+  # content below them rather than under their eye.
+  - name: the-appended-chunk-leaves-the-readers-line-exactly-where-it-was
+    continuable: true
+    chunks: 2
+    presses: [shift+g]
+    wantLoadingMoreInFlight: true
+    moreRequests: 1
+    wantTopLineAfter: body-15
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  - name: a-source-with-nothing-more-behind-it-is-never-asked
+    continuable: true
+    chunks: 0
+    presses: [shift+g]
+    wantLoadingMoreInFlight: false
+    moreRequests: 0
+    wantMissingAfter: [body-20]
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  - name: a-plain-body-source-is-never-asked
+    continuable: false
+    chunks: 2
+    presses: [shift+g]
+    wantLoadingMoreInFlight: false
+    moreRequests: 0
+    wantMissingAfter: [body-20]
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  # Moving the highlight supersedes the load the chunk belongs to. The late
+  # chunk describes a session the pane no longer shows, so it must be dropped
+  # rather than painted over the newly-highlighted one.
+  - name: a-highlight-change-discards-a-chunk-still-being-read
+    continuable: true
+    chunks: 2
+    presses: [shift+g]
+    midPresses: [ctrl+h, down]
+    wantLoadingMoreInFlight: true
+    moreRequests: 1
+    wantMissingAfter: [body-20]
+    wantLoadingMoreAfter: false
+    wantHighlight: bravo
+
+  - name: the-pane-says-it-is-loading-more-only-while-a-chunk-is-in-flight
+    continuable: true
+    chunks: 2
+    presses: [shift+g]
+    wantLoadingMoreInFlight: true
+    moreRequests: 1
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  # One chunk is all this source has. After it lands the pane knows there is
+  # nothing behind it, so scrolling to the end again asks for nothing.
+  - name: a-session-whose-last-chunk-has-landed-is-never-asked-again
+    continuable: true
+    chunks: 1
+    presses: [shift+g]
+    afterPresses: [shift+g, shift+g]
+    wantLoadingMoreInFlight: true
+    moreRequests: 1
+    # The reader is at the end of the extended body, which is where the two
+    # further jumps put them, so the last line of the chunk is what shows.
+    wantVisibleAfter: [body-29]
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  # Twelve rows down leaves two rows of body below the pane, which is inside the
+  # three-row threshold without being the end of the body. It is what pins the
+  # threshold to a distance rather than to arriving at the bottom.
+  - name: scrolling-to-exactly-the-threshold-asks-once-without-reaching-the-end
+    continuable: true
+    chunks: 2
+    presses: [down, down, down, down, down, down, down, down, down, down, down, down]
+    # The label sits at the END of the body and the reader has not reached it,
+    # so the request is out but nothing about it is on screen. That is the point
+    # of asking early: the chunk arrives before they get there.
+    wantLoadingMoreInFlight: false
+    moreRequests: 1
+    wantVisibleAfter: [body-12]
+    wantTopLineAfter: body-12
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha
+
+  # The reader keeps pressing while the first chunk is still being read. One
+  # chunk is in flight, so the second press must ask for nothing: two requests
+  # would read the same continuation twice and append it twice.
+  - name: scrolling-again-while-a-chunk-is-in-flight-does-not-ask-twice
+    continuable: true
+    chunks: 2
+    presses: [shift+g, shift+g]
+    wantLoadingMoreInFlight: true
+    moreRequests: 1
+    wantVisibleAfter: [body-20]
+    wantLoadingMoreAfter: false
+    wantHighlight: alpha

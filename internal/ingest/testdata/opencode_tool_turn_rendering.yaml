@@ -1,0 +1,170 @@
+# Cases for how one OpenCode message renders as turns: the tool name, the tool
+# output, and the single rendering of a message's own prose.
+#
+# `want_message_entry_type` is the entry type the depth-0 message row itself
+# carries after indexing, before any fold. It is what decides whether a message
+# is presented as a tool turn at all, so a message whose parts hold no tool call
+# must stay a text entry.
+#
+# `parts` holds the exact part JSON a row stores, so a case states the real
+# stored shape rather than a helper's idea of it. `want_turns` is the full turn
+# list the message must fold to, in order. `content_rendered_once` names a
+# string that must appear in exactly one turn's content, which is what stops the
+# same prose from rendering twice.
+#
+# Output precedence, asserted by the four precedence cases below: "output" is
+# what a current OpenCode row writes, "result" is the older alias for the same
+# value, "error" names a failure that produced no output, and "content" is the
+# last legacy alias. The first present field wins.
+#
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - tool-name-comes-from-the-tool-field
+  - tool-name-still-comes-from-the-name-field
+  - tool-output-comes-from-state-output
+  - output-wins-over-result-error-and-content
+  - result-wins-when-output-is-absent
+  - error-shows-when-output-and-result-are-absent
+  - content-shows-when-it-is-the-only-alias
+  - a-structured-output-stays-compact-json
+  - a-trailing-assistant-text-part-renders-once
+  - a-reasoning-part-does-not-make-a-tool-turn
+
+cases:
+  - name: tool-name-comes-from-the-tool-field
+    role: assistant
+    parts:
+      - '{"id":"prt_tool_field","type":"tool","tool":"task","callID":"call_1","state":{"status":"completed","input":{"description":"explore"},"output":"task done"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: task
+            input: '{"description":"explore"}'
+            output: "task done"
+
+  - name: tool-name-still-comes-from-the-name-field
+    role: assistant
+    parts:
+      - '{"id":"prt_name_field","type":"tool","name":"read","state":{"status":"completed","input":{"path":"/tmp/a"},"output":"file body"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: read
+            input: '{"path":"/tmp/a"}'
+            output: "file body"
+
+  - name: tool-output-comes-from-state-output
+    role: assistant
+    parts:
+      - '{"id":"prt_output","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a\nb\n"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: bash
+            input: '{"command":"ls"}'
+            output: "a\nb\n"
+
+  - name: output-wins-over-result-error-and-content
+    role: assistant
+    parts:
+      - '{"id":"prt_all","type":"tool","tool":"bash","state":{"status":"completed","input":{},"output":"from output","result":"from result","error":"from error","content":"from content"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: bash
+            input: '{}'
+            output: "from output"
+
+  - name: result-wins-when-output-is-absent
+    role: assistant
+    parts:
+      - '{"id":"prt_result","type":"tool","tool":"bash","state":{"status":"completed","input":{},"result":"from result","error":"from error","content":"from content"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: bash
+            input: '{}'
+            output: "from result"
+
+  - name: error-shows-when-output-and-result-are-absent
+    role: assistant
+    parts:
+      - '{"id":"prt_error","type":"tool","tool":"webfetch","state":{"status":"error","input":{},"error":"non 2xx status code","content":"from content"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: webfetch
+            input: '{}'
+            output: "non 2xx status code"
+
+  - name: content-shows-when-it-is-the-only-alias
+    role: assistant
+    parts:
+      - '{"id":"prt_content","type":"tool","tool":"webfetch","state":{"status":"completed","input":{},"content":"from content"}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: webfetch
+            input: '{}'
+            output: "from content"
+
+  - name: a-structured-output-stays-compact-json
+    role: assistant
+    parts:
+      - '{"id":"prt_structured","type":"tool","tool":"grep","state":{"status":"completed","input":{},"output":{"matches":2}}}'
+    want_message_entry_type: tool_use
+    want_turns:
+      - role: assistant
+        entry_type: tool_use
+        content: ""
+        tools:
+          - name: grep
+            input: '{}'
+            output: '{"matches":2}'
+
+  - name: a-trailing-assistant-text-part-renders-once
+    role: assistant
+    parts:
+      - '{"id":"prt_reason","type":"reasoning","text":"weighing the report wording"}'
+      - '{"id":"prt_report","type":"text","text":"## Objective\nthe finished report"}'
+    content_rendered_once: "## Objective\nthe finished report"
+    want_message_entry_type: text
+    want_turns:
+      - role: assistant
+        entry_type: text
+        content: "## Objective\nthe finished report"
+      - role: assistant
+        entry_type: thinking
+        content: "weighing the report wording"
+
+  - name: a-reasoning-part-does-not-make-a-tool-turn
+    role: assistant
+    parts:
+      - '{"id":"prt_reason_only","type":"reasoning","text":"thinking with no tool call"}'
+    want_message_entry_type: text
+    want_turns:
+      - role: assistant
+        entry_type: thinking
+        content: "thinking with no tool call"

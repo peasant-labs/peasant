@@ -1,0 +1,61 @@
+# How many of a document's turns the renderer DRAWS, driven by
+# TestRender_DrawBoundFollowsHowTheTurnsGotHere
+# (internal/tui/transcriptview/draw_bound_test.go).
+#
+# There are two kinds of document and they answer this differently.
+#
+# A BOUNDED document is a transcript handed over whole. Nobody asked for turn
+# number nine hundred, so the renderer draws MaxRenderedTurns of them and says
+# how many it left out.
+#
+# An UNBOUNDED document holds turns the READER asked for, one scroll at a time.
+# Bounding that draw would make the pane stop growing while the loader kept
+# working - the reader scrolls, more loads, and the transcript on screen does
+# not change - which is the same thing as the feature not working. So every turn
+# is drawn and nothing is omitted.
+#
+# turnsOverBound is how far past MaxRenderedTurns the case's document runs; a
+# negative value stays under it. Each case names the turn numbers that must and
+# must not appear, relative to that bound, so an assertion cannot pass by
+# counting lines.
+#
+# requiredCases names the cases that must stay present; removing one goes red by
+# name. Adding a case need not appear here.
+requiredCases:
+  - a-whole-transcript-past-the-bound-draws-the-bound-and-says-what-it-left-out
+  - a-scrolled-transcript-past-the-bound-draws-every-turn-of-it
+  - a-whole-transcript-under-the-bound-draws-all-of-it-and-omits-nothing
+  - a-scrolled-transcript-under-the-bound-draws-all-of-it-and-omits-nothing
+
+cases:
+  - name: a-whole-transcript-past-the-bound-draws-the-bound-and-says-what-it-left-out
+    unbounded: false
+    turnsOverBound: 5
+    wantOmittedCount: 5
+    wantDrawnAtOffset: [-1]
+    wantNotDrawnAtOffset: [0, 4]
+
+  # The regression this file exists for. Before the unbounded document, a
+  # preview that loaded nine hundred turns by scrolling drew the first two
+  # hundred and summarized the other seven hundred away, so scrolling loaded
+  # content the reader could never see.
+  - name: a-scrolled-transcript-past-the-bound-draws-every-turn-of-it
+    unbounded: true
+    turnsOverBound: 5
+    wantOmittedCount: 0
+    wantDrawnAtOffset: [-1, 0, 4]
+    wantNotDrawnAtOffset: []
+
+  - name: a-whole-transcript-under-the-bound-draws-all-of-it-and-omits-nothing
+    unbounded: false
+    turnsOverBound: -5
+    wantOmittedCount: 0
+    wantDrawnAtOffset: [-6]
+    wantNotDrawnAtOffset: [-5]
+
+  - name: a-scrolled-transcript-under-the-bound-draws-all-of-it-and-omits-nothing
+    unbounded: true
+    turnsOverBound: -5
+    wantOmittedCount: 0
+    wantDrawnAtOffset: [-6]
+    wantNotDrawnAtOffset: [-5]

@@ -77,6 +77,17 @@ func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defa
 		)
 	}
 
+	return contentOverlayFromEntries(sourceEntries), nil
+}
+
+// contentOverlayFromEntries maps entry_index to the full content preview of
+// each re-indexed entry. A depth-0 wrapper with no content of its own inherits
+// its first depth-1 child's content (R6 content migration: depth-0 wrappers
+// have content_preview=NULL because the content moved to depth-1 children).
+// The child scan stops at the next depth-0 entry, so a depth-0 entry that
+// carries a ParentIndex (a harness message graph, see ingest.Turn.ParentIndex)
+// is never adopted as a child: children are found by Depth, not by ParentIndex.
+func contentOverlayFromEntries(sourceEntries []schema.SessionEntry) map[int]string {
 	overlay := make(map[int]string, len(sourceEntries))
 	for i := range sourceEntries {
 		e := &sourceEntries[i]
@@ -84,9 +95,6 @@ func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defa
 			overlay[e.EntryIndex] = *e.ContentPreview
 		}
 	}
-	// depth-0 wrappers with no content of their own inherit their first
-	// depth-1 child's content (R6 content migration: depth-0 wrappers have
-	// content_preview=NULL because the content moved to depth-1 children).
 	for i := range sourceEntries {
 		e := &sourceEntries[i]
 		if e.Depth == 0 && e.ContentPreview == nil {
@@ -102,7 +110,7 @@ func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defa
 			}
 		}
 	}
-	return overlay, nil
+	return overlay
 }
 
 // AnyContentTruncated reports whether ANY entry's ContentPreview was cut by

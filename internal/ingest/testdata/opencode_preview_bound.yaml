@@ -1,0 +1,163 @@
+# Cases for the byte-bounded preview read of one OpenCode session.
+#
+# Each case declares the payload byte length of every source row the fake source
+# serves, in the order the source serves it, plus the budget the read runs
+# under. A legacy case also declares its one message row's payload byte length,
+# because a legacy materialization reads the message table as well as the part
+# table and both spend the budget. second_message_bytes adds one more message
+# row after the first, with second_message_row_bytes as its own part rows, so a
+# case can stop the message pass short and show what happens to the parts of the
+# message it never read.
+#
+# expect_included_rows and expect_included_bytes are what reached the
+# PROJECTION, which is what the preview shows. A row the read paid for and then
+# left out - a part of a message the read stopped short of, or a control row -
+# is not counted here, so the note never claims to show something it dropped.
+#
+# expect_orphan_messages is the number of synthetic root attachments the
+# projection may carry. A part of a message the read merely stopped short of is
+# NOT an orphan, so that number stays zero unless the case declares real orphan
+# rows. The read must stop once the summed payload of the rows it took reaches
+# the budget, and must report what it left out. A budget of zero is the
+# whole-session read the ingest path uses, which can never truncate.
+#
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - legacy-session-within-budget-reads-whole-session
+  - legacy-session-over-budget-stops-at-the-first-rows
+  - legacy-unset-budget-reads-whole-session
+  - legacy-budget-met-exactly-by-the-first-row
+  - legacy-orphan-part-counts-toward-the-budget
+  - legacy-message-payload-alone-exhausts-the-budget
+  - legacy-parts-of-an-unread-message-are-not-orphans
+  - current-session-within-budget-reads-whole-session
+  - current-session-over-budget-stops-at-the-first-rows
+  - current-unset-budget-reads-whole-session
+cases:
+  - name: legacy-session-within-budget-reads-whole-session
+    origin: legacy
+    message_bytes: 64
+    row_bytes: [200, 200, 200]
+    orphan_rows: 0
+    budget_bytes: 4096
+    total_bytes: 664
+    total_rows: 4
+    expect_truncated: false
+    expect_included_rows: 0
+    expect_projection_rows: 3
+
+  - name: legacy-session-over-budget-stops-at-the-first-rows
+    origin: legacy
+    message_bytes: 64
+    row_bytes: [200, 200, 200, 200]
+    orphan_rows: 0
+    budget_bytes: 300
+    total_bytes: 864
+    total_rows: 5
+    expect_truncated: true
+    expect_included_rows: 3
+    expect_included_bytes: 464
+    expect_projection_rows: 2
+
+  - name: legacy-unset-budget-reads-whole-session
+    origin: legacy
+    message_bytes: 64
+    row_bytes: [200, 200, 200, 200]
+    orphan_rows: 0
+    budget_bytes: 0
+    total_bytes: 864
+    total_rows: 5
+    expect_truncated: false
+    expect_included_rows: 0
+    expect_projection_rows: 4
+
+  - name: legacy-budget-met-exactly-by-the-first-row
+    origin: legacy
+    message_bytes: 64
+    row_bytes: [200, 200]
+    orphan_rows: 0
+    budget_bytes: 264
+    total_bytes: 464
+    total_rows: 3
+    expect_truncated: true
+    expect_included_rows: 2
+    expect_included_bytes: 264
+    expect_projection_rows: 1
+
+  - name: legacy-orphan-part-counts-toward-the-budget
+    origin: legacy
+    message_bytes: 64
+    row_bytes: [200]
+    orphan_rows: 2
+    budget_bytes: 300
+    total_bytes: 664
+    total_rows: 4
+    expect_truncated: true
+    expect_included_rows: 3
+    expect_included_bytes: 464
+    expect_projection_rows: 2
+    expect_orphan_messages: 1
+
+  - name: legacy-parts-of-an-unread-message-are-not-orphans
+    origin: legacy
+    message_bytes: 200
+    row_bytes: [200]
+    second_message_bytes: 200
+    second_message_row_bytes: [200, 200]
+    orphan_rows: 0
+    budget_bytes: 800
+    total_bytes: 1000
+    total_rows: 5
+    expect_truncated: true
+    expect_included_rows: 2
+    expect_included_bytes: 400
+    expect_projection_rows: 1
+    expect_orphan_messages: 0
+
+  - name: legacy-message-payload-alone-exhausts-the-budget
+    origin: legacy
+    message_bytes: 4096
+    row_bytes: [200, 200]
+    orphan_rows: 0
+    budget_bytes: 1024
+    total_bytes: 4496
+    total_rows: 3
+    expect_truncated: true
+    expect_included_rows: 1
+    expect_included_bytes: 4096
+    expect_projection_rows: 0
+
+  - name: current-session-within-budget-reads-whole-session
+    origin: current
+    row_bytes: [200, 200, 200]
+    orphan_rows: 0
+    budget_bytes: 4096
+    total_bytes: 600
+    total_rows: 3
+    expect_truncated: false
+    expect_included_rows: 0
+    expect_projection_rows: 3
+
+  - name: current-session-over-budget-stops-at-the-first-rows
+    origin: current
+    row_bytes: [200, 200, 200, 200]
+    orphan_rows: 0
+    budget_bytes: 300
+    total_bytes: 800
+    total_rows: 4
+    expect_truncated: true
+    expect_included_rows: 2
+    expect_included_bytes: 400
+    expect_projection_rows: 2
+
+  - name: current-unset-budget-reads-whole-session
+    origin: current
+    row_bytes: [200, 200, 200, 200]
+    orphan_rows: 0
+    budget_bytes: 0
+    total_bytes: 800
+    total_rows: 4
+    expect_truncated: false
+    expect_included_rows: 0
+    expect_projection_rows: 4

@@ -230,8 +230,13 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return fmt.Errorf("set %s journal mode during setup: %w", fixtureCase.JournalMode, err)
 	}
 
-	if err := createSchema(conn, fixtureCase.Schema); err != nil {
+	if err := createSchema(conn, fixtureCase.Schema, fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0, fixtureCase.SessionExtended); err != nil {
 		return err
+	}
+	if (fixtureCase.Schema == schemaLegacy || fixtureCase.Schema == schemaCurrent || fixtureCase.Schema == schemaHybrid) && fixtureCase.SessionClock != sessionClockAbsent {
+		if err := insertSessionRows(conn, fixtureCase); err != nil {
+			return err
+		}
 	}
 	if err := insertLegacyMessages(conn, fixtureCase.LegacyMessages); err != nil {
 		return err
@@ -240,6 +245,9 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 		return err
 	}
 	if err := insertCurrentMessages(conn, fixtureCase.CurrentMessages); err != nil {
+		return err
+	}
+	if err := deleteSessionRows(conn, fixtureCase.DeletedSessionRows); err != nil {
 		return err
 	}
 	if err := createHistoryTables(conn, fixtureCase.IgnoredHistory); err != nil {
@@ -276,17 +284,32 @@ func applyCatalogPadding(conn *sqlite.Conn, padding catalogPaddingSpec) error {
 	return nil
 }
 
-func createSchema(conn *sqlite.Conn, schema schemaKind) error {
+func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution, extended bool) error {
+	sessionSchema := sessionSchemaSQL
+	if extended {
+		// The session table carries every column the extended record read
+		// consumes, mirroring the real OpenCode shape whose session row records
+		// the agent, token aggregates, cost, version, slug, and revert marker.
+		sessionSchema = sessionSchemaWithExtendedSQL
+	} else if attribution {
+		// The session table carries the working directory and title alongside the
+		// parent link, creation time, and clock, mirroring the real OpenCode shape.
+		sessionSchema = sessionSchemaWithAttributionSQL
+	} else if clock == sessionClockAbsent {
+		// A session table without the time_updated column has no usable clock,
+		// so discovery falls back to the database and WAL mtime floor.
+		sessionSchema = sessionSchemaNoClockSQL
+	}
 	var script string
 	switch schema {
 	case schemaEmpty:
 		script = `CREATE TABLE fixture_header_seed (id INTEGER); DROP TABLE fixture_header_seed;`
 	case schemaLegacy:
-		script = legacySchemaSQL
+		script = sessionSchema + legacySchemaSQL
 	case schemaCurrent:
-		script = currentSchemaSQL
+		script = sessionSchema + currentSchemaSQL
 	case schemaHybrid:
-		script = legacySchemaSQL + currentSchemaSQL
+		script = sessionSchema + legacySchemaSQL + currentSchemaSQL
 	case schemaCurrentMissingSeq:
 		script = currentMissingSeqSchemaSQL
 	case schemaCurrentNullableSeq:
@@ -303,6 +326,66 @@ func createSchema(conn *sqlite.Conn, schema schemaKind) error {
 	}
 	return nil
 }
+
+// sessionSchemaSQL mirrors the upstream session table columns that Peasant
+// reads: the parent link and the per-session update clock.
+const sessionSchemaSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0,
+  time_updated INTEGER NOT NULL DEFAULT 0
+);
+`
+
+// sessionSchemaWithAttributionSQL adds the working directory and title columns
+// to the session table alongside the parent link, creation time, and clock, so
+// the reader attributes a session to its directory, title, and creation time.
+const sessionSchemaWithAttributionSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0,
+  time_updated INTEGER NOT NULL DEFAULT 0,
+  directory TEXT,
+  title TEXT
+);
+`
+
+// sessionSchemaWithExtendedSQL mirrors the real OpenCode session table columns
+// the extended record read consumes: the base attribution columns plus the
+// agent label, the five token aggregates, cost, version, slug, and revert.
+const sessionSchemaWithExtendedSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0,
+  time_updated INTEGER NOT NULL DEFAULT 0,
+  directory TEXT,
+  title TEXT,
+  agent TEXT,
+  tokens_input INTEGER,
+  tokens_output INTEGER,
+  tokens_reasoning INTEGER,
+  tokens_cache_read INTEGER,
+  tokens_cache_write INTEGER,
+  cost REAL,
+  version TEXT,
+  slug TEXT,
+  revert TEXT
+);
+`
+
+// sessionSchemaNoClockSQL is an older session table with no update clock, so
+// discovery reports no usable clock and every session falls back to the
+// database and WAL mtime floor. It exercises the floor path end to end.
+const sessionSchemaNoClockSQL = `
+CREATE TABLE session (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT,
+  time_created INTEGER NOT NULL DEFAULT 0
+);
+`
 
 const legacySchemaSQL = `
 CREATE TABLE message (
@@ -325,7 +408,6 @@ CREATE INDEX part_message_id_idx ON part(message_id, id);
 `
 
 const currentSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -341,7 +423,7 @@ CREATE INDEX session_message_seq_idx ON session_message(seq);
 `
 
 const currentMissingSeqSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -355,7 +437,7 @@ CREATE INDEX session_message_session_idx ON session_message(session_id);
 `
 
 const currentNullableSeqSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -370,7 +452,7 @@ CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message(session_i
 `
 
 const currentPartialSeqSchemaSQL = `
-CREATE TABLE session (id TEXT PRIMARY KEY);
+CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
 CREATE TABLE session_message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -404,15 +486,109 @@ func insertLegacyParts(conn *sqlite.Conn, rows []legacyPart) error {
 	return nil
 }
 
-func insertCurrentMessages(conn *sqlite.Conn, rows []currentMessage) error {
-	seenSessions := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if _, exists := seenSessions[row.SessionID]; !exists {
-			if err := sqlitex.Execute(conn, `INSERT INTO session (id) VALUES (?1);`, &sqlitex.ExecOptions{Args: []any{row.SessionID}}); err != nil {
-				return fmt.Errorf("insert synthetic current session %q with explicit columns: %w", row.SessionID, err)
-			}
-			seenSessions[row.SessionID] = struct{}{}
+// insertSessionRows writes one session row per distinct session id. The
+// session clock mirrors upstream: time_updated is the newest row time of the
+// session, so a later row change or an upstream revert moves it.
+func insertSessionRows(conn *sqlite.Conn, fixtureCase caseSpec) error {
+	type clock struct{ created, updated int64 }
+	clocks := make(map[string]clock)
+	order := make([]string, 0)
+	observe := func(sessionID string, created, updated int64) {
+		value, exists := clocks[sessionID]
+		if !exists {
+			order = append(order, sessionID)
+			value = clock{created: created, updated: updated}
 		}
+		if created < value.created {
+			value.created = created
+		}
+		if updated > value.updated {
+			value.updated = updated
+		}
+		if created > value.updated {
+			value.updated = created
+		}
+		clocks[sessionID] = value
+	}
+	for _, row := range fixtureCase.LegacyMessages {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
+	for _, row := range fixtureCase.LegacyParts {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
+	for _, row := range fixtureCase.CurrentMessages {
+		observe(row.SessionID, row.TimeCreated, row.TimeUpdated)
+	}
+	attribution := make(map[string]sessionAttribution, len(fixtureCase.SessionAttribution))
+	for _, row := range fixtureCase.SessionAttribution {
+		attribution[row.SessionID] = row
+	}
+	hasAttribution := len(fixtureCase.SessionAttribution) > 0
+	for _, sessionID := range order {
+		value := clocks[sessionID]
+		updated := value.updated
+		if fixtureCase.SessionClock == sessionClockLagging {
+			// The clock lags the session's row times, so the newest row time,
+			// not the clock, is the changed time and a row change is still seen.
+			updated = value.created
+		}
+		if fixtureCase.SessionExtended {
+			// The extended session table records the agent label, token aggregates,
+			// cost, version, slug, and revert marker alongside the attribution, so
+			// the production extended-record read carries them into discovery.
+			row := attribution[sessionID]
+			if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated, directory, title, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated, nullableText(row.Directory), nullableText(row.Title), nullableText(row.Agent), row.TokensInput, row.TokensOutput, row.TokensReasoning, row.TokensCacheRead, row.TokensCacheWrite, row.Cost, nullableText(row.Version), nullableText(row.Slug), nullableText(row.Revert)}}); err != nil {
+				return fmt.Errorf("insert synthetic session %q with extended columns: %w", sessionID, err)
+			}
+			continue
+		}
+		if hasAttribution {
+			// A session absent from the attribution list keeps a null directory
+			// and title, so the reader still yields empty attribution for it.
+			row := attribution[sessionID]
+			if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated, directory, title) VALUES (?1, ?2, ?3, ?4, ?5);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated, nullableText(row.Directory), nullableText(row.Title)}}); err != nil {
+				return fmt.Errorf("insert synthetic session %q with attribution columns: %w", sessionID, err)
+			}
+			continue
+		}
+		if err := sqlitex.Execute(conn, `INSERT INTO session (id, time_created, time_updated) VALUES (?1, ?2, ?3);`, &sqlitex.ExecOptions{Args: []any{sessionID, value.created, updated}}); err != nil {
+			return fmt.Errorf("insert synthetic session %q with explicit columns: %w", sessionID, err)
+		}
+	}
+	return nil
+}
+
+// nullableText returns nil for an empty attribution value so the session row
+// carries a SQL null, which the reader reports as an empty field.
+func nullableText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+// deleteSessionRows removes the named session rows while leaving their message
+// and session_message rows in place. Foreign keys stay disabled during the
+// delete so the cascade does not remove the historical rows the deletion case
+// relies on, modelling a session OpenCode dropped from its session list while
+// its rows linger.
+func deleteSessionRows(conn *sqlite.Conn, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := sqlitex.Execute(conn, `PRAGMA foreign_keys=OFF;`, nil); err != nil {
+		return fmt.Errorf("disable foreign keys before removing synthetic session rows: %w", err)
+	}
+	for _, id := range ids {
+		if err := sqlitex.Execute(conn, `DELETE FROM session WHERE id = ?1;`, &sqlitex.ExecOptions{Args: []any{id}}); err != nil {
+			return fmt.Errorf("remove synthetic session row %q: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func insertCurrentMessages(conn *sqlite.Conn, rows []currentMessage) error {
+	for _, row := range rows {
 		const query = `INSERT INTO session_message (id, session_id, type, time_created, time_updated, data, seq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);`
 		if err := sqlitex.Execute(conn, query, &sqlitex.ExecOptions{Args: []any{row.ID, row.SessionID, row.Type, row.TimeCreated, row.TimeUpdated, row.Data, row.Seq}}); err != nil {
 			return fmt.Errorf("insert synthetic current message %q with explicit columns: %w", row.ID, err)

@@ -1,0 +1,42 @@
+# Cases for the OpenCode change cursor as an additional trigger over the session
+# clock. ingested_ms is the last ingest time the store recorded; mod_time_ms is
+# the discovered session's changed time; stored_seq is the cursor the store holds
+# (tracked=false means no cursor is stored yet); event_seq is the session's
+# current newest sequence. expect is the resulting diff status. One YAML file
+# drives every case.
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - in-place-rewrite-bumps-seq
+  - clock-and-seq-both-unchanged
+  - clock-moved-is-primary-signal
+  - first-sighting-without-stored-cursor-stays-unchanged
+cases:
+  - name: in-place-rewrite-bumps-seq
+    ingested_ms: 1000
+    mod_time_ms: 1000
+    tracked: true
+    stored_seq: 10
+    event_seq: 11
+    expect: updated
+  - name: clock-and-seq-both-unchanged
+    ingested_ms: 1000
+    mod_time_ms: 1000
+    tracked: true
+    stored_seq: 11
+    event_seq: 11
+    expect: unchanged
+  - name: clock-moved-is-primary-signal
+    ingested_ms: 1000
+    mod_time_ms: 2000
+    tracked: true
+    stored_seq: 10
+    event_seq: 10
+    expect: updated
+  - name: first-sighting-without-stored-cursor-stays-unchanged
+    ingested_ms: 1000
+    mod_time_ms: 1000
+    tracked: false
+    stored_seq: 0
+    event_seq: 11
+    expect: unchanged

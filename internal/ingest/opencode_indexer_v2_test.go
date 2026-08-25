@@ -186,8 +186,10 @@ func TestOpenCodeIndexer_FullDepthPartDecomposition(t *testing.T) {
 	}
 	if e3.ToolOutput == nil {
 		t.Error("e3 tool_output: expected non-nil")
-	} else if *e3.ToolOutput != `"file content here"` {
-		t.Errorf("e3 tool_output: expected %q, got %q", `"file content here"`, *e3.ToolOutput)
+	} else if *e3.ToolOutput != "file content here" {
+		// A JSON string output is unwrapped to its plain text, the same shape
+		// the Claude reader stores, so one renderer shows both harnesses.
+		t.Errorf("e3 tool_output: expected %q, got %q", "file content here", *e3.ToolOutput)
 	}
 	if e3.ToolCallID == nil || *e3.ToolCallID != "part_003_result" {
 		t.Errorf("e3 tool_call_id: expected %q, got %v", "part_003_result", e3.ToolCallID)

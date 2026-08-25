@@ -1,0 +1,122 @@
+# Two-step (progressive) preview loading for kit.PreviewSplit, driven by
+# TestPreviewSplit_ProgressiveLoad (internal/tui/kit/previewsplit_progressive_test.go).
+#
+# A source that implements kit.ProgressiveBodySource answers a load in two
+# steps: a slice that is quick to read, then the whole body. The split paints
+# the slice at once, says in its own chrome that it is still reading, and swaps
+# the whole body in when it arrives.
+#
+# The two bodies carry DIFFERENT line prefixes on purpose - `slice-NN` and
+# `whole-NN` - so every assertion below names which of the two the pane is
+# showing, rather than inferring it from how much content is on screen.
+#
+# Each case runs one load, applies `midPresses` between the two steps (what the
+# user did while the rest was still being read), then delivers the second step.
+#
+# requiredCases names the cases that must stay present; removing one goes red by
+# name. Adding a case need not appear here.
+requiredCases:
+  - a-progressive-source-paints-the-slice-then-swaps-in-the-whole-body
+  - a-progressive-source-with-nothing-more-never-reads-the-whole-body
+  - a-plain-body-source-keeps-its-single-step-load
+  - an-unscrolled-swap-keeps-the-view-at-the-top
+  - a-scrolled-swap-keeps-the-offset-the-reader-is-at
+  - a-highlight-change-discards-the-whole-body-still-being-read
+
+width: 40
+height: 6
+# The slice must be taller than the pane so a case can scroll inside it before
+# the whole body arrives.
+sliceLines: 12
+wholeLines: 40
+items: [alpha, bravo, charlie]
+
+cases:
+  - name: a-progressive-source-paints-the-slice-then-swaps-in-the-whole-body
+    progressive: true
+    more: true
+    midPresses: []
+    wantFirstVisible: [slice-00]
+    wantFirstMissing: [whole-00, loading preview]
+    wantFirstRestPending: true
+    wantFinalVisible: [whole-00]
+    wantFinalMissing: [slice-00]
+    wantFinalRestPending: false
+    wantWholeBodyRead: true
+    wantHighlight: alpha
+
+  - name: a-progressive-source-with-nothing-more-never-reads-the-whole-body
+    progressive: true
+    more: false
+    midPresses: []
+    wantFirstVisible: [slice-00]
+    wantFirstMissing: [whole-00]
+    wantFirstRestPending: false
+    wantFinalVisible: [slice-00]
+    wantFinalMissing: [whole-00]
+    wantFinalRestPending: false
+    wantWholeBodyRead: false
+    wantFinalTopLine: slice-00
+    wantHighlight: alpha
+
+  - name: a-plain-body-source-keeps-its-single-step-load
+    progressive: false
+    more: false
+    midPresses: []
+    wantFirstVisible: [whole-00]
+    wantFirstMissing: [slice-00]
+    wantFirstRestPending: false
+    wantFinalVisible: [whole-00]
+    wantFinalMissing: [slice-00]
+    wantFinalRestPending: false
+    wantWholeBodyRead: true
+    wantFinalTopLine: whole-00
+    wantHighlight: alpha
+
+  # The reader has not moved, so the whole body must arrive at the top rather
+  # than at some offset the slice happened to leave behind.
+  - name: an-unscrolled-swap-keeps-the-view-at-the-top
+    progressive: true
+    more: true
+    midPresses: []
+    wantFirstVisible: [slice-00]
+    wantFirstMissing: [whole-00]
+    wantFirstRestPending: true
+    wantFinalVisible: [whole-00]
+    wantFinalMissing: [slice-00]
+    wantFinalRestPending: false
+    wantWholeBodyRead: true
+    wantFinalTopLine: whole-00
+    wantHighlight: alpha
+
+  # The reader scrolled three rows into the slice while the rest was loading, so
+  # the whole body must arrive at row three, not back at the top.
+  - name: a-scrolled-swap-keeps-the-offset-the-reader-is-at
+    progressive: true
+    more: true
+    midPresses: [ctrl+l, down, down, down]
+    wantFirstVisible: [slice-00]
+    wantFirstMissing: [whole-00]
+    wantFirstRestPending: true
+    wantFinalVisible: [whole-02]
+    wantFinalMissing: [whole-00, slice-02]
+    wantFinalRestPending: false
+    wantWholeBodyRead: true
+    wantFinalTopLine: whole-02
+    wantHighlight: alpha
+
+  # Moving the highlight supersedes the whole load, both steps of it. The late
+  # whole body belongs to a session the pane no longer shows, so it must be
+  # dropped rather than painted over the newly-highlighted one.
+  - name: a-highlight-change-discards-the-whole-body-still-being-read
+    progressive: true
+    more: true
+    midPresses: [down]
+    wantFirstVisible: [slice-00]
+    wantFirstMissing: [whole-00]
+    wantFirstRestPending: true
+    wantFinalVisible: [loading preview]
+    wantFinalMissing: [whole-00, slice-00]
+    wantFinalRestPending: false
+    wantWholeBodyRead: true
+    wantHighlight: bravo

@@ -1,0 +1,22 @@
+# Expectations for the tolerated legacy part vocabulary case. A well-formed part
+# whose declared type is outside the known set no longer fails the session: a
+# text-bearing unknown part becomes an inert system note, a text-free one is
+# dropped, and one diagnostic per distinct unknown type names the type and how
+# many rows it covered. The known parts keep their exact prior rendering.
+# required_cases names the cases that must stay present. Removing one goes red
+# by name; adding a case need not appear here. The list, not a count, guards.
+required_cases:
+  - legacy-step-start-and-file-tolerated
+cases:
+  - name: legacy-step-start-and-file-tolerated
+    source_fixture: legacy-unknown-part-vocabulary
+    session_id: ses_3cd91f52effeXd3QAJ54jUnkv1
+    expected_known_markers: [synthetic request]
+    expected_tool_name: read
+    expected_tool_calls: 1
+    expected_inert_note: a newer note kind that still carries text
+    forbidden_markers: [deadbeefsnapshot]
+    expected_unknown_types:
+      - {type: file, count: 1}
+      - {type: future-notice, count: 1}
+      - {type: step-start, count: 1}

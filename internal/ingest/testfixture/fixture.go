@@ -15,8 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const expectedCaseCount = 23
-
 //go:embed testdata/opencode_sqlite.yaml
 var fixtureYAML []byte
 
@@ -47,6 +45,31 @@ const (
 	journalWAL    journalMode = "wal"
 )
 
+// sessionClockMode controls how the synthetic session table carries the
+// per-session update clock, so tests can cover the floor path and clock lag.
+type sessionClockMode string
+
+const (
+	// sessionClockMirror advances time_updated to the newest row time, so the
+	// clock never lags. It is the default upstream-faithful behaviour.
+	sessionClockMirror sessionClockMode = ""
+	// sessionClockLagging leaves time_updated behind the newest row time, so
+	// the newest row time is the changed time and a row change is still seen.
+	sessionClockLagging sessionClockMode = "lagging"
+	// sessionClockAbsent omits the time_updated column, so the session has no
+	// usable clock and freshness falls back to the database and WAL mtime floor.
+	sessionClockAbsent sessionClockMode = "absent"
+)
+
+func (m sessionClockMode) validate() error {
+	switch m {
+	case sessionClockMirror, sessionClockLagging, sessionClockAbsent:
+		return nil
+	default:
+		return fmt.Errorf("unknown session clock mode %q", m)
+	}
+}
+
 type corruptionKind string
 
 const (
@@ -66,7 +89,7 @@ const (
 )
 
 type corpus struct {
-	DeclaredCases int        `yaml:"declared_cases"`
+	RequiredCases []string   `yaml:"required_cases"`
 	Cases         []caseSpec `yaml:"cases"`
 }
 
@@ -76,6 +99,7 @@ type caseSpec struct {
 	Format          sourceFormat        `yaml:"format"`
 	Schema          schemaKind          `yaml:"schema"`
 	JournalMode     journalMode         `yaml:"journal_mode"`
+	SessionClock    sessionClockMode    `yaml:"session_clock"`
 	Corruption      corruptionKind      `yaml:"corruption"`
 	DeclaredRows    declaredRowCounts   `yaml:"declared_rows"`
 	ExpectedCatalog expectedCatalogSpec `yaml:"expected_catalog"`
@@ -84,6 +108,43 @@ type caseSpec struct {
 	LegacyParts     []legacyPart        `yaml:"legacy_parts"`
 	CurrentMessages []currentMessage    `yaml:"current_messages"`
 	IgnoredHistory  []historyRow        `yaml:"ignored_history"`
+	// DeletedSessionRows names sessions whose session-table row is removed after
+	// materialization while their message or session_message rows remain. This
+	// models a session OpenCode deleted from its authoritative session list while
+	// its historical rows linger, so discovery can prove that a deleted session
+	// is skipped rather than resurrected.
+	DeletedSessionRows []string `yaml:"deleted_session_rows"`
+	// SessionAttribution adds the directory and title columns to the session
+	// table and sets them for the named sessions, modelling the real OpenCode
+	// shape whose session row carries its working directory, title, and creation
+	// time. A session that has a row but is absent from this list keeps a null
+	// directory and title, so the reader still yields empty attribution for it.
+	SessionAttribution []sessionAttribution `yaml:"session_attribution"`
+	// SessionExtended widens the synthetic session table to the full column set
+	// the record read consumes: the base attribution columns plus agent, the five
+	// token aggregates, cost, version, slug, and revert. The attribution rows then
+	// set those columns, so discovery reads the session statistics, identity, and
+	// agent label through the production extended-record path.
+	SessionExtended bool `yaml:"session_extended"`
+}
+
+// sessionAttribution is one session row's working directory, title, and, when
+// the case is extended, its agent label, token aggregates, cost, version, slug,
+// and revert marker.
+type sessionAttribution struct {
+	SessionID        string  `yaml:"session_id"`
+	Directory        string  `yaml:"directory"`
+	Title            string  `yaml:"title"`
+	Agent            string  `yaml:"agent"`
+	TokensInput      int64   `yaml:"tokens_input"`
+	TokensOutput     int64   `yaml:"tokens_output"`
+	TokensReasoning  int64   `yaml:"tokens_reasoning"`
+	TokensCacheRead  int64   `yaml:"tokens_cache_read"`
+	TokensCacheWrite int64   `yaml:"tokens_cache_write"`
+	Cost             float64 `yaml:"cost"`
+	Version          string  `yaml:"version"`
+	Slug             string  `yaml:"slug"`
+	Revert           string  `yaml:"revert"`
 }
 
 type catalogPaddingSpec struct {
@@ -190,13 +251,8 @@ func loadCorpus(data []byte) (corpus, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return corpus{}, fmt.Errorf("decode synthetic OpenCode source fixtures: expected exactly one YAML document: %w", err)
 	}
-	if expectedCaseCount == 0 || fixtures.DeclaredCases != expectedCaseCount || len(fixtures.Cases) != expectedCaseCount {
-		return corpus{}, fmt.Errorf(
-			"validate synthetic OpenCode source fixture row guard: declared cases=%d, actual=%d, required nonzero count=%d",
-			fixtures.DeclaredCases,
-			len(fixtures.Cases),
-			expectedCaseCount,
-		)
+	if len(fixtures.RequiredCases) == 0 {
+		return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required_cases must name at least one case")
 	}
 
 	names := make(map[string]struct{}, len(fixtures.Cases))
@@ -209,6 +265,19 @@ func loadCorpus(data []byte) (corpus, error) {
 			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixtures: duplicate case name %q", fixtureCase.Name)
 		}
 		names[fixtureCase.Name] = struct{}{}
+	}
+	seenRequired := make(map[string]struct{}, len(fixtures.RequiredCases))
+	for _, required := range fixtures.RequiredCases {
+		if required == "" {
+			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required_cases contains an empty name")
+		}
+		if _, duplicate := seenRequired[required]; duplicate {
+			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required_cases repeats %q", required)
+		}
+		seenRequired[required] = struct{}{}
+		if _, present := names[required]; !present {
+			return corpus{}, fmt.Errorf("validate synthetic OpenCode source fixture row guard: required case %q is missing", required)
+		}
 	}
 	return fixtures, nil
 }
@@ -224,8 +293,8 @@ func (c caseSpec) validate() error {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
 	}
 	if c.Format == sourceFormatCorrupt {
-		if c.Schema != "" || c.JournalMode != "" {
-			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources must not declare a SQLite schema or journal mode", c.Name)
+		if c.Schema != "" || c.JournalMode != "" || c.SessionClock != sessionClockMirror {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources must not declare a SQLite schema, journal mode, or session clock", c.Name)
 		}
 		if err := c.Corruption.validate(); err != nil {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt source has invalid evidence: %w", c.Name, err)
@@ -246,6 +315,12 @@ func (c caseSpec) validate() error {
 		if c.Corruption != corruptionNone {
 			return fmt.Errorf("validate synthetic OpenCode source fixture %q: SQLite sources must not declare corruption %q", c.Name, c.Corruption)
 		}
+		if err := c.SessionClock.validate(); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
+		}
+		if c.SessionClock != sessionClockMirror && c.Schema != schemaLegacy && c.Schema != schemaCurrent && c.Schema != schemaHybrid {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: session clock mode %q requires a legacy, current, or hybrid schema", c.Name, c.SessionClock)
+		}
 	}
 	if err := c.CatalogPadding.validate(c.Schema); err != nil {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q catalog padding: %w", c.Name, err)
@@ -259,7 +334,39 @@ func (c caseSpec) validate() error {
 	if err := c.validateRows(); err != nil {
 		return err
 	}
+	if err := c.validateSessionAttribution(); err != nil {
+		return err
+	}
 	return c.validateSchemaRows()
+}
+
+func (c caseSpec) validateSessionAttribution() error {
+	if len(c.SessionAttribution) == 0 {
+		if c.SessionExtended {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: an extended session table requires session attribution rows", c.Name)
+		}
+		return nil
+	}
+	if c.Format == sourceFormatCorrupt {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: corrupt sources cannot declare session attribution", c.Name)
+	}
+	if c.Schema != schemaLegacy && c.Schema != schemaCurrent && c.Schema != schemaHybrid {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: session attribution requires a legacy, current, or hybrid schema", c.Name)
+	}
+	if c.SessionClock == sessionClockAbsent {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: session attribution requires the session clock column", c.Name)
+	}
+	seen := make(map[string]struct{}, len(c.SessionAttribution))
+	for index, row := range c.SessionAttribution {
+		if err := requiredToken("session attribution session id", row.SessionID); err != nil {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q session attribution %d: %w", c.Name, index, err)
+		}
+		if _, duplicate := seen[row.SessionID]; duplicate {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: duplicate session attribution for %q", c.Name, row.SessionID)
+		}
+		seen[row.SessionID] = struct{}{}
+	}
+	return nil
 }
 
 func (p catalogPaddingSpec) validate(schema schemaKind) error {

@@ -1,4 +1,45 @@
-declared_cases: 23
+# required_cases names the cases that must remain present. Removing one goes
+# red by name; adding a new case need not appear here. The list, not a count,
+# is the deletion guard.
+required_cases:
+  - empty-valid
+  - legacy-message-part
+  - current-session-message
+  - legacy-reader-pages
+  - legacy-reader-wal
+  - hybrid-catalog
+  - current-missing-seq
+  - unsupported-schema
+  - current-nullable-seq
+  - corrupt-non-sqlite
+  - wal-capable
+  - repeated-history-distractors
+  - missing-parent
+  - truncated-sqlite-header
+  - catalog-table-overflow
+  - catalog-column-overflow
+  - catalog-index-overflow
+  - legacy-mounted-projection
+  - current-reader-pages
+  - current-reader-wal
+  - current-partial-ordering-index
+  - semantic-parity-legacy
+  - semantic-parity-current
+  - canonical-selection-mixed
+  - hybrid-deleted-sessions-skipped
+  - legacy-orphan-tolerance
+  - session-records-degrade
+  - session-parent-no-clock
+  - session-clock-present-and-absent
+  - session-clock-absent-floor
+  - session-clock-lagging
+  - hybrid-attribution
+  - extended-attribution
+  - legacy-unknown-part-vocabulary
+  - current-control-rows-tolerated
+  - content-aware-selection
+  - legacy-scrollable-session
+  - legacy-out-of-order-parts
 cases:
   - name: empty-valid
     logical_path: stable/opencode.db
@@ -32,7 +73,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -103,7 +144,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -172,7 +213,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -428,7 +469,7 @@ cases:
       current_messages: 0
       ignored_history: 0
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages: []
@@ -518,7 +559,7 @@ cases:
     corruption: ""
     declared_rows: {legacy_messages: 3, legacy_parts: 5, current_messages: 0, ignored_history: 0}
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -684,7 +725,7 @@ cases:
     corruption: ""
     declared_rows: {legacy_messages: 6, legacy_parts: 7, current_messages: 0, ignored_history: 0}
     expected_catalog:
-      tables: [message, part]
+      tables: [message, part, session]
       indexes: [message_session_time_idx, part_message_id_idx]
       seq: absent
     legacy_messages:
@@ -727,3 +768,528 @@ cases:
       - {id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: model-switched, time_created: 1140, time_updated: 1140, data: '{"id":"msg_06_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":1140}}', seq: 23}
     ignored_history:
       - {kind: event, id: ignored_semantic_history, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, stable_id: msg_02_assistant, time_created: 1019, data: '{"marker":"HISTORY_MUST_NOT_APPEAR"}'}
+
+  - name: canonical-selection-mixed
+    logical_path: selection/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 5, legacy_parts: 6, current_messages: 7, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - {id: msg_legacy_all, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1000, time_updated: 1010, data: '{"id":"msg_legacy_all","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1000,"completed":1010},"content":"legacy all"}'}
+      - {id: msg_legacy_current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, time_created: 1100, time_updated: 1110, data: '{"id":"msg_legacy_current","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv6","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1100,"completed":1110},"content":"legacy current"}'}
+      - {id: msg_legacy_json, session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, time_created: 1200, time_updated: 1210, data: '{"id":"msg_legacy_json","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv8","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1200,"completed":1210},"content":"legacy json"}'}
+      - {id: msg_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, time_created: 1300, time_updated: 1310, data: '{"id":"msg_legacy_only","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvA","role":"user","path":{"cwd":"/synthetic/selection"},"time":{"created":1300,"completed":1310},"content":"legacy only"}'}
+      - {id: msg_legacy_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1400, time_updated: 1410, data: '{"id":"msg_legacy_parent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvD","role":"user","parentID":"msg_absent","path":{"cwd":"/synthetic/selection"},"time":{"created":1400,"completed":1410},"content":"legacy parent"}'}
+    legacy_parts:
+      - {id: part_legacy_all, message_id: msg_legacy_all, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1001, time_updated: 1001, data: '{"id":"part_legacy_all","messageID":"msg_legacy_all","type":"text","text":"LEGACY_ALL","time":{"created":1001}}'}
+      - {id: part_legacy_current, message_id: msg_legacy_current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, time_created: 1101, time_updated: 1101, data: '{"id":"part_legacy_current","messageID":"msg_legacy_current","type":"text","text":"LEGACY_CURRENT","time":{"created":1101}}'}
+      - {id: part_legacy_json, message_id: msg_legacy_json, session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, time_created: 1201, time_updated: 1201, data: '{"id":"part_legacy_json","messageID":"msg_legacy_json","type":"text","text":"LEGACY_JSON","time":{"created":1201}}'}
+      - {id: part_legacy_only, message_id: msg_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, time_created: 1301, time_updated: 1301, data: '{"id":"part_legacy_only","messageID":"msg_legacy_only","type":"text","text":"LEGACY_ONLY","time":{"created":1301}}'}
+      - {id: part_legacy_parent, message_id: msg_legacy_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1401, time_updated: 1401, data: '{"id":"part_legacy_parent","messageID":"msg_legacy_parent","type":"text","text":"LEGACY_PARENT","time":{"created":1401}}'}
+      - {id: part_legacy_orphan, message_id: msg_missing_part_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1402, time_updated: 1402, data: '{"id":"part_legacy_orphan","messageID":"msg_missing_part_parent","type":"text","text":"LEGACY_ORPHAN_PART","time":{"created":1402}}'}
+    current_messages:
+      - {id: msg_current_all, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: user, time_created: 2000, time_updated: 2010, data: '{"id":"msg_current_all","text":"CURRENT_ALL","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2000}}', seq: 1}
+      - {id: msg_current_legacy, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, type: user, time_created: 2100, time_updated: 2110, data: '{"id":"msg_current_legacy","text":"CURRENT_LEGACY","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2100}}', seq: 1}
+      - {id: msg_current_json, session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, type: user, time_created: 2200, time_updated: 2210, data: '{"id":"msg_current_json","text":"CURRENT_JSON","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2200}}', seq: 1}
+      - {id: msg_current_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzv9, type: user, time_created: 2300, time_updated: 2310, data: '{"id":"msg_current_only","text":"CURRENT_ONLY","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2300}}', seq: 1}
+      - {id: msg_current_root, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: user, time_created: 2400, time_updated: 2410, data: '{"id":"msg_current_root","text":"CURRENT_ROOT","files":[],"agents":[],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2400}}', seq: 1}
+      - {id: msg_current_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2411, time_updated: 2420, data: '{"id":"msg_current_child","parentID":"msg_current_root","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_current_parent","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"CURRENT_TOOL_RESULT"}],"result":"CURRENT_TOOL_RESULT"},"time":{"created":2412,"completed":2419}}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2411,"completed":2420}}', seq: 2}
+      - {id: msg_current_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, type: assistant, time_created: 2421, time_updated: 2430, data: '{"id":"msg_current_parent","parentID":"msg_absent","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","id":"part_current_parent","text":"CURRENT_PARENT"}],"metadata":{"cwd":"/synthetic/selection"},"time":{"created":2421,"completed":2430}}', seq: 3}
+    ignored_history: []
+
+  - name: hybrid-deleted-sessions-skipped
+    logical_path: hybriddeleted/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 3, legacy_parts: 3, current_messages: 2, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - {id: msg_del_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzG1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_del_legacy_only","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzG1","role":"user","path":{"cwd":"/synthetic/deleted"},"time":{"created":1000,"completed":1010},"content":"legacy only survivor"}'}
+      - {id: msg_del_both, session_id: ses_3cd91f52effeXd3QAJ54jOyzG2, time_created: 1100, time_updated: 1110, data: '{"id":"msg_del_both","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzG2","role":"user","path":{"cwd":"/synthetic/deleted"},"time":{"created":1100,"completed":1110},"content":"legacy side of both"}'}
+      - {id: msg_del_legacy_gone, session_id: ses_3cd91f52effeXd3QAJ54jOyzG3, time_created: 1200, time_updated: 1210, data: '{"id":"msg_del_legacy_gone","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzG3","role":"user","path":{"cwd":"/synthetic/deleted"},"time":{"created":1200,"completed":1210},"content":"legacy row of a deleted session"}'}
+    legacy_parts:
+      - {id: part_del_legacy_only, message_id: msg_del_legacy_only, session_id: ses_3cd91f52effeXd3QAJ54jOyzG1, time_created: 1001, time_updated: 1001, data: '{"id":"part_del_legacy_only","messageID":"msg_del_legacy_only","type":"text","text":"DEL_LEGACY_ONLY","time":{"created":1001}}'}
+      - {id: part_del_both, message_id: msg_del_both, session_id: ses_3cd91f52effeXd3QAJ54jOyzG2, time_created: 1101, time_updated: 1101, data: '{"id":"part_del_both","messageID":"msg_del_both","type":"text","text":"DEL_BOTH","time":{"created":1101}}'}
+      - {id: part_del_legacy_gone, message_id: msg_del_legacy_gone, session_id: ses_3cd91f52effeXd3QAJ54jOyzG3, time_created: 1201, time_updated: 1201, data: '{"id":"part_del_legacy_gone","messageID":"msg_del_legacy_gone","type":"text","text":"DEL_LEGACY_GONE","time":{"created":1201}}'}
+    current_messages:
+      - {id: sm_del_both, session_id: ses_3cd91f52effeXd3QAJ54jOyzG2, type: message, time_created: 2100, time_updated: 2110, data: '{"role":"assistant","parts":[{"type":"text","text":"current side of both"}]}', seq: 0}
+      - {id: sm_del_current_gone, session_id: ses_3cd91f52effeXd3QAJ54jOyzG4, type: message, time_created: 2200, time_updated: 2210, data: '{"role":"assistant","parts":[{"type":"text","text":"current row of a deleted session"}]}', seq: 0}
+    deleted_session_rows: [ses_3cd91f52effeXd3QAJ54jOyzG3, ses_3cd91f52effeXd3QAJ54jOyzG4]
+    ignored_history: []
+
+  - name: legacy-orphan-tolerance
+    logical_path: orphantolerance/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 1, legacy_parts: 1, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_orphan_host, session_id: ses_3cd91f52effeXd3QAJ54jOyzO1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_orphan_host","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzO1","role":"user","path":{"cwd":"/synthetic/orphan"},"time":{"created":1000,"completed":1010},"content":"host message"}'}
+    legacy_parts:
+      - {id: part_orphan_host, message_id: msg_orphan_host, session_id: ses_3cd91f52effeXd3QAJ54jOyzO1, time_created: 1001, time_updated: 1001, data: '{"id":"part_orphan_host","messageID":"msg_orphan_host","type":"text","text":"ORPHAN_HOST","time":{"created":1001}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-records-degrade
+    logical_path: recordsdegrade/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 2, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_deg_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzB1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_deg_child","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzB1","role":"user","path":{"cwd":"/synthetic/degrade"},"time":{"created":1000,"completed":1010},"content":"good child"}'}
+      - {id: msg_deg_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzB2, time_created: 900, time_updated: 910, data: '{"id":"msg_deg_parent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzB2","role":"user","path":{"cwd":"/synthetic/degrade"},"time":{"created":900,"completed":910},"content":"parent with a corrupt row"}'}
+    legacy_parts:
+      - {id: part_deg_child, message_id: msg_deg_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzB1, time_created: 1001, time_updated: 1001, data: '{"id":"part_deg_child","messageID":"msg_deg_child","type":"text","text":"DEG_CHILD","time":{"created":1001}}'}
+      - {id: part_deg_parent, message_id: msg_deg_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzB2, time_created: 901, time_updated: 901, data: '{"id":"part_deg_parent","messageID":"msg_deg_parent","type":"text","text":"DEG_PARENT","time":{"created":901}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-parent-no-clock
+    logical_path: parentnoclock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    session_clock: absent
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 2, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_pnc_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzP1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_pnc_child","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzP1","role":"user","path":{"cwd":"/synthetic/pnc"},"time":{"created":1000,"completed":1010},"content":"child without clock"}'}
+      - {id: msg_pnc_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzP2, time_created: 900, time_updated: 910, data: '{"id":"msg_pnc_parent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzP2","role":"user","path":{"cwd":"/synthetic/pnc"},"time":{"created":900,"completed":910},"content":"parent without clock"}'}
+    legacy_parts:
+      - {id: part_pnc_child, message_id: msg_pnc_child, session_id: ses_3cd91f52effeXd3QAJ54jOyzP1, time_created: 1001, time_updated: 1001, data: '{"id":"part_pnc_child","messageID":"msg_pnc_child","type":"text","text":"PNC_CHILD","time":{"created":1001}}'}
+      - {id: part_pnc_parent, message_id: msg_pnc_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzP2, time_created: 901, time_updated: 901, data: '{"id":"part_pnc_parent","messageID":"msg_pnc_parent","type":"text","text":"PNC_PARENT","time":{"created":901}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-clock-present-and-absent
+    logical_path: clock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 3, legacy_parts: 2, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_clock_present, session_id: ses_3cd91f52effeXd3QAJ54jOyzvE, time_created: 1000, time_updated: 1010, data: '{"id":"msg_clock_present","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvE","role":"user","path":{"cwd":"/synthetic/clock"},"time":{"created":1000,"completed":1010},"content":"clock present"}'}
+      - {id: msg_absent_old, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1500, time_updated: 1510, data: '{"id":"msg_absent_old","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvF","role":"user","path":{"cwd":"/synthetic/clock"},"time":{"created":1500,"completed":1510},"content":"absent clock older"}'}
+      - {id: msg_absent_new, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1600, time_updated: 1610, data: '{"id":"msg_absent_new","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzvF","role":"user","path":{"cwd":"/synthetic/clock"},"time":{"created":1600,"completed":1610},"content":"absent clock newest"}'}
+    legacy_parts:
+      - {id: part_clock_present, message_id: msg_clock_present, session_id: ses_3cd91f52effeXd3QAJ54jOyzvE, time_created: 1001, time_updated: 1001, data: '{"id":"part_clock_present","messageID":"msg_clock_present","type":"text","text":"CLOCK_PRESENT","time":{"created":1001}}'}
+      - {id: part_absent_old, message_id: msg_absent_old, session_id: ses_3cd91f52effeXd3QAJ54jOyzvF, time_created: 1501, time_updated: 1501, data: '{"id":"part_absent_old","messageID":"msg_absent_old","type":"text","text":"ABSENT_OLD","time":{"created":1501}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-clock-absent-floor
+    logical_path: absentclock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    session_clock: absent
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 1, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_absent_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGA, time_created: 1000, time_updated: 1010, data: '{"id":"msg_absent_a","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGA","role":"user","path":{"cwd":"/synthetic/absentclock"},"time":{"created":1000,"completed":1010},"content":"absent clock older"}'}
+      - {id: msg_absent_b, session_id: ses_3cd91f52effeXd3QAJ54jOyzGA, time_created: 1100, time_updated: 1110, data: '{"id":"msg_absent_b","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGA","role":"user","path":{"cwd":"/synthetic/absentclock"},"time":{"created":1100,"completed":1110},"content":"absent clock newest"}'}
+    legacy_parts:
+      - {id: part_absent_a, message_id: msg_absent_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGA, time_created: 1001, time_updated: 1001, data: '{"id":"part_absent_a","messageID":"msg_absent_a","type":"text","text":"ABSENT_A","time":{"created":1001}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: session-clock-lagging
+    logical_path: laggingclock/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    session_clock: lagging
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 1, current_messages: 0, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_lag_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1000, time_updated: 1010, data: '{"id":"msg_lag_a","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGB","role":"user","path":{"cwd":"/synthetic/laggingclock"},"time":{"created":1000,"completed":1010},"content":"lagging older"}'}
+      - {id: msg_lag_b, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1200, time_updated: 1210, data: '{"id":"msg_lag_b","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzGB","role":"user","path":{"cwd":"/synthetic/laggingclock"},"time":{"created":1200,"completed":1210},"content":"lagging newest"}'}
+    legacy_parts:
+      - {id: part_lag_a, message_id: msg_lag_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzGB, time_created: 1001, time_updated: 1001, data: '{"id":"part_lag_a","messageID":"msg_lag_a","type":"text","text":"LAG_A","time":{"created":1001}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: hybrid-attribution
+    logical_path: hybridattribution/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 1
+      legacy_parts: 1
+      current_messages: 1
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - id: msg_attrib_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzL1
+        time_created: 3000
+        time_updated: 3000
+        data: '{"role":"assistant"}'
+    legacy_parts:
+      - id: part_attrib_1
+        message_id: msg_attrib_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzL1
+        time_created: 3001
+        time_updated: 3001
+        data: '{"type":"text","text":"synthetic legacy projection"}'
+    current_messages:
+      - id: sm_attrib_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzL2
+        type: message
+        time_created: 3010
+        time_updated: 3010
+        data: '{"role":"assistant","parts":[{"type":"text","text":"synthetic current projection"}]}'
+        seq: 0
+    ignored_history: []
+    session_attribution:
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzL1
+        directory: /home/dev/peasant-labs/garden
+        title: legacy winner attribution
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzL2
+        directory: /home/dev/peasant-labs/tool
+        title: current winner attribution
+  - name: extended-attribution
+    logical_path: extendedattribution/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 2
+      legacy_parts: 2
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    session_extended: true
+    legacy_messages:
+      - id: msg_ext_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzX1
+        time_created: 3000
+        time_updated: 3000
+        data: '{"role":"assistant"}'
+      - id: msg_ext_2
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzX2
+        time_created: 3010
+        time_updated: 3010
+        data: '{"role":"assistant"}'
+    legacy_parts:
+      - id: part_ext_1
+        message_id: msg_ext_1
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzX1
+        time_created: 3001
+        time_updated: 3001
+        data: '{"type":"text","text":"synthetic legacy projection"}'
+      - id: part_ext_2
+        message_id: msg_ext_2
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzX2
+        time_created: 3011
+        time_updated: 3011
+        data: '{"type":"text","text":"synthetic legacy projection"}'
+    ignored_history: []
+    session_attribution:
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzX1
+        directory: /home/dev/peasant-labs/garden
+        title: legacy winner attribution
+        agent: general
+        tokens_input: 900
+        tokens_output: 600
+        tokens_reasoning: 100
+        tokens_cache_read: 400
+        tokens_cache_write: 20
+        cost: 0.0125
+        version: 1.1.53
+        slug: glowing-wizard
+        revert: ""
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzX2
+        directory: /home/dev/peasant-labs/tool
+        title: ""
+        agent: reviewer-openai
+        tokens_input: 1200
+        tokens_output: 800
+        tokens_reasoning: 150
+        tokens_cache_read: 640
+        tokens_cache_write: 32
+        cost: 0.0421
+        version: 1.1.40
+        slug: silent-pixel
+        revert: '{"messageID":"msg_x"}'
+
+  - name: legacy-unknown-part-vocabulary
+    logical_path: legacy-unknown/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 2
+      legacy_parts: 6
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - {id: msg_unkvocab_user, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1000, time_updated: 1000, data: '{"role":"user"}'}
+      - {id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1010, time_updated: 1060, data: '{"role":"assistant"}'}
+    legacy_parts:
+      - {id: prt_unkvocab_text, message_id: msg_unkvocab_user, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1001, time_updated: 1001, data: '{"id":"prt_unkvocab_text","messageID":"msg_unkvocab_user","type":"text","text":"synthetic request","time":{"created":1001}}'}
+      - {id: prt_unkvocab_stepstart, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1011, time_updated: 1011, data: '{"id":"prt_unkvocab_stepstart","messageID":"msg_unkvocab_asst","type":"step-start","snapshot":"deadbeefsnapshot","time":{"created":1011}}'}
+      - {id: prt_unkvocab_reason, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1021, time_updated: 1021, data: '{"id":"prt_unkvocab_reason","messageID":"msg_unkvocab_asst","type":"reasoning","text":"synthetic reasoning","time":{"created":1021}}'}
+      - {id: prt_unkvocab_file, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1031, time_updated: 1031, data: '{"id":"prt_unkvocab_file","messageID":"msg_unkvocab_asst","type":"file","mime":"text/plain","filename":"src/vis/tabular.py","url":"file:///synthetic/src/vis/tabular.py","time":{"created":1031}}'}
+      - {id: prt_unkvocab_notice, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1041, time_updated: 1041, data: '{"id":"prt_unkvocab_notice","messageID":"msg_unkvocab_asst","type":"future-notice","text":"a newer note kind that still carries text","time":{"created":1041}}'}
+      - {id: prt_unkvocab_tool, message_id: msg_unkvocab_asst, session_id: ses_3cd91f52effeXd3QAJ54jUnkv1, time_created: 1051, time_updated: 1051, data: '{"id":"prt_unkvocab_tool","messageID":"msg_unkvocab_asst","type":"tool","name":"read","state":{"status":"completed","input":{"path":"src/vis/tabular.py"},"result":{"ok":true}},"time":{"created":1051}}'}
+    current_messages: []
+    ignored_history: []
+
+  - name: current-control-rows-tolerated
+    logical_path: current-control/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 5
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages: []
+    legacy_parts: []
+    current_messages:
+      - {id: msg_ctrl_user, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: user, time_created: 3000, time_updated: 3000, seq: 1, data: '{"id":"msg_ctrl_user","text":"synthetic control request","files":[],"agents":[],"time":{"created":3000}}'}
+      - {id: msg_ctrl_model, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: model-switched, time_created: 3002, time_updated: 3002, seq: 2, data: '{"time":{"created":3002},"model":{"id":"gpt-5.5","providerID":"openai","variant":"xhigh"}}'}
+      - {id: msg_ctrl_asst, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: assistant, time_created: 3004, time_updated: 3006, seq: 3, data: '{"id":"msg_ctrl_asst","agent":"build","model":{"id":"","providerID":"openai"},"content":[{"type":"tool","id":"ctrl_tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/x"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":{"ok":true}},"time":{"created":3005,"completed":3006}}],"time":{"created":3004,"completed":3006}}'}
+      - {id: msg_ctrl_agent, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: agent-switched, time_created: 3007, time_updated: 3007, seq: 4, data: '{"time":{"created":3007},"agent":"plan"}'}
+      - {id: msg_ctrl_title, session_id: ses_3cd91f52effeXd3QAJ54jCtrl1, type: session-title-changed, time_created: 3008, time_updated: 3008, seq: 5, data: '{"time":{"created":3008},"title":"synthetic renamed title"}'}
+    ignored_history: []
+
+  - name: content-aware-selection
+    logical_path: contentaware/opencode.db
+    format: sqlite
+    schema: hybrid
+    journal_mode: delete
+    corruption: ""
+    declared_rows: {legacy_messages: 2, legacy_parts: 2, current_messages: 3, ignored_history: 0}
+    expected_catalog:
+      tables: [message, part, session, session_message]
+      indexes: [message_session_time_idx, part_message_id_idx, session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    legacy_messages:
+      - {id: msg_sub_legacy_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzS1, time_created: 1000, time_updated: 1010, data: '{"id":"msg_sub_legacy_a","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzS1","role":"user","path":{"cwd":"/synthetic/contentaware"},"time":{"created":1000,"completed":1010},"content":"legacy conversation kept"}'}
+      - {id: msg_sub_legacy_c, session_id: ses_3cd91f52effeXd3QAJ54jOyzS3, time_created: 1200, time_updated: 1210, data: '{"id":"msg_sub_legacy_c","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzS3","role":"user","path":{"cwd":"/synthetic/contentaware"},"time":{"created":1200,"completed":1210},"content":"legacy side loses to substantive current"}'}
+    legacy_parts:
+      - {id: part_sub_legacy_a, message_id: msg_sub_legacy_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzS1, time_created: 1001, time_updated: 1001, data: '{"id":"part_sub_legacy_a","messageID":"msg_sub_legacy_a","type":"text","text":"LEGACY_CONVERSATION_KEPT","time":{"created":1001}}'}
+      - {id: part_sub_legacy_c, message_id: msg_sub_legacy_c, session_id: ses_3cd91f52effeXd3QAJ54jOyzS3, time_created: 1201, time_updated: 1201, data: '{"id":"part_sub_legacy_c","messageID":"msg_sub_legacy_c","type":"text","text":"LEGACY_SIDE_C","time":{"created":1201}}'}
+    current_messages:
+      - {id: sm_sub_ctrl_a, session_id: ses_3cd91f52effeXd3QAJ54jOyzS1, type: model-switched, time_created: 2000, time_updated: 2000, seq: 1, data: '{"time":{"created":2000},"model":{"id":"synthetic-model","providerID":"synthetic-provider"}}'}
+      - {id: sm_sub_ctrl_b, session_id: ses_3cd91f52effeXd3QAJ54jOyzS2, type: model-switched, time_created: 2100, time_updated: 2100, seq: 1, data: '{"time":{"created":2100},"model":{"id":"synthetic-model","providerID":"synthetic-provider"}}'}
+      - {id: sm_sub_user_c, session_id: ses_3cd91f52effeXd3QAJ54jOyzS3, type: user, time_created: 2200, time_updated: 2210, seq: 1, data: '{"id":"sm_sub_user_c","text":"CURRENT_CONVERSATION_C","files":[],"agents":[],"metadata":{"cwd":"/synthetic/contentaware"},"time":{"created":2200}}'}
+    ignored_history: []
+
+  # A legacy session built for the scrolled preview: several messages, one of
+  # them carrying three parts, and part identifiers minted in message order the
+  # way OpenCode mints them as a message streams. A small slice budget therefore
+  # walks it in several slices, and the three-part message exercises the drain
+  # that keeps a slice ending on a message boundary.
+  - name: legacy-scrollable-session
+    logical_path: scrollable/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 4
+      legacy_parts: 7
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_scroll_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000000
+        time_updated: 1700000000010
+        data: '{"role":"user","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000000,"completed":1700000000010}}'
+      - id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000100
+        time_updated: 1700000000110
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000100,"completed":1700000000110}}'
+      - id: msg_scroll_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000200
+        time_updated: 1700000000210
+        data: '{"role":"user","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000200,"completed":1700000000210}}'
+      - id: msg_scroll_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000300
+        time_updated: 1700000000310
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/scroll"},"time":{"created":1700000000300,"completed":1700000000310}}'
+    legacy_parts:
+      - id: part_scroll_01_0
+        message_id: msg_scroll_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000001
+        time_updated: 1700000000001
+        data: '{"type":"text","text":"scrollable synthetic turn 01 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000001}}'
+      - id: part_scroll_02_0
+        message_id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000101
+        time_updated: 1700000000101
+        data: '{"type":"text","text":"scrollable synthetic turn 02 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000101}}'
+      - id: part_scroll_02_1
+        message_id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000102
+        time_updated: 1700000000102
+        data: '{"type":"text","text":"scrollable synthetic turn 02 part 1 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000102}}'
+      - id: part_scroll_02_2
+        message_id: msg_scroll_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000103
+        time_updated: 1700000000103
+        data: '{"type":"text","text":"scrollable synthetic turn 02 part 2 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000103}}'
+      - id: part_scroll_03_0
+        message_id: msg_scroll_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000201
+        time_updated: 1700000000201
+        data: '{"type":"text","text":"scrollable synthetic turn 03 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000201}}'
+      - id: part_scroll_04_0
+        message_id: msg_scroll_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000301
+        time_updated: 1700000000301
+        data: '{"type":"text","text":"scrollable synthetic turn 04 part 0 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000301}}'
+      - id: part_scroll_04_1
+        message_id: msg_scroll_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS1
+        time_created: 1700000000302
+        time_updated: 1700000000302
+        data: '{"type":"text","text":"scrollable synthetic turn 04 part 1 pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad pad","time":{"created":1700000000302}}'
+    current_messages: []
+    ignored_history: []
+
+  # A legacy session whose part identifiers sort AGAINST the messages they belong
+  # to: the first message's part sorts third, after the parts of two later
+  # messages. Real OpenCode identifiers are minted as a message streams and do
+  # not do this, but a read that walks parts in identifier order must still
+  # terminate on data that does. It is what exercises the step-over that keeps a
+  # part which blocked two slices in a row from stalling the chain forever.
+  - name: legacy-out-of-order-parts
+    logical_path: outoforder/opencode.db
+    format: sqlite
+    schema: legacy
+    journal_mode: delete
+    corruption: ""
+    declared_rows:
+      legacy_messages: 4
+      legacy_parts: 4
+      current_messages: 0
+      ignored_history: 0
+    expected_catalog:
+      tables: [message, part, session]
+      indexes: [message_session_time_idx, part_message_id_idx]
+      seq: absent
+    legacy_messages:
+      - id: msg_ooo_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000000
+        time_updated: 1700000000010
+        data: '{"role":"user","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000000,"completed":1700000000010}}'
+      - id: msg_ooo_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000100
+        time_updated: 1700000000110
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000100,"completed":1700000000110}}'
+      - id: msg_ooo_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000200
+        time_updated: 1700000000210
+        data: '{"role":"user","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000200,"completed":1700000000210}}'
+      - id: msg_ooo_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000300
+        time_updated: 1700000000310
+        data: '{"role":"assistant","path":{"cwd":"/synthetic/outoforder"},"time":{"created":1700000000300,"completed":1700000000310}}'
+    legacy_parts:
+      - id: part_zz_late
+        message_id: msg_ooo_01
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000001
+        time_updated: 1700000000001
+        data: '{"type":"text","text":"out of order synthetic turn 01","time":{"created":1700000000001}}'
+      - id: part_aa_two
+        message_id: msg_ooo_02
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000101
+        time_updated: 1700000000101
+        data: '{"type":"text","text":"out of order synthetic turn 02","time":{"created":1700000000101}}'
+      - id: part_bb_three
+        message_id: msg_ooo_03
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000201
+        time_updated: 1700000000201
+        data: '{"type":"text","text":"out of order synthetic turn 03","time":{"created":1700000000201}}'
+      - id: part_zzz_four
+        message_id: msg_ooo_04
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzS2
+        time_created: 1700000000301
+        time_updated: 1700000000301
+        data: '{"type":"text","text":"out of order synthetic turn 04","time":{"created":1700000000301}}'
+    current_messages: []
+    ignored_history: []

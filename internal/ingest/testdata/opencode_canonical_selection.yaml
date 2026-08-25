@@ -1,0 +1,57 @@
+# required_cases / required_loader_mutations name the entries that must stay
+# present. Removing one goes red by name; adding one need not appear here.
+required_cases:
+  - all-three-prefers-current
+  - current-and-legacy-prefers-current
+  - current-and-json-prefers-current
+  - legacy-and-json-prefers-legacy
+  - current-only
+  - legacy-only
+  - json-only
+  - current-parent-graph-and-missing-parent
+  - legacy-missing-parent-and-orphan-part
+source_fixture: canonical-selection-mixed
+json_mtime_ms: 3000
+json_sessions:
+  - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, marker: JSON_ALL}
+  - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, marker: JSON_CURRENT}
+  - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, marker: JSON_LEGACY}
+  - {session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, marker: JSON_ONLY}
+parent_links:
+  - {session_id: ses_3cd91f52effeXd3QAJ54jOyzv9, parent_id: ses_3cd91f52effeXd3QAJ54jOyzv5}
+  - {session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, parent_id: ses_3cd91f52effeXd3QAJ54jOyzv5}
+stray_orphan_parts:
+  - {id: part_legacy_truncated, message_id: msg_missing_part_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1403, data: '{"id":"part_legacy_truncated","messageID":"msg_missing_part_parent","type":"text","text":"TRUNCATED_ORPHAN', dropped: true}
+  - {id: part_legacy_step_start, message_id: msg_missing_part_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1404, data: '{"id":"part_legacy_step_start","messageID":"msg_missing_part_parent","type":"step-start","time":{"created":1404}}', dropped: true}
+  - {id: part_legacy_orphan_tool, message_id: msg_missing_part_parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, time_created: 1405, data: '{"id":"part_legacy_orphan_tool","messageID":"msg_missing_part_parent","type":"tool","tool":"read","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"result":"ORPHAN_TOOL_RESULT"},"time":{"created":1405}}', dropped: false}
+freshness:
+  selected_session: ses_3cd91f52effeXd3QAJ54jOyzv5
+  non_selected_row: {table: message, id: msg_legacy_all}
+  selected_row: {table: session_message, id: msg_current_all}
+  deletion: {session: ses_3cd91f52effeXd3QAJ54jOyzvC, table: session_message, id: msg_current_parent}
+cases:
+  - {name: all-three-prefers-current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, representations: [current_sqlite, legacy_sqlite, legacy_json], expected: current_sqlite, marker: CURRENT_ALL, expected_freshness_ms: 2010}
+  - {name: current-and-legacy-prefers-current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv6, representations: [current_sqlite, legacy_sqlite], expected: current_sqlite, marker: CURRENT_LEGACY, expected_freshness_ms: 2110}
+  - {name: current-and-json-prefers-current, session_id: ses_3cd91f52effeXd3QAJ54jOyzv7, representations: [current_sqlite, legacy_json], expected: current_sqlite, marker: CURRENT_JSON, expected_freshness_ms: 2210}
+  - {name: legacy-and-json-prefers-legacy, session_id: ses_3cd91f52effeXd3QAJ54jOyzv8, representations: [legacy_sqlite, legacy_json], expected: legacy_sqlite, marker: LEGACY_JSON, expected_freshness_ms: 1210}
+  - {name: current-only, session_id: ses_3cd91f52effeXd3QAJ54jOyzv9, representations: [current_sqlite], expected: current_sqlite, marker: CURRENT_ONLY, expected_freshness_ms: 2310, expected_parent: ses_3cd91f52effeXd3QAJ54jOyzv5}
+  - {name: legacy-only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvA, representations: [legacy_sqlite], expected: legacy_sqlite, marker: LEGACY_ONLY, expected_freshness_ms: 1310, expected_parent: ses_3cd91f52effeXd3QAJ54jOyzv5}
+  - {name: json-only, session_id: ses_3cd91f52effeXd3QAJ54jOyzvB, representations: [legacy_json], expected: legacy_json, marker: JSON_ONLY, expected_freshness_ms: 3000}
+  - {name: current-parent-graph-and-missing-parent, session_id: ses_3cd91f52effeXd3QAJ54jOyzvC, representations: [current_sqlite], expected: current_sqlite, marker: CURRENT_PARENT, expected_freshness_ms: 2430, missing_parent: msg_absent, linked_parent: msg_current_root, linked_child: msg_current_child, missing_entry: msg_current_parent, tool_call_id: call_current_parent}
+  - {name: legacy-missing-parent-and-orphan-part, session_id: ses_3cd91f52effeXd3QAJ54jOyzvD, representations: [legacy_sqlite], expected: legacy_sqlite, marker: LEGACY_PARENT, expected_freshness_ms: 1410, missing_parent: msg_absent, orphan_entry: part_legacy_orphan, orphan_parent: msg_missing_part_parent, orphan_marker: LEGACY_ORPHAN_PART, orphan_tool_entry: part_legacy_orphan_tool, dropped_orphan_parts: [part_legacy_truncated, part_legacy_step_start]}
+loader_mutations:
+  - {name: unknown-field, kind: unknown_field}
+  - {name: wrong-count, kind: wrong_count}
+  - {name: duplicate-name, kind: duplicate_name}
+  - {name: unknown-representation, kind: unknown_representation}
+  - {name: trailing-document, kind: trailing_document}
+  - {name: orphan-json-session, kind: orphan_json_session}
+  - {name: dropped-part-without-row, kind: dropped_part_without_row}
+required_loader_mutations:
+  - unknown-field
+  - wrong-count
+  - duplicate-name
+  - unknown-representation
+  - trailing-document
+  - orphan-json-session
+  - dropped-part-without-row

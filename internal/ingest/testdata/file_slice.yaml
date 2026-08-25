@@ -1,0 +1,66 @@
+# Slicing a line-oriented transcript file, driven by TestFileTranscriptSlicer
+# (internal/ingest/file_slice_test.go).
+#
+# The slicer's whole job is to hand back the next budget-sized run of COMPLETE
+# lines and say where it stopped. Four properties every case asserts:
+#   - EVERY SLICE ENDS ON A LINE. A slice ends at a newline, or at the end of
+#     the file. No slice ever holds a trailing half-record.
+#   - NOTHING IS LOST OR REPEATED. The slices concatenated are the file, byte
+#     for byte.
+#   - THE READ TERMINATES. It reports nothing more within max_slices, and the
+#     cursor's offset reaches the file's size.
+#   - AN OVERSIZED LINE COMES WHOLE. A line longer than the whole budget is
+#     delivered in one slice rather than in pieces, so a reader never sees it
+#     half-parsed.
+#
+# line_bytes and line_count build the file; oversized_line_bytes, when set,
+# makes ONE line that long so a case can cross the budget with a single record.
+#
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - a-file-of-even-lines-slices-into-whole-lines
+  - a-budget-smaller-than-one-line-still-hands-back-that-whole-line
+  - a-single-line-longer-than-the-whole-budget-arrives-in-one-slice
+  - a-file-inside-its-budget-is-one-slice-with-nothing-more
+  - a-file-with-no-trailing-newline-still-ends-cleanly
+
+cases:
+  - name: a-file-of-even-lines-slices-into-whole-lines
+    line_bytes: 40
+    line_count: 50
+    budget_bytes: 256
+    max_slices: 40
+    expect_multiple_slices: true
+
+  - name: a-budget-smaller-than-one-line-still-hands-back-that-whole-line
+    line_bytes: 200
+    line_count: 12
+    budget_bytes: 64
+    max_slices: 40
+    expect_multiple_slices: true
+
+  - name: a-single-line-longer-than-the-whole-budget-arrives-in-one-slice
+    line_bytes: 30
+    line_count: 8
+    oversized_line_bytes: 9000
+    budget_bytes: 512
+    max_slices: 40
+    expect_multiple_slices: true
+
+  - name: a-file-inside-its-budget-is-one-slice-with-nothing-more
+    line_bytes: 40
+    line_count: 5
+    budget_bytes: 1048576
+    max_slices: 4
+    expect_multiple_slices: false
+
+  # A harness that is still writing leaves the last record unterminated. The
+  # end of the file is a clean boundary whether or not a newline marks it.
+  - name: a-file-with-no-trailing-newline-still-ends-cleanly
+    line_bytes: 40
+    line_count: 10
+    budget_bytes: 128
+    max_slices: 40
+    expect_multiple_slices: true
+    no_trailing_newline: true

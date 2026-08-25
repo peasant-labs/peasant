@@ -1,0 +1,93 @@
+# Reading a line-oriented transcript one slice at a time, driven by
+# TestSourceTurns_ASlicedFileReadEqualsTheWholeFileRead
+# (internal/tui/kickstart/file_slice_preview_test.go).
+#
+# The preview of a long file transcript stops reading the whole file: it paints
+# a leading slice and takes the rest as the reader scrolls. The property that
+# makes that safe is EQUIVALENCE - reading a transcript in slices must produce
+# exactly what reading it whole produces, turn for turn.
+#
+# It is not free. Lines never split, but TURNS straddle them: a tool call and
+# the result that answers it are two records joined by a call identifier, and
+# every file indexer carries state across records as it parses. So each case
+# reads its transcript BOTH ways and compares, including each turn's tool calls
+# and their output - a signature over role and content alone would not notice a
+# call that lost its result at a seam.
+#
+# sliceBytes is deliberately tiny in most cases so a small fixture transcript
+# still takes many slices, and the same transcript is read at several budgets so
+# a boundary landing in a different place each time cannot hide a seam.
+#
+# requiredCases names the cases that must stay present; removing one goes red by
+# name. Adding a case need not appear here.
+required_cases:
+  - a-claude-transcript-sliced-one-line-at-a-time-equals-its-whole-file-read
+  - a-claude-transcript-whose-tool-result-lands-in-a-later-slice-keeps-the-output
+  - a-claude-transcript-sliced-mid-record-still-equals-its-whole-file-read
+  - a-transcript-inside-its-first-page-bound-is-read-once-and-never-scrolls
+  - a-transcript-holding-one-line-longer-than-a-whole-slice-still-finishes
+
+cases:
+  - name: a-claude-transcript-sliced-one-line-at-a-time-equals-its-whole-file-read
+    transcript: tool-call-conversation
+    slice_bytes: 64
+    expect_multiple_slices: true
+
+  # The seam this design exists for. The budget is set so the boundary falls
+  # BETWEEN the assistant record carrying the tool call and the user record
+  # carrying its result. Folding one slice at a time would show the call with no
+  # output and suppress the orphan result, so the output would vanish; the
+  # comparison against the whole-file read catches exactly that.
+  - name: a-claude-transcript-whose-tool-result-lands-in-a-later-slice-keeps-the-output
+    transcript: tool-call-conversation
+    slice_bytes: 320
+    expect_multiple_slices: true
+    expect_tool_output_in_turns: true
+
+  # A budget that is not a multiple of any record length, so boundaries land in
+  # different places than the cases above.
+  - name: a-claude-transcript-sliced-mid-record-still-equals-its-whole-file-read
+    transcript: tool-call-conversation
+    slice_bytes: 137
+    expect_multiple_slices: true
+
+  - name: a-transcript-inside-its-first-page-bound-is-read-once-and-never-scrolls
+    transcript: short-conversation
+    slice_bytes: 1048576
+    expect_multiple_slices: false
+
+  # One record longer than a whole slice budget. The read must deliver it whole
+  # rather than stopping inside it, or the continuation would hand back the same
+  # partial line forever.
+  - name: a-transcript-holding-one-line-longer-than-a-whole-slice-still-finishes
+    transcript: oversized-record
+    slice_bytes: 32
+    expect_multiple_slices: true
+
+# The transcripts each case reads. They are Claude Code JSONL: one record per
+# line, exactly as the harness writes it.
+transcripts:
+  # Two tool calls whose results arrive on LATER lines, which is the shape a
+  # slice boundary can break. The outputs carry unmistakable markers so an
+  # assertion can say whether the output survived rather than counting turns.
+  - name: tool-call-conversation
+    lines:
+    - '{"type":"user","uuid":"u1","message":{"role":"user","content":"run the ingest tests and tell me what fails."}}'
+    - '{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"running them now."}]}}'
+    - '{"type":"assistant","uuid":"a2","parentUuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_one","name":"Bash","input":{"command":"go test ./internal/ingest/"}}]}}'
+    - '{"type":"user","uuid":"r1","parentUuid":"a2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_one","content":"UNMISTAKABLE_TOOL_OUTPUT ok github.com/example/ingest 1.2s"}]}}'
+    - '{"type":"assistant","uuid":"a3","parentUuid":"r1","message":{"role":"assistant","content":[{"type":"text","text":"the ingest package passes."}]}}'
+    - '{"type":"assistant","uuid":"a4","parentUuid":"a3","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_two","name":"Read","input":{"file_path":"/fixtures/pipeline.go"}}]}}'
+    - '{"type":"user","uuid":"r2","parentUuid":"a4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_two","content":"SECOND_TOOL_OUTPUT package ingest"}]}}'
+    - '{"type":"assistant","uuid":"a5","parentUuid":"r2","message":{"role":"assistant","content":[{"type":"text","text":"that is the whole file."}]}}'
+  # Small enough to sit inside any first-page bound, so it is read once.
+  - name: short-conversation
+    lines:
+    - '{"type":"user","uuid":"s1","message":{"role":"user","content":"what does this repository do?"}}'
+    - '{"type":"assistant","uuid":"s2","parentUuid":"s1","message":{"role":"assistant","content":[{"type":"text","text":"it ingests and serves recorded agent sessions."}]}}'
+  # One record far longer than the smallest slice budget a case uses.
+  - name: oversized-record
+    lines:
+    - '{"type":"user","uuid":"b1","message":{"role":"user","content":"paste the log."}}'
+    - '{"type":"assistant","uuid":"b2","parentUuid":"b1","message":{"role":"assistant","content":[{"type":"text","text":"OVERSIZED_RECORD_MARKER log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding log line padding "}]}}'
+    - '{"type":"assistant","uuid":"b3","parentUuid":"b2","message":{"role":"assistant","content":[{"type":"text","text":"that is the end of the log."}]}}'

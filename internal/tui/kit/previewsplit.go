@@ -80,6 +80,61 @@ type BodySource interface {
 	Body(id string) (PreviewBody, error)
 }
 
+// ProgressiveBodySource is the OPTIONAL capability of a [BodySource] whose
+// preview can be produced in two steps: a slice that is quick to read, then the
+// whole body. A PreviewSplit detects it and drives both steps; a BodySource
+// that does not implement it keeps the single-step behavior exactly, so no
+// existing implementer has to change.
+//
+// It exists because a preview can be expensive enough that a blank pane is the
+// user's whole first impression of it. Reading a very long agent session out of
+// a provider database takes seconds; reading the first part of it takes a
+// fraction of one. Painting the quick slice first turns a long blank wait into
+// a pane that fills immediately and completes itself.
+//
+// The two steps are ONE load: they share the load sequence, so a highlight
+// change between them discards the second step with the first.
+type ProgressiveBodySource interface {
+	BodySource
+	// FirstBody returns a body that is quick to produce, and reports whether a
+	// fuller body follows it. A false more means the returned body is final,
+	// and Body is never called for that id.
+	FirstBody(id string) (body PreviewBody, more bool, err error)
+}
+
+// ContinuableBodySource is the OPTIONAL capability of a [BodySource] whose
+// preview EXTENDS as the reader scrolls toward the bottom of it. A PreviewSplit
+// detects it and asks for the next chunk when the viewport comes within
+// [previewContinueThresholdLines] of the end; a BodySource that does not
+// implement it keeps its existing behavior exactly.
+//
+// It exists because a preview of something very long has to be read under a
+// bound, and a single bound makes the pane a dead end: the reader arrives at
+// the bottom and the content simply stops. Extending it as they read turns that
+// bound into a horizon.
+//
+// A continuation runs under the SAME load sequence as the body it extends, so a
+// highlight change discards one still in flight.
+type ContinuableBodySource interface {
+	BodySource
+	// Continuable reports whether the preview of id, AS CURRENTLY LOADED, has
+	// more content behind it. The pane asks after a body load lands, so the
+	// answer describes the body on screen. It must not read anything: it is
+	// called on the UI goroutine.
+	Continuable(id string) bool
+	// MoreBody returns the preview EXTENDED by the next chunk, and reports
+	// whether more remains after it.
+	//
+	// It returns the WHOLE preview so far, not the chunk alone. The pane
+	// replaces its body with the returned one, and because an extension only
+	// ever appends, every line already on screen keeps its offset and the line
+	// under the reader's eye does not move.
+	//
+	// Like Body it is called from a tea.Cmd off the UI goroutine, so it may
+	// block on IO.
+	MoreBody(id string) (body PreviewBody, more bool, err error)
+}
+
 // textBody is the PreviewBody a flat [ContentSource] string becomes. It defers
 // exactly what the pane always deferred: the BodyRenderer (or the default word
 // wrap) runs at the pane's CURRENT width on every draw, not at the width the
@@ -292,6 +347,17 @@ type previewLoadedMsg struct {
 	id    string
 	body  PreviewBody
 	err   error
+	// more reports that body is the quick leading slice of a
+	// [ProgressiveBodySource] preview and that the whole body still follows.
+	// It is false for every single-step load and for the second step itself.
+	more bool
+	// continuable reports that the loaded body has more content behind it,
+	// which a scroll toward its end asks a [ContinuableBodySource] for.
+	continuable bool
+	// appended marks the result of a continuation. Such a body EXTENDS the one
+	// on screen rather than replacing it, so the pane keeps the reader's scroll
+	// offset instead of returning to the top.
+	appended bool
 }
 
 // PreviewSplit is an embedded (non-floating) two-pane surface: a navigable
@@ -331,6 +397,18 @@ type PreviewSplit struct {
 	body      PreviewBody
 	loadErr   error
 	scroll    int
+	// restPending reports that the pane is showing the quick leading slice of
+	// a [ProgressiveBodySource] preview while the whole body is still being
+	// read. The pane says so in its own chrome, and it is what tells the
+	// arriving whole body that it is a SWAP rather than a fresh load.
+	restPending bool
+	// continuable reports that the body on screen has more content behind it;
+	// loadingMore reports that a continuation is in flight. loadingMore does not
+	// set loading: the pane keeps showing what it has, with one line of its own
+	// chrome at the BOTTOM, rather than replacing the reader's content with a
+	// spinner.
+	continuable bool
+	loadingMore bool
 }
 
 // NewPreviewSplit builds a PreviewSplit over theme t with the given left pane
@@ -579,9 +657,39 @@ func (p PreviewSplit) Update(msg tea.Msg) (PreviewSplit, tea.Cmd) {
 			return p, nil
 		}
 		p.loading = false
+		p.loadingMore = false
 		p.body = m.body
 		p.loadErr = m.err
-		p.scroll = 0
+		if m.more && m.err == nil {
+			// The quick slice is on screen; read the whole body next, under the
+			// SAME sequence, so a highlight change in between discards it.
+			p.restPending = true
+			return p, p.restCmd(p.owner, m.seq, m.id)
+		}
+		p.continuable = m.continuable && m.err == nil
+		if m.appended {
+			// A continuation only ever APPENDS, so every line already on screen
+			// keeps its offset. Holding the scroll where it is leaves the line
+			// the reader is on exactly where they left it, with the new content
+			// below.
+			p.restPending = false
+			return p, nil
+		}
+		// Scroll rule: a whole body replacing a slice KEEPS the offset the
+		// reader is at, so the content line under their eye stays where it is;
+		// a reader who never scrolled is at offset zero and therefore stays at
+		// the top. Every other result is a fresh load, which starts at the top.
+		if p.restPending {
+			// The label the slice carried is gone, so give its line back to
+			// the offset.
+			p.scroll -= previewRestPendingLines
+			if p.scroll < 0 {
+				p.scroll = 0
+			}
+		} else {
+			p.scroll = 0
+		}
+		p.restPending = false
 		return p, nil
 
 	case spinner.TickMsg:
@@ -637,6 +745,7 @@ func (p PreviewSplit) Update(msg tea.Msg) (PreviewSplit, tea.Cmd) {
 		if p.active == PaneRight {
 			if action, ok := keymap.Match(p.keymap, m, scrollAvailability{}); ok {
 				p.scrollBy(action)
+				return p, p.continueCmd()
 			}
 			return p, nil
 		}
@@ -677,6 +786,9 @@ func (p *PreviewSplit) startLoad(force bool) tea.Cmd {
 	if !ok {
 		p.currentID = ""
 		p.loading = false
+		p.restPending = false
+		p.continuable = false
+		p.loadingMore = false
 		p.body = nil
 		p.loadErr = nil
 		return nil
@@ -688,6 +800,9 @@ func (p *PreviewSplit) startLoad(force bool) tea.Cmd {
 	p.seq++
 	p.loading = true
 	p.loadErr = nil
+	p.restPending = false
+	p.continuable = false
+	p.loadingMore = false
 	p.scroll = 0
 	seq := p.seq
 	return tea.Batch(p.loadCmd(p.owner, seq, id), p.spinner.Tick())
@@ -699,11 +814,24 @@ func (p *PreviewSplit) startLoad(force bool) tea.Cmd {
 // string, which becomes a [textBody] so both paths reach the pane as one type
 // and are laid out at draw-time width alike.
 func (p PreviewSplit) loadCmd(owner asyncOwnerID, seq int, id string) tea.Cmd {
+	if progressive, ok := p.bodies.(ProgressiveBodySource); ok {
+		return func() tea.Msg {
+			body, more, err := progressive.FirstBody(id)
+			// A leading slice is never continued from: the whole body follows it
+			// and is what the pane extends. Asking here would answer about a
+			// body the pane is about to replace.
+			continuable := false
+			if !more {
+				continuable = bodyContinuable(progressive, id)
+			}
+			return previewLoadedMsg{owner: owner, seq: seq, id: id, body: body, err: err, more: more, continuable: continuable}
+		}
+	}
 	if p.bodies != nil {
 		src := p.bodies
 		return func() tea.Msg {
 			body, err := src.Body(id)
-			return previewLoadedMsg{owner: owner, seq: seq, id: id, body: body, err: err}
+			return previewLoadedMsg{owner: owner, seq: seq, id: id, body: body, err: err, continuable: bodyContinuable(src, id)}
 		}
 	}
 	// The width handed to a ContentSource stays a HINT: layout happens in
@@ -717,11 +845,73 @@ func (p PreviewSplit) loadCmd(owner asyncOwnerID, seq int, id string) tea.Cmd {
 	}
 }
 
+// previewContinueThresholdLines is how close to the end of the preview the
+// viewport must come before the pane asks for the next chunk.
+//
+// Three rows is roughly the last thing a reader sees below the line they are
+// on, so the request goes out while they still have content to read and the
+// next chunk is usually there before they reach the bottom. A larger threshold
+// would fetch content nobody asked to see; a smaller one would leave them
+// looking at the end of the preview while it loads.
+const previewContinueThresholdLines = 3
+
+// continueCmd asks a [ContinuableBodySource] for the next chunk when the
+// viewport has come within [previewContinueThresholdLines] of the end of the
+// preview, and returns nil in every other case: a source that cannot continue,
+// a body with nothing behind it, a continuation already in flight, or a
+// viewport still far from the bottom.
+//
+// The continuation carries the CURRENT owner and sequence, so the split's
+// existing stale guard discards it if the highlight moves while it is running.
+func (p *PreviewSplit) continueCmd() tea.Cmd {
+	if !p.continuable || p.loadingMore || p.loading || p.loadErr != nil {
+		return nil
+	}
+	source, ok := p.bodies.(ContinuableBodySource)
+	if !ok {
+		return nil
+	}
+	_, rw := p.paneWidths()
+	total := len(p.previewBodyLines(rw))
+	if total-(p.scroll+p.height) > previewContinueThresholdLines {
+		return nil
+	}
+	p.loadingMore = true
+	owner, seq, id := p.owner, p.seq, p.currentID
+	return func() tea.Msg {
+		body, more, err := source.MoreBody(id)
+		return previewLoadedMsg{owner: owner, seq: seq, id: id, body: body, err: err, continuable: more, appended: true}
+	}
+}
+
+// restCmd builds the command that reads the WHOLE body after the quick slice is
+// already on screen. It carries the same owner and sequence as the slice, so
+// the split's existing stale guard discards it when the highlight has moved on.
+func (p PreviewSplit) restCmd(owner asyncOwnerID, seq int, id string) tea.Cmd {
+	src := p.bodies
+	if src == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		body, err := src.Body(id)
+		return previewLoadedMsg{owner: owner, seq: seq, id: id, body: body, err: err, continuable: bodyContinuable(src, id)}
+	}
+}
+
+// bodyContinuable asks a source whether the body it just produced has more
+// content behind it. A source that cannot continue answers no by not
+// implementing the capability at all.
+func bodyContinuable(src BodySource, id string) bool {
+	continuable, ok := src.(ContinuableBodySource)
+	return ok && continuable.Continuable(id)
+}
+
 // scrollBy moves the preview viewport by the given navigation action, clamped
 // to the content extent.
 func (p *PreviewSplit) scrollBy(action keymap.ActionID) {
 	_, rw := p.paneWidths()
-	total := len(p.previewBodyLines(rw))
+	head, tail := p.bodyChrome()
+	total := len(p.previewBodyLines(rw)) + len(head) + len(tail)
 	page := p.height
 	if page < 1 {
 		page = 1
@@ -833,17 +1023,79 @@ func (p PreviewSplit) rightLines(styles theme.Styles, rw int) []string {
 	default:
 		body = p.previewBodyLines(rw)
 	}
+	// While the rest of a progressive preview is still being read, the pane
+	// says so on a line of its own at the TOP of the body. It rides IN the
+	// body rather than in a reserved pane row on purpose: reserving a row
+	// would be the pane doing its own height accounting, which is Frame's job
+	// alone, and a line at the top is the line a reader is looking at.
+	//
+	// Losing that line when the whole body arrives would slide the content up
+	// under the reader's eye, so the swap subtracts it from the scroll offset
+	// instead, which leaves the same content line where it was.
+	head, tail := p.bodyChrome()
+	body = append(append(append([]string{}, head...), body...), tail...)
+	tailStart := len(body) - len(tail)
 	out := make([]string, p.height)
 	for i := 0; i < p.height; i++ {
 		idx := i + p.scroll
-		if idx >= 0 && idx < len(body) {
-			out[i] = fitPlain(body[i+p.scroll], rw)
-		} else {
+		switch {
+		case idx < 0 || idx >= len(body):
 			out[i] = fitLine(styles.Base, "", rw)
+		case idx < len(head), idx >= tailStart:
+			out[i] = fitLine(styles.Muted, truncateLine(body[idx], rw), rw)
+		default:
+			out[i] = fitPlain(body[idx], rw)
 		}
 	}
 	return out
 }
+
+// bodyChrome is what the pane says about its own loading state, as body lines
+// above and below the content.
+//
+// Both ride IN the body rather than in reserved pane rows on purpose:
+// reserving a row would be the pane doing its own height accounting, which is
+// the frame's job alone. Which END each takes is what keeps the reader's place.
+// The rest-pending label goes on TOP, because the whole body that replaces the
+// slice arrives at the top and the swap gives that line back to the scroll
+// offset. The loading-more label goes at the BOTTOM, because a continuation
+// appends and a line added below everything cannot displace a line already on
+// screen.
+func (p PreviewSplit) bodyChrome() (head, tail []string) {
+	if p.loadErr != nil || p.loading {
+		return nil, nil
+	}
+	if p.restPending {
+		head = []string{previewRestPendingLabel}
+	}
+	switch {
+	case p.loadingMore:
+		tail = []string{previewLoadingMoreLabel}
+	case p.continuable:
+		// A preview that CAN be continued keeps the row the label will occupy,
+		// blank, from the moment it can be continued. Reserving it inside the
+		// body is what makes the scroll extent the same before and after the
+		// request goes out, so firing the request cannot shift what the reader
+		// is looking at, and a reader who scrolled to the end is already looking
+		// at the row the label appears on.
+		tail = []string{""}
+	}
+	return head, tail
+}
+
+// previewRestPendingLabel is what the pane says while it shows the quick
+// leading slice of a preview and reads the rest. It is the pane's own chrome,
+// so it is lowercase like the loading spinner's label beside it.
+// previewRestPendingLines is how many body lines it occupies, which is what the
+// swap gives back to the scroll offset.
+const (
+	previewRestPendingLabel = "loading the rest..."
+	previewRestPendingLines = 1
+	// previewLoadingMoreLabel is what the pane says while it reads the next
+	// chunk of a preview that extends as the reader scrolls. The row it takes
+	// is kept blank, not absent, whenever the preview can be continued at all.
+	previewLoadingMoreLabel = "loading more..."
+)
 
 // errorLines renders an actionable in-pane failure message answering what
 // went wrong, why, where, and how to recover, each clipped to rw.
