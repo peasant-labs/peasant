@@ -18,6 +18,43 @@ import (
 
 const screenshotCommandTimeout = 90 * time.Second
 
+// freezeBackgroundHex and freezePaddingPx are shared between the Freeze
+// invocation that produces a sheet's published PNG (rasterizeSheet) and the
+// disposable measurement render validateContentFits uses to detect content
+// overflow (contentfit.go). Both invocations must use identical rendering
+// parameters, or the measurement would not describe what the published PNG
+// actually contains.
+const (
+	freezeBackgroundHex = "#171614"
+	freezePaddingPx     = 28
+)
+
+// freezeCommand builds the Freeze invocation shared by every render of a
+// sheet's ANSI content, varying only the output path and canvas size. Both
+// the published render and the disposable overflow-measurement render call
+// this so they can never drift apart in font, padding, or background.
+func freezeCommand(ctx context.Context, freezePath, ansiPath, outputPath string, width, height int) *exec.Cmd {
+	return exec.CommandContext(
+		ctx,
+		freezePath,
+		ansiPath,
+		"--config", "base",
+		"--output", outputPath,
+		"--width", fmt.Sprint(width),
+		"--height", fmt.Sprint(height),
+		"--background", freezeBackgroundHex,
+		"--padding", fmt.Sprint(freezePaddingPx),
+		"--margin", "0",
+		"--border.radius", "0",
+		"--border.width", "0",
+		"--shadow.blur", "0",
+		"--font.family", "JetBrains Mono",
+		"--font.size", "11",
+		"--line-height", "1.2",
+		"--font.ligatures=false",
+	)
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -74,6 +111,15 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	for _, sheet := range sheets {
+		if err := validateContentFits(freezePath, sheet); err != nil {
+			printActionable(
+				stderr,
+				"verify the rendered contact sheet's content fits its declared canvas",
+				err,
+				"grow the sheet's viewport.height in cmd/peasant-guided-screenshots/testdata/captures.yaml to the size the error names, then rerun",
+			)
+			return 1
+		}
 		outputPath := filepath.Join(outputDirectory, string(sheet.fixture.Name)+".png")
 		if err := rasterizeSheet(freezePath, outputPath, sheet); err != nil {
 			printActionable(stderr, "rasterize the mounted ANSI contact sheet", err, "verify Freeze is available in `nix develop`, then rerun")
@@ -178,25 +224,7 @@ func rasterizeSheet(freezePath, outputPath string, sheet renderedSheet) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), screenshotCommandTimeout)
 	defer cancel()
-	command := exec.CommandContext(
-		ctx,
-		freezePath,
-		ansiPath,
-		"--config", "base",
-		"--output", temporaryPNG,
-		"--width", fmt.Sprint(sheet.fixture.Viewport.Width),
-		"--height", fmt.Sprint(sheet.fixture.Viewport.Height),
-		"--background", "#171614",
-		"--padding", "28",
-		"--margin", "0",
-		"--border.radius", "0",
-		"--border.width", "0",
-		"--shadow.blur", "0",
-		"--font.family", "JetBrains Mono",
-		"--font.size", "11",
-		"--line-height", "1.2",
-		"--font.ligatures=false",
-	)
+	command := freezeCommand(ctx, freezePath, ansiPath, temporaryPNG, sheet.fixture.Viewport.Width, sheet.fixture.Viewport.Height)
 	output, err := command.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("Freeze timed out after %s while rendering %q", screenshotCommandTimeout, sheet.fixture.Name)
