@@ -196,6 +196,11 @@ type ListingPreview struct {
 	// a preview that ends where its first read ended.
 	moreTurns SessionMoreTurnsFunc
 	hasMore   SessionHasMoreFunc
+	// extended names the sessions the reader has actually scrolled. It keeps a
+	// preview drawing every turn once it runs out of session to load: without
+	// it, the last chunk landing would take the draw bound back and hide most of
+	// what the reader had just spent scrolls loading.
+	extended map[string]bool
 }
 
 // NewListingPreview builds the selection step's preview over the discovery
@@ -213,6 +218,7 @@ func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns Ses
 		turns:    turns,
 		renderer: transcriptview.New(th),
 		th:       th,
+		extended: map[string]bool{},
 	}
 	for _, opt := range opts {
 		opt(preview)
@@ -273,6 +279,7 @@ func (p *ListingPreview) MoreBody(id string) (kit.PreviewBody, bool, error) {
 		return body, false, err
 	}
 	var continues bool
+	p.extended[id] = true
 	body, _, err := p.load(id, func(sessionID string) ([]ingest.Turn, bool, error) {
 		turns, more, err := p.moreTurns(sessionID)
 		continues = more
@@ -326,11 +333,30 @@ func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool,
 		body.note = emptyNote(sess)
 		return body, false, nil
 	}
-	body.transcript = p.renderer.Document(recorded)
+	body.transcript = p.document(id, recorded)
 	if p.notice != nil && !more {
 		body.notice = p.notice(id)
 	}
 	return body, more, nil
+}
+
+// document binds the loaded turns to the renderer, choosing the draw bound by
+// how those turns got here.
+//
+// A preview that can be EXTENDED holds turns because the reader scrolled for
+// them, so every one of them is drawn: bounding the draw would make the pane
+// stop growing while the loader kept working, which is the same thing as the
+// feature not working. A preview handed a whole recorded session keeps the
+// standing bound, because nothing there was asked for turn by turn.
+//
+// The choice is made per session rather than per preview: a store-backed
+// session in the same list is bounded even while a harness-read one beside it
+// is not.
+func (p *ListingPreview) document(id string, turns []ingest.Turn) transcriptview.Document {
+	if p.Continuable(id) || p.extended[id] {
+		return p.renderer.UnboundedDocument(turns)
+	}
+	return p.renderer.Document(turns)
 }
 
 // emptyNote explains a session that produced no turns. A session whose harness

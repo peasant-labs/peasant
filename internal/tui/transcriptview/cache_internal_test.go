@@ -129,3 +129,85 @@ func visibleForCache(s string) string {
 	}
 	return b.String()
 }
+
+// TestTurnCache_KeepsAScrolledTranscriptWarm proves the cache ceiling FOLLOWS
+// the document actually drawn, so a transcript larger than the starting ceiling
+// is re-drawn warm rather than cold.
+//
+// This is a regression against a cache CLIFF, not a leak. The cache is dropped
+// whole when it is exceeded, so a working set one entry too large clears the map
+// part-way through every single draw and every re-draw pays a fully cold render.
+// A preview that grows as the reader scrolls walks straight into that: measured
+// against a real session, the re-draw cost went from 2ms at 200 turns to 563ms
+// at 883 - on every frame, so on every keystroke.
+//
+// It asserts the cache STATE rather than elapsed time, because a timing
+// assertion on a shared machine reports the machine's load as a defect.
+func TestTurnCache_KeepsAScrolledTranscriptWarm(t *testing.T) {
+	t.Parallel()
+	r := New(theme.New(theme.ModeDark))
+
+	// A document comfortably past the starting ceiling, which is what a reader
+	// reaches after a few scrolls of a long session.
+	const turnCount = maxCachedTurns * 2
+	turns := make([]ingest.Turn, 0, turnCount)
+	for i := range turnCount {
+		turns = append(turns, ingest.Turn{
+			Index: i, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText,
+			Content: fmt.Sprintf("scrolled turn %d", i),
+		})
+	}
+	r.UnboundedDocument(turns).Render(cacheTestWidth)
+	if len(r.cache) < turnCount {
+		t.Fatalf("after drawing %d turns the cache holds %d of them; the next draw re-renders the whole transcript cold",
+			turnCount, len(r.cache))
+	}
+
+	// The ceiling rose for this document, and it must still BOUND. Drawing more
+	// DISTINCT documents than the ceiling can hold has to reset it, or the cache
+	// grows without limit as a reader steps through sessions.
+	//
+	// Two documents of this size legitimately fit side by side: the ceiling
+	// covers one document at cacheWidthsKeptWarm widths, which is the same
+	// number of entries as two documents at one width. So the count that proves
+	// a bound is the one past that.
+	const documents = cacheWidthsKeptWarm + 2
+	for d := 1; d < documents; d++ {
+		next := make([]ingest.Turn, 0, turnCount)
+		for i := range turnCount {
+			next = append(next, ingest.Turn{
+				Index: i, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText,
+				Content: fmt.Sprintf("document %d scrolled turn %d", d, i),
+			})
+		}
+		r.UnboundedDocument(next).Render(cacheTestWidth)
+		if len(r.cache) > r.ceiling {
+			t.Fatalf("after document %d the cache holds %d entries, past its own %d ceiling",
+				d, len(r.cache), r.ceiling)
+		}
+	}
+	if distinct := documents * turnCount; len(r.cache) >= distinct {
+		t.Fatalf("the cache holds %d of %d distinct turns; it never reset and grows without limit",
+			len(r.cache), distinct)
+	}
+}
+
+// TestTurnCache_ABoundedDocumentKeepsTheStartingCeiling proves the ceiling only
+// ever rises for a caller that ASKED to draw more. Every existing caller hands
+// over a bounded document, so none of them may see the ceiling move.
+func TestTurnCache_ABoundedDocumentKeepsTheStartingCeiling(t *testing.T) {
+	t.Parallel()
+	r := New(theme.New(theme.ModeDark))
+	turns := make([]ingest.Turn, 0, MaxRenderedTurns*4)
+	for i := range MaxRenderedTurns * 4 {
+		turns = append(turns, ingest.Turn{
+			Index: i, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText,
+			Content: fmt.Sprintf("handed over turn %d", i),
+		})
+	}
+	r.Document(turns).Render(cacheTestWidth)
+	if r.ceiling != maxCachedTurns {
+		t.Fatalf("a bounded document moved the cache ceiling to %d; it must stay at %d for every caller that did not ask to draw more",
+			r.ceiling, maxCachedTurns)
+	}
+}
