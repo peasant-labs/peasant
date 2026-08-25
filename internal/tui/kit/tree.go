@@ -1530,8 +1530,13 @@ func (t *Tree) clampWindow() {
 	if t.offset < 0 {
 		t.offset = 0
 	}
-	// The row-based margin above is an approximation once rows differ in
-	// height, so make the cursor row's own line fit for certain.
+	// The margin above is expressed in ROWS, which stops being the same thing
+	// as lines as soon as a row can render two of them. This correction is
+	// load-bearing, not defensive: once the viewport is tall enough that the
+	// margin stops growing, the row-based window admits height-treeScrollMargin
+	// rows, and at two lines each that is wider than the viewport - so the
+	// cursor's own line falls off the bottom. Measuring the same window in
+	// lines puts it back.
 	for t.offset < t.cursor && treeLinesBetween(rows, t.offset, t.cursor+1) > t.height {
 		t.offset++
 	}

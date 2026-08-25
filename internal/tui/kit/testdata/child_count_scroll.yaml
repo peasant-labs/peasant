@@ -1,0 +1,117 @@
+# Scroll, clamp, and overflow cases for a window that contains TWO-LINE rows.
+#
+# A parent session renders its child-session count on a second, non-selectable
+# line, so the window is laid out in LINES rather than rows. Everywhere else the
+# tree is exercised with one-line rows, where the line arithmetic collapses back
+# to the old row arithmetic and proves nothing about this. These cases are the
+# combination that a real store actually produces: a forest far taller than the
+# viewport, holding parents that each occupy two lines.
+#
+# Each case builds one project holding the listed sessions, replays the keys,
+# and asserts what the window shows: the first and last visible lines, which way
+# the overflow markers point, and whether the cursor's own row line is on screen.
+#
+# requiredCaseNames is a deletion-protection manifest, not a case count: it names
+# every case that must remain present, and adding a case never touches it.
+requiredCaseNames:
+  - a-count-line-yields-to-its-parent-row-at-the-bottom-edge
+  - scrolling-past-a-two-line-row-reveals-the-rows-below-it
+  - the-clamp-stops-with-the-last-line-on-screen
+  - the-cursor-row-stays-visible-where-the-row-margin-undercounts-lines
+cases:
+  # The window has room for the parent's own line but not for its count line.
+  # The row is what a person selects, so the row wins: its own line always
+  # renders, the count line is left for the next scroll, and the bottom marker
+  # says there is more. The alternative - holding the pair together - would
+  # leave a blank line at the bottom and hide a selectable row.
+  - name: a-count-line-yields-to-its-parent-row-at-the-bottom-edge
+    width: 60
+    height: 3
+    sessions:
+      - {id: s1, label: session one}
+      - {id: s2, label: session two, childCount: "2"}
+      - {id: s3, label: session three}
+    keys: []
+    wantCursor: project
+    wantFirstLineContains: "acme/tool"
+    wantLastLineContains: "session two"
+    wantAbsent: ["+ 2 child"]
+    wantTopOverflow: false
+    wantBottomOverflow: true
+
+  # Moving to the end scrolls the two-line parent off the top entirely: its
+  # count line goes with it and the rows below it arrive.
+  #
+  # The window also UNDERFILLS here, and that is the second half of the same
+  # decision: a row is never split across the TOP edge either, so the window
+  # starts on a whole row. Starting one row earlier would need 4 lines for a
+  # viewport of 3 and would push the cursor off the bottom; starting where it
+  # does leaves one blank line rather than orphaning a count line from its
+  # parent. The blank line is asserted so it stays a choice rather than drift.
+  - name: scrolling-past-a-two-line-row-reveals-the-rows-below-it
+    width: 60
+    height: 3
+    sessions:
+      - {id: s1, label: session one, childCount: "4"}
+      - {id: s2, label: session two}
+      - {id: s3, label: session three}
+    keys: ["G"]
+    wantCursor: s3
+    wantFirstLineContains: "session two"
+    wantLastLineBlank: true
+    wantPresent: ["session three"]
+    wantAbsent: ["+ 4 child", "session one", "acme/tool"]
+    wantTopOverflow: true
+    wantBottomOverflow: false
+
+  # The end of the list is measured in LINES. Counting rows instead would stop
+  # one row too early here and leave the last rows off screen: the forest is
+  # 5 rows but 7 lines tall, so the last window starts at the second parent,
+  # not at the first.
+  - name: the-clamp-stops-with-the-last-line-on-screen
+    width: 60
+    height: 4
+    sessions:
+      - {id: p1, label: parent one, childCount: "2"}
+      - {id: p2, label: parent two, childCount: "3"}
+      - {id: s3, label: session three}
+      - {id: s4, label: session four}
+    keys: ["G"]
+    wantCursor: s4
+    wantFirstLineContains: "parent two"
+    wantLastLineContains: "session four"
+    wantAbsent: ["+ 2 child", "acme/tool"]
+    wantTopOverflow: true
+    wantBottomOverflow: false
+
+  # The scroll margin is expressed in ROWS. With two-line rows and a viewport
+  # tall enough for the margin to stop growing, the row-based window is wider in
+  # LINES than the viewport, and the cursor's own line falls off the bottom. The
+  # correction that measures the same window in lines is what keeps it on screen,
+  # and this case is what proves that correction is reachable rather than
+  # defensive decoration.
+  - name: the-cursor-row-stays-visible-where-the-row-margin-undercounts-lines
+    width: 60
+    height: 13
+    sessions:
+      - {id: s1, label: session one, childCount: "1"}
+      - {id: s2, label: session two, childCount: "1"}
+      - {id: s3, label: session three, childCount: "1"}
+      - {id: s4, label: session four, childCount: "1"}
+      - {id: s5, label: session five, childCount: "1"}
+      - {id: s6, label: session six, childCount: "1"}
+      - {id: s7, label: session seven, childCount: "1"}
+      - {id: s8, label: session eight, childCount: "1"}
+      - {id: s9, label: session nine, childCount: "1"}
+      - {id: s10, label: session ten, childCount: "1"}
+    keys: ["down", "down", "down", "down", "down", "down", "down", "down"]
+    wantCursor: s8
+    wantFirstLineContains: "session three"
+    # The last line is a parent's own row line with its count line left outside
+    # the window: the same bottom-edge rule as the first case, seen here in a
+    # tall viewport rather than a three-line one.
+    wantLastLineContains: "session nine"
+    wantPresent: ["session eight"]
+    wantAbsent: ["session one", "session two", "acme/tool"]
+    wantTopOverflow: true
+    wantBottomOverflow: true
