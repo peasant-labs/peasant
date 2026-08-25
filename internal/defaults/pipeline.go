@@ -134,3 +134,46 @@ const WebAssetsSubdir = "web/out"
 
 // SPAFallbackFile is the default index file for single-page app routing.
 const SPAFallbackFile = "/index.html"
+
+// StoredPreviewFirstPageEntries bounds the first, quickly-read slice of a
+// session the kickstart preview reads from the LOCAL STORE. Only the preview
+// path uses it.
+//
+// The stored path is bounded in entry rows rather than payload bytes because
+// the store hands out rows, not a byte stream: an index range over
+// session_entries is one indexed read whose cost follows the row count.
+//
+// The value is set from what a real store returns. Measured against a personal
+// store of 10,454 sessions, on its longest session (42,731 entries folding to
+// 2,138 turns):
+//
+//	60 entries     about 0.5 ms
+//	200 entries    about 0.8 ms
+//	600 entries    about 1.8 ms
+//	2,000 entries  about 5.4 ms
+//
+// Every one of these is instant, so the bound is chosen for what it SHOWS, not
+// for what it costs. Entries fold to turns at rates between about 2.5:1 early
+// in a session and about 20:1 across a tool-heavy one, so 2,000 entries folds
+// to between roughly 100 and 800 turns. The lower end is half of
+// transcriptview.MaxRenderedTurns, which is the number of turns the viewer
+// treats as a full reading, and the upper end is several times it. Either way
+// the reader gets many screens at once.
+//
+// A session whose entries all fit inside this bound is read ONCE: the slice is
+// then the whole session, and no second read runs.
+const StoredPreviewFirstPageEntries = 2000
+
+// StoredPreviewSliceEntries bounds ONE stored read that the pane keeps: the
+// first full read behind the quick slice above, and each continuation that
+// loads when the reader scrolls to the bottom of the pane.
+//
+// It is four first pages. At the measured cost above that is about 20 ms of
+// reading, and it folds to between roughly 400 and 3,200 turns, so a
+// continuation makes real progress through a long session without the pane
+// pausing. The stored path can afford a continuation as large as its first
+// read - which the byte-bounded harness path deliberately cannot - because
+// both are index range reads of the same shape over rows the store already
+// holds, rather than a payload materialization whose cost grows with the size
+// of the rows it meets.
+const StoredPreviewSliceEntries = 4 * StoredPreviewFirstPageEntries

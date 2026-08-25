@@ -11,19 +11,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
-	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
+	"github.com/peasant-labs/schema"
 )
 
 const kickstartRawSourcePreviewLimit = 16 * 1024
@@ -332,13 +332,15 @@ func ingestedSessionIDs(cmd *cobra.Command, db *store.Store) []string {
 // run with no database at all. The fallback reads the transcript in place. It
 // copies nothing, and it writes nothing to disk or to the database.
 //
-// The turns come from api.StoreDataProvider.SessionByID - the SAME read the
-// session_detail channel and the transcript viewer use - rather than a second
-// hand-rolled query. That is what gets the preview the full turn bodies:
-// SessionByID folds session_entries into turns and, when anything in the
-// session hit the DB's content-preview limit, overlays the untruncated bodies
-// from the source transcript. A preview built on the stored previews alone
-// would cut turns off mid-word, which is a bug that path already fixed once.
+// The stored turns are read one index range of session_entries at a time and
+// folded with the same conversion the session_detail channel and the transcript
+// viewer use, and the untruncated bodies are overlaid from the source
+// transcript through the same builder that path uses - a preview built on the
+// stored bodies alone would cut turns off mid-word, which is a bug that path
+// already fixed once. Reading the ranges rather than the whole session is what
+// lets a preview of a session of tens of thousands of entries paint at once and
+// then extend as the reader scrolls, instead of costing seconds and stopping at
+// the viewer's standing draw bound with no way to continue.
 //
 // Visibility is deliberately sessionvisibility.All: kickstart is where a
 // selection is being CHOSEN, so scoping the preview by a selection the user has
@@ -353,28 +355,28 @@ func kickstartPreview(
 	contexts ...kickstart.ListingPreviewContextSource,
 ) kit.BodySource {
 	ctx := cmd.Context()
-	// storedTurns reports the turns AND whether the store holds the session at
-	// all, so the two outcomes stay distinguishable: a session the store never
-	// imported falls back to its harness transcript, while a store that could
-	// not be read is a real failure the pane must surface. Collapsing both into
-	// "no turns" would report a broken database as an empty session.
-	var storedTurns func(sessionID string) ([]ingest.Turn, bool, error)
+	// storedHeld reports whether the store holds the session at all, so the two
+	// outcomes stay distinguishable: a session the store never imported falls
+	// back to its harness transcript, while a store that could not be read is a
+	// real failure the pane must surface. Collapsing both into "no turns" would
+	// report a broken database as an empty session.
+	//
+	// stored then reads that session's entries one index range at a time. It
+	// replaced a single read of every entry followed by a draw of the first two
+	// hundred turns, which made a long recorded session cost seconds and then
+	// stop where no scroll could continue it.
+	var storedHeld func(sessionID string) (bool, error)
+	var stored *kickstart.StoredTurns
 	if db != nil {
-		provider := api.NewStoreDataProvider(db, sessionvisibility.All())
-		storedTurns = func(sessionID string) ([]ingest.Turn, bool, error) {
+		storedHeld = func(sessionID string) (bool, error) {
 			row, err := db.SessionDetailByID(ctx, sessionID)
 			if err != nil {
-				return nil, false, err
+				return false, err
 			}
-			if row == nil {
-				return nil, false, nil
-			}
-			session, err := provider.SessionByID(ctx, sessionID)
-			if err != nil {
-				return nil, true, err
-			}
-			return session.Turns, true, nil
+			return row != nil, nil
 		}
+		stored = kickstart.NewStoredTurns(db,
+			kickstart.WithStoredTurnsContentOverlay(kickstartStoredContentOverlay(ctx, db)))
 	}
 	// The reader materializes a SQLite-discovered session through the same
 	// adapter dependencies the discovery path uses, so the preview reads one
@@ -382,52 +384,72 @@ func kickstartPreview(
 	sourceTurns := kickstart.NewSourceTurns(&ingest.OSFileSystem{}, sessions,
 		kickstart.WithSourceTurnsGitResolver(&ingest.ExecGitResolver{}),
 		kickstart.WithSourceTurnsSalt(salt.Salt{}))
+	// readStored reports whether the local store answers this session. It is the
+	// one place the choice between the two readers is made, so the turns, the
+	// continuation, and the notice can never come from different sources for the
+	// same row.
+	readStored := func(sessionID string) (bool, error) {
+		if storedHeld == nil {
+			return false, nil
+		}
+		return storedHeld(sessionID)
+	}
 	turns := kickstart.SessionTurnsFunc(func(sessionID string) ([]ingest.Turn, error) {
-		if storedTurns != nil {
-			recorded, held, err := storedTurns(sessionID)
+		held, err := readStored(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			recorded, err := stored.Turns(sessionID)
 			if err != nil {
 				return nil, err
 			}
-			if len(recorded) > 0 {
-				return recorded, nil
-			}
-			if held {
-				// The store holds the session but produced no turns. That state
-				// has its own explanation, with the raw source records, so the
-				// harness transcript must not overwrite it here.
-				return nil, nil
-			}
+			// The store holds the session. Whether it produced turns or not, that
+			// is the answer: an empty stored session has its own explanation, with
+			// the raw source records, which the harness transcript must not
+			// overwrite here.
+			return recorded, nil
 		}
 		return sourceTurns.Turns(sessionID)
 	})
-	// The quick leading read the pane paints first. A session the store already
-	// holds is answered whole in one step, so only a harness read is ever split
-	// in two.
+	// The quick leading read the pane paints first. Both readers page, so a long
+	// session is split in two steps whichever of them answers it.
 	firstTurns := kickstart.SessionFirstTurnsFunc(func(sessionID string) ([]ingest.Turn, bool, error) {
-		if storedTurns != nil {
-			recorded, held, err := storedTurns(sessionID)
-			if err != nil {
-				return nil, false, err
-			}
-			if len(recorded) > 0 {
-				return recorded, false, nil
-			}
-			if held {
-				return nil, false, nil
-			}
+		held, err := readStored(sessionID)
+		if err != nil {
+			return nil, false, err
+		}
+		if held {
+			return stored.FirstTurns(sessionID)
 		}
 		return sourceTurns.FirstTurns(sessionID)
 	})
-	// The notice reports what the bounded harness read left out. A session the
-	// store already answered has no harness read behind it, so its notice is
-	// empty and the pane shows the stored turns alone.
+	// The continuation and the notice follow whichever reader HOLDS the loaded
+	// preview, which both answer from memory. Asking the store again here would
+	// read the database on the pane's own goroutine, and asking the wrong reader
+	// would return that reader's empty preview and blank the pane.
+	moreTurns := kickstart.SessionMoreTurnsFunc(func(sessionID string) ([]ingest.Turn, bool, error) {
+		if stored != nil && stored.Loaded(sessionID) {
+			return stored.MoreTurns(sessionID)
+		}
+		return sourceTurns.MoreTurns(sessionID)
+	})
+	hasMore := kickstart.SessionHasMoreFunc(func(sessionID string) bool {
+		if stored != nil && stored.Loaded(sessionID) {
+			return stored.HasMore(sessionID)
+		}
+		return sourceTurns.HasMore(sessionID)
+	})
+	notice := kickstart.SessionPreviewNoticeFunc(func(sessionID string) string {
+		if stored != nil && stored.Loaded(sessionID) {
+			return stored.Notice(sessionID)
+		}
+		return sourceTurns.Notice(sessionID)
+	})
 	opts := []kickstart.ListingPreviewOption{
-		kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
+		kickstart.WithSessionPreviewNotice(notice),
 		kickstart.WithSessionFirstTurns(firstTurns),
-		// The scrolled continuation. A session the store already answered has no
-		// harness read behind it, so it reports nothing more and the pane offers
-		// no continuation for it.
-		kickstart.WithSessionMoreTurns(sourceTurns.MoreTurns, sourceTurns.HasMore),
+		kickstart.WithSessionMoreTurns(moreTurns, hasMore),
 	}
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
@@ -436,6 +458,34 @@ func kickstartPreview(
 		opts = append(opts, kickstart.WithListingPreviewContextSource(contexts[0]))
 	}
 	return kickstart.NewListingPreview(th, sessions, turns, opts...)
+}
+
+// kickstartStoredContentOverlay recovers the untruncated bodies of a stored
+// session's turns from the transcript its harness wrote.
+//
+// The store keeps each entry's body only up to defaults.ContentPreviewLimit, so
+// turns read straight out of it stop mid-word on any long message. This is the
+// SAME recovery api.StoreDataProvider.SessionByID makes for the session viewer,
+// through the same builder, so the preview and the viewer show one session the
+// same way.
+//
+// It is best-effort, as the viewer's is: a session whose source transcript has
+// moved, been deleted, or cannot be parsed keeps the bodies the store holds
+// rather than failing the preview.
+func kickstartStoredContentOverlay(ctx context.Context, db *store.Store) kickstart.StoredContentOverlayFunc {
+	fs := &ingest.OSFileSystem{}
+	return func(sessionID string) (map[int]string, error) {
+		info, err := db.SessionSourceInfo(ctx, sessionID)
+		if err != nil || info == nil || info.SourcePath == "" {
+			return nil, nil
+		}
+		overlay, err := transcript.BuildContentOverlay(ctx, fs,
+			defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), schema.SessionID(sessionID))
+		if err != nil {
+			return nil, nil
+		}
+		return overlay, nil
+	}
 }
 
 // kickstartImportedEmptySessionBody gives an already stored session with no
