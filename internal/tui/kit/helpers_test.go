@@ -295,8 +295,47 @@ func buildComponent(t *testing.T, component string, th theme.Theme, width, heigh
 			ps, _ = ps.Update(msg)
 		}
 		return ps.View()
+	case "previewsplit-loading-more":
+		return buildContinuingPreviewSplit(t, th, width, height, true)
+	case "previewsplit-more-to-load":
+		return buildContinuingPreviewSplit(t, th, width, height, false)
 	default:
 		t.Fatalf("buildComponent: unknown component %q", component)
 		return ""
 	}
+}
+
+// buildContinuingPreviewSplit renders a preview that extends as the reader
+// scrolls, in the two states that state has: sitting at the end with more
+// behind it, and reading the next chunk.
+//
+// It scrolls to the end on purpose. The chrome the state carries lives at the
+// BOTTOM of the body, so a golden taken at the top of the preview would capture
+// a frame that says nothing about either state.
+func buildContinuingPreviewSplit(t *testing.T, th theme.Theme, width, height int, inFlight bool) string {
+	t.Helper()
+	items := []kit.ListItem{
+		kit.StringItem("peasant"),
+		kit.StringItem("village"),
+		kit.StringItem("fairtrade"),
+		kit.StringItem("schema"),
+	}
+	src := &growingSource{initial: 12, chunk: 4, chunks: 2}
+	ps := kit.NewPreviewSplitWithBodies(th, kit.NewListLeftPane(kit.NewList(th, items)), src)
+	ps.SetSize(width, height)
+	for _, msg := range collectMsgs(ps.Load()) {
+		ps, _ = ps.Update(msg)
+	}
+	// Focus the preview, then jump to the end, which is what asks for the next
+	// chunk and is where the pane says so.
+	ps, _ = ps.Update(keyPress(t, "ctrl+l"))
+	ps, cmd := ps.Update(keyPress(t, "shift+g"))
+	if !inFlight {
+		// Deliver the chunk and settle, so the golden shows a preview that has
+		// more behind it rather than one that is reading it.
+		for _, msg := range collectMsgs(cmd) {
+			ps, _ = ps.Update(msg)
+		}
+	}
+	return ps.View()
 }

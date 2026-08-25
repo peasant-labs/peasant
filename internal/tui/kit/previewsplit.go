@@ -1068,8 +1068,17 @@ func (p PreviewSplit) bodyChrome() (head, tail []string) {
 	if p.restPending {
 		head = []string{previewRestPendingLabel}
 	}
-	if p.loadingMore {
+	switch {
+	case p.loadingMore:
 		tail = []string{previewLoadingMoreLabel}
+	case p.continuable:
+		// A preview that CAN be continued keeps the row the label will occupy,
+		// blank, from the moment it can be continued. Reserving it inside the
+		// body is what makes the scroll extent the same before and after the
+		// request goes out, so firing the request cannot shift what the reader
+		// is looking at, and a reader who scrolled to the end is already looking
+		// at the row the label appears on.
+		tail = []string{""}
 	}
 	return head, tail
 }
@@ -1083,7 +1092,8 @@ const (
 	previewRestPendingLabel = "loading the rest..."
 	previewRestPendingLines = 1
 	// previewLoadingMoreLabel is what the pane says while it reads the next
-	// chunk of a preview that extends as the reader scrolls.
+	// chunk of a preview that extends as the reader scrolls. The row it takes
+	// is kept blank, not absent, whenever the preview can be continued at all.
 	previewLoadingMoreLabel = "loading more..."
 )
 

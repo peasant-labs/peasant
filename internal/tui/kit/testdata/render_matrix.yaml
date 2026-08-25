@@ -4,8 +4,8 @@
 # banked .golden file. The row-count guards in render_matrix_test.go assert
 # this file stays exhaustive: exactly the listed components, each with exactly its
 # dark+light x three-size rows, and no size dropped.
-expectedCaseCount: 78
-expectedComponentCount: 13
+expectedCaseCount: 90
+expectedComponentCount: 15
 expectedSizesPerComponentTheme: 3
 components:
   - frame
@@ -21,6 +21,8 @@ components:
   - tree
   - previewsplit
   - previewsplit-loading-the-rest
+  - previewsplit-loading-more
+  - previewsplit-more-to-load
 cases:
   # frame
   - name: frame/dark/80x10
@@ -423,6 +425,70 @@ cases:
     height: 8
   - name: previewsplit-loading-the-rest/light/min
     component: previewsplit-loading-the-rest
+    theme: light
+    width: 10
+    height: 1
+  # previewsplit-loading-more: the pane scrolled to the end of a preview that
+  # extends as the reader scrolls, while the next chunk is being read.
+  - name: previewsplit-loading-more/dark/80x10
+    component: previewsplit-loading-more
+    theme: dark
+    width: 80
+    height: 10
+  - name: previewsplit-loading-more/dark/40x8
+    component: previewsplit-loading-more
+    theme: dark
+    width: 40
+    height: 8
+  - name: previewsplit-loading-more/dark/min
+    component: previewsplit-loading-more
+    theme: dark
+    width: 10
+    height: 1
+  - name: previewsplit-loading-more/light/80x10
+    component: previewsplit-loading-more
+    theme: light
+    width: 80
+    height: 10
+  - name: previewsplit-loading-more/light/40x8
+    component: previewsplit-loading-more
+    theme: light
+    width: 40
+    height: 8
+  - name: previewsplit-loading-more/light/min
+    component: previewsplit-loading-more
+    theme: light
+    width: 10
+    height: 1
+  # previewsplit-more-to-load: the same pane once that chunk has landed, with
+  # more of the session still behind it and the row its label takes kept.
+  - name: previewsplit-more-to-load/dark/80x10
+    component: previewsplit-more-to-load
+    theme: dark
+    width: 80
+    height: 10
+  - name: previewsplit-more-to-load/dark/40x8
+    component: previewsplit-more-to-load
+    theme: dark
+    width: 40
+    height: 8
+  - name: previewsplit-more-to-load/dark/min
+    component: previewsplit-more-to-load
+    theme: dark
+    width: 10
+    height: 1
+  - name: previewsplit-more-to-load/light/80x10
+    component: previewsplit-more-to-load
+    theme: light
+    width: 80
+    height: 10
+  - name: previewsplit-more-to-load/light/40x8
+    component: previewsplit-more-to-load
+    theme: light
+    width: 40
+    height: 8
+  - name: previewsplit-more-to-load/light/min
+    component: previewsplit-more-to-load
     theme: light
     width: 10
     height: 1
