@@ -91,15 +91,19 @@ func sourceDiscoveredSession(listing ftue.SessionListing) (ingest.DiscoveredSess
 // viewer uses. It writes nothing to disk and nothing to the database. It keeps
 // the parsed turns of the last few sessions in memory only.
 type SourceTurns struct {
-	fs      ingest.FileSystem
-	git     ingest.GitResolver
-	salt    salt.Salt
-	byID    map[string]ftue.SessionListing
-	limit   int
-	budget  int64
-	mu      sync.Mutex
-	cached  map[string]sourcePreview
-	recency []string
+	fs     ingest.FileSystem
+	git    ingest.GitResolver
+	salt   salt.Salt
+	byID   map[string]ftue.SessionListing
+	limit  int
+	budget int64
+	// firstPage bounds the quickly-read leading slice the pane paints before
+	// the full bounded read finishes. Zero or less turns the two-step read off,
+	// so every preview waits for the full bounded read.
+	firstPage int64
+	mu        sync.Mutex
+	cached    map[string]sourcePreview
+	recency   []string
 }
 
 // sourcePreview is one session read from its harness source: the turns to
@@ -137,6 +141,14 @@ func WithSourceTurnsPreviewBudget(budgetBytes int64) SourceTurnsOption {
 	return func(reader *SourceTurns) { reader.budget = budgetBytes }
 }
 
+// WithSourceTurnsFirstPageBudget sets how many payload bytes of one session the
+// reader materializes for the quickly-painted first slice. A value of zero or
+// less removes the first slice, so a preview shows nothing until the full
+// bounded read finishes.
+func WithSourceTurnsFirstPageBudget(budgetBytes int64) SourceTurnsOption {
+	return func(reader *SourceTurns) { reader.firstPage = budgetBytes }
+}
+
 // WithSourceTurnsSalt sets the per-installation salt the reader gives the
 // materializer. The preview reads a session's transcript, not its project hash,
 // so the zero salt is the correct production default; this option exists so a
@@ -154,12 +166,13 @@ func NewSourceTurns(fs ingest.FileSystem, sessions []ftue.SessionListing, opts .
 		}
 	}
 	reader := &SourceTurns{
-		fs:     fs,
-		git:    &ingest.ExecGitResolver{},
-		byID:   byID,
-		limit:  DefaultSourceTurnsCacheSize,
-		budget: defaults.OpenCodePreviewMaterializeMaxBytes,
-		cached: make(map[string]sourcePreview),
+		fs:        fs,
+		git:       &ingest.ExecGitResolver{},
+		byID:      byID,
+		limit:     DefaultSourceTurnsCacheSize,
+		budget:    defaults.OpenCodePreviewMaterializeMaxBytes,
+		firstPage: defaults.OpenCodePreviewFirstPageMaxBytes,
+		cached:    make(map[string]sourcePreview),
 	}
 	for _, opt := range opts {
 		opt(reader)
@@ -191,6 +204,98 @@ func (s *SourceTurns) Turns(sessionID string) ([]ingest.Turn, error) {
 	}
 	s.store(sessionID, preview)
 	return preview.turns, nil
+}
+
+// FirstTurns reads a quickly-available LEADING slice of a session's turns and
+// reports whether more of the session follows.
+//
+// It exists because the full bounded read of a very long session takes seconds,
+// most of it spent measuring the session so the truncation note can name what
+// it left out. This read skips the measurement and stops after the first-page
+// budget, so the pane can paint turns while the full read is still running.
+//
+// A false more means the slice IS the whole session under the preview bound, so
+// no further read is needed. A true more means the caller must still call Turns
+// to get the result the pane finally shows.
+//
+// It caches ONLY a result that is already whole. A leading slice is never
+// cached, and never becomes the answer a later Turns call returns, because that
+// slice stands for less than the session and carries no note saying so.
+func (s *SourceTurns) FirstTurns(sessionID string) ([]ingest.Turn, bool, error) {
+	listing, ok := s.byID[sessionID]
+	if !ok {
+		return nil, false, nil
+	}
+	if preview, hit := s.lookup(sessionID); hit {
+		return preview.turns, false, nil
+	}
+	session, err := sourceDiscoveredSession(listing)
+	if err != nil {
+		return nil, false, fmt.Errorf("preview the transcript of session %q from its harness source: %w", sessionID, err)
+	}
+	firstPage, ok := s.firstPageReader(session)
+	if !ok {
+		// A source with no first-page read (a file transcript, or a reader
+		// configured without the bound) has one step only: read it whole.
+		preview, err := s.readTurns(sessionID, listing, session)
+		if err != nil {
+			return nil, false, err
+		}
+		s.store(sessionID, preview)
+		return preview.turns, false, nil
+	}
+	turns, more, err := s.firstPageTurns(sessionID, listing, session, firstPage)
+	if err != nil {
+		return nil, false, err
+	}
+	if !more {
+		// The slice reached the end of the session, so it is the whole preview
+		// and carries no note. Caching it is caching a complete result.
+		s.store(sessionID, sourcePreview{turns: turns})
+	}
+	return turns, more, nil
+}
+
+// firstPageReader reports the adapter that can read a leading slice of the
+// given session, and false when this session has no two-step read: a file
+// transcript, a harness with no discovery adapter, an adapter that cannot bound
+// a first slice, or a reader configured without a first-page budget.
+func (s *SourceTurns) firstPageReader(session ingest.DiscoveredSession) (ingest.FirstPageTranscriptMaterializer, bool) {
+	if s.firstPage <= 0 {
+		return nil, false
+	}
+	switch session.TranscriptOrigin {
+	case ingest.TranscriptOriginOpenCodeLegacySQLite, ingest.TranscriptOriginOpenCodeCurrentSQLite:
+	default:
+		return nil, false
+	}
+	factory, ok := ingest.DefaultAdapterRegistry[session.Harness]
+	if !ok {
+		return nil, false
+	}
+	firstPage, ok := factory(s.fs, s.git, s.salt).(ingest.FirstPageTranscriptMaterializer)
+	return firstPage, ok
+}
+
+// firstPageTurns materializes the leading slice and folds it the same way the
+// full read folds its own bytes, so the turns the pane paints first are the
+// turns it keeps.
+func (s *SourceTurns) firstPageTurns(sessionID string, listing ftue.SessionListing, session ingest.DiscoveredSession, firstPage ingest.FirstPageTranscriptMaterializer) ([]ingest.Turn, bool, error) {
+	_, data, more, err := firstPage.MaterializeTranscriptFirstPage(context.Background(), session, s.firstPage)
+	if err != nil {
+		return nil, false, fmt.Errorf("materialize the first page of the SQLite transcript of session %q for preview: %w", sessionID, err)
+	}
+	indexer, ok := ingest.NewIndexerRegistry(s.fs, ingest.IndexerRegistryOptions{FullContent: true})[session.Harness]
+	if !ok {
+		return nil, false, fmt.Errorf(
+			"preview the SQLite transcript of session %q from its harness source: harness %q has no transcript reader",
+			sessionID, listing.Harness)
+	}
+	entries, err := indexer.IndexTranscriptBytes(context.Background(), session, data)
+	if err != nil {
+		return nil, false, fmt.Errorf("read the materialized first page of session %q: %w", sessionID, err)
+	}
+	return transcript.EntriesToTurns(entries), more, nil
 }
 
 // Notice implements SessionPreviewNoticeFunc over the harness transcript. It

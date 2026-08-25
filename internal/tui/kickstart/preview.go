@@ -25,6 +25,19 @@ import (
 // recorded turns directly.
 type SessionTurnsFunc func(sessionID string) ([]ingest.Turn, error)
 
+// SessionFirstTurnsFunc reads a quickly-available LEADING slice of one
+// session's turns and reports whether more of the session follows.
+//
+// It is the two-step half of [SessionTurnsFunc], and it exists because reading
+// a very long session out of a provider database takes seconds while reading
+// the first part of it takes a fraction of one. The preview paints the slice at
+// once and then asks SessionTurnsFunc for the result it finally shows.
+//
+// A false more means the slice IS the whole preview, so no second read runs.
+// Its error contract matches SessionTurnsFunc: no turns for a session there is
+// nothing to read for, an error only when the read itself failed.
+type SessionFirstTurnsFunc func(sessionID string) (turns []ingest.Turn, more bool, err error)
+
 // SessionPreviewNoticeFunc reports a plain sentence the preview must show ABOVE
 // the turns it already loaded, or the empty string when there is nothing to
 // say. It exists because a preview can be complete in itself yet still stand
@@ -95,6 +108,15 @@ func WithSessionPreviewNotice(notice SessionPreviewNoticeFunc) ListingPreviewOpt
 	}
 }
 
+// WithSessionFirstTurns supplies the quick leading read the preview paints
+// before the whole session is read. Without it the preview keeps its
+// single-step behavior: the pane shows nothing until the whole read finishes.
+func WithSessionFirstTurns(first SessionFirstTurnsFunc) ListingPreviewOption {
+	return func(preview *ListingPreview) {
+		preview.firstTurns = first
+	}
+}
+
 // WithListingPreviewContextSource enables project and branch detail bodies from
 // the exact scanner forest that supplied the highlighted row.
 func WithListingPreviewContextSource(source ListingPreviewContextSource) ListingPreviewOption {
@@ -139,6 +161,9 @@ type ListingPreview struct {
 	th        theme.Theme
 	contexts  ListingPreviewContextSource
 	notice    SessionPreviewNoticeFunc
+	// firstTurns is the optional quick leading read. When it is nil the
+	// preview loads in one step.
+	firstTurns SessionFirstTurnsFunc
 }
 
 // NewListingPreview builds the selection step's preview over the discovery
@@ -163,51 +188,82 @@ func NewListingPreview(th theme.Theme, sessions []ftue.SessionListing, turns Ses
 	return preview
 }
 
-var _ kit.BodySource = (*ListingPreview)(nil)
+var (
+	_ kit.BodySource            = (*ListingPreview)(nil)
+	_ kit.ProgressiveBodySource = (*ListingPreview)(nil)
+)
 
 // Body implements kit.BodySource. It is called off the UI goroutine, so the
 // store read here never blocks tree navigation.
 func (p *ListingPreview) Body(id string) (kit.PreviewBody, error) {
+	body, _, err := p.load(id, func(sessionID string) ([]ingest.Turn, bool, error) {
+		recorded, err := p.turns(sessionID)
+		return recorded, false, err
+	})
+	return body, err
+}
+
+// FirstBody implements kit.ProgressiveBodySource: it paints the quick leading
+// slice of a session while the whole read is still running.
+//
+// Without a first-turns reader it is the single-step load, so mounting this
+// preview over a source that cannot read a slice costs nothing and changes
+// nothing.
+func (p *ListingPreview) FirstBody(id string) (kit.PreviewBody, bool, error) {
+	if p.firstTurns == nil {
+		body, err := p.Body(id)
+		return body, false, err
+	}
+	return p.load(id, p.firstTurns)
+}
+
+// load builds one preview for id from the given read, and reports whether that
+// read left more of the session to come.
+//
+// The truncation notice is attached ONLY to a body no further read follows.
+// The notice names what the WHOLE preview read left out, so putting it on a
+// leading slice would state a bound the slice was not read under.
+func (p *ListingPreview) load(id string, read func(string) ([]ingest.Turn, bool, error)) (kit.PreviewBody, bool, error) {
 	sess, ok := p.byID[id]
 	if !ok {
 		if p.contexts != nil {
 			if context, found := p.contexts.ListingPreviewContext(id); found {
-				return listingContextBody{th: p.th, lines: listingContextLines(context)}, nil
+				return listingContextBody{th: p.th, lines: listingContextLines(context)}, false, nil
 			}
 		}
-		return sessionBody{th: p.th, note: notASessionBody}, nil
+		return sessionBody{th: p.th, note: notASessionBody}, false, nil
 	}
 	body := sessionBody{th: p.th, header: headerLines(sess)}
 	if p.turns == nil {
 		// No reader at all: nothing can say more than that the store does not
 		// hold the session yet.
 		body.note = notImportedBody
-		return body, nil
+		return body, false, nil
 	}
-	recorded, err := p.turns(id)
+	recorded, more, err := read(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(recorded) == 0 {
 		if p.emptyBody != nil {
 			preview, imported, err := p.emptyBody(id)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if imported {
 				body.note = preview.Note
 				body.rawJSON = preview.SourceJSON
-				return body, nil
+				return body, false, nil
 			}
 		}
 		body.note = emptyNote(sess)
-		return body, nil
+		return body, false, nil
 	}
 	body.transcript = p.renderer.Document(recorded)
-	if p.notice != nil {
+	if p.notice != nil && !more {
 		body.notice = p.notice(id)
 	}
-	return body, nil
+	return body, more, nil
 }
 
 // emptyNote explains a session that produced no turns. A session whose harness

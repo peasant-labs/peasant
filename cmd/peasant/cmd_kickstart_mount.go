@@ -400,10 +400,31 @@ func kickstartPreview(
 		}
 		return sourceTurns.Turns(sessionID)
 	})
+	// The quick leading read the pane paints first. A session the store already
+	// holds is answered whole in one step, so only a harness read is ever split
+	// in two.
+	firstTurns := kickstart.SessionFirstTurnsFunc(func(sessionID string) ([]ingest.Turn, bool, error) {
+		if storedTurns != nil {
+			recorded, held, err := storedTurns(sessionID)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(recorded) > 0 {
+				return recorded, false, nil
+			}
+			if held {
+				return nil, false, nil
+			}
+		}
+		return sourceTurns.FirstTurns(sessionID)
+	})
 	// The notice reports what the bounded harness read left out. A session the
 	// store already answered has no harness read behind it, so its notice is
 	// empty and the pane shows the stored turns alone.
-	opts := []kickstart.ListingPreviewOption{kickstart.WithSessionPreviewNotice(sourceTurns.Notice)}
+	opts := []kickstart.ListingPreviewOption{
+		kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
+		kickstart.WithSessionFirstTurns(firstTurns),
+	}
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
 	}

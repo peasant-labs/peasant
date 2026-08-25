@@ -1,0 +1,72 @@
+# Two-step preview reads of an OpenCode SQLite session, driven by
+# TestSourceTurns_ReadsAFirstPageBeforeTheWholeSession
+# (internal/tui/kickstart/source_preview_two_step_test.go).
+#
+# The preview of a very long session paints a quickly-read leading slice first
+# and then swaps in the whole bounded read. Each case names a synthetic database
+# the testfixture package materializes, discovers one session from it, and reads
+# that session both ways.
+#
+# first_page_budget_bytes bounds the leading slice; preview_budget_bytes bounds
+# the whole read (zero reads the session whole). A case whose session fits its
+# first-page bound is read ONCE - expect_more is false and no second read runs.
+#
+# Two rules every case asserts, because they are what keeps a fast first paint
+# honest:
+#   - a leading slice NEVER carries the truncation note, which describes the
+#     whole read's bound, not the slice's;
+#   - a leading slice is NEVER cached, so the reader's cached answer is always
+#     the whole result.
+#
+# required_cases names the cases that must stay present; removing one goes red
+# by name. Adding a case need not appear here.
+required_cases:
+  - a-legacy-session-over-its-first-page-bound-is-read-in-two-steps
+  - a-current-session-over-its-first-page-bound-is-read-in-two-steps
+  - a-legacy-session-inside-its-first-page-bound-is-read-once
+  - a-current-session-inside-its-first-page-bound-is-read-once
+  - the-note-of-a-two-step-read-describes-the-whole-read-not-the-slice
+cases:
+  - name: a-legacy-session-over-its-first-page-bound-is-read-in-two-steps
+    source_fixture: legacy-mounted-projection
+    origin: opencode-legacy-sqlite
+    first_page_budget_bytes: 700
+    min_first_turns: 1
+    expect_more: true
+
+  - name: a-current-session-over-its-first-page-bound-is-read-in-two-steps
+    source_fixture: semantic-parity-current
+    origin: opencode-current-sqlite
+    first_page_budget_bytes: 1
+    min_first_turns: 1
+    expect_more: true
+
+  - name: a-legacy-session-inside-its-first-page-bound-is-read-once
+    source_fixture: legacy-mounted-projection
+    origin: opencode-legacy-sqlite
+    first_page_budget_bytes: 1048576
+    min_first_turns: 1
+    expect_more: false
+
+  - name: a-current-session-inside-its-first-page-bound-is-read-once
+    source_fixture: semantic-parity-current
+    origin: opencode-current-sqlite
+    first_page_budget_bytes: 1048576
+    min_first_turns: 1
+    expect_more: false
+
+  # The whole read is itself bounded here, so it carries the note. The slice
+  # before it must carry none, and the note that finally shows must be the
+  # whole read's.
+  - name: the-note-of-a-two-step-read-describes-the-whole-read-not-the-slice
+    source_fixture: legacy-mounted-projection
+    origin: opencode-legacy-sqlite
+    first_page_budget_bytes: 700
+    preview_budget_bytes: 700
+    min_first_turns: 1
+    expect_more: true
+    expect_notice_contains:
+      - preview shows the first
+      - rows
+      - the full session ingests normally
+      - this bound applies to the preview only
