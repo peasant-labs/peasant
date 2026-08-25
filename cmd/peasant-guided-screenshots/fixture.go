@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"gopkg.in/yaml.v3"
@@ -387,25 +388,11 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 // that required itself declares no blank or duplicate name. kind identifies
 // the axis (e.g. "selection session", "push session") in failure messages.
 // It is a deletion-protection manifest, not a row count: it never bounds how
-// many rows exist, only that the named ones remain.
+// many rows exist, only that the named ones remain. It delegates to the one
+// shared checker in internal/testutil so every fixture family in this repo
+// reports the same shape of error for the same mistake.
 func requireNames(kind string, required []string, present map[string]bool) error {
-	if len(required) == 0 {
-		return fmt.Errorf("screenshot fixture required %s names is empty; list every %s name the fixture must retain", kind, kind)
-	}
-	seen := make(map[string]bool, len(required))
-	for _, name := range required {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("screenshot fixture required %s names has a blank entry", kind)
-		}
-		if seen[name] {
-			return fmt.Errorf("screenshot fixture required %s names repeats %q", kind, name)
-		}
-		seen[name] = true
-		if !present[name] {
-			return fmt.Errorf("screenshot fixture is missing required %s %q; restore the row or remove it from the required names list", kind, name)
-		}
-	}
-	return nil
+	return testutil.RequireFixtureNames("screenshot fixture", kind, required, present)
 }
 
 func validateSheets(sheets []sheetFixture) error {

@@ -64,25 +64,12 @@ func decodeClaudeTeammateFixtures(source []byte) (claudeTeammateFixtures, error)
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture must contain exactly one YAML document: %v", err)
 	}
-	if len(fixtures.RequiredNames) == 0 {
-		return claudeTeammateFixtures{}, errors.New("Claude teammate fixture required_names is empty; list every case name the fixture must retain")
-	}
-	present := make(map[string]struct{}, len(fixtures.Cases))
+	present := make(map[string]bool, len(fixtures.Cases))
 	for _, testCase := range fixtures.Cases {
-		present[testCase.Name] = struct{}{}
+		present[testCase.Name] = true
 	}
-	seenRequired := make(map[string]struct{}, len(fixtures.RequiredNames))
-	for _, name := range fixtures.RequiredNames {
-		if name == "" {
-			return claudeTeammateFixtures{}, errors.New("Claude teammate fixture required_names has a blank entry")
-		}
-		if _, duplicate := seenRequired[name]; duplicate {
-			return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture required_names repeats %q", name)
-		}
-		seenRequired[name] = struct{}{}
-		if _, ok := present[name]; !ok {
-			return claudeTeammateFixtures{}, fmt.Errorf("Claude teammate fixture is missing required case %q; restore the row or remove it from required_names", name)
-		}
+	if err := testutil.RequireFixtureNames("Claude teammate fixture", "case", fixtures.RequiredNames, present); err != nil {
+		return claudeTeammateFixtures{}, err
 	}
 	return fixtures, nil
 }

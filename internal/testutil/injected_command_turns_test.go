@@ -66,7 +66,7 @@ func TestInjectedCommandTurnFixtureGuardsRequiredCaseDeletion(t *testing.T) {
 	if err == nil {
 		t.Fatal("fixture decoder accepted a corpus missing a required case row")
 	}
-	if !strings.Contains(err.Error(), `required case "command_name_only" is missing`) {
+	if !strings.Contains(err.Error(), `is missing required case "command_name_only"`) {
 		t.Fatalf("deleted-required-case error = %v, want it to name the missing case", err)
 	}
 }
