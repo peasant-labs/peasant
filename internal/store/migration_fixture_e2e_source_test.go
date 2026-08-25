@@ -1,6 +1,6 @@
 //go:build e2e
 
-package store
+package store_test
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 )
 
@@ -76,7 +77,7 @@ func TestBuildV39E2EFixture_CopiesFromLatestSchemaSource(t *testing.T) {
 	source := filepath.Join(dir, "ingested-latest.db")
 	destination := filepath.Join(dir, "frozen-v39.db")
 
-	latest, err := Open(source)
+	latest, err := store.Open(source)
 	if err != nil {
 		t.Fatalf("open the ingested source at the latest schema: %v", err)
 	}
@@ -87,10 +88,10 @@ func TestBuildV39E2EFixture_CopiesFromLatestSchemaSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen the ingested source: %v", err)
 	}
-	if got := upgradeUserVersion(t, conn); got != CurrentSchemaVersion() {
-		t.Fatalf("ingested source user_version = %d, want the current schema %d", got, CurrentSchemaVersion())
+	if got := store.UserVersionForTest(t, conn); got != store.CurrentSchemaVersion() {
+		t.Fatalf("ingested source user_version = %d, want the current schema %d", got, store.CurrentSchemaVersion())
 	}
-	if _, present := upgradeColumn(t, conn, "sessions", fixture.FrozenMustLackColumn); !present {
+	if present := store.ColumnPresentForTest(t, conn, "sessions", fixture.FrozenMustLackColumn); !present {
 		t.Fatalf("ingested source lacks sessions.%s, so it does not carry the column this case exists to prove is dropped", fixture.FrozenMustLackColumn)
 	}
 	for _, seed := range fixture.Seeds {
@@ -102,7 +103,7 @@ func TestBuildV39E2EFixture_CopiesFromLatestSchemaSource(t *testing.T) {
 		t.Fatalf("close the seeded source: %v", err)
 	}
 
-	request := v39FixtureRequest{
+	request := store.V39FixtureRequest{
 		Destination:    destination,
 		IngestedSource: source,
 		SessionID:      fixture.Request.SessionID,
@@ -111,10 +112,10 @@ func TestBuildV39E2EFixture_CopiesFromLatestSchemaSource(t *testing.T) {
 		AuthorTime:     fixture.Request.AuthorTime,
 		PushedAt:       fixture.Request.PushedAt,
 	}
-	if err := request.validate(); err != nil {
+	if err := store.ValidateV39FixtureRequest(request); err != nil {
 		t.Fatalf("validate the fixture request: %v", err)
 	}
-	if err := buildV39E2EFixture(request); err != nil {
+	if err := store.BuildV39E2EFixture(request); err != nil {
 		t.Fatalf("build the V39 fixture from a latest-schema source: %v", err)
 	}
 
@@ -123,10 +124,10 @@ func TestBuildV39E2EFixture_CopiesFromLatestSchemaSource(t *testing.T) {
 		t.Fatalf("open the built V39 fixture: %v", err)
 	}
 	defer frozen.Close()
-	if got := upgradeUserVersion(t, frozen); got != 39 {
+	if got := store.UserVersionForTest(t, frozen); got != 39 {
 		t.Fatalf("built fixture user_version = %d, want 39", got)
 	}
-	if _, present := upgradeColumn(t, frozen, "sessions", fixture.FrozenMustLackColumn); present {
+	if present := store.ColumnPresentForTest(t, frozen, "sessions", fixture.FrozenMustLackColumn); present {
 		t.Fatalf("built fixture carries sessions.%s, so it is not frozen before the origin migration", fixture.FrozenMustLackColumn)
 	}
 	var copied int
