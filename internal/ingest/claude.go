@@ -20,14 +20,16 @@ import (
 
 // ClaudeAdapter discovers and extracts metadata from Claude Code JSONL transcripts.
 type ClaudeAdapter struct {
-	fs       FileSystem
-	git      GitResolver
-	salt     salt.Salt
-	evidence ClaudeEvidenceCache
+	fs             FileSystem
+	git            GitResolver
+	salt           salt.Salt
+	evidence       ClaudeEvidenceCache
+	locationLookup SessionLocationLookup
 }
 
 var _ SourceAdapter = (*ClaudeAdapter)(nil)
 var _ ClaudeEvidenceCaching = (*ClaudeAdapter)(nil)
+var _ ClaudeSessionLocationLookupCapable = (*ClaudeAdapter)(nil)
 
 // NewClaudeAdapter creates a ClaudeAdapter with injected dependencies.
 func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapter {
@@ -38,6 +40,15 @@ func NewClaudeAdapter(fs FileSystem, git GitResolver, s salt.Salt) *ClaudeAdapte
 // earlier run. Without a cache the adapter mines every transcript again.
 func (a *ClaudeAdapter) SetClaudeEvidenceCache(cache ClaudeEvidenceCache) {
 	a.evidence = cache
+}
+
+// SetSessionLocationLookup gives the adapter a way to confirm whether a
+// candidate cross-run spawner is already persisted, and what parent it
+// already has, so re-parenting can trust data outside this run's own write
+// batch. Without a lookup, cross-run linking never fires (see
+// claudeSessionAlreadyStored and claudeStoredParent).
+func (a *ClaudeAdapter) SetSessionLocationLookup(lookup SessionLocationLookup) {
+	a.locationLookup = lookup
 }
 
 func (a *ClaudeAdapter) Harness() Harness {

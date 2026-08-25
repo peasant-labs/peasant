@@ -188,26 +188,22 @@ func assertClaudeTeammateDiscovery(t *testing.T, sessions []ingest.DiscoveredSes
 	}
 }
 
-// fakeClaudeStoreCache is a minimal in-memory double for the evidence cache
-// the real local store provides. It also answers LookupSessionLocation, the
-// exact method the store already exposes for an unrelated reason (pre-
-// populating the diff-stage location cache), which cross-run linking reuses
-// to confirm a persisted-only candidate parent is really stored before
-// pointing a child at it. markStored simulates the write stage a real
-// pipeline run performs after Discover returns.
-type fakeClaudeStoreCache struct {
+// fakeClaudeLinkingEvidenceCache is a minimal in-memory double for the evidence
+// cache the real local store provides. It answers only the evidence-caching
+// contract (LoadClaudeEvidence / SaveClaudeEvidence) — a separate concern
+// from where a session already lives in the store, which
+// fakeSessionLocationLookup below answers instead.
+type fakeClaudeLinkingEvidenceCache struct {
 	evidence map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence
-	stored   map[ingest.SessionID]string // session id -> its stored parent id ("" for a stored root)
 }
 
-func newFakeClaudeStoreCache() *fakeClaudeStoreCache {
-	return &fakeClaudeStoreCache{
+func newFakeClaudeLinkingEvidenceCache() *fakeClaudeLinkingEvidenceCache {
+	return &fakeClaudeLinkingEvidenceCache{
 		evidence: make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence),
-		stored:   make(map[ingest.SessionID]string),
 	}
 }
 
-func (f *fakeClaudeStoreCache) LoadClaudeEvidence(context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
+func (f *fakeClaudeLinkingEvidenceCache) LoadClaudeEvidence(context.Context) (map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, error) {
 	out := make(map[ingest.ResolvedPath]ingest.ClaudeTranscriptEvidence, len(f.evidence))
 	for path, record := range f.evidence {
 		out[path] = record
@@ -215,7 +211,7 @@ func (f *fakeClaudeStoreCache) LoadClaudeEvidence(context.Context) (map[ingest.R
 	return out, nil
 }
 
-func (f *fakeClaudeStoreCache) SaveClaudeEvidence(_ context.Context, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) error {
+func (f *fakeClaudeLinkingEvidenceCache) SaveClaudeEvidence(_ context.Context, upserts []ingest.ClaudeTranscriptEvidence, deletes []ingest.ResolvedPath) error {
 	for _, record := range upserts {
 		f.evidence[record.SourcePath] = record
 	}
@@ -225,9 +221,25 @@ func (f *fakeClaudeStoreCache) SaveClaudeEvidence(_ context.Context, upserts []i
 	return nil
 }
 
+// fakeSessionLocationLookup is a minimal in-memory double for the store's
+// session-location lookup, the exact method the store already exposes for an
+// unrelated reason (pre-populating the diff-stage location cache), which
+// cross-run linking reuses to confirm a persisted-only candidate parent is
+// really stored before pointing a child at it. markStored simulates the
+// write stage a real pipeline run performs after Discover returns.
+type fakeSessionLocationLookup struct {
+	stored map[ingest.SessionID]string // session id -> its stored parent id ("" for a stored root)
+}
+
+func newFakeSessionLocationLookup() *fakeSessionLocationLookup {
+	return &fakeSessionLocationLookup{
+		stored: make(map[ingest.SessionID]string),
+	}
+}
+
 // LookupSessionLocation mirrors the store's contract: an unknown session id
 // answers empty strings and no error.
-func (f *fakeClaudeStoreCache) LookupSessionLocation(_ context.Context, sessionID ingest.SessionID) (string, string, error) {
+func (f *fakeSessionLocationLookup) LookupSessionLocation(_ context.Context, sessionID ingest.SessionID) (string, string, error) {
 	parentID, ok := f.stored[sessionID]
 	if !ok {
 		return "", "", nil
@@ -235,7 +247,7 @@ func (f *fakeClaudeStoreCache) LookupSessionLocation(_ context.Context, sessionI
 	return "fake-host", parentID, nil
 }
 
-func (f *fakeClaudeStoreCache) markStored(sessionID ingest.SessionID, parentID string) {
+func (f *fakeSessionLocationLookup) markStored(sessionID ingest.SessionID, parentID string) {
 	f.stored[sessionID] = parentID
 }
 
@@ -252,9 +264,11 @@ func TestClaudeAdapter_DiscoverTeammateLineageAcrossRuns(t *testing.T) {
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
 			mfs := testutil.NewMemFS()
-			cache := newFakeClaudeStoreCache()
+			cache := newFakeClaudeLinkingEvidenceCache()
+			location := newFakeSessionLocationLookup()
 			adapter := ingest.NewClaudeAdapter(mfs, testutil.DefaultGitResolver(), salt.Salt{})
 			ingest.AttachClaudeEvidenceCache(adapter, cache)
+			ingest.AttachSessionLocationLookup(adapter, location)
 
 			var sessions []ingest.DiscoveredSession
 			for runIndex, run := range fixture.Runs {
@@ -287,7 +301,7 @@ func TestClaudeAdapter_DiscoverTeammateLineageAcrossRuns(t *testing.T) {
 					if session, ok := byID[sid]; ok && session.ParentUUID != nil {
 						parentID = string(*session.ParentUUID)
 					}
-					cache.markStored(ingest.SessionID(sid), parentID)
+					location.markStored(ingest.SessionID(sid), parentID)
 				}
 			}
 
