@@ -5,6 +5,7 @@ requiredNames:
   - structured_identity_root
   - programmatic_launch_root
   - command_wrapper_root
+  - caveat_prefixed_command_wrapper_root
   - bootstrap_text_root
   - no_evidence_root
   - parent_root_with_subagent

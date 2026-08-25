@@ -37,6 +37,14 @@ var requiredClaudeOriginCaseNames = []string{
 	"structured_identity_outranks_a_command_wrapper_in_the_same_file",
 	"only_the_first_user_record_is_read_for_the_prompt",
 	"subagent_transcript_is_classified_agent",
+	"leading_caveat_then_a_command_wrapper_is_a_person",
+	"leading_caveat_then_a_teammate_brief_is_a_program",
+	"a_caveat_with_nothing_after_it_stays_undeclared",
+	"several_stacked_injected_records_are_all_read_past",
+	"an_injected_record_after_a_real_one_is_not_read_past",
+	"the_same_command_wrapper_without_the_leading_caveat",
+	"a_command_wrapper_is_never_read_past",
+	"a_longer_wrapper_name_is_not_the_injected_one",
 }
 
 type claudeOriginFixture struct {

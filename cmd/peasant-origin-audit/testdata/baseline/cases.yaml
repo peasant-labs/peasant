@@ -9,6 +9,13 @@
 # cases are made unreadable by the test itself (chmod 0000 on a copy in a
 # temp directory) -- the checked-in file stays normal so the fixture survives
 # a git checkout on any OS/filesystem.
+#
+# caveat_prefixed_command_wrapper_root is the shape a locally run slash command
+# actually takes on disk: Claude Code writes a caveat record in front of the
+# command wrapper, so the command is the SECOND user record. It is here so the
+# instrument can measure whether the capture reads past leading harness
+# scaffolding -- without it the baseline cannot tell that behaviour apart from
+# its absence, and the real-store tier it drives is the largest one.
 cases:
   - name: structured_identity_root
     relative_path: sample-project/11111111-1111-1111-1111-111111111111.jsonl
@@ -20,6 +27,10 @@ cases:
     signal: programmatic-entry
   - name: command_wrapper_root
     relative_path: sample-project/33333333-3333-3333-3333-333333333333.jsonl
+    origin: user
+    signal: command-invocation
+  - name: caveat_prefixed_command_wrapper_root
+    relative_path: sample-project/88888888-8888-8888-8888-888888888888.jsonl
     origin: user
     signal: command-invocation
   - name: bootstrap_text_root

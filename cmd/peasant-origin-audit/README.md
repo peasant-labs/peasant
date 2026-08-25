@@ -58,7 +58,9 @@ derived.
 ## Baseline
 
 `testdata/baseline/` is a small, hand-counted fixture tree with one shape per deciding signal --
-a structured-identity root, a programmatic-launch root, a command-wrapper root, a bootstrap-text
+a structured-identity root, a programmatic-launch root, a command-wrapper root, a
+caveat-prefixed command-wrapper root (the shape a locally run slash command takes on disk, where
+the harness writes a caveat record in front of the command), a bootstrap-text
 root, a plain-prose root with no evidence, a root/subagent pair (proving `parent-linked`), and a root
 made unreadable by the test itself -- plus `manifest.yaml` (decoded through the shared
 `internal/testutil.SemanticManifest` helper) as the deletion guard over the case names. `TestRunAuditBaseline`

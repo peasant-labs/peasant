@@ -26,8 +26,15 @@ type Evidence struct {
 	// Entrypoint and PromptSource describe a programmatic launch.
 	Entrypoint   string
 	PromptSource string
-	// FirstUserText is the raw, untrimmed text of the first user-role entry, and
-	// is empty when the transcript has none.
+	// FirstUserText is the raw, untrimmed text of the transcript's opening
+	// user-role entry, and is empty when the transcript has none.
+	//
+	// Which entry that is belongs to the adapter, not to this rule. A harness
+	// may write its own scaffolding into user-role entries ahead of the real
+	// opening one, and an adapter that recognises its own markup is expected to
+	// read past a leading run of it and supply the first entry a person or an
+	// agent actually produced. The rule is harness-neutral and reads whatever it
+	// is handed; it never decides which entry that should have been.
 	FirstUserText string
 }
 
