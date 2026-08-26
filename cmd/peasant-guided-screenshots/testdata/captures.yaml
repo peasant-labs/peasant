@@ -48,10 +48,10 @@ selectionStates:
     wantContains: ["search: cursor", harness, "cursor se"]
   - key: project-preview
     query: ""
-    wantContains: ["project: github:acme/tool", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+    wantContains: ["project: github.com:acme/tool", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
   - key: branch-preview
     query: ""
-    wantContains: ["project: github:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
+    wantContains: ["project: github.com:acme/tool", "branch: main", "git directories: 2", /fixtures/gitdirs/pasture-a, /fixtures/gitdirs/pasture-b]
   # The row title is a PREFIX marker: with the child-session count moved to its
   # own line, the parent row carries its tracked chip again, so a narrow split
   # pane clips the title where it previously had room for all of it.

@@ -279,7 +279,7 @@ func TestProjectSummaries_DisplayNamePrefersRemote(t *testing.T) {
 	if remoteRow == nil {
 		t.Fatalf("no row for %s in %+v", fxProjectHash2, result.Projects)
 	}
-	if remoteRow.Project != "github:example-org/garden-app" {
-		t.Errorf("Project = %q, want %q (remote-derived display name)", remoteRow.Project, "github:example-org/garden-app")
+	if remoteRow.Project != "github.com:example-org/garden-app" {
+		t.Errorf("Project = %q, want %q (remote-derived display name)", remoteRow.Project, "github.com:example-org/garden-app")
 	}
 }

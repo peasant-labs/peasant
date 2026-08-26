@@ -148,10 +148,10 @@ cases:
 
   - name: a-project-row-shows-combined-repository-context
     highlightKind: project
-    highlight: "github:acme/tool"
+    highlight: "github.com:acme/tool"
     width: 60
     wantContains:
-      - "project: github:acme/tool"
+      - "project: github.com:acme/tool"
       - "harnesses: claude code, codex, cursor"
       - "remote: github.com/acme/tool"
       - "git directories: 2"
@@ -172,7 +172,7 @@ cases:
     highlight: main
     width: 60
     wantContains:
-      - "project: github:acme/tool"
+      - "project: github.com:acme/tool"
       - "branch: main"
       - "harnesses: claude code, codex"
       - "remote: github.com/acme/tool"

@@ -104,7 +104,7 @@ func TestScannerTreeSource_FoldsFlatListingIntoForest(t *testing.T) {
 // TestScannerTreeSource_ProjectFirstNoHarnessRoot proves the top level is the
 // project (labelled with the canonical projectlabel.Label form), NOT the
 // harness: no root node's ID is a harness slug, and every project root carries a
-// git-remote Meta and a "github:owner/repo"-style label rather than a filesystem
+// git-remote Meta and a "github.com:owner/repo"-style label rather than a filesystem
 // path.
 func TestScannerTreeSource_ProjectFirstNoHarnessRoot(t *testing.T) {
 	t.Parallel()
@@ -117,8 +117,8 @@ func TestScannerTreeSource_ProjectFirstNoHarnessRoot(t *testing.T) {
 		if project.Meta == nil || project.Meta[settings.MetaRemote] == "" {
 			t.Fatalf("project root %q carries no git-remote meta; got %v", project.ID, project.Meta)
 		}
-		if project.Label != "github:acme/tool" {
-			t.Fatalf("project root label = %q, want the projectlabel.Label form %q", project.Label, "github:acme/tool")
+		if project.Label != "github.com:acme/tool" {
+			t.Fatalf("project root label = %q, want the projectlabel.Label form %q", project.Label, "github.com:acme/tool")
 		}
 		if project.ID == string(defaults.HarnessClaudeCode) {
 			t.Fatalf("a harness slug %q must not be a top-level root", project.ID)
@@ -206,8 +206,8 @@ func TestScannerTreeSource_UsesPhysicalCloneIdentityAndCompleteMultiplicity(t *t
 		if project.ID != wantID || project.Meta[settings.MetaProjectIdentity] != wantID {
 			t.Fatalf("project identity = id %q meta %q, want %q", project.ID, project.Meta[settings.MetaProjectIdentity], wantID)
 		}
-		if project.Label != "github:acme/tool" {
-			t.Fatalf("remote project label = %q, want github:acme/tool", project.Label)
+		if project.Label != "github.com:acme/tool" {
+			t.Fatalf("remote project label = %q, want github.com:acme/tool", project.Label)
 		}
 		if strings.Contains(project.Label, root) {
 			t.Fatalf("project label leaked full physical path %q: %q", root, project.Label)

@@ -8,7 +8,7 @@ name: faceted
 expectedNodeCount: 9
 roots:
   - id: github.com/peasant-labs/peasant
-    label: "github:peasant-labs/peasant"
+    label: "github.com:peasant-labs/peasant"
     state: unchecked
     meta:
       remote: git@github.com:peasant-labs/peasant.git
@@ -41,7 +41,7 @@ roots:
             meta:
               harness: claude-code
   - id: github.com/peasant-labs/village
-    label: "github:peasant-labs/village"
+    label: "github.com:peasant-labs/village"
     state: unchecked
     meta:
       remote: git@github.com:peasant-labs/village.git

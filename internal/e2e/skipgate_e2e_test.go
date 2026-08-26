@@ -575,7 +575,8 @@ func truncateVillageDatabase(t *testing.T, db *sql.DB) {
 				'cli_auth_sessions', 'user_github_orgs', 'attestations',
 				'annotations', 'transcript_commits', 'transcript_associations', 'github_app_installations',
 				'collective_repositories', 'repository_commits',
-				'transcript_governance_events_audit'
+				'transcript_governance_events_audit',
+				'owner_overrides', 'transcript_share_attempts'
 			];
 			preserved_tables text[] := ARRAY[
 				'schema_migrations', 'licenses', 'governance_event_types'

@@ -73,8 +73,8 @@ export function decodeProjectPath(project: string): string {
 }
 
 /**
- * A server-computed "host:owner/repo" display label (e.g. "github:acme/widgets",
- * "gitlab:acme/widgets") — the git-remote-derived project name peasant now
+ * A server-computed "host:owner/repo" display label (e.g. "github.com:acme/widgets",
+ * "gitlab.com:acme/widgets") — the git-remote-derived project name peasant now
  * prefers over a raw path. Detected up front so
  * `displayProject`'s path/basename recovery below never mangles it: the label
  * legitimately contains a "/" (between owner and repo), which would otherwise
@@ -109,7 +109,7 @@ const REMOTE_DISPLAY_LABEL = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?:[^\s/\\]+\/.+$/i
  * always operates on a real path, never an opaque dash blob.
  *
  * Handles:
- *  - Remote-derived labels: "github:example-org/garden-app"                 → unchanged
+ *  - Remote-derived labels: "github.com:example-org/garden-app"             → unchanged
  *  - Host slugs:            "~Users-acme-dev-Documents-Projects-phaze"      → "phaze"
  *  - Filesystem paths:      "/Users/sampleuser/Documents/Projects/phaze"   → "phaze"
  *  - Windows paths:         "C:\\Users\\acme\\Projects\\phaze"              → "phaze"
