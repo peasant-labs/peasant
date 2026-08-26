@@ -7,7 +7,41 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-26
+
+### Added
+- Peasant decides at import who drove each recorded session (`user`, `agent`,
+  or `unknown`) from evidence in the transcript, stores the verdict, and
+  declares it on the wire as `sessionOrigin`. Agent-driven sessions (workers,
+  reviewers, teammates, subagents) are hidden from discovery lists and from the
+  kickstart picker, where a visible parent shows its child-session count. A
+  direct link to a hidden session still opens it; hiding is discovery scope,
+  never access control (#194, closes #71).
+- Teammate sessions are re-parented to the session that spawned them when the
+  identity pairing is unique, so a parent push carries its whole tree (#194).
+- `GET /api/v1/session-summaries?ids=` resolves session links without any
+  discovery scope (#194).
+- OpenCode ingestion selects one canonical projection per session when the same
+  session exists as JSON, legacy SQLite, and current SQLite (current, then
+  legacy, then JSON). Discovery unions all three, freshness reads only the
+  selected projection, and parents are emitted before children (#157, closes
+  #127, #128, #179).
+
+### Changed
+- Project labels use the full host form (`github.com:owner/repo` instead of
+  `github:owner/repo`) and are rendered by the shared schema rule, so peasant
+  and village show byte-identical labels. Self-hosted forges keep their
+  hostname (#195).
+- The transcript session header condenses to its breadcrumb and actions row
+  while the trace is scrolled, and restores at the top (fairtrade 0.0.16;
+  #177, #181).
+- Contract pins: schema `v0.1.2` (Local API 0.9.0, Types 0.13.0), redact
+  `v0.1.3`, fairtrade `0.0.16`.
+
 ### Fixed
+- Annotation broadcasts are drained on server shutdown, and closing the store is
+  idempotent and race-safe. A background broadcast can no longer dereference a
+  closed pool (#180, closes #178).
 - Session titles now skip five more harness-injected first turns: the Codex
   plugin catalog and review-action envelope, a Claude Code agent message, the
   "Another Claude session sent a message:" turn that delivers one, and the
@@ -20,6 +54,11 @@ Release, which holds the signed artifacts and checksums.
   applies to the published title, the local display title, and the session
   heading in the web viewer, which now shows a plain placeholder when a session
   has no title yet (#175).
+
+### Database
+- Store migrations V45 (the OpenCode event-sequence change cursor) and V46
+  (`sessions.session_origin` with a closed CHECK set, plus the origin evidence
+  cache). Existing sessions receive an origin verdict on the next import.
 
 ## [0.3.0] - 2026-08-21
 
@@ -86,6 +125,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.4.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.4.0
 [0.3.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.3.0
 [0.2.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.2.1
 [0.2.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.2.0

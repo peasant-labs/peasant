@@ -20,9 +20,15 @@ on:
     types: [opened, edited, synchronize, reopened, closed]
     branches: [develop]
 
+# A new push (synchronize) supersedes the running gates for this PR. A body or
+# title edit does NOT: the edited event carries the same head SHA, so it queues
+# behind the in-flight run instead of cancelling it. Without this guard, a bot
+# editing the PR body seconds after open cancelled the opened run, and the
+# surviving edited run skips the gate jobs, leaving the PR with no pre-merge
+# test / e2e / release-validate signal.
 concurrency:
   group: release-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action != 'edited' }}
 
 permissions:
   contents: read
