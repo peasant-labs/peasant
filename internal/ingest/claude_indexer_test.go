@@ -797,3 +797,98 @@ func TestClaudeIndexer_RegularUserTextUnchanged(t *testing.T) {
 		t.Errorf("extra: expected nil for regular user text, got %q", *e.Extra)
 	}
 }
+
+// TestClaudeIndexer_IsMetaReclassified verifies that Claude Code's own `isMeta`
+// marker reclassifies a user-role entry to role=system, whatever its content.
+//
+// The three shapes below all reached the viewer as human prompts before isMeta
+// was read: they carry no <system-reminder>/<task-notification> wrapper and do
+// not start with "Base directory for this skill:", so every content heuristic
+// misses them. In one real 919-line session, 33 of 66 "user" turns were these.
+func TestClaudeIndexer_IsMetaReclassified(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "image coordinate note for an image the agent rendered",
+			content: "[Image: original 2880x1960, displayed at 2000x1361. Multiply coordinates by 1.44 to map to original image.]",
+		},
+		{
+			name:    "skill body with no Base-directory prefix",
+			content: "Draw as the engineer who has to live with the decision, not as a decorator.",
+		},
+		{
+			name:    "usage limit notice",
+			content: "Your claude.ai usage limit has reset. Continue the task you were working on.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fs := testutil.NewMemFS()
+			idx := ingest.NewClaudeIndexer(fs)
+			ctx := context.Background()
+
+			line := fmt.Sprintf(`{"type":"user","uuid":"u1","isMeta":true,"message":{"role":"user","content":%q}}`, tc.content)
+			session := makeClaudeSession(t, fs, testutil.TestSessionUUID, line)
+
+			entries, err := idx.IndexTranscript(ctx, session)
+			if err != nil {
+				t.Fatalf("IndexTranscript: %v", err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("expected 1 entry, got %d", len(entries))
+			}
+			e := entries[0]
+			if e.Role != ingest.RoleSystem {
+				t.Errorf("role: expected %s (isMeta entries are harness-injected), got %s", ingest.RoleSystem, e.Role)
+			}
+			if e.EntryType != ingest.EntryTypeSystem {
+				t.Errorf("entry_type: expected %s, got %s", ingest.EntryTypeSystem, e.EntryType)
+			}
+		})
+	}
+}
+
+// TestClaudeIndexer_IsMetaNotSetStaysUser is the guard against over-filtering:
+// an entry the human actually typed carries no isMeta (or an explicit false),
+// and text that merely resembles a harness note must still arrive as a user turn.
+func TestClaudeIndexer_IsMetaNotSetStaysUser(t *testing.T) {
+	t.Parallel()
+	// A human quoting the harness's own image note back at the agent.
+	const content = "[Image: original 100x100] — why does this keep showing up as my message?"
+	cases := []struct {
+		name string
+		line string
+	}{
+		{
+			name: "isMeta absent",
+			line: fmt.Sprintf(`{"type":"user","uuid":"u1","message":{"role":"user","content":%q}}`, content),
+		},
+		{
+			name: "isMeta explicitly false",
+			line: fmt.Sprintf(`{"type":"user","uuid":"u1","isMeta":false,"message":{"role":"user","content":%q}}`, content),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fs := testutil.NewMemFS()
+			idx := ingest.NewClaudeIndexer(fs)
+			session := makeClaudeSession(t, fs, testutil.TestSessionUUID, tc.line)
+
+			entries, err := idx.IndexTranscript(context.Background(), session)
+			if err != nil {
+				t.Fatalf("IndexTranscript: %v", err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("expected 1 entry, got %d", len(entries))
+			}
+			if entries[0].Role != ingest.RoleUser {
+				t.Errorf("role: expected %s (isMeta not set means the human typed it), got %s", ingest.RoleUser, entries[0].Role)
+			}
+		})
+	}
+}
