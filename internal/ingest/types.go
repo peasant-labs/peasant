@@ -249,7 +249,11 @@ type IndexLogEntry struct {
 // v13: carry the OpenCode message graph on ParentEntryID at depth 0 and render
 // orphan parts as root-level system entries, so already-indexed OpenCode
 // sessions are re-indexed to the new entry shape.
-const CurrentIndexVersion = 13
+//
+// v14: honour Claude Code's isMeta marker on user entries: harness-injected
+// user-role entries (skill bodies, image notes, usage-limit notices) are
+// reclassified to role=system regardless of content shape.
+const CurrentIndexVersion = 14
 
 // --- PruneFilter ---
 

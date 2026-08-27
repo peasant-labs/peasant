@@ -852,28 +852,43 @@ func TestClaudeIndexer_IsMetaReclassified(t *testing.T) {
 	}
 }
 
-// TestClaudeIndexer_IsMetaAbsentStaysUser is the guard against over-filtering:
-// an entry the human actually typed carries no isMeta, and text that merely
-// resembles a harness note must still arrive as a user turn.
-func TestClaudeIndexer_IsMetaAbsentStaysUser(t *testing.T) {
+// TestClaudeIndexer_IsMetaNotSetStaysUser is the guard against over-filtering:
+// an entry the human actually typed carries no isMeta (or an explicit false),
+// and text that merely resembles a harness note must still arrive as a user turn.
+func TestClaudeIndexer_IsMetaNotSetStaysUser(t *testing.T) {
 	t.Parallel()
-	fs := testutil.NewMemFS()
-	idx := ingest.NewClaudeIndexer(fs)
-	ctx := context.Background()
-
 	// A human quoting the harness's own image note back at the agent.
-	content := "[Image: original 100x100] — why does this keep showing up as my message?"
-	line := fmt.Sprintf(`{"type":"user","uuid":"u1","message":{"role":"user","content":%q}}`, content)
-	session := makeClaudeSession(t, fs, testutil.TestSessionUUID, line)
+	const content = "[Image: original 100x100] — why does this keep showing up as my message?"
+	cases := []struct {
+		name string
+		line string
+	}{
+		{
+			name: "isMeta absent",
+			line: fmt.Sprintf(`{"type":"user","uuid":"u1","message":{"role":"user","content":%q}}`, content),
+		},
+		{
+			name: "isMeta explicitly false",
+			line: fmt.Sprintf(`{"type":"user","uuid":"u1","isMeta":false,"message":{"role":"user","content":%q}}`, content),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fs := testutil.NewMemFS()
+			idx := ingest.NewClaudeIndexer(fs)
+			session := makeClaudeSession(t, fs, testutil.TestSessionUUID, tc.line)
 
-	entries, err := idx.IndexTranscript(ctx, session)
-	if err != nil {
-		t.Fatalf("IndexTranscript: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if entries[0].Role != ingest.RoleUser {
-		t.Errorf("role: expected %s (no isMeta means the human typed it), got %s", ingest.RoleUser, entries[0].Role)
+			entries, err := idx.IndexTranscript(context.Background(), session)
+			if err != nil {
+				t.Fatalf("IndexTranscript: %v", err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("expected 1 entry, got %d", len(entries))
+			}
+			if entries[0].Role != ingest.RoleUser {
+				t.Errorf("role: expected %s (isMeta not set means the human typed it), got %s", ingest.RoleUser, entries[0].Role)
+			}
+		})
 	}
 }
