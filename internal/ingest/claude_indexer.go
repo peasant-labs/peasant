@@ -219,9 +219,16 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 
 // claudeIndexLine is the minimal parsed shape for indexing (subset of claudeJSONLLine).
 type claudeIndexLine struct {
-	Type       string          `json:"type"`
-	UUID       string          `json:"uuid"`
-	ParentUUID string          `json:"parentUuid"`
+	Type       string `json:"type"`
+	UUID       string `json:"uuid"`
+	ParentUUID string `json:"parentUuid"`
+	// IsMeta is Claude Code's own marker for a user-role entry the HARNESS
+	// injected rather than the human typing it: skill bodies, the
+	// "[Image: original WxH, displayed at ...]" note attached to an image the
+	// agent rendered, usage-limit notices, local-command caveats. It is the
+	// authoritative signal — content sniffing can only ever chase the subset of
+	// shapes someone has already seen.
+	IsMeta     bool            `json:"isMeta"`
 	Timestamp  json.RawMessage `json:"timestamp"`
 	StopReason string          `json:"stop_reason"`
 	Content    json.RawMessage `json:"content"` // Top-level content (system entries use this, not message.content)
@@ -389,6 +396,16 @@ func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent boo
 			}
 		}
 	}
+	// isMeta is checked BEFORE the content heuristics and without requiring text:
+	// the harness has already told us this entry is not human input, so no shape
+	// matching is needed and an image-only meta entry (no text to sniff) is caught
+	// too. Reclassified rather than dropped, exactly like the sniffed cases, so the
+	// entry is still recoverable as a system turn.
+	if entry.Role == RoleUser && line.IsMeta {
+		entry.Role = RoleSystem
+		entry.EntryType = EntryTypeSystem
+	}
+
 	if entry.Role == RoleUser && textToCheck != "" {
 		if isSystemInjectedContent(textToCheck) {
 			// System-injected entries: reclassify to role=system, entry_type=system.
