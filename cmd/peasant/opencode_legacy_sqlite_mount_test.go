@@ -132,6 +132,7 @@ func loadLegacySQLiteMountDocument(t testing.TB) legacySQLiteMountDocument {
 }
 
 func TestLegacyOpenCodeSQLiteKickstartEligibilityUsesTypedSessions(t *testing.T) {
+	t.Parallel()
 	document := loadLegacySQLiteMountDocument(t)
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

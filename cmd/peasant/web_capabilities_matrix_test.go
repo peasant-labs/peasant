@@ -115,6 +115,7 @@ func TestWebCapabilitiesMatrix_StrictDecoder(t *testing.T) {
 // regardless of the advertisement. The background cases prove --experimental is
 // forwarded to the forked foreground child.
 func TestWebCapabilitiesMatrix(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping real-binary web capabilities matrix in -short mode")
 	}
