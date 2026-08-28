@@ -950,11 +950,11 @@ func (p *Pipeline) drainLoop(
 
 // indexLoop is the INDEX goroutine for stage 4b.
 //
-// It reads DrainBatch values from indexCh (sent by the consumer goroutine) and calls
-// indexOneSession for each session in the batch. Arena data is still valid when indexLoop
-// reads it — the consumer has not yet called AckBatch for this batch (it waits for
-// indexDoneCh first). After processing each batch, indexLoop signals completion via
-// indexDoneCh so the consumer can release arena space and send the next batch.
+// It reads DrainBatch values from indexCh (sent by the consumer goroutine). With
+// one worker it calls indexOneSession exactly as before. With multiple workers it
+// parses the batch in parallel with runParallel, then writes entries serially so
+// SQLite still has one writer. Arena data is still valid while parsers read it —
+// the consumer waits for indexDoneCh before AckBatch can release this batch.
 //
 // outcome and logPrefix are forwarded to indexOneSession for log annotation;
 // use IndexOutcomeIndexed/"pipeline" for normal ingest and
@@ -971,6 +971,69 @@ func (p *Pipeline) indexLoop(
 ) (indexed []indexedMeta, logEntries []IndexLogEntry) {
 	indexDone := 0
 	for batch := range indexCh {
+		if workers := parallelWorkers(p.config); p.indexers != nil && p.metricsStore != nil && workers > 1 && len(batch.Metas) > 1 {
+			type indexParseResult struct {
+				im        indexedMeta
+				entries   []schema.SessionEntry
+				startedAt int64
+				logEntry  IndexLogEntry
+			}
+			parsed := runParallel(func() error { return nil }, batch.Metas, workers, func(im indexedMeta) indexParseResult {
+				result := indexParseResult{im: im, startedAt: time.Now().UnixMilli()}
+				indexer, ok := p.indexers[im.session.Harness]
+				if !ok {
+					reason := "no indexer for provider"
+					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+					return result
+				}
+				entries, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
+				if err != nil {
+					slog.Warn(logPrefix+": index transcript", "session_id", im.session.SessionID, "error", err)
+					errMsg := err.Error()
+					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+					return result
+				}
+				if len(entries) == 0 {
+					reason := "no entries returned"
+					result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+					return result
+				}
+				result.entries = entries
+				return result
+			})
+
+			for _, result := range parsed {
+				im := result.im
+				ok := false
+				logEntry := result.logEntry
+				if len(result.entries) > 0 {
+					if err := p.metricsStore.IndexSessionEntries(ctx, im.session.SessionID, result.entries); err != nil {
+						slog.Warn(logPrefix+": store session entries", "session_id", im.session.SessionID, "error", err)
+						errMsg := err.Error()
+						logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, len(result.entries), result.startedAt, nil, &errMsg)
+					} else {
+						indexedAtMs := time.Now().UnixMilli()
+						if err := p.metricsStore.UpdateIndexState(ctx, im.session.SessionID, CurrentIndexVersion, indexedAtMs); err != nil {
+							slog.Warn(logPrefix+": update index state", "session_id", im.session.SessionID, "error", err)
+						}
+						ok = true
+						logEntry = p.makeIndexLogEntry(im, outcome, len(result.entries), result.startedAt, nil, nil)
+					}
+				}
+				if logEntry.SessionID != "" {
+					logEntries = append(logEntries, logEntry)
+				}
+				indexed = append(indexed, indexedMeta{
+					session: im.session,
+					startMs: im.startMs,
+					indexed: ok,
+				})
+				indexDone++
+				emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: indexDone})
+			}
+			indexDoneCh <- struct{}{} // signal batch complete to consumer
+			continue
+		}
 		for _, im := range batch.Metas {
 			// im.transcriptData points into arena (still valid — not yet Acked).
 			ok, logEntry := p.indexOneSession(ctx, im, outcome, logPrefix)
