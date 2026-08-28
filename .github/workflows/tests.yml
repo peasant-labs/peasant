@@ -115,8 +115,13 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
           restore-keys: ${{ runner.os }}-go-
 
+      # RACE=1 (the race detector on) for release PRs and post-merge pushes, which
+      # must carry full race coverage; RACE=0 (detector off) for ordinary feature
+      # PRs, where -race amplifies this 2-vCPU job ~3x-16x for wall time the budget
+      # can't spend on every PR. The concurrency it guards is re-tested with -race
+      # on release PRs and post-merge. Same release-PR predicate the e2e jobs use.
       - name: make check
-        run: nix develop -c make check
+        run: nix develop -c make check RACE=${{ (github.event_name != 'pull_request' || startsWith(github.event.pull_request.title, 'release(')) && '1' || '0' }}
 
   # CGO=0 build mode gate. The release binaries are built CGO_ENABLED=0 (static,
   # portable) — that is the mode the goreleaser/nix/distro builds ship. This job

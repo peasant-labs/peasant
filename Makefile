@@ -4,6 +4,15 @@
 
 VERSION ?= dev
 
+# The race detector for `make check`. On by default (local runs and, in CI, the
+# release PRs and post-merge pushes that must carry full race coverage). CI
+# feature PRs pass RACE=0 to skip it: the detector amplifies the suite ~3x-16x
+# for wall time the budget can't spend on every PR, and the concurrency it
+# guards is re-tested with -race on release PRs and post-merge. See the make
+# check step in .github/workflows/tests.yml.
+RACE ?= 1
+GORACE_FLAG := $(if $(filter 0,$(RACE)),,-race)
+
 all: build
 
 # web/package.json is the SOURCE OF TRUTH for web deps; all @peasant-labs/* deps resolve from
@@ -69,9 +78,11 @@ check: fmt lint
 	# the "astgrep" build tag so a plain `go test ./...` never depends on the
 	# binary - ast-grep is ALREADY a hard `make check` dependency via the
 	# untagged scan above, so this adds no new external requirement here.
-	go test -tags=astgrep -race ./internal/tui/gates/...
+	go test -tags=astgrep $(GORACE_FLAG) ./internal/tui/gates/...
 	go run github.com/peasant-labs/schema/cmd/release-guard check-workflow --policy .github/release-guard.policy.yml --release .github/workflows/release.yml
-	go test -race ./...
+	# One pass over every package. The race detector (GORACE_FLAG) is on by
+	# default and gated to RACE=0 on CI feature PRs; see the RACE variable above.
+	go test $(GORACE_FLAG) ./...
 
 # Local end-to-end skip-gate harness. Requires podman + a village
 # checkout (VILLAGE_REPO, default sibling) or VILLAGE_BIN+SETUP_DEMO_BIN.
