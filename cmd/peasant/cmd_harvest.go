@@ -514,14 +514,17 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 	}
 	sizeCounts := map[int]int{}
 	totalSessions := 0
+	totalWorkItems := 0
 	totalEntries := 0
 	totalBytes := int64(0)
 	totalParse := time.Duration(0)
 	totalWrite := time.Duration(0)
 	maxWorkers := 0
+	maxQueueCapacity := 0
 	for _, batch := range profile.Batches {
 		sizeCounts[batch.Sessions]++
 		totalSessions += batch.Sessions
+		totalWorkItems += batch.WorkItems
 		totalEntries += batch.Entries
 		totalBytes += batch.Bytes
 		totalParse += batch.ParseDuration
@@ -529,6 +532,12 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 		if batch.MaxParseWorkers > maxWorkers {
 			maxWorkers = batch.MaxParseWorkers
 		}
+		if batch.QueueCapacity > maxQueueCapacity {
+			maxQueueCapacity = batch.QueueCapacity
+		}
+	}
+	if totalWorkItems == 0 {
+		totalWorkItems = totalSessions
 	}
 	sizes := make([]int, 0, len(sizeCounts))
 	for size := range sizeCounts {
@@ -542,6 +551,9 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 
 	fmt.Fprintf(w, "INDEX profile: %d batches, %d sessions, %d entries, %d bytes\n", len(profile.Batches), totalSessions, totalEntries, totalBytes)
 	fmt.Fprintf(w, "  batch sizes: %s\n", strings.Join(dist, ", "))
+	if maxQueueCapacity > 0 {
+		fmt.Fprintf(w, "  work items: %d; queue capacity: %d\n", totalWorkItems, maxQueueCapacity)
+	}
 	fmt.Fprintf(w, "  parse: %s total; write: %s total; max parse workers: %d\n", totalParse.Round(time.Millisecond), totalWrite.Round(time.Millisecond), maxWorkers)
 	if len(profile.SlowSessions) == 0 {
 		return

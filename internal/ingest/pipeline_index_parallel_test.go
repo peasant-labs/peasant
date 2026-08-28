@@ -32,45 +32,59 @@ type indexParallelSession struct {
 	Preview string `yaml:"preview"`
 }
 
-func TestIndexLoop_ParallelParseKeepsArenaUntilBatchDone(t *testing.T) {
+func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	fixture := loadIndexParallelFixture(t)
 	releaseParses := make(chan struct{})
-	indexer := &blockingParallelIndexer{entries: make(map[SessionID][]schema.SessionEntry), release: releaseParses}
-	metas := make([]indexedMeta, 0, len(fixture.Sessions))
-	for i, sessionFixture := range fixture.Sessions {
-		sessionID, err := NewSessionID(sessionFixture.ID)
-		if err != nil {
-			t.Fatalf("fixture session %q has invalid ID: %v", sessionFixture.Name, err)
-		}
-		preview := sessionFixture.Preview
-		indexer.entries[sessionID] = []schema.SessionEntry{{SessionID: sessionID, EntryIndex: i, Harness: schema.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}
-		metas = append(metas, indexedMeta{session: DiscoveredSession{SessionID: sessionID, Harness: HarnessClaudeCode, SourcePath: ResolvedPath("/stored/" + sessionFixture.ID + ".jsonl"), SourceFormat: SourceFormatJSONL}, transcriptData: []byte(sessionFixture.Preview)})
-	}
+	metas, entries := buildIndexParallelMetas(t, fixture)
+	indexer := &blockingParallelIndexer{entries: entries, release: releaseParses}
 	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
 	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 2}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer}, metricsStore: store}
 	progress := NewProgressState()
 	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
-	indexCh := make(chan DrainBatch, 1)
-	indexDoneCh := make(chan struct{}, 1)
-	done := make(chan struct{})
+	staging := NewStagingBuffer(len(metas)+1, 1024*1024)
+	for _, im := range metas {
+		staging.Add(indexWorkerResult(im))
+	}
+	workersDone := atomic.Bool{}
+	workersDone.Store(true)
+	indexCh := make(chan streamedIndexWork, len(metas))
+	indexDoneCh := make(chan DrainBatch, 1)
+	drainDone := make(chan []SessionResult, 1)
+	go func() {
+		drainDone <- pipeline.drainLoop(context.Background(), staging, &workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas))
+		close(indexCh)
+	}()
+	indexDone := make(chan struct{})
 	go func() {
 		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test")
-		close(done)
+		close(indexDone)
 	}()
 
-	indexCh <- DrainBatch{Metas: metas}
-	close(indexCh)
 	waitForActiveParses(t, indexer, int64(len(metas)))
+	if staging.ArenaUsed() == 0 {
+		t.Fatal("staging arena was acknowledged before parse workers released arena-backed data")
+	}
 	select {
-	case <-indexDoneCh:
-		t.Fatal("indexLoop signalled batch completion before parse workers released arena-backed data")
+	case <-drainDone:
+		t.Fatal("drainLoop returned before streamed INDEX completed its drain-batch token")
 	default:
 	}
 	close(releaseParses)
 	select {
-	case <-done:
+	case results := <-drainDone:
+		if len(results) != len(metas) {
+			t.Fatalf("drain results = %d, want %d", len(results), len(metas))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("drainLoop did not finish")
+	}
+	select {
+	case <-indexDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("indexLoop did not finish")
+	}
+	if got := staging.ArenaUsed(); got != 0 {
+		t.Fatalf("staging arena used = %d, want 0 after streamed INDEX completion", got)
 	}
 	if indexer.maxActive.Load() < int64(len(metas)) {
 		t.Fatalf("max active parses = %d, want %d", indexer.maxActive.Load(), len(metas))
@@ -83,6 +97,84 @@ func TestIndexLoop_ParallelParseKeepsArenaUntilBatchDone(t *testing.T) {
 	}
 	if len(store.entries) != len(metas) {
 		t.Fatalf("indexed session count = %d, want %d", len(store.entries), len(metas))
+	}
+}
+
+func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T) {
+	fixture := loadIndexParallelFixture(t)
+	metas, entries := buildIndexParallelMetas(t, fixture)
+	releaseBlocked := make(chan struct{})
+	indexer := &selectiveBlockingIndexer{entries: entries, blocked: metas[1].session.SessionID, release: releaseBlocked}
+	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry), wrote: make(chan SessionID, len(metas))}
+	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 2}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: indexer}, metricsStore: store}
+	progress := NewProgressState()
+	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
+	indexCh := make(chan streamedIndexWork, len(metas))
+	indexDoneCh := make(chan DrainBatch, 1)
+	done := make(chan struct{})
+	go func() {
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test")
+		close(done)
+	}()
+
+	completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
+	for _, im := range metas {
+		indexCh <- streamedIndexWork{meta: im, batch: completion}
+	}
+	close(indexCh)
+	select {
+	case got := <-store.wrote:
+		if got != metas[0].session.SessionID {
+			t.Fatalf("first indexed session = %s, want %s", got, metas[0].session.SessionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first streamed INDEX write did not complete")
+	}
+	waitForIndexProgress(t, progress, 1)
+	select {
+	case <-indexDoneCh:
+		t.Fatal("streamed INDEX signalled drain-batch completion before all sessions parsed")
+	default:
+	}
+	close(releaseBlocked)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("indexLoop did not finish")
+	}
+	waitForIndexProgress(t, progress, len(metas))
+}
+
+func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
+	fixture := loadIndexParallelFixture(t)
+	metas, entries := buildIndexParallelMetas(t, fixture)
+	store := &serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
+	pipeline := &Pipeline{config: PipelineConfig{Parallelism: 1}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}}, metricsStore: store}
+	indexCh := make(chan streamedIndexWork, len(metas))
+	indexDoneCh := make(chan DrainBatch, 1)
+	done := make(chan struct{})
+	go func() {
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "test")
+		close(done)
+	}()
+
+	completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
+	for _, im := range metas {
+		indexCh <- streamedIndexWork{meta: im, batch: completion}
+	}
+	close(indexCh)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("indexLoop did not finish")
+	}
+	if len(store.writeOrder) != len(metas) {
+		t.Fatalf("write order length = %d, want %d", len(store.writeOrder), len(metas))
+	}
+	for i, im := range metas {
+		if store.writeOrder[i] != im.session.SessionID {
+			t.Fatalf("write order[%d] = %s, want %s", i, store.writeOrder[i], im.session.SessionID)
+		}
 	}
 }
 
@@ -112,12 +204,47 @@ func (idx *blockingParallelIndexer) index(ctx context.Context, session Discovere
 	return idx.entries[session.SessionID], nil
 }
 
+type selectiveBlockingIndexer struct {
+	entries map[SessionID][]schema.SessionEntry
+	blocked SessionID
+	release <-chan struct{}
+}
+
+func (*selectiveBlockingIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
+func (idx *selectiveBlockingIndexer) IndexTranscript(ctx context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
+	return idx.IndexTranscriptBytes(ctx, session, nil)
+}
+func (idx *selectiveBlockingIndexer) IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, _ []byte) ([]schema.SessionEntry, error) {
+	if session.SessionID == idx.blocked {
+		select {
+		case <-idx.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return idx.entries[session.SessionID], nil
+}
+
+type immediateIndexer struct {
+	entries map[SessionID][]schema.SessionEntry
+}
+
+func (*immediateIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
+func (idx *immediateIndexer) IndexTranscript(ctx context.Context, session DiscoveredSession) ([]schema.SessionEntry, error) {
+	return idx.IndexTranscriptBytes(ctx, session, nil)
+}
+func (idx *immediateIndexer) IndexTranscriptBytes(_ context.Context, session DiscoveredSession, _ []byte) ([]schema.SessionEntry, error) {
+	return idx.entries[session.SessionID], nil
+}
+
 type serialIndexStore struct {
 	MetricsStore
-	mu        sync.Mutex
-	entries   map[SessionID][]schema.SessionEntry
-	active    atomic.Int64
-	maxActive atomic.Int64
+	mu         sync.Mutex
+	entries    map[SessionID][]schema.SessionEntry
+	writeOrder []SessionID
+	wrote      chan SessionID
+	active     atomic.Int64
+	maxActive  atomic.Int64
 }
 
 func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
@@ -125,8 +252,12 @@ func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID 
 	defer store.active.Add(-1)
 	recordMax(&store.maxActive, active)
 	store.mu.Lock()
-	defer store.mu.Unlock()
 	store.entries[sessionID] = append([]schema.SessionEntry(nil), entries...)
+	store.writeOrder = append(store.writeOrder, sessionID)
+	store.mu.Unlock()
+	if store.wrote != nil {
+		store.wrote <- sessionID
+	}
 	return nil
 }
 
@@ -151,6 +282,63 @@ func waitForActiveParses(t *testing.T, indexer *blockingParallelIndexer, want in
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("max active parses = %d, want %d", indexer.maxActive.Load(), want)
+}
+
+func waitForIndexProgress(t *testing.T, progress *ProgressState, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if progress.Snapshot()[StageIndex].Done >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("INDEX progress done = %d, want at least %d", progress.Snapshot()[StageIndex].Done, want)
+}
+
+func buildIndexParallelMetas(t *testing.T, fixture indexParallelFixture) ([]indexedMeta, map[SessionID][]schema.SessionEntry) {
+	t.Helper()
+	metas := make([]indexedMeta, 0, len(fixture.Sessions))
+	entries := make(map[SessionID][]schema.SessionEntry, len(fixture.Sessions))
+	for i, sessionFixture := range fixture.Sessions {
+		sessionID, err := NewSessionID(sessionFixture.ID)
+		if err != nil {
+			t.Fatalf("fixture session %q has invalid ID: %v", sessionFixture.Name, err)
+		}
+		preview := sessionFixture.Preview
+		entries[sessionID] = []schema.SessionEntry{{SessionID: sessionID, EntryIndex: i, Harness: schema.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}
+		metas = append(metas, indexedMeta{
+			session: DiscoveredSession{
+				SessionID:    sessionID,
+				Harness:      HarnessClaudeCode,
+				SourcePath:   ResolvedPath("/source/" + sessionFixture.ID + ".jsonl"),
+				SourceFormat: SourceFormatJSONL,
+			},
+			outputTranscriptPath: "/stored/" + sessionFixture.ID + ".jsonl",
+			transcriptData:       []byte(sessionFixture.Preview),
+		})
+	}
+	return metas, entries
+}
+
+func indexWorkerResult(im indexedMeta) workerResult {
+	meta := NewUnifiedMetadata()
+	meta.SessionID = im.session.SessionID
+	meta.ModelHarness = im.session.Harness
+	meta.Source = SourceInfo{FilePath: im.session.SourcePath.String(), Format: im.session.SourceFormat}
+	return workerResult{
+		result: SessionResult{
+			SessionID:  im.session.SessionID,
+			Harness:    im.session.Harness,
+			ParentUUID: im.session.ParentUUID,
+			Status:     DiffNew,
+			OutputPath: "/stored/" + string(im.session.SessionID),
+		},
+		meta:                 &meta,
+		outputTranscriptPath: im.outputTranscriptPath,
+		transcriptData:       append([]byte(nil), im.transcriptData...),
+		startMs:              im.startMs,
+	}
 }
 
 func loadIndexParallelFixture(t *testing.T) indexParallelFixture {
@@ -201,9 +389,12 @@ func BenchmarkIndexLoopParallelParse(b *testing.B) {
 			pipeline := &Pipeline{config: PipelineConfig{Parallelism: workers}, indexers: map[Harness]TranscriptIndexer{HarnessClaudeCode: &cpuIndexBenchmarkIndexer{entries: entries}}, metricsStore: &benchmarkIndexStore{}}
 			b.ResetTimer()
 			for range b.N {
-				indexCh := make(chan DrainBatch, 1)
-				indexDoneCh := make(chan struct{}, 1)
-				indexCh <- DrainBatch{Metas: metas}
+				indexCh := make(chan streamedIndexWork, len(metas))
+				indexDoneCh := make(chan DrainBatch, 1)
+				completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
+				for _, im := range metas {
+					indexCh <- streamedIndexWork{meta: im, batch: completion}
+				}
 				close(indexCh)
 				pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "benchmark")
 			}

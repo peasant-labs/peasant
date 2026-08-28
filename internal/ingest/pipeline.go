@@ -214,6 +214,11 @@ type Pipeline struct {
 	// DB round-trips. Nil before Run() populates it.
 	locationCache map[SessionID]SessionLocation
 
+	// storeWriteMu serializes this pipeline's own SQLite write phases. The
+	// drain loop and INDEX writer run concurrently; without this guard they can
+	// race each other into transient database locks on the same store.
+	storeWriteMu sync.Mutex
+
 	// reminedEvidence is how many cached evidence records this run's discovery
 	// had to mine again, collected from the adapters that can report it.
 	reminedEvidence int
@@ -665,8 +670,6 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// deadlock once the 2 GiB arena fills — workers spin in copyToArena waiting
 	// for arenaTail to advance, but drain only starts after runParallel returns.
 	var workersDone atomic.Bool
-	indexCh := make(chan DrainBatch, 1)
-	indexDoneCh := make(chan struct{}, 1)
 	// errCh buffer sized to the maximum number of drain batches that can be
 	// emitted (ceil(toProcess/DefaultMaxDrainBatch)), plus a safety margin.
 	// Without dynamic sizing the channel could block the drain goroutine if
@@ -677,6 +680,12 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 		errChSize = 16
 	}
 	errCh := make(chan error, errChSize)
+	indexQueueSize := workers * 2
+	if indexQueueSize < 1 {
+		indexQueueSize = 1
+	}
+	indexCh := make(chan streamedIndexWork, indexQueueSize)
+	indexDoneCh := make(chan DrainBatch, errChSize)
 
 	var wg sync.WaitGroup
 	var drainResults []SessionResult
@@ -721,7 +730,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	}()
 
 	// Stage 4b: Consumer goroutine — DB INSERT + INDEX coordination.
-	// Drains staging, inserts to DB, coordinates handoff to INDEX goroutine.
+	// Drains staging, inserts to DB, and streams eligible sessions to INDEX.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -731,8 +740,8 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(drainResults), Total: len(toProcessEntries)})
 	}()
 
-	// INDEX goroutine: reads indexed metadata from consumer and indexes each session.
-	// Arena data is still valid (AckBatch has not been called yet when indexLoop reads).
+	// INDEX goroutine: reads streamed metadata from consumer and indexes each session.
+	// Arena data is still valid until parser workers finish reading each drain batch.
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(toProcessEntries)})
 	wg.Add(1)
 	go func() {
@@ -808,9 +817,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 //  1. Performs DB INSERT (InsertSessions + UpsertSessionCommits) — best-effort.
 //  2. Calls staging.Commit(ids) — marks sessions as DB-committed so their
 //     children become eligible for the next Drain (Commit BEFORE Ack is deliberate).
-//  3. Waits for the previous INDEX batch to complete via indexDoneCh.
-//  4. Calls staging.AckBatch(prev) — frees arena space only AFTER INDEX has read it.
-//  5. Sends the current batch (with Metas populated) to the INDEX goroutine via indexCh.
+//  3. Streams each indexable session to INDEX with a drain-batch completion token.
+//  4. Calls staging.AckBatch(batch) only after INDEX parser workers finish reading
+//     every streamed session that belongs to the batch.
 //
 // Store errors are sent to errCh (buffered); the controller collects them after wg.Wait.
 // Bounded backoff (1ms sleep) is used when the buffer is empty but workers are still running.
@@ -818,16 +827,49 @@ func (p *Pipeline) drainLoop(
 	ctx context.Context,
 	staging *StagingBuffer,
 	workersDone *atomic.Bool,
-	indexCh chan<- DrainBatch,
-	indexDoneCh <-chan struct{},
+	indexCh chan<- streamedIndexWork,
+	indexDoneCh <-chan DrainBatch,
 	errCh chan<- error,
 	prog *ProgressState,
 	toProcess int,
 ) (sessionResults []SessionResult) {
-	var pendingAck *DrainBatch
+	pendingAckBatches := 0
 	dbInsertDone := 0
+	ackBatch := func(batch DrainBatch) {
+		staging.AckBatch(batch)
+		if pendingAckBatches > 0 {
+			pendingAckBatches--
+		}
+	}
+	drainReadyAcks := func() {
+		for {
+			select {
+			case batch := <-indexDoneCh:
+				ackBatch(batch)
+			default:
+				return
+			}
+		}
+	}
+	sendIndexWork := func(work streamedIndexWork) {
+		for {
+			select {
+			case indexCh <- work:
+				return
+			case batch := <-indexDoneCh:
+				ackBatch(batch)
+			}
+		}
+	}
+	waitForPendingAcks := func() {
+		for pendingAckBatches > 0 {
+			batch := <-indexDoneCh
+			ackBatch(batch)
+		}
+	}
 
 	for {
+		drainReadyAcks()
 		done := workersDone.Load()
 		batch := staging.Drain()
 
@@ -856,8 +898,10 @@ func (p *Pipeline) drainLoop(
 
 			// DB INSERT (best-effort).
 			if p.store != nil && len(storeBatch) > 0 {
+				var insertErr error
+				p.storeWriteMu.Lock()
 				if err := p.store.InsertSessions(ctx, storeBatch); err != nil {
-					errCh <- fmt.Errorf("store insert (%d sessions): %w", len(storeBatch), err)
+					insertErr = fmt.Errorf("store insert (%d sessions): %w", len(storeBatch), err)
 				} else {
 					// Persist session commits (non-fatal): runs only after InsertSessions
 					// succeeds so the FK constraint on session_commits(session_id) is satisfied.
@@ -881,6 +925,10 @@ func (p *Pipeline) drainLoop(
 							}
 						}
 					}
+				}
+				p.storeWriteMu.Unlock()
+				if insertErr != nil {
+					errCh <- insertErr
 				}
 			}
 
@@ -922,27 +970,24 @@ func (p *Pipeline) drainLoop(
 			// Commit BEFORE Ack — unlocks children for next Drain sooner.
 			staging.Commit(committedIDs...)
 
-			// Wait for previous INDEX batch to finish, then release its arena space.
-			if pendingAck != nil {
-				<-indexDoneCh
-				staging.AckBatch(*pendingAck)
+			if len(batchMetas) == 0 {
+				staging.AckBatch(batch)
+			} else {
+				batch.Metas = batchMetas
+				completion := newIndexBatchCompletion(batch, len(batchMetas))
+				pendingAckBatches++
+				for _, im := range batchMetas {
+					sendIndexWork(streamedIndexWork{meta: im, batch: completion})
+				}
 			}
-
-			// Send current batch to INDEX goroutine (arena data still valid — not yet Acked).
-			batch.Metas = batchMetas
-			indexCh <- batch
-			pendingAck = &batch
 			dbInsertDone += len(batch.Results)
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDBInsert, Done: dbInsertDone, Total: toProcess})
 			continue
 		}
 
 		if done {
-			// Workers finished and buffer is empty — wait for final INDEX batch then exit.
-			if pendingAck != nil {
-				<-indexDoneCh
-				staging.AckBatch(*pendingAck)
-			}
+			// Workers finished and buffer is empty — release all INDEX-owned arena batches.
+			waitForPendingAcks()
 			break
 		}
 		// Bounded backoff: avoid spinning when buffer is empty but workers still running.
@@ -951,42 +996,108 @@ func (p *Pipeline) drainLoop(
 	return sessionResults
 }
 
+type streamedIndexWork struct {
+	meta  indexedMeta
+	batch *indexBatchCompletion
+}
+
+type indexBatchCompletion struct {
+	batch     DrainBatch
+	remaining atomic.Int64
+}
+
+func newIndexBatchCompletion(batch DrainBatch, workItems int) *indexBatchCompletion {
+	if workItems < 1 {
+		panic("ingest: streamed INDEX batch must have at least one work item")
+	}
+	completion := &indexBatchCompletion{batch: batch}
+	completion.remaining.Store(int64(workItems))
+	return completion
+}
+
+func (completion *indexBatchCompletion) completeWorkItem() (DrainBatch, bool) {
+	if completion == nil {
+		return DrainBatch{}, false
+	}
+	remaining := completion.remaining.Add(-1)
+	if remaining < 0 {
+		panic("ingest: streamed INDEX batch completion underflow")
+	}
+	return completion.batch, remaining == 0
+}
+
 // indexLoop is the INDEX goroutine for stage 4b.
 //
-// It reads DrainBatch values from indexCh (sent by the consumer goroutine). With
-// multiple workers it parses the batch in parallel with runParallel, then writes
-// entries serially so SQLite still has one writer. Arena data is still valid
-// while parsers read it - the consumer waits for indexDoneCh before AckBatch can
-// release this batch.
+// It reads per-session work from indexCh. Parser workers run with bounded
+// parallelism, and the goroutine that consumes parsed results performs all
+// SQLite writes serially. A drain batch is signalled on indexDoneCh after every
+// parser that can read its arena-backed transcript data has completed.
 //
-// outcome and logPrefix are forwarded to the batch indexer for log annotation;
-// use IndexOutcomeIndexed/"pipeline" for normal ingest and
-// IndexOutcomeReindexed/"reindex" for --reindex runs.
+// outcome and logPrefix are forwarded to the writer for log annotation; use
+// IndexOutcomeIndexed/"pipeline" for normal ingest.
 //
 // indexLoop has no panic recovery: crashes are intentional (per design decision).
 func (p *Pipeline) indexLoop(
 	ctx context.Context,
-	indexCh <-chan DrainBatch,
-	indexDoneCh chan<- struct{},
+	indexCh <-chan streamedIndexWork,
+	indexDoneCh chan<- DrainBatch,
 	prog *ProgressState,
 	outcome IndexOutcome,
 	logPrefix string,
 ) (indexed []indexedMeta, logEntries []IndexLogEntry) {
-	indexDone := 0
-	for batch := range indexCh {
-		batchIndexed, batchLogs := p.indexBatch(ctx, batch.Metas, outcome, logPrefix)
-		for i, result := range batchIndexed {
-			logEntry := batchLogs[i]
-			if logEntry.SessionID != "" {
-				logEntries = append(logEntries, logEntry)
-			}
-			indexed = append(indexed, result)
-			indexDone++
-			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: indexDone})
-		}
-		indexDoneCh <- struct{}{} // signal batch complete to consumer
+	workers := parallelWorkers(p.config)
+	if workers < 1 {
+		workers = 1
 	}
-	return
+	parsedCh := make(chan indexParseResult, workers)
+	var activeParses atomic.Int64
+	var maxActiveParses atomic.Int64
+	var parserWG sync.WaitGroup
+	parserWG.Add(workers)
+	for range workers {
+		go func() {
+			defer parserWG.Done()
+			for work := range indexCh {
+				result := p.parseIndexMeta(ctx, work.meta, &activeParses, &maxActiveParses, logPrefix)
+				if batch, complete := work.batch.completeWorkItem(); complete {
+					indexDoneCh <- batch
+				}
+				parsedCh <- result
+			}
+		}()
+	}
+	go func() {
+		parserWG.Wait()
+		close(parsedCh)
+	}()
+
+	profileEnabled := p.config.IndexProfiler != nil && p.indexers != nil && p.metricsStore != nil
+	profileSessions := []IndexProfileSession(nil)
+	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
+	indexDone := 0
+	for result := range parsedCh {
+		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix)
+		if logEntry.SessionID != "" {
+			logEntries = append(logEntries, logEntry)
+		}
+		indexed = append(indexed, indexedMeta)
+		if profileEnabled {
+			profileBatch.Sessions++
+			profileBatch.WorkItems++
+			profileBatch.Entries += profileSession.Entries
+			profileBatch.Bytes += profileSession.Bytes
+			profileBatch.ParseDuration += profileSession.ParseDuration
+			profileBatch.WriteDuration += profileSession.WriteDuration
+			profileSessions = append(profileSessions, profileSession)
+		}
+		indexDone++
+		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: indexDone})
+	}
+	if profileEnabled && profileBatch.WorkItems > 0 {
+		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
+		p.config.IndexProfiler.Record(profileBatch, profileSessions)
+	}
+	return indexed, logEntries
 }
 
 type indexParseResult struct {
@@ -1016,33 +1127,7 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	var activeParses atomic.Int64
 	var maxActiveParses atomic.Int64
 	parseOne := func(im indexedMeta) indexParseResult {
-		result := indexParseResult{im: im, startedAt: time.Now().UnixMilli(), bytes: p.indexProfileBytes(im)}
-		indexer, ok := p.indexers[im.session.Harness]
-		if !ok {
-			reason := "no indexer for provider"
-			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
-			return result
-		}
-
-		active := activeParses.Add(1)
-		recordIndexProfileMax(&maxActiveParses, active)
-		parseStart := time.Now()
-		entries, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
-		result.parseDuration = time.Since(parseStart)
-		activeParses.Add(-1)
-		if err != nil {
-			slog.Warn(logPrefix+": index transcript", "session_id", im.session.SessionID, "error", err)
-			errMsg := err.Error()
-			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
-			return result
-		}
-		if len(entries) == 0 {
-			reason := "no entries returned"
-			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
-			return result
-		}
-		result.entries = entries
-		return result
+		return p.parseIndexMeta(ctx, im, &activeParses, &maxActiveParses, logPrefix)
 	}
 
 	workers := parallelWorkers(p.config)
@@ -1057,50 +1142,96 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 	}
 
 	profileSessions := make([]IndexProfileSession, 0, len(parsed))
-	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(parsed), MaxParseWorkers: int(maxActiveParses.Load())}
+	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(parsed), WorkItems: len(parsed), MaxParseWorkers: int(maxActiveParses.Load())}
 	for _, result := range parsed {
-		im := result.im
-		ok := false
-		logEntry := result.logEntry
-		writeDuration := time.Duration(0)
-		entriesCount := len(result.entries)
-		if entriesCount > 0 {
-			writeStart := time.Now()
-			if err := p.metricsStore.IndexSessionEntries(ctx, im.session.SessionID, result.entries); err != nil {
-				writeDuration = time.Since(writeStart)
-				slog.Warn(logPrefix+": store session entries", "session_id", im.session.SessionID, "error", err)
-				errMsg := err.Error()
-				logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
-			} else {
-				indexedAtMs := time.Now().UnixMilli()
-				if err := p.metricsStore.UpdateIndexState(ctx, im.session.SessionID, CurrentIndexVersion, indexedAtMs); err != nil {
-					slog.Warn(logPrefix+": update index state", "session_id", im.session.SessionID, "error", err)
-				}
-				writeDuration = time.Since(writeStart)
-				ok = true
-				logEntry = p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
-			}
-		}
-
-		indexed = append(indexed, indexedMeta{session: im.session, startMs: im.startMs, indexed: ok})
+		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix)
+		indexed = append(indexed, indexedMeta)
 		logs = append(logs, logEntry)
-		profileBatch.Entries += entriesCount
-		profileBatch.Bytes += result.bytes
-		profileBatch.ParseDuration += result.parseDuration
-		profileBatch.WriteDuration += writeDuration
-		profileSessions = append(profileSessions, IndexProfileSession{
-			SessionID:     im.session.SessionID,
-			Harness:       im.session.Harness,
-			SourcePath:    p.indexProfileSourcePath(im),
-			Outcome:       logEntry.Outcome,
-			Entries:       entriesCount,
-			Bytes:         result.bytes,
-			ParseDuration: result.parseDuration,
-			WriteDuration: writeDuration,
-		})
+		profileBatch.Entries += profileSession.Entries
+		profileBatch.Bytes += profileSession.Bytes
+		profileBatch.ParseDuration += profileSession.ParseDuration
+		profileBatch.WriteDuration += profileSession.WriteDuration
+		profileSessions = append(profileSessions, profileSession)
 	}
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	return indexed, logs
+}
+
+func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activeParses *atomic.Int64, maxActiveParses *atomic.Int64, logPrefix string) (result indexParseResult) {
+	result = indexParseResult{im: im, startedAt: time.Now().UnixMilli(), bytes: p.indexProfileBytes(im)}
+	defer func() {
+		result.im.transcriptData = nil
+	}()
+	if p.indexers == nil || p.metricsStore == nil {
+		return result
+	}
+	indexer, ok := p.indexers[im.session.Harness]
+	if !ok {
+		reason := "no indexer for provider"
+		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+		return result
+	}
+
+	active := activeParses.Add(1)
+	recordIndexProfileMax(maxActiveParses, active)
+	parseStart := time.Now()
+	entries, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
+	result.parseDuration = time.Since(parseStart)
+	activeParses.Add(-1)
+	if err != nil {
+		slog.Warn(logPrefix+": index transcript", "session_id", im.session.SessionID, "error", err)
+		errMsg := err.Error()
+		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+		return result
+	}
+	if len(entries) == 0 {
+		reason := "no entries returned"
+		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+		return result
+	}
+	result.entries = entries
+	return result
+}
+
+func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string) (indexedMeta, IndexLogEntry, IndexProfileSession) {
+	im := result.im
+	ok := false
+	logEntry := result.logEntry
+	writeDuration := time.Duration(0)
+	entriesCount := len(result.entries)
+	if entriesCount > 0 && p.metricsStore != nil {
+		writeStart := time.Now()
+		p.storeWriteMu.Lock()
+		if err := p.metricsStore.IndexSessionEntries(ctx, im.session.SessionID, result.entries); err != nil {
+			writeDuration = time.Since(writeStart)
+			p.storeWriteMu.Unlock()
+			slog.Warn(logPrefix+": store session entries", "session_id", im.session.SessionID, "error", err)
+			errMsg := err.Error()
+			logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
+		} else {
+			indexedAtMs := time.Now().UnixMilli()
+			if err := p.metricsStore.UpdateIndexState(ctx, im.session.SessionID, CurrentIndexVersion, indexedAtMs); err != nil {
+				slog.Warn(logPrefix+": update index state", "session_id", im.session.SessionID, "error", err)
+			}
+			writeDuration = time.Since(writeStart)
+			p.storeWriteMu.Unlock()
+			ok = true
+			logEntry = p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
+		}
+	}
+
+	indexedResult := indexedMeta{session: im.session, startMs: im.startMs, indexed: ok}
+	profileSession := IndexProfileSession{
+		SessionID:     im.session.SessionID,
+		Harness:       im.session.Harness,
+		SourcePath:    p.indexProfileSourcePath(im),
+		Outcome:       logEntry.Outcome,
+		Entries:       entriesCount,
+		Bytes:         result.bytes,
+		ParseDuration: result.parseDuration,
+		WriteDuration: writeDuration,
+	}
+	return indexedResult, logEntry, profileSession
 }
 
 func recordIndexProfileMax(maxValue *atomic.Int64, value int64) {
@@ -2556,8 +2687,6 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		staging := NewStagingBuffer(extractTotal+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
 
 		var reindexWorkersDone atomic.Bool
-		reindexIndexCh := make(chan DrainBatch, 1)
-		reindexIndexDoneCh := make(chan struct{}, 1)
 		// errCh buffer: ceil(extractTotal/DefaultMaxDrainBatch) + safety margin,
 		// same rationale as Run() — prevents blocking the consumer when every batch fails.
 		reindexErrChSize := extractTotal/DefaultMaxDrainBatch + 2
@@ -2565,6 +2694,12 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			reindexErrChSize = 16
 		}
 		reindexErrCh := make(chan error, reindexErrChSize)
+		reindexQueueSize := workers * 2
+		if reindexQueueSize < 1 {
+			reindexQueueSize = 1
+		}
+		reindexIndexCh := make(chan streamedIndexWork, reindexQueueSize)
+		reindexIndexDoneCh := make(chan DrainBatch, reindexErrChSize)
 
 		var reindexWg sync.WaitGroup
 

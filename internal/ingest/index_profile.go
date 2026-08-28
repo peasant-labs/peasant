@@ -20,6 +20,8 @@ type IndexProfiler struct {
 type IndexProfileBatch struct {
 	Source          string
 	Sessions        int
+	WorkItems       int
+	QueueCapacity   int
 	Entries         int
 	Bytes           int64
 	ParseDuration   time.Duration

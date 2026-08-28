@@ -28,12 +28,11 @@ invariants, assumptions), see [AGENTS.md](AGENTS.md).
                   │                  │         │  ┌────────▼──────────┐  ┌─────────────┐ │
                   │                  │         │  │  drainLoop        │  │  indexLoop  │ │
                   │                  │         │  │  (goroutine)      │  │  (goroutine)│ │
-                  │                  │         │  │                   │  │             │ │
-                  │                  │         │  │  Drain            │  │ index each  │ │
-                  │                  │         │  │  → DB Insert      │──▶ session     │ │
-                  │                  │         │  │  → Commit         │  │ in batch    │ │
-                  │                  │         │  │  → wait INDEX     │◀─│             │ │
-                  │                  │         │  │  → AckBatch(prev) │  │ signal done │ │
+                  │                  │         │  │  Drain            │  │ parser pool │ │
+                  │                  │         │  │  → DB Insert      │──▶ per-session │ │
+                  │                  │         │  │  → Commit         │  │ work        │ │
+                  │                  │         │  │  → AckBatch(done) │◀─│ batch token │ │
+                  │                  │         │  │                   │  │ serial write│ │
                   │                  │         │  └────────┬──────────┘  └─────────────┘ │
                   │                  │         │           │                              │
                   │                  │         └───────────┼──────────────────────────────┘
@@ -168,20 +167,20 @@ Worker goroutines (in a single goroutine via runParallel):
   └─ worker N: root D ─── Add() ──────────────────────────┘ ──▶ workersDone.Store(true)
 
 drainLoop goroutine (stage 4b, DB INSERT + coordination):
-  ┌── Drain → DB Insert → Commit → wait indexDoneCh → AckBatch(prev) → send indexCh ──┐
-  ├── Drain → DB Insert → Commit → wait indexDoneCh → AckBatch(prev) → send indexCh ──┤
-  └── ...until workersDone + empty ──────────────────────────────────────────────────┘
+  ┌── Drain → DB Insert → Commit → enqueue streamed INDEX work ──┐
+  ├── Drain → DB Insert → Commit → enqueue streamed INDEX work ──┤
+  └── ...until workersDone + empty + all batch tokens acked ─────┘
 
-indexLoop goroutine (stage 5, INDEX):
-  ┌── receive batch → index each session → signal indexDoneCh ──┐
-  ├── receive batch → index each session → signal indexDoneCh ──┤
-  └── ...until indexCh closed ──────────────────────────────────┘
+indexLoop goroutine (stage 5, INDEX parser pool + serial writer):
+  ┌── receive work → parse session → signal batch token when complete ──┐
+  ├── parsed result → IndexSessionEntries + UpdateIndexState serially ──┤
+  └── ...until indexCh closed and parsed results drained ───────────────┘
 ```
 
-The drainLoop and indexLoop are **pipelined**: batch N+1 DB INSERT overlaps with
-batch N INDEX. The drainLoop waits on `indexDoneCh` before calling `AckBatch`
-on the previous batch — arena data is only freed after the indexLoop finishes
-reading it.
+The drainLoop and indexLoop are **pipelined**: each DB-visible session is sent
+to INDEX without waiting for a full later batch boundary. The drainLoop calls
+`AckBatch` only after the INDEX parser workers signal that every work item for
+that drain batch has finished reading arena-backed transcript bytes.
 
 ---
 
@@ -203,9 +202,9 @@ ordering for DB insertion.
 Two workers producing root A (with child A1) and root B. drainLoop goroutine
 drains with parent-before-child ordering enforced by the committed set.
 
-The pipelined pattern: `Drain → DB Insert → Commit → wait INDEX(prev) → AckBatch(prev) → send to indexCh`.
+The pipelined pattern is `Drain → DB Insert → Commit → enqueue streamed INDEX work → AckBatch(when token completes)`.
 `Commit` runs before `AckBatch` so children become eligible for the next `Drain`
-while arena space is still held for the indexLoop.
+while arena space is still held for parser workers that need it.
 
 ```
   Worker 1            Worker 2            StagingBuffer          drainLoop           indexLoop
@@ -213,84 +212,33 @@ while arena space is still held for the indexLoop.
      │                   │                     │                     │                   │
      │ processSession(A) │                     │                     │                   │
      │───────────────────┼────────────────────▶│                     │                   │
-     │                   │                     │ CAS arenaHead        │                   │
-     │                   │                     │ copy transcript A    │                   │
-     │                   │                     │ CAS count → slot 0   │                   │
-     │                   │                     │ state[0].Store(ready)│                   │
-     │                   │                     │                     │                   │
      │                   │ processSession(B)   │                     │                   │
      │                   │────────────────────▶│                     │                   │
-     │                   │                     │ CAS arenaHead        │                   │
-     │                   │                     │ copy transcript B    │                   │
-     │                   │                     │ CAS count → slot 1   │                   │
-     │                   │                     │ state[1].Store(ready)│                   │
-     │                   │                     │                     │                   │
      │                   │                     │      Drain()         │                   │
      │                   │                     │◀────────────────────│                   │
-     │                   │                     │  slot 0: ready, root │                   │
-     │                   │                     │  slot 1: ready, root │                   │
-     │                   │                     │  state[0,1] → claimed│                   │
-     │                   │                     │─────────────────────▶│                   │
-     │                   │                     │  return DrainBatch   │                   │
+     │                   │                     │  return A, B         │                   │
      │                   │                     │                     │                   │
      │                   │                     │                DB Insert(A, B)           │
-     │                   │                     │                     │                   │
      │                   │                     │      Commit(A, B)   │                   │
      │                   │                     │◀────────────────────│                   │
-     │                   │                     │  committed += {A, B} │                   │
-     │                   │                     │                     │                   │
-     │                   │                     │                     │ (no prev batch)    │
-     │                   │                     │                     │                   │
-     │                   │                     │                     │──send batch──────▶│
-     │                   │                     │                     │                   │ index A, B
-     │                   │                     │                     │◀──indexDoneCh─────│
-     │                   │                     │                     │                   │
-     │                   │                     │      AckBatch(prev) │                   │
+     │                   │                     │                     │──work A──────────▶│ parse A
+     │                   │                     │                     │──work B──────────▶│ parse B
+     │ BFS: child A1     │                     │                     │                   │ serial write A
+     │ processSession(A1)│                     │                     │                   │ serial write B
+     │───────────────────┼────────────────────▶│                     │◀──batch token────│
+     │                   │                     │      AckBatch(A,B)  │                   │
      │                   │                     │◀────────────────────│                   │
-     │                   │                     │  state[0,1] → acked  │                   │
-     │                   │                     │  arenaTail += freed  │                   │
-     │                   │                     │                     │                   │
-     │ BFS: child A1     │                     │                     │                   │
-     │ processSession(A1)│                     │                     │                   │
-     │───────────────────┼────────────────────▶│                     │                   │
-     │                   │                     │ CAS arenaHead        │                   │
-     │                   │                     │ CAS count → slot 2   │                   │
-     │                   │                     │ state[2].Store(ready)│                   │
      │                   │                     │                     │                   │
      │                   │                     │      Drain()         │                   │
      │                   │                     │◀────────────────────│                   │
-     │                   │                     │  slot 2: ready       │                   │
-     │                   │                     │  A1.parent=A         │                   │
-     │                   │                     │  A in committed → ok │                   │
-     │                   │                     │  state[2] → claimed  │                   │
-     │                   │                     │─────────────────────▶│                   │
-     │                   │                     │  return DrainBatch   │                   │
-     │                   │                     │                     │                   │
-     │                   │                     │                DB Insert(A1)             │
-     │                   │                     │                     │                   │
-     │                   │                     │      Commit(A1)     │                   │
+     │                   │                     │  A1.parent=A ok      │                   │
+     │                   │                     │  return A1           │                   │
+     │                   │                     │                     │──work A1────────▶│ parse A1
+     │                   │                     │                DB Insert(A1)             │ serial write A1
+     │                   │                     │      Commit(A1)     │◀──batch token────│
      │                   │                     │◀────────────────────│                   │
-     │                   │                     │                     │                   │
-     │                   │                     │                     │ wait indexDoneCh   │
-     │                   │                     │                     │◀──indexDoneCh─────│
-     │                   │                     │      AckBatch(prev) │                   │
+     │                   │                     │      AckBatch(A1)   │                   │
      │                   │                     │◀────────────────────│                   │
-     │                   │                     │                     │──send batch──────▶│
-     │                   │                     │                     │                   │ index A1
-     │                   │                     │                     │                   │
-     ├─ done             ├─ done               │                     │                   │
-     │                   │                     │                     │                   │
-     │     workersDone.Store(true)             │                     │                   │
-     │                   │                     │      Drain() → empty │                   │
-     │                   │                     │◀────────────────────│                   │
-     │                   │                     │  workersDone == true │                   │
-     │                   │                     │  buffer empty        │                   │
-     │                   │                     │  wait final indexDone│                   │
-     │                   │                     │◀──indexDoneCh─────────────────────────▶│
-     │                   │                     │      AckBatch(final)│                   │
-     │                   │                     │◀────────────────────│                   │
-     │                   │                     │                     │ close(indexCh)     │
-     │                   │                     │                     │ exit               │
      ▼                   ▼                     ▼                     ▼                   ▼
 ```
 
@@ -342,9 +290,9 @@ backoff (1ms→16ms cap) until the drainLoop's `AckBatch` frees arena space.
 2. Transition eligible slots to `claimed(2)`; return `DrainBatch` (Results + Claimed indices)
 3. DB insert using `batch.Results`
 4. `Commit(ids...)` unlocks children for the next `Drain` (before `AckBatch`)
-5. Wait for previous batch's `indexDoneCh` signal (indexLoop finished reading arena data)
-6. `AckBatch(prevBatch)` transitions slots to `acked(3)` and advances `arenaTail`
-7. Send current batch (with `Metas` populated) to indexLoop via `indexCh`
+5. Attach a drain-batch completion token to each indexable session and send it to indexLoop via `indexCh`
+6. Keep draining later eligible work while parser workers read arena-backed transcript data
+7. When `indexDoneCh` returns a completed drain batch, call `AckBatch(batch)` to transition slots to `acked(3)` and advance `arenaTail`
 
 The `DrainBatch` bundles results and claimed slot indices together — no shared
 mutable state between calls. Multiple `DrainBatch` values may be outstanding
