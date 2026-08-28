@@ -82,9 +82,9 @@ func TestPaletteFreshness_SnapshotMatchesInstalledTokens(t *testing.T) {
 		t.Skipf(
 			"skipping the node_modules-currency half of the palette freshness gate: %s is absent (%v).\n"+
 				"This is expected when web/node_modules has not been installed (a hermetic CI job, or a fresh "+
-				"worktree before `corepack pnpm install` in web/). The hermetic half "+
+				"worktree before `pnpm install` in web/). The hermetic half "+
 				"(TestPaletteFreshness_HermeticRegenMatchesCommitted) still ran and does not depend on this file. "+
-				"To exercise this half, run `corepack pnpm install` in web/ and re-run this test.",
+				"To exercise this half, run `pnpm install` in web/ and re-run this test.",
 			installedPath, err)
 	}
 
