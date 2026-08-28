@@ -214,6 +214,7 @@ func TestMountedDirectLinksResolveHistoryHiddenFromDiscovery(t *testing.T) {
 	if err := db.InsertSessions(t.Context(), entries); err != nil {
 		t.Fatalf("seed mounted direct-link sessions: %v", err)
 	}
+	api.MarkStoredSessionsIndexed(t, db)
 	policy, err := sessionvisibility.New(config.SelectionConfig{
 		Mode: config.SelectionModeSelected,
 		Harnesses: map[string]config.SelectionHarnessConfig{

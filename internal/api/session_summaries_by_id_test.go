@@ -230,6 +230,7 @@ func TestMountedLinkedSessionsResolveOutsideBothDiscoveryScopes(t *testing.T) {
 	if err := db.InsertSessions(t.Context(), entries); err != nil {
 		t.Fatalf("seed linked-session rows: %v", err)
 	}
+	api.MarkStoredSessionsIndexed(t, db)
 
 	projects := make([]config.ProjectSelection, 0, len(clonePaths))
 	seenClone := make(map[string]bool, len(clonePaths))

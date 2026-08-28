@@ -310,6 +310,7 @@ func seedDiscoveryHTTPSessions(t *testing.T, db *store.Store, sessions []discove
 	if err := db.InsertSessions(t.Context(), entries); err != nil {
 		t.Fatalf("seed mounted API sessions: %v", err)
 	}
+	MarkStoredSessionsIndexed(t, db)
 	for i, row := range sessions {
 		ms := int64(1700000000000 + (offset+i)*1000)
 		preview := row.SearchText

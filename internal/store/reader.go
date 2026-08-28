@@ -62,6 +62,14 @@ type SessionRow struct {
 	// session predates worktree capture or did not come from Git.
 	GitWorktree string
 
+	// IndexedAt is the Unix-ms time the session last completed an index pass,
+	// or nil when it has never been indexed. A nil value means the session row
+	// and its metrics exist but its entries are not yet populated, so the
+	// transcript viewer would show no turns. Discovery uses it to withhold such
+	// a session from lists until it is actually viewable; it is NOT an access
+	// control (a deep link still resolves the session, see SessionSummariesByID).
+	IndexedAt *int64
+
 	// SessionOrigin is who drove the session (sessionorigin.User / Agent /
 	// Unknown, stored as its wire token) — the sessions.session_origin column
 	// written at ingest. Consumers that need the typed value parse it through
@@ -157,7 +165,8 @@ const (
     s.parent_id,
     p.canonical_remote,
     COALESCE(s.git_worktree, ''),
-    s.session_origin
+    s.session_origin,
+    s.indexed_at
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
 JOIN projects p ON s.project_hash = p.project_hash
@@ -166,10 +175,11 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
 	sqlSessionByID = sqlAllSessions + ` WHERE s.session_id = ?`
 
 	// sqlSessionDetailByID extends sqlAllSessions with extra columns for the detail view.
-	// Columns 0-32: same as sqlAllSessions (scanned by scanSessionRow).
-	// Column 33: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
-	// Column 34: s.pushed_at (nullable)
-	// Column 35: p.canonical_cwd (project working dir, replaces project_path)
+	// Columns 0-33: same as sqlAllSessions (scanned by scanSessionRow), including
+	//               column 33 s.indexed_at.
+	// Column 34: h.git_remote (nullable, from host_slugs JOIN on opaque_id)
+	// Column 35: s.pushed_at (nullable)
+	// Column 36: p.canonical_cwd (project working dir, replaces project_path)
 	sqlSessionDetailByID = `SELECT
     s.session_id, s.model_harness, s.model_id, COALESCE(h.host_slug, s.opaque_host_id),
     s.project_hash, COALESCE(p.canonical_cwd, p.project_hash), s.start_ms, s.end_ms,
@@ -185,6 +195,7 @@ LEFT JOIN host_slugs h ON s.opaque_host_id = h.opaque_id`
     p.canonical_remote,
     COALESCE(s.git_worktree, ''),
     s.session_origin,
+    s.indexed_at,
     h.git_remote, s.pushed_at, COALESCE(p.canonical_cwd, '')
 FROM sessions s
 JOIN session_metrics m ON s.session_id = m.session_id
@@ -917,23 +928,24 @@ func TruncateToRunes(s string, maxRunes int) string {
 // ---------------------------------------------------------------------------
 
 // scanSessionDetailRow reads a SessionDetailRow from the current statement.
-// Columns 0-32 are scanned by scanSessionRow; columns 33-35 are the extra detail fields.
+// Columns 0-33 are scanned by scanSessionRow (33 = s.indexed_at); columns 34-36
+// are the extra detail fields.
 func scanSessionDetailRow(stmt *sqlite.Stmt) SessionDetailRow {
 	row := SessionDetailRow{
 		SessionRow: scanSessionRow(stmt),
 	}
-	// Column 33: h.git_remote (nullable)
-	if stmt.ColumnType(33) != sqlite.TypeNull {
-		v := stmt.ColumnText(33)
+	// Column 34: h.git_remote (nullable)
+	if stmt.ColumnType(34) != sqlite.TypeNull {
+		v := stmt.ColumnText(34)
 		row.GitRemote = &v
 	}
-	// Column 34: s.pushed_at (nullable)
-	if stmt.ColumnType(34) != sqlite.TypeNull {
-		v := stmt.ColumnInt64(34)
+	// Column 35: s.pushed_at (nullable)
+	if stmt.ColumnType(35) != sqlite.TypeNull {
+		v := stmt.ColumnInt64(35)
 		row.PushedAt = &v
 	}
-	// Column 35: p.canonical_cwd (V23+: was project_path)
-	row.ProjectPath = stmt.ColumnText(35)
+	// Column 36: p.canonical_cwd (V23+: was project_path)
+	row.ProjectPath = stmt.ColumnText(36)
 	return row
 }
 
@@ -1029,6 +1041,13 @@ func scanSessionRow(stmt *sqlite.Stmt) SessionRow {
 	// Column 32: s.session_origin. NOT NULL with a CHECK over the three menu
 	// tokens, so it always arrives as a value sessionorigin.Parse accepts.
 	row.SessionOrigin = stmt.ColumnText(32)
+
+	// Column 33: s.indexed_at (nullable). NULL until the session completes an
+	// index pass; a populated value means its entries exist and it is viewable.
+	if stmt.ColumnType(33) != sqlite.TypeNull {
+		v := stmt.ColumnInt64(33)
+		row.IndexedAt = &v
+	}
 
 	return row
 }
