@@ -1512,13 +1512,17 @@ sources:
 	}
 }
 
-// TestDefaultPushFieldVisibility_ProjectNameFalse verifies that ProjectName
-// defaults to false in DefaultPushFieldVisibility — project names may reveal
-// local directory structure or work context and must be opt-in.
-func TestDefaultPushFieldVisibility_ProjectNameFalse(t *testing.T) {
+// TestDefaultPushFieldVisibility_ProjectNameDefaultsOn verifies that
+// ProjectName is left absent (tri-state nil) in DefaultPushFieldVisibility
+// and Resolve treats an absent key as on — peasant sends the repository
+// label by default (D8); the user must opt out explicitly to withhold it.
+func TestDefaultPushFieldVisibility_ProjectNameDefaultsOn(t *testing.T) {
 	defaults := DefaultPushFieldVisibility()
-	if defaults.ProjectName {
-		t.Errorf("DefaultPushFieldVisibility().ProjectName = true, want false")
+	if defaults.ProjectName != nil {
+		t.Errorf("DefaultPushFieldVisibility().ProjectName = %v, want nil (absent)", defaults.ProjectName)
+	}
+	if !defaults.Resolve().ProjectName {
+		t.Errorf("DefaultPushFieldVisibility().Resolve().ProjectName = false, want true (absent key defaults on)")
 	}
 }
 
@@ -1543,14 +1547,14 @@ push:
 		t.Fatalf("Parse: unexpected error: %v", err)
 	}
 
-	if !cfg.Push.Fields.ProjectName {
-		t.Errorf("Push.Fields.ProjectName = false, want true after parsing projectName: true")
+	if !cfg.Push.Fields.Resolve().ProjectName {
+		t.Errorf("Push.Fields.Resolve().ProjectName = false, want true after parsing projectName: true")
 	}
 }
 
-// TestParse_PushFieldVisibility_ProjectNameDefaultFalse verifies that
-// ProjectName defaults to false when not specified in YAML.
-func TestParse_PushFieldVisibility_ProjectNameDefaultFalse(t *testing.T) {
+// TestParse_PushFieldVisibility_ProjectNameDefaultOn verifies that ProjectName
+// resolves to true when not specified in YAML (D8: absent key defaults on).
+func TestParse_PushFieldVisibility_ProjectNameDefaultOn(t *testing.T) {
 	yaml := `
 version: 1
 sources:
@@ -1564,8 +1568,11 @@ sources:
 		t.Fatalf("Parse: unexpected error: %v", err)
 	}
 
-	if cfg.Push.Fields.ProjectName {
-		t.Errorf("Push.Fields.ProjectName = true, want false (default must be omit)")
+	if cfg.Push.Fields.ProjectName != nil {
+		t.Errorf("Push.Fields.ProjectName = %v, want nil (absent key)", cfg.Push.Fields.ProjectName)
+	}
+	if !cfg.Push.Fields.Resolve().ProjectName {
+		t.Errorf("Push.Fields.Resolve().ProjectName = false, want true (absent key defaults on)")
 	}
 }
 

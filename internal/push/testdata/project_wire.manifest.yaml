@@ -1,0 +1,13 @@
+# Required-name manifest for testdata/project_wire.yaml. Name-only: no
+# expectedCaseCount field (user ruling 2026-08-24 bans count guards).
+# testutil.ValidateRequiredNames enforces exact membership by comparing the
+# name SETS, which needs no count to do that.
+requiredNames:
+  - remote_present_sends_label_not_path
+  - no_remote_sends_path_only
+  - project_name_false_withholds_label_sends_path
+  - git_remote_false_withholds_label_and_remote_sends_path
+  - project_path_false_withholds_path
+  - hash_always_sent
+  - wire_carries_canonical_path
+  - nil_redactor_refused

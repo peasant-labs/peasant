@@ -6,10 +6,19 @@
 # preview cannot produce. Standard is the only offered level, so the copy must not
 # name maximum (a refused level the user cannot choose). The PII acronym is spelled
 # out on the example heading, not in these guide hints (see privacyExampleHeading).
+#
+# sentence_names_label_remote_and_path: the hint is config.ProjectIdentitySentence
+# verbatim (shared with the push wizard's noticePanel), so it must name the
+# repository label, the git remote url, and the <PATH> placeholder the project
+# path uses when no label is sendable - the three project-identity outcomes D8/D10
+# describe.
 introMaxSentences: 1
 requiredGuideText:
-  - "project identity"
-  - "git remote"
+  - "repository label"
+  - "git remote url"
+  - "<PATH>"
+  - "the git remote url is not redacted at the standard level"
+  - "only the project hash identifies the project"
 forbiddenGuideText:
   - "maximum"
   - "standard keeps git remote urls and branch output; maximum removes them"

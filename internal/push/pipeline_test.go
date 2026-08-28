@@ -648,6 +648,11 @@ func TestPipeline_UploadError_VillageVsNetwork(t *testing.T) {
 }
 
 // newTestPipeline is a test helper to construct a Pipeline with the given store and publisher.
+//
+// It supplies testutil.NoopRedactor rather than nil: NewPipeline refuses a
+// nil redactor (the safety net must always be wired in production), and the
+// noop double preserves every raw-value assertion these tests made before
+// that refusal existed, since it never rewrites a field.
 func newTestPipeline(
 	store *testutil.StubPushStore,
 	pub *testutil.StubPublisher,
@@ -656,13 +661,24 @@ func newTestPipeline(
 	runCfg push.PipelineConfig,
 	stderr *bytes.Buffer,
 ) *push.Pipeline {
-	return push.NewPipeline(store, pub, baseCreds(), cfg, fs, runCfg, nil, stderr)
+	p, err := push.NewPipeline(store, pub, baseCreds(), cfg, fs, runCfg, &testutil.NoopRedactor{}, stderr)
+	if err != nil {
+		panic(fmt.Sprintf("newTestPipeline: %v", err))
+	}
+	return p
 }
 
-func TestPipeline_DefaultFieldsUseSaltedProjectLabel(t *testing.T) {
+// TestPipeline_DefaultFieldsSendRepositoryLabelAndGitRemote verifies the D8/D10
+// default: with GitRemote, ProjectPath, and ProjectName left absent (the
+// tri-state default, resolved on), and a recognizable git remote recorded, a
+// push sends the repository label (not a raw project name or path) plus the
+// git remote URL as-is on both published documents (the authoritative
+// request and the structured transcript content). GitBranch and HostSlug
+// stay off (plain booleans, default false).
+func TestPipeline_DefaultFieldsSendRepositoryLabelAndGitRemote(t *testing.T) {
 	fs := testutil.NewMemFS()
 	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
-	rawProject, rawWorkdir, rawBranch, rawRemote := plantRawPublicationIdentity(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID)
+	rawProject, rawWorkdir, rawBranch, remote := plantRawPublicationIdentity(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID)
 	storeDouble := &testutil.StubPushStore{
 		Sessions: []ingest.PushSessionRow{makeSession(testutil.TestSessionUUID, testutil.TestHostSlug, defaults.HarnessClaudeCode.String(), nil)},
 	}
@@ -675,9 +691,10 @@ func TestPipeline_DefaultFieldsUseSaltedProjectLabel(t *testing.T) {
 	if result.Errors != 0 || len(publisher.AuthoritativeCalls) != 1 || len(publisher.Calls) != 1 {
 		t.Fatalf("authoritative publication result=%+v metadata calls=%d content calls=%d, want one successful call", result, len(publisher.AuthoritativeCalls), len(publisher.Calls))
 	}
-	want := "project-" + string(testutil.TestProjectHash)[:12]
-	if got := publisher.AuthoritativeCalls[0].Project.Name; got != want {
-		t.Fatalf("authoritative project name = %q, want privacy-safe label %q derived from the salted hash", got, want)
+	// ssh://git.internal/acme/private-project.git -> "git.internal:acme/private-project".
+	wantLabel := "git.internal:acme/private-project"
+	if got := publisher.AuthoritativeCalls[0].Project.Name; got != wantLabel {
+		t.Fatalf("authoritative project name = %q, want repository label %q (D8: sent by default)", got, wantLabel)
 	}
 	var content schema.TranscriptContent
 	if err := json.Unmarshal(publisher.Calls[0].TranscriptBody, &content); err != nil {
@@ -687,24 +704,31 @@ func TestPipeline_DefaultFieldsUseSaltedProjectLabel(t *testing.T) {
 		t.Fatal("published transcript content has no session detail")
 	}
 	detail := content.SessionDetail
-	if detail.Project != want {
-		t.Errorf("transcript project = %q, want privacy-safe label %q derived from the salted hash", detail.Project, want)
+	if detail.Project != wantLabel {
+		t.Errorf("transcript project = %q, want repository label %q", detail.Project, wantLabel)
 	}
-	if detail.WorkingDirectory != "" || detail.GitBranch != "" || detail.GitRemote != "" {
-		t.Errorf("transcript identity fields were not withheld: workingDirectory=%q gitBranch=%q gitRemote=%q", detail.WorkingDirectory, detail.GitBranch, detail.GitRemote)
+	// The local path and branch stay withheld: the label already identifies
+	// the project (D10), and GitBranch defaults off.
+	if detail.WorkingDirectory != "" || detail.GitBranch != "" {
+		t.Errorf("transcript fields were not withheld: workingDirectory=%q gitBranch=%q", detail.WorkingDirectory, detail.GitBranch)
+	}
+	// The git remote URL IS sent as-is by default (D8; it is not redacted at
+	// the standard level either — see config.ProjectIdentitySentence).
+	if detail.GitRemote != remote {
+		t.Errorf("transcript gitRemote = %q, want the raw remote %q (sent by default)", detail.GitRemote, remote)
 	}
 	publishedBody := string(publisher.Calls[0].TranscriptBody)
 	if strings.Contains(publishedBody, rawProject) {
-		t.Errorf("transcript content contains opted-out raw project %q", rawProject)
+		t.Errorf("transcript content contains the raw project name %q; only the label or hash may identify the project", rawProject)
 	}
 	if strings.Contains(publishedBody, rawWorkdir) {
-		t.Errorf("transcript content contains opted-out working directory %q", rawWorkdir)
+		t.Errorf("transcript content contains the withheld working directory %q", rawWorkdir)
 	}
 	if strings.Contains(publishedBody, rawBranch) {
-		t.Errorf("transcript content contains opted-out branch %q", rawBranch)
+		t.Errorf("transcript content contains the withheld branch %q", rawBranch)
 	}
-	if strings.Contains(publishedBody, rawRemote) {
-		t.Errorf("transcript content contains opted-out remote %q", rawRemote)
+	if !strings.Contains(publishedBody, remote) {
+		t.Errorf("transcript content is missing the git remote %q, which is sent by default", remote)
 	}
 }
 

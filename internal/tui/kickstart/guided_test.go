@@ -314,7 +314,17 @@ func assertFramingAroundField(t *testing.T, row guidedFramingRow, view string) {
 	wantBefore := []string{}
 	if row.HasGuide {
 		wantBefore = append(wantBefore, row.Guide.Intro)
-		wantBefore = append(wantBefore, row.Guide.Hints...)
+		// A hint renders as one hard-clipped line (settings/flow.go
+		// appendLine: clip(value, width), no wrapping). Every OTHER
+		// section's hint is short enough to survive that clip whole, but
+		// the privacy section's hint is config.ProjectIdentitySentence — a
+		// whole disclosure paragraph, legitimately truncated with an
+		// ellipsis. hintMountedProbe checks a bounded leading prefix
+		// instead of the untruncated string, which is a no-op for every
+		// hint short enough to already fit.
+		for _, hint := range row.Guide.Hints {
+			wantBefore = append(wantBefore, hintMountedProbe(hint))
+		}
 	}
 	if row.ExampleText != "" {
 		wantBefore = append(wantBefore, row.ExampleText)

@@ -7,6 +7,18 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- Push now sends the repository label (`host:owner/repo`, derived from the
+  recorded git remote) and the git remote URL by default; the project path is
+  sent only as a fallback for a project with no recognizable remote, in its
+  canonical `/<PATH>/<project>` form, and is never paired with a label on the
+  same publish. The three `push.fields` keys that gate this (`gitRemote`,
+  `projectPath`, `projectName`) are now tri-state: an absent key defaults on,
+  and an explicit `true` or `false` is kept exactly as written. `gitBranch` and
+  `hostSlug` remain plain booleans defaulting off. `project.hash` is unaffected
+  — it was, and remains, always sent. The push wizard's consent screen and the
+  kickstart privacy guide share one sentence describing this (peasant#224).
+
 ## [0.4.0] - 2026-08-26
 
 ### Added

@@ -7,7 +7,7 @@ cases:
       - role: user
         depth: 0
         preview: '<system-reminder>private setup</system-reminder><user_query>Fix /Users/alice/work/app/src/auth.go</user_query>'
-    expected: 'Fix /Users/<USER>/<PATH>/app/src/auth.go'
+    expected: 'Fix /<PATH>/app/src/auth.go'
   - name: canonical_cwd_fallback
     assertion: exact
     harness: claude-code
@@ -16,7 +16,7 @@ cases:
       - role: user
         depth: 0
         preview: 'Review /Users/alice/work/app/internal/store/query.go'
-    expected: 'Review /Users/<USER>/<PATH>/app/internal/store/query.go'
+    expected: 'Review /<PATH>/app/internal/store/query.go'
   - name: nested_user_is_not_title
     assertion: exact
     harness: claude-code
@@ -71,7 +71,7 @@ cases:
       - role: user
         depth: 0
         preview: 'Fix /Users/alice/work/app/src/auth.go without exposing private paths'
-    expected: 'Fix /Users/<USER>/<PATH>/app/src/auth.go without exposing private paths'
+    expected: 'Fix /<PATH>/app/src/auth.go without exposing private paths'
   - name: command_with_args_titles_the_argument_prose
     assertion: exact
     harness: claude-code

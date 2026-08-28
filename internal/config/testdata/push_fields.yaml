@@ -1,0 +1,70 @@
+# Cases for PushFieldVisibility's tri-state fields (GitRemote, ProjectPath,
+# ProjectName) and Resolve(): an absent YAML key defaults ON (D8 - peasant
+# sends the repository label and git remote URL by default), while an
+# explicit value is always kept as given. GitBranch and HostSlug are NOT
+# covered here: they stay plain booleans defaulting off. See
+# testdata/push_fields.manifest.yaml for the required-name membership check.
+cases:
+  - name: absent_keys_default_on
+    why: >-
+      D8: when a config carries no push.fields block at all, the three
+      tri-state fields are absent (nil) and Resolve treats an absent key as
+      on, so peasant sends the repository label and git remote by default
+      without the user opting in.
+    yaml: |
+      version: 1
+      sources:
+        claude-code:
+          enabled: true
+          paths:
+            - ~/.claude/projects
+    wantGitRemote: true
+    wantProjectPath: true
+    wantProjectName: true
+
+  - name: explicit_false_kept
+    why: >-
+      a user who explicitly withholds a field must have that choice
+      respected exactly - an explicit false is never overridden back to the
+      tri-state default.
+    yaml: |
+      version: 1
+      sources:
+        claude-code:
+          enabled: true
+          paths:
+            - ~/.claude/projects
+      push:
+        method: all
+        visibility: private
+        fields:
+          gitRemote: false
+          projectPath: false
+          projectName: false
+    wantGitRemote: false
+    wantProjectPath: false
+    wantProjectName: false
+
+  - name: explicit_true_kept
+    why: >-
+      an explicit true is kept as given too - Resolve is not a one-way
+      "absent or false" gate; it distinguishes exactly three states (absent,
+      explicit false, explicit true) and passes an explicit true straight
+      through.
+    yaml: |
+      version: 1
+      sources:
+        claude-code:
+          enabled: true
+          paths:
+            - ~/.claude/projects
+      push:
+        method: all
+        visibility: private
+        fields:
+          gitRemote: true
+          projectPath: true
+          projectName: true
+    wantGitRemote: true
+    wantProjectPath: true
+    wantProjectName: true

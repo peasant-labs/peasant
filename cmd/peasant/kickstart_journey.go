@@ -119,7 +119,11 @@ func buildKickstartJourneyOperations(cmd *cobra.Command, configPath string, load
 			runCfg.Selection = selection
 		}
 		client := village.NewVillageClient(creds.VillageURL, creds.APIKey, nil)
-		result, runErr := push.NewPipeline(db, client, creds, cfg, &ingest.OSFileSystem{}, runCfg, redactor, io.Discard).Run(ctx)
+		pipeline, pipelineErr := push.NewPipeline(db, client, creds, cfg, &ingest.OSFileSystem{}, runCfg, redactor, io.Discard)
+		if pipelineErr != nil {
+			return nil, retrySessions(ftue.StagePublication, ids), fmt.Errorf("create kickstart publication pipeline: %w", pipelineErr)
+		}
+		result, runErr := pipeline.Run(ctx)
 		return classifyKickstartPublication(ids, result, runErr)
 	}
 

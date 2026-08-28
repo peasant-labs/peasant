@@ -142,7 +142,7 @@ func TestPushOfAnAgentParentStillCarriesItsChildren(t *testing.T) {
 	// it is ungated rather than because the fixture left the gates open.
 	published, err := push.MapMetadata(push.MapOptions{
 		Meta:   meta,
-		Fields: config.PushFieldVisibility{},
+		Fields: config.PushFields{},
 	})
 	if err != nil {
 		t.Fatalf("map the publish metadata for an agent-driven parent: %v", err)
@@ -159,7 +159,13 @@ func TestPushOfAnAgentParentStillCarriesItsChildren(t *testing.T) {
 		meta,
 		originDeclarationEntries(),
 		defaults.PublishSchemaVersion,
-		config.PushFieldVisibility{},
+		config.PushFieldVisibility{
+			// Explicit false, not zero-value: GitRemote/ProjectPath/ProjectName
+			// are tri-state and a zero-value (nil) resolves to true (D8).
+			GitRemote:   testutil.BoolPtr(false),
+			ProjectPath: testutil.BoolPtr(false),
+			ProjectName: testutil.BoolPtr(false),
+		},
 		sessionorigin.Agent,
 	)
 	if err != nil {

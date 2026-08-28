@@ -289,9 +289,12 @@ const (
 )
 
 // PushFieldVisibility controls which RAW-identity metadata fields are included in
-// either part of a multipart publication. Fields set to false are omitted
-// (zero-valued) from both the authoritative request and transcript content. All
-// such fields default to false (user must opt-in to share).
+// either part of a multipart publication. GitBranch and HostSlug are plain
+// booleans that default to false (user must opt-in to share). GitRemote,
+// ProjectPath, and ProjectName are tri-state: an absent YAML key defaults to
+// true (peasant sends the repository label plus the git remote URL by
+// default; see config.ProjectIdentitySentence), while an explicit `false`
+// withholds the field. Call Resolve to read the effective plain-bool values.
 //
 // NOTE: project.hash is NOT gated here. It is a per-installation salted
 // HMAC-SHA256 (non-correlatable across users) and is ALWAYS sent, so the village
@@ -299,23 +302,60 @@ const (
 // plaintext. The deprecated `projectHash` key is parsed (ProjectHashLegacy) only
 // to emit a one-line deprecation note; it never gates anything.
 type PushFieldVisibility struct {
-	// GitRemote controls whether git remote URL is included. Default: false — leaks git identity.
-	GitRemote bool `yaml:"gitRemote"`
+	// GitRemote controls whether git remote URL is included. Tri-state:
+	// nil (key absent) defaults to true; an explicit value is kept.
+	GitRemote *bool `yaml:"gitRemote"`
 	// GitBranch controls whether branch name is included. Default: false — may contain feature descriptions.
 	GitBranch bool `yaml:"gitBranch"`
-	// ProjectPath controls whether local project path is included. Default: false — leaks directory structure.
-	ProjectPath bool `yaml:"projectPath"`
+	// ProjectPath controls whether local project path is included. Tri-state:
+	// nil (key absent) defaults to true; an explicit value is kept.
+	ProjectPath *bool `yaml:"projectPath"`
 	// HostSlug controls whether host slug is included. Default: false — for tracked projects, IS the git remote in slug form.
 	HostSlug bool `yaml:"hostSlug"`
-	// ProjectName controls whether the project name is included. Default: false — may leak
-	// project/directory names that reveal local directory structure or work context.
-	ProjectName bool `yaml:"projectName"`
+	// ProjectName controls whether the project name is included. Tri-state:
+	// nil (key absent) defaults to true; an explicit value is kept.
+	ProjectName *bool `yaml:"projectName"`
 	// ProjectHashLegacy is a PARSE-ONLY presence flag for the deprecated
 	// `push.fields.projectHash` key. nil = key absent. It NEVER gates the hash
 	// (project.hash is always sent); it exists solely so the push path can emit a
 	// one-line stderr deprecation note when a stale config still carries the key.
 	// yaml.Unmarshal is non-strict, so an absent key leaves this nil.
 	ProjectHashLegacy *bool `yaml:"projectHash"`
+}
+
+// PushFields is the resolved, plain-bool form of PushFieldVisibility produced
+// by Resolve. Every field here is a definite yes/no — the tri-state
+// absent-defaults-to-true resolution has already happened, so a consumer
+// never has to reason about nil.
+type PushFields struct {
+	GitRemote   bool
+	GitBranch   bool
+	ProjectPath bool
+	HostSlug    bool
+	ProjectName bool
+}
+
+// Resolve returns the effective plain-bool field visibility: an absent
+// GitRemote, ProjectPath, or ProjectName key (nil) resolves to true (peasant
+// sends the repository label and the git remote URL by default); an explicit
+// value is kept as given. GitBranch and HostSlug pass through unchanged.
+func (f PushFieldVisibility) Resolve() PushFields {
+	return PushFields{
+		GitRemote:   resolveTriState(f.GitRemote, true),
+		GitBranch:   f.GitBranch,
+		ProjectPath: resolveTriState(f.ProjectPath, true),
+		HostSlug:    f.HostSlug,
+		ProjectName: resolveTriState(f.ProjectName, true),
+	}
+}
+
+// resolveTriState returns fallback when value is absent (nil), else the
+// explicit value it points to.
+func resolveTriState(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 // HasDeprecatedProjectHashKey reports whether the loaded config carried the
@@ -325,14 +365,17 @@ func (f PushFieldVisibility) HasDeprecatedProjectHashKey() bool {
 	return f.ProjectHashLegacy != nil
 }
 
-// DefaultPushFieldVisibility returns safe defaults where all raw-identity fields are omitted.
+// DefaultPushFieldVisibility returns the tri-state defaults: GitRemote,
+// ProjectPath, and ProjectName are left absent (nil), which Resolve treats as
+// on — peasant sends the repository label and the git remote URL by default.
+// GitBranch and HostSlug stay off until the user opts in.
 func DefaultPushFieldVisibility() PushFieldVisibility {
 	return PushFieldVisibility{
-		GitRemote:   false,
+		GitRemote:   nil,
 		GitBranch:   false,
-		ProjectPath: false,
+		ProjectPath: nil,
 		HostSlug:    false,
-		ProjectName: false,
+		ProjectName: nil,
 	}
 }
 

@@ -65,7 +65,12 @@ rows:
     guide:
       intro: preview how standard redaction changes your text before you publish.
       hints:
-        - standard hides project identity but keeps git remote urls.
+        - >-
+          peasant sends your repository label (host:owner/repo) and your git
+          remote url as it is. only for a project with no repository label,
+          it sends your project path with everything before the project
+          folder replaced by <PATH>. the git remote url is not redacted at
+          the standard level. only the project hash identifies the project.
     wantContains:
       - before you publish
       # The split's right pane now sizes itself to the left control's own
@@ -73,7 +78,11 @@ rows:
       # category is guaranteed visible without paging - PII is covered
       # directly by TestPrivacyGuideUsesRealStandardRedactor.
       - credential
-      - keeps git remote urls
+      # The hint is config.ProjectIdentitySentence (shared verbatim with the
+      # push wizard's noticePanel) and hard-clips at this section's rendered
+      # width - see TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes's
+      # hintMountedProbe for why only a short leading prefix is checked here.
+      - "peasant sends your repository"
     wantMissing:
       - before transcripts enter peasant's local store
       - same redactor as local import

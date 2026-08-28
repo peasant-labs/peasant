@@ -415,7 +415,10 @@ func BuildPushCommand() *cobra.Command {
 
 				client := village.NewVillageClientWithConcurrency(creds.VillageURL, creds.APIKey, resolvedConcurrency)
 				client.SetRequestObserver(run.markVillageRequest)
-				pipeline := push.NewPipeline(db, client, creds, cfg, fs, runCfg, pushRedactor, cmd.ErrOrStderr())
+				pipeline, err := push.NewPipeline(db, client, creds, cfg, fs, runCfg, pushRedactor, cmd.ErrOrStderr())
+				if err != nil {
+					return fmt.Errorf("create push pipeline: %w", err)
+				}
 
 				if dryRun {
 					if level != outputQuiet {

@@ -372,6 +372,25 @@ const redactionScopeSentence = "It redacts known patterns of secrets, personal d
 // by a re-wording somewhere else.
 func RedactionScopeSentence() string { return redactionScopeSentence }
 
+// projectIdentitySentence describes, in the user's own words, exactly what a
+// push sends to identify the project: the repository label and git remote by
+// default, the project path only as a fallback when there is no label, and
+// the project hash as the one value that always identifies the project. The
+// exact wording is fixed by the review that ratified it: every surface that
+// describes push project-identity behavior shares this one sentence rather
+// than re-phrasing it, so the two clauses that matter most - "the git remote
+// url is not redacted at the standard level" and "only the project hash
+// identifies the project" - cannot drift apart across surfaces.
+const projectIdentitySentence = "peasant sends your repository label (host:owner/repo) and your git remote " +
+	"url as it is. only for a project with no repository label, it sends your project path with everything " +
+	"before the project folder replaced by <PATH>. the git remote url is not redacted at the standard level. " +
+	"only the project hash identifies the project."
+
+// ProjectIdentitySentence is projectIdentitySentence for surfaces outside
+// this package - the push wizard's noticePanel and the kickstart privacy
+// guide - so the wording cannot drift between them.
+func ProjectIdentitySentence() string { return projectIdentitySentence }
+
 // RedactionLevelSupported reports whether a level found in a stored configuration
 // lets the run proceed. An unset level is supported: it resolves to the default,
 // which is.

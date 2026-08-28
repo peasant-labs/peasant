@@ -6,6 +6,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/projectlabel"
 	"github.com/peasant-labs/peasant/internal/title"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -22,7 +23,10 @@ type MapOptions struct {
 	// every published item carries only ID plus observedCommitHash.
 	Associations []schema.PublishedAssociation
 	License      schema.License
-	Fields       config.PushFieldVisibility
+	// Fields is the resolved, plain-bool field visibility (config.PushFieldVisibility.Resolve()).
+	// The tri-state absent-defaults-to-true resolution happens once at the
+	// caller, so this function never has to reason about nil.
+	Fields config.PushFields
 	// Redactor redacts the ASSEMBLED document before it is returned.
 	//
 	// It is here rather than at the call site because this function is where the
@@ -98,17 +102,7 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 			Tracking:     meta.Git.Tracking,
 			Associations: append([]schema.PublishedAssociation(nil), opts.Associations...),
 		},
-		Project: schema.ProjectContext{
-			// project.hash is ALWAYS sent. It is a per-installation salted
-			// HMAC-SHA256 (salt.go) — non-correlatable across users — so the
-			// village can group a single user's sessions by project without
-			// being able to recover the underlying remote. Unlike the raw
-			// identity fields (gitRemote/branch/projectPath/projectName/hostSlug,
-			// which stay field-visibility-gated), the hash leaks no plaintext.
-			Hash:     schema.ProjectHash(meta.Project.Hash),
-			FilePath: conditionalString(opts.Fields.ProjectPath, meta.Project.FilePath),
-			Name:     conditionalString(opts.Fields.ProjectName, meta.Project.Name),
-		},
+		Project: projectContextWire(meta, opts.Fields),
 		Stats: schema.SessionStats{
 			TurnCount:     meta.Stats.TurnCount,
 			ToolCallCount: meta.Stats.ToolCallCount,
@@ -221,6 +215,74 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 		}
 	}
 	return json.Marshal(redactedRequest)
+}
+
+// projectContextWire builds the wire-safe Project field: the hash is always
+// sent (see the field-level comment below); the name and file path come from
+// projectWire, which is where the label/path exclusivity (D10) lives.
+func projectContextWire(meta *ingest.UnifiedMetadata, fields config.PushFields) schema.ProjectContext {
+	name, filePath := projectWire(meta, fields)
+	return schema.ProjectContext{
+		// project.hash is ALWAYS sent. It is a per-installation salted
+		// HMAC-SHA256 (salt.go) — non-correlatable across users — so the
+		// village can group a single user's sessions by project without
+		// being able to recover the underlying remote. Unlike the raw
+		// identity fields (gitRemote/branch/projectPath/projectName/hostSlug,
+		// which stay field-visibility-gated), the hash leaks no plaintext.
+		Hash:     schema.ProjectHash(meta.Project.Hash),
+		FilePath: filePath,
+		Name:     name,
+	}
+}
+
+// projectWire computes the wire-safe project name and file path for a publish
+// request.
+//
+// peasant sends the repository label (host:owner/repo, derived from the
+// recorded git remote) by default so the village can display a recognizable
+// project identity without any raw filesystem path leaving the machine. A
+// label is sent only when the remote is recognizable (projectlabel.FromRemote
+// succeeds) AND both the project-name and git-remote fields are visible —
+// gating on GitRemote too because a label that names the exact host and
+// repository IS the git identity in a different shape, so withholding the raw
+// remote while still sending its label would defeat the withholding.
+//
+// The project path is sent ONLY when no label was sent: a label already
+// identifies the project by name, so pairing it with the local filesystem
+// path would leak directory structure for no benefit (D10). Without a usable
+// remote (no label), the path is the only project-identity signal available,
+// so it is sent whenever the project-path field is visible.
+func projectWire(meta *ingest.UnifiedMetadata, fields config.PushFields) (name, filePath string) {
+	if label, ok := projectWireLabel(meta, fields); ok {
+		return label, ""
+	}
+	if fields.ProjectPath {
+		return "", meta.Project.FilePath
+	}
+	return "", ""
+}
+
+// projectWireLabel reports the repository label a publish would send for
+// meta under fields, and whether one is sendable at all.
+//
+// This is the ONE place that decides whether a label goes out, so every
+// wire representation of the session's project identity — the authoritative
+// PublishRequest (via projectWire above) and the structured transcript
+// content (via metadataToSession in content.go) — makes the identical
+// label-vs-path-vs-hash decision. Two separate implementations of this gate
+// drifting apart is exactly the failure mode this function exists to close:
+// one document could show a repository label while the other showed a raw
+// project name for the same push.
+func projectWireLabel(meta *ingest.UnifiedMetadata, fields config.PushFields) (label string, ok bool) {
+	var remote string
+	if meta.Git.Remote != nil {
+		remote = *meta.Git.Remote
+	}
+	label, ok = projectlabel.FromRemote(remote)
+	if !ok || !fields.ProjectName || !fields.GitRemote {
+		return "", false
+	}
+	return label, true
 }
 
 // conditionalStringPtr returns nil if include is false or val is nil.

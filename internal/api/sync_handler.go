@@ -761,7 +761,7 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 	pushCfg.Output.BasePath = string(resolvedOutput)
 
 	// Build and run the push pipeline.
-	pipeline := push.NewPipeline(
+	pipeline, err := push.NewPipeline(
 		h.store,
 		client,
 		creds,
@@ -774,6 +774,10 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		redactor,
 		io.Discard, // stderr warnings not needed for web response
 	)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "create push pipeline: "+err.Error())
+		return
+	}
 
 	result, err := pipeline.Run(r.Context())
 	if err != nil {

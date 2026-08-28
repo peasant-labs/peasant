@@ -509,11 +509,11 @@ func TestPipelinePhaseB_PushGate(t *testing.T) {
 		t.Fatal("metadata on disk has empty Project.Hash — test setup error")
 	}
 
-	// Build a push payload with default field visibility (all false).
+	// Build a push payload with the default (resolved) field visibility.
 	defaultVisibility := config.DefaultPushFieldVisibility()
 	payload, err := push.MapMetadata(push.MapOptions{
 		Meta:   &written,
-		Fields: defaultVisibility,
+		Fields: defaultVisibility.Resolve(),
 	})
 	if err != nil {
 		t.Fatalf("MapMetadata: %v", err)

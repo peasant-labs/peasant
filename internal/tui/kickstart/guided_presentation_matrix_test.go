@@ -193,6 +193,22 @@ func exactMountedLine(view, text string) int {
 	return -1
 }
 
+// hintMountedProbeLength is short enough to survive a hard clip at the
+// smallest tested viewport (80 columns, minus the "• " prefix and frame
+// chrome) regardless of which section's hint is being probed.
+const hintMountedProbeLength = 24
+
+// hintMountedProbe returns a prefix of hint short enough that a single-line,
+// hard-clipped render (settings/flow.go appendLine) cannot have truncated it
+// away, so a mounted-view containment check on the probe stays meaningful
+// for a hint of any length.
+func hintMountedProbe(hint string) string {
+	if len(hint) <= hintMountedProbeLength {
+		return hint
+	}
+	return hint[:hintMountedProbeLength]
+}
+
 func containingMountedLine(view, text string) int {
 	for index, line := range strings.Split(view, "\n") {
 		if strings.Contains(ansi.Strip(line), text) {
@@ -269,9 +285,19 @@ func TestGuidedPresentationMatrixMountsEverySectionInBothThemesAndSizes(t *testi
 				t.Errorf("mounted section %q surface background does not reach the final inner cell", row.Section)
 			}
 			if len(section.Guide.Hints) > 0 {
-				hintAt := containingMountedLine(view, section.Guide.Hints[0])
+				// A hint renders as one hard-clipped line (settings/flow.go
+				// appendLine: clip(value, width), no wrapping), so a hint
+				// longer than the viewport - like the privacy section's
+				// config.ProjectIdentitySentence, which is a whole
+				// disclosure paragraph rather than a short pointer - is
+				// legitimately truncated with an ellipsis. Checking a short
+				// leading prefix (guaranteed to survive that clip at both
+				// tested widths) proves the hint is shown without requiring
+				// the untruncated full text to fit on one line.
+				hintProbe := hintMountedProbe(section.Guide.Hints[0])
+				hintAt := containingMountedLine(view, hintProbe)
 				if hintAt < 0 {
-					t.Fatalf("mounted section %q does not show its first muted hint", row.Section)
+					t.Fatalf("mounted section %q does not show its first muted hint (probe %q)", row.Section, hintProbe)
 				}
 				probe := th.Styles().Surface.Render("x")
 				surfacePrefix := probe[:strings.Index(probe, "x")]

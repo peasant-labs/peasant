@@ -5,8 +5,8 @@
 # uses: a small 80x24 window and a large 120x40 one. Each state also names what
 # its screen must and must not show, so a golden that changes says WHAT changed
 # rather than only THAT it changed.
-expectedCaseCount: 14
-expectedAssertionCount: 7
+expectedCaseCount: 15
+expectedAssertionCount: 8
 
 cases:
   - name: start-dark-120x40
@@ -56,6 +56,11 @@ cases:
     height: 40
   - name: consent-light-80x24
     state: consent
+    theme: light
+    width: 80
+    height: 24
+  - name: consent-scrolled-light-80x24
+    state: consent-scrolled
     theme: light
     width: 80
     height: 24
@@ -117,13 +122,23 @@ assertions:
     wantContains:
       - "metadata"
       - "known patterns"
-      - "deselect it"
+      - "repository label"
       - "before it publishes them to the village"
       - "go back with esc to review one"
     wantMissing:
       - "No raw data will leave your machine"
       - "stored copy"
       - "older rule set"
+  - state: consent-scrolled
+    wantContains:
+      # The consent copy (config.ProjectIdentitySentence plus the existing
+      # redaction hedge) no longer fits an 80x24 viewport in one screen
+      # alongside this closing guidance, so it is verified reachable via
+      # scroll (shift+g / G, "go to bottom") here rather than required of
+      # the top-of-page capture above.
+      - "deselect it"
+    wantMissing:
+      - "No raw data will leave your machine"
   - state: receipt
     wantContains:
       - "push 3 session(s) to the village."

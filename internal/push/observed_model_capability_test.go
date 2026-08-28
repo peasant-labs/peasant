@@ -97,7 +97,11 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 				ContentCapabilities: fixtureCase.Advertisement,
 			}}
 			var stderr bytes.Buffer
-			var redactor ingest.TextRedactor
+			// redactor defaults to a no-op double rather than nil: NewPipeline
+			// refuses a nil redactor (the production safety net must always be
+			// wired), and the noop double preserves this fixture's unredacted
+			// baseline when no pattern or shape mutation overrides it below.
+			var redactor ingest.TextRedactor = &testutil.NoopRedactor{}
 			if fixtureCase.RedactPattern != "" {
 				var err error
 				redactor, err = redact.NewRedactor(redact.Standard, []redact.UserPattern{{ID: "publication-project-pattern", Category: redact.CategoryProject, Pattern: fixtureCase.RedactPattern}}, redact.XDGPaths{})
@@ -108,7 +112,10 @@ func TestPipelineObservedModelCapabilityGate(t *testing.T) {
 			if fixtureCase.ShapeMutation != "" {
 				redactor = shapeChangingRedactor{mutation: fixtureCase.ShapeMutation}
 			}
-			pipeline := push.NewPipeline(store, publisher, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{Concurrency: 1, DryRun: fixtureCase.DryRun}, redactor, &stderr)
+			pipeline, err := push.NewPipeline(store, publisher, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{Concurrency: 1, DryRun: fixtureCase.DryRun}, redactor, &stderr)
+			if err != nil {
+				t.Fatalf("NewPipeline: %v", err)
+			}
 			result, err := pipeline.Run(context.Background())
 			if err != nil {
 				t.Fatalf("Run: %v", err)
