@@ -10,7 +10,7 @@ Three repositories are involved:
 - **peasant** — the Go backend + the Next.js dashboard under `web/`. Owns the
   *data layer* (transport, fetch, adapters, mutation wiring) and app-specific
   *policy* (scoping, routing, links).
-- **fairtrade** — `@peasant-labs/fairtrade`, the design-system, the shared
+- **fairtrade**: `@peasant-labs/fairtrade`, the design-system, the shared
   transcript viewer (`/ui`'s `<TranscriptViewer>` composite + helpers), the
   `/graph` trajectory-graph engine, and the one cooked transcript view-model
   adapter (`adaptTranscript`). Peasant consumes its published package directly
@@ -442,9 +442,9 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
 **Cohesive transcript adapter**
 - `web/src/components/session-detail/v2/SessionDetailV2.tsx` — host adapter
   (transport + scope/focus/links/labels policy).
-- `@peasant-labs/fairtrade` `/ui` `<TranscriptViewer>` composite — the single
+- `@peasant-labs/fairtrade` `/ui` `<TranscriptViewer>` composite: the single
   `adaptTranscript(...)` call plus cooked-field threading.
-- `@peasant-labs/fairtrade` `/ui` session-detail types —
+- `@peasant-labs/fairtrade` `/ui` session-detail types:
   `SessionTab` enum + tab defs.
 - `@peasant-labs/fairtrade` `dist/lib/types/transcript/{adapter,view-model}.d.ts`
   — `adaptTranscript`, `TranscriptViewModel` / `ToolCallVM` / `DiffEntryVM` /
@@ -455,7 +455,7 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
   helpers used by the adapter.
 
 **Distributed chrome prop-adapters**
-- fairtrade `/ui` `.../header/MetadataChips.tsx` + `.../lib/provider.ts` —
+- fairtrade `/ui` `.../header/MetadataChips.tsx` + `.../lib/provider.ts`:
   harness → provider chip (the live provider tag).
 - `web/src/components/ProviderIcon.tsx` — peasant's own (apparently unused)
   harness→glyph map.

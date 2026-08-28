@@ -32,7 +32,7 @@ type Theme = 'dark' | 'light';
  *
  * It mounts the composite with the same shape the real adapter uses (detected
  * phases + derived pattern annotations feeding `computeAnalytics`, the @xyflow
- * graph in `graphSlot` — fairtrade's `/graph` entry owns that one engine — and
+ * graph in `graphSlot` (fairtrade's `/graph` entry owns that one engine), and
  * peasant's per-turn label popover in the `renderTurnActions` slot) but with all
  * capabilities on and host callbacks stubbed, so every action affordance renders
  * for capture. The composite owns a single bounded inner scroller
@@ -225,9 +225,9 @@ export default function VisualHarnessPage() {
           anchorHref={(turnIndex) => `#turn-${turnIndex}`}
           streamPrelude={streamPrelude}
           headerActions={headerActions}
-          // The graph toggle mounts fairtrade's `/graph` @xyflow engine — the one
+          // The graph toggle mounts fairtrade's `/graph` @xyflow engine, the one
           // engine that entry still owns (graph topology/pan/zoom; visuals
-          // are DS) — matching `SessionDetailV2`'s `graphSlot` exactly.
+          // are DS), matching `SessionDetailV2`'s `graphSlot` exactly.
           graphSlot={() => (
             <TrajectoryGraph
               turns={turns}

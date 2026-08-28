@@ -37,7 +37,7 @@
 !baseline/
 !baseline/**
 # Retired baselines are dead artifacts and must not be re-added: the shell
-# baseline, and the pre-composite-migration sibling-package golden.
+# baseline, and the pre-composite-migration transcript-browser golden.
 baseline/shell-baseline/
 baseline/tb/
 # Generated smoke captures and SxS composites are local review artifacts. Keep them

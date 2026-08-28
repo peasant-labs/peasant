@@ -12,7 +12,7 @@ import { Harness, StopReason, ToolCallKind } from "@/types/messages";
  * This file is a faithful port of the demo mockup's `buildWire()`: the editorial
  * fixtures below are projected into the canonical wire `SessionDetailPayload`,
  * which the visual-harness route feeds straight into the shared
- * `@peasant-labs/fairtrade` `<TranscriptViewer>` composite — exactly the
+ * `@peasant-labs/fairtrade` `<TranscriptViewer>` composite, exactly the
  * payload village's real `/transcripts/[id]` page hands it, minus the REST fetch.
  * Rendering the SAME data the demo renders lets the side-by-side capture stitch a
  * true height-matched, same-data comparison of the canonical demo vs the

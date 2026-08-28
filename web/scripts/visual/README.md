@@ -21,10 +21,10 @@ so it never ships as a public route.
 
 **The app and the canonical fairtrade demo now render the literal same component** —
 `<TranscriptViewer>` — not two independent implementations. (Before the transcript composition slice,
-the app instead mounted a retired sibling package's own `<SessionDetail>` composer, an implementation
-that had drifted from the demo with every design-system change — see `SessionDetailV2.tsx`'s history
-note. That sibling package is now deprecated and no longer a peasant dependency; nothing first-party
-mounts its composer anymore.) Rendering the SAME
+the app instead mounted `transcript-browser`'s own `<SessionDetail>` composer, an
+implementation that had drifted from the demo with every design-system change — see
+`SessionDetailV2.tsx`'s history note. `transcript-browser` is now deprecated and no longer a peasant
+dependency; nothing first-party mounts its composer anymore.) Rendering the SAME
 `sess_demo_0001` the fairtrade demo renders makes the side-by-side a true height-matched, **same-data,
 same-component** comparison. The composite renders `.txn-*` surfaces (`.txn-app` root, `.txn-center`
 trace column, `.txn-scorecard`, `.txn-sticky` condensed header, the `.txn-viewtoggle .bs-seg-opt`
@@ -45,8 +45,8 @@ design-language sanity check. The transcript oracle has two arms:
    fixture route is backend-free, so `boot-peasant.mjs` covers this arm against a running backend.
 
 **Retired golden:** the old `scripts/visual/baseline/tb/{dark,light}/` reference — captured from the
-era when the app mounted the retired sibling package's `<SessionDetail>` composer (`.tb-*`, page-scrolled) —
-depicted a composer the app no longer renders and was retired rather than re-blessed.
+era when the app mounted `transcript-browser`'s `<SessionDetail>` composer (`.tb-*`, page-scrolled),
+depicted a composer the app no longer renders, and was retired rather than re-blessed.
 The transcript surface's same-component regression coverage lives in the real-binary smoke golden
 (`baseline/smoke-baseline/`, §4b); `REF_DIR=demo` remains the cross-component design-language ref.
 

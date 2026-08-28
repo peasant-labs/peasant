@@ -3,9 +3,9 @@
      via the SAME adaptTranscript wire adapter peasant's SessionDetailV2 adapter uses (detected phases,
      derived pattern annotations feeding computeAnalytics, peasant's per-turn label popover in the
      renderTurnActions slot), with fairtrade's `/graph` @xyflow TrajectoryGraph plugged into the graph
-     slot — the one engine that entry still owns.
+     slot, the one engine that entry still owns.
 
-   Correction: this harness used to mount a sibling package's OWN `<SessionDetail>` composer (`.tb-*`
+   Correction: this harness used to mount transcript-browser's OWN `<SessionDetail>` composer (`.tb-*`
    classes, page-scroll model) — a sibling implementation that drifted from the canonical demo with every
    design-system change. `SessionDetailV2` moved onto the shared `<TranscriptViewer>` composite directly
    (the same one the canonical demo renders), and this harness + capture script were corrected to match.
