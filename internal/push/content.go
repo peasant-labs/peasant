@@ -335,10 +335,19 @@ func transcriptShapeRedactionError(reason string) error {
 // metadataToSession projects on-disk metadata onto the SessionToDetail input
 // while applying the same raw-identity consent gates as the authoritative part.
 func metadataToSession(meta *ingest.UnifiedMetadata, fields config.PushFieldVisibility) *ingest.Session {
+	resolved := fields.Resolve()
 	sid, _ := ingest.NewSessionID(string(meta.SessionID))
+	// The displayed project identity follows the SAME label-vs-hash decision
+	// as the authoritative publish request (projectWireLabel in mapper.go):
+	// a recognizable git remote with GitRemote and ProjectName both visible
+	// sends the repository label; otherwise this falls back to the
+	// privacy-safe salted-hash label. The raw project name/basename is never
+	// sent on this path either — D10 applies uniformly across both published
+	// documents, not only the authoritative one.
 	project := privacySafeProjectLabel(string(meta.Project.Hash))
-	if fields.ProjectName {
-		project = meta.Project.Name
+	label, sentLabel := projectWireLabel(meta, resolved)
+	if sentLabel {
+		project = label
 	}
 	session := &ingest.Session{
 		ID:        sid,
@@ -348,7 +357,10 @@ func metadataToSession(meta *ingest.UnifiedMetadata, fields config.PushFieldVisi
 		StartTime: time.UnixMilli(meta.Timestamp.Start),
 		EndTime:   time.UnixMilli(meta.Timestamp.End),
 	}
-	if fields.ProjectPath {
+	// The local path is withheld whenever the label went out instead (D10):
+	// a label already identifies the project, so pairing it with the
+	// filesystem path would leak directory structure for no benefit.
+	if !sentLabel && resolved.ProjectPath {
 		session.ProjectPath = meta.CWD
 		if meta.CWD == "" {
 			session.ProjectPath = meta.Project.FilePath
@@ -360,10 +372,10 @@ func metadataToSession(meta *ingest.UnifiedMetadata, fields config.PushFieldVisi
 	session.Metadata.TurnCount = meta.Stats.TurnCount
 	session.Metadata.ToolCallCount = meta.Stats.ToolCallCount
 	session.Metadata.Duration = time.Duration(meta.Stats.DurationMs) * time.Millisecond
-	if fields.GitBranch && meta.Git.Branch != nil {
+	if resolved.GitBranch && meta.Git.Branch != nil {
 		session.GitBranch = *meta.Git.Branch
 	}
-	if fields.GitRemote && meta.Git.Remote != nil {
+	if resolved.GitRemote && meta.Git.Remote != nil {
 		session.GitRemote = *meta.Git.Remote
 	}
 	return session

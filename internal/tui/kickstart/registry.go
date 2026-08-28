@@ -142,8 +142,14 @@ func BuildRegistry(opts Options) settings.Registry {
 			// the same provider so it remains directly callable (e.g. by
 			// tests) independent of that split rendering.
 			Guide: &settings.Guide{
-				Intro:              "preview how standard redaction changes your text before you publish.",
-				Hints:              []string{"standard hides project identity but keeps git remote urls."},
+				Intro: "preview how standard redaction changes your text before you publish.",
+				// The canonical project-identity sentence (config.ProjectIdentitySentence),
+				// shared verbatim with the push wizard's noticePanel so the two
+				// surfaces cannot describe this differently. It replaced a hint
+				// that said standard "hides project identity" - the opposite of
+				// what this epoch made the default (D8: the repository label and
+				// git remote are sent unless explicitly withheld).
+				Hints:              []string{config.ProjectIdentitySentence()},
 				Example:            privacyGuideExample(standardPrivacySamples, realPrivacyRedactor),
 				ExampleInSplitPane: true,
 			},

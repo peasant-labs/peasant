@@ -388,7 +388,7 @@ func TestPushContent_RedactsContentWithoutBreakingIdentifiers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build the redactor the push path uses: %v", err)
 	}
-	fields := config.PushFieldVisibility{ProjectPath: true}
+	fields := config.PushFieldVisibility{ProjectPath: testutil.BoolPtr(true)}
 	// A DECLARED origin, so the document actually carries the field the walk
 	// below compares. It is agent rather than unknown because unknown is also
 	// what a build with no opinion sends, and a fixture that cannot tell the two

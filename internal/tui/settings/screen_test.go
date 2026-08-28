@@ -690,7 +690,7 @@ func screenCascadeAccessor(index int) Accessor[bool] {
 			case 2:
 				cfg.Sources.Codex.Enabled = value
 			case 3:
-				cfg.Push.Fields.GitRemote = value
+				cfg.Push.Fields.GitBranch = value
 			}
 		},
 	}
@@ -701,7 +701,7 @@ func screenCascadeValues(cfg *config.Config) [4]bool {
 		cfg.Village.Connected,
 		cfg.Sources.ClaudeCode.Enabled,
 		cfg.Sources.Codex.Enabled,
-		cfg.Push.Fields.GitRemote,
+		cfg.Push.Fields.GitBranch,
 	}
 }
 

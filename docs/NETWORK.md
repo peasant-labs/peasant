@@ -51,21 +51,21 @@ The push payload is a `multipart/form-data` request with two parts:
 | `model.provider` | `"claude"` | None | Provider name enum |
 | `model.model` | `"claude-sonnet-4-20250514"` | None | Model identifier |
 | `model.harnessVersion` | `"2.1.47"` | None | CLI tool version |
-| `model.hostSlug` | `"github.com--user--repo"` | **HIGH** | Git remote in slug form. **Default: omitted** (field visibility) |
+| `model.hostSlug` | `"github.com--user--repo"` | **HIGH** | Git remote in slug form. Plain boolean, **default: omitted** |
 | `timestamp.start` | `1709913600000` | Low | Unix milliseconds |
 | `timestamp.end` | `1709917200000` | Low | Unix milliseconds |
 | `timestamp.ingested` | `1709920800000` | Low | Unix milliseconds |
 | `source.filePath` | `"/home/<USER>/.claude/projects/..."` | Medium | Redacted — username replaced with `<USER>`, slug patterns redacted |
 | `source.format` | `"jsonl"` | None | |
-| `git.remote` | `"git@github.com:user/repo.git"` | **HIGH** | Reveals git identity. **Default: omitted** (field visibility) |
-| `git.branch` | `"feat/my-feature"` | Medium | May contain feature descriptions. **Default: omitted** (field visibility) |
+| `git.remote` | `"git@github.com:user/repo.git"` | **HIGH** | Reveals git identity. Tri-state, **default: sent as-is** — not redacted at the standard level either |
+| `git.branch` | `"feat/my-feature"` | Medium | May contain feature descriptions. Plain boolean, **default: omitted** |
 | `git.worktree` | `"/home/<USER>/dev/project"` | Medium | Redacted path |
 | `git.tracking` | `"origin/main"` | Low | |
 | `git.associations[].id` | `"assoc-..."` | Low | Opaque durable ID for one local session-to-observed-commit fact |
 | `git.associations[].observedCommitHash` | `"abc123..."` | Medium | Commit hash observed during the session; sent so Village can validate later association-target annotations |
-| `project.hash` | `"a1b2c3..."` | **HIGH** | SHA-256 of git remote URL — currently unsalted, enumerable for public repos |
-| `project.filePath` | `"/home/<USER>/dev/project"` | Medium | **Default: omitted** (field visibility) |
-| `project.name` | `"my-project"` | Low | Repo basename (redacted if slug) |
+| `project.hash` | `"a1b2c3..."` | **HIGH** | Per-installation salted, non-correlatable identifier. **Always sent**, never field-visibility-gated |
+| `project.filePath` | `"/<PATH>/project"` | Medium | Canonical-form path (everything before the project folder replaced by `<PATH>`). Tri-state, **default: sent only when no repository label went out** — see "Field Visibility Controls" |
+| `project.name` | `"github.com:owner/repo"` | Low | The repository label (`host:owner/repo`) derived from the recorded git remote — **never** the raw project name/basename. Tri-state, **default: sent when the remote is recognizable** — see "Field Visibility Controls" |
 | `stats.turnCount` | `42` | None | Aggregate count |
 | `stats.toolCallCount` | `15` | None | Aggregate count |
 | `stats.subagentCount` | `3` | None | Aggregate count |
@@ -108,18 +108,44 @@ If a session contains something you do not want published, exclude it at the wiz
 
 ### Field Visibility Controls
 
-The following fields can be omitted entirely from the push payload via `config.yaml`:
+The following fields can be controlled from the push payload via `config.yaml`:
 
 ```yaml
 push:
   fields:
-    gitRemote: false    # default: false — omit git remote URL
-    gitBranch: false    # default: false — omit branch name
-    projectPath: false  # default: false — omit local project path
-    hostSlug: false     # default: false — omit host slug
+    gitRemote: false     # tri-state, default: on — omit the git remote URL
+    gitBranch: false     # plain boolean, default: false — omit branch name
+    projectPath: false   # tri-state, default: on — omit the local project path
+    hostSlug: false      # plain boolean, default: false — omit host slug
+    projectName: false   # tri-state, default: on — omit the repository label
 ```
 
-Fields set to `false` produce `null` or empty values in the JSON — they never reach the network.
+`gitBranch` and `hostSlug` are plain booleans: an absent key and an explicit `false`
+are the same thing (both off).
+
+`gitRemote`, `projectPath`, and `projectName` are **tri-state**: an *absent* key
+resolves to **on** (peasant sends the value by default); an *explicit* `true` or
+`false` is kept exactly as written. This means a fresh `config.yaml` with no
+`push.fields` block at all still sends the repository label and the git remote URL —
+see `config.ProjectIdentitySentence` for the exact user-facing wording, shared
+verbatim by the push wizard's consent screen and the kickstart privacy guide.
+
+`projectName` and `gitRemote` gate the SAME decision, not two independent ones: a
+recognizable git remote (`host:owner/repo`) is only rendered as the repository
+label when both are visible — withholding the raw remote also withholds the label
+derived from it, because the label names the exact git identity in a different
+shape. `projectPath` is sent only when no label went out (no recognizable remote,
+or the label was withheld): a label already identifies the project, so pairing it
+with the local filesystem path would leak directory structure for no benefit. The
+project path sent in this fallback case is redacted to the canonical form
+(`/<PATH>/<project>`), never the raw path.
+
+`project.hash` (a per-installation salted, non-correlatable identifier) is never
+gated by any of these fields — it is always sent so the village can group a single
+user's sessions by project without recovering any plaintext.
+
+A field set to `false` produces `null` or empty values in the JSON — it never
+reaches the network.
 
 Association rows are different from annotations. Ingest creates them as durable
 source facts only when commit detection observes commits, and the V40 migration

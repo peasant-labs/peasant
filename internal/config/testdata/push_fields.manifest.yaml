@@ -1,0 +1,6 @@
+# Required-name manifest for testdata/push_fields.yaml. Name-only: no
+# expectedCaseCount field (user ruling 2026-08-24 bans count guards).
+requiredNames:
+  - absent_keys_default_on
+  - explicit_false_kept
+  - explicit_true_kept

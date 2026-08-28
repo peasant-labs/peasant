@@ -908,6 +908,57 @@ func (r *StubRedactor) Level() string {
 	return "standard"
 }
 
+// --- NoopRedactor ---
+
+// NoopRedactor is a test double for ingest.TextRedactor (and satisfies
+// redact.JSONRedactor) that returns every value UNCHANGED. Unlike
+// StubRedactor, it never rewrites metadata fields, so a test can supply it
+// wherever production code now requires a non-nil redactor (see
+// push.NewPipeline's nil-redactor refusal) while keeping raw-value
+// assertions written against the pre-refusal behavior valid.
+//
+// NoopRedactor carries no mutable state: the push pipeline invokes a shared
+// redactor from multiple goroutines (one per concurrent upload), so a
+// call-counting field here would be a data race under `go test -race`.
+// Tests that need to observe call counts should use StubRedactor instead
+// (single-goroutine use only) or add their own synchronized double.
+type NoopRedactor struct{}
+
+var _ ingest.TextRedactor = (*NoopRedactor)(nil)
+
+// RedactMetadata returns meta unchanged (a shallow copy of the pointer's
+// value, matching the "returns a copy, never mutates the original" contract).
+func (r *NoopRedactor) RedactMetadata(meta *ingest.UnifiedMetadata) *ingest.UnifiedMetadata {
+	if meta == nil {
+		return nil
+	}
+	copied := *meta
+	return &copied
+}
+
+// RedactJSON returns value unchanged.
+func (r *NoopRedactor) RedactJSON(value any) any {
+	return value
+}
+
+// Level returns "standard" as the noop redactor's reported level.
+func (r *NoopRedactor) Level() string {
+	return "standard"
+}
+
+// RuleSetVersion returns "0.0.0-noop" — this double applies no rules.
+func (r *NoopRedactor) RuleSetVersion() string {
+	return "0.0.0-noop"
+}
+
+// BoolPtr returns a pointer to b. Convenience for constructing tri-state
+// config fields (e.g. config.PushFieldVisibility.GitRemote) in test literals,
+// where Go's struct-literal syntax cannot take the address of a bool constant
+// directly.
+func BoolPtr(b bool) *bool {
+	return &b
+}
+
 // RuleSetVersion returns "1.0.0" as the stub rule set version.
 func (r *StubRedactor) RuleSetVersion() string {
 	return "1.0.0"

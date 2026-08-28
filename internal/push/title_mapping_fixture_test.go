@@ -53,7 +53,12 @@ func TestMapMetadata_RuntimeRulesCoverCanonicalTitle(t *testing.T) {
 		t.Fatalf("construct runtime document redactor: %v", err)
 	}
 	meta := fixtureMetadata()
-	meta.Project.Name = fixture.CustomMatch
+	// No recognizable git remote: the repository label is not sendable, so
+	// the project path carries the custom-matchable value instead of a raw
+	// project name — the wire never sends a raw project name at all (D10),
+	// only a label or a path.
+	meta.Git.Remote = nil
+	meta.Project.FilePath = fixture.CustomMatch
 	meta.Source.FilePath = fixture.XDGConfigHome + "/settings.yaml"
 	metrics := &schema.QualityMetrics{TitleGenerated: &fixture.CanonicalTitle}
 	opts := mapOpts(meta, metrics, nil)
@@ -69,8 +74,8 @@ func TestMapMetadata_RuntimeRulesCoverCanonicalTitle(t *testing.T) {
 	}
 	project := request["project"].(map[string]any)
 	source := request["source"].(map[string]any)
-	if project["name"] != fixture.ExpectedNonTitleFragments[0] {
-		t.Fatalf("custom rule result = %v, want %q", project["name"], fixture.ExpectedNonTitleFragments[0])
+	if project["filePath"] != fixture.ExpectedNonTitleFragments[0] {
+		t.Fatalf("custom rule result = %v, want %q", project["filePath"], fixture.ExpectedNonTitleFragments[0])
 	}
 	if got, _ := source["filePath"].(string); got == fixture.XDGConfigHome+"/settings.yaml" || !bytes.Contains([]byte(got), []byte(fixture.ExpectedNonTitleFragments[1])) {
 		t.Fatalf("XDG path result = %q, want redacted path containing %q", got, fixture.ExpectedNonTitleFragments[1])

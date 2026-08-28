@@ -15,11 +15,11 @@ import (
 // allFieldsVisible returns PushFieldVisibility with all fields enabled for backward-compat tests.
 func allFieldsVisible() config.PushFieldVisibility {
 	return config.PushFieldVisibility{
-		GitRemote:   true,
+		GitRemote:   testutil.BoolPtr(true),
 		GitBranch:   true,
-		ProjectPath: true,
+		ProjectPath: testutil.BoolPtr(true),
 		HostSlug:    true,
-		ProjectName: true,
+		ProjectName: testutil.BoolPtr(true),
 	}
 }
 
@@ -29,7 +29,7 @@ func mapOpts(meta *ingest.UnifiedMetadata, metrics *schema.QualityMetrics, entri
 		Meta:    meta,
 		Metrics: metrics,
 		Entries: entries,
-		Fields:  allFieldsVisible(),
+		Fields:  allFieldsVisible().Resolve(),
 	}
 }
 
@@ -121,8 +121,11 @@ func TestMapMetadata_BasicFields(t *testing.T) {
 	assertEqual(t, "version", "2.1.47", model["version"])
 	assertEqual(t, "hostSlug", testutil.TestHostSlug, model["hostSlug"])
 
+	// With every field visible and a recognizable git remote, project.name is
+	// the repository label (host:owner/repo), not the raw project name — a
+	// label and the remote it is derived from are gated together (D10).
 	project := m["project"].(map[string]any)
-	assertEqual(t, "name", testutil.TestProjectName, project["name"])
+	assertEqual(t, "name", "github.com:testuser/testrepo", project["name"])
 
 	source := m["source"].(map[string]any)
 	assertEqual(t, "format", string(ingest.SourceFormatJSONL), source["format"])
@@ -523,14 +526,23 @@ func TestMapMetadata_WithCostFields(t *testing.T) {
 }
 
 // --- PushFieldVisibility omission tests ---
+//
+// The combinatorial label-vs-path matrix (D10: a label and the raw project
+// path are mutually exclusive; D8: GitRemote/ProjectPath/ProjectName default
+// on) lives in the fixture-driven TestProjectWire
+// (testdata/project_wire.yaml), not here. The tests below keep regression
+// coverage for the OTHER gated fields (branch, host slug) and for the
+// project-hash-is-always-sent invariant.
 
-// TestMapMetadata_DefaultVisibility_AllFieldsOmitted verifies that when all
-// PushFieldVisibility flags are false (zero value), sensitive fields are omitted.
-func TestMapMetadata_DefaultVisibility_AllFieldsOmitted(t *testing.T) {
+// TestMapMetadata_DefaultVisibility_BranchAndHostSlugOmitted verifies that
+// GitBranch and HostSlug, which stay plain booleans defaulting false, are
+// omitted under DefaultPushFieldVisibility even though GitRemote/ProjectPath/
+// ProjectName now default on (D8).
+func TestMapMetadata_DefaultVisibility_BranchAndHostSlugOmitted(t *testing.T) {
 	meta := fixtureMetadata()
 	opts := push.MapOptions{
 		Meta:   meta,
-		Fields: config.PushFieldVisibility{}, // all false
+		Fields: config.DefaultPushFieldVisibility().Resolve(),
 	}
 	payload, err := push.MapMetadata(opts)
 	if err != nil {
@@ -539,29 +551,17 @@ func TestMapMetadata_DefaultVisibility_AllFieldsOmitted(t *testing.T) {
 
 	m := parsePublishRequest(t, payload)
 
-	// Git fields gated by visibility should be absent.
 	git := m["git"].(map[string]any)
-	if _, exists := git["remote"]; exists {
-		t.Error("gitRemote should be absent when Fields.GitRemote is false")
-	}
 	if _, exists := git["branch"]; exists {
-		t.Error("gitBranch should be absent when Fields.GitBranch is false")
+		t.Error("gitBranch should be absent when Fields.GitBranch is false (plain bool, default off)")
 	}
-
-	// Project path should be empty/absent.
-	project := m["project"].(map[string]any)
-	if path, _ := project["filePath"].(string); path != "" {
-		t.Errorf("projectPath should be empty when Fields.ProjectPath is false, got %q", path)
-	}
-
-	// HostSlug should be empty.
 	model := m["model"].(map[string]any)
 	if slug, _ := model["hostSlug"].(string); slug != "" {
-		t.Errorf("hostSlug should be empty when Fields.HostSlug is false, got %q", slug)
+		t.Errorf("hostSlug should be empty when Fields.HostSlug is false (plain bool, default off), got %q", slug)
 	}
 
-	// project.hash is ALWAYS sent (salted, non-correlatable) — never gated, even
-	// when every raw-identity field is omitted.
+	// project.hash is ALWAYS sent (salted, non-correlatable) — never gated.
+	project := m["project"].(map[string]any)
 	wantHash := string(testutil.TestProjectHash)
 	if hash, _ := project["hash"].(string); hash != wantHash {
 		t.Errorf("project.hash must always be present, got %q want %q", hash, wantHash)
@@ -569,14 +569,16 @@ func TestMapMetadata_DefaultVisibility_AllFieldsOmitted(t *testing.T) {
 }
 
 // TestMapMetadata_SelectiveVisibility_GitRemoteOnly verifies that setting only
-// GitRemote=true includes gitRemote but omits other gated fields.
+// GitRemote=true, with ProjectPath and ProjectName explicitly withheld,
+// includes gitRemote but sends no project name or path (no label because
+// ProjectName is off, no path because it is explicitly off too).
 func TestMapMetadata_SelectiveVisibility_GitRemoteOnly(t *testing.T) {
 	meta := fixtureMetadata()
 	opts := push.MapOptions{
 		Meta: meta,
-		Fields: config.PushFieldVisibility{
+		Fields: config.PushFields{
 			GitRemote: true,
-			// GitBranch, ProjectPath, HostSlug all false
+			// GitBranch, ProjectPath, HostSlug, ProjectName all false
 		},
 	}
 	payload, err := push.MapMetadata(opts)
@@ -587,24 +589,23 @@ func TestMapMetadata_SelectiveVisibility_GitRemoteOnly(t *testing.T) {
 	m := parsePublishRequest(t, payload)
 
 	git := m["git"].(map[string]any)
-	// GitRemote should be present.
 	if _, exists := git["remote"]; !exists {
 		t.Error("gitRemote should be present when Fields.GitRemote is true")
 	}
 	assertEqual(t, "remote", testutil.TestGitRemote, git["remote"])
 
-	// GitBranch should be absent.
 	if _, exists := git["branch"]; exists {
 		t.Error("gitBranch should be absent when Fields.GitBranch is false")
 	}
 
-	// ProjectPath should be empty.
 	project := m["project"].(map[string]any)
 	if path, _ := project["filePath"].(string); path != "" {
 		t.Errorf("projectPath should be empty when Fields.ProjectPath is false, got %q", path)
 	}
+	if name, _ := project["name"].(string); name != "" {
+		t.Errorf("project.name should be empty when Fields.ProjectName is false, got %q", name)
+	}
 
-	// HostSlug should be empty.
 	model := m["model"].(map[string]any)
 	if slug, _ := model["hostSlug"].(string); slug != "" {
 		t.Errorf("hostSlug should be empty when Fields.HostSlug is false, got %q", slug)
@@ -622,10 +623,10 @@ func TestMapMetadata_ProjectHash_AlwaysSent(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		fields config.PushFieldVisibility
+		fields config.PushFields
 	}{
-		{name: "default (all raw-identity omitted)", fields: config.DefaultPushFieldVisibility()},
-		{name: "all raw-identity visible", fields: allFieldsVisible()},
+		{name: "default (tri-state resolved)", fields: config.DefaultPushFieldVisibility().Resolve()},
+		{name: "all raw-identity visible", fields: allFieldsVisible().Resolve()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -652,60 +653,6 @@ func TestMapMetadata_ProjectHash_AlwaysSent(t *testing.T) {
 				t.Errorf("project.hash %q is not a 64-char lowercase hex digest", hash)
 			}
 		})
-	}
-}
-
-// TestMapMetadata_ProjectName_OmittedByDefault verifies project names follow the
-// raw-identity visibility policy even on the authoritative publication path.
-func TestMapMetadata_ProjectName_OmittedByDefault(t *testing.T) {
-	meta := fixtureMetadata()
-	opts := push.MapOptions{
-		Meta:   meta,
-		Fields: config.DefaultPushFieldVisibility(), // ProjectName defaults to false
-	}
-	payload, err := push.MapMetadata(opts)
-	if err != nil {
-		t.Fatalf("MapMetadata returned error: %v", err)
-	}
-
-	m := parsePublishRequest(t, payload)
-	project, ok := m["project"].(map[string]any)
-	if !ok {
-		t.Fatalf("project is not a map, got %T", m["project"])
-	}
-
-	if name, _ := project["name"].(string); name != "" {
-		t.Errorf("project.name should be empty when Fields.ProjectName is false, got %q", name)
-	}
-}
-
-// TestMapMetadata_ProjectName_IncludedWhenOptIn verifies that Project.Name is present
-// in the push payload when Fields.ProjectName is explicitly set to true.
-func TestMapMetadata_ProjectName_IncludedWhenOptIn(t *testing.T) {
-	meta := fixtureMetadata()
-	opts := push.MapOptions{
-		Meta: meta,
-		Fields: config.PushFieldVisibility{
-			ProjectName: true, // explicit opt-in
-		},
-	}
-	payload, err := push.MapMetadata(opts)
-	if err != nil {
-		t.Fatalf("MapMetadata returned error: %v", err)
-	}
-
-	m := parsePublishRequest(t, payload)
-	project, ok := m["project"].(map[string]any)
-	if !ok {
-		t.Fatalf("project is not a map, got %T", m["project"])
-	}
-
-	name, _ := project["name"].(string)
-	if name == "" {
-		t.Error("project.name should be present when Fields.ProjectName is true")
-	}
-	if name != testutil.TestProjectName {
-		t.Errorf("project.name: got %q, want %q", name, testutil.TestProjectName)
 	}
 }
 

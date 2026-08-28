@@ -220,8 +220,11 @@ func TestPipeline_PublishedBodyIsRedacted(t *testing.T) {
 		t.Fatalf("build the redactor a production push builds: %v", err)
 	}
 	var stderr bytes.Buffer
-	pipeline := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
+	pipeline, pipelineErr := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
 		push.PipelineConfig{}, redactor, &stderr)
+	if pipelineErr != nil {
+		t.Fatalf("NewPipeline: %v", pipelineErr)
+	}
 
 	result, runErr := pipeline.Run(ctx)
 	if runErr != nil {
@@ -401,8 +404,11 @@ func TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing(t *testing.
 				t.Fatal(redactorErr)
 			}
 			broken := stubJSONRedactor{json: map[string]any{"not": "entries"}, breaks: seam.selects, real: realRedactor}
-			pipeline := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
+			pipeline, pipelineErr := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
 				push.PipelineConfig{}, broken, &stderr)
+			if pipelineErr != nil {
+				t.Fatalf("NewPipeline: %v", pipelineErr)
+			}
 
 			result, runErr := pipeline.Run(ctx)
 			if runErr != nil {
@@ -512,8 +518,11 @@ func TestPipeline_ARedactionThatCannotBeEncodedStopsTheSession(t *testing.T) {
 			// NaN has no JSON representation, so encoding the redacted document fails.
 			// That is precisely the case the underlying primitive swallows.
 			unencodable := stubJSONRedactor{json: []any{map[string]any{"x": math.NaN()}}, breaks: seam.selects, real: realRedactor}
-			pipeline := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
+			pipeline, pipelineErr := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs,
 				push.PipelineConfig{}, unencodable, &stderr)
+			if pipelineErr != nil {
+				t.Fatalf("NewPipeline: %v", pipelineErr)
+			}
 
 			if _, runErr := pipeline.Run(ctx); runErr != nil {
 				t.Logf("Run returned %v (a run-level error is an acceptable way to refuse)", runErr)

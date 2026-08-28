@@ -17,16 +17,20 @@ import (
 // for negotiate() is the publisher (the village HTTP double) and stderr. The
 // pipeline SUT is NOT mocked — only the village transport is.
 func newNegotiatePipeline(pub *testutil.StubPublisher, stderr *bytes.Buffer) *Pipeline {
-	return NewPipeline(
+	p, err := NewPipeline(
 		&testutil.StubPushStore{},
 		pub,
 		&auth.Credentials{VillageURL: "https://village.example", APIKey: "k"},
 		&config.Config{},
 		testutil.NewMemFS(),
 		PipelineConfig{},
-		nil,
+		&testutil.NoopRedactor{},
 		stderr,
 	)
+	if err != nil {
+		panic(err)
+	}
+	return p
 }
 
 // cliVersion is the contract version this build of the CLI emits.

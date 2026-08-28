@@ -872,6 +872,13 @@ func (m PushWizardModel) noticePanel(width int) kit.Panel {
 	// screen draws.
 	panel.Wrapped(styles.Warning, config.RedactionScopeSentence())
 	panel.Blank()
+	// WHAT IDENTIFIES THE PROJECT is a separate claim from what redaction
+	// covers: it is a field-visibility default (D8/D10), not a pattern-match
+	// guarantee, so it gets its own shared sentence rather than folding into
+	// the hedge above. See config.ProjectIdentitySentence for why this
+	// wording is fixed and shared with the kickstart privacy guide.
+	panel.Wrapped(styles.Base, config.ProjectIdentitySentence())
+	panel.Blank()
 	panel.Wrapped(styles.Warning, "source code is published with matched tokens replaced, so a published transcript can differ from what you see locally. read what you share.")
 	panel.Blank()
 	panel.Wrapped(styles.Base, "if a session holds something you do not want published, deselect it: press esc to go back, then space to toggle it off.")

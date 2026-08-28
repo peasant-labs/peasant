@@ -1,0 +1,87 @@
+# Cases for projectWire (internal/push/mapper.go): the label-vs-path
+# exclusivity (D10) and the project-identity field defaults (D8). Every case
+# has a why so a reader never has to reconstruct the reasoning from the Go
+# assertions. See testdata/project_wire.manifest.yaml for the required-name
+# membership check (name-only, no count guard).
+cases:
+  - name: remote_present_sends_label_not_path
+    why: >-
+      peasant sends the repository label by default when the recorded git
+      remote is recognizable, and withholds the local project path because
+      the label already identifies the project (D10) - sending both would
+      leak directory structure for no benefit.
+    remote: "git@github.com:testuser/testrepo.git"
+    wantName: "github.com:testuser/testrepo"
+    wantFilePath: ""
+
+  - name: no_remote_sends_path_only
+    why: >-
+      without a recognizable git remote there is no label to send, so the
+      project path (visible by default under D8) is the only
+      project-identity signal published.
+    remote: ""
+    wantName: ""
+    wantFilePath: "/home/alice/dev/app"
+
+  - name: project_name_false_withholds_label_sends_path
+    why: >-
+      an explicit projectName:false withholds the label even though the
+      remote is recognizable and gitRemote stays on; the path is sent
+      instead because no label went out.
+    remote: "git@github.com:testuser/testrepo.git"
+    projectName: false
+    wantName: ""
+    wantFilePath: "/home/alice/dev/app"
+
+  - name: git_remote_false_withholds_label_and_remote_sends_path
+    why: >-
+      a label names the exact host and repository, which IS the git identity
+      in a different shape - so withholding the raw remote (gitRemote:false)
+      withholds the label too, not only the raw git.remote field, and the
+      path is sent instead.
+    remote: "git@github.com:testuser/testrepo.git"
+    gitRemote: false
+    wantName: ""
+    wantFilePath: "/home/alice/dev/app"
+    wantGitRemoteAbsent: true
+
+  - name: project_path_false_withholds_path
+    why: >-
+      an explicit projectPath:false withholds the local path even when no
+      label was sent (no recognizable remote), leaving no project-identity
+      field at all.
+    remote: ""
+    projectPath: false
+    wantName: ""
+    wantFilePath: ""
+
+  - name: hash_always_sent
+    why: >-
+      project.hash is a per-installation salted, non-correlatable identifier
+      and is never gated by field visibility, even when every raw-identity
+      field (remote, name, path) is switched off.
+    remote: ""
+    gitRemote: false
+    projectName: false
+    projectPath: false
+    wantName: ""
+    wantFilePath: ""
+    wantHashAlwaysSent: true
+
+  - name: wire_carries_canonical_path
+    why: >-
+      the redacted wire body must carry the canonical /<PATH>/<project> form
+      produced by the pinned redact module, asserted on the MARSHALLED JSON STRING rather than
+      a Go field, so a regression in the redact rule or in how the pipeline
+      applies it is caught on the actual bytes a village receives.
+    remote: ""
+    useRealRedactor: true
+    wantWireContains: "/<PATH>/app"
+
+  - name: nil_redactor_refused
+    why: >-
+      NewPipeline is the single production constructor; refusing a nil
+      redactor here is the one place that can guarantee every push path
+      always has the safety-net redaction wired, rather than silently
+      publishing raw content.
+    expectPipelineRefusal: true

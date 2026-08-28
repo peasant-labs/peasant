@@ -26,8 +26,8 @@ import (
 var wizardRenderData []byte
 
 const (
-	expectedWizardRenderCaseCount      = 14
-	expectedWizardRenderAssertionCount = 7
+	expectedWizardRenderCaseCount      = 15
+	expectedWizardRenderAssertionCount = 8
 )
 
 // wizardRenderState is the closed set of screens the goldens capture.
@@ -39,14 +39,22 @@ const (
 	wizardRenderSessionPreview wizardRenderState = "session-preview"
 	wizardRenderEmptyPreview   wizardRenderState = "empty-preview"
 	wizardRenderConsent        wizardRenderState = "consent"
-	wizardRenderReceipt        wizardRenderState = "receipt"
-	wizardRenderHelp           wizardRenderState = "help"
+	// wizardRenderConsentScrolled captures the consent page scrolled to its
+	// last line. The consent copy (config.ProjectIdentitySentence plus the
+	// existing redaction hedge) no longer fits an 80x24 viewport in one
+	// screen alongside the closing "deselect it" guidance, so that guidance
+	// is verified reachable via scroll here instead of unreachably required
+	// of the top-of-page capture.
+	wizardRenderConsentScrolled wizardRenderState = "consent-scrolled"
+	wizardRenderReceipt         wizardRenderState = "receipt"
+	wizardRenderHelp            wizardRenderState = "help"
 )
 
 func (s wizardRenderState) valid() bool {
 	switch s {
 	case wizardRenderStart, wizardRenderSelection, wizardRenderSessionPreview,
-		wizardRenderEmptyPreview, wizardRenderConsent, wizardRenderReceipt, wizardRenderHelp:
+		wizardRenderEmptyPreview, wizardRenderConsent, wizardRenderConsentScrolled,
+		wizardRenderReceipt, wizardRenderHelp:
 		return true
 	default:
 		return false
@@ -185,6 +193,9 @@ func buildWizardScreen(t *testing.T, c wizardRenderCase) PushWizardModel {
 		return m
 	case wizardRenderConsent:
 		return pressKey(acceptStart(m), keyEnter())
+	case wizardRenderConsentScrolled:
+		// keyRune('G') is the footer's "shift+g: go to bottom" action.
+		return pressKey(pressKey(acceptStart(m), keyEnter()), keyRune('G'))
 	case wizardRenderReceipt:
 		return pressKey(pressKey(acceptStart(m), keyEnter()), keyEnter())
 	case wizardRenderHelp:

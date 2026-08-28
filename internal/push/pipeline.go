@@ -103,8 +103,16 @@ type PipelineStore interface {
 //   - cfg: loaded application config (push method, visibility, output base path)
 //   - fs: file system for reading metadata and transcript files
 //   - runCfg: runtime flags from the CLI (dry-run, force, provider filter, etc.)
-//   - redactor: safety-net redactor applied before upload (nil disables re-redaction)
+//   - redactor: safety-net redactor applied before upload; REQUIRED, see below
 //   - stderr: writer for non-fatal warnings (pass os.Stderr in production)
+//
+// redactor must not be nil. The safety-net redaction it performs at upload
+// time (step 1b of pushSession) is the last enforcement point before a
+// session's metadata and entries leave the machine, so a Pipeline built
+// without one would publish raw, un-redacted content. NewPipeline is the
+// single production constructor, so refusing a nil redactor here — rather
+// than letting the pipeline silently skip re-redaction — is the one place
+// that can guarantee every caller gets it.
 func NewPipeline(
 	store PipelineStore,
 	transport Transport,
@@ -114,7 +122,17 @@ func NewPipeline(
 	runCfg PipelineConfig,
 	redactor ingest.TextRedactor,
 	stderr io.Writer,
-) *Pipeline {
+) (*Pipeline, error) {
+	if redactor == nil {
+		return nil, fmt.Errorf(
+			"what: NewPipeline was called with a nil redactor\n" +
+				"why: the push pipeline's safety-net redaction (step 1b of pushSession) is the last enforcement point before session metadata and transcript entries leave this machine; a Pipeline without a redactor would publish that content un-redacted\n" +
+				"where: internal/push.NewPipeline\n" +
+				"when: constructing the push Pipeline, before any session is read or uploaded\n" +
+				"means: no Pipeline was created and no push can proceed\n" +
+				"fix: construct a real redact.Redactor (e.g. via redact.NewRedactor with the configured redaction level) and pass it to NewPipeline; production call sites (cmd_push.go, kickstart_journey.go, sync_handler.go) already do this",
+		)
+	}
 	titles, err := title.Default()
 	if err != nil {
 		slog.Error("initialize canonical title pipeline for publication", "error", err)
@@ -129,7 +147,7 @@ func NewPipeline(
 		redactor:  redactor,
 		stderr:    stderr,
 		titles:    titles,
-	}
+	}, nil
 }
 
 // Run executes the push pipeline and returns the aggregate result.
@@ -810,12 +828,12 @@ func (p *Pipeline) pushSession(
 
 	// 1b. Safety-net redaction: re-redact metadata before upload.
 	// This catches sessions ingested before redaction was added or with minimal level.
-	if p.redactor != nil {
-		redactStart := time.Now()
-		redacted := p.redactor.RedactMetadata(&meta)
-		rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
-		meta = *redacted
-	}
+	// p.redactor is guaranteed non-nil: NewPipeline refuses to construct a
+	// Pipeline without one.
+	redactStart := time.Now()
+	redacted := p.redactor.RedactMetadata(&meta)
+	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
+	meta = *redacted
 
 	// 2. Fetch quality metrics from the store (non-fatal on error).
 	sessionID, _ := ingest.NewSessionID(sess.SessionID)
@@ -910,7 +928,7 @@ func (p *Pipeline) pushSession(
 		Entries:       entries,
 		Associations:  publishedAssociations,
 		License:       license,
-		Fields:        p.cfg.Push.Fields,
+		Fields:        p.cfg.Push.Fields.Resolve(),
 		TitlePipeline: p.titles,
 		// The metadata part is redacted as an assembled DOCUMENT, the way the
 		// transcript part always has been. Per-source redaction historically
