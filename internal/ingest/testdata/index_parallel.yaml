@@ -1,0 +1,11 @@
+required_sessions:
+  - first
+  - second
+
+sessions:
+  - name: first
+    id: 00000000-0000-4000-8000-000000000001
+    preview: first indexed entry
+  - name: second
+    id: 00000000-0000-4000-8000-000000000002
+    preview: second indexed entry

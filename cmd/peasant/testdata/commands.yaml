@@ -26,6 +26,7 @@ commands:
       - { name: debug, type: bool, default: "false", hidden: true }
       - { name: json, type: bool, default: "false" }
       - { name: detect-commits, type: bool, default: "false" }
+      - { name: profile-index, type: bool, default: "false" }
       - { name: session, type: stringSlice, default: "[]" }
       - { name: since, type: string, default: "" }
     subcommands:
@@ -53,7 +54,9 @@ commands:
           - { name: json, type: bool, default: "false" }
           - { name: session, type: stringSlice, default: "[]" }
           - { name: since, type: string, default: "" }
+          - { name: output, type: string, default: "" }
           - { name: detect-commits, type: bool, default: "false" }
+          - { name: profile-index, type: bool, default: "false" }
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }
