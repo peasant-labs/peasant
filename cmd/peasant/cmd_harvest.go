@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +81,7 @@ type harvestFlags struct {
 	debug          bool
 	jsonOutput     bool
 	detectCommits  bool
+	profileIndex   bool
 	sessionIDs     []string
 	since          string
 }
@@ -165,6 +167,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	// Detect-commits flag (relevant for index and all modes).
 	if mode != harvestLogsOnly {
 		cmd.Flags().BoolVar(&flags.detectCommits, "detect-commits", false, "Detect and store git commits linked to each session")
+		cmd.Flags().BoolVar(&flags.profileIndex, "profile-index", false, "Print INDEX parse/write timing diagnostics")
 	}
 }
 
@@ -356,6 +359,11 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	// For index-only mode, use the existing Reindex code path.
 	reindex := mode == harvestIndexOnly
 
+	var indexProfiler *ingest.IndexProfiler
+	if flags.profileIndex {
+		indexProfiler = &ingest.IndexProfiler{}
+	}
+
 	pipelineCfg := ingest.PipelineConfig{
 		Sources:            sources,
 		OutputDir:          resolvedOutput,
@@ -365,6 +373,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		DryRun:             flags.dryRun,
 		Reindex:            reindex,
 		Parallelism:        0, // 0 = auto (runtime.NumCPU())
+		IndexProfiler:      indexProfiler,
 		Progress:           progState,
 	}
 
@@ -483,6 +492,9 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	for _, diagnostic := range result.DiscoveryDiagnostics {
 		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary)
 	}
+	if indexProfiler != nil {
+		printIndexProfile(os.Stderr, indexProfiler.Snapshot())
+	}
 	if flags.jsonOutput {
 		return printJSON(cmd.OutOrStdout(), result)
 	}
@@ -493,6 +505,61 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		return fmt.Errorf("%d session(s) failed", result.Summary.Errors)
 	}
 	return nil
+}
+
+func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
+	if len(profile.Batches) == 0 {
+		fmt.Fprintln(w, "INDEX profile: no INDEX batches ran")
+		return
+	}
+	sizeCounts := map[int]int{}
+	totalSessions := 0
+	totalEntries := 0
+	totalBytes := int64(0)
+	totalParse := time.Duration(0)
+	totalWrite := time.Duration(0)
+	maxWorkers := 0
+	for _, batch := range profile.Batches {
+		sizeCounts[batch.Sessions]++
+		totalSessions += batch.Sessions
+		totalEntries += batch.Entries
+		totalBytes += batch.Bytes
+		totalParse += batch.ParseDuration
+		totalWrite += batch.WriteDuration
+		if batch.MaxParseWorkers > maxWorkers {
+			maxWorkers = batch.MaxParseWorkers
+		}
+	}
+	sizes := make([]int, 0, len(sizeCounts))
+	for size := range sizeCounts {
+		sizes = append(sizes, size)
+	}
+	sort.Ints(sizes)
+	dist := make([]string, 0, len(sizes))
+	for _, size := range sizes {
+		dist = append(dist, fmt.Sprintf("%dx%d", size, sizeCounts[size]))
+	}
+
+	fmt.Fprintf(w, "INDEX profile: %d batches, %d sessions, %d entries, %d bytes\n", len(profile.Batches), totalSessions, totalEntries, totalBytes)
+	fmt.Fprintf(w, "  batch sizes: %s\n", strings.Join(dist, ", "))
+	fmt.Fprintf(w, "  parse: %s total; write: %s total; max parse workers: %d\n", totalParse.Round(time.Millisecond), totalWrite.Round(time.Millisecond), maxWorkers)
+	if len(profile.SlowSessions) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  slow sessions:")
+	for _, session := range profile.SlowSessions {
+		fmt.Fprintf(w, "    %s total (parse %s, write %s) %s %s entries=%d bytes=%d outcome=%s path=%s\n",
+			session.TotalDuration().Round(time.Millisecond),
+			session.ParseDuration.Round(time.Millisecond),
+			session.WriteDuration.Round(time.Millisecond),
+			session.Harness,
+			session.SessionID,
+			session.Entries,
+			session.Bytes,
+			session.Outcome,
+			session.SourcePath,
+		)
+	}
 }
 
 // runVerify checks database schema integrity.
