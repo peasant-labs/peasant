@@ -129,6 +129,11 @@ jobs:
   # CGO_ENABLED=0 is a contradiction.
   cgo0:
     name: CGO=0 consumer/e2e + module-zip proxy
+    # Same policy as the podman e2e job: run on release PRs (release-pr.yml calls
+    # this workflow), post-merge pushes, and on-demand, but skip on ordinary
+    # feature PRs. make check, the real web build, and the lockfile check below
+    # keep running on every PR; only this consumer/e2e job is release-gated.
+    if: github.event_name != 'pull_request' || startsWith(github.event.pull_request.title, 'release(')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 20
     steps:

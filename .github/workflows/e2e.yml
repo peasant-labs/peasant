@@ -3,9 +3,11 @@ name: E2E
 # Heavy full-stack push smoke test: `make e2e` provisions an ephemeral stack with
 # podman (Postgres + MinIO + the real village ./cmd/server) and drives the real
 # peasant CLI through ingest → village push (skip-gate + retraction) → the village
-# secret-scan. It is expensive, so it runs on relevant PRs to develop, pushes to
-# the long-lived branches (post-merge integration check), reusable workflow calls,
-# and on-demand runs.
+# secret-scan. It is expensive, so the job is release-gated (see its `if`): it
+# runs on release PRs, on pushes to the long-lived branches (post-merge
+# integration check), on reusable workflow calls (release-pr.yml / release.yml),
+# and on-demand, but NOT on ordinary feature PRs. The pull_request trigger below
+# still evaluates so the check appears (as skipped) on feature PRs.
 on:
   pull_request:
     branches: [develop]
@@ -37,6 +39,14 @@ permissions:
 jobs:
   e2e:
     name: full-stack push e2e (podman)
+    # Run on release PRs, post-merge pushes to the long-lived branches, reusable
+    # workflow calls (release-pr.yml / release.yml), and on-demand dispatch, but
+    # NOT on ordinary feature PRs: a full-stack integration run is too expensive
+    # to pay on every touching PR. A release PR still gets it, because
+    # release-pr.yml calls this workflow and its title starts with "release(".
+    # Feature PRs see the job as skipped, not absent, so a required-check config
+    # stays satisfied.
+    if: github.event_name != 'pull_request' || startsWith(github.event.pull_request.title, 'release(')
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 45
     steps:
