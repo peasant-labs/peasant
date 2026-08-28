@@ -22,7 +22,7 @@ export const SMOKE_SURFACE_DEFS = Object.freeze([
     label: 'transcript',
     path: ({ project, session }) => `/projects/${encodeURIComponent(project)}/${session}/`,
     // The viewer is fairtrade's TranscriptViewer composite now (.txn-app);
-    // .tb-detail died with transcript-browser's SessionDetail composer.
+    // .tb-detail died with the retired sibling package's SessionDetail composer.
     mount: '.txn-app',
     cap: '.txn-app',
   },

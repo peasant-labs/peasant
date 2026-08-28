@@ -10,7 +10,7 @@ import { SessionDetailV2 } from './SessionDetailV2';
 // computePersonalMedians is mocked as an args-ignoring stub in the other
 // SessionDetailV2 test files, so the bridge
 // this component owns (`outcome: session.outcome ?? ''`, feeding the
-// adapter's optional outcome back into transcript-browser's required-string
+// adapter's optional outcome back into fairtrade/ui's required-string
 // wire contract) had zero coverage — deleting it left all other suites green.
 // This file captures the argument reaching computePersonalMedians and asserts
 // its shape, so removing or breaking the bridge fails here.
@@ -168,16 +168,8 @@ vi.mock('@/lib/ft-ui', () => ({
 // The REAL capturing mock: unlike every other SessionDetailV2 test file,
 // this one records the exact argument SessionDetailV2 hands to
 // computePersonalMedians, so the bridge's output shape is actually asserted.
-vi.mock('@peasant-labs/transcript-browser', () => ({
+vi.mock('@peasant-labs/fairtrade/graph', () => ({
   TrajectoryGraph: () => null,
-  annotateTranscript: () => [],
-  prefilterTurns: (turns: unknown) => turns,
-  computeTasks: () => [],
-  buildTaskWaterfall: () => [],
-  computePersonalMedians: (sessions: unknown[]) => {
-    captures.medians.push(sessions);
-    return undefined;
-  },
 }));
 
 vi.mock('@peasant-labs/fairtrade/ui', () => ({
@@ -189,6 +181,14 @@ vi.mock('@peasant-labs/fairtrade/ui', () => ({
   TranscriptViewer: (props: { viewModel: { turns: unknown[] } }) => (
     <div data-testid="median-bridge-viewer" data-turn-count={props.viewModel.turns.length} />
   ),
+  annotateTranscript: () => [],
+  prefilterTurns: (turns: unknown) => turns,
+  computeTasks: () => [],
+  buildTaskWaterfall: () => [],
+  computePersonalMedians: (sessions: unknown[]) => {
+    captures.medians.push(sessions);
+    return undefined;
+  },
 }));
 
 const BASE_QUALITY_SESSION = {

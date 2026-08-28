@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { notFound } from 'next/navigation';
-import { TrajectoryGraph, annotateTranscript } from '@peasant-labs/transcript-browser';
-import { TranscriptViewer, adaptTranscript, computeAnalytics } from '@peasant-labs/fairtrade/ui';
+import { TrajectoryGraph } from '@peasant-labs/fairtrade/graph';
+import { TranscriptViewer, adaptTranscript, annotateTranscript, computeAnalytics } from '@peasant-labs/fairtrade/ui';
 import '@xyflow/react/dist/style.css';
 import { Moon, Sun } from 'lucide-react';
 import { detectPhases } from '@/lib/insights';
@@ -32,7 +32,7 @@ type Theme = 'dark' | 'light';
  *
  * It mounts the composite with the same shape the real adapter uses (detected
  * phases + derived pattern annotations feeding `computeAnalytics`, the @xyflow
- * graph in `graphSlot` — transcript-browser still owns that one engine — and
+ * graph in `graphSlot` — fairtrade's `/graph` entry owns that one engine — and
  * peasant's per-turn label popover in the `renderTurnActions` slot) but with all
  * capabilities on and host callbacks stubbed, so every action affordance renders
  * for capture. The composite owns a single bounded inner scroller
@@ -225,8 +225,8 @@ export default function VisualHarnessPage() {
           anchorHref={(turnIndex) => `#turn-${turnIndex}`}
           streamPrelude={streamPrelude}
           headerActions={headerActions}
-          // The graph toggle mounts transcript-browser's @xyflow engine — the one
-          // engine transcript-browser still owns (graph topology/pan/zoom; visuals
+          // The graph toggle mounts fairtrade's `/graph` @xyflow engine — the one
+          // engine that entry still owns (graph topology/pan/zoom; visuals
           // are DS) — matching `SessionDetailV2`'s `graphSlot` exactly.
           graphSlot={() => (
             <TrajectoryGraph

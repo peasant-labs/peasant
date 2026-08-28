@@ -4,19 +4,15 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'r
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ChevronDown, ChevronUp, Copy, X } from 'lucide-react';
-import {
-  TrajectoryGraph,
-  annotateTranscript,
-  computePersonalMedians,
-} from '@peasant-labs/transcript-browser';
-// The demo's drop-in composite + its one wire→view adapter. This viewer used
-// to mount transcript-browser's <SessionDetail> — a sibling implementation of
-// the same design that drifted from the demo with every DS change; the demo,
-// the tb example, and (now) both apps all render the SAME composite.
+import { TrajectoryGraph } from '@peasant-labs/fairtrade/graph';
+// The demo's drop-in composite + its one wire→view adapter, plus the shared
+// transcript helpers, all render the SAME composite as the demo.
 import {
   TranscriptViewer,
   adaptTranscript,
+  annotateTranscript,
   computeAnalytics,
+  computePersonalMedians,
   type TranscriptInitialPosition,
   type TranscriptTab,
 } from '@peasant-labs/fairtrade/ui';
@@ -60,11 +56,11 @@ interface SessionDetailV2Props {
 }
 
 /**
- * Thin adapter around the shared `@peasant-labs/transcript-browser`
- * `<SessionDetail>` composer. Peasant owns the *data layer* (the WebSocket
- * `session_detail` + `quality` subscriptions, phase detection, the annotation
- * REST client) and feeds it into the package via props/callbacks; the package
- * owns all rendering + view state.
+ * Renders the demo's drop-in composite (`TranscriptViewer`) through the one
+ * wire-to-view adapter (`adaptTranscript`). Peasant owns the *data layer* (the
+ * WebSocket `session_detail` + `quality` subscriptions, phase detection, the
+ * annotation REST client) and feeds it into the package via props/callbacks;
+ * the package owns all rendering + view state.
  *
  * Peasant additionally owns the scoping layer: the viewer is the
  * destination of every "why" click from Map/Review, so it can open aimed —
@@ -120,7 +116,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
   const medians = useMemo(
     () =>
       computePersonalMedians(
-        // computePersonalMedians (transcript-browser) takes the raw wire
+        // computePersonalMedians (fairtrade/ui) takes the raw wire
         // QualitySession from @peasant-labs/schema, where `outcome` is a
         // required (possibly-empty) string. adaptQualitySessions narrows an
         // absent/not-yet-computed outcome to `undefined` for THIS app's own
@@ -433,7 +429,7 @@ function SessionDetailV2Inner({ sessionId, projectHash, projectName, routeQuery 
           }}
           streamPrelude={streamPrelude}
           headerActions={headerActions}
-          // The graph toggle mounts transcript-browser's @xyflow engine, which
+          // The graph toggle mounts fairtrade's @xyflow engine (`/graph`), which
           // owns graph topology, pan, and zoom while Fairtrade owns visuals.
           graphSlot={() => (
             <TrajectoryGraph

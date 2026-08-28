@@ -1,4 +1,4 @@
-import { prefilterTurns as packagePrefilterTurns } from '@peasant-labs/transcript-browser';
+import { prefilterTurns as packagePrefilterTurns } from '@peasant-labs/fairtrade/ui';
 import type { TurnDetail, ToolCallDetail } from '@/types/messages';
 import { ToolCallKind } from '@/types/messages';
 import {

@@ -130,11 +130,13 @@ vi.mock('@peasant-labs/fairtrade/ui', async (importOriginal) => {
       ...props,
       onActiveTurnChange: (turn: number) => activeTurnCallbacks.push(`active:${turn}`),
     }),
+    annotateTranscript: () => [],
+    computePersonalMedians: () => undefined,
   };
 });
-vi.mock('@peasant-labs/transcript-browser', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@peasant-labs/transcript-browser')>();
-  return { ...actual, TrajectoryGraph: () => null, annotateTranscript: () => [], computePersonalMedians: () => undefined };
+vi.mock('@peasant-labs/fairtrade/graph', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@peasant-labs/fairtrade/graph')>();
+  return { ...actual, TrajectoryGraph: () => null };
 });
 
 function TestDetail() {

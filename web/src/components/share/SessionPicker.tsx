@@ -5,7 +5,7 @@ import { Button, Checkbox } from '@/lib/ft-ui';
 import type { ShareSession, ShareHierarchySession } from '@/lib/share/types';
 import { groupShareHierarchy, isSelectable } from '@/lib/share/group';
 import { decodeProjectPath, displayProject } from '@/lib/quality/utils';
-import { summarizePrompt } from '@peasant-labs/transcript-browser';
+import { summarizePrompt } from '@peasant-labs/fairtrade/ui';
 import type { SetShareFooterActions } from '@/components/share/footer-actions';
 
 // ---------------------------------------------------------------------------

@@ -24,7 +24,6 @@ import '@peasant-labs/fairtrade/graph.css';
 // approach's runtime CDN dependency and its display:swap flash-of-fallback-font
 // while that round-trip resolves.
 import './globals.css';
-import '@peasant-labs/transcript-browser/styles.css';
 // The /analytics route consumes @peasant-labs/fairtrade/analytics — its own
 // per-surface CSS bundle, same isolation model as graph.css above; nothing
 // auto-loads it, so the dashboard ships unstyled without this import.

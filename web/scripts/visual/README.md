@@ -13,7 +13,7 @@ The harness drives a **dev-only fixture route**, `/dev/visual-harness`
 (`web/src/app/dev/visual-harness/page.tsx`), which mounts the SAME shared
 `@peasant-labs/fairtrade` `<TranscriptViewer>` composite the production `/projects/[name]/[id]` page
 (the `SessionDetailV2` adapter) renders — through the SAME `adaptTranscript` wire adapter, with the same
-prop shape (`streamPrelude`, `graphSlot` plugging transcript-browser's `@xyflow` engine, peasant's
+prop shape (`streamPrelude`, `graphSlot` plugging fairtrade's `/graph` `@xyflow` engine, peasant's
 per-turn label popover in `renderTurnActions`) — but fed a **bundled `sess_demo_0001` fixture**
 (`sample-session.ts`) instead of the WebSocket `session_detail` subscription. So a plain `next dev` is
 enough: no backend, no mock store, no auth. The route `404`s in a production build (`output: export`),
@@ -21,10 +21,10 @@ so it never ships as a public route.
 
 **The app and the canonical fairtrade demo now render the literal same component** —
 `<TranscriptViewer>` — not two independent implementations. (Before the transcript composition slice,
-the app instead mounted transcript-browser's own `<SessionDetail>` composer, a sibling implementation
+the app instead mounted a retired sibling package's own `<SessionDetail>` composer, an implementation
 that had drifted from the demo with every design-system change — see `SessionDetailV2.tsx`'s history
-note. That composer is now deprecated: still published for third-party consumers of
-`@peasant-labs/transcript-browser`, but nothing first-party mounts it anymore.) Rendering the SAME
+note. That sibling package is now deprecated and no longer a peasant dependency; nothing first-party
+mounts its composer anymore.) Rendering the SAME
 `sess_demo_0001` the fairtrade demo renders makes the side-by-side a true height-matched, **same-data,
 same-component** comparison. The composite renders `.txn-*` surfaces (`.txn-app` root, `.txn-center`
 trace column, `.txn-scorecard`, `.txn-sticky` condensed header, the `.txn-viewtoggle .bs-seg-opt`
@@ -45,7 +45,7 @@ design-language sanity check. The transcript oracle has two arms:
    fixture route is backend-free, so `boot-peasant.mjs` covers this arm against a running backend.
 
 **Retired golden:** the old `scripts/visual/baseline/tb/{dark,light}/` reference — captured from the
-era when the app mounted transcript-browser's `<SessionDetail>` composer (`.tb-*`, page-scrolled) —
+era when the app mounted the retired sibling package's `<SessionDetail>` composer (`.tb-*`, page-scrolled) —
 depicted a composer the app no longer renders and was retired rather than re-blessed.
 The transcript surface's same-component regression coverage lives in the real-binary smoke golden
 (`baseline/smoke-baseline/`, §4b); `REF_DIR=demo` remains the cross-component design-language ref.

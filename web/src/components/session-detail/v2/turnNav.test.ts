@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextNavTurn } from '@peasant-labs/transcript-browser';
+import { nextNavTurn } from '@peasant-labs/fairtrade/ui';
 
 // Vim-style j/k turn navigation (roadmap 4.1). The DOM glue (keydown + scroll)
 // lives in the sibling viewer package; the pure index math is exported and

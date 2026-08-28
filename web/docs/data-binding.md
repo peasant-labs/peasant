@@ -10,12 +10,11 @@ Three repositories are involved:
 - **peasant** — the Go backend + the Next.js dashboard under `web/`. Owns the
   *data layer* (transport, fetch, adapters, mutation wiring) and app-specific
   *policy* (scoping, routing, links).
-- **transcript-browser** — the shared, framework-agnostic React viewer package
-  `@peasant-labs/transcript-browser`. Owns all transcript *rendering* and *view
-  state*. Peasant consumes its published package.
-- **fairtrade** — `@peasant-labs/fairtrade`, the design-system + the one cooked
-  transcript view-model adapter (`adaptTranscript`). Consumed by
-  transcript-browser (for the view-model) and by peasant (for `/ui` primitives).
+- **fairtrade** — `@peasant-labs/fairtrade`, the design-system, the shared
+  transcript viewer (`/ui`'s `<TranscriptViewer>` composite + helpers), the
+  `/graph` trajectory-graph engine, and the one cooked transcript view-model
+  adapter (`adaptTranscript`). Peasant consumes its published package directly
+  for all transcript rendering and view state.
 
 ---
 
@@ -33,8 +32,8 @@ prop-adapter sits between the wire and the component.
   ───────────────────────────────────   ───────────────   ──────────────────────   ───────────────────────   ───────────────────────────
   session_entries
     → EntriesToTurns
-    → SessionToDetail               ──▶  WebSocket          WebSocketContext         (cohesive)                transcript-browser
-    → SessionDetailPayload               session_detail     ChannelStore +           adaptTranscript() →        <SessionDetail> → dumb
+    → SessionToDetail               ──▶  WebSocket          WebSocketContext         (cohesive)                fairtrade `/ui`
+    → SessionDetailPayload               session_detail     ChannelStore +           adaptTranscript() →        <TranscriptViewer> → dumb
                                          (push)             useSyncExternalStore     TranscriptViewModel        canvas/rails/views
                                                                                      (the ONE wire-parse)
 
@@ -75,12 +74,12 @@ Two transports coexist by design:
 4. `SessionDetailV2` (the *thin adapter*) derives host-owned inputs the package
    refuses to derive itself — the scoped/focused turn list, phase dividers,
    pattern annotations, scorecard medians — and hands them to the shared
-   `<SessionDetail>` via props/callbacks (`:251`–`:328`).
-5. Inside `<SessionDetail>`, **one** call to `adaptTranscript(detail, turns)`
+   `<TranscriptViewer>` via props/callbacks (`:251`–`:328`).
+5. Inside `<TranscriptViewer>`, **one** call to `adaptTranscript(detail, turns)`
    parses the wire (tool `arguments`/`result` JSON, git drift) exactly once into
    a cooked `TranscriptViewModel`; every dumb child renders cooked fields and
    never `JSON.parse`s. This composition is owned by the published
-   `@peasant-labs/transcript-browser` package.
+   `@peasant-labs/fairtrade` package's `/ui` entry.
 
 ### The write/mutation path
 
@@ -142,17 +141,17 @@ flowchart TD
   SYNC --> DETAIL
   QWS["quality WS channel"] --> MED
 
-  subgraph TBROWSER["transcript-browser <SessionDetail> (rendering + view state)"]
+  subgraph FTUI["fairtrade /ui <TranscriptViewer> (rendering + view state)"]
     VM["adaptTranscript(detail, turns)\n= TranscriptViewModel  (ONE wire-parse)"]
     TVT["toolVMsByTurn / vm.diffs / vm.files"]
     DUMB["TranscriptCanvas · RightRail · Diffs/Files/Highlights views"]
     VM --> TVT --> DUMB
   end
-  DETAIL --> TBROWSER
-  TURNS --> TBROWSER
-  PHASE --> TBROWSER
-  ANN --> TBROWSER
-  MED --> TBROWSER
+  DETAIL --> FTUI
+  TURNS --> FTUI
+  PHASE --> FTUI
+  ANN --> FTUI
+  MED --> FTUI
 
   subgraph REST["Transport: REST (on-demand) — separate surfaces"]
     MAPAPI["lib/api/map.ts (getJSON)"]
@@ -208,7 +207,7 @@ flowchart LR
 
   subgraph DIST["Distributed per-component prop-adapters"]
     SV["SessionDetailV2\n(scope/focus turns, phases, annotations,\nlinkBuilder, capabilities, callbacks)"]
-    PI["MetadataChips (transcript browser)\nharness → ProviderIcon + providerLabel chip"]
+    PI["MetadataChips (fairtrade /ui)\nharness → ProviderIcon + providerLabel chip"]
     RS["RedactionStep\nRedaction → ReviewMatch (confidence/100, ns id)"]
     LS["LabelsStep\nAnnotationSummary → ShareLabel"]
     UEL["useEntryLabels\nAnnotationSummary → SavedTurnLabel (entry only)"]
@@ -225,7 +224,7 @@ flowchart LR
   ANT --> RS
   ANT --> LS
   ANT --> UEL
-  AT --> TBV["transcript-browser dumb components"]
+  AT --> TBV["fairtrade /ui dumb components"]
 ```
 
 ---
@@ -236,12 +235,12 @@ flowchart LR
 
 The transcript is the one surface with a single, cohesive wire→view-model
 projection. The projection itself lives in **fairtrade**, invoked **once** inside
-transcript-browser's composer; peasant's `SessionDetailV2` is the host adapter
-that owns the *data* and *policy* around it.
+fairtrade's own `<TranscriptViewer>` composite; peasant's `SessionDetailV2` is
+the host adapter that owns the *data* and *policy* around it.
 
 **`adaptTranscript(payload, annotations?, analytics?) → TranscriptViewModel`**
 (`web/node_modules/@peasant-labs/fairtrade/dist/lib/types/transcript/adapter.d.ts:31`;
-invoked by the `@peasant-labs/transcript-browser` `SessionDetail` composer).
+invoked by fairtrade's own `/ui` `<TranscriptViewer>` composite).
 
 - **Input:** `TranscriptWireInput` — the canonical `SessionDetailPayload`
   (folded turns; tool `arguments`/`result` carried as raw JSON strings; git
@@ -292,7 +291,7 @@ provider key. It is passed through untouched and rendered in the *shared*
 `MetadataChips` header via fairtrade's own `ProviderIcon` + `providerLabel`
 inside a `<Chip>`:
 `const provider = detail.harness; <Chip><ProviderIcon harness={provider} accent/> {providerLabel(provider)}</Chip>`
-(`@peasant-labs/transcript-browser` `MetadataChips` and provider helpers).
+(`@peasant-labs/fairtrade` `/ui` `MetadataChips` and provider helpers).
 - **Surprising:** peasant *also* ships its **own** `ProviderIcon`
   (`web/src/components/ProviderIcon.tsx`) with a `Harness → text-provider-*`
   class map (`:28`), but a repo-wide grep finds **no usages** in app code — it
@@ -443,9 +442,9 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
 **Cohesive transcript adapter**
 - `web/src/components/session-detail/v2/SessionDetailV2.tsx` — host adapter
   (transport + scope/focus/links/labels policy).
-- `@peasant-labs/transcript-browser` `src/SessionDetail.tsx` — composer;
-  the single `adaptTranscript(...)` call plus cooked-field threading.
-- `@peasant-labs/transcript-browser` `src/session-detail-types.ts` —
+- `@peasant-labs/fairtrade` `/ui` `<TranscriptViewer>` composite — the single
+  `adaptTranscript(...)` call plus cooked-field threading.
+- `@peasant-labs/fairtrade` `/ui` session-detail types —
   `SessionTab` enum + tab defs.
 - `@peasant-labs/fairtrade` `dist/lib/types/transcript/{adapter,view-model}.d.ts`
   — `adaptTranscript`, `TranscriptViewModel` / `ToolCallVM` / `DiffEntryVM` /
@@ -456,7 +455,7 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
   helpers used by the adapter.
 
 **Distributed chrome prop-adapters**
-- `transcript-browser/.../header/MetadataChips.tsx` + `.../lib/provider.ts` —
+- fairtrade `/ui` `.../header/MetadataChips.tsx` + `.../lib/provider.ts` —
   harness → provider chip (the live provider tag).
 - `web/src/components/ProviderIcon.tsx` — peasant's own (apparently unused)
   harness→glyph map.
@@ -484,7 +483,7 @@ because redaction is safe-by-default (`ShareWizardClient.tsx:126`).
 ### Accuracy notes / uncertainties
 - The fairtrade `adaptTranscript` internals were read from the shipped `.d.ts`
   (JSDoc typedefs), not the `.ts` source — field names and the "one wire-parse"
-  contract are from those declarations + transcript-browser's usage, which agree.
+  contract are from those declarations + fairtrade `/ui`'s own usage, which agree.
 - "Peasant's `ProviderIcon` is unused" is from a repo-wide grep of `web/src`
   returning only self-references; it could still be referenced from a path not
   searched (none found). Stated as observed, not as certain intent.
