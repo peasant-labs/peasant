@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -12,34 +13,22 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// derefToolCallKind returns the string value of a ToolCallKind pointer, or nil if nil.
-func derefToolCallKind(p *schema.ToolCallKind) any {
-	if p == nil {
-		return nil
-	}
-	return p.String()
-}
-
-// derefStopReason returns the string value of a StopReason pointer, or nil if nil.
-func derefStopReason(p *schema.StopReason) any {
-	if p == nil {
-		return nil
-	}
-	return p.String()
-}
-
 // SQL constants for session_entries write path.
 const (
-	sqlDeleteSessionEntries = `DELETE FROM session_entries WHERE session_id = ?`
+	sessionEntryColumnCount     = 25
+	sessionEntryInsertChunkSize = 32
 
-	sqlInsertSessionEntry = `INSERT INTO session_entries (
+	sqlDeleteSessionEntries    = `DELETE FROM session_entries WHERE session_id = ?`
+	sqlDeleteSessionEntriesExt = `DELETE FROM session_entries_ext WHERE session_id = ?`
+
+	sqlInsertSessionEntryPrefix = `INSERT INTO session_entries (
     session_id, entry_index, provider, entry_type, role,
     timestamp_ms, content_preview, tokens_in, tokens_out,
     has_tool_use, tool_names_csv, has_thinking, is_error,
     raw_byte_length, tool_call_id, entry_id, parent_entry_id, extra,
     depth, parent_index, tool_input, tool_output,
     tool_kind, stop_reason, part_type
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+) VALUES `
 
 	sqlSessionEntriesExist = `SELECT 1 FROM session_entries WHERE session_id = ? LIMIT 1`
 
@@ -52,8 +41,6 @@ JOIN annotations ON annotations.id = targets.annotation_id
 JOIN annotators ON annotators.id = annotations.annotator_id
 WHERE targets.session_id = ?
 ORDER BY targets.entry_index, targets.annotation_id`
-
-	sqlDeleteSessionEntriesExt = `DELETE FROM session_entries_ext WHERE session_id = ?`
 
 	sqlInsertSessionEntryExt = `INSERT INTO session_entries_ext (
     session_id, entry_index, key, value_text, value_int, value_real
@@ -124,54 +111,36 @@ func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.Sessio
 	}
 
 	// Insert all new entries.
+	if err = insertSessionEntries(conn, entries); err != nil {
+		return fmt.Errorf("store: insert session_entries for %s: %w — "+
+			"what: failed to insert indexed entries; "+
+			"why: schema mismatch or constraint violation; "+
+			"user impact: session %s indexing aborted, partial data may exist; "+
+			"how to fix: check CHECK constraints on role/entry_type columns match current schema",
+			sessionID, err, sessionID)
+	}
+	insertExtStmt, _, err := conn.PrepareTransient(sqlInsertSessionEntryExt)
+	if err != nil {
+		return fmt.Errorf("store: prepare session_entry_ext insert for %s: %w", sessionID, err)
+	}
+	defer insertExtStmt.Finalize()
+	insertCommandStmt, _, err := conn.PrepareTransient(sqlInsertSessionCommand)
+	if err != nil {
+		return fmt.Errorf("store: prepare session_command insert for %s: %w", sessionID, err)
+	}
+	defer insertCommandStmt.Finalize()
 	for i := range entries {
 		e := &entries[i]
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertSessionEntry, &sqlitex.ExecOptions{
-			Args: []any{
-				string(e.SessionID),
-				e.EntryIndex,
-				e.Harness.String(),
-				e.EntryType.String(),
-				e.Role.String(),
-				derefInt64(e.TimestampMs),
-				derefString2(e.ContentPreview),
-				derefInt(e.TokensIn),
-				derefInt(e.TokensOut),
-				boolToInt(e.HasToolUse),
-				derefString2(e.ToolNamesCSV),
-				boolToInt(e.HasThinking),
-				boolToInt(e.IsError),
-				derefInt(e.RawByteLength),
-				derefString2(e.ToolCallID),
-				derefString2(e.EntryID),
-				derefString2(e.ParentEntryID),
-				derefString2(e.Extra),
-				// v2 full-depth columns (indices 18-21)
-				e.Depth,
-				derefInt(e.ParentIndex),
-				derefString2(e.ToolInput),
-				derefString2(e.ToolOutput),
-				// v11 ACP-aligned columns (indices 22-23)
-				derefToolCallKind(e.ToolKind),
-				derefStopReason(e.StopReason),
-				// v26 part type label (index 24)
-				derefString2(e.PartType),
-			},
-		}); err != nil {
-			return fmt.Errorf("store: insert session_entry %s[%d]: %w — "+
-				"what: failed to insert indexed entry; "+
-				"why: schema mismatch or constraint violation; "+
-				"user impact: session %s indexing aborted, partial data may exist; "+
-				"how to fix: check CHECK constraints on role/entry_type columns match current schema",
-				sessionID, e.EntryIndex, err, sessionID)
-		}
-
 		// Write known ext keys and session_commands from Extra JSON.
 		if e.Extra != nil {
-			if err = writeExtKeys(conn, string(e.SessionID), e.EntryIndex, *e.Extra); err != nil {
+			extra, ok := parseEntryExtra(*e.Extra)
+			if !ok {
+				continue
+			}
+			if err = writeExtKeys(insertExtStmt, string(e.SessionID), e.EntryIndex, extra); err != nil {
 				return fmt.Errorf("store: write ext keys %s[%d]: %w", sessionID, e.EntryIndex, err)
 			}
-			if err = writeSessionCommand(conn, string(e.SessionID), e.EntryIndex, *e.Extra); err != nil {
+			if err = writeSessionCommand(insertCommandStmt, string(e.SessionID), e.EntryIndex, extra); err != nil {
 				return fmt.Errorf("store: write session command %s[%d]: %w", sessionID, e.EntryIndex, err)
 			}
 		}
@@ -182,6 +151,141 @@ func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.Sessio
 	}
 
 	return nil
+}
+
+func insertSessionEntries(conn *sqlite.Conn, entries []schema.SessionEntry) error {
+	for start := 0; start < len(entries); start += sessionEntryInsertChunkSize {
+		end := start + sessionEntryInsertChunkSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+		if err := insertSessionEntryChunk(conn, entries[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertSessionEntryChunk(conn *sqlite.Conn, entries []schema.SessionEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	stmt, _, err := conn.PrepareTransient(buildSessionEntryInsertSQL(len(entries)))
+	if err != nil {
+		return err
+	}
+	defer stmt.Finalize()
+
+	param := 1
+	for i := range entries {
+		bindSessionEntryParams(stmt, &entries[i], &param)
+	}
+
+	_, err = stmt.Step()
+	if resetErr := stmt.Reset(); err == nil {
+		err = resetErr
+	}
+	if clearErr := stmt.ClearBindings(); err == nil {
+		err = clearErr
+	}
+	if err != nil {
+		return fmt.Errorf("session_entry chunk [%d,%d]: %w", entries[0].EntryIndex, entries[len(entries)-1].EntryIndex, err)
+	}
+	return nil
+}
+
+func buildSessionEntryInsertSQL(rowCount int) string {
+	var b strings.Builder
+	b.Grow(len(sqlInsertSessionEntryPrefix) + rowCount*sessionEntryColumnCount*3)
+	b.WriteString(sqlInsertSessionEntryPrefix)
+	for row := 0; row < rowCount; row++ {
+		if row > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteByte('(')
+		for col := 0; col < sessionEntryColumnCount; col++ {
+			if col > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteByte('?')
+		}
+		b.WriteByte(')')
+	}
+	return b.String()
+}
+
+func bindSessionEntryParams(stmt *sqlite.Stmt, e *schema.SessionEntry, param *int) {
+	stmt.BindText(nextParam(param), string(e.SessionID))
+	stmt.BindInt64(nextParam(param), int64(e.EntryIndex))
+	stmt.BindText(nextParam(param), e.Harness.String())
+	stmt.BindText(nextParam(param), e.EntryType.String())
+	stmt.BindText(nextParam(param), e.Role.String())
+	bindNullableInt64(stmt, nextParam(param), e.TimestampMs)
+	bindNullableString(stmt, nextParam(param), e.ContentPreview)
+	bindNullableInt(stmt, nextParam(param), e.TokensIn)
+	bindNullableInt(stmt, nextParam(param), e.TokensOut)
+	stmt.BindInt64(nextParam(param), int64(boolToInt(e.HasToolUse)))
+	bindNullableString(stmt, nextParam(param), e.ToolNamesCSV)
+	stmt.BindInt64(nextParam(param), int64(boolToInt(e.HasThinking)))
+	stmt.BindInt64(nextParam(param), int64(boolToInt(e.IsError)))
+	bindNullableInt(stmt, nextParam(param), e.RawByteLength)
+	bindNullableString(stmt, nextParam(param), e.ToolCallID)
+	bindNullableString(stmt, nextParam(param), e.EntryID)
+	bindNullableString(stmt, nextParam(param), e.ParentEntryID)
+	bindNullableString(stmt, nextParam(param), e.Extra)
+	stmt.BindInt64(nextParam(param), int64(e.Depth))
+	bindNullableInt(stmt, nextParam(param), e.ParentIndex)
+	bindNullableString(stmt, nextParam(param), e.ToolInput)
+	bindNullableString(stmt, nextParam(param), e.ToolOutput)
+	bindNullableToolCallKind(stmt, nextParam(param), e.ToolKind)
+	bindNullableStopReason(stmt, nextParam(param), e.StopReason)
+	bindNullableString(stmt, nextParam(param), e.PartType)
+}
+
+func nextParam(param *int) int {
+	current := *param
+	*param = *param + 1
+	return current
+}
+
+func bindNullableString(stmt *sqlite.Stmt, param int, value *string) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindText(param, *value)
+}
+
+func bindNullableInt(stmt *sqlite.Stmt, param int, value *int) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindInt64(param, int64(*value))
+}
+
+func bindNullableInt64(stmt *sqlite.Stmt, param int, value *int64) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindInt64(param, *value)
+}
+
+func bindNullableToolCallKind(stmt *sqlite.Stmt, param int, value *schema.ToolCallKind) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindText(param, value.String())
+}
+
+func bindNullableStopReason(stmt *sqlite.Stmt, param int, value *schema.StopReason) {
+	if value == nil {
+		stmt.BindNull(param)
+		return
+	}
+	stmt.BindText(param, value.String())
 }
 
 // entryAnnotationTarget is one annotation's attachment to a span of a session's
@@ -336,13 +440,16 @@ var knownExtIntKeys = []string{"tokens_reasoning", "cache_read", "cache_write"}
 // knownExtTextKey is the Extra JSON key promoted to session_entries_ext as value_text.
 const knownExtTextKey = "model_id"
 
-// writeExtKeys parses the Extra JSON and writes known keys to session_entries_ext.
-func writeExtKeys(conn *sqlite.Conn, sessionID string, entryIndex int, extraJSON string) error {
+func parseEntryExtra(extraJSON string) (map[string]any, bool) {
 	var extra map[string]any
 	if err := json.Unmarshal([]byte(extraJSON), &extra); err != nil {
-		return nil // malformed JSON — skip silently
+		return nil, false // malformed JSON — skip silently
 	}
+	return extra, true
+}
 
+// writeExtKeys writes known Extra JSON keys to session_entries_ext.
+func writeExtKeys(stmt *sqlite.Stmt, sessionID string, entryIndex int, extra map[string]any) error {
 	// Integer keys.
 	for _, key := range knownExtIntKeys {
 		v, ok := extra[key]
@@ -354,9 +461,7 @@ func writeExtKeys(conn *sqlite.Conn, sessionID string, entryIndex int, extraJSON
 		if !ok || fv == 0 {
 			continue
 		}
-		if err := sqlitex.ExecuteTransient(conn, sqlInsertSessionEntryExt, &sqlitex.ExecOptions{
-			Args: []any{sessionID, entryIndex, key, nil, int(fv), nil},
-		}); err != nil {
+		if err := execPreparedSessionEntryExt(stmt, sessionID, entryIndex, key, nil, int(fv)); err != nil {
 			return err
 		}
 	}
@@ -365,9 +470,7 @@ func writeExtKeys(conn *sqlite.Conn, sessionID string, entryIndex int, extraJSON
 	if v, ok := extra[knownExtTextKey]; ok {
 		sv, ok := v.(string)
 		if ok && sv != "" {
-			if err := sqlitex.ExecuteTransient(conn, sqlInsertSessionEntryExt, &sqlitex.ExecOptions{
-				Args: []any{sessionID, entryIndex, knownExtTextKey, sv, nil, nil},
-			}); err != nil {
+			if err := execPreparedSessionEntryExt(stmt, sessionID, entryIndex, knownExtTextKey, &sv, 0); err != nil {
 				return err
 			}
 		}
@@ -376,16 +479,33 @@ func writeExtKeys(conn *sqlite.Conn, sessionID string, entryIndex int, extraJSON
 	return nil
 }
 
+func execPreparedSessionEntryExt(stmt *sqlite.Stmt, sessionID string, entryIndex int, key string, valueText *string, valueInt int) error {
+	stmt.BindText(1, sessionID)
+	stmt.BindInt64(2, int64(entryIndex))
+	stmt.BindText(3, key)
+	bindNullableString(stmt, 4, valueText)
+	if valueText == nil {
+		stmt.BindInt64(5, int64(valueInt))
+	} else {
+		stmt.BindNull(5)
+	}
+	stmt.BindNull(6)
+
+	_, err := stmt.Step()
+	if resetErr := stmt.Reset(); err == nil {
+		err = resetErr
+	}
+	if clearErr := stmt.ClearBindings(); err == nil {
+		err = clearErr
+	}
+	return err
+}
+
 // writeSessionCommand checks the Extra JSON for a "command_name" key and, if found,
 // inserts a row into session_commands. The session_entries row must already be
 // inserted (FK constraint) when this is called.
 // "command_args" is optional — nil is stored when absent.
-func writeSessionCommand(conn *sqlite.Conn, sessionID string, entryIndex int, extraJSON string) error {
-	var extra map[string]any
-	if err := json.Unmarshal([]byte(extraJSON), &extra); err != nil {
-		return nil // malformed JSON — skip silently
-	}
-
+func writeSessionCommand(stmt *sqlite.Stmt, sessionID string, entryIndex int, extra map[string]any) error {
 	cmdNameVal, ok := extra["command_name"]
 	if !ok {
 		return nil // no command_name key — not a skill invocation entry
@@ -395,14 +515,23 @@ func writeSessionCommand(conn *sqlite.Conn, sessionID string, entryIndex int, ex
 		return nil
 	}
 
-	var cmdArgs any // nil if absent
+	var cmdArgs *string
 	if v, ok := extra["command_args"]; ok {
 		if sv, ok := v.(string); ok && sv != "" {
-			cmdArgs = sv
+			cmdArgs = &sv
 		}
 	}
 
-	return sqlitex.ExecuteTransient(conn, sqlInsertSessionCommand, &sqlitex.ExecOptions{
-		Args: []any{sessionID, entryIndex, cmdName, cmdArgs},
-	})
+	stmt.BindText(1, sessionID)
+	stmt.BindInt64(2, int64(entryIndex))
+	stmt.BindText(3, cmdName)
+	bindNullableString(stmt, 4, cmdArgs)
+	_, err := stmt.Step()
+	if resetErr := stmt.Reset(); err == nil {
+		err = resetErr
+	}
+	if clearErr := stmt.ClearBindings(); err == nil {
+		err = clearErr
+	}
+	return err
 }
