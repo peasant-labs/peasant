@@ -118,6 +118,16 @@ func (p *StoreDataProvider) SessionSummaries(ctx context.Context) ([]SessionSumm
 
 	visibleRows := make([]store.SessionRow, 0, len(rows))
 	for i := range rows {
+		// A session that has not completed an index pass has a metrics row (so a
+		// turn count exists) but no entries yet, so opening it would show no
+		// turns. Withhold it from every discovery list until it is viewable. This
+		// is a discovery gate, not access control: SessionSummariesByID (the
+		// deep-link path) deliberately does not apply it, so a held identifier
+		// still resolves. Counts derive from this same visible set, so the list
+		// and its "N sessions" total cannot disagree.
+		if rows[i].IndexedAt == nil {
+			continue
+		}
 		visible, err := p.discoverableSessionRow(&rows[i])
 		if err != nil {
 			return nil, fmt.Errorf("store adapter: session summaries visibility: %w", err)

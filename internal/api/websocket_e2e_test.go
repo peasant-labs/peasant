@@ -1766,6 +1766,7 @@ func TestProgressiveProvider_E2E_WebSocket_WithStore(t *testing.T) {
 	if err := s.InsertSessions(ctx, entries); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
 	}
+	api.MarkStoredSessionsIndexed(t, s)
 
 	storeProv := api.NewStoreDataProvider(s, sessionvisibility.All())
 

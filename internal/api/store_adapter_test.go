@@ -173,6 +173,7 @@ func seedStore(t *testing.T, s *store.Store, entries []ingest.StoreEntry) *api.S
 	if err := s.InsertSessions(ctx, entries); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
 	}
+	api.MarkStoredSessionsIndexed(t, s)
 	// Compute daily summaries (decoupled from InsertSessions).
 	daySet := make(map[string]bool)
 	for _, e := range entries {
@@ -201,6 +202,7 @@ func seedStoreWithFS(t *testing.T, s *store.Store, entries []ingest.StoreEntry, 
 	if err := s.InsertSessions(ctx, entries); err != nil {
 		t.Fatalf("InsertSessions: %v", err)
 	}
+	api.MarkStoredSessionsIndexed(t, s)
 	daySet := make(map[string]bool)
 	for _, e := range entries {
 		if e.Metadata != nil && e.Metadata.Timestamp.Start > 0 {
