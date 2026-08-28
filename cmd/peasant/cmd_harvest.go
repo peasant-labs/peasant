@@ -155,12 +155,12 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	cmd.Flags().BoolVar(&flags.jsonOutput, defaults.JSONFlagName, false, "Output as JSON instead of human-readable")
 	cmd.Flags().StringSliceVar(&flags.sessionIDs, "session", nil, "Filter to specific session IDs (repeatable, comma-separated)")
 	cmd.Flags().StringVar(&flags.since, "since", "", "Filter to sessions from the last N period (e.g. 2w, 3m, 7d)")
+	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
-	// Source/output flags (relevant for logs and all modes).
+	// Source flags are relevant for logs and all modes.
 	if mode != harvestIndexOnly {
 		cmd.Flags().StringVar(&flags.sourceProvider, "source-provider", "", "Override source provider (claude-code, opencode, codex, cursor, strike)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the provider (replaces config, not additive)")
-		cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", false, "Also process sessions still being written")
 	}
 

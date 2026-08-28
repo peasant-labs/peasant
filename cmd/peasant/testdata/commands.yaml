@@ -54,6 +54,7 @@ commands:
           - { name: json, type: bool, default: "false" }
           - { name: session, type: stringSlice, default: "[]" }
           - { name: since, type: string, default: "" }
+          - { name: output, type: string, default: "" }
           - { name: detect-commits, type: bool, default: "false" }
           - { name: profile-index, type: bool, default: "false" }
       - use: verify
