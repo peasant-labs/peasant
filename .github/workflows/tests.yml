@@ -217,7 +217,7 @@ jobs:
   # The two jobs below close those gaps.
   # They set pnpm/node up the same way release.yml / release-validate.yml do
   # (pnpm/action-setup@v4 with package_json_file: web/package.json; setup-node@v4
-  # node 24).
+  # node 26).
   # ---------------------------------------------------------------------------
 
   # Lockfile drift: assert web/pnpm-lock.yaml is in sync with
