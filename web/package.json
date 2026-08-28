@@ -4,6 +4,9 @@
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=26"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -52,7 +55,7 @@
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.0.0",
     "@types/diff": "^7.0.2",
-    "@types/node": "^22.10.0",
+    "@types/node": "^26",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.0.0",
