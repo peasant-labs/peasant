@@ -102,7 +102,7 @@ describe('mounted Strike transcript', () => {
 
     const graph = await waitFor(() => {
       const mounted = view.container.querySelector('.tb-graph');
-      if (!mounted) throw new Error('real transcript-browser graph did not mount in SessionDetailV2.strike.test.tsx after the user selected graph mode; the mounted transcript is not exercising the production graph path; verify graphSlot still wires TrajectoryGraph and the packed transcript-browser artifact exports its graph engine');
+      if (!mounted) throw new Error('real fairtrade/graph did not mount in SessionDetailV2.strike.test.tsx after the user selected graph mode; the mounted transcript is not exercising the production graph path; verify graphSlot still wires TrajectoryGraph and the packed fairtrade artifact exports its graph engine');
       return mounted;
     });
     const assistantGraphNode = graph.querySelector('[data-harness="strike"] .ft-gnode');

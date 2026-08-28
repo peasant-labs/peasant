@@ -12,7 +12,7 @@ import { Harness, StopReason, ToolCallKind } from "@/types/messages";
  * This file is a faithful port of the demo mockup's `buildWire()`: the editorial
  * fixtures below are projected into the canonical wire `SessionDetailPayload`,
  * which the visual-harness route feeds straight into the shared
- * `@peasant-labs/transcript-browser` `<SessionDetail>` composer — exactly the
+ * `@peasant-labs/fairtrade` `<TranscriptViewer>` composite, exactly the
  * payload village's real `/transcripts/[id]` page hands it, minus the REST fetch.
  * Rendering the SAME data the demo renders lets the side-by-side capture stitch a
  * true height-matched, same-data comparison of the canonical demo vs the
@@ -374,11 +374,11 @@ export const sampleSession: SessionDetailPayload = {
   tokensOut: 6200,
   turnCount: 8,
   toolCallCount: 5,
-  project: "transcript-browser",
+  project: "transcript-canvas",
   model: "claude-opus-4-7",
-  workingDirectory: "/Users/dev/transcript-browser",
+  workingDirectory: "/Users/dev/transcript-canvas",
   gitBranch: "lift/transcript-canvas",
-  gitRemote: "https://example.com/peasant-labs/transcript-browser.git",
+  gitRemote: "https://example.com/peasant-labs/transcript-canvas.git",
   outcome: "resolved",
   turns: TURNS.map(turnToWire),
   scorecard: sampleScorecard,

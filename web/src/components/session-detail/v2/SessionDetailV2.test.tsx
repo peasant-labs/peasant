@@ -38,14 +38,10 @@ vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ theme: 'dark', setTheme: vi.fn(), toggle: vi.fn() }),
 }));
 
-// The shared package is the heavy leaf (composer, graph canvas); the
-// change-scope empty state is adapter-owned and never reaches it.
-vi.mock('@peasant-labs/transcript-browser', () => ({
+// The graph canvas is the heavy leaf; the change-scope empty state is
+// adapter-owned and never reaches it.
+vi.mock('@peasant-labs/fairtrade/graph', () => ({
   TrajectoryGraph: () => null,
-  annotateTranscript: () => [],
-  computePersonalMedians: () => undefined,
-  // Reached via scopeTurns when a scope is active; identity is fine for tests.
-  prefilterTurns: (turns: unknown) => turns,
 }));
 
 // The viewer now mounts fairtrade's composite; the adapter must return a
@@ -91,6 +87,10 @@ vi.mock(import('@peasant-labs/fairtrade/ui'), async (importOriginal) => {
     TranscriptViewer: TranscriptViewerMock,
     adaptTranscript: (() => ({ turns: [] })) as unknown as typeof actual.adaptTranscript,
     computeAnalytics: (() => ({})) as unknown as typeof actual.computeAnalytics,
+    annotateTranscript: (() => []) as unknown as typeof actual.annotateTranscript,
+    computePersonalMedians: (() => undefined) as unknown as typeof actual.computePersonalMedians,
+    // Reached via scopeTurns when a scope is active; identity is fine for tests.
+    prefilterTurns: ((turns: unknown) => turns) as unknown as typeof actual.prefilterTurns,
   };
 });
 

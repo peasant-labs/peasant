@@ -106,7 +106,7 @@ for (const [route, htmlPath] of ROUTES) {
       'those chunks contain the previous complete provider inventory but no Strike display policy',
       htmlPath,
       `${route} can reject or misrender a canonical Strike session`,
-      'consume the immutable Strike-capable Fairtrade and transcript-browser packages, clean all generated output, and rebuild',
+      'consume the immutable Strike-capable Fairtrade package, clean all generated output, and rebuild',
     )
   }
   const policyChunks = chunks.filter(({ content }) => looksLikeProviderPolicy(content))

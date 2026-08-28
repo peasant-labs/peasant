@@ -2,8 +2,8 @@
      wire SessionDetailPayload -> the shared @peasant-labs/fairtrade/ui <TranscriptViewer> composite
      via the SAME adaptTranscript wire adapter peasant's SessionDetailV2 adapter uses (detected phases,
      derived pattern annotations feeding computeAnalytics, peasant's per-turn label popover in the
-     renderTurnActions slot), with transcript-browser's @xyflow TrajectoryGraph plugged into the graph
-     slot — the one engine transcript-browser still owns.
+     renderTurnActions slot), with fairtrade's `/graph` @xyflow TrajectoryGraph plugged into the graph
+     slot, the one engine that entry still owns.
 
    Correction: this harness used to mount transcript-browser's OWN `<SessionDetail>` composer (`.tb-*`
    classes, page-scroll model) — a sibling implementation that drifted from the canonical demo with every
@@ -298,7 +298,7 @@ await surface('txn-label-popover', async () => {
   await page.keyboard.press('Escape'); await pause(250)
 })
 
-// trajectory graph view-mode (transcript-browser's @xyflow engine in the composite's graph slot).
+// trajectory graph view-mode (fairtrade's `/graph` @xyflow engine in the composite's graph slot).
 // Captures the WHOLE composite (.txn-app), not the inner .txn-graphslot sub-region: every sibling
 // surface below shoots .txn-app, and fairtrade's own shootdemo.mjs does the same for its txn-graph
 // shot (`shot('txn-graph')` with no selector override -> its default `.txn-app`) — so this pairs

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTaskWaterfall, type TaskGroup } from '@peasant-labs/transcript-browser';
+import { buildTaskWaterfall, type TaskGroup } from '@peasant-labs/fairtrade/ui';
 
 // Steps waterfall (roadmap 5.2): the duration-lane geometry is a pure transform
 // over the package's TaskGroup data (computeTasks). It's exported and tested here

@@ -96,10 +96,10 @@ ast-grep scan --config sgconfig.yml .
 
 ## Frontend integration
 
-Peasant consumes published `@peasant-labs/fairtrade` and
-`@peasant-labs/transcript-browser` packages. Transcript turn rendering belongs in the browser
-package; Peasant's session-detail code is an adapter for local data, navigation, and annotations.
-Avoid duplicating shared rendering behavior in this repository.
+Peasant consumes the published `@peasant-labs/fairtrade` package. Transcript turn rendering
+belongs in fairtrade's `/ui` and `/graph` entries; Peasant's session-detail code is an adapter for
+local data, navigation, and annotations. Avoid duplicating shared rendering behavior in this
+repository.
 
 For visual changes, use `web/scripts/visual/` and capture the real built binary path. Confirm that
 the server is serving the newly built assets before trusting screenshots or computed-style probes.

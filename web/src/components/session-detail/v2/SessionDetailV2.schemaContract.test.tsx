@@ -80,22 +80,11 @@ vi.mock('@/lib/ft-ui', () => ({
   FeedbackPanel: ({ title, children }: { title?: ReactNode; children?: ReactNode }) => <div><p>{title}</p>{children}</div>,
 }));
 
-vi.mock('@peasant-labs/transcript-browser', () => ({
+vi.mock('@peasant-labs/fairtrade/graph', () => ({
   TrajectoryGraph: (props: Record<string, unknown>) => {
     captures.graphs.push(props);
     return <div data-testid="trajectory-graph" />;
   },
-  annotateTranscript: (turns: unknown[]) => {
-    captures.annotated.push(turns);
-    return [];
-  },
-  computePersonalMedians: (sessions: unknown[]) => {
-    captures.medians.push(sessions);
-    return undefined;
-  },
-  prefilterTurns: (turns: unknown[]) => turns,
-  computeTasks: () => [],
-  buildTaskWaterfall: () => [],
 }));
 
 vi.mock('@peasant-labs/fairtrade/ui', () => ({
@@ -110,6 +99,17 @@ vi.mock('@peasant-labs/fairtrade/ui', () => ({
         meta: { provider: payload.harness },
       };
     },
+    annotateTranscript: (turns: unknown[]) => {
+      captures.annotated.push(turns);
+      return [];
+    },
+    computePersonalMedians: (sessions: unknown[]) => {
+      captures.medians.push(sessions);
+      return undefined;
+    },
+    prefilterTurns: (turns: unknown[]) => turns,
+    computeTasks: () => [],
+    buildTaskWaterfall: () => [],
     TranscriptViewer: (props: {
       viewModel: { turns: Array<Record<string, unknown>>; meta: { provider: string } };
       graphSlot?: () => ReactNode;

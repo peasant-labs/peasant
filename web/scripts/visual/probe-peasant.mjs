@@ -5,7 +5,7 @@
    (the `.txn-app` root, `.txn-body-grid` layout, `.txn-center` trace column, `.txn-scorecard`,
    `.txn-graphslot`, the `bs-seg-opt` list/graph toggle, the `.txn-sticky` condensed header) and owns
    exactly ONE bounded inner scroller — `.txn-stream` — rather than scrolling the page (correction: the
-   composite used to be transcript-browser's own `<SessionDetail>`, a sibling implementation that
+   composite used to be `transcript-browser`'s own `<SessionDetail>`, an implementation that
    drifted from the canonical demo and scrolled the page; `SessionDetailV2` moved onto the shared
    composite directly, and this probe was corrected to match). The `.txn-stream-prelude` (peasant's
    toolbar/explanation/steps/scope/error content) renders inside `.txn-stream`, before the first turn,
