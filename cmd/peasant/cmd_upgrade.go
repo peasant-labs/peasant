@@ -71,15 +71,16 @@ type upgradeOptions struct {
 }
 
 type upgradeDeps struct {
-	Executable    func() (string, error)
-	EvalSymlinks  func(string) (string, error)
-	Stat          func(string) (fs.FileInfo, error)
-	CommandOutput func(context.Context, string, ...string) ([]byte, error)
-	HTTPClient    *http.Client
-	APIBaseURL    string
-	GOOS          string
-	GOARCH        string
-	InstallBinary func(string, []byte, fs.FileMode) error
+	Executable     func() (string, error)
+	EvalSymlinks   func(string) (string, error)
+	Stat           func(string) (fs.FileInfo, error)
+	CommandOutput  func(context.Context, string, ...string) ([]byte, error)
+	HTTPClient     *http.Client
+	APIBaseURL     string
+	GOOS           string
+	GOARCH         string
+	CurrentVersion string
+	InstallBinary  func(string, []byte, fs.FileMode) error
 }
 
 type upgradeManagedInstall struct {
@@ -106,7 +107,8 @@ func BuildUpgradeCommand() *cobra.Command {
 }
 
 func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
-	opts := upgradeOptions{CurrentVersion: defaults.Version.String()}
+	deps = normalizeUpgradeDeps(deps)
+	opts := upgradeOptions{CurrentVersion: deps.CurrentVersion}
 	cmd := &cobra.Command{
 		Use:     "upgrade",
 		Aliases: []string{"update"},
@@ -137,15 +139,16 @@ func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
 
 func defaultUpgradeDeps() upgradeDeps {
 	return upgradeDeps{
-		Executable:    os.Executable,
-		EvalSymlinks:  filepath.EvalSymlinks,
-		Stat:          os.Stat,
-		CommandOutput: defaultUpgradeCommandOutput,
-		HTTPClient:    &http.Client{Timeout: upgradeHTTPTimeout},
-		APIBaseURL:    upgradeAPIBaseURL,
-		GOOS:          runtime.GOOS,
-		GOARCH:        runtime.GOARCH,
-		InstallBinary: installPeasantBinary,
+		Executable:     os.Executable,
+		EvalSymlinks:   filepath.EvalSymlinks,
+		Stat:           os.Stat,
+		CommandOutput:  defaultUpgradeCommandOutput,
+		HTTPClient:     &http.Client{Timeout: upgradeHTTPTimeout},
+		APIBaseURL:     upgradeAPIBaseURL,
+		GOOS:           runtime.GOOS,
+		GOARCH:         runtime.GOARCH,
+		CurrentVersion: defaults.Version.String(),
+		InstallBinary:  installPeasantBinary,
 	}
 }
 
@@ -174,6 +177,9 @@ func normalizeUpgradeDeps(deps upgradeDeps) upgradeDeps {
 	}
 	if deps.GOARCH == "" {
 		deps.GOARCH = defaults.GOARCH
+	}
+	if deps.CurrentVersion == "" {
+		deps.CurrentVersion = defaults.CurrentVersion
 	}
 	if deps.InstallBinary == nil {
 		deps.InstallBinary = defaults.InstallBinary

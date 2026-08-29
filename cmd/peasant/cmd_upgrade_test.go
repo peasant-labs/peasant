@@ -130,19 +130,15 @@ func TestUpgradeReleaseSelectionFixtures(t *testing.T) {
 			})
 			defer server.Close()
 			deps := upgradeTestDeps(t, server.URL, filepath.Join(t.TempDir(), "peasant"))
-			var output bytes.Buffer
+			deps.CurrentVersion = tc.CurrentVersion
 
-			err := runUpgradeCommand(context.Background(), &output, upgradeOptions{
-				CurrentVersion:    tc.CurrentVersion,
-				IncludePrerelease: tc.IncludePrerelease,
-				DryRun:            tc.DryRun,
-			}, deps)
+			output, err := executeUpgradeCommandForTest(t, deps, tc.Args...)
 			if err != nil {
-				t.Fatalf("upgrade dry-run returned error: %v\noutput:\n%s", err, output.String())
+				t.Fatalf("upgrade dry-run returned error: %v\noutput:\n%s", err, output)
 			}
 			for _, want := range tc.OutputContains {
-				if !strings.Contains(output.String(), want) {
-					t.Fatalf("release-selection output missing %q:\n%s", want, output.String())
+				if !strings.Contains(output, want) {
+					t.Fatalf("release-selection output missing %q:\n%s", want, output)
 				}
 			}
 		})
@@ -253,13 +249,12 @@ type upgradeManagedInstallCase struct {
 }
 
 type upgradeReleaseSelectionCase struct {
-	Name              string                  `yaml:"name"`
-	CurrentVersion    string                  `yaml:"current_version"`
-	IncludePrerelease bool                    `yaml:"include_prerelease"`
-	DryRun            bool                    `yaml:"dry_run"`
-	Latest            upgradeReleaseFixture   `yaml:"latest"`
-	Releases          []upgradeReleaseFixture `yaml:"releases"`
-	OutputContains    []string                `yaml:"output_contains"`
+	Name           string                  `yaml:"name"`
+	CurrentVersion string                  `yaml:"current_version"`
+	Args           []string                `yaml:"args"`
+	Latest         upgradeReleaseFixture   `yaml:"latest"`
+	Releases       []upgradeReleaseFixture `yaml:"releases"`
+	OutputContains []string                `yaml:"output_contains"`
 }
 
 type upgradeReleaseFixture struct {

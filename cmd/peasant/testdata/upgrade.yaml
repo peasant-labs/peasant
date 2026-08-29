@@ -68,7 +68,7 @@ managed_install_cases:
 release_selection_cases:
   - name: stable-default
     current_version: "0.4.0"
-    dry_run: true
+    args: ["--dry-run"]
     latest:
       tag: "v0.4.1"
       assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
@@ -84,8 +84,7 @@ release_selection_cases:
 
   - name: stable-prerelease-opt-in
     current_version: "0.4.0"
-    include_prerelease: true
-    dry_run: true
+    args: ["--prerelease", "--dry-run"]
     latest:
       tag: "v0.4.1"
       assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
@@ -101,7 +100,7 @@ release_selection_cases:
 
   - name: prerelease-current-default
     current_version: "0.5.0-rc1"
-    dry_run: true
+    args: ["--dry-run"]
     latest:
       tag: "v0.4.1"
       assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
