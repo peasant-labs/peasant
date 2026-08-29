@@ -2946,6 +2946,75 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 	}
 }
 
+func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	setupSourceFile(t, mfs, sourcePath)
+
+	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
+	meta := makeMinimalMeta(t, testSessionID)
+	sid := session.SessionID
+
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(
+			[]ingest.DiscoveredSession{session},
+			map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta},
+		),
+	}
+
+	indexer := &testutil.StubIndexer{
+		Kind: ingest.TranscriptSourceFile,
+		Entries: map[ingest.SessionID][]schema.SessionEntry{
+			sid: {{SessionID: sid, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText}},
+		},
+	}
+	metricsStore := testutil.NewStubMetricsStore()
+	analyzer := &testutil.StubAnalyzer{ComputeErr: errors.New("compute failed")}
+	classifier := &testutil.StubSessionClassifier{}
+	profiler := &ingest.IndexProfiler{}
+
+	cfg := makePipelineConfig(testOutputDir)
+	cfg.IndexProfiler = profiler
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
+			ingest.HarnessClaudeCode: indexer,
+		}),
+		ingest.WithMetricsStore(metricsStore),
+		ingest.WithAnalyzer(analyzer),
+		ingest.WithClassifier(classifier),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+
+	result, err := pipeline.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Summary.Indexed != 1 {
+		t.Fatalf("Summary.Indexed = %d, want 1", result.Summary.Indexed)
+	}
+	if result.Summary.Computed != 0 {
+		t.Fatalf("Summary.Computed = %d, want 0", result.Summary.Computed)
+	}
+	if len(classifier.Annotated) != 1 || classifier.Annotated[0] != sid {
+		t.Fatalf("classifier.Annotated = %v, want [%s]", classifier.Annotated, sid)
+	}
+
+	stageCounts := map[ingest.Stage]int{}
+	for _, stage := range profiler.Snapshot().Stages {
+		stageCounts[stage.Stage]++
+	}
+	if stageCounts[ingest.StageCompute] != 1 {
+		t.Fatalf("profile COMPUTE rows = %d, want 1", stageCounts[ingest.StageCompute])
+	}
+	if stageCounts[ingest.StageAnnotate] != 1 {
+		t.Fatalf("profile ANNOTATE rows = %d, want 1", stageCounts[ingest.StageAnnotate])
+	}
+}
+
 func TestPipeline_NilOptionalDeps_SkipsNewStages(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()

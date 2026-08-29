@@ -21,6 +21,9 @@ import (
 //go:embed testdata/index_parallel.yaml
 var indexParallelYAML []byte
 
+//go:embed testdata/warm-path/stream-compute-annotate.yaml
+var streamComputeAnnotateYAML []byte
+
 type indexParallelFixture struct {
 	RequiredSessions []string               `yaml:"required_sessions"`
 	Sessions         []indexParallelSession `yaml:"sessions"`
@@ -56,7 +59,7 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	}()
 	indexDone := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test")
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil)
 		close(indexDone)
 	}()
 
@@ -113,7 +116,7 @@ func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T)
 	indexDoneCh := make(chan DrainBatch, 1)
 	done := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test")
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil)
 		close(done)
 	}()
 
@@ -154,7 +157,7 @@ func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
 	indexDoneCh := make(chan DrainBatch, 1)
 	done := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "test")
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "test", nil)
 		close(done)
 	}()
 
@@ -212,6 +215,187 @@ func TestIndexBatch_UsesStoreBatchWriterAndProfilesWriteShape(t *testing.T) {
 	}
 	if batch.WriteStats.HashMatches != len(metas) || batch.WriteStats.AnnotationTargetsCarried != len(metas)*2 {
 		t.Fatalf("profile write stats = %+v, want hash matches %d and annotation targets carried %d", batch.WriteStats, len(metas), len(metas)*2)
+	}
+}
+
+func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
+	fixture := loadStreamComputeAnnotateFixture(t)
+	metas, entries := buildIndexParallelMetas(t, fixture)
+	releaseSecondWrite := make(chan struct{})
+	store := &blockingSecondIndexStore{
+		serialIndexStore: serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)},
+		blocked:          metas[1].session.SessionID,
+		release:          releaseSecondWrite,
+	}
+	analyzer := &recordingStreamAnalyzer{computeStarted: make(chan SessionID, len(metas)), computeDone: make(chan SessionID, len(metas))}
+	classifier := &recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}
+	pipeline := &Pipeline{
+		config:       PipelineConfig{Parallelism: 1},
+		indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}},
+		metricsStore: store,
+		analyzer:     analyzer,
+		classifier:   classifier,
+	}
+	progress := NewProgressState()
+	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
+	indexCh := make(chan streamedIndexWork, len(metas))
+	indexDoneCh := make(chan DrainBatch, 1)
+	downstreamCh := make(chan indexedMeta, len(metas))
+	downstreamDone := make(chan streamedDownstreamResult, 1)
+	go func() {
+		downstreamDone <- pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test")
+	}()
+	indexDone := make(chan struct{})
+	go func() {
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", downstreamCh)
+		close(downstreamCh)
+		close(indexDone)
+	}()
+
+	completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
+	indexCh <- streamedIndexWork{meta: metas[0], batch: completion}
+
+	select {
+	case got := <-analyzer.computeStarted:
+		if got != metas[0].session.SessionID {
+			t.Fatalf("first streamed COMPUTE session = %s, want %s", got, metas[0].session.SessionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("COMPUTE did not start after the first session finished INDEX")
+	}
+	select {
+	case <-indexDone:
+		t.Fatal("INDEX completed all sessions before streamed COMPUTE started")
+	default:
+	}
+	select {
+	case got := <-classifier.annotated:
+		if got != metas[0].session.SessionID {
+			t.Fatalf("first streamed ANNOTATE session = %s, want %s", got, metas[0].session.SessionID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ANNOTATE did not start after COMPUTE finished for the first indexed session")
+	}
+
+	for _, im := range metas[1:] {
+		indexCh <- streamedIndexWork{meta: im, batch: completion}
+	}
+	close(indexCh)
+	close(releaseSecondWrite)
+	select {
+	case <-indexDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("indexLoop did not finish after blocked write released")
+	}
+	select {
+	case got := <-downstreamDone:
+		if got.ComputeDone != len(metas) || got.AnnotateDone != len(metas) || got.Computed != len(metas) {
+			t.Fatalf("downstream result = %+v, want all %d sessions computed and annotated", got, len(metas))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamed downstream worker did not finish")
+	}
+	if got := progress.Snapshot()[StageCompute].Done; got != len(metas) {
+		t.Fatalf("COMPUTE progress done = %d, want %d", got, len(metas))
+	}
+	if got := progress.Snapshot()[StageAnnotate].Done; got != len(metas) {
+		t.Fatalf("ANNOTATE progress done = %d, want %d", got, len(metas))
+	}
+}
+
+func TestStreamedDownstream_StopsSafelyAfterCancellation(t *testing.T) {
+	fixture := loadStreamComputeAnnotateFixture(t)
+	metas, _ := buildIndexParallelMetas(t, fixture)
+	ctx, cancel := context.WithCancel(context.Background())
+	analyzer := &cancelingStreamAnalyzer{cancel: cancel, started: make(chan SessionID, len(metas))}
+	classifier := &recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}
+	pipeline := &Pipeline{
+		config:     PipelineConfig{Parallelism: 1},
+		analyzer:   analyzer,
+		classifier: classifier,
+	}
+	progress := NewProgressState()
+	downstreamCh := make(chan indexedMeta, len(metas))
+	downstreamCh <- indexedMeta{session: metas[0].session, startMs: metas[0].startMs, indexed: true}
+	close(downstreamCh)
+
+	result := pipeline.runStreamedDownstream(ctx, downstreamCh, progress, len(metas), "test")
+	if result.ComputeDone != 1 {
+		t.Fatalf("computed work after cancellation = %d, want 1", result.ComputeDone)
+	}
+	if result.AnnotateDone != 0 {
+		t.Fatalf("annotated work after cancellation = %d, want 0", result.AnnotateDone)
+	}
+	if len(analyzer.started) != 1 {
+		t.Fatalf("started compute sessions after cancellation = %d, want 1", len(analyzer.started))
+	}
+}
+
+func TestStreamedDownstream_ComputeErrorStillAnnotatesIndexedSessions(t *testing.T) {
+	fixture := loadStreamComputeAnnotateFixture(t)
+	metas, _ := buildIndexParallelMetas(t, fixture)
+	analyzer := &erroringStreamAnalyzer{err: fmt.Errorf("compute failed")}
+	classifier := &recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}
+	pipeline := &Pipeline{
+		config:     PipelineConfig{Parallelism: 1},
+		analyzer:   analyzer,
+		classifier: classifier,
+	}
+	progress := NewProgressState()
+	downstreamCh := make(chan indexedMeta, len(metas))
+	for _, im := range metas {
+		downstreamCh <- indexedMeta{session: im.session, startMs: im.startMs, indexed: true}
+	}
+	close(downstreamCh)
+
+	result := pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test")
+	if result.Computed != 0 {
+		t.Fatalf("computed count after compute error = %d, want 0", result.Computed)
+	}
+	if result.ComputeDone != len(metas) {
+		t.Fatalf("compute progress after compute error = %d, want %d", result.ComputeDone, len(metas))
+	}
+	if result.AnnotateDone != len(metas) {
+		t.Fatalf("annotate progress after compute error = %d, want %d", result.AnnotateDone, len(metas))
+	}
+	for _, im := range metas {
+		select {
+		case got := <-classifier.annotated:
+			if got != im.session.SessionID {
+				t.Fatalf("annotated session = %s, want %s", got, im.session.SessionID)
+			}
+		default:
+			t.Fatalf("missing annotation call for %s", im.session.SessionID)
+		}
+	}
+}
+
+func TestStreamedDownstream_AnnotateErrorAdvancesBestEffortProgress(t *testing.T) {
+	fixture := loadStreamComputeAnnotateFixture(t)
+	metas, _ := buildIndexParallelMetas(t, fixture)
+	analyzer := &recordingStreamAnalyzer{computeStarted: make(chan SessionID, len(metas)), computeDone: make(chan SessionID, len(metas))}
+	classifier := &erroringStreamClassifier{recordingStreamClassifier: recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}, err: fmt.Errorf("annotate failed")}
+	pipeline := &Pipeline{
+		config:     PipelineConfig{Parallelism: 1},
+		analyzer:   analyzer,
+		classifier: classifier,
+	}
+	progress := NewProgressState()
+	downstreamCh := make(chan indexedMeta, len(metas))
+	for _, im := range metas {
+		downstreamCh <- indexedMeta{session: im.session, startMs: im.startMs, indexed: true}
+	}
+	close(downstreamCh)
+
+	result := pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test")
+	if result.Computed != len(metas) || result.ComputeDone != len(metas) {
+		t.Fatalf("compute result after annotate error = %+v, want %d computed", result, len(metas))
+	}
+	if result.AnnotateDone != len(metas) {
+		t.Fatalf("annotate progress after annotate error = %d, want %d", result.AnnotateDone, len(metas))
+	}
+	if got := progress.Snapshot()[StageAnnotate].Done; got != len(metas) {
+		t.Fatalf("ANNOTATE progress snapshot = %d, want %d", got, len(metas))
 	}
 }
 
@@ -282,6 +466,82 @@ type serialIndexStore struct {
 	wrote      chan SessionID
 	active     atomic.Int64
 	maxActive  atomic.Int64
+}
+
+type blockingSecondIndexStore struct {
+	serialIndexStore
+	blocked SessionID
+	release <-chan struct{}
+}
+
+func (store *blockingSecondIndexStore) IndexSessionEntries(ctx context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
+	if sessionID == store.blocked {
+		select {
+		case <-store.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return store.serialIndexStore.IndexSessionEntries(ctx, sessionID, entries)
+}
+
+type recordingStreamAnalyzer struct {
+	computeStarted chan SessionID
+	computeDone    chan SessionID
+}
+
+type cancelingStreamAnalyzer struct {
+	cancel  context.CancelFunc
+	started chan SessionID
+}
+
+type erroringStreamAnalyzer struct {
+	err error
+}
+
+func (a *erroringStreamAnalyzer) ComputeMetrics(context.Context, []SessionID) (int, error) {
+	return 0, a.err
+}
+
+func (*erroringStreamAnalyzer) ComputeInsights(context.Context, []string) error { return nil }
+
+func (a *cancelingStreamAnalyzer) ComputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error) {
+	for _, sid := range sessionIDs {
+		a.started <- sid
+	}
+	a.cancel()
+	return 0, ctx.Err()
+}
+
+func (*cancelingStreamAnalyzer) ComputeInsights(context.Context, []string) error { return nil }
+
+func (a *recordingStreamAnalyzer) ComputeMetrics(_ context.Context, sessionIDs []SessionID) (int, error) {
+	for _, sid := range sessionIDs {
+		a.computeStarted <- sid
+		a.computeDone <- sid
+	}
+	return len(sessionIDs), nil
+}
+
+func (*recordingStreamAnalyzer) ComputeInsights(context.Context, []string) error { return nil }
+
+type recordingStreamClassifier struct {
+	annotated chan SessionID
+}
+
+func (c *recordingStreamClassifier) Annotate(_ context.Context, sessionID SessionID) error {
+	c.annotated <- sessionID
+	return nil
+}
+
+type erroringStreamClassifier struct {
+	recordingStreamClassifier
+	err error
+}
+
+func (c *erroringStreamClassifier) Annotate(_ context.Context, sessionID SessionID) error {
+	c.annotated <- sessionID
+	return c.err
 }
 
 func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
@@ -415,29 +675,39 @@ func indexWorkerResult(im indexedMeta) workerResult {
 
 func loadIndexParallelFixture(t *testing.T) indexParallelFixture {
 	t.Helper()
+	return decodeIndexParallelFixture(t, indexParallelYAML, "index parallel fixture")
+}
+
+func loadStreamComputeAnnotateFixture(t *testing.T) indexParallelFixture {
+	t.Helper()
+	return decodeIndexParallelFixture(t, streamComputeAnnotateYAML, "stream compute annotate fixture")
+}
+
+func decodeIndexParallelFixture(t *testing.T, data []byte, label string) indexParallelFixture {
+	t.Helper()
 	var fixture indexParallelFixture
-	decoder := yaml.NewDecoder(bytes.NewReader(indexParallelYAML))
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixture); err != nil {
-		t.Fatalf("decode index parallel fixture: %v", err)
+		t.Fatalf("decode %s: %v", label, err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
 			err = fmt.Errorf("found another YAML document")
 		}
-		t.Fatalf("index parallel fixture must contain exactly one document: %v", err)
+		t.Fatalf("%s must contain exactly one document: %v", label, err)
 	}
 	present := make(map[string]bool, len(fixture.Sessions))
 	for _, session := range fixture.Sessions {
 		if strings.TrimSpace(session.Name) == "" {
-			t.Fatal("index parallel fixture has an unnamed session")
+			t.Fatalf("%s has an unnamed session", label)
 		}
 		present[session.Name] = true
 	}
 	for _, required := range fixture.RequiredSessions {
 		if !present[required] {
-			t.Fatalf("index parallel fixture is missing required session %q", required)
+			t.Fatalf("%s is missing required session %q", label, required)
 		}
 	}
 	return fixture
@@ -468,7 +738,7 @@ func BenchmarkIndexLoopParallelParse(b *testing.B) {
 					indexCh <- streamedIndexWork{meta: im, batch: completion}
 				}
 				close(indexCh)
-				pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "benchmark")
+				pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "benchmark", nil)
 			}
 		})
 	}
