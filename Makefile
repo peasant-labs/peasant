@@ -31,7 +31,7 @@ all: build
 web:
 	@cd web && if ! command -v pnpm >/dev/null 2>&1; then \
 		echo 'ERROR [make web] pnpm is not on PATH. web/ is pnpm-only (web/pnpm-lock.yaml is the single lockfile;'; \
-		echo '  no npm build path is supported). Fix: run "npm install -g pnpm@10.28.0" (the'; \
+		echo '  no npm build path is supported). Fix: run "npm install -g pnpm@11.24.0" (the'; \
 		echo '  version pinned by web/package.json packageManager), or "npm install -g corepack && corepack enable".'; \
 		exit 1; \
 	fi
