@@ -392,15 +392,22 @@ type openCodeSemanticPart struct {
 }
 
 type openCodeIndexPart struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Name    string          `json:"name"`
-	Tool    string          `json:"tool"`
-	Text    string          `json:"text"`
-	Input   json.RawMessage `json:"input"`
-	Content json.RawMessage `json:"content"`
-	Output  json.RawMessage `json:"output"`
-	Time    struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Name string `json:"name"`
+	Tool string `json:"tool"`
+	Text string `json:"text"`
+	// Synthetic marks a part the harness itself wrote into the transcript
+	// rather than a part a person typed or a model produced. OpenCode's task
+	// tool sets it on the text part it injects into the parent session when a
+	// background task finishes, so the flag is the only honest signal that the
+	// message is machine-authored. Reading it keeps the injected result out of
+	// the user's own turns.
+	Synthetic bool            `json:"synthetic"`
+	Input     json.RawMessage `json:"input"`
+	Content   json.RawMessage `json:"content"`
+	Output    json.RawMessage `json:"output"`
+	Time      struct {
 		Created int64 `json:"created"`
 		Start   int64 `json:"start"`
 	} `json:"time"`
@@ -767,6 +774,13 @@ func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 			// A tolerated unknown part is an inert note, so it never turns its
 			// message into a tool or skill entry.
 			continue
+		}
+		if part.Data.Synthetic {
+			// A synthetic part is harness-authored. It reclassifies its message
+			// the same way a compaction, subtask, or agent part does, whatever
+			// role the stored message carries: a synthetic part on an assistant
+			// message reclassifies that message to a system entry too.
+			result.isSystemEntry = true
 		}
 		switch part.Data.Type {
 		case "compaction", "subtask", "agent":
@@ -1139,9 +1153,10 @@ func (idx *OpenCodeIndexer) countParts(storageRoot, msgID string) int {
 // It is produced by inspectParts and consumed in IndexTranscript to reclassify
 // the parent message entry.
 type partInspection struct {
-	// isSystemEntry is true if any part has a structural system type:
-	// "compaction", "subtask", or "agent". These reclassify the parent
-	// message to role=system, entry_type=system.
+	// isSystemEntry is true if any part has a structural system type
+	// ("compaction", "subtask", or "agent") or carries the harness's own
+	// synthetic marker. These reclassify the parent message to role=system,
+	// entry_type=system.
 	isSystemEntry bool
 
 	// skillName is non-empty if a part has type="tool" and tool="skill".

@@ -39,6 +39,7 @@ type openCodeToolTurnRenderingCase struct {
 	Parts                []string                  `yaml:"parts"`
 	ContentRenderedOnce  string                    `yaml:"content_rendered_once"`
 	WantMessageEntryType string                    `yaml:"want_message_entry_type"`
+	WantMessageRole      string                    `yaml:"want_message_role"`
 	WantTurns            []openCodeTurnExpectation `yaml:"want_turns"`
 }
 
@@ -64,7 +65,7 @@ func loadOpenCodeToolTurnRenderingDoc(t *testing.T) openCodeToolTurnRenderingDoc
 	}
 	present := make(map[string]struct{}, len(doc.Cases))
 	for _, testCase := range doc.Cases {
-		if testCase.Name == "" || testCase.Role == "" || testCase.WantMessageEntryType == "" || len(testCase.Parts) == 0 || len(testCase.WantTurns) == 0 {
+		if testCase.Name == "" || testCase.Role == "" || testCase.WantMessageEntryType == "" || testCase.WantMessageRole == "" || len(testCase.Parts) == 0 || len(testCase.WantTurns) == 0 {
 			t.Fatalf("tool-turn rendering fixture has an incomplete case: %+v", testCase)
 		}
 		for _, part := range testCase.Parts {
@@ -137,7 +138,9 @@ func managedProjectionWithParts(t *testing.T, sessionID, role string, parts []st
 // duplicate text-part drop makes a-trailing-assistant-text-part-renders-once
 // fail with the report on two turns. Counting "reasoning" as a tool part in
 // inspectOpenCodeSemanticParts makes a-reasoning-part-does-not-make-a-tool-turn
-// fail with a tool_use turn.
+// fail with a tool_use turn. Dropping the Synthetic read from
+// inspectOpenCodeSemanticParts makes the synthetic-task-result cases fail with
+// the injected result still standing as a user turn.
 func TestOpenCodeToolTurnRendering(t *testing.T) {
 	t.Parallel()
 	doc := loadOpenCodeToolTurnRenderingDoc(t)
@@ -169,6 +172,9 @@ func TestOpenCodeToolTurnRendering(t *testing.T) {
 			}
 			if string(entries[0].EntryType) != testCase.WantMessageEntryType {
 				t.Errorf("message entry type = %q, want %q", entries[0].EntryType, testCase.WantMessageEntryType)
+			}
+			if string(entries[0].Role) != testCase.WantMessageRole {
+				t.Errorf("message role = %q, want %q", entries[0].Role, testCase.WantMessageRole)
 			}
 			turns := transcript.EntriesToTurns(entries)
 			if len(turns) != len(testCase.WantTurns) {
