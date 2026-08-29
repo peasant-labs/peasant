@@ -7,6 +7,8 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.5.0-rc1] - 2026-08-29
+
 ### Changed
 - Push now sends the repository label (`host:owner/repo`, derived from the
   recorded git remote) and the git remote URL by default; the project path is
@@ -16,8 +18,38 @@ Release, which holds the signed artifacts and checksums.
   `projectPath`, `projectName`) are now tri-state: an absent key defaults on,
   and an explicit `true` or `false` is kept exactly as written. `gitBranch` and
   `hostSlug` remain plain booleans defaulting off. `project.hash` is unaffected
-  — it was, and remains, always sent. The push wizard's consent screen and the
-  kickstart privacy guide share one sentence describing this (peasant#224).
+  and remains always sent. The push wizard's consent screen and the kickstart
+  privacy guide share one sentence describing this (#224).
+- The web transcript viewer imports the shared transcript graph and helper
+  components from fairtrade 0.0.18, so Peasant no longer keeps a separate graph
+  engine path for transcript rendering (#228).
+
+### Fixed
+- Claude Code user entries marked `isMeta` are now treated as harness-injected
+  turns during ingest, so they do not become user-visible transcript prompts
+  (#217).
+- Discovery lists hide sessions that have metadata but are not indexed yet. A
+  direct session link still opens after the session is indexed (#231).
+
+### Performance
+- `peasant harvest index --all` parses INDEX work in parallel, streams eligible
+  sessions from `drainLoop` into INDEX workers, keeps SQLite writes serialized,
+  and avoids the transient SQLite lock storm seen on large copied corpora (#230,
+  #250).
+- Warm harvest runs skip unchanged `session_entries` rewrites with
+  `sessions.session_entries_hash`, skip unchanged classifier annotation work with
+  `annotation_run_state`, and batch classifier annotation writes (#250).
+- `--profile-index` reports INDEX queue shape, write causes, stage timings, and
+  annotation detail, and `docs/benchmarks/harvest-optimizations.md` records the
+  copied-corpus benchmark method and results (#250).
+
+### Database
+- Store migrations V47 (`sessions.session_entries_hash`) and V48
+  (`annotation_run_state`) support warm INDEX and annotation skip state (#250).
+
+### Dependencies
+- Contract pins: schema `v0.1.2` (Local API 0.9.0, Types 0.13.0), redact
+  `v0.1.5`, fairtrade `0.0.18`.
 
 ## [0.4.0] - 2026-08-26
 
@@ -137,6 +169,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.5.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc1
 [0.4.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.4.0
 [0.3.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.3.0
 [0.2.1]: https://github.com/peasant-labs/peasant/releases/tag/v0.2.1
