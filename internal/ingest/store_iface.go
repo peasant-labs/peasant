@@ -763,12 +763,11 @@ type AnnotationQueryStore interface {
 	// that the village can accept; push rejects unknown or user-defined type_ids.
 	ListSystemAnnotations(ctx context.Context) ([]AnnotationPushRow, error)
 
-	// ListSupersededAnnotations returns all SUPERSEDED (superseded_by IS NOT NULL)
-	// system-origin annotations. It is the retraction source:
-	// ListSystemAnnotations filters superseded_by IS NULL, so it cannot serve this.
-	// Each returned row carries the SAME content-bearing fields the annotation was
-	// originally pushed with, so recomputing its content hash yields the hash the
-	// village stored — letting the client retract exactly what it locally retired.
+	// ListSupersededAnnotations returns system-origin retraction candidates.
+	// Rows come from two independent sources: annotations superseded by another
+	// annotation, and active classifier annotations whose repaired entry target
+	// became superseded. Target-loss rows rely on the persisted content hash so
+	// the client can retract the exact annotation Village already stored.
 	ListSupersededAnnotations(ctx context.Context) ([]AnnotationPushRow, error)
 
 	// ListUnresolvedAnnotationTargetAnchors returns active entry annotations whose

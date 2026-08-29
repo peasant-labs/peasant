@@ -262,11 +262,11 @@ ORDER BY v.created_at DESC`
   AND v.superseded_by IS NULL
   AND COALESCE(ata.state, 'resolved') = 'resolved'` + annotationPushRowQueryTail
 
-	// sqlListSupersededAnnotations is sqlListSystemAnnotations with the supersession
-	// predicate INVERTED: it returns SUPERSEDED system-origin annotations (the rows
-	// ListSystemAnnotations excludes). It is the retraction source:
-	// each superseded row still carries its original content-bearing fields, so the
-	// caller recomputes the SAME content hash it was pushed with.
+	// sqlListSupersededAnnotations returns system-origin retraction candidates.
+	// Rows come from annotations superseded by another annotation, or active
+	// classifier annotations whose repaired entry target became superseded. The
+	// target-loss path relies on the persisted content hash to retract the exact
+	// annotation Village already stored.
 	sqlListSupersededAnnotations = annotationPushRowBase + `
   AND (v.superseded_by IS NOT NULL OR ata.state = 'superseded')` + annotationPushRowQueryTail
 

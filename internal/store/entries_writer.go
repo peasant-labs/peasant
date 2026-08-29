@@ -356,10 +356,6 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 
 	remappedTargets, err := restoreEntryAnnotationTargets(conn, string(sessionID), carried, entries)
 	if err != nil {
-		var refused *annotationRemapRefusedError
-		if errors.As(err, &refused) {
-			outcome.stats.AnnotationRollbackFailures++
-		}
 		return outcome, err
 	}
 	outcome.stats.AnnotationTargetsRemapped += remappedTargets
@@ -1021,14 +1017,6 @@ type entryTargetAnchor struct {
 	partType       string
 	contentPreview string
 }
-
-type annotationRemapRefusedError struct {
-	err error
-}
-
-func (e *annotationRemapRefusedError) Error() string { return e.err.Error() }
-
-func (e *annotationRemapRefusedError) Unwrap() error { return e.err }
 
 // readEntryAnnotationTargets reads the entry-annotation attachments of one
 // session, so a re-index can put them back.

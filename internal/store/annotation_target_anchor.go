@@ -144,11 +144,3 @@ func (s *Store) ListUnresolvedAnnotationTargetAnchors(ctx context.Context, sessi
 	}
 	return rows, nil
 }
-
-func (s *Store) HasUnresolvedAnnotationTargetAnchors(ctx context.Context, sessionID ingest.SessionID) (bool, error) {
-	rows, err := s.ListUnresolvedAnnotationTargetAnchors(ctx, string(sessionID))
-	if err != nil {
-		return false, err
-	}
-	return len(rows) > 0, nil
-}
