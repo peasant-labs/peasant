@@ -37,6 +37,7 @@ required_cases:
   - a-user-message-with-one-synthetic-annotation-stays-a-user-turn
   - a-message-whose-two-parts-are-both-synthetic-is-a-system-entry
   - a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
+  - a-synthetic-result-beside-an-unrecognized-part-still-reclassifies
 
 cases:
   - name: tool-name-comes-from-the-tool-field
@@ -287,13 +288,15 @@ cases:
         entry_type: text
         content: "You are in plan mode. Do not edit files."
 
-  # The mirror of the case above, with the order reversed. The rule reads every
-  # part, not the first one, so where the person's own part sits in the message
-  # cannot decide whose message it is.
+  # The mirror of the case above, with the order reversed. OpenCode really does
+  # order an annotation ahead of a person's own part: resolving an attachment
+  # emits its synthetic explanation before the parts that follow it. The rule
+  # reads every part, not the first one, so where the person's own part sits in
+  # the message cannot decide whose message it is.
   - name: a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
     role: user
     parts:
-      - '{"id":"prt_lead_reminder","type":"text","synthetic":true,"text":"You are in plan mode. Do not edit files."}'
+      - '{"id":"prt_lead_annotation","type":"text","synthetic":true,"text":"Called the Read tool with the following input: notes.md"}'
       - '{"id":"prt_person_replied","type":"text","text":"start with the auth module please"}'
     content_rendered_once: "start with the auth module please"
     want_message_entry_type: text
@@ -301,7 +304,28 @@ cases:
     want_turns:
       - role: user
         entry_type: text
-        content: "You are in plan mode. Do not edit files."
+        content: "Called the Read tool with the following input: notes.md"
       - role: user
         entry_type: text
         content: "start with the auth module please"
+
+  # A part whose type this indexer does not know is an inert note. It is neither
+  # the person's own words nor a harness marker, so it is excluded from the
+  # every-part rule: it can neither force a reclassification nor block one. A
+  # newer OpenCode part type riding along must not put the injected result back
+  # in the person's turns.
+  - name: a-synthetic-result-beside-an-unrecognized-part-still-reclassifies
+    role: user
+    parts:
+      - '{"id":"prt_unknown_note","type":"a-part-type-this-indexer-does-not-know","text":"an inert note from a newer OpenCode"}'
+      - '{"id":"prt_result_beside_unknown","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"
+      # The unrecognized part keeps rendering as its own inert system note.
+      - role: system
+        entry_type: system
+        content: "an inert note from a newer OpenCode"
