@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func TestUpgradeCommandRegisteredWithUpdateAlias(t *testing.T) {
@@ -30,41 +32,52 @@ func TestUpgradeCommandRegisteredWithUpdateAlias(t *testing.T) {
 	}
 }
 
-func TestUpgradeManagedDpkgPrintsPackageAdviceWithoutNetwork(t *testing.T) {
+func TestUpgradeManagedInstallAdviceFixtures(t *testing.T) {
 	t.Parallel()
-	deps := upgradeDeps{
-		Executable: func() (string, error) { return "/usr/bin/peasant", nil },
-		GOOS:       "linux",
-		GOARCH:     "amd64",
-		CommandOutput: func(_ context.Context, name string, args ...string) ([]byte, error) {
-			if name == "dpkg-query" && strings.Join(args, " ") == "-S /usr/bin/peasant" {
-				return []byte("peasant: /usr/bin/peasant\n"), nil
+	fixture := loadUpgradeFixture(t)
+	requireUpgradeCaseNames(t, fixture.ManagedInstallCases, map[string]struct{}{
+		"dpkg":     {},
+		"rpm":      {},
+		"pacman":   {},
+		"nix":      {},
+		"homebrew": {},
+	})
+	for _, tc := range fixture.ManagedInstallCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			deps := upgradeDeps{
+				Executable: func() (string, error) { return tc.Executable, nil },
+				GOOS:       tc.GOOS,
+				GOARCH:     tc.GOARCH,
+				CommandOutput: func(_ context.Context, name string, args ...string) ([]byte, error) {
+					for _, command := range tc.Commands {
+						if command.Name == name && stringSlicesEqual(command.Args, args) {
+							return []byte(command.Stdout), nil
+						}
+					}
+					return nil, errors.New("not managed by this test command")
+				},
+				HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					t.Fatal("managed install advice must not call the network")
+					return nil, errors.New("unexpected request")
+				})},
+				InstallBinary: func(string, []byte, os.FileMode) error {
+					t.Fatal("managed install advice must not replace the binary")
+					return nil
+				},
 			}
-			return nil, errors.New("not managed by this test command")
-		},
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			t.Fatal("managed install advice must not call the network")
-			return nil, errors.New("unexpected request")
-		})},
-		InstallBinary: func(string, []byte, os.FileMode) error {
-			t.Fatal("managed install advice must not replace the binary")
-			return nil
-		},
-	}
 
-	output, err := executeUpgradeCommandForTest(t, deps, "--version", "0.5.0-rc2")
-	if err != nil {
-		t.Fatalf("upgrade command returned error: %v\noutput:\n%s", err, output)
-	}
-	for _, want := range []string{
-		"managed by dpkg package \"peasant\"",
-		"No files were changed",
-		"peasant_0.5.0-rc2_linux_amd64.deb",
-		"sudo apt install",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("managed advice output missing %q:\n%s", want, output)
-		}
+			output, err := executeUpgradeCommandForTest(t, deps, tc.Args...)
+			if err != nil {
+				t.Fatalf("upgrade command returned error: %v\noutput:\n%s", err, output)
+			}
+			for _, want := range tc.OutputContains {
+				if !strings.Contains(output, want) {
+					t.Fatalf("managed advice output missing %q:\n%s", want, output)
+				}
+			}
+		})
 	}
 }
 
@@ -99,47 +112,40 @@ func TestUpgradeRejectsUnsafeVersionBeforeAdvice(t *testing.T) {
 	}
 }
 
-func TestUpgradeRawDryRunSelectsNewestPrerelease(t *testing.T) {
+func TestUpgradeReleaseSelectionFixtures(t *testing.T) {
 	t.Parallel()
-	server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
-		Releases: []upgradeRelease{
-			newUpgradeTestRelease("v0.5.0-rc2", "peasant_0.5.0-rc2_linux_amd64.tar.gz", "checksums.txt"),
-			newUpgradeTestRelease("v0.4.0", "peasant_0.4.0_linux_amd64.tar.gz", "checksums.txt"),
-		},
+	fixture := loadUpgradeFixture(t)
+	requireUpgradeCaseNames(t, fixture.ReleaseSelectionCases, map[string]struct{}{
+		"stable-default":             {},
+		"stable-prerelease-opt-in":   {},
+		"prerelease-current-default": {},
 	})
-	defer server.Close()
-	deps := upgradeTestDeps(t, server.URL, filepath.Join(t.TempDir(), "peasant"))
+	for _, tc := range fixture.ReleaseSelectionCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
+				Latest:   tc.Latest.release(),
+				Releases: upgradeFixtureReleases(tc.Releases),
+			})
+			defer server.Close()
+			deps := upgradeTestDeps(t, server.URL, filepath.Join(t.TempDir(), "peasant"))
+			var output bytes.Buffer
 
-	output, err := executeUpgradeCommandForTest(t, deps, "--prerelease", "--dry-run")
-	if err != nil {
-		t.Fatalf("upgrade dry-run returned error: %v\noutput:\n%s", err, output)
-	}
-	for _, want := range []string{"target:  v0.5.0-rc2", "asset:   peasant_0.5.0-rc2_linux_amd64.tar.gz", "dry run: no files were changed"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("dry-run output missing %q:\n%s", want, output)
-		}
-	}
-}
-
-func TestUpgradeRawDryRunCurrentPrereleaseSelectsNewestPrereleaseByDefault(t *testing.T) {
-	t.Parallel()
-	server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
-		Latest: newUpgradeTestRelease("v0.4.0", "peasant_0.4.0_linux_amd64.tar.gz", "checksums.txt"),
-		Releases: []upgradeRelease{
-			newUpgradeTestRelease("v0.5.0-rc2", "peasant_0.5.0-rc2_linux_amd64.tar.gz", "checksums.txt"),
-			newUpgradeTestRelease("v0.4.0", "peasant_0.4.0_linux_amd64.tar.gz", "checksums.txt"),
-		},
-	})
-	defer server.Close()
-	deps := upgradeTestDeps(t, server.URL, filepath.Join(t.TempDir(), "peasant"))
-	var output bytes.Buffer
-
-	err := runUpgradeCommand(context.Background(), &output, upgradeOptions{CurrentVersion: "0.5.0-rc1", DryRun: true}, deps)
-	if err != nil {
-		t.Fatalf("upgrade dry-run returned error: %v\noutput:\n%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "target:  v0.5.0-rc2") {
-		t.Fatalf("current prerelease did not select newest prerelease:\n%s", output.String())
+			err := runUpgradeCommand(context.Background(), &output, upgradeOptions{
+				CurrentVersion:    tc.CurrentVersion,
+				IncludePrerelease: tc.IncludePrerelease,
+				DryRun:            tc.DryRun,
+			}, deps)
+			if err != nil {
+				t.Fatalf("upgrade dry-run returned error: %v\noutput:\n%s", err, output.String())
+			}
+			for _, want := range tc.OutputContains {
+				if !strings.Contains(output.String(), want) {
+					t.Fatalf("release-selection output missing %q:\n%s", want, output.String())
+				}
+			}
+		})
 	}
 }
 
@@ -229,6 +235,113 @@ type upgradeReleaseServerConfig struct {
 	Releases []upgradeRelease
 	Tagged   map[string]upgradeRelease
 	Assets   map[string][]byte
+}
+
+type upgradeFixture struct {
+	ManagedInstallCases   []upgradeManagedInstallCase   `yaml:"managed_install_cases"`
+	ReleaseSelectionCases []upgradeReleaseSelectionCase `yaml:"release_selection_cases"`
+}
+
+type upgradeManagedInstallCase struct {
+	Name           string                  `yaml:"name"`
+	Executable     string                  `yaml:"executable"`
+	GOOS           string                  `yaml:"goos"`
+	GOARCH         string                  `yaml:"goarch"`
+	Args           []string                `yaml:"args"`
+	Commands       []upgradeCommandFixture `yaml:"commands"`
+	OutputContains []string                `yaml:"output_contains"`
+}
+
+type upgradeReleaseSelectionCase struct {
+	Name              string                  `yaml:"name"`
+	CurrentVersion    string                  `yaml:"current_version"`
+	IncludePrerelease bool                    `yaml:"include_prerelease"`
+	DryRun            bool                    `yaml:"dry_run"`
+	Latest            upgradeReleaseFixture   `yaml:"latest"`
+	Releases          []upgradeReleaseFixture `yaml:"releases"`
+	OutputContains    []string                `yaml:"output_contains"`
+}
+
+type upgradeReleaseFixture struct {
+	Tag    string   `yaml:"tag"`
+	Draft  bool     `yaml:"draft"`
+	Assets []string `yaml:"assets"`
+}
+
+type upgradeCommandFixture struct {
+	Name   string   `yaml:"name"`
+	Args   []string `yaml:"args"`
+	Stdout string   `yaml:"stdout"`
+}
+
+func loadUpgradeFixture(t *testing.T) upgradeFixture {
+	t.Helper()
+	data, err := os.ReadFile("testdata/upgrade.yaml")
+	if err != nil {
+		t.Fatalf("read upgrade fixture: %v", err)
+	}
+	var fixture upgradeFixture
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatalf("decode upgrade fixture: %v", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			t.Fatal("upgrade fixture must contain exactly one YAML document")
+		}
+		t.Fatalf("decode trailing upgrade fixture document: %v", err)
+	}
+	return fixture
+}
+
+type namedUpgradeCase interface {
+	upgradeCaseName() string
+}
+
+func (c upgradeManagedInstallCase) upgradeCaseName() string   { return c.Name }
+func (c upgradeReleaseSelectionCase) upgradeCaseName() string { return c.Name }
+
+func requireUpgradeCaseNames[T namedUpgradeCase](t *testing.T, cases []T, required map[string]struct{}) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(cases))
+	for _, tc := range cases {
+		seen[tc.upgradeCaseName()] = struct{}{}
+	}
+	for name := range required {
+		if _, ok := seen[name]; !ok {
+			t.Fatalf("upgrade fixture is missing required case %q", name)
+		}
+	}
+}
+
+func (f upgradeReleaseFixture) release() upgradeRelease {
+	release := upgradeRelease{TagName: f.Tag, Draft: f.Draft}
+	for _, asset := range f.Assets {
+		release.Assets = append(release.Assets, upgradeAsset{Name: asset})
+	}
+	return release
+}
+
+func upgradeFixtureReleases(fixtures []upgradeReleaseFixture) []upgradeRelease {
+	releases := make([]upgradeRelease, len(fixtures))
+	for i, fixture := range fixtures {
+		releases[i] = fixture.release()
+	}
+	return releases
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func newUpgradeReleaseServer(t *testing.T, cfg upgradeReleaseServerConfig) *httptest.Server {
