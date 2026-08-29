@@ -296,7 +296,7 @@ cases:
   - name: a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
     role: user
     parts:
-      - '{"id":"prt_lead_annotation","type":"text","synthetic":true,"text":"Called the Read tool with the following input: notes.md"}'
+      - '{"id":"prt_lead_annotation","type":"text","synthetic":true,"text":"Called the Read tool with the following input: {\"filePath\":\"notes.md\"}"}'
       - '{"id":"prt_person_replied","type":"text","text":"start with the auth module please"}'
     content_rendered_once: "start with the auth module please"
     want_message_entry_type: text
@@ -304,7 +304,7 @@ cases:
     want_turns:
       - role: user
         entry_type: text
-        content: "Called the Read tool with the following input: notes.md"
+        content: "Called the Read tool with the following input: {\"filePath\":\"notes.md\"}"
       - role: user
         entry_type: text
         content: "start with the auth module please"
