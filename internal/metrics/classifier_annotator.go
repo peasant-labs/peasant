@@ -167,7 +167,7 @@ func (ca *ClassifierAnnotator) persistResults(ctx context.Context, sessionID ing
 
 func (ca *ClassifierAnnotator) persistResultsBatch(ctx context.Context, sessionID ingest.SessionID, results []*ClassifierResult, stats *ingest.AnnotationProfileStats, batchStore ingest.ClassifierAnnotationBatchStore) bool {
 	writes := make([]ingest.ClassifierAnnotationWrite, 0, len(results))
-	writeTypeIDs := make([]string, 0, len(results))
+	writeProfiles := make([]classifierAnnotationProfileKey, 0, len(results))
 	persistFailed := false
 	for _, r := range results {
 		write, err := ca.classifierAnnotationWrite(ctx, sessionID, r, stats)
@@ -181,19 +181,34 @@ func (ca *ClassifierAnnotator) persistResultsBatch(ctx context.Context, sessionI
 			continue
 		}
 		writes = append(writes, write)
-		writeTypeIDs = append(writeTypeIDs, r.TypeID)
+		writeProfiles = append(writeProfiles, classifierAnnotationProfileKey{
+			typeID:     r.TypeID,
+			value:      r.Value,
+			targetKind: classifierResultTargetKind(r),
+		})
 	}
 	if len(writes) == 0 {
 		return persistFailed
 	}
 	writeStarted := annotationProfileStart(stats)
-	batchResults := batchStore.ApplyClassifierAnnotations(ctx, writes)
+	var batchResults []ingest.ClassifierAnnotationWriteResult
+	if profiled, ok := batchStore.(ingest.ProfiledClassifierAnnotationBatchStore); ok {
+		batchResults = profiled.ApplyClassifierAnnotationsWithProfile(ctx, writes, stats)
+	} else {
+		batchResults = batchStore.ApplyClassifierAnnotations(ctx, writes)
+	}
 	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
 		s.BatchWriteCount++
 		s.BatchWriteTime += time.Since(writeStarted)
 		s.BatchResultCount += len(batchResults)
 	})
 	for i, result := range batchResults {
+		if i < len(writeProfiles) {
+			profile := writeProfiles[i]
+			addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+				s.RecordAnnotationResult(profile.typeID, profile.value, profile.targetKind, result.Dedup, result.Err != nil)
+			})
+		}
 		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
 			addAnnotationDedupDecision(s, result.Dedup)
 			if result.Err != nil {
@@ -203,8 +218,8 @@ func (ca *ClassifierAnnotator) persistResultsBatch(ctx context.Context, sessionI
 		if result.Err != nil {
 			persistFailed = true
 			typeID := ""
-			if i < len(writeTypeIDs) {
-				typeID = writeTypeIDs[i]
+			if i < len(writeProfiles) {
+				typeID = writeProfiles[i].typeID
 			}
 			slog.Warn("ClassifierAnnotator.Annotate: persist batch result",
 				"session_id", sessionID,
@@ -214,6 +229,22 @@ func (ca *ClassifierAnnotator) persistResultsBatch(ctx context.Context, sessionI
 		}
 	}
 	return persistFailed
+}
+
+type classifierAnnotationProfileKey struct {
+	typeID     string
+	value      string
+	targetKind ingest.AnnotationProfileTargetKind
+}
+
+func classifierResultTargetKind(r *ClassifierResult) ingest.AnnotationProfileTargetKind {
+	if r == nil {
+		return ingest.AnnotationProfileTargetUnknown
+	}
+	if r.Target != nil {
+		return ingest.AnnotationProfileTargetEntry
+	}
+	return ingest.AnnotationProfileTargetSession
 }
 
 func addAnnotationTiming(stats *ingest.AnnotationProfileStats, add func(*ingest.AnnotationProfileStats)) {
@@ -416,7 +447,10 @@ func (ca *ClassifierAnnotator) persistResult(
 	}
 
 	dedupResult := ca.decideDedupAction(existing, write.ContentHash)
-	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) { addAnnotationDedupDecision(s, dedupResult) })
+	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+		addAnnotationDedupDecision(s, dedupResult)
+		s.RecordAnnotationResult(r.TypeID, r.Value, classifierResultTargetKind(r), dedupResult, false)
+	})
 
 	switch dedupResult {
 	case ingest.DedupSkip:

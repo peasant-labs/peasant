@@ -603,12 +603,32 @@ func printIndexProfileAnnotationStats(w io.Writer, stats ingest.AnnotationProfil
 	if stats.BatchWriteCount > 0 || stats.BatchResultCount > 0 || stats.BatchErrorCount > 0 {
 		fmt.Fprintf(w, "    batch persistence: %s total; batches=%d results=%d errors=%d\n", stats.BatchWriteTime.Round(time.Millisecond), stats.BatchWriteCount, stats.BatchResultCount, stats.BatchErrorCount)
 	}
+	if stats.HasBatchPersistenceDetail() {
+		fmt.Fprintln(w, "    batch persistence detail:")
+		fmt.Fprintf(w, "      mutex wait: %s total; count=%d\n", stats.BatchMutexWaitTime.Round(time.Millisecond), stats.BatchMutexWaitCount)
+		fmt.Fprintf(w, "      connection checkout: %s total; count=%d\n", stats.BatchConnectionTime.Round(time.Millisecond), stats.BatchConnectionCount)
+		fmt.Fprintf(w, "      savepoint SQL: %s total; count=%d\n", stats.BatchSavepointTime.Round(time.Millisecond), stats.BatchSavepointCount)
+		fmt.Fprintf(w, "      dedup lookup: %s total; count=%d\n", stats.BatchDedupLookupTime.Round(time.Millisecond), stats.BatchDedupLookupCount)
+		fmt.Fprintf(w, "      insert annotation row: %s total; count=%d\n", stats.BatchInsertParentTime.Round(time.Millisecond), stats.BatchInsertParentCount)
+		fmt.Fprintf(w, "      insert target row: %s total; count=%d\n", stats.BatchInsertTargetTime.Round(time.Millisecond), stats.BatchInsertTargetCount)
+		fmt.Fprintf(w, "      update content hash: %s total; count=%d\n", stats.BatchUpdateHashTime.Round(time.Millisecond), stats.BatchUpdateHashCount)
+		fmt.Fprintf(w, "      supersede annotation: %s total; count=%d\n", stats.BatchSupersedeTime.Round(time.Millisecond), stats.BatchSupersedeCount)
+		fmt.Fprintf(w, "      commit: %s total; count=%d\n", stats.BatchCommitTime.Round(time.Millisecond), stats.BatchCommitCount)
+	}
 	fmt.Fprintf(w, "    dedup lookup: %s total; count=%d\n", stats.DedupLookupTime.Round(time.Millisecond), stats.DedupLookupCount)
 	fmt.Fprintf(w, "    create session annotation: %s total; count=%d\n", stats.CreateSessionTime.Round(time.Millisecond), stats.CreateSessionCount)
 	fmt.Fprintf(w, "    create entry annotation: %s total; count=%d\n", stats.CreateEntryTime.Round(time.Millisecond), stats.CreateEntryCount)
 	fmt.Fprintf(w, "    update content hash: %s total; count=%d\n", stats.UpdateContentHashTime.Round(time.Millisecond), stats.UpdateContentHashCount)
 	fmt.Fprintf(w, "    supersede annotation: %s total; count=%d\n", stats.SupersedeTime.Round(time.Millisecond), stats.SupersedeCount)
 	fmt.Fprintf(w, "    dedup decisions: skip=%d create=%d supersede=%d\n", stats.DedupSkipCount, stats.DedupCreateCount, stats.DedupSupersedeCount)
+	if rows := stats.SortedAnnotationResults(); len(rows) > 0 {
+		fmt.Fprintln(w, "    annotation results by type:")
+		for _, row := range rows {
+			total := row.SkipCount + row.CreateCount + row.SupersedeCount
+			fmt.Fprintf(w, "      type=%s value=%s target=%s total=%d skip=%d create=%d supersede=%d errors=%d\n",
+				row.TypeID, row.Value, row.TargetKind, total, row.SkipCount, row.CreateCount, row.SupersedeCount, row.ErrorCount)
+		}
+	}
 }
 
 func printIndexProfileWriteStats(w io.Writer, stats ingest.SessionEntryWriteStats) {

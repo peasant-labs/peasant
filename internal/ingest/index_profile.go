@@ -110,16 +110,34 @@ type AnnotationProfileStats struct {
 	ClassifierRunCount int
 	ClassifierRunTime  time.Duration
 
-	ResultCount        int
-	SessionResultCount int
-	EntryResultCount   int
-	StateSkipCount     int
-	IDCacheHits        int
-	IDCacheMisses      int
-	BatchWriteCount    int
-	BatchWriteTime     time.Duration
-	BatchResultCount   int
-	BatchErrorCount    int
+	ResultCount            int
+	SessionResultCount     int
+	EntryResultCount       int
+	StateSkipCount         int
+	IDCacheHits            int
+	IDCacheMisses          int
+	BatchWriteCount        int
+	BatchWriteTime         time.Duration
+	BatchResultCount       int
+	BatchErrorCount        int
+	BatchMutexWaitCount    int
+	BatchMutexWaitTime     time.Duration
+	BatchConnectionCount   int
+	BatchConnectionTime    time.Duration
+	BatchSavepointCount    int
+	BatchSavepointTime     time.Duration
+	BatchDedupLookupCount  int
+	BatchDedupLookupTime   time.Duration
+	BatchInsertParentCount int
+	BatchInsertParentTime  time.Duration
+	BatchInsertTargetCount int
+	BatchInsertTargetTime  time.Duration
+	BatchUpdateHashCount   int
+	BatchUpdateHashTime    time.Duration
+	BatchSupersedeCount    int
+	BatchSupersedeTime     time.Duration
+	BatchCommitCount       int
+	BatchCommitTime        time.Duration
 
 	DedupLookupCount       int
 	DedupLookupTime        time.Duration
@@ -135,6 +153,32 @@ type AnnotationProfileStats struct {
 	DedupSkipCount      int
 	DedupCreateCount    int
 	DedupSupersedeCount int
+
+	AnnotationResults map[AnnotationProfileBreakdownKey]AnnotationProfileBreakdown
+}
+
+type AnnotationProfileTargetKind string
+
+const (
+	AnnotationProfileTargetUnknown AnnotationProfileTargetKind = "unknown"
+	AnnotationProfileTargetSession AnnotationProfileTargetKind = "session"
+	AnnotationProfileTargetEntry   AnnotationProfileTargetKind = "entry"
+)
+
+type AnnotationProfileBreakdownKey struct {
+	TypeID     string
+	Value      string
+	TargetKind AnnotationProfileTargetKind
+}
+
+type AnnotationProfileBreakdown struct {
+	TypeID         string
+	Value          string
+	TargetKind     AnnotationProfileTargetKind
+	SkipCount      int
+	CreateCount    int
+	SupersedeCount int
+	ErrorCount     int
 }
 
 // Add folds other into s.
@@ -155,6 +199,24 @@ func (s *AnnotationProfileStats) Add(other AnnotationProfileStats) {
 	s.BatchWriteTime += other.BatchWriteTime
 	s.BatchResultCount += other.BatchResultCount
 	s.BatchErrorCount += other.BatchErrorCount
+	s.BatchMutexWaitCount += other.BatchMutexWaitCount
+	s.BatchMutexWaitTime += other.BatchMutexWaitTime
+	s.BatchConnectionCount += other.BatchConnectionCount
+	s.BatchConnectionTime += other.BatchConnectionTime
+	s.BatchSavepointCount += other.BatchSavepointCount
+	s.BatchSavepointTime += other.BatchSavepointTime
+	s.BatchDedupLookupCount += other.BatchDedupLookupCount
+	s.BatchDedupLookupTime += other.BatchDedupLookupTime
+	s.BatchInsertParentCount += other.BatchInsertParentCount
+	s.BatchInsertParentTime += other.BatchInsertParentTime
+	s.BatchInsertTargetCount += other.BatchInsertTargetCount
+	s.BatchInsertTargetTime += other.BatchInsertTargetTime
+	s.BatchUpdateHashCount += other.BatchUpdateHashCount
+	s.BatchUpdateHashTime += other.BatchUpdateHashTime
+	s.BatchSupersedeCount += other.BatchSupersedeCount
+	s.BatchSupersedeTime += other.BatchSupersedeTime
+	s.BatchCommitCount += other.BatchCommitCount
+	s.BatchCommitTime += other.BatchCommitTime
 	s.DedupLookupCount += other.DedupLookupCount
 	s.DedupLookupTime += other.DedupLookupTime
 	s.CreateSessionCount += other.CreateSessionCount
@@ -168,6 +230,22 @@ func (s *AnnotationProfileStats) Add(other AnnotationProfileStats) {
 	s.DedupSkipCount += other.DedupSkipCount
 	s.DedupCreateCount += other.DedupCreateCount
 	s.DedupSupersedeCount += other.DedupSupersedeCount
+	for key, value := range other.AnnotationResults {
+		if s.AnnotationResults == nil {
+			s.AnnotationResults = make(map[AnnotationProfileBreakdownKey]AnnotationProfileBreakdown, len(other.AnnotationResults))
+		}
+		current := s.AnnotationResults[key]
+		if current.TypeID == "" {
+			current.TypeID = value.TypeID
+			current.Value = value.Value
+			current.TargetKind = value.TargetKind
+		}
+		current.SkipCount += value.SkipCount
+		current.CreateCount += value.CreateCount
+		current.SupersedeCount += value.SupersedeCount
+		current.ErrorCount += value.ErrorCount
+		s.AnnotationResults[key] = current
+	}
 }
 
 // Any reports whether any timing or counter is non-zero.
@@ -184,6 +262,7 @@ func (s AnnotationProfileStats) Any() bool {
 		s.BatchWriteCount != 0 ||
 		s.BatchResultCount != 0 ||
 		s.BatchErrorCount != 0 ||
+		s.HasBatchPersistenceDetail() ||
 		s.DedupLookupCount != 0 ||
 		s.CreateSessionCount != 0 ||
 		s.CreateEntryCount != 0 ||
@@ -191,7 +270,74 @@ func (s AnnotationProfileStats) Any() bool {
 		s.SupersedeCount != 0 ||
 		s.DedupSkipCount != 0 ||
 		s.DedupCreateCount != 0 ||
-		s.DedupSupersedeCount != 0
+		s.DedupSupersedeCount != 0 ||
+		len(s.AnnotationResults) != 0
+}
+
+func (s AnnotationProfileStats) HasBatchPersistenceDetail() bool {
+	return s.BatchMutexWaitCount != 0 ||
+		s.BatchConnectionCount != 0 ||
+		s.BatchSavepointCount != 0 ||
+		s.BatchDedupLookupCount != 0 ||
+		s.BatchInsertParentCount != 0 ||
+		s.BatchInsertTargetCount != 0 ||
+		s.BatchUpdateHashCount != 0 ||
+		s.BatchSupersedeCount != 0 ||
+		s.BatchCommitCount != 0
+}
+
+func (s *AnnotationProfileStats) RecordAnnotationResult(typeID string, value string, targetKind AnnotationProfileTargetKind, dedup AnnotationDedupResult, failed bool) {
+	if typeID == "" {
+		typeID = "unknown"
+	}
+	if value == "" {
+		value = "unknown"
+	}
+	if targetKind == "" {
+		targetKind = AnnotationProfileTargetUnknown
+	}
+	key := AnnotationProfileBreakdownKey{TypeID: typeID, Value: value, TargetKind: targetKind}
+	if s.AnnotationResults == nil {
+		s.AnnotationResults = make(map[AnnotationProfileBreakdownKey]AnnotationProfileBreakdown)
+	}
+	row := s.AnnotationResults[key]
+	if row.TypeID == "" {
+		row.TypeID = typeID
+		row.Value = value
+		row.TargetKind = targetKind
+	}
+	switch dedup {
+	case DedupSkip:
+		row.SkipCount++
+	case DedupSupersede:
+		row.SupersedeCount++
+	default:
+		row.CreateCount++
+	}
+	if failed {
+		row.ErrorCount++
+	}
+	s.AnnotationResults[key] = row
+}
+
+func (s AnnotationProfileStats) SortedAnnotationResults() []AnnotationProfileBreakdown {
+	if len(s.AnnotationResults) == 0 {
+		return nil
+	}
+	rows := make([]AnnotationProfileBreakdown, 0, len(s.AnnotationResults))
+	for _, row := range s.AnnotationResults {
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].TypeID != rows[j].TypeID {
+			return rows[i].TypeID < rows[j].TypeID
+		}
+		if rows[i].Value != rows[j].Value {
+			return rows[i].Value < rows[j].Value
+		}
+		return rows[i].TargetKind < rows[j].TargetKind
+	})
+	return rows
 }
 
 // IndexProfileBatch records aggregate work for one INDEX batch.
@@ -279,6 +425,12 @@ func (p *IndexProfiler) Snapshot() IndexProfileSnapshot {
 	sessions := append([]IndexProfileSession(nil), p.sessions...)
 	stages := append([]IndexProfileStage(nil), p.stages...)
 	annotate := p.annotate
+	if len(annotate.AnnotationResults) > 0 {
+		annotate.AnnotationResults = make(map[AnnotationProfileBreakdownKey]AnnotationProfileBreakdown, len(p.annotate.AnnotationResults))
+		for key, value := range p.annotate.AnnotationResults {
+			annotate.AnnotationResults[key] = value
+		}
+	}
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return sessions[i].TotalDuration() > sessions[j].TotalDuration()
 	})

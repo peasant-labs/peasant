@@ -524,6 +524,12 @@ type ClassifierAnnotationBatchStore interface {
 	ApplyClassifierAnnotations(ctx context.Context, writes []ClassifierAnnotationWrite) []ClassifierAnnotationWriteResult
 }
 
+// ProfiledClassifierAnnotationBatchStore adds opt-in timing detail for the
+// classifier batch writer. Normal callers keep using ClassifierAnnotationBatchStore.
+type ProfiledClassifierAnnotationBatchStore interface {
+	ApplyClassifierAnnotationsWithProfile(ctx context.Context, writes []ClassifierAnnotationWrite, stats *AnnotationProfileStats) []ClassifierAnnotationWriteResult
+}
+
 // AnnotationStore abstracts annotation write operations for the pipeline ANNOTATE stage.
 // Defined in ingest (not store) to maintain the DI direction:
 // store implements this interface; the pipeline depends on it.

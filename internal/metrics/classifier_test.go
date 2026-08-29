@@ -111,6 +111,17 @@ func (s *batchAnnotationStore) ApplyClassifierAnnotations(_ context.Context, wri
 	return results
 }
 
+func (s *batchAnnotationStore) ApplyClassifierAnnotationsWithProfile(ctx context.Context, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) []ingest.ClassifierAnnotationWriteResult {
+	results := s.ApplyClassifierAnnotations(ctx, writes)
+	if stats != nil {
+		stats.BatchDedupLookupCount += len(writes)
+		stats.BatchInsertParentCount += len(writes)
+		stats.BatchInsertTargetCount += len(writes)
+		stats.BatchUpdateHashCount += len(writes)
+	}
+	return results
+}
+
 func (s *stubAnnotationStore) GetAnnotatorIDByName(_ context.Context, name string) (string, error) {
 	s.annotatorCalls = append(s.annotatorCalls, name)
 	return s.annotatorIDs[name], nil
@@ -2000,7 +2011,25 @@ func TestClassifierAnnotator_AnnotateWithProfile_RecordsBatchPersistence(t *test
 	if stats.BatchWriteCount != 1 || stats.BatchResultCount != len(as.writes) || stats.DedupCreateCount != len(as.writes) {
 		t.Fatalf("batch profile counters do not match writes %d: %+v", len(as.writes), stats)
 	}
+	if stats.BatchDedupLookupCount != len(as.writes) || stats.BatchInsertParentCount != len(as.writes) || stats.BatchInsertTargetCount != len(as.writes) || stats.BatchUpdateHashCount != len(as.writes) {
+		t.Fatalf("profiled batch store counters do not match writes %d: %+v", len(as.writes), stats)
+	}
 	if stats.DedupLookupCount != 0 || stats.CreateSessionCount != 0 || stats.CreateEntryCount != 0 || stats.UpdateContentHashCount != 0 {
 		t.Fatalf("batch profile double-counted per-result operations: %+v", stats)
+	}
+	breakdownTotal := 0
+	foundSession := false
+	foundEntry := false
+	for _, row := range stats.SortedAnnotationResults() {
+		breakdownTotal += row.SkipCount + row.CreateCount + row.SupersedeCount
+		if row.TargetKind == ingest.AnnotationProfileTargetSession {
+			foundSession = true
+		}
+		if row.TargetKind == ingest.AnnotationProfileTargetEntry {
+			foundEntry = true
+		}
+	}
+	if breakdownTotal != len(as.writes) || !foundSession || !foundEntry {
+		t.Fatalf("annotation result breakdown total=%d session=%t entry=%t, want total=%d and both targets: %+v", breakdownTotal, foundSession, foundEntry, len(as.writes), stats.SortedAnnotationResults())
 	}
 }
