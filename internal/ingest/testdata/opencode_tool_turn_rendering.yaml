@@ -36,6 +36,7 @@ required_cases:
   - a-synthetic-part-on-an-assistant-message-is-a-system-entry
   - a-user-message-with-one-synthetic-annotation-stays-a-user-turn
   - a-message-whose-two-parts-are-both-synthetic-is-a-system-entry
+  - a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
 
 cases:
   - name: tool-name-comes-from-the-tool-field
@@ -285,3 +286,22 @@ cases:
       - role: system
         entry_type: text
         content: "You are in plan mode. Do not edit files."
+
+  # The mirror of the case above, with the order reversed. The rule reads every
+  # part, not the first one, so where the person's own part sits in the message
+  # cannot decide whose message it is.
+  - name: a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
+    role: user
+    parts:
+      - '{"id":"prt_lead_reminder","type":"text","synthetic":true,"text":"You are in plan mode. Do not edit files."}'
+      - '{"id":"prt_person_replied","type":"text","text":"start with the auth module please"}'
+    content_rendered_once: "start with the auth module please"
+    want_message_entry_type: text
+    want_message_role: user
+    want_turns:
+      - role: user
+        entry_type: text
+        content: "You are in plan mode. Do not edit files."
+      - role: user
+        entry_type: text
+        content: "start with the auth module please"
