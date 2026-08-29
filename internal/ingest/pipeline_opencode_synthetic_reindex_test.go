@@ -2,8 +2,6 @@ package ingest_test
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -24,29 +22,18 @@ const openCodeSyntheticTaskText = `<task id="ses_ffe6cce48ffefzK8rzeIauasaI" sta
 
 // writeOpenCodeTaskResultMessage writes the injected message and its one text
 // part into an OpenCode storage tree. synthetic selects whether the stored part
-// carries the harness's own synthetic marker, which is the only difference
-// between a machine-authored injection and a message a person wrote.
+// carries OpenCode's own synthetic marker, which is the only difference between
+// a machine-authored injection and a message a person wrote.
 func writeOpenCodeTaskResultMessage(t *testing.T, fs *testutil.MemFS, sessionID, msgID, partID string, synthetic bool) {
 	t.Helper()
-	const root = "/opencode-store"
-	message := fmt.Sprintf(`{"id":%q,"sessionID":%q,"role":"user","time":{"created":1700000003000}}`, msgID, sessionID)
-	if err := fs.WriteFile(fmt.Sprintf("%s/storage/message/%s/%s.json", root, sessionID, msgID), []byte(message), 0o644); err != nil {
-		t.Fatalf("write the injected message: %v", err)
-	}
-	marker := ""
+	// The message carries no content of its own, so the stored preview comes
+	// from the injected text part and names the entry this test is about.
+	addOpenCodeMessageNoContent(t, fs, sessionID, msgID, string(ingest.RoleUser))
+	part := map[string]any{"text": openCodeSyntheticTaskText}
 	if synthetic {
-		marker = `"synthetic":true,`
+		part["synthetic"] = true
 	}
-	encodedText, err := json.Marshal(openCodeSyntheticTaskText)
-	if err != nil {
-		t.Fatalf("encode the injected text: %v", err)
-	}
-	// The marker is spliced in as raw JSON so the stored bytes are exactly the
-	// shape OpenCode writes.
-	part := []byte(fmt.Sprintf(`{"id":%q,"type":"text",%s"text":%s}`, partID, marker, encodedText))
-	if err := fs.WriteFile(fmt.Sprintf("%s/storage/part/%s/%s.json", root, msgID, partID), part, 0o644); err != nil {
-		t.Fatalf("write the injected text part: %v", err)
-	}
+	addOpenCodePartTyped(t, fs, msgID, partID, "text", part)
 }
 
 // TestPipeline_ReindexReclassifiesAnInjectedOpenCodeTaskResult proves the

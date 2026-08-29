@@ -397,12 +397,13 @@ type openCodeIndexPart struct {
 	Name string `json:"name"`
 	Tool string `json:"tool"`
 	Text string `json:"text"`
-	// Synthetic marks a part the harness itself wrote into the transcript
-	// rather than a part a person typed or a model produced. OpenCode's task
-	// tool sets it on the text part it injects into the parent session when a
-	// background task finishes, so the flag is the only honest signal that the
-	// message is machine-authored. Reading it keeps the injected result out of
-	// the user's own turns.
+	// Synthetic is OpenCode's own marker for a part the harness wrote into the
+	// transcript rather than a part a person typed or a model produced. Its
+	// task tool sets it on the text part it injects into the parent session
+	// when a background task finishes, so the flag is the only honest signal
+	// that the message is machine-authored. Reading it keeps the injected
+	// result out of the user's own turns. It is unrelated to the "synthetic
+	// orphan slot" this indexer builds for a parentless part.
 	Synthetic bool            `json:"synthetic"`
 	Input     json.RawMessage `json:"input"`
 	Content   json.RawMessage `json:"content"`
@@ -769,18 +770,27 @@ func openCodeMessageEntry(sessionID SessionID, index int, message openCodeSemant
 
 func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 	var result partInspection
+	// countedParts and syntheticParts decide the all-synthetic reclassification
+	// below. A tolerated unknown part is an inert note and counts as neither, so
+	// it neither forces nor blocks the reclassification.
+	countedParts := 0
+	syntheticParts := 0
 	for _, part := range parts {
 		if part.UnknownType {
 			// A tolerated unknown part is an inert note, so it never turns its
 			// message into a tool or skill entry.
 			continue
 		}
+		// A message is harness-authored only when EVERY one of its parts is.
+		// OpenCode attaches a synthetic part to a message a person really wrote
+		// whenever it annotates that message: a plan-mode reminder, an attached
+		// file, an MCP resource, an agent mention. Reclassifying on any single
+		// synthetic part would hide the person's own words behind a system
+		// note. OpenCode draws the same line, counting a user message as the
+		// person's own unless every part of it is synthetic.
+		countedParts++
 		if part.Data.Synthetic {
-			// A synthetic part is harness-authored. It reclassifies its message
-			// the same way a compaction, subtask, or agent part does, whatever
-			// role the stored message carries: a synthetic part on an assistant
-			// message reclassifies that message to a system entry too.
-			result.isSystemEntry = true
+			syntheticParts++
 		}
 		switch part.Data.Type {
 		case "compaction", "subtask", "agent":
@@ -815,6 +825,9 @@ func inspectOpenCodeSemanticParts(parts []openCodeSemanticPart) partInspection {
 		default:
 			result.toolPartCount++
 		}
+	}
+	if countedParts > 0 && syntheticParts == countedParts {
+		result.isSystemEntry = true
 	}
 	return result
 }
@@ -1154,9 +1167,11 @@ func (idx *OpenCodeIndexer) countParts(storageRoot, msgID string) int {
 // the parent message entry.
 type partInspection struct {
 	// isSystemEntry is true if any part has a structural system type
-	// ("compaction", "subtask", or "agent") or carries the harness's own
-	// synthetic marker. These reclassify the parent message to role=system,
-	// entry_type=system.
+	// ("compaction", "subtask", or "agent"), or if EVERY part of the message
+	// carries OpenCode's own synthetic marker, which says the harness wrote the
+	// message rather than a person. These reclassify the parent message to
+	// role=system, entry_type=system. A message that mixes a person's own part
+	// with a synthetic annotation stays theirs.
 	isSystemEntry bool
 
 	// skillName is non-empty if a part has type="tool" and tool="skill".

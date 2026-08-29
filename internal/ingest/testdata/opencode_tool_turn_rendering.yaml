@@ -34,6 +34,7 @@ required_cases:
   - a-synthetic-failed-task-result-is-a-system-entry
   - a-real-user-message-about-a-task-stays-a-user-turn
   - a-synthetic-part-on-an-assistant-message-is-a-system-entry
+  - a-user-message-with-one-synthetic-annotation-stays-a-user-turn
 
 cases:
   - name: tool-name-comes-from-the-tool-field
@@ -236,3 +237,28 @@ cases:
       - role: system
         entry_type: system
         content: "harness-authored assistant note"
+
+  # OpenCode attaches a synthetic part to a message a person really wrote
+  # whenever it annotates that message: a plan-mode reminder, an attached file,
+  # an MCP resource, an agent mention. The person's own part is not synthetic,
+  # so the message stays theirs and their words keep rendering as their turn.
+  #
+  # The annotation itself still folds to a turn of its own, which is the
+  # long-standing rendering of a second text part and is not decided here. What
+  # this case fixes in place is that the person's question is not swallowed:
+  # reclassifying the whole message on one synthetic part would have hidden it.
+  - name: a-user-message-with-one-synthetic-annotation-stays-a-user-turn
+    role: user
+    parts:
+      - '{"id":"prt_person_asked","type":"text","text":"can you also check the auth module?"}'
+      - '{"id":"prt_plan_reminder","type":"text","synthetic":true,"text":"You are in plan mode. Do not edit files."}'
+    content_rendered_once: "can you also check the auth module?"
+    want_message_entry_type: text
+    want_message_role: user
+    want_turns:
+      - role: user
+        entry_type: text
+        content: "can you also check the auth module?"
+      - role: user
+        entry_type: text
+        content: "You are in plan mode. Do not edit files."
