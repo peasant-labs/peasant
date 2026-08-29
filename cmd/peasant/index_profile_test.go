@@ -90,6 +90,9 @@ func TestPrintIndexProfileShowsStagesAndWriteCauseCounters(t *testing.T) {
 			DedupCreateCount:       13,
 			DedupSupersedeCount:    14,
 			AnnotationResults: map[ingest.AnnotationProfileBreakdownKey]ingest.AnnotationProfileBreakdown{
+				{TypeID: "metadata.session_scope", Value: "/home/minttea/private/project", TargetKind: ingest.AnnotationProfileTargetSession}: {
+					TypeID: "metadata.session_scope", Value: "/home/minttea/private/project", TargetKind: ingest.AnnotationProfileTargetSession, CreateCount: 1,
+				},
 				{TypeID: "session_outcome", Value: "resolved", TargetKind: ingest.AnnotationProfileTargetSession}: {
 					TypeID: "session_outcome", Value: "resolved", TargetKind: ingest.AnnotationProfileTargetSession, CreateCount: 2,
 				},
@@ -147,11 +150,15 @@ func TestPrintIndexProfileShowsStagesAndWriteCauseCounters(t *testing.T) {
 		"    supersede annotation: 8s total; count=11",
 		"    dedup decisions: skip=12 create=13 supersede=14",
 		"    annotation results by type:",
+		"      type=metadata.session_scope value=<redacted:",
 		"      type=resolution_evidence value=present target=entry total=3 skip=1 create=0 supersede=2 errors=1",
 		"      type=session_outcome value=resolved target=session total=2 skip=0 create=2 supersede=0 errors=0",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("profile output missing %q\noutput:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "/home/minttea/private/project") {
+		t.Fatalf("profile output leaked unsafe annotation value:\n%s", got)
 	}
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -626,9 +628,37 @@ func printIndexProfileAnnotationStats(w io.Writer, stats ingest.AnnotationProfil
 		for _, row := range rows {
 			total := row.SkipCount + row.CreateCount + row.SupersedeCount
 			fmt.Fprintf(w, "      type=%s value=%s target=%s total=%d skip=%d create=%d supersede=%d errors=%d\n",
-				row.TypeID, row.Value, row.TargetKind, total, row.SkipCount, row.CreateCount, row.SupersedeCount, row.ErrorCount)
+				row.TypeID, annotationProfileValue(row.Value), row.TargetKind, total, row.SkipCount, row.CreateCount, row.SupersedeCount, row.ErrorCount)
 		}
 	}
+}
+
+func annotationProfileValue(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	if isSafeAnnotationProfileValue(value) {
+		return value
+	}
+	sum := sha256.Sum256([]byte(value))
+	return "<redacted:" + hex.EncodeToString(sum[:4]) + ">"
+}
+
+func isSafeAnnotationProfileValue(value string) bool {
+	if len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func printIndexProfileWriteStats(w io.Writer, stats ingest.SessionEntryWriteStats) {
