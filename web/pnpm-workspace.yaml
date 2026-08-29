@@ -12,7 +12,7 @@ packages:
 # reports under ERR_PNPM_IGNORED_BUILDS is listed here as `false`, which
 # explicitly IGNORES its build script instead of leaving it unreviewed. Do
 # not set any entry to `true`. This repo's lockfile currently flags:
-#   - esbuild (dev-only, used by the Next.js toolchain)
+#   - esbuild (dev-only, pulled in by vite and vitest)
 #   - sharp (image optimization)
 # Their binaries come from platform-specific optional packages resolved by
 # pnpm at install time, not from the build script, so the app still works
