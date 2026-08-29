@@ -178,6 +178,43 @@ func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
 	}
 }
 
+func TestIndexBatch_UsesStoreBatchWriterAndProfilesWriteShape(t *testing.T) {
+	fixture := loadIndexParallelFixture(t)
+	metas, entries := buildIndexParallelMetas(t, fixture)
+	profiler := &IndexProfiler{}
+	store := &batchIndexStore{entries: make(map[SessionID][]schema.SessionEntry)}
+	pipeline := &Pipeline{
+		config:       PipelineConfig{Parallelism: 1, IndexProfiler: profiler},
+		indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}},
+		metricsStore: store,
+	}
+
+	indexed, logs := pipeline.indexBatch(context.Background(), metas, IndexOutcomeIndexed, "test")
+	if len(indexed) != len(metas) {
+		t.Fatalf("indexed result count = %d, want %d", len(indexed), len(metas))
+	}
+	if len(logs) != len(metas) {
+		t.Fatalf("index log count = %d, want %d", len(logs), len(metas))
+	}
+	if got := store.singleWrites.Load(); got != 0 {
+		t.Fatalf("single-session writes = %d, want 0", got)
+	}
+	if len(store.batchSizes) != 1 || store.batchSizes[0] != len(metas) {
+		t.Fatalf("batch sizes = %v, want one batch of %d", store.batchSizes, len(metas))
+	}
+	snapshot := profiler.Snapshot()
+	if len(snapshot.Batches) != 1 {
+		t.Fatalf("profile batches = %d, want 1", len(snapshot.Batches))
+	}
+	batch := snapshot.Batches[0]
+	if batch.WriteTxs != 1 || batch.WriteSavepoints != len(metas) {
+		t.Fatalf("profile write shape = %d txs, %d savepoints; want 1 tx and %d savepoints", batch.WriteTxs, batch.WriteSavepoints, len(metas))
+	}
+	if batch.WriteStats.HashMatches != len(metas) || batch.WriteStats.AnnotationTargetsCarried != len(metas)*2 {
+		t.Fatalf("profile write stats = %+v, want hash matches %d and annotation targets carried %d", batch.WriteStats, len(metas), len(metas)*2)
+	}
+}
+
 type blockingParallelIndexer struct {
 	entries   map[SessionID][]schema.SessionEntry
 	release   <-chan struct{}
@@ -262,6 +299,41 @@ func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID 
 }
 
 func (*serialIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error { return nil }
+
+type batchIndexStore struct {
+	MetricsStore
+	mu           sync.Mutex
+	entries      map[SessionID][]schema.SessionEntry
+	batchSizes   []int
+	singleWrites atomic.Int64
+}
+
+func (store *batchIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
+	store.singleWrites.Add(1)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.entries[sessionID] = append([]schema.SessionEntry(nil), entries...)
+	return nil
+}
+
+func (store *batchIndexStore) IndexSessionEntryBatch(_ context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.batchSizes = append(store.batchSizes, len(writes))
+	results := make([]SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		store.entries[write.SessionID] = append([]schema.SessionEntry(nil), write.Entries...)
+		results[i] = SessionEntryWriteResult{
+			SessionID: write.SessionID,
+			Written:   true,
+			Stats: SessionEntryWriteStats{
+				HashMatches:              1,
+				AnnotationTargetsCarried: 2,
+			},
+		}
+	}
+	return results
+}
 
 func recordMax(max *atomic.Int64, value int64) {
 	for {

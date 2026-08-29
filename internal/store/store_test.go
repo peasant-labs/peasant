@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -156,7 +157,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	//   seed) are data-only. V40 adds the durable association ledger and V41 adds
 	//   its normalized annotation target table. V43 adds the publication receipt
 	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
-	//   cache. V45 adds the OpenCode change cursor.
+	//   cache. V45 adds the OpenCode change cursor. V48 adds annotation_run_state.
 	var tableCount int
 	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -167,8 +168,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 52 {
-		t.Errorf("expected 52 tables including the OpenCode change cursor, got %d", tableCount)
+	if tableCount != 53 {
+		t.Errorf("expected 53 tables including annotation_run_state, got %d", tableCount)
 	}
 
 	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
@@ -205,16 +206,6 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	}
 
 	// Verify user_version was set by the migration framework.
-	// All 46 migrations run, so user_version = 46. (V35 adds the FTS5 virtual
-	// table + shadow tables; V36 seeds the user.custom_label annotation type;
-	// V37/V38 add the sessions/pulled_transcripts license_id columns; V39 seeds
-	// the quality.turn_outcome/quality.turn_flag annotation types. V40/V41 add
-	// the durable association ledger and its annotation target table; V42 admits
-	// Strike in the closed harness mirrors; V43 adds publication receipts and
-	// attempt diagnostics; V44 adds the Claude discovery evidence cache; V45
-	// adds the OpenCode change cursor; V46 adds
-	// sessions.session_origin/origin_version and widens the evidence cache
-	// with its origin column.)
 	var userVersion int
 	err = sqlitex.ExecuteTransient(conn, `PRAGMA user_version;`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -225,8 +216,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
-	if userVersion != 46 {
-		t.Errorf("expected user_version=46 after all migrations, got %d", userVersion)
+	if userVersion != store.CurrentSchemaVersion() {
+		t.Errorf("expected user_version=%d after all migrations, got %d", store.CurrentSchemaVersion(), userVersion)
 	}
 }
 
@@ -571,6 +562,72 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 	tokOut := queryInt(t, conn, `SELECT output_tokens FROM session_metrics WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
 	if tokOut != 900 {
 		t.Errorf("output_tokens after upsert: expected 900, got %d", tokOut)
+	}
+}
+
+func TestStore_InsertSessions_PreservesSessionEntriesHashOnUpsert(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	const sid = "44444444-4444-4444-4444-444444444445"
+	hash := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	entry := makeStoreEntry(t, sid, hash, "github.com-user-repo", defaults.HarnessClaudeCode, 1700000000000, 1000, 500)
+
+	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
+		t.Fatalf("first InsertSessions: %v", err)
+	}
+
+	conn := takeConn(t, s.PoolForTest())
+	newRowNullHash := queryInt(t, conn, `SELECT COUNT(*) FROM sessions WHERE session_id = ? AND session_entries_hash IS NULL`, sid)
+	if newRowNullHash != 1 {
+		s.PoolForTest().Put(conn)
+		t.Fatalf("new session_entries_hash: expected NULL on initial insert, got non-NULL")
+	}
+
+	const entriesHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_entries_hash = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{entriesHash, sid},
+	}); err != nil {
+		s.PoolForTest().Put(conn)
+		t.Fatalf("seed session_entries_hash: %v", err)
+	}
+	s.PoolForTest().Put(conn)
+
+	entry.Metadata.Stats.TokensIn = 2000
+	entry.Metadata.Stats.TokensOut = 900
+	entry.Metadata.Timestamp.End = 1700000123456
+	entry.Metadata.Source.FilePath = "/test/path/session-updated.jsonl"
+	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
+		t.Fatalf("second InsertSessions: %v", err)
+	}
+
+	conn = takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(conn)
+
+	gotHash := queryText(t, conn, `SELECT COALESCE(session_entries_hash, '') FROM sessions WHERE session_id = ?`, sid)
+	if gotHash != entriesHash {
+		t.Errorf("session_entries_hash after metadata upsert: expected %q, got %q", entriesHash, gotHash)
+	}
+
+	gotEndMs := queryInt(t, conn, `SELECT end_ms FROM sessions WHERE session_id = ?`, sid)
+	if int64(gotEndMs) != entry.Metadata.Timestamp.End {
+		t.Errorf("end_ms after metadata upsert: expected %d, got %d", entry.Metadata.Timestamp.End, gotEndMs)
+	}
+
+	gotSourcePath := queryText(t, conn, `SELECT source_path FROM sessions WHERE session_id = ?`, sid)
+	if gotSourcePath != entry.Metadata.Source.FilePath {
+		t.Errorf("source_path after metadata upsert: expected %q, got %q", entry.Metadata.Source.FilePath, gotSourcePath)
+	}
+
+	tokIn := queryInt(t, conn, `SELECT input_tokens FROM session_metrics WHERE session_id = ?`, sid)
+	if tokIn != 2000 {
+		t.Errorf("input_tokens after upsert: expected 2000, got %d", tokIn)
+	}
+
+	newRowNullHash = queryInt(t, conn, `SELECT COUNT(*) FROM sessions WHERE session_id = ? AND session_entries_hash IS NULL`, sid)
+	if newRowNullHash != 0 {
+		t.Error("session_entries_hash was reset to NULL on metadata upsert")
 	}
 }
 
@@ -2190,12 +2247,21 @@ func TestStore_UpdateIndexState_RoundTrip(t *testing.T) {
 	}
 
 	indexedAtMs := int64(1705276860000)
+	conn := takeConn(t, s.PoolForTest())
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET session_entries_hash = ? WHERE session_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{strings.Repeat("a", 64), sid},
+	}); err != nil {
+		s.PoolForTest().Put(conn)
+		t.Fatalf("seed session_entries_hash before legacy update: %v", err)
+	}
+	s.PoolForTest().Put(conn)
+
 	if err := s.UpdateIndexState(ctx, sessionID, 2, indexedAtMs); err != nil {
 		t.Fatalf("UpdateIndexState: %v", err)
 	}
 
 	// Verify the session row was updated.
-	conn := takeConn(t, s.PoolForTest())
+	conn = takeConn(t, s.PoolForTest())
 	defer s.PoolForTest().Put(conn)
 
 	gotVersion := queryInt(t, conn, `SELECT index_version FROM sessions WHERE session_id = ?`, sid)
@@ -2206,6 +2272,11 @@ func TestStore_UpdateIndexState_RoundTrip(t *testing.T) {
 	gotIndexedAt := queryInt(t, conn, `SELECT indexed_at FROM sessions WHERE session_id = ?`, sid)
 	if int64(gotIndexedAt) != indexedAtMs {
 		t.Errorf("indexed_at: expected %d, got %d", indexedAtMs, gotIndexedAt)
+	}
+
+	gotHash := queryText(t, conn, `SELECT COALESCE(session_entries_hash, '') FROM sessions WHERE session_id = ?`, sid)
+	if gotHash != "" {
+		t.Errorf("legacy UpdateIndexState left session_entries_hash = %q, want cleared", gotHash)
 	}
 }
 

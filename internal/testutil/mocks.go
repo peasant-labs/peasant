@@ -1049,17 +1049,29 @@ func (a *StubAnalyzer) ComputeInsights(_ context.Context, days []string) error {
 // It records every sessionID passed to Annotate for assertion in tests.
 // Err, if non-nil, is returned for every Annotate call.
 type StubSessionClassifier struct {
-	mu        sync.Mutex
-	Annotated []ingest.SessionID
-	Err       error // returned for every Annotate call if non-nil
+	mu               sync.Mutex
+	Annotated        []ingest.SessionID
+	ProfiledCalls    []ingest.SessionID
+	ProfiledProfiler *ingest.IndexProfiler
+	Err              error // returned for every Annotate call if non-nil
 }
 
 var _ ingest.SessionClassifier = (*StubSessionClassifier)(nil)
+var _ ingest.ProfiledSessionClassifier = (*StubSessionClassifier)(nil)
 
 func (s *StubSessionClassifier) Annotate(_ context.Context, sessionID ingest.SessionID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Annotated = append(s.Annotated, sessionID)
+	return s.Err
+}
+
+func (s *StubSessionClassifier) AnnotateWithProfile(_ context.Context, sessionID ingest.SessionID, profiler *ingest.IndexProfiler) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Annotated = append(s.Annotated, sessionID)
+	s.ProfiledCalls = append(s.ProfiledCalls, sessionID)
+	s.ProfiledProfiler = profiler
 	return s.Err
 }
 

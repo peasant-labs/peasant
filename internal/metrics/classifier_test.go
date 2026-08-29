@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
@@ -20,16 +21,36 @@ import (
 // delegate to the embedded nil interface and panic if called.
 type stubMetricsStore struct {
 	ingest.MetricsStore
-	entries []schema.SessionEntry
-	m       *ingest.SessionMetrics
+	entries             []schema.SessionEntry
+	m                   *ingest.SessionMetrics
+	listEntriesCalls    int
+	annotationState     *ingest.AnnotationRunState
+	sessionEntriesHash  string
+	saveAnnotationState *ingest.AnnotationRunState
+	saveAnnotationCalls int
 }
 
 func (s *stubMetricsStore) ListEntries(_ context.Context, _ ingest.SessionID) ([]schema.SessionEntry, error) {
+	s.listEntriesCalls++
 	return s.entries, nil
 }
 
 func (s *stubMetricsStore) GetMetrics(_ context.Context, _ ingest.SessionID) (*ingest.SessionMetrics, error) {
 	return s.m, nil
+}
+
+func (s *stubMetricsStore) GetCurrentSessionEntriesHash(_ context.Context, _ ingest.SessionID) (string, bool, error) {
+	return s.sessionEntriesHash, s.sessionEntriesHash != "", nil
+}
+
+func (s *stubMetricsStore) GetAnnotationRunState(_ context.Context, _ ingest.SessionID) (*ingest.AnnotationRunState, error) {
+	return s.annotationState, nil
+}
+
+func (s *stubMetricsStore) SaveAnnotationRunState(_ context.Context, state ingest.AnnotationRunState) error {
+	s.saveAnnotationCalls++
+	s.saveAnnotationState = &state
+	return nil
 }
 
 // stubAnnotationStore records calls for assertion.
@@ -50,6 +71,23 @@ type stubAnnotationStore struct {
 	superseded [][2]string
 	// contentHashes records (annotationID, hash) pairs for UpdateContentHash calls.
 	contentHashes [][2]string
+}
+
+type batchAnnotationStore struct {
+	*stubAnnotationStore
+	writes []ingest.ClassifierAnnotationWrite
+}
+
+func (s *batchAnnotationStore) ApplyClassifierAnnotations(_ context.Context, writes []ingest.ClassifierAnnotationWrite) []ingest.ClassifierAnnotationWriteResult {
+	s.writes = append(s.writes, writes...)
+	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
+	for i := range writes {
+		results[i] = ingest.ClassifierAnnotationWriteResult{
+			Dedup:        ingest.DedupCreate,
+			AnnotationID: fmt.Sprintf("batch-ann-uuid-%d", i+1),
+		}
+	}
+	return results
 }
 
 func (s *stubAnnotationStore) GetAnnotatorIDByName(_ context.Context, name string) (string, error) {
@@ -138,6 +176,12 @@ func buildMetrics(sid ingest.SessionID, toolCalls, turnCount int) *ingest.Sessio
 			TurnCount: &turnCount,
 		},
 	}
+}
+
+func buildVersionedMetrics(sid ingest.SessionID, computeVersion int) *ingest.SessionMetrics {
+	m := buildMetrics(sid, 3, 4)
+	m.ComputeVersion = &computeVersion
+	return m
 }
 
 // --- ClassifierAnnotator integration tests ---
@@ -721,6 +765,208 @@ func newFullAnnotationStore() *stubAnnotationStore {
 	}
 }
 
+func TestClassifierAnnotator_Annotate_CachesSeededIDs(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	ms := &stubMetricsStore{
+		entries: []schema.SessionEntry{
+			buildEntry(sid, 0, ingest.RoleUser, "please fix this fuck bug"),
+			buildEntry(sid, 1, ingest.RoleAssistant, "done"),
+		},
+		m: buildMetrics(sid, 3, 4),
+	}
+	as := newFullAnnotationStore()
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("first Annotate: %v", err)
+	}
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("second Annotate: %v", err)
+	}
+
+	assertLookupOnce := func(kind, needle string, values []string) {
+		t.Helper()
+		var got int
+		for _, value := range values {
+			if value == needle {
+				got++
+			}
+		}
+		if got != 1 {
+			t.Errorf("expected %s lookup for %q once, got %d calls in %v", kind, needle, got, values)
+		}
+	}
+
+	if got := len(as.annotatorCalls); got != 4 {
+		t.Errorf("expected exactly 4 annotator lookups across two runs, got %d: %v", got, as.annotatorCalls)
+	}
+	if got := len(as.typeCalls); got != 4 {
+		t.Errorf("expected exactly 4 annotation type lookups across two runs, got %d: %v", got, as.typeCalls)
+	}
+	assertLookupOnce("annotator", "outcome-classifier", as.annotatorCalls)
+	assertLookupOnce("annotator", "frustration-classifier", as.annotatorCalls)
+	assertLookupOnce("annotator", "frustration-signal-classifier", as.annotatorCalls)
+	assertLookupOnce("annotator", "resolution-evidence-classifier", as.annotatorCalls)
+	assertLookupOnce("annotation type", testutil.TestTypeIDSessionOutcome, as.typeCalls)
+	assertLookupOnce("annotation type", testutil.TestTypeIDUserFrustration, as.typeCalls)
+	assertLookupOnce("annotation type", testutil.TestTypeIDFrustrationSignal, as.typeCalls)
+	assertLookupOnce("annotation type", testutil.TestTypeIDResolutionEvidence, as.typeCalls)
+}
+
+func TestClassifierAnnotator_Annotate_NoStateRunsAndSavesState(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	ms := &stubMetricsStore{
+		entries:            []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "please fix this bug")},
+		m:                  buildVersionedMetrics(sid, 7),
+		sessionEntriesHash: strings.Repeat("a", 64),
+	}
+	as := newFullAnnotationStore()
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+
+	if ms.listEntriesCalls != 1 {
+		t.Fatalf("ListEntries calls = %d, want 1", ms.listEntriesCalls)
+	}
+	if ms.saveAnnotationCalls != 1 {
+		t.Fatalf("SaveAnnotationRunState calls = %d, want 1", ms.saveAnnotationCalls)
+	}
+	if ms.saveAnnotationState == nil {
+		t.Fatal("SaveAnnotationRunState did not receive state")
+	}
+	if ms.saveAnnotationState.SessionEntriesHash != strings.Repeat("a", 64) {
+		t.Errorf("saved hash = %q, want current hash", ms.saveAnnotationState.SessionEntriesHash)
+	}
+	if ms.saveAnnotationState.ComputeVersion != 7 {
+		t.Errorf("saved compute version = %d, want 7", ms.saveAnnotationState.ComputeVersion)
+	}
+	if ms.saveAnnotationState.ClassifierVersion != metrics.CurrentClassifierAnnotationVersion {
+		t.Errorf("saved classifier version = %d, want %d", ms.saveAnnotationState.ClassifierVersion, metrics.CurrentClassifierAnnotationVersion)
+	}
+}
+
+func TestClassifierAnnotator_Annotate_MatchingStateSkipsWork(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	hash := strings.Repeat("b", 64)
+	ms := &stubMetricsStore{
+		entries:            []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug")},
+		m:                  buildVersionedMetrics(sid, 8),
+		sessionEntriesHash: hash,
+		annotationState: &ingest.AnnotationRunState{
+			SessionID:          sid,
+			SessionEntriesHash: hash,
+			ComputeVersion:     8,
+			ClassifierVersion:  metrics.CurrentClassifierAnnotationVersion,
+			AnnotatedAt:        time.UnixMilli(1700000000000),
+		},
+	}
+	as := newFullAnnotationStore()
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+
+	if ms.listEntriesCalls != 0 {
+		t.Fatalf("ListEntries calls = %d, want 0", ms.listEntriesCalls)
+	}
+	if len(as.created) != 0 || len(as.entryCreated) != 0 || len(as.annotatorCalls) != 0 || len(as.typeCalls) != 0 {
+		t.Fatalf("annotation work ran despite matching state: created=%d entryCreated=%d annotatorCalls=%d typeCalls=%d",
+			len(as.created), len(as.entryCreated), len(as.annotatorCalls), len(as.typeCalls))
+	}
+	if ms.saveAnnotationCalls != 0 {
+		t.Fatalf("SaveAnnotationRunState calls = %d, want 0", ms.saveAnnotationCalls)
+	}
+}
+
+func TestClassifierAnnotator_Annotate_StaleClassifierVersionRuns(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	hash := strings.Repeat("c", 64)
+	ms := &stubMetricsStore{
+		entries:            []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "please fix this bug")},
+		m:                  buildVersionedMetrics(sid, 8),
+		sessionEntriesHash: hash,
+		annotationState: &ingest.AnnotationRunState{
+			SessionID:          sid,
+			SessionEntriesHash: hash,
+			ComputeVersion:     8,
+			ClassifierVersion:  metrics.CurrentClassifierAnnotationVersion - 1,
+			AnnotatedAt:        time.UnixMilli(1700000000000),
+		},
+	}
+	as := newFullAnnotationStore()
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if ms.listEntriesCalls != 1 {
+		t.Fatalf("ListEntries calls = %d, want 1", ms.listEntriesCalls)
+	}
+	if ms.saveAnnotationCalls != 1 {
+		t.Fatalf("SaveAnnotationRunState calls = %d, want 1", ms.saveAnnotationCalls)
+	}
+}
+
+func TestClassifierAnnotator_Annotate_StaleComputeVersionRuns(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	hash := strings.Repeat("d", 64)
+	ms := &stubMetricsStore{
+		entries:            []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "please fix this bug")},
+		m:                  buildVersionedMetrics(sid, 9),
+		sessionEntriesHash: hash,
+		annotationState: &ingest.AnnotationRunState{
+			SessionID:          sid,
+			SessionEntriesHash: hash,
+			ComputeVersion:     8,
+			ClassifierVersion:  metrics.CurrentClassifierAnnotationVersion,
+			AnnotatedAt:        time.UnixMilli(1700000000000),
+		},
+	}
+	as := newFullAnnotationStore()
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if ms.listEntriesCalls != 1 {
+		t.Fatalf("ListEntries calls = %d, want 1", ms.listEntriesCalls)
+	}
+	if ms.saveAnnotationCalls != 1 {
+		t.Fatalf("SaveAnnotationRunState calls = %d, want 1", ms.saveAnnotationCalls)
+	}
+}
+
+func TestClassifierAnnotator_Annotate_PersistFailureDoesNotSaveState(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	ms := &stubMetricsStore{
+		entries:            []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug")},
+		m:                  buildVersionedMetrics(sid, 10),
+		sessionEntriesHash: strings.Repeat("e", 64),
+	}
+	as := newFullAnnotationStore()
+	as.entryCreateErr = map[int]error{0: errors.New("simulated DB error")}
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if ms.listEntriesCalls != 1 {
+		t.Fatalf("ListEntries calls = %d, want 1", ms.listEntriesCalls)
+	}
+	if ms.saveAnnotationCalls != 0 {
+		t.Fatalf("SaveAnnotationRunState calls = %d, want 0", ms.saveAnnotationCalls)
+	}
+}
+
 // --- Entry-level classifier: persistResult dispatch tests ---
 
 // TestPersistResult_TargetNil_CreatesSessionAnnotation verifies that when
@@ -959,6 +1205,32 @@ func TestClassifyFrustrationEntries_DetectsExpletiveAtCorrectIndex(t *testing.T)
 	}
 }
 
+func TestClassifyFrustrationEntries_UsesStoredEntryIndex(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	engine := metrics.NewClassifierEngine()
+
+	entries := []schema.SessionEntry{
+		buildEntry(sid, 8, ingest.RoleUser, "please fix the routing issue"),
+		buildEntry(sid, 21, ingest.RoleAssistant, "I found the bug"),
+		buildEntry(sid, 34, ingest.RoleUser, "fuck this, it is still broken"),
+	}
+	results := engine.Run(context.Background(), sid, entries, nil)
+
+	frustrationSignals := findResults(results, testutil.TestTypeIDFrustrationSignal)
+	if len(frustrationSignals) != 1 {
+		t.Fatalf("expected 1 frustration_signal result, got %d", len(frustrationSignals))
+	}
+
+	r := frustrationSignals[0]
+	if r.Target == nil {
+		t.Fatal("expected non-nil Target for entry-level result")
+	}
+	if r.Target.EntryIndex != 34 {
+		t.Errorf("Target.EntryIndex = %d, want stored entry index 34", r.Target.EntryIndex)
+	}
+}
+
 // TestClassifyFrustrationEntries_MultipleExpletives verifies multiple entries with
 // frustration patterns each produce their own result.
 func TestClassifyFrustrationEntries_MultipleExpletives(t *testing.T) {
@@ -1057,6 +1329,40 @@ func TestClassifyResolutionEntries_MarksResolutionEvidence(t *testing.T) {
 	}
 	if !foundIdx3 {
 		t.Error("expected resolution_evidence result at entry index 3")
+	}
+}
+
+func TestClassifyResolutionEntries_UsesStoredEntryIndex(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	engine := metrics.NewClassifierEngine()
+
+	entries := []schema.SessionEntry{
+		buildEntry(sid, 11, ingest.RoleUser, "fix the routing issue"),
+		buildEntry(sid, 17, ingest.RoleAssistant, "I found the bug"),
+		buildEntry(sid, 42, ingest.RoleAssistant, "All tests pass and the fix is complete"),
+	}
+	results := engine.Run(context.Background(), sid, entries, nil)
+
+	resolutionEvidence := findResults(results, testutil.TestTypeIDResolutionEvidence)
+	if len(resolutionEvidence) == 0 {
+		t.Fatal("expected at least 1 resolution_evidence result")
+	}
+
+	foundStoredIndex := false
+	for _, r := range resolutionEvidence {
+		if r.Target == nil {
+			t.Fatal("expected non-nil Target for entry-level result")
+		}
+		if r.Target.EntryIndex == 42 {
+			foundStoredIndex = true
+		}
+		if r.Target.EntryIndex == 2 {
+			t.Errorf("Target.EntryIndex = %d, want stored entry index 42, not slice offset", r.Target.EntryIndex)
+		}
+	}
+	if !foundStoredIndex {
+		t.Errorf("expected resolution_evidence result at stored entry index 42; got %+v", resolutionEvidence)
 	}
 }
 
@@ -1494,5 +1800,90 @@ func TestAnnotationDedupResult_String(t *testing.T) {
 		if got := tc.d.String(); got != tc.want {
 			t.Errorf("AnnotationDedupResult(%d).String() = %q, want %q", int(tc.d), got, tc.want)
 		}
+	}
+}
+
+func TestClassifierAnnotator_AnnotateWithProfile_RecordsAnnotationWork(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug")}, m: buildMetrics(sid, 5, 4)}
+	as := newFullAnnotationStore()
+	profiler := &ingest.IndexProfiler{}
+
+	ca := metrics.NewClassifierAnnotator(ms, as)
+	if err := ca.AnnotateWithProfile(context.Background(), sid, profiler); err != nil {
+		t.Fatalf("AnnotateWithProfile returned error: %v", err)
+	}
+
+	stats := profiler.Snapshot().Annotation
+	if stats.ListEntriesCount != 1 || stats.GetMetricsCount != 1 || stats.ClassifierRunCount != 1 {
+		t.Fatalf("profile load/run counts = list:%d metrics:%d run:%d, want 1 each", stats.ListEntriesCount, stats.GetMetricsCount, stats.ClassifierRunCount)
+	}
+	if stats.ResultCount == 0 {
+		t.Fatal("ResultCount = 0, want classifier results")
+	}
+	if stats.ResultCount != stats.SessionResultCount+stats.EntryResultCount {
+		t.Fatalf("result target counts do not add up: total=%d session=%d entry=%d", stats.ResultCount, stats.SessionResultCount, stats.EntryResultCount)
+	}
+	if stats.IDCacheMisses != stats.ResultCount || stats.DedupLookupCount != stats.ResultCount || stats.DedupCreateCount != stats.ResultCount || stats.UpdateContentHashCount != stats.ResultCount {
+		t.Fatalf("profile result counters do not match result count %d: %+v", stats.ResultCount, stats)
+	}
+	if stats.CreateSessionCount != len(as.created) || stats.CreateEntryCount != len(as.entryCreated) {
+		t.Fatalf("profile create counts = session:%d entry:%d, want session:%d entry:%d", stats.CreateSessionCount, stats.CreateEntryCount, len(as.created), len(as.entryCreated))
+	}
+}
+
+func TestClassifierAnnotator_Annotate_UsesBatchPersistenceWhenAvailable(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug"), buildEntry(sid, 1, ingest.RoleAssistant, "All tests pass")}, m: buildMetrics(sid, 3, 4)}
+	as := &batchAnnotationStore{stubAnnotationStore: newFullAnnotationStore()}
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.Annotate(context.Background(), sid); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if len(as.writes) == 0 {
+		t.Fatal("expected classifier results to use batch persistence")
+	}
+	if len(as.created) != 0 || len(as.entryCreated) != 0 {
+		t.Fatalf("expected no fallback create calls when batch persistence is available; session=%d entry=%d", len(as.created), len(as.entryCreated))
+	}
+
+	foundEntryWrite := false
+	foundSessionWrite := false
+	for _, write := range as.writes {
+		if write.ContentHash == "" {
+			t.Fatal("batch write had empty content hash")
+		}
+		if write.Create.SessionID != nil {
+			foundSessionWrite = true
+		}
+		if write.Create.EntryTarget != nil && write.Find.EntryIndex != nil {
+			foundEntryWrite = true
+		}
+	}
+	if !foundSessionWrite || !foundEntryWrite {
+		t.Fatalf("batch target coverage = session:%t entry:%t, want both", foundSessionWrite, foundEntryWrite)
+	}
+}
+
+func TestClassifierAnnotator_AnnotateWithProfile_RecordsBatchPersistence(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "fuck this bug")}, m: buildMetrics(sid, 3, 4)}
+	as := &batchAnnotationStore{stubAnnotationStore: newFullAnnotationStore()}
+	profiler := &ingest.IndexProfiler{}
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	if err := ca.AnnotateWithProfile(context.Background(), sid, profiler); err != nil {
+		t.Fatalf("AnnotateWithProfile: %v", err)
+	}
+	stats := profiler.Snapshot().Annotation
+	if stats.BatchWriteCount != 1 || stats.BatchResultCount != len(as.writes) || stats.DedupCreateCount != len(as.writes) {
+		t.Fatalf("batch profile counters do not match writes %d: %+v", len(as.writes), stats)
+	}
+	if stats.DedupLookupCount != 0 || stats.CreateSessionCount != 0 || stats.CreateEntryCount != 0 || stats.UpdateContentHashCount != 0 {
+		t.Fatalf("batch profile double-counted per-result operations: %+v", stats)
 	}
 }

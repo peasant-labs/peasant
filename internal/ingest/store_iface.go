@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"time"
 
 	"github.com/peasant-labs/schema"
 )
@@ -121,6 +122,53 @@ type MetricsStore interface {
 	// Returns ("", "", "", nil) if the session is not found.
 	// Used by reconstructFromSourceInfo as a fallback when peasant-sync metadata is missing.
 	LookupSourceInfo(ctx context.Context, sessionID SessionID) (sourcePath string, sourceFormat SourceFormat, provider string, err error)
+}
+
+// SessionEntryWrite is one session's replacement entry set for the INDEX stage.
+// IndexVersion zero means entries are written without updating the session's
+// index state. Non-zero IndexVersion updates sessions.index_version and
+// sessions.indexed_at inside the same per-session atomic write.
+type SessionEntryWrite struct {
+	SessionID    SessionID
+	Entries      []schema.SessionEntry
+	IndexVersion int
+	IndexedAtMs  int64
+}
+
+// SessionEntryWriteResult reports the outcome for one SessionEntryWrite.
+type SessionEntryWriteResult struct {
+	SessionID SessionID
+	Written   bool // true when the write request completed, including an unchanged-row skip
+	Skipped   bool // true when existing entry projections already matched and no entry rows were replaced
+	Stats     SessionEntryWriteStats
+	Err       error
+}
+
+// SessionEntryBatchStore is an optional MetricsStore capability. A store that
+// implements it can commit multiple session entry replacements in one outer
+// transaction while preserving per-session rollback with savepoints.
+type SessionEntryBatchStore interface {
+	IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult
+}
+
+// AnnotationRunState records the exact inputs used by the last completed
+// classifier annotation pass for one session. If all stored values still match,
+// the ANNOTATE stage can skip loading entries and running classifiers.
+type AnnotationRunState struct {
+	SessionID          SessionID
+	SessionEntriesHash string
+	ComputeVersion     int
+	ClassifierVersion  int
+	AnnotatedAt        time.Time
+}
+
+// AnnotationRunStateStore is an optional metrics-store capability. Stores that
+// implement it let ClassifierAnnotator skip unchanged sessions. Stores that do
+// not implement it keep the older always-run behaviour.
+type AnnotationRunStateStore interface {
+	GetCurrentSessionEntriesHash(ctx context.Context, sessionID SessionID) (hash string, ok bool, err error)
+	GetAnnotationRunState(ctx context.Context, sessionID SessionID) (*AnnotationRunState, error)
+	SaveAnnotationRunState(ctx context.Context, state AnnotationRunState) error
 }
 
 // TranscriptSourceKind is where a harness's ENTRIES come from.
@@ -310,6 +358,15 @@ type SessionClassifier interface {
 	Annotate(ctx context.Context, sessionID SessionID) error
 }
 
+// ProfiledSessionClassifier is an optional extension for classifiers that can
+// report aggregate annotation detail to the index profiler.
+type ProfiledSessionClassifier interface {
+	SessionClassifier
+	// AnnotateWithProfile runs Annotate and records implementation-specific timing
+	// and counters into profiler. A nil profiler must behave like Annotate.
+	AnnotateWithProfile(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) error
+}
+
 // SessionAnnotationParams holds the inputs for creating a session-level annotation.
 // Uses ingest-package types to keep the DI boundary clean: store implements
 // AnnotationStore without creating an import cycle.
@@ -416,6 +473,34 @@ type ExistingAnnotation struct {
 	// ContentHash is the SHA3-256 hash stored on the existing annotation.
 	// Empty string if no content_hash has been computed yet.
 	ContentHash string
+}
+
+// ClassifierAnnotationWrite is one classifier result prepared for persistence.
+// Create holds the annotation body and target. Find holds the logical identity
+// used for de-duplication. ContentHash must be computed from the same fields in
+// Create, before the write reaches the store.
+type ClassifierAnnotationWrite struct {
+	Create      CreateAnnotationParams
+	Find        FindAnnotationParams
+	ContentHash string
+}
+
+// ClassifierAnnotationWriteResult reports the best-effort outcome for one
+// ClassifierAnnotationWrite. Err is scoped to this one write unless every result
+// reports the same setup or commit failure.
+type ClassifierAnnotationWriteResult struct {
+	Dedup                AnnotationDedupResult
+	AnnotationID         string
+	ExistingAnnotationID string
+	Err                  error
+}
+
+// ClassifierAnnotationBatchStore is an optional annotation-store capability.
+// Implementations can persist all classifier annotations for one session in one
+// outer transaction while using per-result savepoints to keep bad results from
+// rolling back good results.
+type ClassifierAnnotationBatchStore interface {
+	ApplyClassifierAnnotations(ctx context.Context, writes []ClassifierAnnotationWrite) []ClassifierAnnotationWriteResult
 }
 
 // AnnotationStore abstracts annotation write operations for the pipeline ANNOTATE stage.

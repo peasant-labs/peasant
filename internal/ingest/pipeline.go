@@ -31,6 +31,8 @@ const (
 	DiffActive                      // Source file modified < staleness threshold ago
 )
 
+const indexWriteBatchLimit = 64
+
 // String returns a human-readable name for the DiffStatus.
 func (s DiffStatus) String() string {
 	switch s {
@@ -383,15 +385,20 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	prog := p.config.Progress
 
 	// Stage 1: DISCOVER
+	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	allSessions, err := p.discover(ctx)
 	if err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
+		p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
 		return nil, fmt.Errorf("pipeline discover: %w", err)
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(allSessions), Total: len(allSessions)})
+	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(allSessions), len(allSessions))
+	prepareProfileStart := time.Now()
 	if p.config.PrepareSessionFilter != nil {
 		if err := p.config.PrepareSessionFilter(ctx, allSessions); err != nil {
+			p.recordIndexProfileStage(StagePrepare, prepareProfileStart, 0, len(allSessions))
 			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
 		}
 	}
@@ -431,13 +438,17 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			}
 		}
 	}
+	p.recordIndexProfileStage(StagePrepare, prepareProfileStart, len(allSessions), len(allSessions))
 
 	// Stage 2: DIFF
+	diffProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(allSessions)})
 	diffResult := p.diff(allSessions)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
+	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(diffResult.Sessions), len(diffResult.Sessions))
 
 	// Stage 3: FILTER + Stage 4a: EXTRACT + WRITE
+	filterProfileStart := time.Now()
 	//
 	// Pre-pass: identify active sessions that are required as parents by
 	// sessions that will be processed (New, Updated). These active parents
@@ -581,6 +592,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			toProcessEntries = append(toProcessEntries, entry)
 		}
 	}
+	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
 
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
 	// denial, and parent-inheritance decisions as a real run. It stops only after
@@ -697,6 +709,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		extractProfileStart := time.Now()
 		runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 			// Process root.
 			wr := p.processSession(ctx, entry)
@@ -726,6 +739,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 		})
 		extractDone := int(extractDoneAtomic.Load())
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: extractDone, Total: toProcess})
+		p.recordIndexProfileStage(StageExtract, extractProfileStart, extractDone, toProcess)
 		workersDone.Store(true)
 	}()
 
@@ -734,10 +748,12 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		dbInsertProfileStart := time.Now()
 		defer close(indexCh) // signal INDEX goroutine to stop when consumer exits
 		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDBInsert, Total: len(toProcessEntries)})
 		drainResults = p.drainLoop(ctx, staging, &workersDone, indexCh, indexDoneCh, errCh, prog, len(toProcessEntries))
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(drainResults), Total: len(toProcessEntries)})
+		p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, len(drainResults), len(toProcessEntries))
 	}()
 
 	// INDEX goroutine: reads streamed metadata from consumer and indexes each session.
@@ -746,7 +762,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		indexProfileStart := time.Now()
 		drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, indexCh, indexDoneCh, prog, IndexOutcomeIndexed, "pipeline")
+		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), len(toProcessEntries))
 	}()
 
 	// Controller: wait for all goroutines to complete.
@@ -1075,23 +1093,58 @@ func (p *Pipeline) indexLoop(
 	profileSessions := []IndexProfileSession(nil)
 	profileBatch := IndexProfileBatch{Source: logPrefix, QueueCapacity: cap(indexCh)}
 	indexDone := 0
-	for result := range parsedCh {
-		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix)
-		if logEntry.SessionID != "" {
-			logEntries = append(logEntries, logEntry)
+	pending := make([]indexParseResult, 0, indexWriteBatchLimit)
+	flushPending := func(results []indexParseResult) {
+		flush := p.flushIndexParseResults(ctx, results, outcome, logPrefix)
+		for i, indexedResult := range flush.indexed {
+			indexed = append(indexed, indexedResult)
+			if flush.logEntries[i].SessionID != "" {
+				logEntries = append(logEntries, flush.logEntries[i])
+			}
+			indexDone++
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: indexDone})
 		}
-		indexed = append(indexed, indexedMeta)
 		if profileEnabled {
-			profileBatch.Sessions++
-			profileBatch.WorkItems++
-			profileBatch.Entries += profileSession.Entries
-			profileBatch.Bytes += profileSession.Bytes
-			profileBatch.ParseDuration += profileSession.ParseDuration
-			profileBatch.WriteDuration += profileSession.WriteDuration
-			profileSessions = append(profileSessions, profileSession)
+			for _, profileSession := range flush.profileSessions {
+				profileBatch.Sessions++
+				profileBatch.WorkItems++
+				profileBatch.Entries += profileSession.Entries
+				profileBatch.Bytes += profileSession.Bytes
+				profileBatch.ParseDuration += profileSession.ParseDuration
+				profileSessions = append(profileSessions, profileSession)
+			}
+			profileBatch.WriteDuration += flush.writeDuration
+			profileBatch.WriteTxs += flush.writeTxs
+			profileBatch.WriteSavepoints += flush.writeSavepoints
+			profileBatch.WriteSkipped += flush.writeSkipped
+			profileBatch.WriteStats.Add(flush.writeStats)
 		}
-		indexDone++
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: indexDone})
+	}
+	for {
+		result, ok := <-parsedCh
+		if !ok {
+			break
+		}
+		pending = append(pending, result)
+		parsedClosed := false
+	drainParsed:
+		for len(pending) < indexWriteBatchLimit {
+			select {
+			case next, ok := <-parsedCh:
+				if !ok {
+					parsedClosed = true
+					break drainParsed
+				}
+				pending = append(pending, next)
+			default:
+				break drainParsed
+			}
+		}
+		flushPending(pending)
+		pending = pending[:0]
+		if parsedClosed {
+			break
+		}
 	}
 	if profileEnabled && profileBatch.WorkItems > 0 {
 		profileBatch.MaxParseWorkers = int(maxActiveParses.Load())
@@ -1143,15 +1196,25 @@ func (p *Pipeline) indexBatch(ctx context.Context, metas []indexedMeta, outcome 
 
 	profileSessions := make([]IndexProfileSession, 0, len(parsed))
 	profileBatch := IndexProfileBatch{Source: logPrefix, Sessions: len(parsed), WorkItems: len(parsed), MaxParseWorkers: int(maxActiveParses.Load())}
-	for _, result := range parsed {
-		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix)
-		indexed = append(indexed, indexedMeta)
-		logs = append(logs, logEntry)
-		profileBatch.Entries += profileSession.Entries
-		profileBatch.Bytes += profileSession.Bytes
-		profileBatch.ParseDuration += profileSession.ParseDuration
-		profileBatch.WriteDuration += profileSession.WriteDuration
-		profileSessions = append(profileSessions, profileSession)
+	for start := 0; start < len(parsed); start += indexWriteBatchLimit {
+		end := start + indexWriteBatchLimit
+		if end > len(parsed) {
+			end = len(parsed)
+		}
+		flush := p.flushIndexParseResults(ctx, parsed[start:end], outcome, logPrefix)
+		indexed = append(indexed, flush.indexed...)
+		logs = append(logs, flush.logEntries...)
+		for _, profileSession := range flush.profileSessions {
+			profileBatch.Entries += profileSession.Entries
+			profileBatch.Bytes += profileSession.Bytes
+			profileBatch.ParseDuration += profileSession.ParseDuration
+			profileSessions = append(profileSessions, profileSession)
+		}
+		profileBatch.WriteDuration += flush.writeDuration
+		profileBatch.WriteTxs += flush.writeTxs
+		profileBatch.WriteSavepoints += flush.writeSavepoints
+		profileBatch.WriteSkipped += flush.writeSkipped
+		profileBatch.WriteStats.Add(flush.writeStats)
 	}
 	p.config.IndexProfiler.Record(profileBatch, profileSessions)
 	return indexed, logs
@@ -1191,6 +1254,144 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	}
 	result.entries = entries
 	return result
+}
+
+type indexWriteFlush struct {
+	indexed         []indexedMeta
+	logEntries      []IndexLogEntry
+	profileSessions []IndexProfileSession
+	writeDuration   time.Duration
+	writeTxs        int
+	writeSavepoints int
+	writeSkipped    int
+	writeStats      SessionEntryWriteStats
+}
+
+func (p *Pipeline) flushIndexParseResults(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string) indexWriteFlush {
+	batchStore, ok := p.metricsStore.(SessionEntryBatchStore)
+	if !ok || len(results) == 0 {
+		return p.flushIndexParseResultsOneByOne(ctx, results, outcome, logPrefix)
+	}
+	return p.flushIndexParseResultsBatch(ctx, results, batchStore, outcome, logPrefix)
+}
+
+func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results []indexParseResult, outcome IndexOutcome, logPrefix string) indexWriteFlush {
+	flush := indexWriteFlush{
+		indexed:         make([]indexedMeta, 0, len(results)),
+		logEntries:      make([]IndexLogEntry, 0, len(results)),
+		profileSessions: make([]IndexProfileSession, 0, len(results)),
+	}
+	for _, result := range results {
+		indexedMeta, logEntry, profileSession := p.writeIndexParseResult(ctx, result, outcome, logPrefix)
+		flush.indexed = append(flush.indexed, indexedMeta)
+		flush.logEntries = append(flush.logEntries, logEntry)
+		flush.profileSessions = append(flush.profileSessions, profileSession)
+		flush.writeDuration += profileSession.WriteDuration
+		if len(result.entries) > 0 && p.metricsStore != nil {
+			flush.writeTxs++
+		}
+	}
+	return flush
+}
+
+func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []indexParseResult, batchStore SessionEntryBatchStore, outcome IndexOutcome, logPrefix string) indexWriteFlush {
+	flush := indexWriteFlush{
+		indexed:         make([]indexedMeta, len(results)),
+		logEntries:      make([]IndexLogEntry, len(results)),
+		profileSessions: make([]IndexProfileSession, len(results)),
+	}
+	writes := make([]SessionEntryWrite, 0, len(results))
+	writePositions := make([]int, 0, len(results))
+	nowMs := time.Now().UnixMilli()
+	for i, result := range results {
+		if len(result.entries) == 0 || p.metricsStore == nil {
+			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
+			flush.logEntries[i] = result.logEntry
+			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
+			continue
+		}
+		writes = append(writes, SessionEntryWrite{
+			SessionID:    result.im.session.SessionID,
+			Entries:      result.entries,
+			IndexVersion: CurrentIndexVersion,
+			IndexedAtMs:  nowMs,
+		})
+		writePositions = append(writePositions, i)
+	}
+
+	writeResults := make([]SessionEntryWriteResult, len(writes))
+	writeDuration := time.Duration(0)
+	if len(writes) > 0 {
+		writeStart := time.Now()
+		p.storeWriteMu.Lock()
+		writeResults = batchStore.IndexSessionEntryBatch(ctx, writes)
+		p.storeWriteMu.Unlock()
+		writeDuration = time.Since(writeStart)
+		flush.writeDuration = writeDuration
+		flush.writeTxs = 1
+		flush.writeSavepoints = len(writes)
+	}
+	perSessionWriteDuration := time.Duration(0)
+	if len(writes) > 0 {
+		perSessionWriteDuration = writeDuration / time.Duration(len(writes))
+	}
+	if len(writeResults) != len(writes) {
+		resultCount := len(writeResults)
+		writeResults = make([]SessionEntryWriteResult, len(writes))
+		for i := range writes {
+			writeResults[i] = SessionEntryWriteResult{
+				SessionID: writes[i].SessionID,
+				Err:       fmt.Errorf("%s: store returned %d batch write result(s) for %d write(s)", logPrefix, resultCount, len(writes)),
+			}
+		}
+	}
+	for i, result := range results {
+		if len(result.entries) == 0 || p.metricsStore == nil {
+			continue
+		}
+		flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
+		flush.logEntries[i] = result.logEntry
+		flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, perSessionWriteDuration)
+	}
+	for i, writeResult := range writeResults {
+		flush.writeStats.Add(writeResult.Stats)
+		if writeResult.Skipped {
+			flush.writeSkipped++
+		}
+		position := writePositions[i]
+		result := results[position]
+		writeErr := writeResult.Err
+		if writeErr == nil && !writeResult.Written {
+			writeErr = fmt.Errorf("%s: store did not report session %s as written", logPrefix, result.im.session.SessionID)
+		}
+		if writeErr != nil {
+			slog.Warn(logPrefix+": store session entries", "session_id", result.im.session.SessionID, "error", writeErr)
+			errMsg := writeErr.Error()
+			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, len(result.entries), result.startedAt, nil, &errMsg)
+			flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
+			flush.logEntries[position] = logEntry
+			flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
+			continue
+		}
+		logEntry := p.makeIndexLogEntry(result.im, outcome, len(result.entries), result.startedAt, nil, nil)
+		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true}
+		flush.logEntries[position] = logEntry
+		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
+	}
+	return flush
+}
+
+func (p *Pipeline) makeIndexProfileSession(result indexParseResult, logEntry IndexLogEntry, writeDuration time.Duration) IndexProfileSession {
+	return IndexProfileSession{
+		SessionID:     result.im.session.SessionID,
+		Harness:       result.im.session.Harness,
+		SourcePath:    p.indexProfileSourcePath(result.im),
+		Outcome:       logEntry.Outcome,
+		Entries:       len(result.entries),
+		Bytes:         result.bytes,
+		ParseDuration: result.parseDuration,
+		WriteDuration: writeDuration,
+	}
 }
 
 func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseResult, outcome IndexOutcome, logPrefix string) (indexedMeta, IndexLogEntry, IndexProfileSession) {
@@ -1241,6 +1442,13 @@ func recordIndexProfileMax(maxValue *atomic.Int64, value int64) {
 			return
 		}
 	}
+}
+
+func (p *Pipeline) recordIndexProfileStage(stage Stage, started time.Time, done int, total int) {
+	if p == nil {
+		return
+	}
+	p.config.IndexProfiler.RecordStage(stage, time.Since(started), done, total)
 }
 
 func (p *Pipeline) indexProfileBytes(im indexedMeta) int64 {
@@ -2163,6 +2371,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: priorDone, Total: priorDone + len(indexSessions)})
 	}
 	if p.indexers != nil && p.metricsStore != nil {
+		indexProfileStart := time.Now()
 		batchIndexed, batchLogs := p.indexBatch(ctx, indexSessions, outcome, logPrefix)
 		for i, result := range batchIndexed {
 			if result.indexed {
@@ -2174,10 +2383,12 @@ func (p *Pipeline) indexComputeAndFinalize(
 			}
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageIndex, Done: priorDone + i + 1, Total: priorDone + len(indexSessions)})
 		}
+		p.recordIndexProfileStage(StageIndex, indexProfileStart, len(batchIndexed), len(indexSessions))
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageIndex, Done: indexed, Total: len(priorIndexed) + len(indexSessions)})
 
 	// Persist index_log entries (best-effort).
+	indexLogProfileStart := time.Now()
 	if p.indexLogger != nil {
 		for _, entry := range indexLogEntries {
 			if err := p.indexLogger.LogIndexEntry(ctx, entry); err != nil {
@@ -2185,12 +2396,14 @@ func (p *Pipeline) indexComputeAndFinalize(
 			}
 		}
 	}
+	p.recordIndexProfileStage(StageIndexLog, indexLogProfileStart, len(indexLogEntries), len(indexLogEntries))
 
 	// COMPUTE metrics + insights (best-effort, non-fatal).
 	// Gate on len(indexSessions) > 0 (sessions that were written this run),
 	// not on indexed > 0 (which would miss sessions whose entries already exist
 	// from a prior run). The engine handles idempotency via MetricsExist.
 	computed := 0
+	computeProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageCompute, Total: len(successfullyIndexed)})
 	if p.analyzer != nil && (len(indexSessions) > 0 || len(priorIndexed) > 0) {
 		// Compute metrics only for sessions that were successfully indexed this run.
@@ -2227,8 +2440,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageCompute, Done: computed, Total: len(successfullyIndexed)})
+	p.recordIndexProfileStage(StageCompute, computeProfileStart, computed, len(successfullyIndexed))
 
 	// ANNOTATE sessions (best-effort, non-fatal).
+	annotateProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageAnnotate, Total: len(successfullyIndexed)})
 	if p.classifier != nil && len(successfullyIndexed) > 0 {
 		if err := p.stageAnnotate(ctx, successfullyIndexed, prog); err != nil {
@@ -2236,8 +2451,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageAnnotate, Done: len(successfullyIndexed), Total: len(successfullyIndexed)})
+	p.recordIndexProfileStage(StageAnnotate, annotateProfileStart, len(successfullyIndexed), len(successfullyIndexed))
 
 	// CLEANUP orphan .tmp-* directories.
+	cleanupProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageCleanup})
 	p.cleanOrphans()
 	// Clean up orphan project rows (projects with no remaining sessions).
@@ -2254,8 +2471,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageCleanup})
+	p.recordIndexProfileStage(StageCleanup, cleanupProfileStart, 1, 1)
 
 	// REPORT.
+	reportProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageReport})
 	pipelineResult := &PipelineResult{
 		Sessions:             sessionResults,
@@ -2289,8 +2508,10 @@ func (p *Pipeline) indexComputeAndFinalize(
 	}
 
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageReport, Done: len(pipelineResult.Sessions), Total: len(pipelineResult.Sessions)})
+	p.recordIndexProfileStage(StageReport, reportProfileStart, len(pipelineResult.Sessions), len(pipelineResult.Sessions))
 
 	// AUDIT — write ingest_log entry (best-effort, non-fatal).
+	auditProfileStart := time.Now()
 	if p.logger != nil {
 		finishedAt := time.Now().UnixMilli()
 		logEntry := IngestLogEntry{
@@ -2308,6 +2529,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 			slog.Warn(logPrefix+": log ingest run", "error", err)
 		}
 	}
+	p.recordIndexProfileStage(StageAudit, auditProfileStart, 1, 1)
 
 	return pipelineResult, nil
 }
@@ -2579,11 +2801,16 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	prog := p.config.Progress
 
 	// Stage 1: DISCOVER — scan peasant-sync output.
+	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	scanned := p.scanPeasantSyncSessions()
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(scanned), Total: len(scanned)})
+	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(scanned), len(scanned))
+	prepareProfileStart := time.Now()
+	p.recordIndexProfileStage(StagePrepare, prepareProfileStart, len(scanned), len(scanned))
 
 	// Stage 2: DIFF — filter to targeted sessions.
+	diffProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(scanned)})
 	var targeted []reindexTarget
 	if p.config.Force {
@@ -2608,10 +2835,13 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		}
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(targeted), Total: len(scanned)})
+	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(targeted), len(scanned))
 
 	// Stage 3: FILTER — emit targeted count.
+	filterProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: len(scanned)})
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(targeted), Total: len(scanned)})
+	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(targeted), len(scanned))
 
 	if p.config.DryRun {
 		result := &PipelineResult{
@@ -2707,6 +2937,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		reindexWg.Add(1)
 		go func() {
 			defer reindexWg.Done()
+			extractProfileStart := time.Now()
 			runParallel(ctx.Err, rootEntries, workers, func(entry DiffEntry) workerResult {
 				wr := p.processSession(ctx, entry)
 				done := int(extractDoneAtomic.Add(1))
@@ -2729,6 +2960,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 				return wr
 			})
 			reindexWorkersDone.Store(true)
+			p.recordIndexProfileStage(StageExtract, extractProfileStart, int(extractDoneAtomic.Load()), extractTotal+len(fallbackTargets))
 		}()
 
 		// Stage 4b (reindex): Consumer goroutine — DB INSERT + INDEX coordination.
@@ -2738,10 +2970,12 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		reindexWg.Add(1)
 		go func() {
 			defer reindexWg.Done()
+			dbInsertProfileStart := time.Now()
 			defer close(reindexIndexCh)
 			reindexDrainResults := p.drainLoop(ctx, staging, &reindexWorkersDone, reindexIndexCh, reindexIndexDoneCh, reindexErrCh, prog, extractTotal)
 			sessionResults = append(sessionResults, reindexDrainResults...)
 			emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: len(reindexDrainResults), Total: extractTotal})
+			p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, len(reindexDrainResults), extractTotal)
 		}()
 
 		// Stage INDEX goroutine (reindex).
@@ -2749,7 +2983,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		reindexWg.Add(1)
 		go func() {
 			defer reindexWg.Done()
+			indexProfileStart := time.Now()
 			drainIndexed, drainIndexLogEntries = p.indexLoop(ctx, reindexIndexCh, reindexIndexDoneCh, prog, IndexOutcomeReindexed, "reindex")
+			p.recordIndexProfileStage(StageIndex, indexProfileStart, len(drainIndexed), extractTotal)
 		}()
 
 		// Wait for all reindex goroutines to complete.
@@ -2765,6 +3001,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		}
 
 		// Process fallback sessions (source missing — no EXTRACT+WRITE, straight to INDEX+COMPUTE).
+		fallbackExtractProfileStart := time.Now()
 		for _, t := range fallbackTargets {
 			slog.Warn("reindex: original source missing, falling back to INDEX+COMPUTE",
 				"session_id", t.session.SessionID,
@@ -2798,12 +3035,14 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: extractTotal + len(fallbackTargets)})
 		}
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: int(extractDoneAtomic.Load()), Total: extractTotal + len(fallbackTargets)})
+		p.recordIndexProfileStage(StageExtract, fallbackExtractProfileStart, len(fallbackTargets), len(fallbackTargets))
 
 		// Stages 5-9: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
 		return p.indexComputeAndFinalize(ctx, indexSessions, drainIndexed, sessionResults, storeErr, start, append(indexLogEntries, drainIndexLogEntries...), IndexOutcomeReindexed, "reindex")
 	}
 
 	// No extractable sessions — all are fallback. Process fallback sessions directly.
+	extractProfileStart := time.Now()
 	for _, t := range fallbackTargets {
 		slog.Warn("reindex: original source missing, falling back to INDEX+COMPUTE",
 			"session_id", t.session.SessionID,
@@ -2837,10 +3076,13 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: len(fallbackTargets)})
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageExtract, Done: int(extractDoneAtomic.Load()), Total: len(fallbackTargets)})
+	p.recordIndexProfileStage(StageExtract, extractProfileStart, int(extractDoneAtomic.Load()), len(fallbackTargets))
 
 	// DB INSERT — no extractable sessions means no store entries.
+	dbInsertProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDBInsert, Total: 0})
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDBInsert, Done: 0, Total: 0})
+	p.recordIndexProfileStage(StageDBInsert, dbInsertProfileStart, 0, 0)
 	var storeErr error
 
 	// Steps 3e-end: INDEX, COMPUTE, CLEANUP, REPORT, AUDIT (shared with Run).
@@ -2994,6 +3236,8 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 	}
 	workers := parallelWorkers(p.config)
 	total := len(sessionIDs)
+	profiled, useProfile := p.classifier.(ProfiledSessionClassifier)
+	profiler := p.config.IndexProfiler
 
 	var wg sync.WaitGroup
 	ch := make(chan SessionID, workers)
@@ -3005,7 +3249,13 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 		go func() {
 			defer wg.Done()
 			for sid := range ch {
-				if err := p.classifier.Annotate(ctx, sid); err != nil {
+				var err error
+				if useProfile && profiler != nil {
+					err = profiled.AnnotateWithProfile(ctx, sid, profiler)
+				} else {
+					err = p.classifier.Annotate(ctx, sid)
+				}
+				if err != nil {
 					slog.Warn("pipeline: annotate session",
 						"session_id", sid,
 						"error", err,

@@ -9,7 +9,9 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ? WHERE session_id = ?`
+const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL WHERE session_id = ?`
+
+const sqlUpdateIndexStateWithSessionEntriesHash = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = ? WHERE session_id = ?`
 
 // UpdateIndexState sets the index_version and indexed_at for a session after
 // successful indexing.
@@ -24,6 +26,31 @@ func (s *Store) UpdateIndexState(ctx context.Context, sessionID ingest.SessionID
 		Args: []any{version, indexedAtMs, string(sessionID)},
 	}); err != nil {
 		return fmt.Errorf("store: update index state for %s: %w", sessionID, err)
+	}
+	return nil
+}
+
+// UpdateIndexStateWithSessionEntriesHash sets the index state and the parsed
+// entries digest together. Use it only after the same transaction has stored the
+// matching session_entries rows.
+func (s *Store) UpdateIndexStateWithSessionEntriesHash(ctx context.Context, sessionID ingest.SessionID, version int, indexedAtMs int64, sessionEntriesHash string) error {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return fmt.Errorf("store: take connection: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	if err := updateIndexStateWithSessionEntriesHashOnConn(conn, sessionID, version, indexedAtMs, sessionEntriesHash); err != nil {
+		return err
+	}
+	return nil
+}
+
+func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, version int, indexedAtMs int64, sessionEntriesHash string) error {
+	if err := sqlitex.ExecuteTransient(conn, sqlUpdateIndexStateWithSessionEntriesHash, &sqlitex.ExecOptions{
+		Args: []any{version, indexedAtMs, sessionEntriesHash, string(sessionID)},
+	}); err != nil {
+		return fmt.Errorf("store: update index state and session_entries_hash for %s: %w", sessionID, err)
 	}
 	return nil
 }

@@ -2,9 +2,12 @@ package store_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
@@ -173,6 +176,259 @@ func seedAnnotationTypeIDForTest(t *testing.T, s *store.Store, typeID string) st
 		t.Fatalf("seedAnnotationTypeIDForTest(%q): not found", typeID)
 	}
 	return id
+}
+
+func seedEntryForAnnotationBatchTest(t *testing.T, ctx context.Context, s *store.Store, sessionID string, entryIndex int) {
+	t.Helper()
+	conn, err := s.PoolForTest().Take(ctx)
+	if err != nil {
+		t.Fatalf("pool.Take: %v", err)
+	}
+	defer s.PoolForTest().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn,
+		`INSERT INTO session_entries (session_id, entry_index, provider, entry_type, role)
+         VALUES (?, ?, 'claude', 'text', 'assistant')`,
+		&sqlitex.ExecOptions{Args: []any{sessionID, entryIndex}}); err != nil {
+		t.Fatalf("insert session_entry %s/%d: %v", sessionID, entryIndex, err)
+	}
+}
+
+func classifierSessionWrite(annotationTypeID, annotatorID, sessionID, value, hash string) ingest.ClassifierAnnotationWrite {
+	sid := sessionID
+	return ingest.ClassifierAnnotationWrite{
+		Create: ingest.CreateAnnotationParams{
+			SessionID:        &sid,
+			AnnotatorID:      annotatorID,
+			AnnotationTypeID: annotationTypeID,
+			Value:            value,
+		},
+		Find: ingest.FindAnnotationParams{
+			AnnotationTypeID: annotationTypeID,
+			AnnotatorID:      annotatorID,
+			SessionID:        &sid,
+		},
+		ContentHash: hash,
+	}
+}
+
+func classifierEntryWrite(annotationTypeID, annotatorID, sessionID string, entryIndex int, value, hash string) ingest.ClassifierAnnotationWrite {
+	sid := sessionID
+	idx := entryIndex
+	return ingest.ClassifierAnnotationWrite{
+		Create: ingest.CreateAnnotationParams{
+			EntryTarget:      &ingest.EntryTarget{SessionID: sessionID, EntryIndex: entryIndex},
+			AnnotatorID:      annotatorID,
+			AnnotationTypeID: annotationTypeID,
+			Value:            value,
+		},
+		Find: ingest.FindAnnotationParams{
+			AnnotationTypeID: annotationTypeID,
+			AnnotatorID:      annotatorID,
+			SessionID:        &sid,
+			EntryIndex:       &idx,
+		},
+		ContentHash: hash,
+	}
+}
+
+func TestApplyClassifierAnnotations_CreatesSessionAndEntryWithHashes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000201"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 0)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	results := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{
+		classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", "hash-session-create"),
+		classifierEntryWrite(typeID, annotatorID, sessionID, 0, "resolved", "hash-entry-create"),
+	})
+	if len(results) != 2 {
+		t.Fatalf("ApplyClassifierAnnotations results = %d, want 2", len(results))
+	}
+	for i, result := range results {
+		if result.Err != nil {
+			t.Fatalf("result %d error: %v", i, result.Err)
+		}
+		if result.Dedup != ingest.DedupCreate {
+			t.Fatalf("result %d dedup = %s, want create", i, result.Dedup)
+		}
+		if result.AnnotationID == "" {
+			t.Fatalf("result %d annotation ID is empty", i)
+		}
+	}
+
+	sessionRows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(sessionRows) != 1 || sessionRows[0].ContentHash == nil || *sessionRows[0].ContentHash != "hash-session-create" {
+		t.Fatalf("session annotation hash mismatch: %+v", sessionRows)
+	}
+	entryRows, err := s.GetAnnotationsForEntry(ctx, sessionID, 0)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForEntry: %v", err)
+	}
+	if len(entryRows) != 1 || entryRows[0].ContentHash == nil || *entryRows[0].ContentHash != "hash-entry-create" {
+		t.Fatalf("entry annotation hash mismatch: %+v", entryRows)
+	}
+}
+
+func TestApplyClassifierAnnotations_SkipsMatchingContentHash(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000202"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	first := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", "same-hash")})
+	if first[0].Err != nil {
+		t.Fatalf("first write: %v", first[0].Err)
+	}
+	second := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", "same-hash")})
+	if second[0].Err != nil {
+		t.Fatalf("second write: %v", second[0].Err)
+	}
+	if second[0].Dedup != ingest.DedupSkip {
+		t.Fatalf("second dedup = %s, want skip", second[0].Dedup)
+	}
+	if second[0].AnnotationID != first[0].AnnotationID {
+		t.Fatalf("skip annotation ID = %q, want existing %q", second[0].AnnotationID, first[0].AnnotationID)
+	}
+	rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("non-superseded rows = %d, want 1", len(rows))
+	}
+}
+
+func TestApplyClassifierAnnotations_SupersedesDifferentContentHash(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000203"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	first := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierSessionWrite(typeID, annotatorID, sessionID, "partial", "old-hash")})
+	if first[0].Err != nil {
+		t.Fatalf("first write: %v", first[0].Err)
+	}
+	second := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", "new-hash")})
+	if second[0].Err != nil {
+		t.Fatalf("second write: %v", second[0].Err)
+	}
+	if second[0].Dedup != ingest.DedupSupersede {
+		t.Fatalf("second dedup = %s, want supersede", second[0].Dedup)
+	}
+	if second[0].ExistingAnnotationID != first[0].AnnotationID {
+		t.Fatalf("existing annotation ID = %q, want %q", second[0].ExistingAnnotationID, first[0].AnnotationID)
+	}
+	rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != "resolved" || rows[0].ContentHash == nil || *rows[0].ContentHash != "new-hash" {
+		t.Fatalf("non-superseded annotation mismatch: %+v", rows)
+	}
+}
+
+func TestApplyClassifierAnnotations_SavepointKeepsGoodWrites(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000204"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	bad := classifierSessionWrite(typeID, annotatorID, sessionID, "bad", "bad-hash")
+	bad.Create.SessionID = nil
+	results := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{
+		classifierSessionWrite(typeID, annotatorID, sessionID, "first", "first-hash"),
+		bad,
+		classifierSessionWrite(typeID, annotatorID, sessionID, "last", "last-hash"),
+	})
+	if len(results) != 3 {
+		t.Fatalf("results = %d, want 3", len(results))
+	}
+	if results[0].Err != nil {
+		t.Fatalf("first write error: %v", results[0].Err)
+	}
+	if results[1].Err == nil {
+		t.Fatal("bad write error is nil")
+	}
+	if results[2].Err != nil {
+		t.Fatalf("last write error: %v", results[2].Err)
+	}
+	rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != "last" {
+		t.Fatalf("expected last good write to supersede first after bad write was skipped; rows: %+v", rows)
+	}
+}
+
+func TestApplyClassifierAnnotations_ConcurrentBatchesSerializeWrites(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	const batchCount = 16
+	sessionIDs := make([]string, batchCount)
+	for i := range sessionIDs {
+		sessionIDs[i] = uuid.New().String()
+		seedTestSessionV13(t, ctx, s, sessionIDs[i])
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, batchCount)
+	for i, sessionID := range sessionIDs {
+		wg.Add(1)
+		go func(i int, sessionID string) {
+			defer wg.Done()
+			<-start
+			results := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{
+				classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", sessionID+"-hash"),
+			})
+			if len(results) != 1 {
+				errs <- fmt.Errorf("batch %d results = %d, want 1", i, len(results))
+				return
+			}
+			if results[0].Err != nil {
+				errs <- fmt.Errorf("batch %d write error: %w", i, results[0].Err)
+			}
+		}(i, sessionID)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, sessionID := range sessionIDs {
+		rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("GetAnnotationsForSession(%s): %v", sessionID, err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("session %s annotation rows = %d, want 1", sessionID, len(rows))
+		}
+	}
 }
 
 // TestCreateAnnotation_SessionTarget verifies inserting a session-level annotation.
