@@ -13,7 +13,20 @@ import (
 const (
 	sqlGetCurrentSessionEntriesHash = `SELECT session_entries_hash FROM sessions WHERE session_id = ?`
 	sqlGetAnnotationRunState        = `SELECT session_id, session_entries_hash, compute_version, classifier_version, annotated_at FROM annotation_run_state WHERE session_id = ?`
-	sqlSaveAnnotationRunState       = `INSERT INTO annotation_run_state (session_id, session_entries_hash, compute_version, classifier_version, annotated_at)
+	sqlGetAnnotationRunInputs       = `SELECT
+    s.session_id,
+    s.session_entries_hash,
+    sm.compute_version,
+    ars.session_id,
+    ars.session_entries_hash,
+    ars.compute_version,
+    ars.classifier_version,
+    ars.annotated_at
+FROM sessions s
+LEFT JOIN session_metrics sm ON sm.session_id = s.session_id
+LEFT JOIN annotation_run_state ars ON ars.session_id = s.session_id
+WHERE s.session_id = ?`
+	sqlSaveAnnotationRunState = `INSERT INTO annotation_run_state (session_id, session_entries_hash, compute_version, classifier_version, annotated_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     session_entries_hash = excluded.session_entries_hash,
@@ -21,6 +34,46 @@ ON CONFLICT(session_id) DO UPDATE SET
     classifier_version = excluded.classifier_version,
     annotated_at = excluded.annotated_at`
 )
+
+func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.SessionID) (*ingest.AnnotationRunInputs, error) {
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: take connection for annotation run input lookup: %w", err)
+	}
+	defer s.pool.Put(conn)
+
+	var inputs *ingest.AnnotationRunInputs
+	err = sqlitex.ExecuteTransient(conn, sqlGetAnnotationRunInputs, &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			inputs = &ingest.AnnotationRunInputs{
+				SessionID: ingest.SessionID(stmt.ColumnText(0)),
+			}
+			if stmt.ColumnType(1) != sqlite.TypeNull {
+				inputs.SessionEntriesHash = stmt.ColumnText(1)
+				inputs.HasSessionEntriesHash = inputs.SessionEntriesHash != ""
+			}
+			if stmt.ColumnType(2) != sqlite.TypeNull {
+				inputs.ComputeVersion = stmt.ColumnInt(2)
+				inputs.HasComputeVersion = true
+			}
+			if stmt.ColumnType(3) != sqlite.TypeNull {
+				inputs.State = &ingest.AnnotationRunState{
+					SessionID:          ingest.SessionID(stmt.ColumnText(3)),
+					SessionEntriesHash: stmt.ColumnText(4),
+					ComputeVersion:     stmt.ColumnInt(5),
+					ClassifierVersion:  stmt.ColumnInt(6),
+					AnnotatedAt:        time.UnixMilli(stmt.ColumnInt64(7)),
+				}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: get annotation run inputs for %s: %w", sessionID, err)
+	}
+	return inputs, nil
+}
 
 func (s *Store) GetCurrentSessionEntriesHash(ctx context.Context, sessionID ingest.SessionID) (string, bool, error) {
 	conn, err := s.pool.Take(ctx)

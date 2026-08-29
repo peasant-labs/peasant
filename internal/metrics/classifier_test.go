@@ -2,6 +2,7 @@ package metrics_test
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,7 +13,11 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/annotation-run-state/combined-skip.yaml
+var classifierCombinedSkipYAML []byte
 
 // --- stubs for ClassifierAnnotator integration tests ---
 
@@ -23,6 +28,7 @@ type stubMetricsStore struct {
 	ingest.MetricsStore
 	entries             []schema.SessionEntry
 	m                   *ingest.SessionMetrics
+	getMetricsCalls     int
 	listEntriesCalls    int
 	annotationState     *ingest.AnnotationRunState
 	sessionEntriesHash  string
@@ -36,7 +42,22 @@ func (s *stubMetricsStore) ListEntries(_ context.Context, _ ingest.SessionID) ([
 }
 
 func (s *stubMetricsStore) GetMetrics(_ context.Context, _ ingest.SessionID) (*ingest.SessionMetrics, error) {
+	s.getMetricsCalls++
 	return s.m, nil
+}
+
+func (s *stubMetricsStore) GetAnnotationRunInputs(_ context.Context, sessionID ingest.SessionID) (*ingest.AnnotationRunInputs, error) {
+	inputs := &ingest.AnnotationRunInputs{
+		SessionID:             sessionID,
+		SessionEntriesHash:    s.sessionEntriesHash,
+		HasSessionEntriesHash: s.sessionEntriesHash != "",
+		State:                 s.annotationState,
+	}
+	if s.m != nil && s.m.ComputeVersion != nil {
+		inputs.ComputeVersion = *s.m.ComputeVersion
+		inputs.HasComputeVersion = true
+	}
+	return inputs, nil
 }
 
 func (s *stubMetricsStore) GetCurrentSessionEntriesHash(_ context.Context, _ ingest.SessionID) (string, bool, error) {
@@ -875,12 +896,108 @@ func TestClassifierAnnotator_Annotate_MatchingStateSkipsWork(t *testing.T) {
 	if ms.listEntriesCalls != 0 {
 		t.Fatalf("ListEntries calls = %d, want 0", ms.listEntriesCalls)
 	}
+	if ms.getMetricsCalls != 0 {
+		t.Fatalf("GetMetrics calls = %d, want 0", ms.getMetricsCalls)
+	}
 	if len(as.created) != 0 || len(as.entryCreated) != 0 || len(as.annotatorCalls) != 0 || len(as.typeCalls) != 0 {
 		t.Fatalf("annotation work ran despite matching state: created=%d entryCreated=%d annotatorCalls=%d typeCalls=%d",
 			len(as.created), len(as.entryCreated), len(as.annotatorCalls), len(as.typeCalls))
 	}
 	if ms.saveAnnotationCalls != 0 {
 		t.Fatalf("SaveAnnotationRunState calls = %d, want 0", ms.saveAnnotationCalls)
+	}
+}
+
+type classifierCombinedSkipFixture struct {
+	Cases []classifierCombinedSkipCase `yaml:"cases"`
+}
+
+type classifierCombinedSkipCase struct {
+	Name                   string `yaml:"name"`
+	CurrentHash            string `yaml:"current_hash"`
+	HasMetrics             bool   `yaml:"has_metrics"`
+	HasComputeVersion      bool   `yaml:"has_compute_version"`
+	MetricComputeVersion   int    `yaml:"metric_compute_version"`
+	StateHash              string `yaml:"state_hash"`
+	StateComputeVersion    int    `yaml:"state_compute_version"`
+	StateClassifierVersion int    `yaml:"state_classifier_version"`
+	HasState               bool   `yaml:"has_state"`
+	WantListEntriesCalls   int    `yaml:"want_list_entries_calls"`
+	WantGetMetricsCalls    int    `yaml:"want_get_metrics_calls"`
+	WantSaveStateCalls     int    `yaml:"want_save_state_calls"`
+}
+
+func TestClassifierAnnotator_Annotate_CombinedLookupDecisions(t *testing.T) {
+	t.Parallel()
+	var fixture classifierCombinedSkipFixture
+	if err := yaml.Unmarshal(classifierCombinedSkipYAML, &fixture); err != nil {
+		t.Fatalf("unmarshal combined skip fixture: %v", err)
+	}
+	assertRequiredClassifierCombinedSkipCases(t, fixture.Cases)
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			sid := mustSessionID(t, testutil.TestSessionUUID)
+			var sessionMetrics *ingest.SessionMetrics
+			if tc.HasMetrics {
+				if tc.HasComputeVersion {
+					sessionMetrics = buildVersionedMetrics(sid, tc.MetricComputeVersion)
+				} else {
+					sessionMetrics = buildMetrics(sid, 3, 4)
+				}
+			}
+			ms := &stubMetricsStore{
+				entries:            []schema.SessionEntry{buildEntry(sid, 0, ingest.RoleUser, "please fix this bug")},
+				m:                  sessionMetrics,
+				sessionEntriesHash: tc.CurrentHash,
+			}
+			if tc.HasState {
+				ms.annotationState = &ingest.AnnotationRunState{
+					SessionID:          sid,
+					SessionEntriesHash: tc.StateHash,
+					ComputeVersion:     tc.StateComputeVersion,
+					ClassifierVersion:  tc.StateClassifierVersion,
+					AnnotatedAt:        time.UnixMilli(1700000000000),
+				}
+			}
+			as := newFullAnnotationStore()
+			ca := metrics.NewClassifierAnnotator(ms, as)
+
+			if err := ca.Annotate(context.Background(), sid); err != nil {
+				t.Fatalf("Annotate: %v", err)
+			}
+			if ms.listEntriesCalls != tc.WantListEntriesCalls {
+				t.Fatalf("ListEntries calls = %d, want %d", ms.listEntriesCalls, tc.WantListEntriesCalls)
+			}
+			if ms.getMetricsCalls != tc.WantGetMetricsCalls {
+				t.Fatalf("GetMetrics calls = %d, want %d", ms.getMetricsCalls, tc.WantGetMetricsCalls)
+			}
+			if ms.saveAnnotationCalls != tc.WantSaveStateCalls {
+				t.Fatalf("SaveAnnotationRunState calls = %d, want %d", ms.saveAnnotationCalls, tc.WantSaveStateCalls)
+			}
+		})
+	}
+}
+
+func assertRequiredClassifierCombinedSkipCases(t *testing.T, cases []classifierCombinedSkipCase) {
+	t.Helper()
+	requiredNames := map[string]bool{
+		"current state skips without metrics read":            false,
+		"stale hash reads metrics and recomputes":             false,
+		"stale metric version reads metrics and recomputes":   false,
+		"missing state reads metrics and recomputes":          false,
+		"missing metrics recomputes without saving state":     false,
+		"nil compute version recomputes without saving state": false,
+	}
+	for _, tc := range cases {
+		if _, ok := requiredNames[tc.Name]; ok {
+			requiredNames[tc.Name] = true
+		}
+	}
+	for name, seen := range requiredNames {
+		if !seen {
+			t.Fatalf("required combined skip fixture case %q is missing", name)
+		}
 	}
 }
 

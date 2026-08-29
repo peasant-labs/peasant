@@ -162,6 +162,19 @@ type AnnotationRunState struct {
 	AnnotatedAt        time.Time
 }
 
+// AnnotationRunInputs carries the bounded session state needed to decide
+// whether a classifier annotation pass is current. The full metrics row is not
+// included because the skip path only needs the compute version; callers load
+// full metrics only when they must run classifiers.
+type AnnotationRunInputs struct {
+	SessionID             SessionID
+	SessionEntriesHash    string
+	HasSessionEntriesHash bool
+	ComputeVersion        int
+	HasComputeVersion     bool
+	State                 *AnnotationRunState
+}
+
 // AnnotationRunStateStore is an optional metrics-store capability. Stores that
 // implement it let ClassifierAnnotator skip unchanged sessions. Stores that do
 // not implement it keep the older always-run behaviour.
@@ -169,6 +182,14 @@ type AnnotationRunStateStore interface {
 	GetCurrentSessionEntriesHash(ctx context.Context, sessionID SessionID) (hash string, ok bool, err error)
 	GetAnnotationRunState(ctx context.Context, sessionID SessionID) (*AnnotationRunState, error)
 	SaveAnnotationRunState(ctx context.Context, state AnnotationRunState) error
+}
+
+// AnnotationRunInputStore is an optional metrics-store capability that resolves
+// all state needed for the classifier annotation skip decision through one
+// bounded read. Stores that do not implement it keep the older safe lookup path.
+type AnnotationRunInputStore interface {
+	AnnotationRunStateStore
+	GetAnnotationRunInputs(ctx context.Context, sessionID SessionID) (*AnnotationRunInputs, error)
 }
 
 // TranscriptSourceKind is where a harness's ENTRIES come from.

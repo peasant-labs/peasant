@@ -92,6 +92,12 @@ func (ca *ClassifierAnnotator) AnnotateWithProfile(ctx context.Context, sessionI
 }
 
 func (ca *ClassifierAnnotator) annotate(ctx context.Context, sessionID ingest.SessionID, stats *ingest.AnnotationProfileStats) error {
+	stateInputs, hasCombinedInputs := ca.combinedAnnotationRunInputs(ctx, sessionID)
+	if hasCombinedInputs && annotationRunInputsCurrent(stateInputs) {
+		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) { s.StateSkipCount++ })
+		return nil
+	}
+
 	metricsStarted := annotationProfileStart(stats)
 	metrics, err := ca.metricsStore.GetMetrics(ctx, sessionID)
 	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
@@ -102,8 +108,8 @@ func (ca *ClassifierAnnotator) annotate(ctx context.Context, sessionID ingest.Se
 		return fmt.Errorf("ClassifierAnnotator.Annotate: get metrics for %s: %w", sessionID, err)
 	}
 
-	entriesHash, computeVersion, stateUsable := ca.annotationRunInputs(ctx, sessionID, metrics)
-	if stateUsable && ca.annotationStateCurrent(ctx, sessionID, entriesHash, computeVersion) {
+	entriesHash, computeVersion, stateUsable := ca.annotationRunInputs(ctx, sessionID, metrics, stateInputs, hasCombinedInputs)
+	if !hasCombinedInputs && stateUsable && ca.annotationStateCurrent(ctx, sessionID, entriesHash, computeVersion) {
 		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) { s.StateSkipCount++ })
 		return nil
 	}
@@ -223,7 +229,41 @@ func annotationProfileStart(stats *ingest.AnnotationProfileStats) time.Time {
 	return time.Now()
 }
 
-func (ca *ClassifierAnnotator) annotationRunInputs(ctx context.Context, sessionID ingest.SessionID, metrics *ingest.SessionMetrics) (string, int, bool) {
+func (ca *ClassifierAnnotator) combinedAnnotationRunInputs(ctx context.Context, sessionID ingest.SessionID) (*ingest.AnnotationRunInputs, bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	inputStore, ok := ca.metricsStore.(ingest.AnnotationRunInputStore)
+	if !ok {
+		return nil, false
+	}
+	inputs, err := inputStore.GetAnnotationRunInputs(ctx, sessionID)
+	if err != nil {
+		slog.Warn("ClassifierAnnotator.Annotate: combined annotation state lookup failed, continuing with annotation",
+			"session_id", sessionID,
+			"error", err,
+		)
+		return nil, false
+	}
+	return inputs, inputs != nil
+}
+
+func annotationRunInputsCurrent(inputs *ingest.AnnotationRunInputs) bool {
+	if inputs == nil || !inputs.HasSessionEntriesHash || inputs.SessionEntriesHash == "" || !inputs.HasComputeVersion || inputs.State == nil {
+		return false
+	}
+	return inputs.State.SessionEntriesHash == inputs.SessionEntriesHash &&
+		inputs.State.ComputeVersion == inputs.ComputeVersion &&
+		inputs.State.ClassifierVersion == CurrentClassifierAnnotationVersion
+}
+
+func (ca *ClassifierAnnotator) annotationRunInputs(ctx context.Context, sessionID ingest.SessionID, metrics *ingest.SessionMetrics, combined *ingest.AnnotationRunInputs, hasCombined bool) (string, int, bool) {
+	if hasCombined {
+		if combined == nil || !combined.HasSessionEntriesHash || combined.SessionEntriesHash == "" || metrics == nil || metrics.ComputeVersion == nil {
+			return "", 0, false
+		}
+		return combined.SessionEntriesHash, *metrics.ComputeVersion, true
+	}
 	if metrics == nil || metrics.ComputeVersion == nil {
 		return "", 0, false
 	}
