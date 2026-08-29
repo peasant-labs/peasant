@@ -12,6 +12,14 @@ import (
 //
 // Returns an empty slice (not nil) when no annotations exist for the session.
 func ExportAnnotations(ctx context.Context, db *store.Store, sessionID string) ([]ExportedAnnotation, error) {
+	unresolved, err := db.ListUnresolvedAnnotationTargetAnchors(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("ExportAnnotations: failed to check unresolved annotation targets for session %s: %w\nWhat went wrong: the export trust-boundary check could not read annotation_target_anchors.\nWhere: internal/export/annotations.go, ExportAnnotations.\nFix: verify the database is readable and re-run the export.", sessionID, err)
+	}
+	if len(unresolved) > 0 {
+		first := unresolved[0]
+		return nil, fmt.Errorf("ExportAnnotations: refused to export %d unresolved annotation target(s) for session %s\nWhat went wrong: annotation %s has no safely resolved transcript entry target.\nWhy it happened: re-index repair could not prove the old target maps to one unique current entry.\nWhere: annotation_target_anchors unresolved state before session annotation export.\nWhat it means: Peasant did not export annotations because doing so could attach a user label to the wrong transcript entry.\nFix: inspect the session with 'peasant annotate list %s', recreate or remove the affected annotation from annotator %q, then re-run the export.", len(unresolved), sessionID, first.AnnotationID, sessionID, first.AnnotatorName)
+	}
 	// Collect session-level annotations.
 	rows, err := db.GetAnnotationsForSession(ctx, sessionID)
 	if err != nil {

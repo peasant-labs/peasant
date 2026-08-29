@@ -1,0 +1,103 @@
+cases:
+  - name: resolved-entry-id
+    annotator: human-web
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, entry_id: entry-0, content: alpha }
+      - { index: 1, entry_id: entry-1, content: bravo }
+      - { index: 2, entry_id: entry-2, content: charlie }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, entry_id: entry-0, content: alpha }
+      - { index: 1, entry_id: entry-new, content: new text }
+      - { index: 2, entry_id: entry-1, content: bravo }
+      - { index: 3, entry_id: entry-2, content: charlie }
+    want_state: resolved
+    want_start: 2
+    want_end: 3
+  - name: resolved-tool-call-id
+    annotator: human-web
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, tool_call_id: tool-1, entry_type: tool_use, role: assistant, part_type: tool_use, content: tool call }
+      - { index: 2, content: charlie }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, content: inserted }
+      - { index: 2, tool_call_id: tool-1, entry_type: tool_use, role: assistant, part_type: tool_use, content: tool call }
+    want_state: resolved
+    want_start: 2
+    want_end: 3
+  - name: resolved-content-fingerprint
+    annotator: human-web
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, content: unique text }
+      - { index: 2, content: charlie }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, content: alpha }
+      - { index: 2, content: unique text }
+      - { index: 3, content: charlie }
+    want_state: resolved
+    want_start: 2
+    want_end: 3
+  - name: unresolved-human-ambiguous
+    annotator: human-web
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, content: same text }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, content: alpha }
+      - { index: 2, content: same text }
+      - { index: 3, content: same text }
+    want_state: unresolved
+    want_no_target: true
+    want_push_error: true
+  - name: unresolved-human-no-match
+    annotator: human-web
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, entry_id: missing-entry, content: target text }
+      - { index: 2, content: charlie }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, content: replacement text }
+      - { index: 2, content: charlie }
+    want_state: unresolved
+    want_no_target: true
+    want_push_error: true
+  - name: unresolved-human-missing-target
+    annotator: human-web
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, entry_id: deleted-entry, content: target text }
+      - { index: 2, content: charlie }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, content: alpha }
+      - { index: 2, content: charlie }
+    want_state: unresolved
+    want_no_target: true
+    want_push_error: true
+  - name: superseded-classifier-ambiguous
+    annotator: frustration-classifier
+    type_id: quality.frustration_signal
+    old_entries:
+      - { index: 0, content: alpha }
+      - { index: 1, content: same text }
+    target: { start: 1, end: 2 }
+    new_entries:
+      - { index: 0, content: alpha }
+      - { index: 2, content: same text }
+      - { index: 3, content: same text }
+    want_state: superseded
+    want_no_target: true

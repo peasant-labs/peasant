@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/crypto/sha3"
@@ -40,10 +39,11 @@ const (
 	// sqlSelectTargetEntriesForSession reads the entry-annotation attachments a
 	// re-index has to carry across its DELETE. Ordered so a restore is
 	// deterministic and a failure names the same row every time.
-	sqlSelectTargetEntriesForSession = `SELECT targets.annotation_id, targets.entry_index, targets.end_index, annotators.name
+	sqlSelectTargetEntriesForSession = `SELECT targets.annotation_id, targets.entry_index, targets.end_index, annotators.name, annotator_kinds.name
 FROM annotation_target_entries targets
 JOIN annotations ON annotations.id = targets.annotation_id
 JOIN annotators ON annotators.id = annotations.annotator_id
+JOIN annotator_kinds ON annotator_kinds.id = annotators.kind_id
 WHERE targets.session_id = ?
 ORDER BY targets.entry_index, targets.annotation_id`
 
@@ -1006,6 +1006,7 @@ func bindNullableStopReason(stmt *sqlite.Stmt, param int, value *schema.StopReas
 type entryAnnotationTarget struct {
 	annotationID  string
 	annotatorName string
+	annotatorKind string
 	entryIndex    int
 	endIndex      int
 	anchors       []entryTargetAnchor
@@ -1039,6 +1040,7 @@ func readEntryAnnotationTargets(conn *sqlite.Conn, sessionID string) ([]entryAnn
 			targets = append(targets, entryAnnotationTarget{
 				annotationID:  stmt.ColumnText(0),
 				annotatorName: stmt.ColumnText(3),
+				annotatorKind: stmt.ColumnText(4),
 				entryIndex:    stmt.ColumnInt(1),
 				endIndex:      stmt.ColumnInt(2),
 			})
@@ -1141,21 +1143,17 @@ func restoreEntryAnnotationTargets(
 			}
 			continue
 		}
-		if missingIndex < 0 {
-			missingIndex = target.entryIndex
-		}
 		{
 			var remapped bool
 			if start, end, remapped = remapEntryAnnotationTarget(target, newAnchors); !remapped {
-				dryRun := fmt.Sprintf("peasant annotate prune %s --session %s --dry-run",
-					githooks.ShellQuote(target.annotatorName), githooks.ShellQuote(sessionID))
-				return remappedTargets, &annotationRemapRefusedError{err: fmt.Errorf("store: preserve annotation_target_entries for %s[%d,%d): the re-index no longer contains the complete span targeted by annotation %s — "+
-					"what: an entry annotation could not be carried onto the replacement index; "+
-					"why: entry %d disappeared from the newly indexed transcript and no unique contiguous anchor match was found; "+
-					"user impact: the re-index was rolled back, so the previous entries and annotation target remain intact and later village pushes are not poisoned by an orphan; "+
-					"how to fix: using the same global --config-dir/--data-dir overrides as this ingest, inspect the annotation with 'peasant annotate list %s'. If it no longer applies, preview the annotator-and-session-scoped cleanup with '%s', remove or recreate the affected annotation, then re-run the same peasant ingest command",
-					sessionID, target.entryIndex, target.endIndex, target.annotationID, missingIndex,
-					githooks.ShellQuote(sessionID), dryRun)}
+				state := AnnotationTargetAnchorSuperseded
+				if target.annotatorKind == "human" {
+					state = AnnotationTargetAnchorUnresolved
+				}
+				if err := upsertAnnotationTargetAnchorOnConn(conn, target.annotationID, sessionID, target.entryIndex, target.endIndex, state); err != nil {
+					return remappedTargets, err
+				}
+				continue
 			}
 		}
 		if start != target.entryIndex || end != target.endIndex {
@@ -1221,6 +1219,9 @@ func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target ent
 			"user impact: session %s was NOT re-indexed (the whole re-index is rolled back), because completing it would have left annotation %s with no publishable target; "+
 			"how to fix: check the analytics store for constraint or corruption errors, then re-run the same peasant ingest command with the same global --config-dir/--data-dir overrides",
 			sessionID, start, err, sessionID, target.annotationID)
+	}
+	if err := upsertAnnotationTargetAnchorOnConn(conn, target.annotationID, sessionID, start, end, AnnotationTargetAnchorResolved); err != nil {
+		return err
 	}
 	return nil
 }

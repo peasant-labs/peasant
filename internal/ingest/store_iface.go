@@ -770,6 +770,20 @@ type AnnotationQueryStore interface {
 	// originally pushed with, so recomputing its content hash yields the hash the
 	// village stored — letting the client retract exactly what it locally retired.
 	ListSupersededAnnotations(ctx context.Context) ([]AnnotationPushRow, error)
+
+	// ListUnresolvedAnnotationTargetAnchors returns active entry annotations whose
+	// durable target repair state is unresolved. An empty sessionID means all
+	// sessions. Push uses this trust-boundary check before building wire payloads.
+	ListUnresolvedAnnotationTargetAnchors(ctx context.Context, sessionID string) ([]AnnotationTargetAnchorRow, error)
+}
+
+type AnnotationTargetAnchorRow struct {
+	AnnotationID  string
+	SessionID     string
+	AnnotatorName string
+	AnnotatorKind string
+	TypeID        string
+	ContentHash   *string
 }
 
 // AnnotationPushRow is the push-specific view of an annotation.

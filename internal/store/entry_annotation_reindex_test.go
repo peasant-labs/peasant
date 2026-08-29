@@ -2,17 +2,60 @@ package store_test
 
 import (
 	"context"
+	"embed"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	peasantExport "github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
+	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
+
+//go:embed testdata/annotation-repair/target-anchors.yaml
+var annotationRepairFixturesFS embed.FS
+
+type annotationRepairFixtures struct {
+	Cases []annotationRepairCase `yaml:"cases"`
+}
+
+type annotationRepairCase struct {
+	Name          string                            `yaml:"name"`
+	Annotator     string                            `yaml:"annotator"`
+	TypeID        string                            `yaml:"type_id"`
+	OldEntries    []annotationRepairEntry           `yaml:"old_entries"`
+	Target        annotationRepairTarget            `yaml:"target"`
+	NewEntries    []annotationRepairEntry           `yaml:"new_entries"`
+	WantState     store.AnnotationTargetAnchorState `yaml:"want_state"`
+	WantStart     int                               `yaml:"want_start"`
+	WantEnd       int                               `yaml:"want_end"`
+	WantNoTarget  bool                              `yaml:"want_no_target"`
+	WantPushError bool                              `yaml:"want_push_error"`
+}
+
+type annotationRepairEntry struct {
+	Index      int    `yaml:"index"`
+	EntryID    string `yaml:"entry_id"`
+	ToolCallID string `yaml:"tool_call_id"`
+	EntryType  string `yaml:"entry_type"`
+	Role       string `yaml:"role"`
+	PartType   string `yaml:"part_type"`
+	Content    string `yaml:"content"`
+}
+
+type annotationRepairTarget struct {
+	Start int `yaml:"start"`
+	End   int `yaml:"end"`
+}
 
 const (
 	reindexSessionID   = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
@@ -70,15 +113,7 @@ func TestIndexSessionEntries_CarriesEntryAnnotationsAcrossAReindex(t *testing.T)
 	}
 }
 
-// TestIndexSessionEntries_RollsBackWhenAnAnnotatedEntryIsGone covers the one case
-// an attachment cannot safely move: the entry it described is no longer in the
-// transcript.
-//
-// Detaching the target creates the poison row this repair exists to prevent, and
-// deleting the annotation would lose user data. The whole replacement therefore
-// rolls back, retaining the old entries and target until the user removes or
-// recreates the annotation deliberately.
-func TestIndexSessionEntries_RollsBackWhenAnAnnotatedEntryIsGone(t *testing.T) {
+func TestIndexSessionEntries_SupersedesClassifierTargetWhenAnnotatedEntryIsGone(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 
@@ -89,25 +124,19 @@ func TestIndexSessionEntries_RollsBackWhenAnAnnotatedEntryIsGone(t *testing.T) {
 	// preserve an annotation over content that no longer exists.
 	lost := annotateReindexEntry(t, s, 1, 4)
 
-	// The transcript shrank: entry 3 no longer exists.
-	err := reindexEntries(s, 2)
-	if err == nil {
-		t.Fatal("re-index succeeded after deleting an annotated entry; want a rollback that preserves the target")
+	if err := reindexEntries(s, 2); err != nil {
+		t.Fatalf("re-index classifier target loss: %v", err)
 	}
-	for _, want := range []string{lost, "[1,4)", "rolled back", "annotate prune", "--dry-run"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("re-index error does not contain %q:\n%v", want, err)
-		}
-	}
-	if got := entryTargetCount(t, s, lost); got != 1 {
-		t.Errorf("annotation %s has %d target row(s) after rollback, want 1", lost, got)
+	assertAnchorState(t, s, lost, store.AnnotationTargetAnchorSuperseded)
+	if got := entryTargetCount(t, s, lost); got != 0 {
+		t.Errorf("annotation %s has %d target row(s) after superseded repair, want 0", lost, got)
 	}
 	entries, listErr := s.ListEntries(context.Background(), schema.SessionID(reindexSessionID))
 	if listErr != nil {
 		t.Fatalf("list entries after rollback: %v", listErr)
 	}
-	if len(entries) != 4 {
-		t.Errorf("entries after rollback = %d, want the original 4", len(entries))
+	if len(entries) != 2 {
+		t.Errorf("entries after repair = %d, want replacement 2", len(entries))
 	}
 }
 
@@ -142,19 +171,16 @@ func TestIndexSessionEntries_DoesNotSkipInvalidEntryAnnotationSpan(t *testing.T)
 	annotationID := annotateReindexEntry(t, s, 1, 2)
 	setReindexTargetEnd(t, s, annotationID, 3)
 
-	err := reindexEntries(s, 2)
-	if err == nil {
-		t.Fatal("identical re-index succeeded with an invalid existing annotation span; want fail-safe rollback")
+	if err := reindexEntries(s, 2); err != nil {
+		t.Fatalf("identical re-index with invalid classifier span: %v", err)
 	}
-	for _, want := range []string{annotationID, "rolled back", "no unique contiguous anchor match"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("re-index error does not contain %q:\n%v", want, err)
-		}
+	assertAnchorState(t, s, annotationID, store.AnnotationTargetAnchorSuperseded)
+	if got := entryTargetCount(t, s, annotationID); got != 0 {
+		t.Fatalf("target rows after invalid classifier span repair = %d, want 0", got)
 	}
-	assertReindexTargetSpan(t, s, annotationID, 1, 3)
 }
 
-func TestIndexSessionEntries_RollsBackWhenEntryAnnotationRemapIsAmbiguous(t *testing.T) {
+func TestIndexSessionEntries_SupersedesClassifierTargetWhenRemapIsAmbiguous(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 
@@ -166,28 +192,207 @@ func TestIndexSessionEntries_RollsBackWhenEntryAnnotationRemapIsAmbiguous(t *tes
 	})
 	ambiguous := annotateReindexEntry(t, s, 1, 2)
 
-	err := reindexCustomEntries(s, []schema.SessionEntry{
+	if err := reindexCustomEntries(s, []schema.SessionEntry{
 		reindexContentEntry(0, "alpha"),
 		reindexContentEntry(2, "same text"),
 		reindexContentEntry(3, "same text"),
-	})
-	if err == nil {
-		t.Fatal("re-index succeeded with two possible annotation targets; want rollback")
+	}); err != nil {
+		t.Fatalf("re-index ambiguous classifier target: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no unique contiguous anchor match") {
-		t.Fatalf("re-index error does not explain ambiguous remap:\n%v", err)
+	assertAnchorState(t, s, ambiguous, store.AnnotationTargetAnchorSuperseded)
+	if got := entryTargetCount(t, s, ambiguous); got != 0 {
+		t.Fatalf("target rows after ambiguous classifier repair = %d, want 0", got)
 	}
-	assertReindexTargetSpan(t, s, ambiguous, 1, 2)
 	entries, listErr := s.ListEntries(context.Background(), schema.SessionID(reindexSessionID))
 	if listErr != nil {
 		t.Fatalf("list entries after ambiguous rollback: %v", listErr)
 	}
 	if len(entries) != 3 {
-		t.Fatalf("entries after ambiguous rollback = %d, want original 3", len(entries))
+		t.Fatalf("entries after ambiguous classifier repair = %d, want replacement 3", len(entries))
+	}
+}
+
+func TestIndexSessionEntries_TargetAnchorRepairFixtures(t *testing.T) {
+	fixtures := loadAnnotationRepairFixtures(t)
+	for _, tc := range fixtures.Cases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			s := openTestStore(t)
+			seedReindexSession(t, s)
+			indexReindexCustomEntries(t, s, repairEntries(tc.OldEntries))
+			annotationID := annotateReindexEntryWith(t, s, tc.Target.Start, tc.Target.End, tc.Annotator, tc.TypeID)
+
+			if err := reindexCustomEntries(s, repairEntries(tc.NewEntries)); err != nil {
+				t.Fatalf("IndexSessionEntries(%s): %v", tc.Name, err)
+			}
+
+			assertAnchorState(t, s, annotationID, tc.WantState)
+			if tc.WantNoTarget {
+				if got := entryTargetCount(t, s, annotationID); got != 0 {
+					t.Fatalf("target rows after unresolved repair = %d, want 0", got)
+				}
+			} else {
+				assertReindexTargetSpan(t, s, annotationID, tc.WantStart, tc.WantEnd)
+			}
+			if tc.WantPushError {
+				_, err := push.PushAnnotationsSelected(context.Background(), nil, s, push.AnnotationSelection{}, true, 1)
+				if err == nil {
+					t.Fatal("push with unresolved target succeeded; want fail-closed error")
+				}
+				for _, want := range []string{annotationID, "unresolved annotation target", "how to fix"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("push error does not contain %q:\n%v", want, err)
+					}
+				}
+				_, err = peasantExport.ExportAnnotations(context.Background(), s, reindexSessionID)
+				if err == nil {
+					t.Fatal("export with unresolved target succeeded; want fail-closed error")
+				}
+				for _, want := range []string{annotationID, "refused to export", "Fix:"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("export error does not contain %q:\n%v", want, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestIndexSessionEntries_PushRetractsPublishedClassifierAfterTargetLoss(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	seedReindexSession(t, s)
+	indexReindexCustomEntries(t, s, []schema.SessionEntry{
+		reindexContentEntry(0, "alpha"),
+		reindexContentEntry(1, "stale classifier target"),
+		reindexContentEntry(2, "charlie"),
+	})
+	annotationID := annotateReindexEntry(t, s, 1, 2)
+	oldItem := schema.AnnotationPushItem{
+		TargetKind: schema.TargetEntry,
+		EntryTarget: &schema.AnnotationEntryTarget{
+			SessionID:  reindexSessionID,
+			EntryIndex: 1,
+			EndIndex:   2,
+		},
+		TypeID:        reindexTypeID,
+		Value:         "detected",
+		AnnotatorName: reindexAnnotator,
+	}
+	oldHash := oldItem.ComputeContentHash()
+	if err := s.UpdateContentHash(context.Background(), annotationID, oldHash); err != nil {
+		t.Fatalf("store old classifier annotation content hash: %v", err)
+	}
+
+	if err := reindexCustomEntries(s, []schema.SessionEntry{
+		reindexContentEntry(0, "alpha"),
+		reindexContentEntry(1, "replacement text"),
+		reindexContentEntry(2, "charlie"),
+	}); err != nil {
+		t.Fatalf("re-index classifier target loss: %v", err)
+	}
+	assertAnchorState(t, s, annotationID, store.AnnotationTargetAnchorSuperseded)
+	if got := entryTargetCount(t, s, annotationID); got != 0 {
+		t.Fatalf("target rows after classifier target loss = %d, want 0", got)
+	}
+
+	var received schema.AnnotationPushRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/annotations/manifest" {
+			_ = json.NewEncoder(w).Encode(schema.AnnotationManifestResponse{Hashes: []string{oldHash}})
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode annotation push request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(schema.AnnotationPushResponse{})
+	}))
+	defer server.Close()
+
+	client := village.NewVillageClient(server.URL, "test-api-key", nil)
+	summary, err := push.PushAnnotationsSelected(context.Background(), client, s, push.AnnotationSelection{}, false, 1)
+	if err != nil {
+		t.Fatalf("push after classifier target loss: %v", err)
+	}
+	if summary.Retracted != 1 {
+		t.Fatalf("retracted count = %d, want 1", summary.Retracted)
+	}
+	if len(received.Retractions) != 1 || received.Retractions[0] != oldHash {
+		t.Fatalf("wire retractions = %v, want [%s]", received.Retractions, oldHash)
+	}
+	if len(received.Annotations) != 0 {
+		t.Fatalf("active annotations sent after classifier target loss = %d, want 0", len(received.Annotations))
 	}
 }
 
 // --- helpers ---------------------------------------------------------------
+
+func loadAnnotationRepairFixtures(t *testing.T) annotationRepairFixtures {
+	t.Helper()
+	data, err := annotationRepairFixturesFS.ReadFile("testdata/annotation-repair/target-anchors.yaml")
+	if err != nil {
+		t.Fatalf("read annotation repair fixtures: %v", err)
+	}
+	var fixtures annotationRepairFixtures
+	if err := yaml.Unmarshal(data, &fixtures); err != nil {
+		t.Fatalf("parse annotation repair fixtures: %v", err)
+	}
+	requiredNames := map[string]bool{
+		"resolved-entry-id":               false,
+		"resolved-tool-call-id":           false,
+		"resolved-content-fingerprint":    false,
+		"unresolved-human-ambiguous":      false,
+		"unresolved-human-no-match":       false,
+		"unresolved-human-missing-target": false,
+		"superseded-classifier-ambiguous": false,
+	}
+	for _, tc := range fixtures.Cases {
+		if _, ok := requiredNames[tc.Name]; ok {
+			requiredNames[tc.Name] = true
+		}
+	}
+	for name, seen := range requiredNames {
+		if !seen {
+			t.Fatalf("annotation repair fixture %q is required", name)
+		}
+	}
+	return fixtures
+}
+
+func repairEntries(fixtures []annotationRepairEntry) []schema.SessionEntry {
+	entries := make([]schema.SessionEntry, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		entryType := schema.EntryTypeText
+		if fixture.EntryType == "tool_use" {
+			entryType = schema.EntryTypeToolUse
+		}
+		role := schema.RoleAssistant
+		if fixture.Role == "user" {
+			role = schema.RoleUser
+		}
+		entry := schema.SessionEntry{
+			SessionID:      schema.SessionID(reindexSessionID),
+			EntryIndex:     fixture.Index,
+			Harness:        ingest.HarnessClaudeCode,
+			EntryType:      entryType,
+			Role:           role,
+			ContentPreview: strPtr(fixture.Content),
+		}
+		if fixture.EntryID != "" {
+			entry.EntryID = strPtr(fixture.EntryID)
+		}
+		if fixture.ToolCallID != "" {
+			entry.ToolCallID = strPtr(fixture.ToolCallID)
+		}
+		if fixture.PartType != "" {
+			entry.PartType = strPtr(fixture.PartType)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
 
 func seedReindexSession(t *testing.T, s *store.Store) {
 	t.Helper()
@@ -273,27 +478,51 @@ func reindexContentEntry(index int, content string) schema.SessionEntry {
 // and returns its store ID.
 func annotateReindexEntry(t *testing.T, s *store.Store, entryIndex, endIndex int) string {
 	t.Helper()
+	return annotateReindexEntryWith(t, s, entryIndex, endIndex, reindexAnnotator, reindexTypeID)
+}
+
+func annotateReindexEntryWith(t *testing.T, s *store.Store, entryIndex, endIndex int, annotatorName, typeID string) string {
+	t.Helper()
 	ctx := context.Background()
-	annotatorID, err := s.GetAnnotatorIDByName(ctx, reindexAnnotator)
+	annotatorID, err := s.GetAnnotatorIDByName(ctx, annotatorName)
 	if err != nil || annotatorID == "" {
-		t.Fatalf("resolve annotator %q: id=%q err=%v", reindexAnnotator, annotatorID, err)
+		t.Fatalf("resolve annotator %q: id=%q err=%v", annotatorName, annotatorID, err)
 	}
-	typeID, err := s.GetAnnotationTypeID(ctx, reindexTypeID)
-	if err != nil || typeID == "" {
-		t.Fatalf("resolve annotation type %q: id=%q err=%v", reindexTypeID, typeID, err)
+	annotationTypeID, err := s.GetAnnotationTypeID(ctx, typeID)
+	if err != nil || annotationTypeID == "" {
+		t.Fatalf("resolve annotation type %q: id=%q err=%v", typeID, annotationTypeID, err)
 	}
 	id, err := s.CreateEntryAnnotation(ctx, ingest.EntryAnnotationParams{
 		SessionID:        reindexSessionID,
 		EntryIndex:       entryIndex,
 		EndIndex:         endIndex,
 		AnnotatorID:      annotatorID,
-		AnnotationTypeID: typeID,
+		AnnotationTypeID: annotationTypeID,
 		Value:            "detected",
 	})
 	if err != nil {
 		t.Fatalf("CreateEntryAnnotation(%d,%d): %v", entryIndex, endIndex, err)
 	}
 	return id
+}
+
+func assertAnchorState(t *testing.T, s *store.Store, annotationID string, want store.AnnotationTargetAnchorState) {
+	t.Helper()
+	conn := takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(conn)
+	got := ""
+	if err := sqlitex.ExecuteTransient(conn, `SELECT state FROM annotation_target_anchors WHERE annotation_id = ?`, &sqlitex.ExecOptions{
+		Args: []any{annotationID},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			got = stmt.ColumnText(0)
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("read annotation target anchor %s: %v", annotationID, err)
+	}
+	if got != string(want) {
+		t.Fatalf("anchor state = %q, want %q", got, want)
+	}
 }
 
 // entryTargetCount reports how many attachments an annotation currently has.
