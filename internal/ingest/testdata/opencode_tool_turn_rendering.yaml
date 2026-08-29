@@ -35,6 +35,7 @@ required_cases:
   - a-real-user-message-about-a-task-stays-a-user-turn
   - a-synthetic-part-on-an-assistant-message-is-a-system-entry
   - a-user-message-with-one-synthetic-annotation-stays-a-user-turn
+  - a-message-whose-two-parts-are-both-synthetic-is-a-system-entry
 
 cases:
   - name: tool-name-comes-from-the-tool-field
@@ -202,13 +203,13 @@ cases:
   - name: a-synthetic-failed-task-result-is-a-system-entry
     role: user
     parts:
-      - '{"id":"prt_task_error","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"error\"> <summary>Background task failed: Research serving runtimes</summary> <task_result>the model refused the request</task_result> </task>"}'
+      - '{"id":"prt_task_error","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"error\"> <summary>Background task failed: Research serving runtimes</summary> <task_error>the model refused the request</task_error> </task>"}'
     want_message_entry_type: system
     want_message_role: system
     want_turns:
       - role: system
         entry_type: system
-        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"error\"> <summary>Background task failed: Research serving runtimes</summary> <task_result>the model refused the request</task_result> </task>"
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"error\"> <summary>Background task failed: Research serving runtimes</summary> <task_error>the model refused the request</task_error> </task>"
 
   # A person may write about a task and even paste the tag. Without the flag the
   # message is theirs and stays a user turn, which is why no text-shape
@@ -260,5 +261,27 @@ cases:
         entry_type: text
         content: "can you also check the auth module?"
       - role: user
+        entry_type: text
+        content: "You are in plan mode. Do not edit files."
+
+  # The rule is "every part", not "one part". OpenCode appends a reminder part
+  # to the last user message of a turn, and that message can be one the harness
+  # itself injected. Both parts are then synthetic and the whole message is
+  # harness-authored, so it must still reclassify.
+  - name: a-message-whose-two-parts-are-both-synthetic-is-a-system-entry
+    role: user
+    parts:
+      - '{"id":"prt_two_result","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"}'
+      - '{"id":"prt_two_reminder","type":"text","synthetic":true,"text":"You are in plan mode. Do not edit files."}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"
+      # The second part folds to its own turn and keeps its own text type.
+      # The role is what decides whose words a reader is looking at, and it
+      # follows the reclassified message.
+      - role: system
         entry_type: text
         content: "You are in plan mode. Do not edit files."
