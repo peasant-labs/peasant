@@ -45,7 +45,7 @@ func classifyResolutionEntries(
 	phrasesCSV := strings.Join(resolutionEvidencePhrases, ",")
 
 	var results []*ClassifierResult
-	for i, entry := range entries {
+	for _, entry := range entries {
 		// Only scan assistant entries for resolution evidence.
 		if entry.Role != ingest.RoleAssistant {
 			continue
@@ -66,7 +66,7 @@ func classifyResolutionEntries(
 							Details: map[string]string{"phrases": phrasesCSV},
 						},
 						Target: &ClassifierTarget{
-							EntryIndex: i,
+							EntryIndex: entry.EntryIndex,
 						},
 					})
 					goto nextEntry // one match per entry is sufficient

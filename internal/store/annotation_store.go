@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -996,6 +997,10 @@ func (s *Store) ListSupersededAnnotations(ctx context.Context) ([]ingest.Annotat
 // Compile-time guard: *Store must satisfy ingest.AnnotationQueryStore.
 var _ ingest.AnnotationQueryStore = (*Store)(nil)
 
+// Compile-time guard: *Store must satisfy the optional classifier annotation
+// batch persistence capability.
+var _ ingest.ClassifierAnnotationBatchStore = (*Store)(nil)
+
 // ---------------------------------------------------------------------------
 // Dedup / Supersession (R9)
 // ---------------------------------------------------------------------------
@@ -1027,6 +1032,14 @@ func (s *Store) FindExistingAnnotation(ctx context.Context, p ingest.FindAnnotat
 		return nil, fmt.Errorf("store: FindExistingAnnotation: SessionID is required")
 	}
 
+	result, err := findExistingAnnotationOnConn(conn, query, args)
+	if err != nil {
+		return nil, fmt.Errorf("store: FindExistingAnnotation: %w", err)
+	}
+	return result, nil
+}
+
+func findExistingAnnotationOnConn(conn *sqlite.Conn, query string, args []any) (*ingest.ExistingAnnotation, error) {
 	var result *ingest.ExistingAnnotation
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		Args: args,
@@ -1038,7 +1051,7 @@ func (s *Store) FindExistingAnnotation(ctx context.Context, p ingest.FindAnnotat
 			return nil
 		},
 	}); err != nil {
-		return nil, fmt.Errorf("store: FindExistingAnnotation: %w", err)
+		return nil, err
 	}
 	return result, nil
 }
@@ -1238,6 +1251,197 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 	}
 
 	return newID, nil
+}
+
+// ApplyClassifierAnnotations persists one session's classifier results in one
+// SQLite transaction. Each classifier result is protected by a savepoint so a
+// validation or insert failure for one result is reported on that result and does
+// not roll back other results from the same Annotate call.
+func (s *Store) ApplyClassifierAnnotations(ctx context.Context, writes []ingest.ClassifierAnnotationWrite) []ingest.ClassifierAnnotationWriteResult {
+	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
+	if len(writes) == 0 {
+		return results
+	}
+
+	s.annotationWriteMu.Lock()
+	defer s.annotationWriteMu.Unlock()
+
+	conn, err := s.pool.Take(ctx)
+	if err != nil {
+		setupErr := fmt.Errorf("store: take connection for classifier annotation batch: %w", err)
+		for i := range results {
+			results[i].Err = setupErr
+		}
+		return results
+	}
+	defer s.pool.Put(conn)
+
+	txnErr := error(nil)
+	endFn := sqlitex.Transaction(conn)
+	txnOpen := true
+	defer func() {
+		if txnOpen {
+			endFn(&txnErr)
+		}
+	}()
+
+	for i := range writes {
+		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i])
+		results[i] = outcome
+		if err != nil {
+			results[i].Err = err
+			if fatal {
+				txnErr = err
+				break
+			}
+		}
+	}
+
+	endFn(&txnErr)
+	txnOpen = false
+	if txnErr != nil {
+		commitErr := fmt.Errorf("store: commit classifier annotation batch: %w", txnErr)
+		for i := range results {
+			if results[i].Err == nil {
+				results[i].Err = commitErr
+			}
+			results[i].AnnotationID = ""
+		}
+	}
+	return results
+}
+
+func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite) (ingest.ClassifierAnnotationWriteResult, error, bool) {
+	const savepointName = "classifier_annotation_batch_item"
+	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
+		return ingest.ClassifierAnnotationWriteResult{}, fmt.Errorf("store: start classifier annotation savepoint: %w", err), true
+	}
+
+	result, err := applyClassifierAnnotationOnConn(conn, write)
+	if err != nil {
+		rollbackErr, fatal := rollbackClassifierAnnotationSavepoint(conn, savepointName, err)
+		return result, rollbackErr, fatal
+	}
+	if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil); err != nil {
+		return result, fmt.Errorf("store: release classifier annotation savepoint: %w", err), true
+	}
+	return result, nil, false
+}
+
+func rollbackClassifierAnnotationSavepoint(conn *sqlite.Conn, savepointName string, cause error) (error, bool) {
+	rollbackErr := sqlitex.ExecuteTransient(conn, "ROLLBACK TO SAVEPOINT "+savepointName, nil)
+	releaseErr := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil)
+	if rollbackErr != nil || releaseErr != nil {
+		errs := []error{fmt.Errorf("store: classifier annotation savepoint failed: %w", cause)}
+		if rollbackErr != nil {
+			errs = append(errs, fmt.Errorf("store: rollback classifier annotation savepoint: %w", rollbackErr))
+		}
+		if releaseErr != nil {
+			errs = append(errs, fmt.Errorf("store: release classifier annotation savepoint: %w", releaseErr))
+		}
+		return errors.Join(errs...), true
+	}
+	return cause, false
+}
+
+func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite) (ingest.ClassifierAnnotationWriteResult, error) {
+	result := ingest.ClassifierAnnotationWriteResult{Dedup: ingest.DedupCreate}
+	if write.ContentHash == "" {
+		return result, fmt.Errorf("store: classifier annotation write requires non-empty content hash")
+	}
+
+	query, args, err := classifierAnnotationFindQuery(write.Find)
+	if err != nil {
+		return result, err
+	}
+	existing, err := findExistingAnnotationOnConn(conn, query, args)
+	if err != nil {
+		return result, fmt.Errorf("store: find existing classifier annotation: %w", err)
+	}
+	if existing != nil {
+		result.ExistingAnnotationID = existing.ID
+		if existing.ContentHash == write.ContentHash {
+			result.Dedup = ingest.DedupSkip
+			result.AnnotationID = existing.ID
+			return result, nil
+		}
+		result.Dedup = ingest.DedupSupersede
+	}
+
+	newID, err := createClassifierAnnotationOnConn(conn, write.Create, write.ContentHash)
+	if err != nil {
+		return result, err
+	}
+	result.AnnotationID = newID
+	if existing != nil {
+		nowMs := time.Now().UnixMilli()
+		if err := sqlitex.ExecuteTransient(conn, sqlSupersedeAnnotation, &sqlitex.ExecOptions{
+			Args: []any{newID, nowMs, existing.ID},
+		}); err != nil {
+			return result, fmt.Errorf("store: supersede classifier annotation %s with %s: %w", existing.ID, newID, err)
+		}
+	}
+	return result, nil
+}
+
+func classifierAnnotationFindQuery(p ingest.FindAnnotationParams) (string, []any, error) {
+	switch {
+	case p.EntryIndex != nil && p.SessionID != nil:
+		return sqlFindExistingEntryAnnotation, []any{p.AnnotationTypeID, p.AnnotatorID, *p.SessionID, *p.EntryIndex}, nil
+	case p.SessionID != nil:
+		return sqlFindExistingSessionAnnotation, []any{p.AnnotationTypeID, p.AnnotatorID, *p.SessionID}, nil
+	default:
+		return "", nil, fmt.Errorf("store: classifier annotation find requires a session target")
+	}
+}
+
+func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotationParams, contentHash string) (string, error) {
+	newID := uuid.New().String()
+	targetKindName, childSQL, childArgs, provenanceJSON, err := classifierAnnotationInsertParts(newID, p)
+	if err != nil {
+		return "", err
+	}
+	nowMs := time.Now().UnixMilli()
+	if err := sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
+		Args: []any{
+			newID, targetKindName,
+			p.AnnotationTypeID, p.AnnotatorID, p.Value,
+			ptrFloat64ToAny(p.Confidence), ptrStringToAny(p.Reason), provenanceJSON,
+			0, nowMs,
+		},
+	}); err != nil {
+		return "", fmt.Errorf("store: insert classifier annotation: %w", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{Args: childArgs}); err != nil {
+		return "", fmt.Errorf("store: insert classifier annotation target: %w", err)
+	}
+	if err := sqlitex.ExecuteTransient(conn, sqlUpdateContentHash, &sqlitex.ExecOptions{Args: []any{contentHash, newID}}); err != nil {
+		return "", fmt.Errorf("store: set classifier annotation content hash on %s: %w", newID, err)
+	}
+	return newID, nil
+}
+
+func classifierAnnotationInsertParts(newID string, p ingest.CreateAnnotationParams) (string, string, []any, any, error) {
+	var provenanceJSON any
+	if p.Provenance != nil {
+		b, err := json.Marshal(p.Provenance)
+		if err != nil {
+			return "", "", nil, nil, fmt.Errorf("store: marshal classifier annotation provenance: %w", err)
+		}
+		provenanceJSON = string(b)
+	}
+	switch {
+	case p.SessionID != nil && p.EntryTarget == nil:
+		return "session", sqlInsertTargetSession, []any{newID, *p.SessionID}, provenanceJSON, nil
+	case p.EntryTarget != nil && p.SessionID == nil:
+		endIdx := p.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = p.EntryTarget.EntryIndex + 1
+		}
+		return "entry", sqlInsertTargetEntry, []any{newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx}, provenanceJSON, nil
+	default:
+		return "", "", nil, nil, fmt.Errorf("store: classifier annotation requires exactly one session or entry target")
+	}
 }
 
 // CountAnnotationsByAnnotator returns the number of annotations that would be deleted by

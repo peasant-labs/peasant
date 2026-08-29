@@ -87,8 +87,8 @@ func TestMigrationV46UpgradesAStoreFrozenAtV45(t *testing.T) {
 	}
 	defer upgraded.PoolForTest().Put(after)
 
-	if got := upgradeUserVersion(t, after); got != 46 {
-		t.Errorf("upgraded store user_version = %d, want 46", got)
+	if got := upgradeUserVersion(t, after); got != CurrentSchemaVersion() {
+		t.Errorf("upgraded store user_version = %d, want %d", got, CurrentSchemaVersion())
 	}
 	// Their migration survives the upgrade.
 	if !upgradeTableExists(t, after, "opencode_session_seq_cursor") {

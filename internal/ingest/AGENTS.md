@@ -12,10 +12,12 @@ DISCOVER ─▶ DIFF ─▶ FILTER ─┬─▶ EXTRACT+WRITE (N workers) ─▶
                              │                                       │ lock-free CAS
                              │   drainLoop goroutine ◀── Drain ◀────┘
                              │     DB Insert → Commit
-                             │     → wait indexDoneCh → AckBatch(prev) → send indexCh
+                             │     → stream per-session INDEX work
+                             │     → AckBatch when parser token completes
                              │
                              │   indexLoop goroutine ◀── indexCh
-                             │     index sessions → signal indexDoneCh
+                             │     parser workers → serial SQLite writer
+                             │     → signal drain-batch token on indexDoneCh
                              │
                              │   main goroutine (pure controller): wg.Wait()
                              │
@@ -24,7 +26,7 @@ DISCOVER ─▶ DIFF ─▶ FILTER ─┬─▶ EXTRACT+WRITE (N workers) ─▶
 
 **Sequential:** DISCOVER, DIFF, FILTER, COMPUTE, CLEANUP, REPORT, AUDIT (main goroutine)
 **Concurrent:** EXTRACT+WRITE (N workers) + drainLoop (DB INSERT) + indexLoop (INDEX) overlap
-**Pipelined:** batch N+1 DB INSERT in drainLoop overlaps with batch N INDEX in indexLoop
+**Pipelined:** drainLoop streams each DB-visible session to INDEX; parser workers overlap with later drains and SQLite writes stay serial
 
 Core data structure: **statically-allocated lock-free batched circular queue**.
 Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine consumes).
@@ -37,8 +39,8 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 | 2 | DIFF | Sequential | No | Classify: New / Updated / Unchanged / Active. |
 | 3 | FILTER | Sequential | No | Skip Unchanged + Active; resolve FK parent deps. |
 | 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, atomic write (tmp + rename). |
-| 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Best-effort | Drain StagingBuffer → upsert SQLite. Pipelined with INDEX. |
-| 5 | INDEX | **Concurrent** (indexLoop goroutine) | Best-effort | Parse transcripts → `session_entries`. Receives batches from drainLoop. |
+| 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Best-effort | Drain StagingBuffer → upsert SQLite → stream indexable sessions. Pipelined with INDEX. |
+| 5 | INDEX | **Concurrent** (parser workers + serial writer) | Best-effort | Parse transcripts in bounded workers → serial `session_entries` writes. Receives streamed work from drainLoop. |
 | 6 | COMPUTE | Sequential | Best-effort | 16 metric functions + daily insights. |
 | 7 | CLEANUP | Sequential | Best-effort | Remove orphan `.tmp-*` dirs. |
 | 8 | REPORT | Sequential | No | Aggregate counts → `PipelineResult`. |
@@ -58,7 +60,7 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 **StagingBuffer** — slot array + 2 GiB byte arena + committed set.
 Slot state machine (monotonic): `empty(0) ──Add──▶ ready(1) ──Drain──▶ claimed(2) ──AckBatch──▶ acked(3)`
 `Drain()` returns a `DrainBatch` (Results + Claimed indices). `AckBatch(DrainBatch)` frees arena space.
-Multiple `DrainBatch` values may be outstanding simultaneously; each owns its own `Claimed` slice.
+Multiple `DrainBatch` values may be outstanding simultaneously; each owns its own `Claimed` slice. The drain loop now attaches one completion token to the streamed INDEX work for that batch, so arena bytes are released only after all parser workers that can read that batch finish.
 
 **SessionEntryQueue** — Vyukov MPMC. Each slot has a `sequence` atomic (sole sync point).
 Push: CAS `head`, write, store `seq = pos+1`. Pop: CAS `tail`, read, store `seq = pos+cap`.
@@ -123,7 +125,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | `PipelineConfig` | pipeline.go | Sources, output dir, flags, parallelism |
 | `PipelineResult` | pipeline.go | Aggregate counts, errors, session results |
 | `workerResult` | parallel.go | EXTRACT+WRITE output: metadata, transcript bytes, paths |
-| `DrainBatch` | parallel.go | Drain result bundling Results + Claimed slot indices + Metas |
+| `DrainBatch` | parallel.go | Drain result bundling Results + Claimed slot indices; drain loop attaches Metas to stream INDEX work |
 | `DiffEntry` | pipeline.go | Session + diff classification |
 | `StagingBuffer` | parallel.go | Lock-free buffer with arena + parent-child ordering |
 | `SessionEntryQueue` | parallel.go | Vyukov MPMC ring buffer |

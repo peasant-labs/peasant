@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -244,18 +245,21 @@ ORDER BY t.type_id`,
 
 // Compile-time interface guards.
 var (
-	_ ingest.SessionStore = (*Store)(nil)
-	_ ingest.MetricsStore = (*Store)(nil)
-	_ ingest.PruneStore   = (*Store)(nil)
+	_ ingest.SessionStore                   = (*Store)(nil)
+	_ ingest.MetricsStore                   = (*Store)(nil)
+	_ ingest.AnnotationRunStateStore        = (*Store)(nil)
+	_ ingest.ClassifierAnnotationBatchStore = (*Store)(nil)
+	_ ingest.PruneStore                     = (*Store)(nil)
 )
 
 // Store manages persistent storage of sessions and metrics via SQLite.
 // It holds a connection pool, the installation salt (for opaque ID computation),
 // and manages the database lifecycle.
 type Store struct {
-	pool   *sqlitex.Pool
-	salt   salt.Salt
-	closed atomic.Bool
+	pool              *sqlitex.Pool
+	salt              salt.Salt
+	annotationWriteMu sync.Mutex
+	closed            atomic.Bool
 }
 
 // InstallationSalt returns the salt used by ingestion to derive canonical,

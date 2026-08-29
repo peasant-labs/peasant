@@ -111,6 +111,82 @@ func TestIndexSessionEntries_RollsBackWhenAnAnnotatedEntryIsGone(t *testing.T) {
 	}
 }
 
+func TestIndexSessionEntries_RemapsEntryAnnotationByEntryID(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+
+	seedReindexSession(t, s)
+	indexReindexCustomEntries(t, s, []schema.SessionEntry{
+		reindexEntry(0, "entry-0", "alpha"),
+		reindexEntry(1, "entry-1", "bravo"),
+		reindexEntry(2, "entry-2", "charlie"),
+	})
+	annotationID := annotateReindexEntry(t, s, 1, 2)
+
+	indexReindexCustomEntries(t, s, []schema.SessionEntry{
+		reindexEntry(0, "entry-0", "alpha"),
+		reindexEntry(1, "entry-new", "new text"),
+		reindexEntry(2, "entry-1", "bravo"),
+		reindexEntry(3, "entry-2", "charlie"),
+	})
+
+	assertReindexTargetSpan(t, s, annotationID, 2, 3)
+}
+
+func TestIndexSessionEntries_DoesNotSkipInvalidEntryAnnotationSpan(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+
+	seedReindexSession(t, s)
+	indexReindexEntries(t, s, 2)
+	annotationID := annotateReindexEntry(t, s, 1, 2)
+	setReindexTargetEnd(t, s, annotationID, 3)
+
+	err := reindexEntries(s, 2)
+	if err == nil {
+		t.Fatal("identical re-index succeeded with an invalid existing annotation span; want fail-safe rollback")
+	}
+	for _, want := range []string{annotationID, "rolled back", "no unique contiguous anchor match"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("re-index error does not contain %q:\n%v", want, err)
+		}
+	}
+	assertReindexTargetSpan(t, s, annotationID, 1, 3)
+}
+
+func TestIndexSessionEntries_RollsBackWhenEntryAnnotationRemapIsAmbiguous(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+
+	seedReindexSession(t, s)
+	indexReindexCustomEntries(t, s, []schema.SessionEntry{
+		reindexContentEntry(0, "alpha"),
+		reindexContentEntry(1, "same text"),
+		reindexContentEntry(2, "charlie"),
+	})
+	ambiguous := annotateReindexEntry(t, s, 1, 2)
+
+	err := reindexCustomEntries(s, []schema.SessionEntry{
+		reindexContentEntry(0, "alpha"),
+		reindexContentEntry(2, "same text"),
+		reindexContentEntry(3, "same text"),
+	})
+	if err == nil {
+		t.Fatal("re-index succeeded with two possible annotation targets; want rollback")
+	}
+	if !strings.Contains(err.Error(), "no unique contiguous anchor match") {
+		t.Fatalf("re-index error does not explain ambiguous remap:\n%v", err)
+	}
+	assertReindexTargetSpan(t, s, ambiguous, 1, 2)
+	entries, listErr := s.ListEntries(context.Background(), schema.SessionID(reindexSessionID))
+	if listErr != nil {
+		t.Fatalf("list entries after ambiguous rollback: %v", listErr)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries after ambiguous rollback = %d, want original 3", len(entries))
+	}
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func seedReindexSession(t *testing.T, s *store.Store) {
@@ -159,6 +235,40 @@ func reindexEntries(s *store.Store, count int) error {
 	return s.IndexSessionEntries(context.Background(), schema.SessionID(reindexSessionID), entries)
 }
 
+func indexReindexCustomEntries(t *testing.T, s *store.Store, entries []schema.SessionEntry) {
+	t.Helper()
+	if err := reindexCustomEntries(s, entries); err != nil {
+		t.Fatalf("IndexSessionEntries(custom): %v", err)
+	}
+}
+
+func reindexCustomEntries(s *store.Store, entries []schema.SessionEntry) error {
+	return s.IndexSessionEntries(context.Background(), schema.SessionID(reindexSessionID), entries)
+}
+
+func reindexEntry(index int, entryID string, content string) schema.SessionEntry {
+	return schema.SessionEntry{
+		SessionID:      schema.SessionID(reindexSessionID),
+		EntryIndex:     index,
+		Harness:        ingest.HarnessClaudeCode,
+		EntryType:      schema.EntryTypeText,
+		Role:           schema.RoleAssistant,
+		EntryID:        strPtr(entryID),
+		ContentPreview: strPtr(content),
+	}
+}
+
+func reindexContentEntry(index int, content string) schema.SessionEntry {
+	return schema.SessionEntry{
+		SessionID:      schema.SessionID(reindexSessionID),
+		EntryIndex:     index,
+		Harness:        ingest.HarnessClaudeCode,
+		EntryType:      schema.EntryTypeText,
+		Role:           schema.RoleAssistant,
+		ContentPreview: strPtr(content),
+	}
+}
+
 // annotateReindexEntry attaches one entry annotation to [entryIndex, endIndex)
 // and returns its store ID.
 func annotateReindexEntry(t *testing.T, s *store.Store, entryIndex, endIndex int) string {
@@ -203,6 +313,15 @@ func assertReindexTargetSpan(t *testing.T, s *store.Store, annotationID string, 
 				start, end, wantStart, wantEnd)
 		}
 	})
+}
+
+func setReindexTargetEnd(t *testing.T, s *store.Store, annotationID string, endIndex int) {
+	t.Helper()
+	conn := takeConn(t, s.PoolForTest())
+	defer s.PoolForTest().Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE annotation_target_entries SET end_index = ? WHERE annotation_id = ?`, &sqlitex.ExecOptions{Args: []any{endIndex, annotationID}}); err != nil {
+		t.Fatalf("update annotation target end_index for %s: %v", annotationID, err)
+	}
 }
 
 // forEachTargetEntry reads the attachments straight out of the table, so the

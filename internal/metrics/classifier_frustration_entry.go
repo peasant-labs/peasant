@@ -35,7 +35,7 @@ func classifyFrustrationEntries(
 	patternsCSV := strings.Join(expletivePatterns, ",")
 
 	var results []*ClassifierResult
-	for i, entry := range entries {
+	for _, entry := range entries {
 		for _, field := range contentFields(entry) {
 			lc := strings.ToLower(field)
 			for _, pattern := range expletivePatterns {
@@ -51,7 +51,7 @@ func classifyFrustrationEntries(
 							Details: map[string]string{"patterns": patternsCSV},
 						},
 						Target: &ClassifierTarget{
-							EntryIndex: i,
+							EntryIndex: entry.EntryIndex,
 						},
 					})
 					goto nextEntry // one match per entry is sufficient

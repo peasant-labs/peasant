@@ -510,25 +510,44 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 	if len(profile.Batches) == 0 {
 		fmt.Fprintln(w, "INDEX profile: no INDEX batches ran")
+		printIndexProfileStages(w, profile.Stages)
+		printIndexProfileAnnotationStats(w, profile.Annotation)
 		return
 	}
 	sizeCounts := map[int]int{}
 	totalSessions := 0
+	totalWorkItems := 0
 	totalEntries := 0
 	totalBytes := int64(0)
 	totalParse := time.Duration(0)
 	totalWrite := time.Duration(0)
+	totalWriteTxs := 0
+	totalWriteSavepoints := 0
+	totalWriteSkipped := 0
+	totalWriteStats := ingest.SessionEntryWriteStats{}
 	maxWorkers := 0
+	maxQueueCapacity := 0
 	for _, batch := range profile.Batches {
 		sizeCounts[batch.Sessions]++
 		totalSessions += batch.Sessions
+		totalWorkItems += batch.WorkItems
 		totalEntries += batch.Entries
 		totalBytes += batch.Bytes
 		totalParse += batch.ParseDuration
 		totalWrite += batch.WriteDuration
+		totalWriteTxs += batch.WriteTxs
+		totalWriteSavepoints += batch.WriteSavepoints
+		totalWriteSkipped += batch.WriteSkipped
+		totalWriteStats.Add(batch.WriteStats)
 		if batch.MaxParseWorkers > maxWorkers {
 			maxWorkers = batch.MaxParseWorkers
 		}
+		if batch.QueueCapacity > maxQueueCapacity {
+			maxQueueCapacity = batch.QueueCapacity
+		}
+	}
+	if totalWorkItems == 0 {
+		totalWorkItems = totalSessions
 	}
 	sizes := make([]int, 0, len(sizeCounts))
 	for size := range sizeCounts {
@@ -542,7 +561,16 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 
 	fmt.Fprintf(w, "INDEX profile: %d batches, %d sessions, %d entries, %d bytes\n", len(profile.Batches), totalSessions, totalEntries, totalBytes)
 	fmt.Fprintf(w, "  batch sizes: %s\n", strings.Join(dist, ", "))
+	if maxQueueCapacity > 0 {
+		fmt.Fprintf(w, "  work items: %d; queue capacity: %d\n", totalWorkItems, maxQueueCapacity)
+	}
+	if totalWriteTxs > 0 || totalWriteSavepoints > 0 {
+		fmt.Fprintf(w, "  write txs: %d; savepoints: %d; skipped rewrites: %d\n", totalWriteTxs, totalWriteSavepoints, totalWriteSkipped)
+	}
+	printIndexProfileWriteStats(w, totalWriteStats)
 	fmt.Fprintf(w, "  parse: %s total; write: %s total; max parse workers: %d\n", totalParse.Round(time.Millisecond), totalWrite.Round(time.Millisecond), maxWorkers)
+	printIndexProfileStages(w, profile.Stages)
+	printIndexProfileAnnotationStats(w, profile.Annotation)
 	if len(profile.SlowSessions) == 0 {
 		return
 	}
@@ -560,6 +588,88 @@ func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {
 			session.SourcePath,
 		)
 	}
+}
+
+func printIndexProfileAnnotationStats(w io.Writer, stats ingest.AnnotationProfileStats) {
+	if !stats.Any() {
+		return
+	}
+	fmt.Fprintln(w, "  annotation detail:")
+	fmt.Fprintf(w, "    list entries: %s total; count=%d\n", stats.ListEntriesTime.Round(time.Millisecond), stats.ListEntriesCount)
+	fmt.Fprintf(w, "    get metrics: %s total; count=%d\n", stats.GetMetricsTime.Round(time.Millisecond), stats.GetMetricsCount)
+	fmt.Fprintf(w, "    classifier run: %s total; count=%d\n", stats.ClassifierRunTime.Round(time.Millisecond), stats.ClassifierRunCount)
+	fmt.Fprintf(w, "    results: total=%d session-target=%d entry-target=%d skipped-by-state=%d\n", stats.ResultCount, stats.SessionResultCount, stats.EntryResultCount, stats.StateSkipCount)
+	fmt.Fprintf(w, "    id cache: hits=%d misses=%d\n", stats.IDCacheHits, stats.IDCacheMisses)
+	if stats.BatchWriteCount > 0 || stats.BatchResultCount > 0 || stats.BatchErrorCount > 0 {
+		fmt.Fprintf(w, "    batch persistence: %s total; batches=%d results=%d errors=%d\n", stats.BatchWriteTime.Round(time.Millisecond), stats.BatchWriteCount, stats.BatchResultCount, stats.BatchErrorCount)
+	}
+	fmt.Fprintf(w, "    dedup lookup: %s total; count=%d\n", stats.DedupLookupTime.Round(time.Millisecond), stats.DedupLookupCount)
+	fmt.Fprintf(w, "    create session annotation: %s total; count=%d\n", stats.CreateSessionTime.Round(time.Millisecond), stats.CreateSessionCount)
+	fmt.Fprintf(w, "    create entry annotation: %s total; count=%d\n", stats.CreateEntryTime.Round(time.Millisecond), stats.CreateEntryCount)
+	fmt.Fprintf(w, "    update content hash: %s total; count=%d\n", stats.UpdateContentHashTime.Round(time.Millisecond), stats.UpdateContentHashCount)
+	fmt.Fprintf(w, "    supersede annotation: %s total; count=%d\n", stats.SupersedeTime.Round(time.Millisecond), stats.SupersedeCount)
+	fmt.Fprintf(w, "    dedup decisions: skip=%d create=%d supersede=%d\n", stats.DedupSkipCount, stats.DedupCreateCount, stats.DedupSupersedeCount)
+}
+
+func printIndexProfileWriteStats(w io.Writer, stats ingest.SessionEntryWriteStats) {
+	if !stats.Any() {
+		return
+	}
+	fmt.Fprintln(w, "  write causes:")
+	fmt.Fprintf(w, "    hash matches: %d\n", stats.HashMatches)
+	fmt.Fprintf(w, "    hash misses: %d\n", stats.HashMisses)
+	fmt.Fprintf(w, "    fallback compares: %d\n", stats.FallbackCompares)
+	fmt.Fprintf(w, "    skipped by hash: %d\n", stats.SkippedByHash)
+	fmt.Fprintf(w, "    skipped by compare: %d\n", stats.SkippedByCompare)
+	fmt.Fprintf(w, "    rewrites: %d\n", stats.Rewrites)
+	fmt.Fprintf(w, "    projection repair rewrites: %d\n", stats.ProjectionRepairRewrites)
+	fmt.Fprintf(w, "    annotation rollback failures: %d\n", stats.AnnotationRollbackFailures)
+	fmt.Fprintf(w, "    annotation targets carried: %d\n", stats.AnnotationTargetsCarried)
+	fmt.Fprintf(w, "    annotation targets remapped: %d\n", stats.AnnotationTargetsRemapped)
+}
+
+func printIndexProfileStages(w io.Writer, stages []ingest.IndexProfileStage) {
+	if len(stages) == 0 {
+		return
+	}
+	byStage := make(map[ingest.Stage]ingest.IndexProfileStage, len(stages))
+	for _, stage := range stages {
+		current := byStage[stage.Stage]
+		current.Stage = stage.Stage
+		current.Duration += stage.Duration
+		current.Done = stage.Done
+		current.Total = stage.Total
+		byStage[stage.Stage] = current
+	}
+	fmt.Fprintln(w, "  stage timings:")
+	fmt.Fprintln(w, "    note: stage timings can overlap and do not sum to wall time")
+	printed := make(map[ingest.Stage]bool, len(byStage))
+	for _, stageName := range ingest.IndexProfileStageOrder {
+		stage, ok := byStage[stageName]
+		if !ok {
+			continue
+		}
+		printIndexProfileStage(w, stage)
+		printed[stageName] = true
+	}
+	var extra []string
+	for stageName := range byStage {
+		if !printed[stageName] {
+			extra = append(extra, string(stageName))
+		}
+	}
+	sort.Strings(extra)
+	for _, stageName := range extra {
+		printIndexProfileStage(w, byStage[ingest.Stage(stageName)])
+	}
+}
+
+func printIndexProfileStage(w io.Writer, stage ingest.IndexProfileStage) {
+	progress := ""
+	if stage.Total > 0 {
+		progress = fmt.Sprintf(" done=%d/%d", stage.Done, stage.Total)
+	}
+	fmt.Fprintf(w, "    %s: %s%s\n", stage.Stage, stage.Duration.Round(time.Millisecond), progress)
 }
 
 // runVerify checks database schema integrity.

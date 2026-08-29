@@ -65,12 +65,34 @@ ON CONFLICT(project_hash) DO UPDATE SET
 	sqlInsertHostSlug = `INSERT OR IGNORE INTO host_slugs (opaque_id, host_slug, git_remote, canonical_remote)
 VALUES (?, ?, ?, ?)`
 
-	// sqlInsertSession inserts a session row (V23+: opaque_host_id replaces host_slug FK).
-	sqlInsertSession = `INSERT OR REPLACE INTO sessions (
+	// sqlInsertSession upserts a session row (V23+: opaque_host_id replaces host_slug FK).
+	// The conflict path updates only metadata fields owned by InsertSessions. It
+	// intentionally does not touch index fields such as session_entries_hash;
+	// IndexSessionEntryBatch is the authority for that hash, and the legacy
+	// UpdateIndexState path still clears it when it cannot prove hash/index
+	// atomicity.
+	sqlInsertSession = `INSERT INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
     schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+    parent_id = excluded.parent_id,
+    model_harness = excluded.model_harness,
+    model_id = excluded.model_id,
+    opaque_host_id = excluded.opaque_host_id,
+    project_hash = excluded.project_hash,
+    start_ms = excluded.start_ms,
+    end_ms = excluded.end_ms,
+    ingested_ms = excluded.ingested_ms,
+    source_path = excluded.source_path,
+    source_format = excluded.source_format,
+    schema_version = excluded.schema_version,
+    git_branch = excluded.git_branch,
+    git_worktree = excluded.git_worktree,
+    git_tracking = excluded.git_tracking,
+    tool_version = excluded.tool_version,
+    session_origin = excluded.session_origin`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 
@@ -163,7 +185,8 @@ GROUP BY date_utc, s.project_hash`
 //  1. INSERT OR IGNORE INTO projects (deduplicate project_hash)
 //  2. Compute opaque_host_id = HMAC-SHA256(salt, canonical_remote or host_slug)
 //  3. INSERT OR IGNORE INTO host_slugs with opaque_id PK
-//  4. INSERT OR REPLACE INTO sessions with opaque_host_id FK
+//  4. INSERT INTO sessions with opaque_host_id FK; on conflict, update metadata
+//     fields while preserving index-owned columns
 //  5. INSERT OR REPLACE INTO session_metrics (upsert)
 //  6. COMMIT
 //

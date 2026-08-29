@@ -250,6 +250,12 @@ var migrationV24 = createSessionCommands + ";\n" +
 // admits the empty string, marking a cache row mined before this field existed.
 // Plain ALTER TABLE ADD COLUMN, no table rebuild. See schema_v46.go.
 
+// migrationV47 adds sessions.session_entries_hash, the digest of the parsed
+// session_entries projection. See schema_v47.go.
+
+// migrationV48 creates annotation_run_state for classifier annotation skip
+// decisions. See schema_v48.go.
+
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
 	Migrations: []string{
@@ -299,6 +305,8 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV44,
 		migrationV45,
 		migrationV46,
+		migrationV47,
+		migrationV48,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -339,5 +347,7 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V44: Claude discovery evidence cache (new table, no FKs)
 		nil,                        // V45: OpenCode change cursor (new table, no FKs)
 		nil,                        // V46: ALTER TABLE ADD COLUMN on sessions + claude_transcript_evidence (no FKs)
+		nil,                        // V47: ALTER TABLE ADD COLUMN sessions.session_entries_hash (no FKs)
+		nil,                        // V48: CREATE TABLE annotation_run_state
 	},
 }
