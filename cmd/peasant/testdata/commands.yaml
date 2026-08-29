@@ -144,6 +144,18 @@ commands:
   - name: Version
     use: version
 
+  - name: Upgrade
+    use: upgrade
+    aliases: [update]
+    flags:
+      - { name: version, type: string, default: "" }
+      - { name: prerelease, type: bool, default: "false" }
+      - { name: dry-run, type: bool, default: "false" }
+    exit_cases:
+      - args: ["--help"]
+        expect_error: false
+        output_contains: ["upgrade", "--version", "--prerelease"]
+
   - name: Kickstart
     use: kickstart
     aliases: ["ftue"]

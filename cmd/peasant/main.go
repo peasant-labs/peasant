@@ -19,6 +19,7 @@ var commands = [...]func() *cobra.Command{
 	BuildModelsCommand,
 	BuildSessionsCommand,
 	BuildVersionCommand,
+	BuildUpgradeCommand,
 	BuildKickstartCommand,
 	BuildConfigCommand,
 	BuildAnnotateCommand,

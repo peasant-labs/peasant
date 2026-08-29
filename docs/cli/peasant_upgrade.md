@@ -1,24 +1,22 @@
-## peasant redact
+## peasant upgrade
 
-Redact local transcripts
+Upgrade Peasant
 
 ### Synopsis
 
-Apply redaction to locally stored transcripts. Sessions already redacted at the current level are skipped unless content has changed (stale).
+Upgrade Peasant from GitHub release artifacts. Raw archive installs are replaced in place after verifying checksums.txt. Package-manager-owned installs are not modified; the command prints the manager-owned upgrade path so package metadata stays correct. Stable builds use the latest stable release by default; prerelease builds look for prerelease updates too. Use --prerelease to opt in from a stable build, or --version for an exact release.
 
 ```
-peasant redact [flags]
+peasant upgrade [flags]
 ```
 
 ### Options
 
 ```
-      --all               Redact all sessions
-      --dry-run           Show what would be redacted without modifying files
-  -h, --help              help for redact
-      --json              Output results as JSON
-      --level string      Override redaction level (standard)
-      --session strings   Session IDs to redact (repeatable)
+      --dry-run          Print the upgrade plan without changing files
+  -h, --help             help for upgrade
+      --prerelease       Allow the newest prerelease when --version is not set
+      --version string   Install a specific release tag or version
 ```
 
 ### Options inherited from parent commands
