@@ -48,9 +48,10 @@ func TestUpgradeManagedInstallAdviceFixtures(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
 			deps := upgradeDeps{
-				Executable: func() (string, error) { return tc.Executable, nil },
-				GOOS:       tc.GOOS,
-				GOARCH:     tc.GOARCH,
+				Executable:     func() (string, error) { return tc.Executable, nil },
+				GOOS:           tc.GOOS,
+				GOARCH:         tc.GOARCH,
+				CurrentVersion: "v0.0.0",
 				CommandOutput: func(_ context.Context, name string, args ...string) ([]byte, error) {
 					for _, command := range tc.Commands {
 						if command.Name == name && stringSlicesEqual(command.Args, args) {
@@ -192,6 +193,7 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 	fixture := loadUpgradeFixture(t)
 	requireUpgradeCaseNames(t, fixture.DowngradeRefusalCases, map[string]struct{}{
 		"dev-build-refuses-older-stable":      {},
+		"allow-downgrade-needs-exact-version": {},
 		"observed-dev-placeholder-fails-safe": {},
 		"malformed-target-version-fails-safe": {},
 	})
@@ -203,6 +205,8 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 			assetName := "peasant_" + strings.TrimPrefix(tc.TargetVersion, "v") + "_linux_amd64.tar.gz"
 			var assetRequests atomic.Int64
 			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
+				Latest:   newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
+				Releases: []upgradeRelease{newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt")},
 				Tagged: map[string]upgradeRelease{
 					normalizeUpgradeTag(tc.TargetVersion): newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
 				},
@@ -220,7 +224,11 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 				return nil
 			}
 
-			output, err := executeUpgradeCommandForTest(t, deps, "--version", tc.TargetVersion)
+			args := tc.Args
+			if len(args) == 0 {
+				args = []string{"--version", tc.TargetVersion}
+			}
+			output, err := executeUpgradeCommandForTest(t, deps, args...)
 			if err == nil {
 				t.Fatalf("upgrade accepted blocked target; output:\n%s", output)
 			}
@@ -234,6 +242,61 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 			}
 			if assetRequests.Load() != 0 {
 				t.Fatalf("blocked target downloaded %d asset(s), want 0", assetRequests.Load())
+			}
+		})
+	}
+}
+
+func TestUpgradeAllowsExplicitDowngradeOverrideFixtures(t *testing.T) {
+	t.Parallel()
+	fixture := loadUpgradeFixture(t)
+	requireUpgradeCaseNames(t, fixture.DowngradeOverrideCases, map[string]struct{}{
+		"dev-build-allows-explicit-older-stable": {},
+	})
+	for _, tc := range fixture.DowngradeOverrideCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			currentPath := filepath.Join(t.TempDir(), "peasant")
+			if err := os.WriteFile(currentPath, []byte("old binary"), 0o755); err != nil {
+				t.Fatalf("seed current binary: %v", err)
+			}
+			newBinary := []byte("downgrade binary")
+			archive := makeUpgradeArchive(t, newBinary)
+			assetName := "peasant_" + strings.TrimPrefix(tc.TargetVersion, "v") + "_linux_amd64.tar.gz"
+			var assetRequests atomic.Int64
+			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
+				Tagged: map[string]upgradeRelease{
+					normalizeUpgradeTag(tc.TargetVersion): newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
+				},
+				Assets: map[string][]byte{
+					assetName:       archive,
+					"checksums.txt": []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), assetName)),
+				},
+				AssetRequests: &assetRequests,
+			})
+			defer server.Close()
+			deps := upgradeTestDeps(t, server.URL, currentPath)
+			deps.CurrentVersion = tc.CurrentVersion
+
+			output, err := executeUpgradeCommandForTest(t, deps, "--version", tc.TargetVersion, "--allow-downgrade")
+			if err != nil {
+				t.Fatalf("upgrade with downgrade override returned error: %v\noutput:\n%s", err, output)
+			}
+			for _, want := range tc.OutputContains {
+				if !strings.Contains(output, want) {
+					t.Fatalf("downgrade override output missing %q:\n%s", want, output)
+				}
+			}
+			got, err := os.ReadFile(currentPath)
+			if err != nil {
+				t.Fatalf("read replaced binary: %v", err)
+			}
+			if !bytes.Equal(got, newBinary) {
+				t.Fatalf("binary content = %q, want %q", got, newBinary)
+			}
+			if assetRequests.Load() != 2 {
+				t.Fatalf("downgrade override downloaded %d asset(s), want checksums and archive", assetRequests.Load())
 			}
 		})
 	}
@@ -329,10 +392,11 @@ type upgradeReleaseServerConfig struct {
 }
 
 type upgradeFixture struct {
-	ManagedInstallCases   []upgradeManagedInstallCase   `yaml:"managed_install_cases"`
-	ReleaseSelectionCases []upgradeReleaseSelectionCase `yaml:"release_selection_cases"`
-	VersionOrderCases     []upgradeVersionOrderCase     `yaml:"version_order_cases"`
-	DowngradeRefusalCases []upgradeDowngradeRefusalCase `yaml:"downgrade_refusal_cases"`
+	ManagedInstallCases    []upgradeManagedInstallCase    `yaml:"managed_install_cases"`
+	ReleaseSelectionCases  []upgradeReleaseSelectionCase  `yaml:"release_selection_cases"`
+	VersionOrderCases      []upgradeVersionOrderCase      `yaml:"version_order_cases"`
+	DowngradeRefusalCases  []upgradeDowngradeRefusalCase  `yaml:"downgrade_refusal_cases"`
+	DowngradeOverrideCases []upgradeDowngradeOverrideCase `yaml:"downgrade_override_cases"`
 }
 
 type upgradeManagedInstallCase struct {
@@ -366,7 +430,15 @@ type upgradeDowngradeRefusalCase struct {
 	Name           string   `yaml:"name"`
 	CurrentVersion string   `yaml:"current_version"`
 	TargetVersion  string   `yaml:"target_version"`
+	Args           []string `yaml:"args"`
 	ErrorContains  []string `yaml:"error_contains"`
+}
+
+type upgradeDowngradeOverrideCase struct {
+	Name           string   `yaml:"name"`
+	CurrentVersion string   `yaml:"current_version"`
+	TargetVersion  string   `yaml:"target_version"`
+	OutputContains []string `yaml:"output_contains"`
 }
 
 type upgradeReleaseFixture struct {
@@ -407,10 +479,11 @@ type namedUpgradeCase interface {
 	upgradeCaseName() string
 }
 
-func (c upgradeManagedInstallCase) upgradeCaseName() string   { return c.Name }
-func (c upgradeReleaseSelectionCase) upgradeCaseName() string { return c.Name }
-func (c upgradeVersionOrderCase) upgradeCaseName() string     { return c.Name }
-func (c upgradeDowngradeRefusalCase) upgradeCaseName() string { return c.Name }
+func (c upgradeManagedInstallCase) upgradeCaseName() string    { return c.Name }
+func (c upgradeReleaseSelectionCase) upgradeCaseName() string  { return c.Name }
+func (c upgradeVersionOrderCase) upgradeCaseName() string      { return c.Name }
+func (c upgradeDowngradeRefusalCase) upgradeCaseName() string  { return c.Name }
+func (c upgradeDowngradeOverrideCase) upgradeCaseName() string { return c.Name }
 
 func requireUpgradeCaseNames[T namedUpgradeCase](t *testing.T, cases []T, required map[string]struct{}) {
 	t.Helper()

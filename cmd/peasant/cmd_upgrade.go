@@ -67,6 +67,7 @@ type upgradeOptions struct {
 	Version           string
 	IncludePrerelease bool
 	DryRun            bool
+	AllowDowngrade    bool
 	CurrentVersion    string
 	VersionSet        bool
 }
@@ -119,7 +120,8 @@ func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
 			"modified; the command prints the manager-owned upgrade path so package metadata " +
 			"stays correct. Stable builds use the latest stable release by default; prerelease " +
 			"builds look for prerelease updates too. Use --prerelease to opt in from a stable " +
-			"build, or --version for an exact release.",
+			"build, or --version for an exact release. Use --allow-downgrade with --version " +
+			"only for an intentional rollback to an older release.",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -135,6 +137,7 @@ func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Version, "version", "", "Install a specific release tag or version")
 	cmd.Flags().BoolVar(&opts.IncludePrerelease, "prerelease", false, "Allow the newest prerelease when --version is not set")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Print the upgrade plan without changing files")
+	cmd.Flags().BoolVar(&opts.AllowDowngrade, "allow-downgrade", false, "Allow installing an older release when paired with --version")
 	return cmd
 }
 
@@ -203,6 +206,12 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, 
 	if opts.Version == "" && !opts.IncludePrerelease && isUpgradePrerelease(opts.CurrentVersion) {
 		opts.IncludePrerelease = true
 	}
+	if opts.Version != "" {
+		handled, err := handleUpgradeVersionOrder(out, opts, normalizeUpgradeTag(opts.Version), true)
+		if err != nil || handled {
+			return err
+		}
+	}
 
 	executablePath, err := deps.Executable()
 	if err != nil {
@@ -230,16 +239,11 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, 
 	if err != nil {
 		return err
 	}
-	order, err := compareUpgradeVersions(opts.CurrentVersion, release.TagName)
-	if err != nil {
-		return err
-	}
-	if order == upgradeVersionSame {
-		fmt.Fprintf(out, "Peasant is already at %s; no files were changed.\n", release.TagName)
-		return nil
-	}
-	if order == upgradeVersionAfter {
-		return downgradeUpgradeError(opts.CurrentVersion, release.TagName)
+	if opts.Version == "" {
+		handled, err := handleUpgradeVersionOrder(out, opts, release.TagName, false)
+		if err != nil || handled {
+			return err
+		}
 	}
 
 	archiveName, err := upgradeArchiveName(release.TagName, deps.GOOS, deps.GOARCH)
@@ -885,6 +889,28 @@ func compareUpgradeVersions(current, target string) (upgradeVersionOrder, error)
 	return currentVersion.compare(targetVersion), nil
 }
 
+func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag string, exactTarget bool) (bool, error) {
+	order, err := compareUpgradeVersions(opts.CurrentVersion, targetTag)
+	if err != nil {
+		return false, err
+	}
+	if order == upgradeVersionSame {
+		fmt.Fprintf(out, "Peasant is already at %s; no files were changed.\n", targetTag)
+		return true, nil
+	}
+	if order != upgradeVersionAfter {
+		return false, nil
+	}
+	if !opts.AllowDowngrade {
+		return false, downgradeUpgradeError(opts.CurrentVersion, targetTag)
+	}
+	if !exactTarget {
+		return false, allowDowngradeRequiresVersionError(opts.CurrentVersion, targetTag)
+	}
+	fmt.Fprintf(out, "downgrade override: current %s sorts after target %s; continuing because --allow-downgrade was set.\n", opts.CurrentVersion, targetTag)
+	return false, nil
+}
+
 func parseUpgradeVersion(version, label string) (parsedUpgradeVersion, error) {
 	original := strings.TrimSpace(version)
 	if original == "" {
@@ -1044,7 +1070,18 @@ func downgradeUpgradeError(current, target string) error {
 		"peasant upgrade",
 		"after selecting the target release and before downloading files",
 		"Peasant refused the downgrade and no files were changed",
-		"choose a newer Peasant release or keep the current binary; peasant upgrade does not allow downgrades",
+		fmt.Sprintf("choose a newer Peasant release, keep the current binary, or pass --version %s --allow-downgrade only if you intentionally need to roll back", target),
+	)
+}
+
+func allowDowngradeRequiresVersionError(current, target string) error {
+	return upgradeActionableError(
+		"the downgrade override needs an exact target version",
+		fmt.Sprintf("current %s sorts after the selected target %s, but --allow-downgrade was not paired with --version", current, target),
+		"peasant upgrade --allow-downgrade",
+		"after selecting the target release and before downloading files",
+		"Peasant refused the downgrade and no files were changed",
+		fmt.Sprintf("rerun with --version %s --allow-downgrade if you intentionally need to roll back to that release", target),
 	)
 }
 

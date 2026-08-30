@@ -182,7 +182,17 @@ downgrade_refusal_cases:
       - "the target Peasant release is older than the current binary"
       - "current v0.5.0-rc1-dev.813+2153f8143 sorts after target v0.4.0"
       - "Peasant refused the downgrade and no files were changed"
-      - "peasant upgrade does not allow downgrades"
+      - "--version v0.4.0 --allow-downgrade"
+
+  - name: allow-downgrade-needs-exact-version
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.4.0"
+    args: ["--allow-downgrade"]
+    error_contains:
+      - "the downgrade override needs an exact target version"
+      - "--allow-downgrade was not paired with --version"
+      - "Peasant refused the downgrade and no files were changed"
+      - "--version v0.4.0 --allow-downgrade"
 
   - name: observed-dev-placeholder-fails-safe
     current_version: "dev"
@@ -199,3 +209,13 @@ downgrade_refusal_cases:
       - "the target Peasant version could not be ordered"
       - "target version \"v0.5.bad\""
       - "no files were changed"
+
+downgrade_override_cases:
+  - name: dev-build-allows-explicit-older-stable
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.4.0"
+    output_contains:
+      - "downgrade override: current v0.5.0-rc1-dev.813+2153f8143 sorts after target v0.4.0; continuing because --allow-downgrade was set."
+      - "current: v0.5.0-rc1-dev.813+2153f8143"
+      - "target:  v0.4.0"
+      - "installed v0.4.0"
