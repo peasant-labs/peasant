@@ -192,10 +192,11 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 	t.Parallel()
 	fixture := loadUpgradeFixture(t)
 	requireUpgradeCaseNames(t, fixture.DowngradeRefusalCases, map[string]struct{}{
-		"dev-build-refuses-older-stable":      {},
-		"allow-downgrade-needs-exact-version": {},
-		"observed-dev-placeholder-fails-safe": {},
-		"malformed-target-version-fails-safe": {},
+		"dev-build-refuses-older-stable":                   {},
+		"allow-downgrade-needs-exact-version-managed":      {},
+		"allow-downgrade-needs-exact-version-newer-target": {},
+		"observed-dev-placeholder-fails-safe":              {},
+		"malformed-target-version-fails-safe":              {},
 	})
 	for _, tc := range fixture.DowngradeRefusalCases {
 		tc := tc
@@ -217,8 +218,22 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 				AssetRequests: &assetRequests,
 			})
 			defer server.Close()
-			deps := upgradeTestDeps(t, server.URL, filepath.Join(t.TempDir(), "peasant"))
+			executablePath := filepath.Join(t.TempDir(), "peasant")
+			if tc.Executable != "" {
+				executablePath = tc.Executable
+			}
+			deps := upgradeTestDeps(t, server.URL, executablePath)
 			deps.CurrentVersion = tc.CurrentVersion
+			if len(tc.Commands) > 0 {
+				deps.CommandOutput = func(_ context.Context, name string, args ...string) ([]byte, error) {
+					for _, command := range tc.Commands {
+						if command.Name == name && stringSlicesEqual(command.Args, args) {
+							return []byte(command.Stdout), nil
+						}
+					}
+					return nil, errors.New("not managed by this test command")
+				}
+			}
 			deps.InstallBinary = func(string, []byte, os.FileMode) error {
 				t.Fatal("downgrade refusal must not replace the binary")
 				return nil
@@ -232,7 +247,7 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 			if err == nil {
 				t.Fatalf("upgrade accepted blocked target; output:\n%s", output)
 			}
-			if strings.Contains(output, "current:") || strings.Contains(output, "target:") || strings.Contains(output, "asset:") || strings.Contains(output, "path:") || strings.Contains(output, "dry run:") {
+			if strings.Contains(output, "current:") || strings.Contains(output, "target:") || strings.Contains(output, "asset:") || strings.Contains(output, "path:") || strings.Contains(output, "dry run:") || strings.Contains(output, "managed by") || strings.Contains(output, "manager-owned upgrade path") {
 				t.Fatalf("blocked target wrote plan output before refusal:\n%s", output)
 			}
 			for _, want := range tc.ErrorContains {
@@ -247,11 +262,12 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 	}
 }
 
-func TestUpgradeAllowsExplicitDowngradeOverrideFixtures(t *testing.T) {
+func TestUpgradeExplicitDowngradeOverrideFixtures(t *testing.T) {
 	t.Parallel()
 	fixture := loadUpgradeFixture(t)
 	requireUpgradeCaseNames(t, fixture.DowngradeOverrideCases, map[string]struct{}{
-		"dev-build-allows-explicit-older-stable": {},
+		"dev-build-allows-explicit-older-stable":          {},
+		"explicit-older-stable-rejects-checksum-mismatch": {},
 	})
 	for _, tc := range fixture.DowngradeOverrideCases {
 		tc := tc
@@ -265,21 +281,52 @@ func TestUpgradeAllowsExplicitDowngradeOverrideFixtures(t *testing.T) {
 			archive := makeUpgradeArchive(t, newBinary)
 			assetName := "peasant_" + strings.TrimPrefix(tc.TargetVersion, "v") + "_linux_amd64.tar.gz"
 			var assetRequests atomic.Int64
+			checksum := fmt.Sprintf("%x", sha256.Sum256(archive))
+			if tc.ChecksumMismatch {
+				checksum = strings.Repeat("0", sha256.Size*2)
+			}
 			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
 				Tagged: map[string]upgradeRelease{
 					normalizeUpgradeTag(tc.TargetVersion): newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
 				},
 				Assets: map[string][]byte{
 					assetName:       archive,
-					"checksums.txt": []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), assetName)),
+					"checksums.txt": []byte(checksum + "  " + assetName + "\n"),
 				},
 				AssetRequests: &assetRequests,
 			})
 			defer server.Close()
 			deps := upgradeTestDeps(t, server.URL, currentPath)
 			deps.CurrentVersion = tc.CurrentVersion
+			if len(tc.ErrorContains) > 0 {
+				deps.InstallBinary = func(string, []byte, os.FileMode) error {
+					t.Fatal("checksum failure must not replace the binary")
+					return nil
+				}
+			}
 
 			output, err := executeUpgradeCommandForTest(t, deps, "--version", tc.TargetVersion, "--allow-downgrade")
+			if len(tc.ErrorContains) > 0 {
+				if err == nil {
+					t.Fatalf("upgrade with downgrade override succeeded, want error; output:\n%s", output)
+				}
+				for _, want := range tc.ErrorContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("downgrade override error missing %q:\n%s", want, err)
+					}
+				}
+				got, err := os.ReadFile(currentPath)
+				if err != nil {
+					t.Fatalf("read preserved binary: %v", err)
+				}
+				if !bytes.Equal(got, []byte("old binary")) {
+					t.Fatalf("binary content changed after error: got %q", got)
+				}
+				if assetRequests.Load() != 2 {
+					t.Fatalf("downgrade override downloaded %d asset(s), want checksums and archive", assetRequests.Load())
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("upgrade with downgrade override returned error: %v\noutput:\n%s", err, output)
 			}
@@ -427,18 +474,22 @@ type upgradeVersionOrderCase struct {
 }
 
 type upgradeDowngradeRefusalCase struct {
-	Name           string   `yaml:"name"`
-	CurrentVersion string   `yaml:"current_version"`
-	TargetVersion  string   `yaml:"target_version"`
-	Args           []string `yaml:"args"`
-	ErrorContains  []string `yaml:"error_contains"`
+	Name           string                  `yaml:"name"`
+	CurrentVersion string                  `yaml:"current_version"`
+	TargetVersion  string                  `yaml:"target_version"`
+	Executable     string                  `yaml:"executable"`
+	Commands       []upgradeCommandFixture `yaml:"commands"`
+	Args           []string                `yaml:"args"`
+	ErrorContains  []string                `yaml:"error_contains"`
 }
 
 type upgradeDowngradeOverrideCase struct {
-	Name           string   `yaml:"name"`
-	CurrentVersion string   `yaml:"current_version"`
-	TargetVersion  string   `yaml:"target_version"`
-	OutputContains []string `yaml:"output_contains"`
+	Name             string   `yaml:"name"`
+	CurrentVersion   string   `yaml:"current_version"`
+	TargetVersion    string   `yaml:"target_version"`
+	OutputContains   []string `yaml:"output_contains"`
+	ChecksumMismatch bool     `yaml:"checksum_mismatch"`
+	ErrorContains    []string `yaml:"error_contains"`
 }
 
 type upgradeReleaseFixture struct {

@@ -206,8 +206,11 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, 
 	if opts.Version == "" && !opts.IncludePrerelease && isUpgradePrerelease(opts.CurrentVersion) {
 		opts.IncludePrerelease = true
 	}
+	if opts.AllowDowngrade && opts.Version == "" {
+		return allowDowngradeWithoutVersionError()
+	}
 	if opts.Version != "" {
-		handled, err := handleUpgradeVersionOrder(out, opts, normalizeUpgradeTag(opts.Version), true)
+		handled, err := handleUpgradeVersionOrder(out, opts, normalizeUpgradeTag(opts.Version))
 		if err != nil || handled {
 			return err
 		}
@@ -240,7 +243,7 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, 
 		return err
 	}
 	if opts.Version == "" {
-		handled, err := handleUpgradeVersionOrder(out, opts, release.TagName, false)
+		handled, err := handleUpgradeVersionOrder(out, opts, release.TagName)
 		if err != nil || handled {
 			return err
 		}
@@ -889,7 +892,7 @@ func compareUpgradeVersions(current, target string) (upgradeVersionOrder, error)
 	return currentVersion.compare(targetVersion), nil
 }
 
-func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag string, exactTarget bool) (bool, error) {
+func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag string) (bool, error) {
 	order, err := compareUpgradeVersions(opts.CurrentVersion, targetTag)
 	if err != nil {
 		return false, err
@@ -903,9 +906,6 @@ func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag str
 	}
 	if !opts.AllowDowngrade {
 		return false, downgradeUpgradeError(opts.CurrentVersion, targetTag)
-	}
-	if !exactTarget {
-		return false, allowDowngradeRequiresVersionError(opts.CurrentVersion, targetTag)
 	}
 	fmt.Fprintf(out, "downgrade override: current %s sorts after target %s; continuing because --allow-downgrade was set.\n", opts.CurrentVersion, targetTag)
 	return false, nil
@@ -1074,14 +1074,14 @@ func downgradeUpgradeError(current, target string) error {
 	)
 }
 
-func allowDowngradeRequiresVersionError(current, target string) error {
+func allowDowngradeWithoutVersionError() error {
 	return upgradeActionableError(
 		"the downgrade override needs an exact target version",
-		fmt.Sprintf("current %s sorts after the selected target %s, but --allow-downgrade was not paired with --version", current, target),
+		"--allow-downgrade was not paired with --version <tag>",
 		"peasant upgrade --allow-downgrade",
-		"after selecting the target release and before downloading files",
-		"Peasant refused the downgrade and no files were changed",
-		fmt.Sprintf("rerun with --version %s --allow-downgrade if you intentionally need to roll back to that release", target),
+		"before checking the installation channel or selecting a release",
+		"Peasant refused to continue and no files were changed",
+		"rerun with --version <tag> --allow-downgrade if you intentionally need to roll back to an older release",
 	)
 }
 
