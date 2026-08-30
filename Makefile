@@ -2,7 +2,16 @@
 # requests before a tag is minted.
 .PHONY: build run clean web web-stub fmt lint check dev docs docs-open e2e e2e-schema-parity demo nix-vendor-hash guided-screenshots guided-screenshots-test origin-audit origin-audit-test
 
-VERSION ?= dev
+VERSION ?=
+
+define build_peasant_cli
+set -e; \
+	version="$(VERSION)"; \
+	if [ -z "$$version" ]; then \
+		version="$$(sh ./scripts/dev-version.sh)"; \
+	fi; \
+	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
+endef
 
 # The race detector for `make check`. On by default (local runs and, in CI, the
 # release PRs and post-merge pushes that must carry full race coverage). CI
@@ -164,14 +173,14 @@ origin-audit-test:
 	go test -race -tags=origin_audit ./cmd/peasant-origin-audit
 
 build: web
-	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$(VERSION)" -o bin/peasant ./cmd/peasant
+	@$(build_peasant_cli)
 	@cd web && pnpm test:provider-build-provenance
 
 nix-vendor-hash:
 	./scripts/update-nix-vendor-hash.sh
 
 go:
-	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$(VERSION)" -o bin/peasant ./cmd/peasant
+	@$(build_peasant_cli)
 
 run: web
 	go run ./cmd/peasant web
