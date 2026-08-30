@@ -224,7 +224,7 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 			if err == nil {
 				t.Fatalf("upgrade accepted blocked target; output:\n%s", output)
 			}
-			if strings.Contains(output, "asset:") || strings.Contains(output, "path:") || strings.Contains(output, "dry run:") {
+			if strings.Contains(output, "current:") || strings.Contains(output, "target:") || strings.Contains(output, "asset:") || strings.Contains(output, "path:") || strings.Contains(output, "dry run:") {
 				t.Fatalf("blocked target wrote plan output before refusal:\n%s", output)
 			}
 			for _, want := range tc.ErrorContains {
