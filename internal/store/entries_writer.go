@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
@@ -286,8 +287,11 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		}
 	}
 
+	targetReadStarted := time.Now()
 	carried, err := readEntryAnnotationTargets(conn, string(sessionID))
+	outcome.stats.AnnotationTargetReadTime += time.Since(targetReadStarted)
 	if err != nil {
+		outcome.stats.AnnotationTargetRepairErrors++
 		return outcome, fmt.Errorf("store: read annotation_target_entries for %s: %w — "+
 			"what: the entry-targeted annotations of this session could not be read before re-indexing; "+
 			"why: a query against annotation_target_entries failed; "+
@@ -354,8 +358,9 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		}
 	}
 
-	remappedTargets, err := restoreEntryAnnotationTargets(conn, string(sessionID), carried, entries)
+	remappedTargets, err := restoreEntryAnnotationTargets(conn, string(sessionID), carried, entries, &outcome.stats)
 	if err != nil {
+		outcome.stats.AnnotationTargetRepairErrors++
 		return outcome, err
 	}
 	outcome.stats.AnnotationTargetsRemapped += remappedTargets
@@ -1109,11 +1114,13 @@ func restoreEntryAnnotationTargets(
 	sessionID string,
 	carried []entryAnnotationTarget,
 	entries []schema.SessionEntry,
+	stats *ingest.SessionEntryWriteStats,
 ) (int, error) {
 	if len(carried) == 0 {
 		return 0, nil
 	}
 	remappedTargets := 0
+	matchStarted := time.Now()
 	present := make(map[int]bool, len(entries))
 	for i := range entries {
 		present[entries[i].EntryIndex] = true
@@ -1122,33 +1129,68 @@ func restoreEntryAnnotationTargets(
 	for i := range entries {
 		newAnchors = append(newAnchors, entryTargetAnchorFromEntry(&entries[i]))
 	}
+	if stats != nil {
+		stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+	}
 	for _, target := range carried {
 		start, end := target.entryIndex, target.endIndex
+		matchStarted := time.Now()
 		missingIndex := missingSpanIndex(target, present)
-		if missingIndex < 0 && entryAnnotationSpanStillMatches(target, newAnchors) {
-			if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end); err != nil {
+		spanStillMatches := missingIndex < 0 && entryAnnotationSpanStillMatches(target, newAnchors)
+		if stats != nil {
+			stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+		}
+		if spanStillMatches {
+			if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end, stats); err != nil {
 				return remappedTargets, err
+			}
+			if stats != nil {
+				stats.AnnotationTargetsPreserved++
 			}
 			continue
 		}
 		{
 			var remapped bool
+			matchStarted := time.Now()
 			if start, end, remapped = remapEntryAnnotationTarget(target, newAnchors); !remapped {
+				if stats != nil {
+					stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+				}
 				state := AnnotationTargetAnchorSuperseded
 				if target.annotatorKind == "human" {
 					state = AnnotationTargetAnchorUnresolved
 				}
+				anchorStarted := time.Now()
 				if err := upsertAnnotationTargetAnchorOnConn(conn, target.annotationID, sessionID, target.entryIndex, target.endIndex, state); err != nil {
+					if stats != nil {
+						stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
+					}
 					return remappedTargets, err
+				}
+				if stats != nil {
+					stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
+					if state == AnnotationTargetAnchorUnresolved {
+						stats.AnnotationTargetsUnresolved++
+					} else {
+						stats.AnnotationTargetsSuperseded++
+					}
 				}
 				continue
 			}
+			if stats != nil {
+				stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+			}
 		}
-		if start != target.entryIndex || end != target.endIndex {
-			remappedTargets++
-		}
-		if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end); err != nil {
+		sameSpan := start == target.entryIndex && end == target.endIndex
+		if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end, stats); err != nil {
 			return remappedTargets, err
+		}
+		if sameSpan {
+			if stats != nil {
+				stats.AnnotationTargetsPreserved++
+			}
+		} else {
+			remappedTargets++
 		}
 	}
 	return remappedTargets, nil
@@ -1197,10 +1239,14 @@ func anchorsShareKey(a, b entryTargetAnchor) bool {
 	return false
 }
 
-func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target entryAnnotationTarget, start, end int) error {
+func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target entryAnnotationTarget, start, end int, stats *ingest.SessionEntryWriteStats) error {
+	restoreStarted := time.Now()
 	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
 		Args: []any{target.annotationID, sessionID, start, end},
 	}); err != nil {
+		if stats != nil {
+			stats.AnnotationTargetRestoreTime += time.Since(restoreStarted)
+		}
 		return fmt.Errorf("store: restore annotation_target_entries for %s[%d]: %w — "+
 			"what: an entry annotation could not be re-attached to the entry it targets after re-indexing; "+
 			"why: the insert into annotation_target_entries failed; "+
@@ -1208,8 +1254,18 @@ func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target ent
 			"how to fix: check the analytics store for constraint or corruption errors, then re-run the same peasant ingest command with the same global --config-dir/--data-dir overrides",
 			sessionID, start, err, sessionID, target.annotationID)
 	}
+	if stats != nil {
+		stats.AnnotationTargetRestoreTime += time.Since(restoreStarted)
+	}
+	anchorStarted := time.Now()
 	if err := upsertAnnotationTargetAnchorOnConn(conn, target.annotationID, sessionID, start, end, AnnotationTargetAnchorResolved); err != nil {
+		if stats != nil {
+			stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
+		}
 		return err
+	}
+	if stats != nil {
+		stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
 	}
 	return nil
 }

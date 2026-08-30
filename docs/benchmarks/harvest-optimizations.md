@@ -993,7 +993,7 @@ set and warning classes are recorded.
 Extract the main profile lines:
 
 ```bash
-rg "^(INDEX profile|  batch sizes|  work items|  write txs|  write causes:|  annotation detail:|    (hash matches|hash misses|fallback compares|skipped by hash|skipped by compare|rewrites|projection repair rewrites|annotation rollback failures|annotation targets carried|annotation targets remapped|note:|list entries:|get metrics:|classifier run:|results:|id cache:|batch persistence:|dedup lookup:|create session annotation:|create entry annotation:|update content hash:|supersede annotation:|dedup decisions:|[A-Z][A-Z ]+:)|  parse|  stage timings:|peasant harvest|  index:|  warning:)" "$WORK/profile.log"
+rg "^(INDEX profile|  batch sizes|  work items|  write txs|  write causes:|  annotation target repair timing:|  annotation detail:|    (hash matches|hash misses|fallback compares|skipped by hash|skipped by compare|rewrites|projection repair rewrites|annotation rollback failures|annotation targets carried|annotation targets preserved|annotation targets remapped|annotation targets unresolved|annotation targets superseded|annotation target repair errors|read targets:|match anchors:|restore target rows:|anchor upserts:|note:|list entries:|get metrics:|classifier run:|results:|id cache:|batch persistence:|dedup lookup:|create session annotation:|create entry annotation:|update content hash:|supersede annotation:|dedup decisions:|[A-Z][A-Z ]+:)|  parse|  stage timings:|peasant harvest|  index:|  warning:)" "$WORK/profile.log"
 ```
 
 Count known warning classes:
