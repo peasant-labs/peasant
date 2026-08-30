@@ -177,8 +177,12 @@ func (tc devBuildVersionCase) caseName() string { return tc.Name }
 
 func writeFakeGit(t *testing.T) string {
 	t.Helper()
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("find shell for fake git: %v", err)
+	}
 	path := filepath.Join(t.TempDir(), "git")
-	const script = `#!/usr/bin/env sh
+	script := "#!" + shell + `
 set -eu
 
 if [ "$1" = "describe" ]; then
