@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 const (
@@ -67,22 +69,24 @@ type upgradeOptions struct {
 	Version           string
 	IncludePrerelease bool
 	DryRun            bool
+	Yes               bool
 	AllowDowngrade    bool
 	CurrentVersion    string
 	VersionSet        bool
 }
 
 type upgradeDeps struct {
-	Executable     func() (string, error)
-	EvalSymlinks   func(string) (string, error)
-	Stat           func(string) (fs.FileInfo, error)
-	CommandOutput  func(context.Context, string, ...string) ([]byte, error)
-	HTTPClient     *http.Client
-	APIBaseURL     string
-	GOOS           string
-	GOARCH         string
-	CurrentVersion string
-	InstallBinary  func(string, []byte, fs.FileMode) error
+	Executable      func() (string, error)
+	EvalSymlinks    func(string) (string, error)
+	Stat            func(string) (fs.FileInfo, error)
+	CommandOutput   func(context.Context, string, ...string) ([]byte, error)
+	HTTPClient      *http.Client
+	APIBaseURL      string
+	GOOS            string
+	GOARCH          string
+	CurrentVersion  string
+	InstallBinary   func(string, []byte, fs.FileMode) error
+	StdinIsTerminal func(io.Reader) bool
 }
 
 type upgradeManagedInstall struct {
@@ -121,7 +125,8 @@ func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
 			"stays correct. Stable builds use the latest stable release by default; prerelease " +
 			"builds look for prerelease updates too. Use --prerelease to opt in from a stable " +
 			"build, or --version for an exact release. Use --allow-downgrade with --version " +
-			"only for an intentional rollback to an older release.",
+			"only for an intentional rollback to an older release. Use --yes only when " +
+			"automation has already reviewed and accepted the printed replacement plan.",
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -131,28 +136,30 @@ func buildUpgradeCommand(deps upgradeDeps) *cobra.Command {
 			}
 			runOpts := opts
 			runOpts.VersionSet = cmd.Flags().Changed("version")
-			return runUpgradeCommand(ctx, cmd.OutOrStdout(), runOpts, deps)
+			return runUpgradeCommand(ctx, cmd.OutOrStdout(), cmd.InOrStdin(), runOpts, deps)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Version, "version", "", "Install a specific release tag or version")
 	cmd.Flags().BoolVar(&opts.IncludePrerelease, "prerelease", false, "Allow the newest prerelease when --version is not set")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Print the upgrade plan without changing files")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Accept the raw archive replacement plan without an interactive prompt")
 	cmd.Flags().BoolVar(&opts.AllowDowngrade, "allow-downgrade", false, "Allow installing an older release when paired with --version")
 	return cmd
 }
 
 func defaultUpgradeDeps() upgradeDeps {
 	return upgradeDeps{
-		Executable:     os.Executable,
-		EvalSymlinks:   filepath.EvalSymlinks,
-		Stat:           os.Stat,
-		CommandOutput:  defaultUpgradeCommandOutput,
-		HTTPClient:     &http.Client{Timeout: upgradeHTTPTimeout},
-		APIBaseURL:     upgradeAPIBaseURL,
-		GOOS:           runtime.GOOS,
-		GOARCH:         runtime.GOARCH,
-		CurrentVersion: defaults.Version.String(),
-		InstallBinary:  installPeasantBinary,
+		Executable:      os.Executable,
+		EvalSymlinks:    filepath.EvalSymlinks,
+		Stat:            os.Stat,
+		CommandOutput:   defaultUpgradeCommandOutput,
+		HTTPClient:      &http.Client{Timeout: upgradeHTTPTimeout},
+		APIBaseURL:      upgradeAPIBaseURL,
+		GOOS:            runtime.GOOS,
+		GOARCH:          runtime.GOARCH,
+		CurrentVersion:  defaults.Version.String(),
+		InstallBinary:   installPeasantBinary,
+		StdinIsTerminal: upgradeInputIsTerminal,
 	}
 }
 
@@ -188,10 +195,13 @@ func normalizeUpgradeDeps(deps upgradeDeps) upgradeDeps {
 	if deps.InstallBinary == nil {
 		deps.InstallBinary = defaults.InstallBinary
 	}
+	if deps.StdinIsTerminal == nil {
+		deps.StdinIsTerminal = defaults.StdinIsTerminal
+	}
 	return deps
 }
 
-func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, deps upgradeDeps) error {
+func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts upgradeOptions, deps upgradeDeps) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -276,12 +286,16 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, 
 		)
 	}
 
-	fmt.Fprintf(out, "current: %s\n", opts.CurrentVersion)
-	fmt.Fprintf(out, "target:  %s\n", release.TagName)
-	fmt.Fprintf(out, "asset:   %s\n", archiveName)
-	fmt.Fprintf(out, "path:    %s\n", resolvedPath)
+	printRawUpgradePlan(out, opts, deps, release, archiveName, archiveAsset, checksumsAsset, resolvedPath)
 	if opts.DryRun {
 		fmt.Fprintln(out, "dry run: no files were changed")
+		return nil
+	}
+	confirmed, err := confirmRawUpgradePlan(in, out, opts, deps)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
 		return nil
 	}
 
@@ -349,6 +363,51 @@ func defaultUpgradeCommandOutput(ctx context.Context, name string, args ...strin
 	defer cancel()
 	cmd := exec.CommandContext(probeCtx, name, args...)
 	return cmd.CombinedOutput()
+}
+
+func upgradeInputIsTerminal(in io.Reader) bool {
+	file, ok := in.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+func printRawUpgradePlan(out io.Writer, opts upgradeOptions, deps upgradeDeps, release upgradeRelease, archiveName string, archiveAsset, checksumsAsset upgradeAsset, resolvedPath string) {
+	fmt.Fprintln(out, "Upgrade plan:")
+	fmt.Fprintf(out, "  current version: %s\n", opts.CurrentVersion)
+	fmt.Fprintf(out, "  target version:  %s\n", release.TagName)
+	fmt.Fprintf(out, "  machine: %s/%s\n", deps.GOOS, deps.GOARCH)
+	fmt.Fprintf(out, "  archive: %s\n", archiveName)
+	fmt.Fprintf(out, "  checksums source: %s\n", checksumsAsset.BrowserDownloadURL)
+	fmt.Fprintf(out, "  download source: %s\n", archiveAsset.BrowserDownloadURL)
+	fmt.Fprintln(out, "  temporary download location: memory only; no archive file is written")
+	fmt.Fprintf(out, "  current binary to replace: %s\n", resolvedPath)
+}
+
+func confirmRawUpgradePlan(in io.Reader, out io.Writer, opts upgradeOptions, deps upgradeDeps) (bool, error) {
+	if opts.Yes {
+		fmt.Fprintln(out, "confirmation: --yes set; continuing without prompt")
+		return true, nil
+	}
+	if in == nil || !deps.StdinIsTerminal(in) {
+		return false, nonInteractiveUpgradeConfirmationError()
+	}
+	fmt.Fprint(out, "continue? [y/N] ")
+	response, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, upgradeActionableError(
+			"the upgrade confirmation response could not be read",
+			err.Error(),
+			"peasant upgrade",
+			"after printing the raw archive replacement plan and before downloading files",
+			"Peasant refused to replace the current binary and no files were changed",
+			"rerun from an interactive terminal and answer yes, or rerun with --yes only if automation has already reviewed the printed plan",
+		)
+	}
+	response = strings.ToLower(strings.TrimSpace(response))
+	if response != "y" && response != "yes" {
+		fmt.Fprintln(out, "upgrade cancelled: no files were changed")
+		return false, nil
+	}
+	return true, nil
 }
 
 func detectManagedPeasantInstall(ctx context.Context, deps upgradeDeps, paths []string) (upgradeManagedInstall, bool) {
@@ -1082,6 +1141,17 @@ func allowDowngradeWithoutVersionError() error {
 		"before checking the installation channel or selecting a release",
 		"Peasant refused to continue and no files were changed",
 		"rerun with --version <tag> --allow-downgrade if you intentionally need to roll back to an older release",
+	)
+}
+
+func nonInteractiveUpgradeConfirmationError() error {
+	return upgradeActionableError(
+		"the raw archive replacement plan needs interactive confirmation",
+		"standard input is not an interactive terminal and --yes was not set",
+		"peasant upgrade",
+		"after printing the raw archive replacement plan and before downloading files",
+		"Peasant refused to replace the current binary and no files were changed",
+		"rerun from an interactive terminal and answer yes, or rerun with --yes only if automation has already reviewed the printed plan",
 	)
 }
 

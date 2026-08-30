@@ -305,7 +305,7 @@ func TestUpgradeExplicitDowngradeOverrideFixtures(t *testing.T) {
 				}
 			}
 
-			output, err := executeUpgradeCommandForTest(t, deps, "--version", tc.TargetVersion, "--allow-downgrade")
+			output, err := executeUpgradeCommandForTest(t, deps, "--version", tc.TargetVersion, "--allow-downgrade", "--yes")
 			if len(tc.ErrorContains) > 0 {
 				if err == nil {
 					t.Fatalf("upgrade with downgrade override succeeded, want error; output:\n%s", output)
@@ -349,6 +349,100 @@ func TestUpgradeExplicitDowngradeOverrideFixtures(t *testing.T) {
 	}
 }
 
+func TestUpgradeRawInstallConfirmationFixtures(t *testing.T) {
+	t.Parallel()
+	fixture := loadUpgradeFixture(t)
+	requireUpgradeCaseNames(t, fixture.RawConfirmationCases, map[string]struct{}{
+		"prompt-accepts-yes-before-download":             {},
+		"prompt-default-no-cancels-before-download":      {},
+		"non-terminal-refuses-before-download":           {},
+		"dry-run-prints-plan-without-prompt-or-download": {},
+		"yes-accepts-plan-without-terminal":              {},
+	})
+	for _, tc := range fixture.RawConfirmationCases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			currentPath := filepath.Join(t.TempDir(), "peasant")
+			original := []byte("old binary")
+			if err := os.WriteFile(currentPath, original, 0o755); err != nil {
+				t.Fatalf("seed current binary: %v", err)
+			}
+			newBinary := []byte("new binary")
+			archive := makeUpgradeArchive(t, newBinary)
+			assetName := "peasant_" + strings.TrimPrefix(tc.TargetVersion, "v") + "_linux_amd64.tar.gz"
+			var assetRequests atomic.Int64
+			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
+				Tagged: map[string]upgradeRelease{
+					normalizeUpgradeTag(tc.TargetVersion): newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
+				},
+				Assets: map[string][]byte{
+					assetName:       archive,
+					"checksums.txt": []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), assetName)),
+				},
+				AssetRequests: &assetRequests,
+			})
+			defer server.Close()
+			deps := upgradeTestDeps(t, server.URL, currentPath)
+			deps.CurrentVersion = tc.CurrentVersion
+			deps.StdinIsTerminal = func(io.Reader) bool { return tc.StdinIsTerminal }
+			if !tc.ExpectChanged {
+				deps.InstallBinary = func(string, []byte, os.FileMode) error {
+					t.Fatal("unconfirmed upgrade must not replace the binary")
+					return nil
+				}
+			}
+
+			output, err := executeUpgradeCommandForTestWithInput(t, deps, strings.NewReader(tc.Stdin), tc.Args...)
+			if len(tc.ErrorContains) > 0 {
+				if err == nil {
+					t.Fatalf("upgrade succeeded, want error; output:\n%s", output)
+				}
+				for _, want := range tc.ErrorContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("confirmation error missing %q:\n%s", want, err)
+					}
+				}
+			} else if err != nil {
+				t.Fatalf("upgrade command returned error: %v\noutput:\n%s", err, output)
+			}
+			for _, want := range tc.OutputContains {
+				if !strings.Contains(output, want) {
+					t.Fatalf("confirmation output missing %q:\n%s", want, output)
+				}
+			}
+			for _, forbidden := range tc.OutputNotContains {
+				if strings.Contains(output, forbidden) {
+					t.Fatalf("confirmation output contained %q:\n%s", forbidden, output)
+				}
+			}
+			if !strings.Contains(output, "  current binary to replace: "+currentPath) {
+				t.Fatalf("upgrade plan did not name exact replacement path %q:\n%s", currentPath, output)
+			}
+
+			got, err := os.ReadFile(currentPath)
+			if err != nil {
+				t.Fatalf("read current binary: %v", err)
+			}
+			if tc.ExpectChanged {
+				if !bytes.Equal(got, newBinary) {
+					t.Fatalf("binary content = %q, want %q", got, newBinary)
+				}
+				if assetRequests.Load() != 2 {
+					t.Fatalf("confirmed upgrade downloaded %d asset(s), want checksums and archive", assetRequests.Load())
+				}
+				return
+			}
+			if !bytes.Equal(got, original) {
+				t.Fatalf("binary changed without confirmation: got %q want %q", got, original)
+			}
+			if assetRequests.Load() != 0 {
+				t.Fatalf("unconfirmed upgrade downloaded %d asset(s), want 0", assetRequests.Load())
+			}
+		})
+	}
+}
+
 func TestUpgradeRawInstallDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	t.Parallel()
 	currentPath := filepath.Join(t.TempDir(), "peasant")
@@ -370,7 +464,7 @@ func TestUpgradeRawInstallDownloadsVerifiesAndReplacesBinary(t *testing.T) {
 	defer server.Close()
 	deps := upgradeTestDeps(t, server.URL, currentPath)
 
-	output, err := executeUpgradeCommandForTest(t, deps, "--version", "9.9.9")
+	output, err := executeUpgradeCommandForTest(t, deps, "--version", "9.9.9", "--yes")
 	if err != nil {
 		t.Fatalf("upgrade install returned error: %v\noutput:\n%s", err, output)
 	}
@@ -414,7 +508,7 @@ func TestUpgradeRawInstallRejectsChecksumMismatchAndPreservesBinary(t *testing.T
 	defer server.Close()
 	deps := upgradeTestDeps(t, server.URL, currentPath)
 
-	output, err := executeUpgradeCommandForTest(t, deps, "--version", "9.9.9")
+	output, err := executeUpgradeCommandForTest(t, deps, "--version", "9.9.9", "--yes")
 	if err == nil {
 		t.Fatalf("upgrade install succeeded with a checksum mismatch; output:\n%s", output)
 	}
@@ -444,6 +538,7 @@ type upgradeFixture struct {
 	VersionOrderCases      []upgradeVersionOrderCase      `yaml:"version_order_cases"`
 	DowngradeRefusalCases  []upgradeDowngradeRefusalCase  `yaml:"downgrade_refusal_cases"`
 	DowngradeOverrideCases []upgradeDowngradeOverrideCase `yaml:"downgrade_override_cases"`
+	RawConfirmationCases   []upgradeRawConfirmationCase   `yaml:"raw_confirmation_cases"`
 }
 
 type upgradeManagedInstallCase struct {
@@ -492,6 +587,19 @@ type upgradeDowngradeOverrideCase struct {
 	ErrorContains    []string `yaml:"error_contains"`
 }
 
+type upgradeRawConfirmationCase struct {
+	Name              string   `yaml:"name"`
+	CurrentVersion    string   `yaml:"current_version"`
+	TargetVersion     string   `yaml:"target_version"`
+	Args              []string `yaml:"args"`
+	Stdin             string   `yaml:"stdin"`
+	StdinIsTerminal   bool     `yaml:"stdin_is_terminal"`
+	ExpectChanged     bool     `yaml:"expect_changed"`
+	OutputContains    []string `yaml:"output_contains"`
+	OutputNotContains []string `yaml:"output_not_contains"`
+	ErrorContains     []string `yaml:"error_contains"`
+}
+
 type upgradeReleaseFixture struct {
 	Tag    string   `yaml:"tag"`
 	Draft  bool     `yaml:"draft"`
@@ -535,6 +643,7 @@ func (c upgradeReleaseSelectionCase) upgradeCaseName() string  { return c.Name }
 func (c upgradeVersionOrderCase) upgradeCaseName() string      { return c.Name }
 func (c upgradeDowngradeRefusalCase) upgradeCaseName() string  { return c.Name }
 func (c upgradeDowngradeOverrideCase) upgradeCaseName() string { return c.Name }
+func (c upgradeRawConfirmationCase) upgradeCaseName() string   { return c.Name }
 
 func requireUpgradeCaseNames[T namedUpgradeCase](t *testing.T, cases []T, required map[string]struct{}) {
 	t.Helper()
@@ -666,10 +775,18 @@ func upgradeTestDeps(t *testing.T, apiBaseURL, executablePath string) upgradeDep
 }
 
 func executeUpgradeCommandForTest(t *testing.T, deps upgradeDeps, args ...string) (string, error) {
+	return executeUpgradeCommandForTestWithInput(t, deps, nil, args...)
+}
+
+func executeUpgradeCommandForTestWithInput(t *testing.T, deps upgradeDeps, input io.Reader, args ...string) (string, error) {
 	t.Helper()
 	root := &cobra.Command{Use: "peasant"}
 	cmd := buildUpgradeCommand(deps)
 	root.AddCommand(cmd)
+	if input != nil {
+		root.SetIn(input)
+		cmd.SetIn(input)
+	}
 	var output bytes.Buffer
 	root.SetOut(&output)
 	root.SetErr(&output)
