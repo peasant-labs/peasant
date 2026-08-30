@@ -7,6 +7,10 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Dependencies
+- Contract pins: schema `v0.1.3-rc1` (Village API 0.14.0, Local API 0.9.0,
+  Types 0.14.0).
+
 ## [0.5.0-rc2] - 2026-08-31
 
 ### Added
