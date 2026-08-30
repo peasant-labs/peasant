@@ -31,7 +31,12 @@ const (
 	DiffActive                      // Source file modified < staleness threshold ago
 )
 
-const indexWriteBatchLimit = 64
+const (
+	indexWriteBatchLimit        = 64
+	annotationFlushSessionLimit = 256
+	annotationFlushWriteLimit   = 4096
+	annotationFlushInterval     = 500 * time.Millisecond
+)
 
 // String returns a human-readable name for the DiffStatus.
 func (s DiffStatus) String() string {
@@ -3234,6 +3239,9 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 	if p.classifier == nil {
 		return nil
 	}
+	if buffered, ok := p.classifier.(BufferedSessionClassifier); ok {
+		return p.stageAnnotateBuffered(ctx, sessionIDs, prog, buffered)
+	}
 	workers := parallelWorkers(p.config)
 	total := len(sessionIDs)
 	profiled, useProfile := p.classifier.(ProfiledSessionClassifier)
@@ -3260,8 +3268,8 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 						"session_id", sid,
 						"error", err,
 						"what", "classifier failed to annotate session entries",
-						"why", "classifier error or missing session_entries rows",
-						"user_impact", "session will lack quality annotations in the web UI",
+						"why", "classifier error, missing session_entries rows, or annotation persistence failure",
+						"user_impact", "session annotations may be incomplete or recomputed on the next index run",
 						"how_to_fix", "re-run peasant ingest index --force --session "+string(sid))
 				}
 				n := int(done.Add(1))
@@ -3276,5 +3284,120 @@ func (p *Pipeline) stageAnnotate(ctx context.Context, sessionIDs []SessionID, pr
 	}
 	close(ch)
 	wg.Wait()
+	return nil
+}
+
+func (p *Pipeline) stageAnnotateBuffered(ctx context.Context, sessionIDs []SessionID, prog *ProgressState, classifier BufferedSessionClassifier) error {
+	workers := parallelWorkers(p.config)
+	total := len(sessionIDs)
+	if total == 0 {
+		return nil
+	}
+	profiler := p.config.IndexProfiler
+
+	sessions := make(chan SessionID, workers)
+	batches := make(chan SessionAnnotationBatch, workers)
+	results := make(chan SessionAnnotationBatchResult, total)
+
+	var resultWG sync.WaitGroup
+	resultWG.Add(1)
+	go func() {
+		defer resultWG.Done()
+		done := 0
+		for result := range results {
+			if result.Err != nil {
+				slog.Warn("pipeline: annotate session",
+					"session_id", result.SessionID,
+					"error", result.Err,
+					"what", "classifier failed to annotate session entries",
+					"why", "classifier error, missing session_entries rows, or annotation persistence failure",
+					"user_impact", "session annotations may be incomplete or recomputed on the next index run",
+					"how_to_fix", "re-run peasant ingest index --force --session "+string(result.SessionID))
+			}
+			done++
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: done, Total: total})
+		}
+	}()
+
+	var prepareWG sync.WaitGroup
+	for range workers {
+		prepareWG.Add(1)
+		go func() {
+			defer prepareWG.Done()
+			for sid := range sessions {
+				batch, err := classifier.PrepareAnnotations(ctx, sid, profiler)
+				if err != nil {
+					results <- SessionAnnotationBatchResult{SessionID: sid, Err: err}
+					continue
+				}
+				if batch.SessionID == "" {
+					batch.SessionID = sid
+				}
+				if batch.Skipped || (len(batch.Writes) == 0 && batch.RunState == nil) {
+					results <- SessionAnnotationBatchResult{SessionID: batch.SessionID}
+					continue
+				}
+				batches <- batch
+			}
+		}()
+	}
+
+	var writerWG sync.WaitGroup
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		ticker := time.NewTicker(annotationFlushInterval)
+		defer ticker.Stop()
+		var pending []SessionAnnotationBatch
+		pendingWrites := 0
+		flush := func() {
+			if len(pending) == 0 {
+				return
+			}
+			flushed := classifier.FlushAnnotationBatches(ctx, pending, profiler)
+			if len(flushed) > len(pending) {
+				flushed = flushed[:len(pending)]
+			}
+			for _, result := range flushed {
+				results <- result
+			}
+			if len(flushed) < len(pending) {
+				for _, batch := range pending[len(flushed):] {
+					results <- SessionAnnotationBatchResult{
+						SessionID: batch.SessionID,
+						Err:       fmt.Errorf("pipeline: annotation batch flush returned %d result(s) for %d session batch(es)", len(flushed), len(pending)),
+					}
+				}
+			}
+			pending = pending[:0]
+			pendingWrites = 0
+		}
+		for {
+			select {
+			case batch, ok := <-batches:
+				if !ok {
+					flush()
+					return
+				}
+				pending = append(pending, batch)
+				pendingWrites += len(batch.Writes)
+				if len(pending) >= annotationFlushSessionLimit || pendingWrites >= annotationFlushWriteLimit {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
+			}
+		}
+	}()
+
+	for _, sid := range sessionIDs {
+		sessions <- sid
+	}
+	close(sessions)
+	prepareWG.Wait()
+	close(batches)
+	writerWG.Wait()
+	close(results)
+	resultWG.Wait()
 	return nil
 }

@@ -796,7 +796,8 @@ Interpretation:
   does not address the `1h19m51.913s` aggregate mutex wait.
 - The next optimization should add a stage-level buffer: annotation workers
   prepare per-session writes in parallel, and one writer flushes larger batches
-  across many sessions in fewer transactions.
+  across many sessions in fewer transactions. The writer should also flush at a
+  regular interval so small or slow batches still make visible progress.
 
 ### Prior Streaming PR Run
 
@@ -1286,7 +1287,8 @@ Implementation notes:
 - keep the existing `SessionClassifier` and `ProfiledSessionClassifier` fallback;
 - have `stageAnnotate` use the buffered path only when the classifier implements
   the optional buffered interface;
-- bound the buffer by batch count and result count so memory stays predictable;
+- bound the buffer by batch count, result count, and a regular flush interval so
+  memory and visible progress stay predictable;
 - preserve best-effort per-session behavior: one bad session must not stop later
   batches;
 - save `annotation_run_state` only after that session's annotation writes
@@ -1303,6 +1305,9 @@ Implementation notes:
 - Given many sessions produce annotations, when the buffered path runs, then the
   store sees fewer annotation write transactions than one transaction per
   session.
+- Given a prepared session waits below the batch-size thresholds, when `500ms`
+  elapses, then the writer flushes pending annotations and ANNOTATE progress
+  advances before all sessions finish preparing.
 - Given one prepared session has an invalid write, when the writer flushes a
   multi-session batch, then only that session reports an error and later sessions
   still write.

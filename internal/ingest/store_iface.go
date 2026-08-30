@@ -388,6 +388,15 @@ type ProfiledSessionClassifier interface {
 	AnnotateWithProfile(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) error
 }
 
+// BufferedSessionClassifier is an optional ANNOTATE-stage fast path. It lets the
+// pipeline prepare annotation writes for many sessions in parallel, then flush
+// those prepared writes through larger serial store batches.
+type BufferedSessionClassifier interface {
+	SessionClassifier
+	PrepareAnnotations(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) (SessionAnnotationBatch, error)
+	FlushAnnotationBatches(ctx context.Context, batches []SessionAnnotationBatch, profiler *IndexProfiler) []SessionAnnotationBatchResult
+}
+
 // SessionAnnotationParams holds the inputs for creating a session-level annotation.
 // Uses ingest-package types to keep the DI boundary clean: store implements
 // AnnotationStore without creating an import cycle.
@@ -506,6 +515,35 @@ type ClassifierAnnotationWrite struct {
 	ContentHash string
 }
 
+// SessionAnnotationWrite adds profile grouping metadata to one prepared
+// classifier annotation write. The store persists Write; the classifier uses the
+// remaining fields to attribute results in profile output.
+type SessionAnnotationWrite struct {
+	Write          ClassifierAnnotationWrite
+	TypeID         string
+	Value          string
+	TargetKind     AnnotationProfileTargetKind
+	ClassifierTime time.Duration
+}
+
+// SessionAnnotationBatch is the prepared annotation work for one session.
+// Skipped means state proved the session current and no store flush is needed.
+type SessionAnnotationBatch struct {
+	SessionID SessionID
+	Writes    []SessionAnnotationWrite
+	RunState  *AnnotationRunState
+	Skipped   bool
+}
+
+// SessionAnnotationBatchResult reports the best-effort outcome for one prepared
+// session batch. Per-write failures are reported in Results; Err is for
+// batch-level failures such as setup, commit, or run-state persistence.
+type SessionAnnotationBatchResult struct {
+	SessionID SessionID
+	Results   []ClassifierAnnotationWriteResult
+	Err       error
+}
+
 // ClassifierAnnotationWriteResult reports the best-effort outcome for one
 // ClassifierAnnotationWrite. Err is scoped to this one write unless every result
 // reports the same setup or commit failure.
@@ -570,6 +608,18 @@ type ClassifierAnnotationBatchStore interface {
 // classifier batch writer. Normal callers keep using ClassifierAnnotationBatchStore.
 type ProfiledClassifierAnnotationBatchStore interface {
 	ApplyClassifierAnnotationsWithProfile(ctx context.Context, writes []ClassifierAnnotationWrite, stats *AnnotationProfileStats) []ClassifierAnnotationWriteResult
+}
+
+// ClassifierAnnotationSessionBatchStore persists prepared classifier annotation
+// writes for multiple sessions in one serial store call.
+type ClassifierAnnotationSessionBatchStore interface {
+	ApplyClassifierAnnotationBatches(ctx context.Context, batches []SessionAnnotationBatch) []SessionAnnotationBatchResult
+}
+
+// ProfiledClassifierAnnotationSessionBatchStore adds opt-in timing detail for
+// the multi-session classifier annotation writer.
+type ProfiledClassifierAnnotationSessionBatchStore interface {
+	ApplyClassifierAnnotationBatchesWithProfile(ctx context.Context, batches []SessionAnnotationBatch, stats *AnnotationProfileStats) []SessionAnnotationBatchResult
 }
 
 // AnnotationStore abstracts annotation write operations for the pipeline ANNOTATE stage.

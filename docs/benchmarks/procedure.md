@@ -202,6 +202,8 @@ persistence. Classifier compute is small compared with write contention:
 - batch mutex wait: about `1h20m` aggregate.
 
 This means session annotation workers are already running concurrently, but they
-queue behind one SQLite writer. The next experiment should reduce write pressure
-with a stage-level buffer that collects prepared annotations from many sessions
-and flushes them through larger serial write batches.
+queue behind one SQLite writer. The buffered-writer candidate reduces write
+pressure with a stage-level buffer that collects prepared annotations from many
+sessions and flushes them through larger serial write batches. Flushes are
+bounded by batch size and by a `500ms` interval so progress remains visible on
+small or slow batches.

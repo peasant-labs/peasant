@@ -138,6 +138,13 @@ func (s *Store) SaveAnnotationRunState(ctx context.Context, state ingest.Annotat
 	}
 	defer s.pool.Put(conn)
 
+	if err := saveAnnotationRunStateOnConn(conn, state); err != nil {
+		return fmt.Errorf("store: save annotation_run_state for %s: %w", state.SessionID, err)
+	}
+	return nil
+}
+
+func saveAnnotationRunStateOnConn(conn *sqlite.Conn, state ingest.AnnotationRunState) error {
 	annotatedAt := state.AnnotatedAt
 	if annotatedAt.IsZero() {
 		annotatedAt = time.Now()
@@ -145,7 +152,7 @@ func (s *Store) SaveAnnotationRunState(ctx context.Context, state ingest.Annotat
 	if err := sqlitex.ExecuteTransient(conn, sqlSaveAnnotationRunState, &sqlitex.ExecOptions{
 		Args: []any{string(state.SessionID), state.SessionEntriesHash, state.ComputeVersion, state.ClassifierVersion, annotatedAt.UnixMilli()},
 	}); err != nil {
-		return fmt.Errorf("store: save annotation_run_state for %s: %w", state.SessionID, err)
+		return fmt.Errorf("execute annotation_run_state upsert: %w", err)
 	}
 	return nil
 }
