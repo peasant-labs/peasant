@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -101,6 +102,21 @@ type upgradeRelease struct {
 	Draft      bool           `json:"draft"`
 	Prerelease bool           `json:"prerelease"`
 	Assets     []upgradeAsset `json:"assets"`
+}
+
+type upgradeReleaseSelection struct {
+	Target        upgradeRelease
+	Stable        upgradeRelease
+	HasStable     bool
+	Prerelease    upgradeRelease
+	HasPrerelease bool
+}
+
+type upgradeDowngradeContext struct {
+	BinaryPath    string
+	TargetLabel   string
+	StableTag     string
+	PrereleaseTag string
 }
 
 type upgradeAsset struct {
@@ -219,13 +235,6 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts up
 	if opts.AllowDowngrade && opts.Version == "" {
 		return allowDowngradeWithoutVersionError()
 	}
-	if opts.Version != "" {
-		handled, err := handleUpgradeVersionOrder(out, opts, normalizeUpgradeTag(opts.Version))
-		if err != nil || handled {
-			return err
-		}
-	}
-
 	executablePath, err := deps.Executable()
 	if err != nil {
 		return upgradeActionableError(
@@ -243,17 +252,32 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts up
 	}
 
 	paths := dedupeUpgradePaths(executablePath, resolvedPath)
+	if opts.Version != "" {
+		downgradeContext := upgradeDowngradeContext{
+			BinaryPath:  resolvedPath,
+			TargetLabel: "selected release",
+		}
+		handled, err := handleUpgradeVersionOrder(out, opts, normalizeUpgradeTag(opts.Version), downgradeContext)
+		if err != nil || handled {
+			return err
+		}
+	}
+
 	if managed, ok := detectManagedPeasantInstall(ctx, deps, paths); ok {
 		printManagedUpgradeAdvice(out, managed, opts, deps)
 		return nil
 	}
 
-	release, err := resolveUpgradeRelease(ctx, deps, opts)
+	selection, err := resolveUpgradeRelease(ctx, deps, opts)
 	if err != nil {
 		return err
 	}
+	release := selection.Target
 	if opts.Version == "" {
-		handled, err := handleUpgradeVersionOrder(out, opts, release.TagName)
+		if !opts.IncludePrerelease && upgradeCurrentSortsAfter(opts.CurrentVersion, release.TagName) {
+			selection = enrichStableDowngradeSelectionWithPrerelease(ctx, deps, selection)
+		}
+		handled, err := handleUpgradeVersionOrder(out, opts, release.TagName, downgradeContextFromReleaseSelection(selection, resolvedPath))
 		if err != nil || handled {
 			return err
 		}
@@ -527,13 +551,13 @@ func printManagedUpgradeAdvice(out io.Writer, install upgradeManagedInstall, opt
 	}
 }
 
-func resolveUpgradeRelease(ctx context.Context, deps upgradeDeps, opts upgradeOptions) (upgradeRelease, error) {
+func resolveUpgradeRelease(ctx context.Context, deps upgradeDeps, opts upgradeOptions) (upgradeReleaseSelection, error) {
 	base := strings.TrimRight(deps.APIBaseURL, "/")
 	if opts.Version != "" {
 		tag := normalizeUpgradeTag(opts.Version)
 		var release upgradeRelease
 		if err := getUpgradeJSON(ctx, deps.HTTPClient, base+"/releases/tags/"+url.PathEscape(tag), &release); err != nil {
-			return upgradeRelease{}, upgradeActionableError(
+			return upgradeReleaseSelection{}, upgradeActionableError(
 				"the requested Peasant release could not be resolved",
 				err.Error(),
 				"peasant upgrade --version",
@@ -542,12 +566,12 @@ func resolveUpgradeRelease(ctx context.Context, deps upgradeDeps, opts upgradeOp
 				fmt.Sprintf("check that %s contains tag %s, then retry", upgradeReleasePageURL, tag),
 			)
 		}
-		return release, nil
+		return upgradeReleaseSelection{Target: release}, nil
 	}
 	if opts.IncludePrerelease {
 		var releases []upgradeRelease
 		if err := getUpgradeJSON(ctx, deps.HTTPClient, base+"/releases?per_page=100", &releases); err != nil {
-			return upgradeRelease{}, upgradeActionableError(
+			return upgradeReleaseSelection{}, upgradeActionableError(
 				"Peasant releases could not be listed",
 				err.Error(),
 				"peasant upgrade --prerelease",
@@ -556,12 +580,30 @@ func resolveUpgradeRelease(ctx context.Context, deps upgradeDeps, opts upgradeOp
 				"check network access to the GitHub API, then retry",
 			)
 		}
+		var selection upgradeReleaseSelection
 		for _, release := range releases {
-			if !release.Draft {
-				return release, nil
+			if release.Draft {
+				continue
+			}
+			if selection.Target.TagName == "" {
+				selection.Target = release
+			}
+			if isUpgradeReleasePrerelease(release) {
+				if !selection.HasPrerelease {
+					selection.Prerelease = release
+					selection.HasPrerelease = true
+				}
+				continue
+			}
+			if !selection.HasStable {
+				selection.Stable = release
+				selection.HasStable = true
 			}
 		}
-		return upgradeRelease{}, upgradeActionableError(
+		if selection.Target.TagName != "" {
+			return selection, nil
+		}
+		return upgradeReleaseSelection{}, upgradeActionableError(
 			"no published Peasant release was available",
 			"the GitHub releases response contained no non-draft release",
 			"peasant upgrade --prerelease",
@@ -572,7 +614,7 @@ func resolveUpgradeRelease(ctx context.Context, deps upgradeDeps, opts upgradeOp
 	}
 	var release upgradeRelease
 	if err := getUpgradeJSON(ctx, deps.HTTPClient, base+"/releases/latest", &release); err != nil {
-		return upgradeRelease{}, upgradeActionableError(
+		return upgradeReleaseSelection{}, upgradeActionableError(
 			"the latest stable Peasant release could not be resolved",
 			err.Error(),
 			"peasant upgrade",
@@ -581,7 +623,31 @@ func resolveUpgradeRelease(ctx context.Context, deps upgradeDeps, opts upgradeOp
 			"check network access to the GitHub API, or pass --version for a known tag",
 		)
 	}
-	return release, nil
+	return upgradeReleaseSelection{Target: release, Stable: release, HasStable: true}, nil
+}
+
+func isUpgradeReleasePrerelease(release upgradeRelease) bool {
+	return release.Prerelease || isUpgradePrerelease(release.TagName)
+}
+
+func enrichStableDowngradeSelectionWithPrerelease(ctx context.Context, deps upgradeDeps, selection upgradeReleaseSelection) upgradeReleaseSelection {
+	if selection.HasPrerelease {
+		return selection
+	}
+	base := strings.TrimRight(deps.APIBaseURL, "/")
+	var releases []upgradeRelease
+	if err := getUpgradeJSON(ctx, deps.HTTPClient, base+"/releases?per_page=100", &releases); err != nil {
+		return selection
+	}
+	for _, release := range releases {
+		if release.Draft || !isUpgradeReleasePrerelease(release) {
+			continue
+		}
+		selection.Prerelease = release
+		selection.HasPrerelease = true
+		return selection
+	}
+	return selection
 }
 
 func getUpgradeJSON(ctx context.Context, client *http.Client, endpoint string, out any) error {
@@ -951,7 +1017,7 @@ func compareUpgradeVersions(current, target string) (upgradeVersionOrder, error)
 	return currentVersion.compare(targetVersion), nil
 }
 
-func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag string) (bool, error) {
+func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag string, context upgradeDowngradeContext) (bool, error) {
 	order, err := compareUpgradeVersions(opts.CurrentVersion, targetTag)
 	if err != nil {
 		return false, err
@@ -964,7 +1030,7 @@ func handleUpgradeVersionOrder(out io.Writer, opts upgradeOptions, targetTag str
 		return false, nil
 	}
 	if !opts.AllowDowngrade {
-		return false, downgradeUpgradeError(opts.CurrentVersion, targetTag)
+		return false, downgradeUpgradeError(opts.CurrentVersion, targetTag, context)
 	}
 	fmt.Fprintf(out, "downgrade override: current %s sorts after target %s; continuing because --allow-downgrade was set.\n", opts.CurrentVersion, targetTag)
 	return false, nil
@@ -1122,15 +1188,97 @@ func unorderedUpgradeVersionError(label, version, why string) error {
 	)
 }
 
-func downgradeUpgradeError(current, target string) error {
-	return upgradeActionableError(
-		"the target Peasant release is older than the current binary",
-		fmt.Sprintf("current %s sorts after target %s", current, target),
-		"peasant upgrade",
-		"after selecting the target release and before downloading files",
-		"Peasant refused the downgrade and no files were changed",
-		fmt.Sprintf("choose a newer Peasant release, keep the current binary, or pass --version %s --allow-downgrade only if you intentionally need to roll back", target),
-	)
+func downgradeUpgradeError(current, target string, context upgradeDowngradeContext) error {
+	if context.TargetLabel == "" {
+		context.TargetLabel = "selected release"
+	}
+	var builder strings.Builder
+	builder.WriteString("peasant upgrade failed\n\n")
+	wroteSummary := false
+	wroteSummary = writeDowngradeSummaryLine(&builder, wroteSummary, current, "latest `stable` release", context.StableTag)
+	wroteSummary = writeDowngradeSummaryLine(&builder, wroteSummary, current, "latest `prerelease` release", context.PrereleaseTag)
+	if !wroteSummary {
+		fmt.Fprintf(&builder, "`current` peasant version already newer than %s %s\n", context.TargetLabel, target)
+	}
+	fmt.Fprintf(&builder, "\ninfo: no files were changed; path to the binary we tried to upgrade\n    %s\n\n", context.BinaryPath)
+	builder.WriteString("versions\n--------\n")
+	writeUpgradeVersionRows(&builder, downgradeVersionRows(current, target, context))
+	builder.WriteString("\nshow more information\n    peasant upgrade --help\n")
+	fmt.Fprintf(&builder, "\nif you want to downgrade anyways\n    peasant upgrade --version %s --allow-downgrade\n", target)
+	if context.PrereleaseTag != "" {
+		builder.WriteString("\nif you want to install the `prerelease`\n    ")
+		if upgradeCurrentSortsAfter(current, context.PrereleaseTag) {
+			fmt.Fprintf(&builder, "peasant upgrade --version %s --allow-downgrade\n", context.PrereleaseTag)
+		} else {
+			builder.WriteString("peasant upgrade --prerelease\n")
+		}
+	}
+	return errors.New(strings.TrimRight(builder.String(), "\n"))
+}
+
+func downgradeContextFromReleaseSelection(selection upgradeReleaseSelection, binaryPath string) upgradeDowngradeContext {
+	context := upgradeDowngradeContext{BinaryPath: binaryPath, TargetLabel: "selected release"}
+	if selection.HasStable {
+		context.StableTag = selection.Stable.TagName
+		if selection.Target.TagName == selection.Stable.TagName {
+			context.TargetLabel = "latest `stable` release"
+		}
+	}
+	if selection.HasPrerelease {
+		context.PrereleaseTag = selection.Prerelease.TagName
+		if selection.Target.TagName == selection.Prerelease.TagName {
+			context.TargetLabel = "latest `prerelease` release"
+		}
+	}
+	return context
+}
+
+func writeDowngradeSummaryLine(builder *strings.Builder, wroteSummary bool, current, label, tag string) bool {
+	if tag == "" || !upgradeCurrentSortsAfter(current, tag) {
+		return wroteSummary
+	}
+	adverb := "already"
+	if wroteSummary {
+		adverb = "also"
+	}
+	fmt.Fprintf(builder, "`current` peasant version %s newer than %s %s\n", adverb, label, tag)
+	return true
+}
+
+type upgradeVersionRow struct {
+	Label string
+	Value string
+}
+
+func downgradeVersionRows(current, target string, context upgradeDowngradeContext) []upgradeVersionRow {
+	rows := []upgradeVersionRow{{Label: "current", Value: current}}
+	if context.StableTag != "" {
+		rows = append(rows, upgradeVersionRow{Label: "stable", Value: context.StableTag})
+	}
+	if context.PrereleaseTag != "" {
+		rows = append(rows, upgradeVersionRow{Label: "prerelease", Value: context.PrereleaseTag})
+	}
+	if context.StableTag == "" && context.PrereleaseTag == "" {
+		rows = append(rows, upgradeVersionRow{Label: "target", Value: target})
+	}
+	return rows
+}
+
+func writeUpgradeVersionRows(builder *strings.Builder, rows []upgradeVersionRow) {
+	labelWidth := 0
+	for _, row := range rows {
+		if len(row.Label) > labelWidth {
+			labelWidth = len(row.Label)
+		}
+	}
+	for _, row := range rows {
+		fmt.Fprintf(builder, "%-*s %s\n", labelWidth+1, row.Label+":", row.Value)
+	}
+}
+
+func upgradeCurrentSortsAfter(current, target string) bool {
+	order, err := compareUpgradeVersions(current, target)
+	return err == nil && order == upgradeVersionAfter
 }
 
 func allowDowngradeWithoutVersionError() error {
@@ -1166,5 +1314,5 @@ func releaseURL(release upgradeRelease) string {
 }
 
 func upgradeActionableError(what, why, where, when, means, fix string) error {
-	return fmt.Errorf("upgrade failed\nwhat: %s\nwhy: %s\nwhere: %s\nwhen: %s\nmeans: %s\nfix: %s", what, why, where, when, means, fix)
+	return fmt.Errorf("upgrade failed\nwhat:  %s\nwhy:   %s\nwhere: %s\nwhen:  %s\nmeans: %s\nfix:   %s", what, why, where, when, means, fix)
 }

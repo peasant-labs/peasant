@@ -192,11 +192,13 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 	t.Parallel()
 	fixture := loadUpgradeFixture(t)
 	requireUpgradeCaseNames(t, fixture.DowngradeRefusalCases, map[string]struct{}{
-		"dev-build-refuses-older-stable":                   {},
-		"allow-downgrade-needs-exact-version-managed":      {},
-		"allow-downgrade-needs-exact-version-newer-target": {},
-		"observed-dev-placeholder-fails-safe":              {},
-		"malformed-target-version-fails-safe":              {},
+		"dev-build-refuses-older-selected-stable":              {},
+		"dev-build-refuses-newest-prerelease-with-stable-info": {},
+		"newer-current-refuses-stable-and-suggests-prerelease": {},
+		"allow-downgrade-needs-exact-version-managed":          {},
+		"allow-downgrade-needs-exact-version-newer-target":     {},
+		"observed-dev-placeholder-fails-safe":                  {},
+		"malformed-target-version-fails-safe":                  {},
 	})
 	for _, tc := range fixture.DowngradeRefusalCases {
 		tc := tc
@@ -204,10 +206,25 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 			t.Parallel()
 			archive := makeUpgradeArchive(t, []byte("new binary"))
 			assetName := "peasant_" + strings.TrimPrefix(tc.TargetVersion, "v") + "_linux_amd64.tar.gz"
+			latestTag := tc.TargetVersion
+			if tc.LatestStableVersion != "" {
+				latestTag = tc.LatestStableVersion
+			}
+			targetTag := normalizeUpgradeTag(tc.TargetVersion)
+			releases := []upgradeRelease{newUpgradeTestRelease(targetTag, assetName, "checksums.txt")}
+			if tc.LatestPrereleaseVersion != "" {
+				prereleaseTag := normalizeUpgradeTag(tc.LatestPrereleaseVersion)
+				if prereleaseTag != targetTag {
+					releases = append([]upgradeRelease{newUpgradeTestRelease(prereleaseTag, "checksums.txt")}, releases...)
+				}
+			}
+			if tc.LatestStableVersion != "" && normalizeUpgradeTag(tc.LatestStableVersion) != targetTag {
+				releases = append(releases, newUpgradeTestRelease(normalizeUpgradeTag(tc.LatestStableVersion), "checksums.txt"))
+			}
 			var assetRequests atomic.Int64
 			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
-				Latest:   newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
-				Releases: []upgradeRelease{newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt")},
+				Latest:   newUpgradeTestRelease(normalizeUpgradeTag(latestTag), assetName, "checksums.txt"),
+				Releases: releases,
 				Tagged: map[string]upgradeRelease{
 					normalizeUpgradeTag(tc.TargetVersion): newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
 				},
@@ -247,8 +264,13 @@ func TestUpgradeRefusesDowngradeTargetsBeforeDownloadFixtures(t *testing.T) {
 			if err == nil {
 				t.Fatalf("upgrade accepted blocked target; output:\n%s", output)
 			}
-			if strings.Contains(output, "current:") || strings.Contains(output, "target:") || strings.Contains(output, "asset:") || strings.Contains(output, "path:") || strings.Contains(output, "dry run:") || strings.Contains(output, "managed by") || strings.Contains(output, "manager-owned upgrade path") {
-				t.Fatalf("blocked target wrote plan output before refusal:\n%s", output)
+			for _, forbidden := range []string{"Upgrade plan:", "asset:", "dry run:", "managed by", "manager-owned upgrade path", "download source:", "checksums source:", "current binary to replace:"} {
+				if strings.Contains(output, forbidden) {
+					t.Fatalf("blocked target wrote plan output containing %q before refusal:\n%s", forbidden, output)
+				}
+			}
+			if strings.Contains(err.Error(), "path to the binary we tried to upgrade") && !strings.Contains(err.Error(), executablePath) {
+				t.Fatalf("blocked target error did not name the resolved binary path %q:\n%s", executablePath, err)
 			}
 			for _, want := range tc.ErrorContains {
 				if !strings.Contains(err.Error(), want) {
@@ -620,13 +642,15 @@ type upgradeVersionOrderCase struct {
 }
 
 type upgradeDowngradeRefusalCase struct {
-	Name           string                  `yaml:"name"`
-	CurrentVersion string                  `yaml:"current_version"`
-	TargetVersion  string                  `yaml:"target_version"`
-	Executable     string                  `yaml:"executable"`
-	Commands       []upgradeCommandFixture `yaml:"commands"`
-	Args           []string                `yaml:"args"`
-	ErrorContains  []string                `yaml:"error_contains"`
+	Name                    string                  `yaml:"name"`
+	CurrentVersion          string                  `yaml:"current_version"`
+	TargetVersion           string                  `yaml:"target_version"`
+	LatestStableVersion     string                  `yaml:"latest_stable_version"`
+	LatestPrereleaseVersion string                  `yaml:"latest_prerelease_version"`
+	Executable              string                  `yaml:"executable"`
+	Commands                []upgradeCommandFixture `yaml:"commands"`
+	Args                    []string                `yaml:"args"`
+	ErrorContains           []string                `yaml:"error_contains"`
 }
 
 type upgradeDowngradeOverrideCase struct {
