@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -229,9 +230,16 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, opts upgradeOptions, 
 	if err != nil {
 		return err
 	}
-	if isCurrentUpgradeVersion(opts.CurrentVersion, release.TagName) {
+	order, err := compareUpgradeVersions(opts.CurrentVersion, release.TagName)
+	if err != nil {
+		return err
+	}
+	if order == upgradeVersionSame {
 		fmt.Fprintf(out, "Peasant is already at %s; no files were changed.\n", release.TagName)
 		return nil
+	}
+	if order == upgradeVersionAfter {
+		return downgradeUpgradeError(opts.CurrentVersion, release.TagName)
 	}
 
 	archiveName, err := upgradeArchiveName(release.TagName, deps.GOOS, deps.GOARCH)
@@ -821,15 +829,223 @@ func normalizeUpgradeVersion(version string) string {
 	return version
 }
 
-func isCurrentUpgradeVersion(current, targetTag string) bool {
-	current = normalizeUpgradeVersion(current)
-	target := normalizeUpgradeVersion(targetTag)
-	return current != "" && current != "dev" && current == target
-}
-
 func isUpgradePrerelease(version string) bool {
 	version = normalizeUpgradeVersion(version)
 	return version != "" && version != "dev" && strings.Contains(version, "-")
+}
+
+type upgradeVersionOrder int
+
+const (
+	upgradeVersionBefore upgradeVersionOrder = -1
+	upgradeVersionSame   upgradeVersionOrder = 0
+	upgradeVersionAfter  upgradeVersionOrder = 1
+)
+
+func (o upgradeVersionOrder) String() string {
+	switch o {
+	case upgradeVersionBefore:
+		return "before"
+	case upgradeVersionSame:
+		return "same"
+	case upgradeVersionAfter:
+		return "after"
+	default:
+		return "unknown"
+	}
+}
+
+type upgradeVersionPhase int
+
+const (
+	upgradeVersionPhaseDev upgradeVersionPhase = iota
+	upgradeVersionPhaseRC
+	upgradeVersionPhaseRelease
+)
+
+type parsedUpgradeVersion struct {
+	major       int
+	minor       int
+	patch       int
+	phase       upgradeVersionPhase
+	rc          int
+	dev         bool
+	devDistance int
+}
+
+func compareUpgradeVersions(current, target string) (upgradeVersionOrder, error) {
+	currentVersion, err := parseUpgradeVersion(current, "current")
+	if err != nil {
+		return upgradeVersionSame, err
+	}
+	targetVersion, err := parseUpgradeVersion(target, "target")
+	if err != nil {
+		return upgradeVersionSame, err
+	}
+	return currentVersion.compare(targetVersion), nil
+}
+
+func parseUpgradeVersion(version, label string) (parsedUpgradeVersion, error) {
+	original := strings.TrimSpace(version)
+	if original == "" {
+		return parsedUpgradeVersion{}, unorderedUpgradeVersionError(label, version, "version is empty")
+	}
+	withoutPrefix := strings.TrimPrefix(original, "v")
+	withoutBuild, _, _ := strings.Cut(withoutPrefix, "+")
+	core, prerelease, hasPrerelease := strings.Cut(withoutBuild, "-")
+	major, minor, patch, err := parseUpgradeVersionCore(core)
+	if err != nil {
+		return parsedUpgradeVersion{}, unorderedUpgradeVersionError(label, version, err.Error())
+	}
+	out := parsedUpgradeVersion{major: major, minor: minor, patch: patch, phase: upgradeVersionPhaseRelease}
+	if !hasPrerelease {
+		return out, nil
+	}
+	phase, rc, dev, devDistance, err := parseUpgradePrerelease(prerelease)
+	if err != nil {
+		return parsedUpgradeVersion{}, unorderedUpgradeVersionError(label, version, err.Error())
+	}
+	out.phase = phase
+	out.rc = rc
+	out.dev = dev
+	out.devDistance = devDistance
+	return out, nil
+}
+
+func parseUpgradeVersionCore(core string) (int, int, int, error) {
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, fmt.Errorf("version core %q must be MAJOR.MINOR.PATCH", core)
+	}
+	major, err := parseUpgradeVersionNumber(parts[0], "MAJOR")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	minor, err := parseUpgradeVersionNumber(parts[1], "MINOR")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	patch, err := parseUpgradeVersionNumber(parts[2], "PATCH")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return major, minor, patch, nil
+}
+
+func parseUpgradePrerelease(prerelease string) (upgradeVersionPhase, int, bool, int, error) {
+	if strings.HasPrefix(prerelease, "dev.") {
+		distancePart := strings.TrimPrefix(prerelease, "dev.")
+		distance, err := parseUpgradeVersionNumber(distancePart, "development distance")
+		if err != nil {
+			return upgradeVersionPhaseDev, 0, false, 0, err
+		}
+		return upgradeVersionPhaseDev, 0, true, distance, nil
+	}
+	if !strings.HasPrefix(prerelease, "rc") {
+		return upgradeVersionPhaseRelease, 0, false, 0, fmt.Errorf("prerelease %q is not rcN, rc.N, rcN-dev.N, or dev.N", prerelease)
+	}
+	rcPart := strings.TrimPrefix(prerelease, "rc")
+	rcPart = strings.TrimPrefix(rcPart, ".")
+	dev := false
+	devDistance := 0
+	if before, after, ok := strings.Cut(rcPart, "-dev."); ok {
+		rcPart = before
+		dev = true
+		distance, err := parseUpgradeVersionNumber(after, "development distance")
+		if err != nil {
+			return upgradeVersionPhaseRC, 0, false, 0, err
+		}
+		devDistance = distance
+	}
+	if strings.ContainsAny(rcPart, ".-") {
+		return upgradeVersionPhaseRC, 0, false, 0, fmt.Errorf("release candidate %q must contain one numeric rc component", prerelease)
+	}
+	rc, err := parseUpgradeVersionNumber(rcPart, "release candidate")
+	if err != nil {
+		return upgradeVersionPhaseRC, 0, false, 0, err
+	}
+	return upgradeVersionPhaseRC, rc, dev, devDistance, nil
+}
+
+func parseUpgradeVersionNumber(value, label string) (int, error) {
+	if value == "" {
+		return 0, fmt.Errorf("%s component is empty", label)
+	}
+	if len(value) > 1 && strings.HasPrefix(value, "0") {
+		return 0, fmt.Errorf("%s component %q has a leading zero", label, value)
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("%s component %q is not numeric", label, value)
+		}
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s component %q is not numeric: %w", label, value, err)
+	}
+	return parsed, nil
+}
+
+func (v parsedUpgradeVersion) compare(other parsedUpgradeVersion) upgradeVersionOrder {
+	left := []int{v.major, v.minor, v.patch}
+	right := []int{other.major, other.minor, other.patch}
+	for i := range left {
+		if left[i] < right[i] {
+			return upgradeVersionBefore
+		}
+		if left[i] > right[i] {
+			return upgradeVersionAfter
+		}
+	}
+	if v.phase < other.phase {
+		return upgradeVersionBefore
+	}
+	if v.phase > other.phase {
+		return upgradeVersionAfter
+	}
+	if v.phase == upgradeVersionPhaseRC {
+		if v.rc < other.rc {
+			return upgradeVersionBefore
+		}
+		if v.rc > other.rc {
+			return upgradeVersionAfter
+		}
+		if !v.dev && other.dev {
+			return upgradeVersionBefore
+		}
+		if v.dev && !other.dev {
+			return upgradeVersionAfter
+		}
+	}
+	if v.devDistance < other.devDistance {
+		return upgradeVersionBefore
+	}
+	if v.devDistance > other.devDistance {
+		return upgradeVersionAfter
+	}
+	return upgradeVersionSame
+}
+
+func unorderedUpgradeVersionError(label, version, why string) error {
+	return upgradeActionableError(
+		fmt.Sprintf("the %s Peasant version could not be ordered", label),
+		fmt.Sprintf("%s version %q is not a supported release, release candidate, or development build: %s", label, version, why),
+		"peasant upgrade",
+		"before comparing the current and target versions",
+		"Peasant cannot prove whether the target is an upgrade or a downgrade, so no files were changed",
+		"use a Peasant binary stamped with a release or ordered development version; to install an older release, download it manually from the release page",
+	)
+}
+
+func downgradeUpgradeError(current, target string) error {
+	return upgradeActionableError(
+		"the target Peasant release is older than the current binary",
+		fmt.Sprintf("current %s sorts after target %s", current, target),
+		"peasant upgrade",
+		"after selecting the target release and before downloading files",
+		"Peasant refused the downgrade and no files were changed",
+		"choose a newer Peasant release or keep the current binary; peasant upgrade does not allow downgrades",
+	)
 }
 
 func releaseURL(release upgradeRelease) string {
