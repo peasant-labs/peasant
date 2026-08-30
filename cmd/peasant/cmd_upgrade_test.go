@@ -372,6 +372,32 @@ func TestUpgradeRawInstallConfirmationFixtures(t *testing.T) {
 			archive := makeUpgradeArchive(t, newBinary)
 			assetName := "peasant_" + strings.TrimPrefix(tc.TargetVersion, "v") + "_linux_amd64.tar.gz"
 			var assetRequests atomic.Int64
+			var earlyAssetRequests atomic.Int64
+			var installCalls atomic.Int64
+			var earlyInstallCalls atomic.Int64
+			var promptOutputMissing atomic.Bool
+			allowDownloadAndInstall := atomic.Bool{}
+			if upgradeArgsContain(tc.Args, "--yes") {
+				allowDownloadAndInstall.Store(true)
+			}
+			var output bytes.Buffer
+			input := &upgradeInstrumentedReader{
+				source: strings.NewReader(tc.Stdin),
+				onFirstRead: func() {
+					if assetRequests.Load() != 0 {
+						earlyAssetRequests.Add(1)
+					}
+					if installCalls.Load() != 0 {
+						earlyInstallCalls.Add(1)
+					}
+					if !strings.Contains(output.String(), "continue? [y/N]") {
+						promptOutputMissing.Store(true)
+					}
+					if tc.ExpectChanged {
+						allowDownloadAndInstall.Store(true)
+					}
+				},
+			}
 			server := newUpgradeReleaseServer(t, upgradeReleaseServerConfig{
 				Tagged: map[string]upgradeRelease{
 					normalizeUpgradeTag(tc.TargetVersion): newUpgradeTestRelease(normalizeUpgradeTag(tc.TargetVersion), assetName, "checksums.txt"),
@@ -381,22 +407,46 @@ func TestUpgradeRawInstallConfirmationFixtures(t *testing.T) {
 					"checksums.txt": []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(archive), assetName)),
 				},
 				AssetRequests: &assetRequests,
+				AssetRequestObserver: func(string) {
+					if !allowDownloadAndInstall.Load() {
+						earlyAssetRequests.Add(1)
+					}
+				},
 			})
 			defer server.Close()
 			deps := upgradeTestDeps(t, server.URL, currentPath)
 			deps.CurrentVersion = tc.CurrentVersion
 			deps.StdinIsTerminal = func(io.Reader) bool { return tc.StdinIsTerminal }
-			if !tc.ExpectChanged {
-				deps.InstallBinary = func(string, []byte, os.FileMode) error {
+			deps.InstallBinary = func(path string, binary []byte, mode os.FileMode) error {
+				installCalls.Add(1)
+				if !allowDownloadAndInstall.Load() {
+					earlyInstallCalls.Add(1)
+				}
+				if !tc.ExpectChanged {
 					t.Fatal("unconfirmed upgrade must not replace the binary")
 					return nil
 				}
+				return installPeasantBinary(path, binary, mode)
 			}
 
-			output, err := executeUpgradeCommandForTestWithInput(t, deps, strings.NewReader(tc.Stdin), tc.Args...)
+			outputString, err := executeUpgradeCommandForTestWithIO(t, deps, input, &output, tc.Args...)
+			if promptOutputMissing.Load() {
+				t.Fatalf("confirmation input was read before the prompt was written:\n%s", outputString)
+			}
+			if earlyAssetRequests.Load() != 0 {
+				t.Fatalf("upgrade downloaded assets before confirmation or --yes; output:\n%s", outputString)
+			}
+			if earlyInstallCalls.Load() != 0 {
+				t.Fatalf("upgrade tried to install before confirmation or --yes; output:\n%s", outputString)
+			}
+			if !tc.StdinIsTerminal || upgradeArgsContain(tc.Args, "--dry-run") || upgradeArgsContain(tc.Args, "--yes") {
+				if input.didRead.Load() {
+					t.Fatalf("upgrade read confirmation input when no prompt was allowed:\n%s", outputString)
+				}
+			}
 			if len(tc.ErrorContains) > 0 {
 				if err == nil {
-					t.Fatalf("upgrade succeeded, want error; output:\n%s", output)
+					t.Fatalf("upgrade succeeded, want error; output:\n%s", outputString)
 				}
 				for _, want := range tc.ErrorContains {
 					if !strings.Contains(err.Error(), want) {
@@ -404,20 +454,20 @@ func TestUpgradeRawInstallConfirmationFixtures(t *testing.T) {
 					}
 				}
 			} else if err != nil {
-				t.Fatalf("upgrade command returned error: %v\noutput:\n%s", err, output)
+				t.Fatalf("upgrade command returned error: %v\noutput:\n%s", err, outputString)
 			}
 			for _, want := range tc.OutputContains {
-				if !strings.Contains(output, want) {
-					t.Fatalf("confirmation output missing %q:\n%s", want, output)
+				if !strings.Contains(outputString, want) {
+					t.Fatalf("confirmation output missing %q:\n%s", want, outputString)
 				}
 			}
 			for _, forbidden := range tc.OutputNotContains {
-				if strings.Contains(output, forbidden) {
-					t.Fatalf("confirmation output contained %q:\n%s", forbidden, output)
+				if strings.Contains(outputString, forbidden) {
+					t.Fatalf("confirmation output contained %q:\n%s", forbidden, outputString)
 				}
 			}
-			if !strings.Contains(output, "  current binary to replace: "+currentPath) {
-				t.Fatalf("upgrade plan did not name exact replacement path %q:\n%s", currentPath, output)
+			if !strings.Contains(outputString, "  current binary to replace: "+currentPath) {
+				t.Fatalf("upgrade plan did not name exact replacement path %q:\n%s", currentPath, outputString)
 			}
 
 			got, err := os.ReadFile(currentPath)
@@ -525,11 +575,12 @@ func TestUpgradeRawInstallRejectsChecksumMismatchAndPreservesBinary(t *testing.T
 }
 
 type upgradeReleaseServerConfig struct {
-	Latest        upgradeRelease
-	Releases      []upgradeRelease
-	Tagged        map[string]upgradeRelease
-	Assets        map[string][]byte
-	AssetRequests *atomic.Int64
+	Latest               upgradeRelease
+	Releases             []upgradeRelease
+	Tagged               map[string]upgradeRelease
+	Assets               map[string][]byte
+	AssetRequests        *atomic.Int64
+	AssetRequestObserver func(string)
 }
 
 type upgradeFixture struct {
@@ -691,10 +742,13 @@ func newUpgradeReleaseServer(t *testing.T, cfg upgradeReleaseServerConfig) *http
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assetPrefix := "/assets/"
 		if strings.HasPrefix(r.URL.Path, assetPrefix) {
+			name := strings.TrimPrefix(r.URL.Path, assetPrefix)
 			if cfg.AssetRequests != nil {
 				cfg.AssetRequests.Add(1)
 			}
-			name := strings.TrimPrefix(r.URL.Path, assetPrefix)
+			if cfg.AssetRequestObserver != nil {
+				cfg.AssetRequestObserver(name)
+			}
 			data, ok := cfg.Assets[name]
 			if !ok {
 				http.NotFound(w, r)
@@ -779,6 +833,11 @@ func executeUpgradeCommandForTest(t *testing.T, deps upgradeDeps, args ...string
 }
 
 func executeUpgradeCommandForTestWithInput(t *testing.T, deps upgradeDeps, input io.Reader, args ...string) (string, error) {
+	var output bytes.Buffer
+	return executeUpgradeCommandForTestWithIO(t, deps, input, &output, args...)
+}
+
+func executeUpgradeCommandForTestWithIO(t *testing.T, deps upgradeDeps, input io.Reader, output *bytes.Buffer, args ...string) (string, error) {
 	t.Helper()
 	root := &cobra.Command{Use: "peasant"}
 	cmd := buildUpgradeCommand(deps)
@@ -787,12 +846,33 @@ func executeUpgradeCommandForTestWithInput(t *testing.T, deps upgradeDeps, input
 		root.SetIn(input)
 		cmd.SetIn(input)
 	}
-	var output bytes.Buffer
-	root.SetOut(&output)
-	root.SetErr(&output)
+	root.SetOut(output)
+	root.SetErr(output)
 	root.SetArgs(append([]string{cmd.Name()}, args...))
 	err := root.Execute()
 	return output.String(), err
+}
+
+type upgradeInstrumentedReader struct {
+	source      *strings.Reader
+	onFirstRead func()
+	didRead     atomic.Bool
+}
+
+func (r *upgradeInstrumentedReader) Read(p []byte) (int, error) {
+	if !r.didRead.Swap(true) && r.onFirstRead != nil {
+		r.onFirstRead()
+	}
+	return r.source.Read(p)
+}
+
+func upgradeArgsContain(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func makeUpgradeArchive(t *testing.T, binary []byte) []byte {
