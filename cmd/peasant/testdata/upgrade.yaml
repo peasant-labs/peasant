@@ -1,0 +1,115 @@
+managed_install_cases:
+  - name: dpkg
+    executable: /usr/bin/peasant
+    goos: linux
+    goarch: amd64
+    args: ["--version", "0.5.0-rc2"]
+    commands:
+      - name: dpkg-query
+        args: ["-S", "/usr/bin/peasant"]
+        stdout: "peasant: /usr/bin/peasant\n"
+    output_contains:
+      - "managed by dpkg package \"peasant\""
+      - "No files were changed"
+      - "peasant_0.5.0-rc2_linux_amd64.deb"
+      - "sudo apt install"
+
+  - name: rpm
+    executable: /usr/bin/peasant
+    goos: linux
+    goarch: amd64
+    args: ["--version", "0.5.0-rc2"]
+    commands:
+      - name: rpm
+        args: ["-qf", "/usr/bin/peasant"]
+        stdout: "peasant-0.5.0-1.x86_64\n"
+    output_contains:
+      - "managed by rpm package \"peasant-0.5.0-1.x86_64\""
+      - "No files were changed"
+      - "peasant_0.5.0-rc2_linux_amd64.rpm"
+      - "sudo dnf install"
+
+  - name: pacman
+    executable: /usr/bin/peasant
+    goos: linux
+    goarch: amd64
+    commands:
+      - name: pacman
+        args: ["-Qo", "/usr/bin/peasant"]
+        stdout: "/usr/bin/peasant is owned by peasant-bin 0.5.0-1\n"
+    output_contains:
+      - "managed by pacman package \"peasant-bin\""
+      - "No files were changed"
+      - "yay -Syu peasant-bin"
+      - "paru -Syu peasant-bin"
+
+  - name: nix
+    executable: /nix/store/abc123-peasant-0.5.0/bin/peasant
+    goos: linux
+    goarch: amd64
+    output_contains:
+      - "managed by nix package \"peasant\""
+      - "No files were changed"
+      - "nix profile upgrade peasant"
+
+  - name: homebrew
+    executable: /opt/homebrew/bin/peasant
+    goos: darwin
+    goarch: arm64
+    commands:
+      - name: brew
+        args: ["list", "--cask", "peasant"]
+        stdout: "/opt/homebrew/bin/peasant\n"
+    output_contains:
+      - "managed by homebrew package \"peasant\""
+      - "No files were changed"
+      - "brew update && brew upgrade --cask peasant"
+
+release_selection_cases:
+  - name: stable-default
+    current_version: "0.4.0"
+    args: ["--dry-run"]
+    latest:
+      tag: "v0.4.1"
+      assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
+    releases:
+      - tag: "v0.5.0-rc2"
+        assets: ["peasant_0.5.0-rc2_linux_amd64.tar.gz", "checksums.txt"]
+      - tag: "v0.4.1"
+        assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
+    output_contains:
+      - "target:  v0.4.1"
+      - "asset:   peasant_0.4.1_linux_amd64.tar.gz"
+      - "dry run: no files were changed"
+
+  - name: stable-prerelease-opt-in
+    current_version: "0.4.0"
+    args: ["--prerelease", "--dry-run"]
+    latest:
+      tag: "v0.4.1"
+      assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
+    releases:
+      - tag: "v0.5.0-rc2"
+        assets: ["peasant_0.5.0-rc2_linux_amd64.tar.gz", "checksums.txt"]
+      - tag: "v0.4.1"
+        assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
+    output_contains:
+      - "target:  v0.5.0-rc2"
+      - "asset:   peasant_0.5.0-rc2_linux_amd64.tar.gz"
+      - "dry run: no files were changed"
+
+  - name: prerelease-current-default
+    current_version: "0.5.0-rc1"
+    args: ["--dry-run"]
+    latest:
+      tag: "v0.4.1"
+      assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
+    releases:
+      - tag: "v0.5.0-rc2"
+        assets: ["peasant_0.5.0-rc2_linux_amd64.tar.gz", "checksums.txt"]
+      - tag: "v0.4.1"
+        assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
+    output_contains:
+      - "target:  v0.5.0-rc2"
+      - "asset:   peasant_0.5.0-rc2_linux_amd64.tar.gz"
+      - "dry run: no files were changed"
