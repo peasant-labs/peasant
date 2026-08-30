@@ -295,6 +295,12 @@ func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) 
 		if result.Err != nil {
 			t.Fatalf("result %d error: %v", i, result.Err)
 		}
+		if result.Profile.DedupLookupCount != 1 || result.Profile.InsertParentCount != 1 || result.Profile.InsertTargetCount != 1 || result.Profile.UpdateHashCount != 1 {
+			t.Fatalf("result %d profile counters mismatch: %+v", i, result.Profile)
+		}
+		if result.Profile.PersistenceTime() <= 0 {
+			t.Fatalf("result %d persistence time = %s, want > 0", i, result.Profile.PersistenceTime())
+		}
 	}
 	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
 		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)

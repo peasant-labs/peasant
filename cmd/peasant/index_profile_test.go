@@ -91,13 +91,13 @@ func TestPrintIndexProfileShowsStagesAndWriteCauseCounters(t *testing.T) {
 			DedupSupersedeCount:    14,
 			AnnotationResults: map[ingest.AnnotationProfileBreakdownKey]ingest.AnnotationProfileBreakdown{
 				{TypeID: "metadata.session_scope", Value: "/home/minttea/private/project", TargetKind: ingest.AnnotationProfileTargetSession}: {
-					TypeID: "metadata.session_scope", Value: "/home/minttea/private/project", TargetKind: ingest.AnnotationProfileTargetSession, CreateCount: 1,
+					TypeID: "metadata.session_scope", Value: "/home/minttea/private/project", TargetKind: ingest.AnnotationProfileTargetSession, CreateCount: 1, ClassifierTime: 500 * time.Millisecond, PersistTime: 600 * time.Millisecond,
 				},
 				{TypeID: "session_outcome", Value: "resolved", TargetKind: ingest.AnnotationProfileTargetSession}: {
-					TypeID: "session_outcome", Value: "resolved", TargetKind: ingest.AnnotationProfileTargetSession, CreateCount: 2,
+					TypeID: "session_outcome", Value: "resolved", TargetKind: ingest.AnnotationProfileTargetSession, CreateCount: 2, ClassifierTime: 700 * time.Millisecond, PersistTime: 800 * time.Millisecond, DedupTime: 100 * time.Millisecond, InsertTime: 200 * time.Millisecond, TargetTime: 300 * time.Millisecond, HashTime: 400 * time.Millisecond,
 				},
 				{TypeID: "resolution_evidence", Value: "present", TargetKind: ingest.AnnotationProfileTargetEntry}: {
-					TypeID: "resolution_evidence", Value: "present", TargetKind: ingest.AnnotationProfileTargetEntry, SkipCount: 1, SupersedeCount: 2, ErrorCount: 1,
+					TypeID: "resolution_evidence", Value: "present", TargetKind: ingest.AnnotationProfileTargetEntry, SkipCount: 1, SupersedeCount: 2, ErrorCount: 1, ClassifierTime: 900 * time.Millisecond, PersistTime: time.Second, SavepointTime: 100 * time.Millisecond, DedupTime: 200 * time.Millisecond, InsertTime: 300 * time.Millisecond, TargetTime: 400 * time.Millisecond, HashTime: 500 * time.Millisecond, SupersedeTime: 600 * time.Millisecond,
 				},
 			},
 		},
@@ -151,8 +151,8 @@ func TestPrintIndexProfileShowsStagesAndWriteCauseCounters(t *testing.T) {
 		"    dedup decisions: skip=12 create=13 supersede=14",
 		"    annotation results by type:",
 		"      type=metadata.session_scope value=<redacted:",
-		"      type=resolution_evidence value=present target=entry total=3 skip=1 create=0 supersede=2 errors=1",
-		"      type=session_outcome value=resolved target=session total=2 skip=0 create=2 supersede=0 errors=0",
+		"      type=resolution_evidence value=present target=entry total=3 skip=1 create=0 supersede=2 errors=1 time=1.9s classifier=900ms persist=1s savepoint=100ms dedup=200ms insert=300ms target-insert=400ms hash=500ms supersede-sql=600ms",
+		"      type=session_outcome value=resolved target=session total=2 skip=0 create=2 supersede=0 errors=0 time=1.5s classifier=700ms persist=800ms savepoint=0s dedup=100ms insert=200ms target-insert=300ms hash=400ms supersede-sql=0s",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("profile output missing %q\noutput:\n%s", want, got)

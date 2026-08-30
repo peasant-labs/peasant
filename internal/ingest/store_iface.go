@@ -513,7 +513,49 @@ type ClassifierAnnotationWriteResult struct {
 	Dedup                AnnotationDedupResult
 	AnnotationID         string
 	ExistingAnnotationID string
+	Profile              ClassifierAnnotationWriteProfile
 	Err                  error
+}
+
+// ClassifierAnnotationWriteProfile reports the timed SQL work for one classifier
+// annotation write when index profiling is enabled.
+type ClassifierAnnotationWriteProfile struct {
+	SavepointCount    int
+	SavepointTime     time.Duration
+	DedupLookupCount  int
+	DedupLookupTime   time.Duration
+	InsertParentCount int
+	InsertParentTime  time.Duration
+	InsertTargetCount int
+	InsertTargetTime  time.Duration
+	UpdateHashCount   int
+	UpdateHashTime    time.Duration
+	SupersedeCount    int
+	SupersedeTime     time.Duration
+}
+
+func (p ClassifierAnnotationWriteProfile) PersistenceTime() time.Duration {
+	return p.SavepointTime +
+		p.DedupLookupTime +
+		p.InsertParentTime +
+		p.InsertTargetTime +
+		p.UpdateHashTime +
+		p.SupersedeTime
+}
+
+func (p *ClassifierAnnotationWriteProfile) Add(other ClassifierAnnotationWriteProfile) {
+	p.SavepointCount += other.SavepointCount
+	p.SavepointTime += other.SavepointTime
+	p.DedupLookupCount += other.DedupLookupCount
+	p.DedupLookupTime += other.DedupLookupTime
+	p.InsertParentCount += other.InsertParentCount
+	p.InsertParentTime += other.InsertParentTime
+	p.InsertTargetCount += other.InsertTargetCount
+	p.InsertTargetTime += other.InsertTargetTime
+	p.UpdateHashCount += other.UpdateHashCount
+	p.UpdateHashTime += other.UpdateHashTime
+	p.SupersedeCount += other.SupersedeCount
+	p.SupersedeTime += other.SupersedeTime
 }
 
 // ClassifierAnnotationBatchStore is an optional annotation-store capability.

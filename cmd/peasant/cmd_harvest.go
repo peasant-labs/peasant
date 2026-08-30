@@ -627,8 +627,10 @@ func printIndexProfileAnnotationStats(w io.Writer, stats ingest.AnnotationProfil
 		fmt.Fprintln(w, "    annotation results by type:")
 		for _, row := range rows {
 			total := row.SkipCount + row.CreateCount + row.SupersedeCount
-			fmt.Fprintf(w, "      type=%s value=%s target=%s total=%d skip=%d create=%d supersede=%d errors=%d\n",
-				row.TypeID, annotationProfileValue(row.Value), row.TargetKind, total, row.SkipCount, row.CreateCount, row.SupersedeCount, row.ErrorCount)
+			fmt.Fprintf(w, "      type=%s value=%s target=%s total=%d skip=%d create=%d supersede=%d errors=%d time=%s classifier=%s persist=%s savepoint=%s dedup=%s insert=%s target-insert=%s hash=%s supersede-sql=%s\n",
+				row.TypeID, annotationProfileValue(row.Value), row.TargetKind, total, row.SkipCount, row.CreateCount, row.SupersedeCount, row.ErrorCount,
+				row.AttributedTime().Round(time.Millisecond), row.ClassifierTime.Round(time.Millisecond), row.PersistTime.Round(time.Millisecond), row.SavepointTime.Round(time.Millisecond), row.DedupTime.Round(time.Millisecond),
+				row.InsertTime.Round(time.Millisecond), row.TargetTime.Round(time.Millisecond), row.HashTime.Round(time.Millisecond), row.SupersedeTime.Round(time.Millisecond))
 		}
 	}
 }

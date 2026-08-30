@@ -179,6 +179,22 @@ type AnnotationProfileBreakdown struct {
 	CreateCount    int
 	SupersedeCount int
 	ErrorCount     int
+	ClassifierTime time.Duration
+	PersistTime    time.Duration
+	SavepointTime  time.Duration
+	DedupTime      time.Duration
+	InsertTime     time.Duration
+	TargetTime     time.Duration
+	HashTime       time.Duration
+	SupersedeTime  time.Duration
+}
+
+func (b AnnotationProfileBreakdown) AttributedTime() time.Duration {
+	return b.ClassifierTime + b.PersistTime
+}
+
+func (b AnnotationProfileBreakdown) Count() int {
+	return b.SkipCount + b.CreateCount + b.SupersedeCount
 }
 
 // Add folds other into s.
@@ -244,6 +260,14 @@ func (s *AnnotationProfileStats) Add(other AnnotationProfileStats) {
 		current.CreateCount += value.CreateCount
 		current.SupersedeCount += value.SupersedeCount
 		current.ErrorCount += value.ErrorCount
+		current.ClassifierTime += value.ClassifierTime
+		current.PersistTime += value.PersistTime
+		current.SavepointTime += value.SavepointTime
+		current.DedupTime += value.DedupTime
+		current.InsertTime += value.InsertTime
+		current.TargetTime += value.TargetTime
+		current.HashTime += value.HashTime
+		current.SupersedeTime += value.SupersedeTime
 		s.AnnotationResults[key] = current
 	}
 }
@@ -286,7 +310,7 @@ func (s AnnotationProfileStats) HasBatchPersistenceDetail() bool {
 		s.BatchCommitCount != 0
 }
 
-func (s *AnnotationProfileStats) RecordAnnotationResult(typeID string, value string, targetKind AnnotationProfileTargetKind, dedup AnnotationDedupResult, failed bool) {
+func (s *AnnotationProfileStats) RecordAnnotationResult(typeID string, value string, targetKind AnnotationProfileTargetKind, dedup AnnotationDedupResult, failed bool, classifierTime time.Duration, profile ClassifierAnnotationWriteProfile) {
 	if typeID == "" {
 		typeID = "unknown"
 	}
@@ -317,6 +341,14 @@ func (s *AnnotationProfileStats) RecordAnnotationResult(typeID string, value str
 	if failed {
 		row.ErrorCount++
 	}
+	row.ClassifierTime += classifierTime
+	row.PersistTime += profile.PersistenceTime()
+	row.SavepointTime += profile.SavepointTime
+	row.DedupTime += profile.DedupLookupTime
+	row.InsertTime += profile.InsertParentTime
+	row.TargetTime += profile.InsertTargetTime
+	row.HashTime += profile.UpdateHashTime
+	row.SupersedeTime += profile.SupersedeTime
 	s.AnnotationResults[key] = row
 }
 
@@ -329,6 +361,12 @@ func (s AnnotationProfileStats) SortedAnnotationResults() []AnnotationProfileBre
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].AttributedTime() != rows[j].AttributedTime() {
+			return rows[i].AttributedTime() > rows[j].AttributedTime()
+		}
+		if rows[i].Count() != rows[j].Count() {
+			return rows[i].Count() > rows[j].Count()
+		}
 		if rows[i].TypeID != rows[j].TypeID {
 			return rows[i].TypeID < rows[j].TypeID
 		}
