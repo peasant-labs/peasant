@@ -78,8 +78,12 @@ release_selection_cases:
       - tag: "v0.4.1"
         assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
     output_contains:
-      - "target:  v0.4.1"
-      - "asset:   peasant_0.4.1_linux_amd64.tar.gz"
+      - "Upgrade plan:"
+      - "target version:  v0.4.1"
+      - "machine: linux/amd64"
+      - "archive: peasant_0.4.1_linux_amd64.tar.gz"
+      - "temporary download location: memory only; no archive file is written"
+      - "current binary to replace:"
       - "dry run: no files were changed"
 
   - name: stable-prerelease-opt-in
@@ -94,8 +98,11 @@ release_selection_cases:
       - tag: "v0.4.1"
         assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
     output_contains:
-      - "target:  v0.5.0-rc2"
-      - "asset:   peasant_0.5.0-rc2_linux_amd64.tar.gz"
+      - "Upgrade plan:"
+      - "target version:  v0.5.0-rc2"
+      - "machine: linux/amd64"
+      - "archive: peasant_0.5.0-rc2_linux_amd64.tar.gz"
+      - "current binary to replace:"
       - "dry run: no files were changed"
 
   - name: prerelease-current-default
@@ -110,8 +117,11 @@ release_selection_cases:
       - tag: "v0.4.1"
         assets: ["peasant_0.4.1_linux_amd64.tar.gz", "checksums.txt"]
     output_contains:
-      - "target:  v0.5.0-rc2"
-      - "asset:   peasant_0.5.0-rc2_linux_amd64.tar.gz"
+      - "Upgrade plan:"
+      - "target version:  v0.5.0-rc2"
+      - "machine: linux/amd64"
+      - "archive: peasant_0.5.0-rc2_linux_amd64.tar.gz"
+      - "current binary to replace:"
       - "dry run: no files were changed"
 
   - name: stable-current-equals-target
@@ -231,8 +241,9 @@ downgrade_override_cases:
     target_version: "v0.4.0"
     output_contains:
       - "downgrade override: current v0.5.0-rc1-dev.813+2153f8143 sorts after target v0.4.0; continuing because --allow-downgrade was set."
-      - "current: v0.5.0-rc1-dev.813+2153f8143"
-      - "target:  v0.4.0"
+      - "current version: v0.5.0-rc1-dev.813+2153f8143"
+      - "target version:  v0.4.0"
+      - "confirmation: --yes set; continuing without prompt"
       - "installed v0.4.0"
 
   - name: explicit-older-stable-rejects-checksum-mismatch
@@ -242,3 +253,83 @@ downgrade_override_cases:
     error_contains:
       - "checksum did not match"
       - "the existing binary was left untouched"
+
+raw_confirmation_cases:
+  - name: prompt-accepts-yes-before-download
+    current_version: "v9.8.0"
+    target_version: "v9.9.9"
+    args: ["--version", "9.9.9"]
+    stdin: "yes\n"
+    stdin_is_terminal: true
+    expect_changed: true
+    output_contains:
+      - "Upgrade plan:"
+      - "current version: v9.8.0"
+      - "target version:  v9.9.9"
+      - "machine: linux/amd64"
+      - "archive: peasant_9.9.9_linux_amd64.tar.gz"
+      - "checksums source:"
+      - "download source:"
+      - "temporary download location: memory only; no archive file is written"
+      - "current binary to replace:"
+      - "continue? [y/N]"
+      - "installed v9.9.9"
+
+  - name: prompt-default-no-cancels-before-download
+    current_version: "v9.8.0"
+    target_version: "v9.9.9"
+    args: ["--version", "9.9.9"]
+    stdin: "\n"
+    stdin_is_terminal: true
+    expect_changed: false
+    output_contains:
+      - "Upgrade plan:"
+      - "continue? [y/N]"
+      - "upgrade cancelled: no files were changed"
+    output_not_contains:
+      - "installed v9.9.9"
+
+  - name: non-terminal-refuses-before-download
+    current_version: "v9.8.0"
+    target_version: "v9.9.9"
+    args: ["--version", "9.9.9"]
+    stdin: "yes\n"
+    stdin_is_terminal: false
+    expect_changed: false
+    output_contains:
+      - "Upgrade plan:"
+    output_not_contains:
+      - "continue? [y/N]"
+      - "installed v9.9.9"
+    error_contains:
+      - "the raw archive replacement plan needs interactive confirmation"
+      - "standard input is not an interactive terminal and --yes was not set"
+      - "Peasant refused to replace the current binary and no files were changed"
+      - "--yes"
+
+  - name: dry-run-prints-plan-without-prompt-or-download
+    current_version: "v9.8.0"
+    target_version: "v9.9.9"
+    args: ["--version", "9.9.9", "--dry-run"]
+    stdin_is_terminal: false
+    expect_changed: false
+    output_contains:
+      - "Upgrade plan:"
+      - "dry run: no files were changed"
+    output_not_contains:
+      - "continue? [y/N]"
+      - "confirmation: --yes set"
+      - "installed v9.9.9"
+
+  - name: yes-accepts-plan-without-terminal
+    current_version: "v9.8.0"
+    target_version: "v9.9.9"
+    args: ["--version", "9.9.9", "--yes"]
+    stdin_is_terminal: false
+    expect_changed: true
+    output_contains:
+      - "Upgrade plan:"
+      - "confirmation: --yes set; continuing without prompt"
+      - "installed v9.9.9"
+    output_not_contains:
+      - "continue? [y/N]"

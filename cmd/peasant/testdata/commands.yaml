@@ -151,11 +151,12 @@ commands:
       - { name: version, type: string, default: "" }
       - { name: prerelease, type: bool, default: "false" }
       - { name: dry-run, type: bool, default: "false" }
+      - { name: yes, type: bool, default: "false" }
       - { name: allow-downgrade, type: bool, default: "false" }
     exit_cases:
       - args: ["--help"]
         expect_error: false
-        output_contains: ["upgrade", "--version", "--prerelease", "--allow-downgrade"]
+        output_contains: ["upgrade", "--version", "--prerelease", "--allow-downgrade", "--yes"]
 
   - name: Kickstart
     use: kickstart
