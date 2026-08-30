@@ -31,8 +31,8 @@ func init() {
 // value and falling back to Go module build info.
 //
 //   - If the ldflags-injected version is a real value (not the "dev"
-//     placeholder), use it. This is the release path (goreleaser / `make build`
-//     pass -X ...version=<tag>).
+//     placeholder), use it. Release builds, explicit `make build VERSION=<tag>`
+//     runs, and default Makefile source builds all inject this value.
 //   - Otherwise the binary was built without -X (notably `go install
 //     github.com/peasant-labs/peasant/cmd/peasant@v1.2.3`). Go records the
 //     module version in debug.BuildInfo.Main.Version, so use that when present.

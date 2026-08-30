@@ -4,6 +4,15 @@
 
 VERSION ?=
 
+define build_peasant_cli
+set -e; \
+	version="$(VERSION)"; \
+	if [ -z "$$version" ]; then \
+		version="$$(sh ./scripts/dev-version.sh)"; \
+	fi; \
+	go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
+endef
+
 # The race detector for `make check`. On by default (local runs and, in CI, the
 # release PRs and post-merge pushes that must carry full race coverage). CI
 # feature PRs pass RACE=0 to skip it: the detector amplifies the suite ~3x-16x
@@ -164,24 +173,14 @@ origin-audit-test:
 	go test -race -tags=origin_audit ./cmd/peasant-origin-audit
 
 build: web
-	@set -e; \
-		version="$(VERSION)"; \
-		if [ -z "$$version" ]; then \
-			version="$$(sh ./scripts/dev-version.sh)"; \
-		fi; \
-		go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
+	@$(build_peasant_cli)
 	@cd web && pnpm test:provider-build-provenance
 
 nix-vendor-hash:
 	./scripts/update-nix-vendor-hash.sh
 
 go:
-	@set -e; \
-		version="$(VERSION)"; \
-		if [ -z "$$version" ]; then \
-			version="$$(sh ./scripts/dev-version.sh)"; \
-		fi; \
-		go build -ldflags "-X github.com/peasant-labs/peasant/internal/defaults.version=$$version" -o bin/peasant ./cmd/peasant
+	@$(build_peasant_cli)
 
 run: web
 	go run ./cmd/peasant web

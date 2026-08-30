@@ -45,6 +45,12 @@ dev_build_cases:
     commit_count: "0"
     short_hash: "abcdef123"
     want: "v0.5.0-rc1-dev.0+abcdef123"
+  - name: final-release-base-increments-patch-version
+    describe_tag: "v0.5.0"
+    commit_count: "7"
+    short_hash: "abc123def"
+    want: "v0.5.1-dev.7+abc123def"
+    want_greater_than: "v0.5.0"
   - name: missing-release-tag-fails
     describe_error: "fatal: No names found"
     commit_count: "813"

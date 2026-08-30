@@ -4,6 +4,14 @@ set -eu
 
 git_bin="${GIT_BIN:-git}"
 
+is_semver_uint() {
+  case "$1" in
+    '' | *[!0-9]*) return 1 ;;
+    0 | [1-9]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 fail() {
   what="$1"
   why="$2"
@@ -35,6 +43,39 @@ case "$base_tag" in
     ;;
 esac
 
+case "$base_tag" in
+  *+*)
+    fail "latest reachable release tag $base_tag contains build metadata" \
+      'development versions append their own build metadata with the source commit hash' \
+      'retag the release without +metadata, fetch tags, or pass VERSION=<release tag> for release builds'
+    ;;
+esac
+
+tag_body="${base_tag#v}"
+core="${tag_body%%-*}"
+major="${core%%.*}"
+minor_patch="${core#*.}"
+minor="${minor_patch%%.*}"
+patch="${minor_patch#*.}"
+
+if [ "$minor_patch" = "$core" ] || [ "$patch" = "$minor_patch" ]; then
+  fail "latest reachable release tag $base_tag is not a complete SemVer tag" \
+    'development versions need a MAJOR.MINOR.PATCH base' \
+    'retag from a complete Peasant release such as v1.2.3, fetch tags, or pass VERSION=<release tag> for release builds'
+fi
+
+if ! is_semver_uint "$major" || ! is_semver_uint "$minor" || ! is_semver_uint "$patch"; then
+  fail "latest reachable release tag $base_tag has a non-numeric or leading-zero version core" \
+    'development versions need numeric MAJOR.MINOR.PATCH components' \
+    'retag from a valid Peasant release such as v1.2.3, fetch tags, or pass VERSION=<release tag> for release builds'
+fi
+
+dev_base="$base_tag"
+if [ "$tag_body" = "$core" ]; then
+  patch=$((patch + 1))
+  dev_base="v${major}.${minor}.${patch}"
+fi
+
 distance="$("$git_bin" rev-list --count "${base_tag}..HEAD" 2>/dev/null)" ||
   fail "commit distance from $base_tag could not be counted" \
     'the repository history is not available enough to order this development build' \
@@ -61,4 +102,4 @@ case "$hash" in
     ;;
 esac
 
-printf '%s-dev.%s+%s\n' "$base_tag" "$distance" "$hash"
+printf '%s-dev.%s+%s\n' "$dev_base" "$distance" "$hash"

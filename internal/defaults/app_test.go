@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -40,6 +41,7 @@ type devBuildVersionCase struct {
 	ShortHash         string   `yaml:"short_hash"`
 	ShortHashError    string   `yaml:"short_hash_error"`
 	Want              string   `yaml:"want"`
+	WantGreaterThan   string   `yaml:"want_greater_than"`
 	WantErrorContains []string `yaml:"want_error_contains"`
 }
 
@@ -75,11 +77,12 @@ func TestResolveVersion(t *testing.T) {
 func TestDevVersionScriptFixtures(t *testing.T) {
 	fixture := loadAppVersionFixture(t)
 	requireCaseNames(t, fixture.DevBuildCases, map[string]struct{}{
-		"normal-git-metadata":                 {},
-		"exact-tag-source-build-is-still-dev": {},
-		"missing-release-tag-fails":           {},
-		"invalid-commit-distance-fails":       {},
-		"invalid-short-hash-fails":            {},
+		"normal-git-metadata":                         {},
+		"exact-tag-source-build-is-still-dev":         {},
+		"final-release-base-increments-patch-version": {},
+		"missing-release-tag-fails":                   {},
+		"invalid-commit-distance-fails":               {},
+		"invalid-short-hash-fails":                    {},
 	})
 
 	for _, tc := range fixture.DevBuildCases {
@@ -105,6 +108,9 @@ func TestDevVersionScriptFixtures(t *testing.T) {
 				got := strings.TrimSpace(string(output))
 				if got != tc.Want {
 					t.Fatalf("dev-version.sh = %q, want %q", got, tc.Want)
+				}
+				if tc.WantGreaterThan != "" && !semverCoreGreater(got, tc.WantGreaterThan) {
+					t.Fatalf("dev-version.sh = %q, want greater than %q", got, tc.WantGreaterThan)
 				}
 				return
 			}
@@ -186,7 +192,7 @@ if [ "$1" = "describe" ]; then
 fi
 
 if [ "$1" = "rev-list" ]; then
-  [ "$2" = "--count" ] || exit 88
+  [ "$2" = "--count" ] && [ "$3" = "${FAKE_GIT_DESCRIBE_TAG:-}..HEAD" ] || exit 88
   if [ -n "${FAKE_GIT_COMMIT_COUNT_ERROR:-}" ]; then
     printf '%s\n' "$FAKE_GIT_COMMIT_COUNT_ERROR" >&2
     exit 1
@@ -211,4 +217,44 @@ exit 89
 		t.Fatalf("write fake git: %v", err)
 	}
 	return path
+}
+
+func semverCoreGreater(a, b string) bool {
+	aCore, aOK := parseVersionCore(a)
+	bCore, bOK := parseVersionCore(b)
+	if !aOK || !bOK {
+		return false
+	}
+	for i := range aCore {
+		if aCore[i] != bCore[i] {
+			return aCore[i] > bCore[i]
+		}
+	}
+	return false
+}
+
+func parseVersionCore(v string) ([3]int, bool) {
+	var out [3]int
+	v = strings.TrimPrefix(v, "v")
+	if before, _, ok := strings.Cut(v, "+"); ok {
+		v = before
+	}
+	if before, _, ok := strings.Cut(v, "-"); ok {
+		v = before
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, part := range parts {
+		if part == "" {
+			return out, false
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
