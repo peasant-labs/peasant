@@ -1,8 +1,8 @@
 # Ingest Pipeline: Detailed Architecture
 
-Detailed diagrams and deep-dives for the ingest pipeline's concurrency model
-and lock-free data structures. For the compact agent reference (constraints,
-invariants, assumptions), see [AGENTS.md](AGENTS.md).
+Detailed diagrams and deep-dives for the ingest pipeline's concurrency model,
+DB-backed stages, and lock-free data structures. For the compact agent
+reference (constraints, invariants, assumptions), see [AGENTS.md](AGENTS.md).
 
 ---
 
@@ -41,6 +41,10 @@ invariants, assumptions), see [AGENTS.md](AGENTS.md).
                   │  │COMPUTE│◀──────┼─────────────────────┘
                   │  └───┬───┘       │
                   │      │           │
+                  │  ┌───▼────┐      │
+                  │  │ANNOTATE│      │
+                  │  └───┬────┘      │
+                  │      │           │
                   │  ┌───▼───┐       │
                   │  │CLEANUP│       │
                   │  └───┬───┘       │
@@ -54,6 +58,34 @@ invariants, assumptions), see [AGENTS.md](AGENTS.md).
                   │  └──────┘        │
                   └──────────────────┘
 ```
+
+The main controller owns stage ordering. The DB insert and INDEX goroutines run
+at the same time as EXTRACT+WRITE so transcript parsing and SQLite work do not
+wait for the full extraction batch. The ANNOTATE stage starts after COMPUTE so
+classifiers always see current metrics.
+
+Profile-only timings include `PREPARE`, `INDEX LOG`, and `AUDIT`. They appear in
+index profile output, but they are not normal progress-renderer stages.
+
+---
+
+## Stage Reference
+
+| Stage | Progress stage? | Concurrency | Fatal? | Description |
+|-------|-----------------|-------------|--------|-------------|
+| DISCOVER | Yes | Sequential | Partial | Ask enabled adapters to enumerate sessions. All providers failing is fatal; per-provider failure is partial. |
+| PREPARE | Profile only | Sequential | No | Resolve stored origins and load lookup caches before DIFF. |
+| DIFF | Yes | Sequential | No | Classify sessions as new, updated, unchanged, or active. |
+| FILTER | Yes | Sequential | No | Apply flags, selection, and FK parent eligibility. |
+| EXTRACT+WRITE | Yes | Parallel workers | Per session | Read provider data, redact when configured, write transcript/debug files through staging. |
+| DB INSERT | Yes | drainLoop goroutine | Best effort | Upsert session rows, current commit projections, durable association rows, and OpenCode sequence cursors. |
+| INDEX | Yes | Parser workers plus one serial writer | Best effort | Parse transcripts into `session_entries`; batch SQLite writes and skip unchanged projections by hash. |
+| INDEX LOG | Profile only | Sequential | Best effort | Persist per-session index outcome rows after INDEX work completes. |
+| COMPUTE | Yes | Sequential engine call | Best effort | Compute metrics and daily insights for sessions indexed successfully. |
+| ANNOTATE | Yes | Prepare workers plus one serial writer | Best effort | Skip current sessions by `annotation_run_state`, or prepare and flush classifier annotation batches. |
+| CLEANUP | Yes | Sequential | Best effort | Remove orphan `.tmp-*` dirs and orphan project rows. |
+| REPORT | Yes | Sequential | No | Build `PipelineResult` and aggregate counts. |
+| AUDIT | Profile only | Sequential | Best effort | Write the final `ingest_log` row. |
 
 ---
 
@@ -154,13 +186,14 @@ be silently discarded merely because Peasant cannot classify it yet.
 
 ## Execution Timeline
 
-```
+```text
 Time ──────────────────────────────────────────────────────────────▶
 
 Main goroutine (pure controller):
-  DISCOVER ─▶ DIFF ─▶ FILTER ─▶ spawn goroutines ─▶ wg.Wait() ─▶ COMPUTE ─▶ ...
+  DISCOVER -> PREPARE(profile) -> DIFF -> FILTER -> spawn goroutines -> wg.Wait()
+  -> stale-index sweep -> INDEX LOG(profile) -> COMPUTE -> ANNOTATE -> CLEANUP -> REPORT -> AUDIT(profile)
 
-Worker goroutines (in a single goroutine via runParallel):
+Worker goroutines (created by runParallel):
   ┌─ worker 1: root A + subtree ─── Add() ─── Add() ──────┐
   ├─ worker 2: root B + subtree ─── Add() ────────────────┤
   ├─ worker 3: root C + subtree ─── Add() ─── Add() ──────┤
@@ -175,12 +208,36 @@ indexLoop goroutine (stage 5, INDEX parser pool + serial writer):
   ┌── receive work → parse session → signal batch token when complete ──┐
   ├── parsed result → IndexSessionEntries + UpdateIndexState serially ──┤
   └── ...until indexCh closed and parsed results drained ───────────────┘
+
+ANNOTATE prepare workers:
+  ┌── receive session id -> load combined run-state inputs -> skip current ─┐
+  └── or prepare classifier writes + run state for writer goroutine ────────┘
+
+ANNOTATE writer goroutine:
+  ┌── collect prepared batches -> FlushAnnotationBatches serially ──────────┐
+  └── flush on 256 sessions, 4096 writes, 500ms, or input close ────────────┘
 ```
 
 The drainLoop and indexLoop are **pipelined**: each DB-visible session is sent
 to INDEX without waiting for a full later batch boundary. The drainLoop calls
 `AckBatch` only after the INDEX parser workers signal that every work item for
 that drain batch has finished reading arena-backed transcript bytes.
+
+INDEX is parallel only on parse. SQLite entry writes stay serial. The serial
+writer flushes up to `64` parsed sessions per outer transaction and keeps
+per-session rollback with savepoints. A session whose `session_entries_hash`,
+derived entry tables, and entry-target annotation spans still match is reported
+as written but skipped, so warm runs do not replace millions of unchanged entry
+rows.
+
+ANNOTATE is also split into parallel preparation and serial persistence. Each
+prepare worker first loads combined annotation run inputs. If the stored
+`annotation_run_state` matches the current entry hash, compute version, and
+classifier version, the session is marked done without listing entries or
+running classifiers. Otherwise, classifier results are converted into prepared
+writes and one writer goroutine flushes multi-session batches. This shape keeps
+CPU-bound classifier preparation parallel while avoiding concurrent SQLite
+annotation writers.
 
 ---
 
