@@ -113,3 +113,132 @@ release_selection_cases:
       - "target:  v0.5.0-rc2"
       - "asset:   peasant_0.5.0-rc2_linux_amd64.tar.gz"
       - "dry run: no files were changed"
+
+  - name: stable-current-equals-target
+    current_version: "v0.4.1"
+    args: ["--dry-run"]
+    latest:
+      tag: "v0.4.1"
+    output_contains:
+      - "Peasant is already at v0.4.1; no files were changed."
+
+version_order_cases:
+  - name: stable-release-ordering
+    current_version: "v0.4.0"
+    target_version: "v0.5.0"
+    want_order: "before"
+
+  - name: release-candidate-ordering
+    current_version: "v0.5.0-rc2"
+    target_version: "v0.5.0-rc1"
+    want_order: "after"
+
+  - name: dev-build-orders-after-its-base-rc
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.5.0-rc1"
+    want_order: "after"
+
+  - name: dev-build-orders-before-newer-rc
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.5.0-rc2"
+    want_order: "before"
+
+  - name: final-base-dev-build-orders-after-final
+    current_version: "v0.5.1-dev.7+abc123def"
+    target_version: "v0.5.0"
+    want_order: "after"
+
+  - name: equal-release-versions
+    current_version: "0.5.0"
+    target_version: "v0.5.0"
+    want_order: "same"
+
+  - name: malformed-current-version-fails-safe
+    current_version: "v0.5"
+    target_version: "v0.5.0"
+    error_contains:
+      - "current Peasant version could not be ordered"
+      - "MAJOR.MINOR.PATCH"
+
+  - name: malformed-target-version-fails-safe
+    current_version: "v0.5.0"
+    target_version: "v0.5.bad"
+    error_contains:
+      - "target Peasant version could not be ordered"
+      - "PATCH component"
+
+  - name: observed-dev-placeholder-fails-safe
+    current_version: "dev"
+    target_version: "v0.4.0"
+    error_contains:
+      - "current Peasant version could not be ordered"
+      - "version core \"dev\" must be MAJOR.MINOR.PATCH"
+
+downgrade_refusal_cases:
+  - name: dev-build-refuses-older-stable
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.4.0"
+    error_contains:
+      - "the target Peasant release is older than the current binary"
+      - "current v0.5.0-rc1-dev.813+2153f8143 sorts after target v0.4.0"
+      - "Peasant refused the downgrade and no files were changed"
+      - "--version v0.4.0 --allow-downgrade"
+
+  - name: allow-downgrade-needs-exact-version-managed
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.4.0"
+    executable: "/usr/bin/peasant"
+    args: ["--allow-downgrade"]
+    commands:
+      - name: dpkg-query
+        args: ["-S", "/usr/bin/peasant"]
+        stdout: "peasant: /usr/bin/peasant\n"
+    error_contains:
+      - "the downgrade override needs an exact target version"
+      - "--allow-downgrade was not paired with --version"
+      - "Peasant refused to continue and no files were changed"
+      - "--version <tag> --allow-downgrade"
+
+  - name: allow-downgrade-needs-exact-version-newer-target
+    current_version: "v0.4.0"
+    target_version: "v0.5.0"
+    args: ["--allow-downgrade", "--dry-run"]
+    error_contains:
+      - "the downgrade override needs an exact target version"
+      - "--allow-downgrade was not paired with --version"
+      - "Peasant refused to continue and no files were changed"
+      - "--version <tag> --allow-downgrade"
+
+  - name: observed-dev-placeholder-fails-safe
+    current_version: "dev"
+    target_version: "v0.4.0"
+    error_contains:
+      - "the current Peasant version could not be ordered"
+      - "current version \"dev\""
+      - "no files were changed"
+
+  - name: malformed-target-version-fails-safe
+    current_version: "v0.5.0"
+    target_version: "v0.5.bad"
+    error_contains:
+      - "the target Peasant version could not be ordered"
+      - "target version \"v0.5.bad\""
+      - "no files were changed"
+
+downgrade_override_cases:
+  - name: dev-build-allows-explicit-older-stable
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.4.0"
+    output_contains:
+      - "downgrade override: current v0.5.0-rc1-dev.813+2153f8143 sorts after target v0.4.0; continuing because --allow-downgrade was set."
+      - "current: v0.5.0-rc1-dev.813+2153f8143"
+      - "target:  v0.4.0"
+      - "installed v0.4.0"
+
+  - name: explicit-older-stable-rejects-checksum-mismatch
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.4.0"
+    checksum_mismatch: true
+    error_contains:
+      - "checksum did not match"
+      - "the existing binary was left untouched"
