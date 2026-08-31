@@ -2661,6 +2661,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	// stored successfully. These are the only sessions passed to ComputeMetrics.
 	indexed := 0
 	successfullyIndexed := make([]SessionID, 0, len(priorIndexed)+len(indexSessions))
+	remainingSuccessfullyIndexed := make([]SessionID, 0, len(indexSessions))
 	for _, im := range priorIndexed {
 		if im.indexed {
 			indexed++
@@ -2683,6 +2684,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 			if result.indexed {
 				indexed++
 				successfullyIndexed = append(successfullyIndexed, result.session.SessionID)
+				remainingSuccessfullyIndexed = append(remainingSuccessfullyIndexed, result.session.SessionID)
 			}
 			if batchLogs[i].SessionID != "" {
 				indexLogEntries = append(indexLogEntries, batchLogs[i])
@@ -2733,12 +2735,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if p.analyzer != nil && (len(indexSessions) > 0 || len(priorIndexed) > 0) {
 		computeTargets := successfullyIndexed
 		if priorDownstream != nil {
-			computeTargets = computeTargets[:0]
-			for _, im := range indexSessions {
-				if im.indexed {
-					computeTargets = append(computeTargets, im.session.SessionID)
-				}
-			}
+			computeTargets = remainingSuccessfullyIndexed
 		}
 		if len(computeTargets) > 0 {
 			n, err := p.analyzer.ComputeMetrics(ctx, computeTargets)
