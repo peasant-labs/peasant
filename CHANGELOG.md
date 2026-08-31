@@ -7,6 +7,38 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.5.0-rc2] - 2026-08-31
+
+### Added
+- `peasant upgrade` installs newer release artifacts from GitHub, refuses to
+  replace a raw archive install until the user confirms it, and compares
+  source-build versions with ordered development stamps (#17, #270).
+
+### Fixed
+- Upgrade refuses targets older than the current binary and recommends the
+  latest stable release when it needs to show a safe downgrade command (#269,
+  #270).
+- OpenCode background-task result messages whose parts are all synthetic now
+  ingest as system entries. Mixed messages with user-authored text stay user
+  entries (#253).
+
+### Performance
+- Annotation run-state skip checks now read the entry hash, compute version,
+  metrics, and run state through one store lookup (#256).
+- Annotation persistence batches writes, prefetches active annotations for
+  deduplication, and keeps SQLite work behind one writer while COMPUTE and
+  ANNOTATE can start as INDEX sessions finish (#255, #273).
+
+### Database
+- Store migration V49 adds `annotation_target_anchors`, so repaired annotation
+  targets stay durable and unresolved targets fail closed instead of pointing at
+  the wrong transcript entry (#254).
+
+### CI
+- Release packaging validation now runs through release flows only, so ordinary
+  pull requests do not start snapshot packaging jobs while release PRs and rc
+  tags still validate packages (#280).
+
 ## [0.5.0-rc1] - 2026-08-29
 
 ### Changed
@@ -169,6 +201,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.5.0-rc2]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc2
 [0.5.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc1
 [0.4.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.4.0
 [0.3.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.3.0
