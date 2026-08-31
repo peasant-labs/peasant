@@ -253,7 +253,11 @@ type IndexLogEntry struct {
 // v14: honour Claude Code's isMeta marker on user entries: harness-injected
 // user-role entries (skill bodies, image notes, usage-limit notices) are
 // reclassified to role=system regardless of content shape.
-const CurrentIndexVersion = 14
+//
+// v15: honour OpenCode's synthetic marker on message parts: messages whose
+// counted parts are all harness-authored are reclassified to role=system, so
+// injected background task results no longer appear as user turns.
+const CurrentIndexVersion = 15
 
 // --- PruneFilter ---
 

@@ -30,6 +30,14 @@ required_cases:
   - a-structured-output-stays-compact-json
   - a-trailing-assistant-text-part-renders-once
   - a-reasoning-part-does-not-make-a-tool-turn
+  - a-synthetic-completed-task-result-is-a-system-entry
+  - a-synthetic-failed-task-result-is-a-system-entry
+  - a-real-user-message-about-a-task-stays-a-user-turn
+  - a-synthetic-part-on-an-assistant-message-is-a-system-entry
+  - a-user-message-with-one-synthetic-annotation-stays-a-user-turn
+  - a-message-whose-two-parts-are-both-synthetic-is-a-system-entry
+  - a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
+  - a-synthetic-result-beside-an-unrecognized-part-still-reclassifies
 
 cases:
   - name: tool-name-comes-from-the-tool-field
@@ -37,6 +45,7 @@ cases:
     parts:
       - '{"id":"prt_tool_field","type":"tool","tool":"task","callID":"call_1","state":{"status":"completed","input":{"description":"explore"},"output":"task done"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -51,6 +60,7 @@ cases:
     parts:
       - '{"id":"prt_name_field","type":"tool","name":"read","state":{"status":"completed","input":{"path":"/tmp/a"},"output":"file body"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -65,6 +75,7 @@ cases:
     parts:
       - '{"id":"prt_output","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a\nb\n"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -79,6 +90,7 @@ cases:
     parts:
       - '{"id":"prt_all","type":"tool","tool":"bash","state":{"status":"completed","input":{},"output":"from output","result":"from result","error":"from error","content":"from content"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -93,6 +105,7 @@ cases:
     parts:
       - '{"id":"prt_result","type":"tool","tool":"bash","state":{"status":"completed","input":{},"result":"from result","error":"from error","content":"from content"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -107,6 +120,7 @@ cases:
     parts:
       - '{"id":"prt_error","type":"tool","tool":"webfetch","state":{"status":"error","input":{},"error":"non 2xx status code","content":"from content"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -121,6 +135,7 @@ cases:
     parts:
       - '{"id":"prt_content","type":"tool","tool":"webfetch","state":{"status":"completed","input":{},"content":"from content"}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -135,6 +150,7 @@ cases:
     parts:
       - '{"id":"prt_structured","type":"tool","tool":"grep","state":{"status":"completed","input":{},"output":{"matches":2}}}'
     want_message_entry_type: tool_use
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: tool_use
@@ -151,6 +167,7 @@ cases:
       - '{"id":"prt_report","type":"text","text":"## Objective\nthe finished report"}'
     content_rendered_once: "## Objective\nthe finished report"
     want_message_entry_type: text
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: text
@@ -164,7 +181,151 @@ cases:
     parts:
       - '{"id":"prt_reason_only","type":"reasoning","text":"thinking with no tool call"}'
     want_message_entry_type: text
+    want_message_role: assistant
     want_turns:
       - role: assistant
         entry_type: thinking
         content: "thinking with no tool call"
+
+  # OpenCode's task tool injects the finished result of a background task back
+  # into the parent session as a user-role message whose one text part carries
+  # synthetic: true. The flag, not the text shape, is what says the harness
+  # wrote the message, so the indexer reads the flag alone.
+  - name: a-synthetic-completed-task-result-is-a-system-entry
+    role: user
+    parts:
+      - '{"id":"prt_task_done","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"
+
+  - name: a-synthetic-failed-task-result-is-a-system-entry
+    role: user
+    parts:
+      - '{"id":"prt_task_error","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"error\"> <summary>Background task failed: Research serving runtimes</summary> <task_error>the model refused the request</task_error> </task>"}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"error\"> <summary>Background task failed: Research serving runtimes</summary> <task_error>the model refused the request</task_error> </task>"
+
+  # A person may write about a task and even paste the tag. Without the flag the
+  # message is theirs and stays a user turn, which is why no text-shape
+  # recognizer decides this.
+  - name: a-real-user-message-about-a-task-stays-a-user-turn
+    role: user
+    parts:
+      - '{"id":"prt_user_task_text","type":"text","text":"what does <task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> mean in the log?"}'
+    want_message_entry_type: text
+    want_message_role: user
+    want_turns:
+      - role: user
+        entry_type: text
+        content: "what does <task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> mean in the log?"
+
+  # The documented outcome for a synthetic part on an assistant message: the
+  # flag reclassifies whatever message holds it, exactly as a compaction,
+  # subtask, or agent part does.
+  - name: a-synthetic-part-on-an-assistant-message-is-a-system-entry
+    role: assistant
+    parts:
+      - '{"id":"prt_assistant_synthetic","type":"text","synthetic":true,"text":"harness-authored assistant note"}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "harness-authored assistant note"
+
+  # OpenCode attaches a synthetic part to a message a person really wrote
+  # whenever it annotates that message: a plan-mode reminder, an attached file,
+  # an MCP resource, an agent mention. The person's own part is not synthetic,
+  # so the message stays theirs and their words keep rendering as their turn.
+  #
+  # The annotation itself still folds to a turn of its own, which is the
+  # long-standing rendering of a second text part and is not decided here. What
+  # this case fixes in place is that the person's question is not swallowed:
+  # reclassifying the whole message on one synthetic part would have hidden it.
+  - name: a-user-message-with-one-synthetic-annotation-stays-a-user-turn
+    role: user
+    parts:
+      - '{"id":"prt_person_asked","type":"text","text":"can you also check the auth module?"}'
+      - '{"id":"prt_plan_reminder","type":"text","synthetic":true,"text":"You are in plan mode. Do not edit files."}'
+    content_rendered_once: "can you also check the auth module?"
+    want_message_entry_type: text
+    want_message_role: user
+    want_turns:
+      - role: user
+        entry_type: text
+        content: "can you also check the auth module?"
+      - role: user
+        entry_type: text
+        content: "You are in plan mode. Do not edit files."
+
+  # The rule is "every part", not "one part". OpenCode appends a reminder part
+  # to the last user message of a turn, and that message can be one the harness
+  # itself injected. Both parts are then synthetic and the whole message is
+  # harness-authored, so it must still reclassify.
+  - name: a-message-whose-two-parts-are-both-synthetic-is-a-system-entry
+    role: user
+    parts:
+      - '{"id":"prt_two_result","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"}'
+      - '{"id":"prt_two_reminder","type":"text","synthetic":true,"text":"You are in plan mode. Do not edit files."}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"
+      # The second part folds to its own turn and keeps its own text type.
+      # The role is what decides whose words a reader is looking at, and it
+      # follows the reclassified message.
+      - role: system
+        entry_type: text
+        content: "You are in plan mode. Do not edit files."
+
+  # The mirror of the case above, with the order reversed. OpenCode really does
+  # order an annotation ahead of a person's own part: resolving an attachment
+  # emits its synthetic explanation before the parts that follow it. The rule
+  # reads every part, not the first one, so where the person's own part sits in
+  # the message cannot decide whose message it is.
+  - name: a-synthetic-part-before-a-real-part-still-leaves-a-user-turn
+    role: user
+    parts:
+      - '{"id":"prt_lead_annotation","type":"text","synthetic":true,"text":"Called the Read tool with the following input: {\"filePath\":\"notes.md\"}"}'
+      - '{"id":"prt_person_replied","type":"text","text":"start with the auth module please"}'
+    content_rendered_once: "start with the auth module please"
+    want_message_entry_type: text
+    want_message_role: user
+    want_turns:
+      - role: user
+        entry_type: text
+        content: "Called the Read tool with the following input: {\"filePath\":\"notes.md\"}"
+      - role: user
+        entry_type: text
+        content: "start with the auth module please"
+
+  # A part whose type this indexer does not know is an inert note. It is neither
+  # the person's own words nor a harness marker, so it is excluded from the
+  # every-part rule: it can neither force a reclassification nor block one. A
+  # newer OpenCode part type riding along must not put the injected result back
+  # in the person's turns.
+  - name: a-synthetic-result-beside-an-unrecognized-part-still-reclassifies
+    role: user
+    parts:
+      - '{"id":"prt_unknown_note","type":"a-part-type-this-indexer-does-not-know","text":"an inert note from a newer OpenCode"}'
+      - '{"id":"prt_result_beside_unknown","type":"text","synthetic":true,"text":"<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"}'
+    want_message_entry_type: system
+    want_message_role: system
+    want_turns:
+      - role: system
+        entry_type: system
+        content: "<task id=\"ses_ffe6cce48ffefzK8rzeIauasaI\" state=\"completed\"> <summary>Background task completed: Research serving runtimes</summary> <task_result>the runtimes report</task_result> </task>"
+      # The unrecognized part keeps rendering as its own inert system note.
+      - role: system
+        entry_type: system
+        content: "an inert note from a newer OpenCode"
