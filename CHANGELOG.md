@@ -21,6 +21,10 @@ Release, which holds the signed artifacts and checksums.
 - OpenCode background-task result messages whose parts are all synthetic now
   ingest as system entries. Mixed messages with user-authored text stay user
   entries (#253).
+- `peasant harvest` now shows live DIFF and FILTER progress, renders the
+  progress block through Bubble Tea without flicker or leaked terminal replies,
+  and prints a quieter summary with explicit duration and no unchanged detail
+  rows (#284).
 
 ### Performance
 - Annotation run-state skip checks now read the entry hash, compute version,
