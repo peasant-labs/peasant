@@ -213,7 +213,7 @@ downgrade_refusal_cases:
       - "current:    v0.5.0-rc1-dev.813+2153f8143"
       - "stable:     v0.4.0"
       - "prerelease: v0.5.0-rc1"
-      - "if you want to downgrade anyways\n    peasant upgrade --version v0.5.0-rc1 --allow-downgrade"
+      - "if you want to downgrade anyways\n    peasant upgrade --version v0.4.0 --allow-downgrade"
       - "if you want to install the `prerelease`\n    peasant upgrade --version v0.5.0-rc1 --allow-downgrade"
 
   - name: newer-current-refuses-stable-and-suggests-prerelease
@@ -227,6 +227,7 @@ downgrade_refusal_cases:
       - "current:    v0.4.2"
       - "stable:     v0.4.1"
       - "prerelease: v0.5.0-rc1"
+      - "if you want to downgrade anyways\n    peasant upgrade --version v0.4.1 --allow-downgrade"
       - "if you want to install the `prerelease`\n    peasant upgrade --prerelease"
 
   - name: allow-downgrade-needs-exact-version-managed
