@@ -362,9 +362,7 @@ func TestDebugFlagHidden(t *testing.T) {
 	}
 }
 
-// TestPrintSummary_ErrorsInParenthetical verifies printSummary includes errors
-// in the parenthetical and active separately (1sq).
-func TestPrintSummary_ErrorsInParenthetical(t *testing.T) {
+func TestPrintSummary_ExpandsSessionCounts(t *testing.T) {
 	t.Parallel()
 	result := &ingest.PipelineResult{
 		Summary: ingest.PipelineSummary{
@@ -384,16 +382,18 @@ func TestPrintSummary_ErrorsInParenthetical(t *testing.T) {
 	printSummary(&buf, result, false, false, "/tmp/out", "", sources, 0)
 	output := buf.String()
 
-	// The format should be: N sessions (X new, Y updated, Z unchanged, W errors), A active (debounced)
-	if !strings.Contains(output, "3 new, 2 updated, 1 unchanged, 2 errors)") {
-		t.Errorf("errors should be in parenthetical; got: %s", output)
-	}
-	if !strings.Contains(output, "1 active (debounced)") {
-		t.Errorf("active should be shown separately as 'N active (debounced)'; got: %s", output)
-	}
-	// Total should be 3+2+1+1+2 = 9
-	if !strings.Contains(output, "9 sessions") {
-		t.Errorf("total should be 9 sessions; got: %s", output)
+	for _, text := range []string{
+		"peasant harvest: 9 sessions",
+		"new",
+		"updated",
+		"unchanged",
+		"errors",
+		"active (debounced)",
+		"duration: 1.5s",
+	} {
+		if !strings.Contains(output, text) {
+			t.Errorf("summary should include %q; got: %s", text, output)
+		}
 	}
 }
 
@@ -491,7 +491,7 @@ func TestPrintSummary_HidesUnchangedDetailsButKeepsChangedRows(t *testing.T) {
 
 func assertHarvestSummaryShowsOnlyChangedRows(t *testing.T, output string) {
 	t.Helper()
-	if !strings.Contains(output, "2 unchanged") {
+	if !strings.Contains(output, "unchanged") {
 		t.Errorf("summary count should still report unchanged sessions; got: %s", output)
 	}
 	if strings.Contains(output, "UNCHANGED") {

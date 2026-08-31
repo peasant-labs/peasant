@@ -1197,6 +1197,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	if customPatternCount > 0 {
 		fmt.Fprintf(w, "Custom patterns: %d\n", customPatternCount)
 	}
+	fmt.Fprintln(w)
 
 	s := result.Summary
 	total := s.New + s.Updated + s.Unchanged + s.Active + s.Errors
@@ -1206,12 +1207,13 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	if includeActive {
 		activeLabel = "(included)"
 	}
-	fmt.Fprintf(w, "peasant harvest: %d sessions (%d new, %d updated, %d unchanged, %d errors), %d active %s [%s]\n",
-		total,
-		s.New, s.Updated, s.Unchanged, s.Errors, s.Active,
-		activeLabel,
-		result.Duration.Round(100*time.Millisecond))
-	fmt.Fprintf(w, "  duration: %s\n", result.Duration.Round(100*time.Millisecond))
+	fmt.Fprintf(w, "peasant harvest: %d sessions\n", total)
+	fmt.Fprintf(w, "   - %-5d new\n", s.New)
+	fmt.Fprintf(w, "   - %-5d updated\n", s.Updated)
+	fmt.Fprintf(w, "   - %-5d unchanged\n", s.Unchanged)
+	fmt.Fprintf(w, "   - %-5d errors\n", s.Errors)
+	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
+	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.
 	//
@@ -1224,13 +1226,15 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	// import itself succeeded.
 	indexFailures := countIndexFailures(result.IndexLog)
 	if s.Indexed > 0 || s.Computed > 0 || indexFailures > 0 {
-		fmt.Fprintf(w, "  index: %d indexed, %d computed (index_version=%d, metadata_version=%d)\n",
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "index: %d indexed, %d computed (index_version=%d, metadata_version=%d)\n",
 			s.Indexed, s.Computed, s.IndexVersion, s.MetadataVersion)
 	}
 	if indexFailures > 0 {
 		fmt.Fprintf(w, "  warning: %d session(s) were imported but NOT indexed, so they are empty in the viewer, in "+
-			"search, in metrics, and in anything published. Run 'peasant harvest --json' for the reason on each.\n",
+			"search, in metrics, and in anything published.\n",
 			indexFailures)
+		fmt.Fprintln(w, "  Run 'peasant harvest --json' for the reason on each.")
 	}
 
 	if len(result.Sessions) == 0 {
@@ -1266,6 +1270,10 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 			rootSessions = append(rootSessions, sr)
 		}
 	}
+	if len(rootSessions) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
 
 	// printRoot outputs one root session row and, in verbose mode, expands its subagents.
 	printRoot := func(sr ingest.SessionResult) {
