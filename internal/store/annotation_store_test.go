@@ -493,6 +493,105 @@ func TestApplyClassifierAnnotationBatches_RunStateErrorKeepsAnnotations(t *testi
 	}
 }
 
+func TestApplyClassifierAnnotationBatches_SessionDedupCacheSkipsAndSupersedesRepeatedTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000217"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	seed := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierSessionWrite(typeID, annotatorID, sessionID, "old", "hash-session-cache-old")})
+	if len(seed) != 1 || seed[0].Err != nil {
+		t.Fatalf("seed write = %+v, want success", seed)
+	}
+
+	batch := ingest.SessionAnnotationBatch{
+		SessionID: ingest.SessionID(sessionID),
+		Writes: []ingest.SessionAnnotationWrite{
+			{Write: classifierSessionWrite(typeID, annotatorID, sessionID, "old", "hash-session-cache-old"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "old", TargetKind: ingest.AnnotationProfileTargetSession},
+			{Write: classifierSessionWrite(typeID, annotatorID, sessionID, "new", "hash-session-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetSession},
+			{Write: classifierSessionWrite(typeID, annotatorID, sessionID, "new", "hash-session-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetSession},
+		},
+	}
+	results := s.ApplyClassifierAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{batch})
+	if len(results) != 1 || results[0].Err != nil || len(results[0].Results) != 3 {
+		t.Fatalf("batch result = %+v, want three successful writes", results)
+	}
+	for i, result := range results[0].Results {
+		if result.Err != nil {
+			t.Fatalf("write %d error: %v", i, result.Err)
+		}
+	}
+	if results[0].Results[0].Dedup != ingest.DedupSkip || results[0].Results[0].AnnotationID != seed[0].AnnotationID {
+		t.Fatalf("first dedup = %+v, want skip of seed %s", results[0].Results[0], seed[0].AnnotationID)
+	}
+	if results[0].Results[1].Dedup != ingest.DedupSupersede || results[0].Results[1].ExistingAnnotationID != seed[0].AnnotationID {
+		t.Fatalf("second dedup = %+v, want supersede of seed %s", results[0].Results[1], seed[0].AnnotationID)
+	}
+	if results[0].Results[2].Dedup != ingest.DedupSkip || results[0].Results[2].AnnotationID != results[0].Results[1].AnnotationID {
+		t.Fatalf("third dedup = %+v, want skip of new annotation %s", results[0].Results[2], results[0].Results[1].AnnotationID)
+	}
+	rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != "new" || rows[0].ContentHash == nil || *rows[0].ContentHash != "hash-session-cache-new" {
+		t.Fatalf("active session rows = %+v, want one new annotation", rows)
+	}
+}
+
+func TestApplyClassifierAnnotationBatches_EntryDedupCacheSkipsAndSupersedesRepeatedTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000218"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 0)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	seed := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierEntryWrite(typeID, annotatorID, sessionID, 0, "old", "hash-entry-cache-old")})
+	if len(seed) != 1 || seed[0].Err != nil {
+		t.Fatalf("seed write = %+v, want success", seed)
+	}
+
+	batch := ingest.SessionAnnotationBatch{
+		SessionID: ingest.SessionID(sessionID),
+		Writes: []ingest.SessionAnnotationWrite{
+			{Write: classifierEntryWrite(typeID, annotatorID, sessionID, 0, "old", "hash-entry-cache-old"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "old", TargetKind: ingest.AnnotationProfileTargetEntry},
+			{Write: classifierEntryWrite(typeID, annotatorID, sessionID, 0, "new", "hash-entry-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetEntry},
+			{Write: classifierEntryWrite(typeID, annotatorID, sessionID, 0, "new", "hash-entry-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetEntry},
+		},
+	}
+	results := s.ApplyClassifierAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{batch})
+	if len(results) != 1 || results[0].Err != nil || len(results[0].Results) != 3 {
+		t.Fatalf("batch result = %+v, want three successful writes", results)
+	}
+	for i, result := range results[0].Results {
+		if result.Err != nil {
+			t.Fatalf("write %d error: %v", i, result.Err)
+		}
+	}
+	if results[0].Results[0].Dedup != ingest.DedupSkip || results[0].Results[0].AnnotationID != seed[0].AnnotationID {
+		t.Fatalf("first dedup = %+v, want skip of seed %s", results[0].Results[0], seed[0].AnnotationID)
+	}
+	if results[0].Results[1].Dedup != ingest.DedupSupersede || results[0].Results[1].ExistingAnnotationID != seed[0].AnnotationID {
+		t.Fatalf("second dedup = %+v, want supersede of seed %s", results[0].Results[1], seed[0].AnnotationID)
+	}
+	if results[0].Results[2].Dedup != ingest.DedupSkip || results[0].Results[2].AnnotationID != results[0].Results[1].AnnotationID {
+		t.Fatalf("third dedup = %+v, want skip of new annotation %s", results[0].Results[2], results[0].Results[1].AnnotationID)
+	}
+	rows, err := s.GetAnnotationsForEntry(ctx, sessionID, 0)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForEntry: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != "new" || rows[0].ContentHash == nil || *rows[0].ContentHash != "hash-entry-cache-new" {
+		t.Fatalf("active entry rows = %+v, want one new annotation", rows)
+	}
+}
+
 func TestApplyClassifierAnnotations_SkipsMatchingContentHash(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
