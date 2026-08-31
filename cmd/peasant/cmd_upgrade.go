@@ -1204,7 +1204,7 @@ func downgradeUpgradeError(current, target string, context upgradeDowngradeConte
 	builder.WriteString("versions\n--------\n")
 	writeUpgradeVersionRows(&builder, downgradeVersionRows(current, target, context))
 	builder.WriteString("\nshow more information\n    peasant upgrade --help\n")
-	fmt.Fprintf(&builder, "\nif you want to downgrade anyways\n    peasant upgrade --version %s --allow-downgrade\n", target)
+	fmt.Fprintf(&builder, "\nif you want to downgrade anyways\n    peasant upgrade --version %s --allow-downgrade\n", downgradeCommandTarget(current, target, context))
 	if context.PrereleaseTag != "" {
 		builder.WriteString("\nif you want to install the `prerelease`\n    ")
 		if upgradeCurrentSortsAfter(current, context.PrereleaseTag) {
@@ -1214,6 +1214,13 @@ func downgradeUpgradeError(current, target string, context upgradeDowngradeConte
 		}
 	}
 	return errors.New(strings.TrimRight(builder.String(), "\n"))
+}
+
+func downgradeCommandTarget(current, target string, context upgradeDowngradeContext) string {
+	if context.StableTag != "" && upgradeCurrentSortsAfter(current, context.StableTag) {
+		return context.StableTag
+	}
+	return target
 }
 
 func downgradeContextFromReleaseSelection(selection upgradeReleaseSelection, binaryPath string) upgradeDowngradeContext {
