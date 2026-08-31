@@ -1173,8 +1173,8 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 
 // printSummary outputs the human-readable pipeline summary.
 //
-// Default (no --verbose): path header + summary line + per-session rows with provider and output path.
-// --verbose: same rows but subagents are expanded underneath their parent instead of collapsed.
+// Default (no --verbose): path header + summary line + changed/error rows with provider and output path.
+// --verbose: same rows but visible subagents are expanded underneath their parent instead of collapsed.
 func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, includeActive bool, outputDir string, configPath string, sources map[defaults.Harness]ingest.SourceConfig, customPatternCount int) {
 	// Path header.
 	fmt.Fprintf(w, "Output:  %s\n", outputDir)
@@ -1211,6 +1211,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 		s.New, s.Updated, s.Unchanged, s.Errors, s.Active,
 		activeLabel,
 		result.Duration.Round(100*time.Millisecond))
+	fmt.Fprintf(w, "  duration: %s\n", result.Duration.Round(100*time.Millisecond))
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.
 	//
@@ -1236,20 +1237,32 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 		return
 	}
 
+	shouldPrintSession := func(sr ingest.SessionResult) bool {
+		return sr.Error != nil || sr.Status != ingest.DiffUnchanged
+	}
+
 	// Build subagent maps using ParentUUID (semantic, not path-based).
 	subagentCount := map[ingest.SessionID]int{}
 	subagentsByParent := map[ingest.SessionID][]ingest.SessionResult{}
 	for _, sr := range result.Sessions {
-		if sr.ParentUUID != nil {
+		if sr.ParentUUID != nil && shouldPrintSession(sr) {
 			subagentCount[*sr.ParentUUID]++
 			subagentsByParent[*sr.ParentUUID] = append(subagentsByParent[*sr.ParentUUID], sr)
 		}
 	}
 
-	// Collect root sessions (non-subagents) preserving original order.
+	// Collect visible root sessions preserving original order. Unchanged rows stay
+	// out of the detail list because large warm harvests can contain thousands.
 	var rootSessions []ingest.SessionResult
+	printedRoot := map[ingest.SessionID]bool{}
 	for _, sr := range result.Sessions {
-		if sr.ParentUUID == nil {
+		if sr.ParentUUID == nil && shouldPrintSession(sr) {
+			rootSessions = append(rootSessions, sr)
+			printedRoot[sr.SessionID] = true
+		}
+	}
+	for _, sr := range result.Sessions {
+		if sr.ParentUUID != nil && shouldPrintSession(sr) && !printedRoot[*sr.ParentUUID] {
 			rootSessions = append(rootSessions, sr)
 		}
 	}

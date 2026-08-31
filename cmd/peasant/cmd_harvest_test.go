@@ -418,6 +418,87 @@ func TestPrintSummary_IncludeActiveLabel(t *testing.T) {
 	}
 }
 
+func TestPrintSummary_PrintsExplicitDuration(t *testing.T) {
+	t.Parallel()
+	result := &ingest.PipelineResult{
+		Summary:  ingest.PipelineSummary{New: 1},
+		Duration: 1500 * time.Millisecond,
+	}
+
+	var buf bytes.Buffer
+	printSummary(&buf, result, false, false, "/out", "", map[ingest.Harness]ingest.SourceConfig{}, 0)
+	if !strings.Contains(buf.String(), "duration: 1.5s") {
+		t.Errorf("summary should print explicit wall-clock duration; got: %s", buf.String())
+	}
+}
+
+func TestPrintSummary_HidesUnchangedDetailsButKeepsChangedRows(t *testing.T) {
+	t.Parallel()
+	parentID := ingest.SessionID("unchanged-parent-id")
+	result := &ingest.PipelineResult{
+		Summary: ingest.PipelineSummary{
+			New:       1,
+			Updated:   1,
+			Unchanged: 2,
+		},
+		Duration: 100 * time.Millisecond,
+		Sessions: []ingest.SessionResult{
+			{
+				SessionID:  parentID,
+				Harness:    ingest.HarnessClaudeCode,
+				Status:     ingest.DiffUnchanged,
+				OutputPath: "/output/unchanged-parent-id",
+			},
+			{
+				SessionID:  "updated-child-id",
+				Harness:    ingest.HarnessClaudeCode,
+				ParentUUID: &parentID,
+				Status:     ingest.DiffUpdated,
+				OutputPath: "/output/updated-child-id",
+			},
+			{
+				SessionID:  "unchanged-root-id",
+				Harness:    ingest.HarnessCodex,
+				Status:     ingest.DiffUnchanged,
+				OutputPath: "/output/unchanged-root-id",
+			},
+			{
+				SessionID:  "new-root-id",
+				Harness:    ingest.HarnessOpenCode,
+				Status:     ingest.DiffNew,
+				OutputPath: "/output/new-root-id",
+			},
+		},
+	}
+
+	var normal bytes.Buffer
+	printSummary(&normal, result, false, false, "/output", "", map[ingest.Harness]ingest.SourceConfig{}, 0)
+	assertHarvestSummaryShowsOnlyChangedRows(t, normal.String())
+
+	var verbose bytes.Buffer
+	printSummary(&verbose, result, true, false, "/output", "", map[ingest.Harness]ingest.SourceConfig{}, 0)
+	assertHarvestSummaryShowsOnlyChangedRows(t, verbose.String())
+}
+
+func assertHarvestSummaryShowsOnlyChangedRows(t *testing.T, output string) {
+	t.Helper()
+	if !strings.Contains(output, "2 unchanged") {
+		t.Errorf("summary count should still report unchanged sessions; got: %s", output)
+	}
+	if strings.Contains(output, "UNCHANGED") {
+		t.Errorf("summary details should not print UNCHANGED rows; got: %s", output)
+	}
+	if strings.Contains(output, "unchanged-parent-id") || strings.Contains(output, "unchanged-root-id") {
+		t.Errorf("summary details should hide unchanged session identifiers; got: %s", output)
+	}
+	if !strings.Contains(output, "updated-child-id") {
+		t.Errorf("summary details should keep a changed subagent even when its parent is unchanged; got: %s", output)
+	}
+	if !strings.Contains(output, "new-root-id") {
+		t.Errorf("summary details should keep changed root sessions; got: %s", output)
+	}
+}
+
 // TestPrintSummary_DefaultShowsProviderAndPath verifies that default mode shows
 // provider and output path, with subagent count suffix for sessions that have subagents.
 func TestPrintSummary_DefaultShowsProviderAndPath(t *testing.T) {
