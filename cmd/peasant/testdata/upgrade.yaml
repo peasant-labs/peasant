@@ -185,14 +185,49 @@ version_order_cases:
       - "version core \"dev\" must be MAJOR.MINOR.PATCH"
 
 downgrade_refusal_cases:
-  - name: dev-build-refuses-older-stable
+  - name: dev-build-refuses-older-selected-stable
     current_version: "v0.5.0-rc1-dev.813+2153f8143"
     target_version: "v0.4.0"
     error_contains:
-      - "the target Peasant release is older than the current binary"
-      - "current v0.5.0-rc1-dev.813+2153f8143 sorts after target v0.4.0"
-      - "Peasant refused the downgrade and no files were changed"
+      - "peasant upgrade failed"
+      - "`current` peasant version already newer than selected release v0.4.0"
+      - "info: no files were changed; path to the binary we tried to upgrade"
+      - "versions\n--------"
+      - "current: v0.5.0-rc1-dev.813+2153f8143"
+      - "target:  v0.4.0"
+      - "show more information\n    peasant upgrade --help"
+      - "if you want to downgrade anyways"
       - "--version v0.4.0 --allow-downgrade"
+
+  - name: dev-build-refuses-newest-prerelease-with-stable-info
+    current_version: "v0.5.0-rc1-dev.813+2153f8143"
+    target_version: "v0.5.0-rc1"
+    latest_stable_version: "v0.4.0"
+    latest_prerelease_version: "v0.5.0-rc1"
+    args: ["--prerelease"]
+    error_contains:
+      - "peasant upgrade failed"
+      - "`current` peasant version already newer than latest `stable` release v0.4.0"
+      - "`current` peasant version also newer than latest `prerelease` release v0.5.0-rc1"
+      - "versions\n--------"
+      - "current:    v0.5.0-rc1-dev.813+2153f8143"
+      - "stable:     v0.4.0"
+      - "prerelease: v0.5.0-rc1"
+      - "if you want to downgrade anyways\n    peasant upgrade --version v0.5.0-rc1 --allow-downgrade"
+      - "if you want to install the `prerelease`\n    peasant upgrade --version v0.5.0-rc1 --allow-downgrade"
+
+  - name: newer-current-refuses-stable-and-suggests-prerelease
+    current_version: "v0.4.2"
+    target_version: "v0.4.1"
+    latest_stable_version: "v0.4.1"
+    latest_prerelease_version: "v0.5.0-rc1"
+    args: ["--dry-run"]
+    error_contains:
+      - "`current` peasant version already newer than latest `stable` release v0.4.1"
+      - "current:    v0.4.2"
+      - "stable:     v0.4.1"
+      - "prerelease: v0.5.0-rc1"
+      - "if you want to install the `prerelease`\n    peasant upgrade --prerelease"
 
   - name: allow-downgrade-needs-exact-version-managed
     current_version: "v0.5.0-rc1-dev.813+2153f8143"
