@@ -96,7 +96,10 @@ type stubAnnotationStore struct {
 
 type batchAnnotationStore struct {
 	*stubAnnotationStore
-	writes []ingest.ClassifierAnnotationWrite
+	writes            []ingest.ClassifierAnnotationWrite
+	sessionBatchCalls int
+	sessionBatchSizes []int
+	sessionBatchErr   error
 }
 
 func (s *batchAnnotationStore) ApplyClassifierAnnotations(_ context.Context, writes []ingest.ClassifierAnnotationWrite) []ingest.ClassifierAnnotationWriteResult {
@@ -133,6 +136,46 @@ func (s *batchAnnotationStore) ApplyClassifierAnnotationsWithProfile(ctx context
 			stats.BatchInsertTargetTime += results[i].Profile.InsertTargetTime
 			stats.BatchUpdateHashCount++
 			stats.BatchUpdateHashTime += results[i].Profile.UpdateHashTime
+		}
+	}
+	return results
+}
+
+func (s *batchAnnotationStore) ApplyClassifierAnnotationBatches(ctx context.Context, batches []ingest.SessionAnnotationBatch) []ingest.SessionAnnotationBatchResult {
+	s.sessionBatchCalls++
+	results := make([]ingest.SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		storeWrites := make([]ingest.ClassifierAnnotationWrite, len(batch.Writes))
+		for j, write := range batch.Writes {
+			storeWrites[j] = write.Write
+		}
+		s.sessionBatchSizes = append(s.sessionBatchSizes, len(storeWrites))
+		results[i] = ingest.SessionAnnotationBatchResult{
+			SessionID: batch.SessionID,
+			Results:   s.ApplyClassifierAnnotations(ctx, storeWrites),
+		}
+		if s.sessionBatchErr != nil {
+			results[i].Err = s.sessionBatchErr
+		}
+	}
+	return results
+}
+
+func (s *batchAnnotationStore) ApplyClassifierAnnotationBatchesWithProfile(ctx context.Context, batches []ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) []ingest.SessionAnnotationBatchResult {
+	s.sessionBatchCalls++
+	results := make([]ingest.SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		storeWrites := make([]ingest.ClassifierAnnotationWrite, len(batch.Writes))
+		for j, write := range batch.Writes {
+			storeWrites[j] = write.Write
+		}
+		s.sessionBatchSizes = append(s.sessionBatchSizes, len(storeWrites))
+		results[i] = ingest.SessionAnnotationBatchResult{
+			SessionID: batch.SessionID,
+			Results:   s.ApplyClassifierAnnotationsWithProfile(ctx, storeWrites, stats),
+		}
+		if s.sessionBatchErr != nil {
+			results[i].Err = s.sessionBatchErr
 		}
 	}
 	return results
@@ -2052,5 +2095,93 @@ func TestClassifierAnnotator_AnnotateWithProfile_RecordsBatchPersistence(t *test
 	}
 	if breakdownPersist == 0 {
 		t.Fatalf("annotation result breakdown did not receive persistence timing: %+v", stats.SortedAnnotationResults())
+	}
+}
+
+func TestClassifierAnnotator_PrepareAndFlushAnnotationBatches_UsesOneBufferedStoreCall(t *testing.T) {
+	t.Parallel()
+	sidA := mustSessionID(t, testutil.TestSessionUUID)
+	sidB := mustSessionID(t, testutil.TestSubagentID)
+	ms := &stubMetricsStore{entries: []schema.SessionEntry{buildEntry(sidA, 0, ingest.RoleUser, "fuck this bug")}, m: buildMetrics(sidA, 3, 4)}
+	as := &batchAnnotationStore{stubAnnotationStore: newFullAnnotationStore()}
+	profiler := &ingest.IndexProfiler{}
+	ca := metrics.NewClassifierAnnotator(ms, as)
+
+	batchA, err := ca.PrepareAnnotations(context.Background(), sidA, profiler)
+	if err != nil {
+		t.Fatalf("PrepareAnnotations A: %v", err)
+	}
+	batchB, err := ca.PrepareAnnotations(context.Background(), sidB, profiler)
+	if err != nil {
+		t.Fatalf("PrepareAnnotations B: %v", err)
+	}
+	results := ca.FlushAnnotationBatches(context.Background(), []ingest.SessionAnnotationBatch{batchA, batchB}, profiler)
+	if len(results) != 2 {
+		t.Fatalf("FlushAnnotationBatches results = %d, want 2", len(results))
+	}
+	if as.sessionBatchCalls != 1 {
+		t.Fatalf("session batch store calls = %d, want 1", as.sessionBatchCalls)
+	}
+	if len(as.sessionBatchSizes) != 2 || as.sessionBatchSizes[0] == 0 || as.sessionBatchSizes[1] == 0 {
+		t.Fatalf("session batch sizes = %+v, want two non-empty prepared batches", as.sessionBatchSizes)
+	}
+	stats := profiler.Snapshot().Annotation
+	if stats.GetMetricsCount != 2 || stats.ListEntriesCount != 2 || stats.ClassifierRunCount != 2 {
+		t.Fatalf("prepare stats = metrics:%d entries:%d run:%d, want 2 each", stats.GetMetricsCount, stats.ListEntriesCount, stats.ClassifierRunCount)
+	}
+	if stats.BatchWriteCount != 1 || stats.BatchResultCount != len(as.writes) {
+		t.Fatalf("flush stats = writes:%d results:%d, want one flush with %d results", stats.BatchWriteCount, stats.BatchResultCount, len(as.writes))
+	}
+	if stats.BatchErrorCount != 0 {
+		t.Fatalf("BatchErrorCount = %d, want 0", stats.BatchErrorCount)
+	}
+}
+
+func TestClassifierAnnotator_FlushAnnotationBatches_RecordsBatchLevelError(t *testing.T) {
+	t.Parallel()
+	sid := mustSessionID(t, testutil.TestSessionUUID)
+	as := &batchAnnotationStore{
+		stubAnnotationStore: newFullAnnotationStore(),
+		sessionBatchErr:     errors.New("state save failed"),
+	}
+	profiler := &ingest.IndexProfiler{}
+	ca := metrics.NewClassifierAnnotator(&stubMetricsStore{}, as)
+	sidString := string(sid)
+	batch := ingest.SessionAnnotationBatch{
+		SessionID: sid,
+		Writes: []ingest.SessionAnnotationWrite{{
+			Write: ingest.ClassifierAnnotationWrite{
+				Create: ingest.CreateAnnotationParams{
+					SessionID:        &sidString,
+					AnnotatorID:      "anntr-uuid-1",
+					AnnotationTypeID: "type-uuid-10",
+					Value:            "resolved",
+				},
+				Find: ingest.FindAnnotationParams{
+					AnnotationTypeID: "type-uuid-10",
+					AnnotatorID:      "anntr-uuid-1",
+					SessionID:        &sidString,
+				},
+				ContentHash: "hash-1",
+			},
+			TypeID:     testutil.TestTypeIDSessionOutcome,
+			Value:      "resolved",
+			TargetKind: ingest.AnnotationProfileTargetSession,
+		}},
+	}
+
+	results := ca.FlushAnnotationBatches(context.Background(), []ingest.SessionAnnotationBatch{batch}, profiler)
+	if len(results) != 1 {
+		t.Fatalf("FlushAnnotationBatches results = %d, want 1", len(results))
+	}
+	if results[0].Err == nil {
+		t.Fatal("FlushAnnotationBatches result Err = nil, want batch-level error")
+	}
+	stats := profiler.Snapshot().Annotation
+	if stats.BatchWriteCount != 1 || stats.BatchResultCount != 1 {
+		t.Fatalf("flush stats = writes:%d results:%d, want 1/1", stats.BatchWriteCount, stats.BatchResultCount)
+	}
+	if stats.BatchErrorCount != 1 {
+		t.Fatalf("BatchErrorCount = %d, want 1", stats.BatchErrorCount)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2712,6 +2713,118 @@ func TestPipeline_WithClassifier_AnnotatesNewSessions(t *testing.T) {
 	}
 	if classifier.Annotated[0] != sid {
 		t.Errorf("classifier.Annotated[0] = %q, want %q", classifier.Annotated[0], sid)
+	}
+}
+
+type recordingBufferedClassifier struct {
+	mu        sync.Mutex
+	annotated []ingest.SessionID
+	prepared  []ingest.SessionID
+	flushes   [][]ingest.SessionID
+}
+
+var _ ingest.BufferedSessionClassifier = (*recordingBufferedClassifier)(nil)
+
+func (c *recordingBufferedClassifier) Annotate(_ context.Context, sessionID ingest.SessionID) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.annotated = append(c.annotated, sessionID)
+	return nil
+}
+
+func (c *recordingBufferedClassifier) PrepareAnnotations(_ context.Context, sessionID ingest.SessionID, _ *ingest.IndexProfiler) (ingest.SessionAnnotationBatch, error) {
+	c.mu.Lock()
+	c.prepared = append(c.prepared, sessionID)
+	c.mu.Unlock()
+	return ingest.SessionAnnotationBatch{
+		SessionID: sessionID,
+		Writes: []ingest.SessionAnnotationWrite{{
+			TypeID:     "test.annotation",
+			Value:      "prepared",
+			TargetKind: ingest.AnnotationProfileTargetSession,
+		}},
+	}, nil
+}
+
+func (c *recordingBufferedClassifier) FlushAnnotationBatches(_ context.Context, batches []ingest.SessionAnnotationBatch, _ *ingest.IndexProfiler) []ingest.SessionAnnotationBatchResult {
+	ids := make([]ingest.SessionID, len(batches))
+	results := make([]ingest.SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		ids[i] = batch.SessionID
+		results[i] = ingest.SessionAnnotationBatchResult{
+			SessionID: batch.SessionID,
+			Results: []ingest.ClassifierAnnotationWriteResult{{
+				Dedup:        ingest.DedupCreate,
+				AnnotationID: "buffered-annotation",
+			}},
+		}
+	}
+	c.mu.Lock()
+	c.flushes = append(c.flushes, ids)
+	c.mu.Unlock()
+	return results
+}
+
+func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
+	t.Parallel()
+	mfs := testutil.NewMemFS()
+	git := testutil.DefaultGitResolver()
+
+	sourcePathA := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
+	sourcePathB := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID2)
+	setupSourceFile(t, mfs, sourcePathA)
+	setupSourceFile(t, mfs, sourcePathB)
+
+	sessionA := makeDiscoveredSession(t, testSessionID, sourcePathA, time.Now().Add(-1*time.Hour))
+	sessionB := makeDiscoveredSession(t, testSessionID2, sourcePathB, time.Now().Add(-1*time.Hour))
+	sidA := sessionA.SessionID
+	sidB := sessionB.SessionID
+	adapters := map[ingest.Harness]ingest.AdapterFactory{
+		ingest.HarnessClaudeCode: makeStubAdapter(
+			[]ingest.DiscoveredSession{sessionA, sessionB},
+			map[ingest.SessionID]*ingest.UnifiedMetadata{
+				sidA: makeMinimalMeta(t, testSessionID),
+				sidB: makeMinimalMeta(t, testSessionID2),
+			},
+		),
+	}
+	indexer := &testutil.StubIndexer{
+		Kind: ingest.TranscriptSourceFile,
+		Entries: map[ingest.SessionID][]schema.SessionEntry{
+			sidA: {{SessionID: sidA, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText}},
+			sidB: {{SessionID: sidB, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText}},
+		},
+	}
+	classifier := &recordingBufferedClassifier{}
+
+	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
+		c.Parallelism = 2
+	})
+	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+		ingest.WithStore(&testutil.StubSessionStore{}),
+		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
+			ingest.HarnessClaudeCode: indexer,
+		}),
+		ingest.WithMetricsStore(testutil.NewStubMetricsStore()),
+		ingest.WithClassifier(classifier),
+	)
+	if err != nil {
+		t.Fatalf("NewPipeline: %v", err)
+	}
+	if _, err := pipeline.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	classifier.mu.Lock()
+	defer classifier.mu.Unlock()
+	if len(classifier.annotated) != 0 {
+		t.Fatalf("Annotate calls = %d, want 0 buffered path calls", len(classifier.annotated))
+	}
+	if len(classifier.prepared) != 2 {
+		t.Fatalf("PrepareAnnotations calls = %d, want 2", len(classifier.prepared))
+	}
+	if len(classifier.flushes) != 1 || len(classifier.flushes[0]) != 2 {
+		t.Fatalf("flushes = %+v, want one flush containing both sessions", classifier.flushes)
 	}
 }
 

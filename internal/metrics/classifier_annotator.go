@@ -58,6 +58,7 @@ type classifierAnnotationIDs struct {
 // Compile-time guard: *ClassifierAnnotator must satisfy ingest.SessionClassifier.
 var _ ingest.SessionClassifier = (*ClassifierAnnotator)(nil)
 var _ ingest.ProfiledSessionClassifier = (*ClassifierAnnotator)(nil)
+var _ ingest.BufferedSessionClassifier = (*ClassifierAnnotator)(nil)
 
 // NewClassifierAnnotator constructs a ClassifierAnnotator with the given stores.
 func NewClassifierAnnotator(
@@ -89,6 +90,316 @@ func (ca *ClassifierAnnotator) AnnotateWithProfile(ctx context.Context, sessionI
 		profiler.RecordAnnotation(stats)
 	}()
 	return ca.annotate(ctx, sessionID, &stats)
+}
+
+func (ca *ClassifierAnnotator) PrepareAnnotations(ctx context.Context, sessionID ingest.SessionID, profiler *ingest.IndexProfiler) (ingest.SessionAnnotationBatch, error) {
+	if profiler == nil {
+		return ca.prepareAnnotations(ctx, sessionID, nil)
+	}
+	var stats ingest.AnnotationProfileStats
+	defer func() {
+		profiler.RecordAnnotation(stats)
+	}()
+	return ca.prepareAnnotations(ctx, sessionID, &stats)
+}
+
+func (ca *ClassifierAnnotator) prepareAnnotations(ctx context.Context, sessionID ingest.SessionID, stats *ingest.AnnotationProfileStats) (ingest.SessionAnnotationBatch, error) {
+	batch := ingest.SessionAnnotationBatch{SessionID: sessionID}
+	stateInputs, hasCombinedInputs := ca.combinedAnnotationRunInputs(ctx, sessionID)
+	if hasCombinedInputs && annotationRunInputsCurrent(stateInputs) {
+		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) { s.StateSkipCount++ })
+		batch.Skipped = true
+		return batch, nil
+	}
+
+	metricsStarted := annotationProfileStart(stats)
+	metrics, err := ca.metricsStore.GetMetrics(ctx, sessionID)
+	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+		s.GetMetricsCount++
+		s.GetMetricsTime += time.Since(metricsStarted)
+	})
+	if err != nil {
+		return batch, fmt.Errorf("ClassifierAnnotator.Annotate: get metrics for %s: %w", sessionID, err)
+	}
+
+	entriesHash, computeVersion, stateUsable := ca.annotationRunInputs(ctx, sessionID, metrics, stateInputs, hasCombinedInputs)
+	if !hasCombinedInputs && stateUsable && ca.annotationStateCurrent(ctx, sessionID, entriesHash, computeVersion) {
+		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) { s.StateSkipCount++ })
+		batch.Skipped = true
+		return batch, nil
+	}
+
+	listStarted := annotationProfileStart(stats)
+	entries, err := ca.metricsStore.ListEntries(ctx, sessionID)
+	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+		s.ListEntriesCount++
+		s.ListEntriesTime += time.Since(listStarted)
+	})
+	if err != nil {
+		return batch, fmt.Errorf("ClassifierAnnotator.Annotate: list entries for %s: %w", sessionID, err)
+	}
+
+	runStarted := annotationProfileStart(stats)
+	results, resultTimes := ca.runClassifiers(ctx, sessionID, entries, metrics, stats != nil)
+	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+		s.ClassifierRunCount++
+		s.ClassifierRunTime += time.Since(runStarted)
+		s.ResultCount += len(results)
+		for _, result := range results {
+			if result.Target == nil {
+				s.SessionResultCount++
+			} else {
+				s.EntryResultCount++
+			}
+		}
+	})
+
+	prepareFailed := false
+	batch.Writes = make([]ingest.SessionAnnotationWrite, 0, len(results))
+	for _, result := range results {
+		write, err := ca.classifierAnnotationWrite(ctx, sessionID, result, stats)
+		if err != nil {
+			prepareFailed = true
+			slog.Warn("ClassifierAnnotator.Annotate: prepare classifier annotation write",
+				"session_id", sessionID,
+				"type_id", result.TypeID,
+				"error", err,
+			)
+			continue
+		}
+		batch.Writes = append(batch.Writes, ingest.SessionAnnotationWrite{
+			Write:          write,
+			TypeID:         result.TypeID,
+			Value:          result.Value,
+			TargetKind:     classifierResultTargetKind(result),
+			ClassifierTime: classifierResultProfileTime(resultTimes, result),
+		})
+	}
+	if stateUsable && !prepareFailed {
+		state := classifierAnnotationRunState(sessionID, entriesHash, computeVersion)
+		batch.RunState = &state
+	}
+	return batch, nil
+}
+
+func (ca *ClassifierAnnotator) FlushAnnotationBatches(ctx context.Context, batches []ingest.SessionAnnotationBatch, profiler *ingest.IndexProfiler) []ingest.SessionAnnotationBatchResult {
+	if profiler == nil {
+		return ca.flushAnnotationBatches(ctx, batches, nil)
+	}
+	var stats ingest.AnnotationProfileStats
+	results := ca.flushAnnotationBatches(ctx, batches, &stats)
+	profiler.RecordAnnotation(stats)
+	return results
+}
+
+func (ca *ClassifierAnnotator) flushAnnotationBatches(ctx context.Context, batches []ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) []ingest.SessionAnnotationBatchResult {
+	if len(batches) == 0 {
+		return nil
+	}
+	writeStarted := annotationProfileStart(stats)
+	var results []ingest.SessionAnnotationBatchResult
+	if stats != nil {
+		if store, ok := ca.annotationStore.(ingest.ProfiledClassifierAnnotationSessionBatchStore); ok {
+			results = store.ApplyClassifierAnnotationBatchesWithProfile(ctx, batches, stats)
+		} else if store, ok := ca.annotationStore.(ingest.ClassifierAnnotationSessionBatchStore); ok {
+			results = store.ApplyClassifierAnnotationBatches(ctx, batches)
+		} else {
+			results = ca.flushAnnotationBatchesFallback(ctx, batches, stats)
+		}
+	} else if store, ok := ca.annotationStore.(ingest.ClassifierAnnotationSessionBatchStore); ok {
+		results = store.ApplyClassifierAnnotationBatches(ctx, batches)
+	} else {
+		results = ca.flushAnnotationBatchesFallback(ctx, batches, nil)
+	}
+	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchWriteCount++
+		s.BatchWriteTime += time.Since(writeStarted)
+		for _, result := range results {
+			s.BatchResultCount += len(result.Results)
+		}
+	})
+	ca.recordAnnotationBatchResults(ctx, batches, results, stats)
+	return results
+}
+
+func (ca *ClassifierAnnotator) flushAnnotationBatchesFallback(ctx context.Context, batches []ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) []ingest.SessionAnnotationBatchResult {
+	results := make([]ingest.SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		results[i].SessionID = batch.SessionID
+		if batch.Skipped || (len(batch.Writes) == 0 && batch.RunState == nil) {
+			continue
+		}
+		storeWrites := sessionAnnotationStoreWrites(batch.Writes)
+		if stats != nil {
+			if batchStore, ok := ca.annotationStore.(ingest.ProfiledClassifierAnnotationBatchStore); ok {
+				results[i].Results = batchStore.ApplyClassifierAnnotationsWithProfile(ctx, storeWrites, stats)
+			} else if batchStore, ok := ca.annotationStore.(ingest.ClassifierAnnotationBatchStore); ok {
+				results[i].Results = batchStore.ApplyClassifierAnnotations(ctx, storeWrites)
+			} else {
+				results[i].Results = ca.persistPreparedAnnotationWrites(ctx, batch.Writes, stats)
+			}
+		} else if batchStore, ok := ca.annotationStore.(ingest.ClassifierAnnotationBatchStore); ok {
+			results[i].Results = batchStore.ApplyClassifierAnnotations(ctx, storeWrites)
+		} else {
+			results[i].Results = ca.persistPreparedAnnotationWrites(ctx, batch.Writes, nil)
+		}
+		if !classifierAnnotationWriteResultsHaveError(results[i].Results) && batch.RunState != nil {
+			results[i].Err = ca.savePreparedAnnotationRunState(ctx, *batch.RunState)
+		}
+	}
+	return results
+}
+
+func sessionAnnotationStoreWrites(writes []ingest.SessionAnnotationWrite) []ingest.ClassifierAnnotationWrite {
+	storeWrites := make([]ingest.ClassifierAnnotationWrite, len(writes))
+	for i, write := range writes {
+		storeWrites[i] = write.Write
+	}
+	return storeWrites
+}
+
+func classifierAnnotationWriteResultsHaveError(results []ingest.ClassifierAnnotationWriteResult) bool {
+	for _, result := range results {
+		if result.Err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (ca *ClassifierAnnotator) persistPreparedAnnotationWrites(ctx context.Context, writes []ingest.SessionAnnotationWrite, stats *ingest.AnnotationProfileStats) []ingest.ClassifierAnnotationWriteResult {
+	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
+	for i, write := range writes {
+		results[i] = ca.persistPreparedAnnotationWrite(ctx, write, stats)
+	}
+	return results
+}
+
+func (ca *ClassifierAnnotator) persistPreparedAnnotationWrite(ctx context.Context, write ingest.SessionAnnotationWrite, stats *ingest.AnnotationProfileStats) ingest.ClassifierAnnotationWriteResult {
+	result := ingest.ClassifierAnnotationWriteResult{Dedup: ingest.DedupCreate}
+	findStarted := annotationProfileStart(stats)
+	existing, err := ca.annotationStore.FindExistingAnnotation(ctx, write.Write.Find)
+	addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+		s.DedupLookupCount++
+		s.DedupLookupTime += time.Since(findStarted)
+	})
+	if err != nil {
+		slog.Warn("ClassifierAnnotator.persistResult: dedup check failed, proceeding with create",
+			"type_id", write.TypeID, "error", err)
+	}
+	if existing != nil {
+		result.ExistingAnnotationID = existing.ID
+	}
+
+	dedupResult := ca.decideDedupAction(existing, write.Write.ContentHash)
+	result.Dedup = dedupResult
+	switch dedupResult {
+	case ingest.DedupSkip:
+		result.AnnotationID = existing.ID
+		return result
+	case ingest.DedupSupersede:
+		newID, createErr := ca.createAnnotationFromParams(ctx, write.TypeID, write.Write.Create, stats)
+		if createErr != nil {
+			result.Err = createErr
+			return result
+		}
+		result.AnnotationID = newID
+		hashStarted := annotationProfileStart(stats)
+		if hashErr := ca.annotationStore.UpdateContentHash(ctx, newID, write.Write.ContentHash); hashErr != nil {
+			addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+				s.UpdateContentHashCount++
+				s.UpdateContentHashTime += time.Since(hashStarted)
+			})
+			result.Err = hashErr
+			return result
+		}
+		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+			s.UpdateContentHashCount++
+			s.UpdateContentHashTime += time.Since(hashStarted)
+		})
+		supersedeStarted := annotationProfileStart(stats)
+		if supErr := ca.annotationStore.SupersedeAnnotation(ctx, existing.ID, newID); supErr != nil {
+			addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+				s.SupersedeCount++
+				s.SupersedeTime += time.Since(supersedeStarted)
+			})
+			result.Err = supErr
+			return result
+		}
+		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+			s.SupersedeCount++
+			s.SupersedeTime += time.Since(supersedeStarted)
+		})
+		return result
+	default:
+		newID, createErr := ca.createAnnotationFromParams(ctx, write.TypeID, write.Write.Create, stats)
+		if createErr != nil {
+			result.Err = createErr
+			return result
+		}
+		result.AnnotationID = newID
+		hashStarted := annotationProfileStart(stats)
+		if hashErr := ca.annotationStore.UpdateContentHash(ctx, newID, write.Write.ContentHash); hashErr != nil {
+			addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+				s.UpdateContentHashCount++
+				s.UpdateContentHashTime += time.Since(hashStarted)
+			})
+			result.Err = hashErr
+			return result
+		}
+		addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+			s.UpdateContentHashCount++
+			s.UpdateContentHashTime += time.Since(hashStarted)
+		})
+		return result
+	}
+}
+
+func (ca *ClassifierAnnotator) recordAnnotationBatchResults(ctx context.Context, batches []ingest.SessionAnnotationBatch, results []ingest.SessionAnnotationBatchResult, stats *ingest.AnnotationProfileStats) {
+	for i, result := range results {
+		if i >= len(batches) {
+			return
+		}
+		batch := batches[i]
+		hasWriteError := false
+		for j, writeResult := range result.Results {
+			if j < len(batch.Writes) {
+				write := batch.Writes[j]
+				addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+					s.RecordAnnotationResult(write.TypeID, write.Value, write.TargetKind, writeResult.Dedup, writeResult.Err != nil, write.ClassifierTime, writeResult.Profile)
+				})
+			}
+			addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+				addAnnotationDedupDecision(s, writeResult.Dedup)
+				if writeResult.Err != nil {
+					s.BatchErrorCount++
+					hasWriteError = true
+				}
+			})
+			if writeResult.Err != nil {
+				typeID := ""
+				if j < len(batch.Writes) {
+					typeID = batch.Writes[j].TypeID
+				}
+				slog.Warn("ClassifierAnnotator.Annotate: persist batch result",
+					"session_id", batch.SessionID,
+					"type_id", typeID,
+					"error", writeResult.Err,
+				)
+			}
+		}
+		if result.Err != nil && ctx.Err() == nil {
+			if !hasWriteError {
+				addAnnotationTiming(stats, func(s *ingest.AnnotationProfileStats) {
+					s.BatchErrorCount++
+				})
+			}
+			slog.Warn("ClassifierAnnotator.Annotate: flush annotation batch",
+				"session_id", result.SessionID,
+				"error", result.Err,
+			)
+		}
+	}
 }
 
 func (ca *ClassifierAnnotator) annotate(ctx context.Context, sessionID ingest.SessionID, stats *ingest.AnnotationProfileStats) error {
@@ -365,23 +676,31 @@ func (ca *ClassifierAnnotator) annotationStateCurrent(ctx context.Context, sessi
 }
 
 func (ca *ClassifierAnnotator) saveAnnotationRunState(ctx context.Context, sessionID ingest.SessionID, entriesHash string, computeVersion int) {
-	stateStore, ok := ca.metricsStore.(ingest.AnnotationRunStateStore)
-	if !ok {
-		return
+	state := classifierAnnotationRunState(sessionID, entriesHash, computeVersion)
+	if err := ca.savePreparedAnnotationRunState(ctx, state); err != nil {
+		slog.Warn("ClassifierAnnotator.Annotate: save annotation state failed",
+			"session_id", sessionID,
+			"error", err,
+		)
 	}
-	state := ingest.AnnotationRunState{
+}
+
+func classifierAnnotationRunState(sessionID ingest.SessionID, entriesHash string, computeVersion int) ingest.AnnotationRunState {
+	return ingest.AnnotationRunState{
 		SessionID:          sessionID,
 		SessionEntriesHash: entriesHash,
 		ComputeVersion:     computeVersion,
 		ClassifierVersion:  CurrentClassifierAnnotationVersion,
 		AnnotatedAt:        time.Now(),
 	}
-	if err := stateStore.SaveAnnotationRunState(ctx, state); err != nil {
-		slog.Warn("ClassifierAnnotator.Annotate: save annotation state failed",
-			"session_id", sessionID,
-			"error", err,
-		)
+}
+
+func (ca *ClassifierAnnotator) savePreparedAnnotationRunState(ctx context.Context, state ingest.AnnotationRunState) error {
+	stateStore, ok := ca.metricsStore.(ingest.AnnotationRunStateStore)
+	if !ok {
+		return nil
 	}
+	return stateStore.SaveAnnotationRunState(ctx, state)
 }
 
 func (ca *ClassifierAnnotator) classifierAnnotationWrite(

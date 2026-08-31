@@ -1004,6 +1004,11 @@ var _ ingest.ClassifierAnnotationBatchStore = (*Store)(nil)
 // Compile-time guard: *Store can report profile detail for classifier batch writes.
 var _ ingest.ProfiledClassifierAnnotationBatchStore = (*Store)(nil)
 
+// Compile-time guards: *Store supports flushing prepared annotations for many
+// sessions in one serial writer call.
+var _ ingest.ClassifierAnnotationSessionBatchStore = (*Store)(nil)
+var _ ingest.ProfiledClassifierAnnotationSessionBatchStore = (*Store)(nil)
+
 // ---------------------------------------------------------------------------
 // Dedup / Supersession (R9)
 // ---------------------------------------------------------------------------
@@ -1268,6 +1273,14 @@ func (s *Store) ApplyClassifierAnnotationsWithProfile(ctx context.Context, write
 	return s.applyClassifierAnnotations(ctx, writes, stats)
 }
 
+func (s *Store) ApplyClassifierAnnotationBatches(ctx context.Context, batches []ingest.SessionAnnotationBatch) []ingest.SessionAnnotationBatchResult {
+	return s.applyClassifierAnnotationBatches(ctx, batches, nil)
+}
+
+func (s *Store) ApplyClassifierAnnotationBatchesWithProfile(ctx context.Context, batches []ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) []ingest.SessionAnnotationBatchResult {
+	return s.applyClassifierAnnotationBatches(ctx, batches, stats)
+}
+
 func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) []ingest.ClassifierAnnotationWriteResult {
 	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
 	if len(writes) == 0 {
@@ -1306,16 +1319,10 @@ func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.
 		}
 	}()
 
-	for i := range writes {
-		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats)
-		results[i] = outcome
-		if err != nil {
-			results[i].Err = err
-			if fatal {
-				txnErr = err
-				break
-			}
-		}
+	var fatalErr error
+	results, fatalErr = applyClassifierAnnotationWritesOnConn(conn, writes, stats)
+	if fatalErr != nil {
+		txnErr = fatalErr
 	}
 
 	commitStarted := annotationBatchProfileStart(stats)
@@ -1333,6 +1340,132 @@ func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.
 			}
 			results[i].AnnotationID = ""
 		}
+	}
+	return results
+}
+
+func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) []ingest.SessionAnnotationBatchResult {
+	results := make([]ingest.SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		results[i].SessionID = batch.SessionID
+	}
+	if len(batches) == 0 {
+		return results
+	}
+
+	mutexStarted := annotationBatchProfileStart(stats)
+	s.annotationWriteMu.Lock()
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchMutexWaitCount++
+		s.BatchMutexWaitTime += time.Since(mutexStarted)
+	})
+	defer s.annotationWriteMu.Unlock()
+
+	connStarted := annotationBatchProfileStart(stats)
+	conn, err := s.pool.Take(ctx)
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchConnectionCount++
+		s.BatchConnectionTime += time.Since(connStarted)
+	})
+	if err != nil {
+		setupErr := fmt.Errorf("store: take connection for classifier annotation batch: %w", err)
+		for i := range results {
+			results[i].Err = setupErr
+			results[i].Results = classifierAnnotationFailedResults(len(batches[i].Writes), setupErr)
+		}
+		return results
+	}
+	defer s.pool.Put(conn)
+
+	txnErr := error(nil)
+	endFn := sqlitex.Transaction(conn)
+	txnOpen := true
+	defer func() {
+		if txnOpen {
+			endFn(&txnErr)
+		}
+	}()
+
+	for i, batch := range batches {
+		storeWrites := sessionAnnotationBatchStoreWrites(batch.Writes)
+		writeResults, fatalErr := applyClassifierAnnotationWritesOnConn(conn, storeWrites, stats)
+		results[i].Results = writeResults
+		if fatalErr != nil {
+			results[i].Err = fatalErr
+			txnErr = fatalErr
+			break
+		}
+		if classifierAnnotationResultsHaveError(writeResults) || batch.RunState == nil {
+			continue
+		}
+		if err := saveAnnotationRunStateOnConn(conn, *batch.RunState); err != nil {
+			results[i].Err = fmt.Errorf("store: save annotation state in classifier annotation batch: %w", err)
+		}
+	}
+
+	commitStarted := annotationBatchProfileStart(stats)
+	endFn(&txnErr)
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchCommitCount++
+		s.BatchCommitTime += time.Since(commitStarted)
+	})
+	txnOpen = false
+	if txnErr != nil {
+		commitErr := fmt.Errorf("store: commit classifier annotation batch: %w", txnErr)
+		for i := range results {
+			if results[i].Err == nil {
+				results[i].Err = commitErr
+			}
+			if len(results[i].Results) == 0 && len(batches[i].Writes) != 0 {
+				results[i].Results = classifierAnnotationFailedResults(len(batches[i].Writes), commitErr)
+			}
+			for j := range results[i].Results {
+				if results[i].Results[j].Err == nil {
+					results[i].Results[j].Err = commitErr
+				}
+				results[i].Results[j].AnnotationID = ""
+			}
+		}
+	}
+	return results
+}
+
+func applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) ([]ingest.ClassifierAnnotationWriteResult, error) {
+	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
+	for i := range writes {
+		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats)
+		results[i] = outcome
+		if err != nil {
+			results[i].Err = err
+			if fatal {
+				return results, err
+			}
+		}
+	}
+	return results, nil
+}
+
+func sessionAnnotationBatchStoreWrites(writes []ingest.SessionAnnotationWrite) []ingest.ClassifierAnnotationWrite {
+	storeWrites := make([]ingest.ClassifierAnnotationWrite, len(writes))
+	for i, write := range writes {
+		storeWrites[i] = write.Write
+	}
+	return storeWrites
+}
+
+func classifierAnnotationResultsHaveError(results []ingest.ClassifierAnnotationWriteResult) bool {
+	for _, result := range results {
+		if result.Err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func classifierAnnotationFailedResults(count int, err error) []ingest.ClassifierAnnotationWriteResult {
+	results := make([]ingest.ClassifierAnnotationWriteResult, count)
+	for i := range results {
+		results[i].Err = err
 	}
 	return results
 }

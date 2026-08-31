@@ -245,11 +245,12 @@ ORDER BY t.type_id`,
 
 // Compile-time interface guards.
 var (
-	_ ingest.SessionStore                   = (*Store)(nil)
-	_ ingest.MetricsStore                   = (*Store)(nil)
-	_ ingest.AnnotationRunInputStore        = (*Store)(nil)
-	_ ingest.ClassifierAnnotationBatchStore = (*Store)(nil)
-	_ ingest.PruneStore                     = (*Store)(nil)
+	_ ingest.SessionStore                          = (*Store)(nil)
+	_ ingest.MetricsStore                          = (*Store)(nil)
+	_ ingest.AnnotationRunInputStore               = (*Store)(nil)
+	_ ingest.ClassifierAnnotationBatchStore        = (*Store)(nil)
+	_ ingest.ClassifierAnnotationSessionBatchStore = (*Store)(nil)
+	_ ingest.PruneStore                            = (*Store)(nil)
 )
 
 // Store manages persistent storage of sessions and metrics via SQLite.

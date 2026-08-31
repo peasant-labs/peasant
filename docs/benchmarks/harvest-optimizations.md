@@ -4,14 +4,31 @@ This document lets a new team continue the INDEX optimization work from the
 current state. It records what is done, what the last profile proved, what it did
 not prove, and the exact commands used for copied-data profiling.
 
+For the repeatable setup, command sequence, cleanup rules, and public-safe report
+template, see [Harvest Benchmark Procedure](procedure.md).
+
 ## Current State
 
-The active streaming PR is:
+The historical streaming PR was:
 
 - PR: <https://github.com/peasant-labs/peasant/pull/250>
 - Branch: `peasant-239--perf--stream-index-drain`
 - Base branch: `develop`
 - Main issue: <https://github.com/peasant-labs/peasant/issues/239>
+
+The current annotation performance stack is split across focused PRs:
+
+- PR #262 adds durable annotation target anchors and safe unresolved/superseded
+  repair state.
+- PR #263 streams COMPUTE and ANNOTATE after indexed session batches.
+- PR #264 combines annotation run-state, session hash, and compute-version lookup.
+- PR #265 adds annotation profile detail and per-annotation timing attribution.
+
+The current measured bottleneck is no longer INDEX row insertion on the warm
+copied corpus. After the INDEX optimizations and annotation run-state skip, the
+no-annotations profile shows ANNOTATE is dominated by annotation persistence
+contention. Classifier compute is small compared with waiting for the single
+SQLite annotation writer.
 
 The PR replaces full-batch INDEX handoff with a bounded per-session work queue:
 
@@ -680,6 +697,108 @@ payload for classifier execution. That follow-up should keep the current optiona
 interface fallback so tests and alternate stores that only implement the older
 methods still run the safe full-annotation path.
 
+#### No-Annotations Annotation Persistence Profile
+
+This run used the reusable no-annotations copied corpus after adding batch
+persistence sub-timers, redacted value output, and per-annotation timing
+attribution. It measured annotation creation from a copied store whose annotation
+rows had been removed before the run.
+
+The no-annotations corpus was reused directly at
+`/tmp/opencode/peasant-index-profile-no-annotations-source`. The profile logs
+were moved out of the control directory after the run. The corpus was scrubbed
+afterwards and verified clean: `annotations=0`, `annotation_run_state=0`, empty
+annotation target tables, and SQLite integrity check `ok`.
+
+Preparation before the run:
+
+- `annotations`: `0`
+- `annotation_run_state`: `0`
+- SQLite integrity check: `ok`
+
+Result:
+
+- profile status: `1`
+- status `1` is expected for this copied corpus because it reports known
+  dirty-corpus warnings
+- script wall seconds: `472`
+- CLI wall time: `7m49.3s`
+- `1` INDEX batch record
+- `7897` sessions in the INDEX profile
+- `3017012` entries in the INDEX profile
+- `7976250453` bytes in the INDEX profile
+- batch sizes: `7897x1`
+- work items: `7897`
+- INDEX queue capacity: `64`
+- write transactions: `153`
+- savepoints: `7798`
+- skipped rewrites: `6826`
+- parse time: `2m8.449s`
+- write time: `1m15.889s`
+- max parse workers: `32`
+- `DISCOVER`: `5.256s`
+- `DB INSERT`: `1m16.229s`
+- `INDEX`: `1m16.294s`
+- `INDEX LOG`: `2.04s`
+- `COMPUTE`: `1m9.629s`
+- `ANNOTATE`: `5m15.233s`
+- successful indexed sessions: `7798`
+- session import errors: `109`
+- imported but not indexed warning count: `75`
+- `database is locked` lines: `0`
+- annotation target carry failures: `0`
+- missing provider-root warnings: `74`
+
+Annotation detail:
+
+- list entries: `32.349s` total; count `7798`
+- get metrics: `14.25s` total; count `7798`
+- classifier run: `14.996s` total; count `7798`
+- results: total `100531`, session-target `21526`, entry-target `79005`,
+  skipped-by-state `0`
+- ID cache: hits `100526`, misses `5`
+- batch persistence: `1h24m54.399s` total; batches `7798`; results `100531`;
+  errors `0`
+- mutex wait: `1h19m51.913s` total; count `7798`
+- connection checkout: `27ms` total; count `7798`
+- savepoint SQL: `484ms` total; count `201062`
+- dedup lookup: `4m31.161s` total; count `100531`
+- insert annotation row: `5.9s` total; count `100531`
+- insert target row: `2.605s` total; count `100531`
+- update content hash: `2.483s` total; count `100531`
+- supersede annotation: `0s` total; count `0`
+- commit: `19.148s` total; count `7798`
+- dedup decisions: skip `0`, create `100531`, supersede `0`
+
+Top attributed annotation groups:
+
+- `quality.session_outcome=resolved`: `7151` results, `2m49.327s` attributed,
+  `139ms` classifier, `2m49.188s` persistence, `2m47.182s` dedup lookup
+- `quality.user_frustration=not_detected`: `7643` results, `59.789s`
+  attributed, `4.84s` classifier, `54.949s` persistence, `53.75s` dedup lookup
+- `quality.session_outcome=abandoned`: `647` results, `13.878s` attributed,
+  `2ms` classifier, `13.876s` persistence, `13.695s` dedup lookup
+- `quality.resolution_evidence=present`: `78600` results, `12.188s`
+  attributed, `1.969s` classifier, `10.22s` persistence, `3.089s` dedup lookup
+- largest `metadata.session_scope` value group: `635` results, `3.677s`
+  attributed, `283ms` classifier, `3.394s` persistence, `3.305s` dedup lookup
+
+Interpretation:
+
+- The no-annotations run proves the current ANNOTATE hot path is write
+  contention, not classifier compute.
+- Sessions are already processed by a worker pool in the ANNOTATE stage, but each
+  session still calls the annotation batch writer separately.
+- The store serializes those calls with `annotationWriteMu`, so the parallel
+  session workers spend most aggregate time waiting for the single SQLite writer.
+- Parallelizing classifier groups inside one session is therefore a secondary
+  optimization. It can reduce about `15s` of aggregate classifier time, but it
+  does not address the `1h19m51.913s` aggregate mutex wait.
+- The next optimization should add a stage-level buffer: annotation workers
+  prepare per-session writes in parallel, and one writer flushes larger batches
+  across many sessions in fewer transactions. The writer should also flush at a
+  regular interval so small or slow batches still make visible progress.
+
 ### Prior Streaming PR Run
 
 The last copied-data profile happened before the local batch-writer and remap
@@ -733,6 +852,10 @@ Interpretation:
   separately from branch-caused failures.
 
 ## Profile Commands
+
+The canonical procedure is now in [Harvest Benchmark Procedure](procedure.md).
+The commands below are kept as historical detail for the original copied-corpus
+harness work.
 
 Run commands from the Peasant worktree for the branch you want to measure. Use
 the same copied corpus path for every branch. Do not create a per-run copy of the
@@ -1058,6 +1181,10 @@ non-comparable. The same copied data can produce different evidence if one run
 reads original live source paths, uses a different temp-root layout, or reports
 dirty-corpus warnings without separating them from branch-caused failures.
 
+Status: the repeatable procedure is now documented in
+[Harvest Benchmark Procedure](procedure.md). Keep this section for the original
+requirements and use the procedure as the operational source of truth.
+
 ### Plan
 
 Create a script or checked-in developer command that automates the commands in
@@ -1090,24 +1217,130 @@ The harness should record:
 - Given a candidate claims faster wall time, when the profile report is read,
   then the report also shows equal or higher successful indexed-session count.
 
+## Next Optimization 4: Buffer Annotation Writes Across Sessions
+
+### Problem
+
+The ANNOTATE stage already processes sessions concurrently, but each worker calls
+the annotation batch writer for one session at a time. The store serializes those
+calls with one annotation write mutex, so parallel workers queue behind the same
+SQLite write lane.
+
+The no-annotations profile shows this shape clearly:
+
+- classifier run: `14.996s` aggregate;
+- batch persistence: `1h24m54.399s` aggregate;
+- mutex wait: `1h19m51.913s` aggregate;
+- `7798` annotation batches for `100531` results.
+
+Parallel classifier groups can reduce classifier CPU time, but it does not remove
+the observed write contention. The next user-visible win is fewer, larger
+annotation write transactions.
+
+### Plan
+
+Add a stage-level annotation buffer between classification and SQLite writes:
+
+```text
+ANNOTATE workers
+  -> prepare per-session annotation writes in parallel
+  -> buffered annotation channel
+  -> one serial writer flushes many sessions per transaction
+  -> per-session results update progress and run state
+```
+
+Public API shape should stay minimal and testable:
+
+```go
+type SessionAnnotationWrite struct {
+    Write          ClassifierAnnotationWrite
+    TypeID         string
+    Value          string
+    TargetKind     AnnotationProfileTargetKind
+    ClassifierTime time.Duration
+}
+
+type SessionAnnotationBatch struct {
+    SessionID SessionID
+    Writes    []SessionAnnotationWrite
+    RunState  *AnnotationRunState
+}
+
+type SessionAnnotationBatchResult struct {
+    SessionID SessionID
+    Results   []ClassifierAnnotationWriteResult
+    Err       error
+}
+
+type BufferedSessionClassifier interface {
+    PrepareAnnotations(ctx context.Context, sessionID SessionID, profiler *IndexProfiler) (SessionAnnotationBatch, error)
+    FlushAnnotationBatches(ctx context.Context, batches []SessionAnnotationBatch, profiler *IndexProfiler) []SessionAnnotationBatchResult
+}
+```
+
+The final names can be adjusted during implementation, but the design boundary is
+fixed: classification remains parallel and SQLite writes are flushed by one
+bounded serial path.
+
+Implementation notes:
+
+- keep the existing `SessionClassifier` and `ProfiledSessionClassifier` fallback;
+- have `stageAnnotate` use the buffered path only when the classifier implements
+  the optional buffered interface;
+- bound the buffer by batch count, result count, and a regular flush interval so
+  memory and visible progress stay predictable;
+- preserve best-effort per-session behavior: one bad session must not stop later
+  batches;
+- save `annotation_run_state` only after that session's annotation writes
+  succeed;
+- batch run-state saves with the annotation write transaction, or flush them in
+  the same serial writer so they do not reintroduce one write transaction per
+  session;
+- keep profile counters for prepared sessions, flushed batches, write results,
+  mutex wait, commit time, and per-annotation attributed timing;
+- keep annotation values redacted in profile output.
+
+### Validation
+
+- Given many sessions produce annotations, when the buffered path runs, then the
+  store sees fewer annotation write transactions than one transaction per
+  session.
+- Given a prepared session waits below the batch-size thresholds, when `500ms`
+  elapses, then the writer flushes pending annotations and ANNOTATE progress
+  advances before all sessions finish preparing.
+- Given one prepared session has an invalid write, when the writer flushes a
+  multi-session batch, then only that session reports an error and later sessions
+  still write.
+- Given a session's annotation writes fail, when the writer completes, then its
+  `annotation_run_state` is not saved.
+- Given a session's annotation writes succeed, when the writer completes, then
+  its `annotation_run_state` is saved.
+- Given the classifier does not implement the buffered interface, when ANNOTATE
+  runs, then the existing one-session `Annotate` behavior remains active.
+- Given the no-annotations copied corpus, when profiling runs after this change,
+  then ANNOTATE should show fewer batches, lower mutex wait, and unchanged
+  annotation result counts.
+
 ## Recommended Order
 
 The current order is:
 
-1. Finish the profile/counter patch and use it to identify the next bottleneck.
-   This is done locally: the hash-preserve profile showed `ANNOTATE` as the next
-   hotspot.
-2. Keep the small annotation ID cache as a low-risk cleanup. The first profile
-   after it did not show a material speedup.
-3. Keep the annotation-run-state skip and batched classifier annotation
-   persistence. The entry-index-fix profile shows `ANNOTATE` at `5.032s`, with
-   `7084` sessions skipped by state, zero batch-persistence errors, and zero
-   entry-index foreign-key errors.
-4. Do not add the combined state/hash/version lookup in this PR. Track it as a
-   follow-up if the remaining warm-path `GetMetrics` overhead is worth removing.
-   The expected win is bounded by the observed `5.328s` over `7118` metrics reads
-   in a `2m34.5s` run.
-5. Do better reindex handling as a separate correctness track. This is
+1. Keep the INDEX write optimizations: streaming work, batch entry writes,
+   hash-backed unchanged-row skip, and safe annotation target handling.
+2. Keep the annotation-run-state skip and combined state/hash/version lookup.
+   They remove avoidable warm-path annotation work.
+3. Keep the annotation profile detail and per-annotation timing attribution.
+   They now identify the ANNOTATE bottleneck with enough precision to choose the
+   next write-shape experiment.
+4. Use [Harvest Benchmark Procedure](procedure.md) for future evidence. Do not
+   rely on ad hoc command transcripts.
+5. Implement the buffered annotation writer across sessions. The goal is fewer
+   annotation write transactions and lower aggregate mutex wait, while preserving
+   per-session best-effort results and run-state correctness.
+6. Treat parallel classifier groups as a secondary optimization. It can reduce
+   classifier CPU time, but the current no-annotations profile shows classifier
+   run time is not the dominant cost.
+7. Do better reindex handling as a separate correctness track. This is
    independent of the speed wins. Durable anchors and unresolved repair state
    need their own migration, tests, push behavior, and user-facing repair
    semantics.

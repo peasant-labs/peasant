@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -310,6 +311,185 @@ func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) 
 	}
 	if stats.BatchSupersedeCount != 0 {
 		t.Fatalf("batch supersede count = %d, want 0", stats.BatchSupersedeCount)
+	}
+}
+
+func TestApplyClassifierAnnotationBatchesWithProfile_WritesSessionsAndRunState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionA := "c1305555-0000-0000-0000-000000000212"
+	sessionB := "c1305555-0000-0000-0000-000000000213"
+	seedTestSessionV13(t, ctx, s, sessionA)
+	seedTestSessionV13(t, ctx, s, sessionB)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionB, 0)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+	var stats ingest.AnnotationProfileStats
+
+	results := s.ApplyClassifierAnnotationBatchesWithProfile(ctx, []ingest.SessionAnnotationBatch{
+		{
+			SessionID: ingest.SessionID(sessionA),
+			Writes: []ingest.SessionAnnotationWrite{{
+				Write:      classifierSessionWrite(typeID, annotatorID, sessionA, "resolved", "hash-session-buffered"),
+				TypeID:     testutil.TestTypeIDSessionOutcome,
+				Value:      "resolved",
+				TargetKind: ingest.AnnotationProfileTargetSession,
+			}},
+			RunState: &ingest.AnnotationRunState{SessionID: ingest.SessionID(sessionA), SessionEntriesHash: testutil.TestContentHash, ComputeVersion: 1, ClassifierVersion: 1, AnnotatedAt: time.Unix(1700000000, 0)},
+		},
+		{
+			SessionID: ingest.SessionID(sessionB),
+			Writes: []ingest.SessionAnnotationWrite{{
+				Write:      classifierEntryWrite(typeID, annotatorID, sessionB, 0, "resolved", "hash-entry-buffered"),
+				TypeID:     testutil.TestTypeIDSessionOutcome,
+				Value:      "resolved",
+				TargetKind: ingest.AnnotationProfileTargetEntry,
+			}},
+			RunState: &ingest.AnnotationRunState{SessionID: ingest.SessionID(sessionB), SessionEntriesHash: testutil.TestContentHash2, ComputeVersion: 1, ClassifierVersion: 1, AnnotatedAt: time.Unix(1700000001, 0)},
+		},
+	}, &stats)
+	if len(results) != 2 {
+		t.Fatalf("batch results = %d, want 2", len(results))
+	}
+	for i, result := range results {
+		if result.Err != nil {
+			t.Fatalf("batch %d error: %v", i, result.Err)
+		}
+		if len(result.Results) != 1 || result.Results[0].Err != nil {
+			t.Fatalf("batch %d write results = %+v, want one successful write", i, result.Results)
+		}
+	}
+	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
+		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)
+	}
+	if stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 2 {
+		t.Fatalf("batch detail counters mismatch: %+v", stats)
+	}
+	stateA, err := s.GetAnnotationRunState(ctx, ingest.SessionID(sessionA))
+	if err != nil {
+		t.Fatalf("GetAnnotationRunState A: %v", err)
+	}
+	if stateA == nil || stateA.SessionEntriesHash != testutil.TestContentHash {
+		t.Fatalf("state A = %+v, want saved hash %s", stateA, testutil.TestContentHash)
+	}
+	stateB, err := s.GetAnnotationRunState(ctx, ingest.SessionID(sessionB))
+	if err != nil {
+		t.Fatalf("GetAnnotationRunState B: %v", err)
+	}
+	if stateB == nil || stateB.SessionEntriesHash != testutil.TestContentHash2 {
+		t.Fatalf("state B = %+v, want saved hash %s", stateB, testutil.TestContentHash2)
+	}
+}
+
+func TestApplyClassifierAnnotationBatches_BadSessionDoesNotBlockLaterSession(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	badSession := "c1305555-0000-0000-0000-000000000214"
+	goodSession := "c1305555-0000-0000-0000-000000000215"
+	seedTestSessionV13(t, ctx, s, badSession)
+	seedTestSessionV13(t, ctx, s, goodSession)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+	badWrite := classifierSessionWrite(typeID, annotatorID, badSession, "bad", "hash-bad-buffered")
+	badWrite.Create.SessionID = nil
+
+	results := s.ApplyClassifierAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{
+		{
+			SessionID: ingest.SessionID(badSession),
+			Writes: []ingest.SessionAnnotationWrite{{
+				Write:      badWrite,
+				TypeID:     testutil.TestTypeIDSessionOutcome,
+				Value:      "bad",
+				TargetKind: ingest.AnnotationProfileTargetSession,
+			}},
+			RunState: &ingest.AnnotationRunState{SessionID: ingest.SessionID(badSession), SessionEntriesHash: testutil.TestContentHash, ComputeVersion: 1, ClassifierVersion: 1, AnnotatedAt: time.Unix(1700000002, 0)},
+		},
+		{
+			SessionID: ingest.SessionID(goodSession),
+			Writes: []ingest.SessionAnnotationWrite{{
+				Write:      classifierSessionWrite(typeID, annotatorID, goodSession, "resolved", "hash-good-buffered"),
+				TypeID:     testutil.TestTypeIDSessionOutcome,
+				Value:      "resolved",
+				TargetKind: ingest.AnnotationProfileTargetSession,
+			}},
+			RunState: &ingest.AnnotationRunState{SessionID: ingest.SessionID(goodSession), SessionEntriesHash: testutil.TestContentHash2, ComputeVersion: 1, ClassifierVersion: 1, AnnotatedAt: time.Unix(1700000003, 0)},
+		},
+	})
+	if len(results) != 2 {
+		t.Fatalf("batch results = %d, want 2", len(results))
+	}
+	if len(results[0].Results) != 1 || results[0].Results[0].Err == nil {
+		t.Fatalf("bad batch write result = %+v, want per-write error", results[0].Results)
+	}
+	if results[1].Err != nil || len(results[1].Results) != 1 || results[1].Results[0].Err != nil {
+		t.Fatalf("good batch result = %+v, want success", results[1])
+	}
+	badState, err := s.GetAnnotationRunState(ctx, ingest.SessionID(badSession))
+	if err != nil {
+		t.Fatalf("GetAnnotationRunState bad: %v", err)
+	}
+	if badState != nil {
+		t.Fatalf("bad session state = %+v, want nil", badState)
+	}
+	goodState, err := s.GetAnnotationRunState(ctx, ingest.SessionID(goodSession))
+	if err != nil {
+		t.Fatalf("GetAnnotationRunState good: %v", err)
+	}
+	if goodState == nil || goodState.SessionEntriesHash != testutil.TestContentHash2 {
+		t.Fatalf("good session state = %+v, want saved hash %s", goodState, testutil.TestContentHash2)
+	}
+	goodRows, err := s.GetAnnotationsForSession(ctx, goodSession)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession good: %v", err)
+	}
+	if len(goodRows) != 1 || goodRows[0].ContentHash == nil || *goodRows[0].ContentHash != "hash-good-buffered" {
+		t.Fatalf("good session annotations = %+v, want persisted buffered annotation", goodRows)
+	}
+}
+
+func TestApplyClassifierAnnotationBatches_RunStateErrorKeepsAnnotations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000216"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	results := s.ApplyClassifierAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{{
+		SessionID: ingest.SessionID(sessionID),
+		Writes: []ingest.SessionAnnotationWrite{{
+			Write:      classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", "hash-run-state-error"),
+			TypeID:     testutil.TestTypeIDSessionOutcome,
+			Value:      "resolved",
+			TargetKind: ingest.AnnotationProfileTargetSession,
+		}},
+		RunState: &ingest.AnnotationRunState{SessionID: ingest.SessionID(sessionID), SessionEntriesHash: "invalid-run-state-hash", ComputeVersion: 1, ClassifierVersion: 1, AnnotatedAt: time.Unix(1700000004, 0)},
+	}})
+	if len(results) != 1 {
+		t.Fatalf("batch results = %d, want 1", len(results))
+	}
+	if results[0].Err == nil {
+		t.Fatal("batch result Err = nil, want run-state save error")
+	}
+	if len(results[0].Results) != 1 || results[0].Results[0].Err != nil {
+		t.Fatalf("write results = %+v, want annotation write success", results[0].Results)
+	}
+	rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ContentHash == nil || *rows[0].ContentHash != "hash-run-state-error" {
+		t.Fatalf("session annotations = %+v, want committed annotation despite state error", rows)
+	}
+	state, err := s.GetAnnotationRunState(ctx, ingest.SessionID(sessionID))
+	if err != nil {
+		t.Fatalf("GetAnnotationRunState: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("annotation run state = %+v, want nil after save error", state)
 	}
 }
 
