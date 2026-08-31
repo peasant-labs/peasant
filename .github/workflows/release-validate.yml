@@ -5,33 +5,15 @@ name: Release Validate
 # environment to prove the .goreleaser.yml + flake packaging actually work —
 # WITHOUT touching any external registry (everything stays local).
 #
-# Two entry points:
-#   - pull_request to develop touching packaging-relevant files (validate on PR).
-#   - workflow_call from release.yml on the rc path (validate the rc).
+# Entry points:
+#   - workflow_call from release-pr.yml for release(...) PRs.
+#   - workflow_call from release.yml on the rc tag path.
 #
 # This workflow has one purpose: packaging validation
 # only. The plain linux binary smoke (ldd-static + version==tag) is owned by
 # release.yml's `smoke` job and is NOT duplicated here. The macOS cask install is
 # the darwin smoke release.yml deliberately omits, and runs ONLY on rc.
 on:
-  pull_request:
-    branches: [develop]
-    paths:
-      - ".goreleaser.yml"
-      - ".github/workflows/release.yml"
-      - ".github/workflows/release-e2e.yml"
-      - ".github/workflows/release-pr.yml"
-      - ".github/workflows/release-validate.yml"
-      - "scripts/install-goreleaser"
-      - "scripts/goreleaser-v2.17.1-homebrew.patch"
-      - "flake.nix"
-      - "flake.lock"
-      - "go.mod"
-      - "go.sum"
-      - "web/package.json"
-      - "web/pnpm-lock.yaml"
-      - "**.go"
-      - "Makefile"
   workflow_call:
 
 concurrency:
