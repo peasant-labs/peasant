@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -440,6 +441,7 @@ func TestPrintSummary_HidesUnchangedDetailsButKeepsChangedRows(t *testing.T) {
 			New:       1,
 			Updated:   1,
 			Unchanged: 2,
+			Errors:    1,
 		},
 		Duration: 100 * time.Millisecond,
 		Sessions: []ingest.SessionResult{
@@ -455,6 +457,13 @@ func TestPrintSummary_HidesUnchangedDetailsButKeepsChangedRows(t *testing.T) {
 				ParentUUID: &parentID,
 				Status:     ingest.DiffUpdated,
 				OutputPath: "/output/updated-child-id",
+			},
+			{
+				SessionID:  "error-child-id",
+				Harness:    ingest.HarnessClaudeCode,
+				ParentUUID: &parentID,
+				Status:     ingest.DiffUnchanged,
+				Error:      errors.New("extract failed"),
 			},
 			{
 				SessionID:  "unchanged-root-id",
@@ -494,8 +503,53 @@ func assertHarvestSummaryShowsOnlyChangedRows(t *testing.T, output string) {
 	if !strings.Contains(output, "updated-child-id") {
 		t.Errorf("summary details should keep a changed subagent even when its parent is unchanged; got: %s", output)
 	}
+	if !strings.Contains(output, "ERROR") || !strings.Contains(output, "error-child-id") {
+		t.Errorf("summary details should keep an error subagent even when its parent is unchanged; got: %s", output)
+	}
 	if !strings.Contains(output, "new-root-id") {
 		t.Errorf("summary details should keep changed root sessions; got: %s", output)
+	}
+}
+
+func TestPrintJSON_PreservesUnchangedSessions(t *testing.T) {
+	t.Parallel()
+	result := &ingest.PipelineResult{
+		Summary: ingest.PipelineSummary{
+			New:       1,
+			Updated:   1,
+			Unchanged: 1,
+			Errors:    1,
+		},
+		Duration: 100 * time.Millisecond,
+		Sessions: []ingest.SessionResult{
+			{SessionID: "unchanged-id", Harness: ingest.HarnessCodex, Status: ingest.DiffUnchanged},
+			{SessionID: "new-id", Harness: ingest.HarnessOpenCode, Status: ingest.DiffNew},
+			{SessionID: "error-id", Harness: ingest.HarnessClaudeCode, Status: ingest.DiffUpdated, Error: errors.New("write failed")},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := printJSON(&buf, result); err != nil {
+		t.Fatalf("printJSON: %v", err)
+	}
+	var decoded jsonPipelineResult
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode JSON output: %v", err)
+	}
+	if len(decoded.Sessions) != 3 {
+		t.Fatalf("JSON output has %d sessions, want 3", len(decoded.Sessions))
+	}
+	seenUnchanged := false
+	for _, session := range decoded.Sessions {
+		if session.SessionID == "unchanged-id" && session.Status == ingest.DiffUnchanged.String() {
+			seenUnchanged = true
+		}
+		if session.SessionID == "error-id" && session.Error != "write failed" {
+			t.Fatalf("JSON error session error = %q, want %q", session.Error, "write failed")
+		}
+	}
+	if !seenUnchanged {
+		t.Fatal("JSON output should preserve unchanged sessions")
 	}
 }
 

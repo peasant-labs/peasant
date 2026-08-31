@@ -14,28 +14,38 @@ import (
 
 func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	progress := NewProgressState()
-	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: 2})
 	secondReadStarted := make(chan struct{})
 	releaseSecondRead := make(chan struct{})
 	filesystem := &blockingReadDirFS{
 		secondReadStarted: secondReadStarted,
 		releaseSecondRead: releaseSecondRead,
 	}
-	pipeline := &Pipeline{
-		fs: filesystem,
-		config: PipelineConfig{
-			OutputDir: ResolvedPath("/out"),
-		},
-	}
 	sessions := []DiscoveredSession{
 		{SessionID: "session-one", Harness: HarnessClaudeCode},
 		{SessionID: "session-two", Harness: HarnessClaudeCode},
 	}
+	pipeline := &Pipeline{
+		fs: filesystem,
+		adapters: map[Harness]AdapterFactory{
+			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
+				return progressAdapter{sessions: sessions}
+			},
+		},
+		config: PipelineConfig{
+			Sources: map[Harness]SourceConfig{
+				HarnessClaudeCode: {Enabled: true},
+			},
+			OutputDir:     ResolvedPath("/out"),
+			DryRun:        true,
+			Progress:      progress,
+			SessionFilter: func(DiscoveredSession) bool { return false },
+		},
+	}
 
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		pipeline.diff(sessions, progress)
-		close(done)
+		_, err := pipeline.Run(context.Background())
+		done <- err
 	}()
 
 	select {
@@ -49,9 +59,16 @@ func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	}
 	close(releaseSecondRead)
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("pipeline run: %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("DIFF did not finish after releasing the blocked metadata lookup")
+	}
+	diffProgress := progress.Snapshot()[StageDiff]
+	if diffProgress.Done != 2 || diffProgress.Total != 2 || !diffProgress.Ended {
+		t.Fatalf("final DIFF progress = %+v, want done=2 total=2 ended=true", diffProgress)
 	}
 }
 
@@ -115,6 +132,10 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("pipeline did not finish after releasing the blocked filter callback")
+	}
+	filterProgress = progress.Snapshot()[StageFilter]
+	if filterProgress.Done != 2 || filterProgress.Total != 2 || !filterProgress.Ended {
+		t.Fatalf("final FILTER progress = %+v, want done=2 total=2 ended=true", filterProgress)
 	}
 }
 
