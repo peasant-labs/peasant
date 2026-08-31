@@ -1,0 +1,73 @@
+cases:
+  - name: current state skips without metrics read
+    current_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    has_metrics: true
+    has_compute_version: true
+    metric_compute_version: 8
+    state_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    state_compute_version: 8
+    state_classifier_version: 1
+    has_state: true
+    want_list_entries_calls: 0
+    want_get_metrics_calls: 0
+    want_save_state_calls: 0
+  - name: stale hash reads metrics and recomputes
+    current_hash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    has_metrics: true
+    has_compute_version: true
+    metric_compute_version: 8
+    state_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    state_compute_version: 8
+    state_classifier_version: 1
+    has_state: true
+    want_list_entries_calls: 1
+    want_get_metrics_calls: 1
+    want_save_state_calls: 1
+  - name: stale metric version reads metrics and recomputes
+    current_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    has_metrics: true
+    has_compute_version: true
+    metric_compute_version: 9
+    state_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    state_compute_version: 8
+    state_classifier_version: 1
+    has_state: true
+    want_list_entries_calls: 1
+    want_get_metrics_calls: 1
+    want_save_state_calls: 1
+  - name: missing state reads metrics and recomputes
+    current_hash: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    has_metrics: true
+    has_compute_version: true
+    metric_compute_version: 8
+    state_hash: ""
+    state_compute_version: 0
+    state_classifier_version: 0
+    has_state: false
+    want_list_entries_calls: 1
+    want_get_metrics_calls: 1
+    want_save_state_calls: 1
+  - name: missing metrics recomputes without saving state
+    current_hash: 1111111111111111111111111111111111111111111111111111111111111111
+    has_metrics: false
+    has_compute_version: false
+    metric_compute_version: 0
+    state_hash: 1111111111111111111111111111111111111111111111111111111111111111
+    state_compute_version: 8
+    state_classifier_version: 1
+    has_state: true
+    want_list_entries_calls: 1
+    want_get_metrics_calls: 1
+    want_save_state_calls: 0
+  - name: nil compute version recomputes without saving state
+    current_hash: 2222222222222222222222222222222222222222222222222222222222222222
+    has_metrics: true
+    has_compute_version: false
+    metric_compute_version: 0
+    state_hash: 2222222222222222222222222222222222222222222222222222222222222222
+    state_compute_version: 8
+    state_classifier_version: 1
+    has_state: true
+    want_list_entries_calls: 1
+    want_get_metrics_calls: 1
+    want_save_state_calls: 0

@@ -1,0 +1,67 @@
+cases:
+  - name: current state
+    session_id: 99999999-8888-4888-8888-999999999999
+    current_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    has_metric_row: true
+    has_compute_version: true
+    metric_compute_version: 12
+    want_has_compute_version: true
+    state_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    state_compute_version: 12
+    state_classifier_version: 1
+    has_state: true
+  - name: stale hash
+    session_id: 99999999-8888-4888-8888-999999999998
+    current_hash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    has_metric_row: true
+    has_compute_version: true
+    metric_compute_version: 12
+    want_has_compute_version: true
+    state_hash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    state_compute_version: 12
+    state_classifier_version: 1
+    has_state: true
+  - name: stale metric version
+    session_id: 99999999-8888-4888-8888-999999999997
+    current_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    has_metric_row: true
+    has_compute_version: true
+    metric_compute_version: 13
+    want_has_compute_version: true
+    state_hash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    state_compute_version: 12
+    state_classifier_version: 1
+    has_state: true
+  - name: missing state
+    session_id: 99999999-8888-4888-8888-999999999996
+    current_hash: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    has_metric_row: true
+    has_compute_version: true
+    metric_compute_version: 12
+    want_has_compute_version: true
+    state_hash: ""
+    state_compute_version: 0
+    state_classifier_version: 0
+    has_state: false
+  - name: missing metrics
+    session_id: 99999999-8888-4888-8888-999999999995
+    current_hash: 1111111111111111111111111111111111111111111111111111111111111111
+    has_metric_row: false
+    has_compute_version: false
+    metric_compute_version: 0
+    want_has_compute_version: false
+    state_hash: 1111111111111111111111111111111111111111111111111111111111111111
+    state_compute_version: 12
+    state_classifier_version: 1
+    has_state: true
+  - name: nil compute version
+    session_id: 99999999-8888-4888-8888-999999999994
+    current_hash: 2222222222222222222222222222222222222222222222222222222222222222
+    has_metric_row: true
+    has_compute_version: false
+    metric_compute_version: 0
+    want_has_compute_version: true
+    state_hash: 2222222222222222222222222222222222222222222222222222222222222222
+    state_compute_version: 12
+    state_classifier_version: 1
+    has_state: true

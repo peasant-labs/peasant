@@ -247,7 +247,7 @@ ORDER BY t.type_id`,
 var (
 	_ ingest.SessionStore                   = (*Store)(nil)
 	_ ingest.MetricsStore                   = (*Store)(nil)
-	_ ingest.AnnotationRunStateStore        = (*Store)(nil)
+	_ ingest.AnnotationRunInputStore        = (*Store)(nil)
 	_ ingest.ClassifierAnnotationBatchStore = (*Store)(nil)
 	_ ingest.PruneStore                     = (*Store)(nil)
 )
