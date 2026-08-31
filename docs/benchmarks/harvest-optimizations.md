@@ -864,14 +864,20 @@ corpus.
 Preferred command after the local harness change:
 
 ```bash
-scripts/profile-index-copy.sh --work /tmp/opencode/peasant-index-profile-control-streaming
+scripts/profile-index-copy.sh \
+  --work /tmp/opencode/peasant-index-profile-control-streaming \
+  --summary-output /tmp/opencode/peasant-streaming.summary.log
 ```
 
 Use one small control directory per branch, for example:
 
 ```bash
-scripts/profile-index-copy.sh --work /tmp/opencode/peasant-index-profile-control-develop
-scripts/profile-index-copy.sh --work /tmp/opencode/peasant-index-profile-control-streaming
+scripts/profile-index-copy.sh \
+  --work /tmp/opencode/peasant-index-profile-control-develop \
+  --summary-output /tmp/opencode/peasant-develop.summary.log
+scripts/profile-index-copy.sh \
+  --work /tmp/opencode/peasant-index-profile-control-streaming \
+  --summary-output /tmp/opencode/peasant-streaming.summary.log
 ```
 
 The script keeps the control directory and `profile.log` by default. Add

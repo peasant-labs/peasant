@@ -68,7 +68,6 @@ Set a corpus and run-specific output names:
 CORPUS="/tmp/opencode/peasant-index-profile-no-annotations-source"
 WORK="/tmp/opencode/peasant-index-profile-control-no-annotations-candidate"
 SUMMARY="/tmp/opencode/peasant-no-annotations-candidate.summary.log"
-RAW="/tmp/opencode/peasant-no-annotations-candidate.raw.log"
 ```
 
 Run the checked-in harness. It creates a small control directory and points the
@@ -77,11 +76,8 @@ corpus.
 
 ```bash
 STATUS=0
-scripts/profile-index-copy.sh --corpus "$CORPUS" --work "$WORK" >"$SUMMARY" 2>&1 || STATUS=$?
-if [ -f "$WORK/profile.log" ]; then
-  mv "$WORK/profile.log" "$RAW"
-fi
-printf '\nscript exit status: %d\nraw profile log: %s\nsummary log: %s\n' "$STATUS" "$RAW" "$SUMMARY" >>"$SUMMARY"
+scripts/profile-index-copy.sh --corpus "$CORPUS" --work "$WORK" --summary-output "$SUMMARY" || STATUS=$?
+printf '\nscript exit status: %d\nsummary log: %s\n' "$STATUS" "$SUMMARY" >>"$SUMMARY"
 ```
 
 `STATUS=1` can be expected on copied corpora with known dirty-data warnings. Do
@@ -90,7 +86,7 @@ number of successfully indexed sessions.
 
 ## Extract Public-Safe Evidence
 
-Use the harness summary as the main source. It prints profile lines, warning
+Use the harness summary as the main source. It writes profile lines, warning
 counts, corpus path, control directory, wall seconds, and the CLI profile status.
 
 When you create a public PR or issue comment, include:

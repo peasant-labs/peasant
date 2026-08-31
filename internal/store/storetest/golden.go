@@ -1,6 +1,7 @@
 // Package storetest provides test helpers that use a pre-migrated "golden"
 // SQLite database to avoid paying the full migration cost (~371ms) in every
-// parallel test. The golden DB is created once per test binary via sync.Once.
+// parallel test. The golden DB is shared by active tests and removed when the
+// last user of that shared template finishes.
 package storetest
 
 import (
@@ -17,35 +18,56 @@ import (
 )
 
 var (
-	goldenOnce sync.Once
+	goldenMu   sync.Mutex
 	goldenPath string // path to the fully-migrated template DB
-	goldenErr  error
+	goldenRefs int
 )
 
-// ensureGolden creates the golden DB exactly once per test binary.
+// ensureGolden creates or reuses the shared golden DB for the current test.
 func ensureGolden(t *testing.T) string {
 	t.Helper()
-	goldenOnce.Do(func() {
-		// Use os.MkdirTemp so the golden DB outlives any single test's TempDir.
+	goldenMu.Lock()
+	defer goldenMu.Unlock()
+	if goldenPath == "" {
+		// Use os.MkdirTemp so parallel tests can share one migrated DB template.
 		dir, err := os.MkdirTemp("", "storetest-golden-*")
 		if err != nil {
-			goldenErr = err
-			return
+			t.Fatalf("storetest: create golden DB temp dir: %v", err)
 		}
-		goldenPath = filepath.Join(dir, "golden.db")
+		path := filepath.Join(dir, "golden.db")
 
 		// Open (runs all migrations), then close immediately.
-		s, err := store.Open(goldenPath)
+		s, err := store.Open(path)
 		if err != nil {
-			goldenErr = err
-			return
+			_ = os.RemoveAll(dir)
+			t.Fatalf("storetest: create golden DB: %v", err)
 		}
-		goldenErr = s.Close()
-	})
-	if goldenErr != nil {
-		t.Fatalf("storetest: create golden DB: %v", goldenErr)
+		if err := s.Close(); err != nil {
+			_ = os.RemoveAll(dir)
+			t.Fatalf("storetest: close golden DB: %v", err)
+		}
+		goldenPath = path
 	}
+	goldenRefs++
+	t.Cleanup(func() { releaseGolden(t) })
 	return goldenPath
+}
+
+func releaseGolden(t *testing.T) {
+	t.Helper()
+	goldenMu.Lock()
+	defer goldenMu.Unlock()
+	if goldenRefs > 0 {
+		goldenRefs--
+	}
+	if goldenRefs != 0 || goldenPath == "" {
+		return
+	}
+	dir := filepath.Dir(goldenPath)
+	goldenPath = ""
+	if err := os.RemoveAll(dir); err != nil {
+		t.Errorf("storetest: remove golden DB temp dir %q: %v", dir, err)
+	}
 }
 
 // copyFile performs a simple file copy using io.Copy.

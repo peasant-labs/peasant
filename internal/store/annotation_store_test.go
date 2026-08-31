@@ -296,7 +296,7 @@ func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) 
 		if result.Err != nil {
 			t.Fatalf("result %d error: %v", i, result.Err)
 		}
-		if result.Profile.DedupLookupCount != 1 || result.Profile.InsertParentCount != 1 || result.Profile.InsertTargetCount != 1 || result.Profile.UpdateHashCount != 1 {
+		if result.Profile.DedupLookupCount != 1 || result.Profile.InsertParentCount != 1 || result.Profile.InsertTargetCount != 1 || result.Profile.UpdateHashCount != 0 {
 			t.Fatalf("result %d profile counters mismatch: %+v", i, result.Profile)
 		}
 		if result.Profile.PersistenceTime() <= 0 {
@@ -306,7 +306,7 @@ func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) 
 	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
 		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)
 	}
-	if stats.BatchSavepointCount != 4 || stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 2 {
+	if stats.BatchSavepointCount != 4 || stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 0 {
 		t.Fatalf("batch detail counters mismatch: %+v", stats)
 	}
 	if stats.BatchSupersedeCount != 0 {
@@ -363,7 +363,7 @@ func TestApplyClassifierAnnotationBatchesWithProfile_WritesSessionsAndRunState(t
 	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
 		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)
 	}
-	if stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 2 {
+	if stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 0 {
 		t.Fatalf("batch detail counters mismatch: %+v", stats)
 	}
 	stateA, err := s.GetAnnotationRunState(ctx, ingest.SessionID(sessionA))

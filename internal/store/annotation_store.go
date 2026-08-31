@@ -171,6 +171,13 @@ const (
     confidence, reason, provenance, is_primary, created_at
 ) VALUES (?, (SELECT id FROM target_kinds WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?)`
 
+	// Classifier writes always have a content hash. Insert it with the parent row
+	// so the hot path does not need a second UPDATE for every new annotation.
+	sqlInsertClassifierAnnotation = `INSERT INTO annotations (
+    id, target_kind_id, annotation_type_id, annotator_id, value,
+    confidence, reason, provenance, is_primary, content_hash, created_at
+) VALUES (?, (SELECT id FROM target_kinds WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
 	// V16 TPT child table INSERTs (one per target kind).
 	sqlInsertTargetSession     = `INSERT INTO annotation_target_sessions (annotation_id, session_id) VALUES (?, ?)`
 	sqlInsertTargetEntry       = `INSERT INTO annotation_target_entries (annotation_id, session_id, entry_index, end_index) VALUES (?, ?, ?, ?)`
@@ -1891,12 +1898,12 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 	}
 	nowMs := time.Now().UnixMilli()
 	parentStarted := annotationBatchProfileStart(stats)
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, sqlInsertClassifierAnnotation, &sqlitex.ExecOptions{
 		Args: []any{
 			newID, targetKindName,
 			p.AnnotationTypeID, p.AnnotatorID, p.Value,
 			ptrFloat64ToAny(p.Confidence), ptrStringToAny(p.Reason), provenanceJSON,
-			0, nowMs,
+			0, contentHash, nowMs,
 		},
 	}); err != nil {
 		recordBatchInsertParentProfile(stats, profile, time.Since(parentStarted))
@@ -1918,12 +1925,6 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 			return "", fmt.Errorf("store: persist classifier annotation target anchor: %w", err)
 		}
 	}
-	hashStarted := annotationBatchProfileStart(stats)
-	if err := sqlitex.ExecuteTransient(conn, sqlUpdateContentHash, &sqlitex.ExecOptions{Args: []any{contentHash, newID}}); err != nil {
-		recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
-		return "", fmt.Errorf("store: set classifier annotation content hash on %s: %w", newID, err)
-	}
-	recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
 	return newID, nil
 }
 
