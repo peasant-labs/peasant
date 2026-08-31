@@ -296,7 +296,7 @@ func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) 
 		if result.Err != nil {
 			t.Fatalf("result %d error: %v", i, result.Err)
 		}
-		if result.Profile.DedupLookupCount != 1 || result.Profile.InsertParentCount != 1 || result.Profile.InsertTargetCount != 1 || result.Profile.UpdateHashCount != 1 {
+		if result.Profile.DedupLookupCount != 1 || result.Profile.InsertParentCount != 1 || result.Profile.InsertTargetCount != 1 || result.Profile.UpdateHashCount != 0 {
 			t.Fatalf("result %d profile counters mismatch: %+v", i, result.Profile)
 		}
 		if result.Profile.PersistenceTime() <= 0 {
@@ -306,7 +306,7 @@ func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) 
 	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
 		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)
 	}
-	if stats.BatchSavepointCount != 4 || stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 2 {
+	if stats.BatchSavepointCount != 4 || stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 0 {
 		t.Fatalf("batch detail counters mismatch: %+v", stats)
 	}
 	if stats.BatchSupersedeCount != 0 {
@@ -363,7 +363,7 @@ func TestApplyClassifierAnnotationBatchesWithProfile_WritesSessionsAndRunState(t
 	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
 		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)
 	}
-	if stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 2 {
+	if stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 0 {
 		t.Fatalf("batch detail counters mismatch: %+v", stats)
 	}
 	stateA, err := s.GetAnnotationRunState(ctx, ingest.SessionID(sessionA))
@@ -490,6 +490,105 @@ func TestApplyClassifierAnnotationBatches_RunStateErrorKeepsAnnotations(t *testi
 	}
 	if state != nil {
 		t.Fatalf("annotation run state = %+v, want nil after save error", state)
+	}
+}
+
+func TestApplyClassifierAnnotationBatches_SessionDedupCacheSkipsAndSupersedesRepeatedTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000217"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	seed := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierSessionWrite(typeID, annotatorID, sessionID, "old", "hash-session-cache-old")})
+	if len(seed) != 1 || seed[0].Err != nil {
+		t.Fatalf("seed write = %+v, want success", seed)
+	}
+
+	batch := ingest.SessionAnnotationBatch{
+		SessionID: ingest.SessionID(sessionID),
+		Writes: []ingest.SessionAnnotationWrite{
+			{Write: classifierSessionWrite(typeID, annotatorID, sessionID, "old", "hash-session-cache-old"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "old", TargetKind: ingest.AnnotationProfileTargetSession},
+			{Write: classifierSessionWrite(typeID, annotatorID, sessionID, "new", "hash-session-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetSession},
+			{Write: classifierSessionWrite(typeID, annotatorID, sessionID, "new", "hash-session-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetSession},
+		},
+	}
+	results := s.ApplyClassifierAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{batch})
+	if len(results) != 1 || results[0].Err != nil || len(results[0].Results) != 3 {
+		t.Fatalf("batch result = %+v, want three successful writes", results)
+	}
+	for i, result := range results[0].Results {
+		if result.Err != nil {
+			t.Fatalf("write %d error: %v", i, result.Err)
+		}
+	}
+	if results[0].Results[0].Dedup != ingest.DedupSkip || results[0].Results[0].AnnotationID != seed[0].AnnotationID {
+		t.Fatalf("first dedup = %+v, want skip of seed %s", results[0].Results[0], seed[0].AnnotationID)
+	}
+	if results[0].Results[1].Dedup != ingest.DedupSupersede || results[0].Results[1].ExistingAnnotationID != seed[0].AnnotationID {
+		t.Fatalf("second dedup = %+v, want supersede of seed %s", results[0].Results[1], seed[0].AnnotationID)
+	}
+	if results[0].Results[2].Dedup != ingest.DedupSkip || results[0].Results[2].AnnotationID != results[0].Results[1].AnnotationID {
+		t.Fatalf("third dedup = %+v, want skip of new annotation %s", results[0].Results[2], results[0].Results[1].AnnotationID)
+	}
+	rows, err := s.GetAnnotationsForSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForSession: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != "new" || rows[0].ContentHash == nil || *rows[0].ContentHash != "hash-session-cache-new" {
+		t.Fatalf("active session rows = %+v, want one new annotation", rows)
+	}
+}
+
+func TestApplyClassifierAnnotationBatches_EntryDedupCacheSkipsAndSupersedesRepeatedTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000218"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 0)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+
+	seed := s.ApplyClassifierAnnotations(ctx, []ingest.ClassifierAnnotationWrite{classifierEntryWrite(typeID, annotatorID, sessionID, 0, "old", "hash-entry-cache-old")})
+	if len(seed) != 1 || seed[0].Err != nil {
+		t.Fatalf("seed write = %+v, want success", seed)
+	}
+
+	batch := ingest.SessionAnnotationBatch{
+		SessionID: ingest.SessionID(sessionID),
+		Writes: []ingest.SessionAnnotationWrite{
+			{Write: classifierEntryWrite(typeID, annotatorID, sessionID, 0, "old", "hash-entry-cache-old"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "old", TargetKind: ingest.AnnotationProfileTargetEntry},
+			{Write: classifierEntryWrite(typeID, annotatorID, sessionID, 0, "new", "hash-entry-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetEntry},
+			{Write: classifierEntryWrite(typeID, annotatorID, sessionID, 0, "new", "hash-entry-cache-new"), TypeID: testutil.TestTypeIDSessionOutcome, Value: "new", TargetKind: ingest.AnnotationProfileTargetEntry},
+		},
+	}
+	results := s.ApplyClassifierAnnotationBatches(ctx, []ingest.SessionAnnotationBatch{batch})
+	if len(results) != 1 || results[0].Err != nil || len(results[0].Results) != 3 {
+		t.Fatalf("batch result = %+v, want three successful writes", results)
+	}
+	for i, result := range results[0].Results {
+		if result.Err != nil {
+			t.Fatalf("write %d error: %v", i, result.Err)
+		}
+	}
+	if results[0].Results[0].Dedup != ingest.DedupSkip || results[0].Results[0].AnnotationID != seed[0].AnnotationID {
+		t.Fatalf("first dedup = %+v, want skip of seed %s", results[0].Results[0], seed[0].AnnotationID)
+	}
+	if results[0].Results[1].Dedup != ingest.DedupSupersede || results[0].Results[1].ExistingAnnotationID != seed[0].AnnotationID {
+		t.Fatalf("second dedup = %+v, want supersede of seed %s", results[0].Results[1], seed[0].AnnotationID)
+	}
+	if results[0].Results[2].Dedup != ingest.DedupSkip || results[0].Results[2].AnnotationID != results[0].Results[1].AnnotationID {
+		t.Fatalf("third dedup = %+v, want skip of new annotation %s", results[0].Results[2], results[0].Results[1].AnnotationID)
+	}
+	rows, err := s.GetAnnotationsForEntry(ctx, sessionID, 0)
+	if err != nil {
+		t.Fatalf("GetAnnotationsForEntry: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Value != "new" || rows[0].ContentHash == nil || *rows[0].ContentHash != "hash-entry-cache-new" {
+		t.Fatalf("active entry rows = %+v, want one new annotation", rows)
 	}
 }
 

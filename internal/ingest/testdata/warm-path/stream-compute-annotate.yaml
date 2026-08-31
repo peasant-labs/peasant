@@ -1,0 +1,14 @@
+required_sessions:
+  - alpha
+  - beta
+  - gamma
+sessions:
+  - name: alpha
+    id: 00000000-0000-4000-8000-000000000101
+    preview: alpha prompt
+  - name: beta
+    id: 00000000-0000-4000-8000-000000000102
+    preview: beta prompt
+  - name: gamma
+    id: 00000000-0000-4000-8000-000000000103
+    preview: gamma prompt

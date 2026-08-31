@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -170,6 +171,13 @@ const (
     confidence, reason, provenance, is_primary, created_at
 ) VALUES (?, (SELECT id FROM target_kinds WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?)`
 
+	// Classifier writes always have a content hash. Insert it with the parent row
+	// so the hot path does not need a second UPDATE for every new annotation.
+	sqlInsertClassifierAnnotation = `INSERT INTO annotations (
+    id, target_kind_id, annotation_type_id, annotator_id, value,
+    confidence, reason, provenance, is_primary, content_hash, created_at
+) VALUES (?, (SELECT id FROM target_kinds WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
 	// V16 TPT child table INSERTs (one per target kind).
 	sqlInsertTargetSession     = `INSERT INTO annotation_target_sessions (annotation_id, session_id) VALUES (?, ?)`
 	sqlInsertTargetEntry       = `INSERT INTO annotation_target_entries (annotation_id, session_id, entry_index, end_index) VALUES (?, ?, ?, ?)`
@@ -296,6 +304,26 @@ WHERE a.annotation_type_id = ?
   AND a.superseded_by IS NULL
 ORDER BY a.created_at DESC
 LIMIT 1`
+
+	sqlPrefetchExistingSessionAnnotationsFmt = `SELECT a.annotation_type_id, a.annotator_id, ts.session_id,
+	       a.id, COALESCE(a.content_hash, '')
+FROM annotation_target_sessions ts
+JOIN annotations a ON a.id = ts.annotation_id
+WHERE ts.session_id IN (%s)
+  AND a.annotation_type_id IN (%s)
+  AND a.annotator_id IN (%s)
+  AND a.superseded_by IS NULL
+ORDER BY a.created_at DESC`
+
+	sqlPrefetchExistingEntryAnnotationsFmt = `SELECT a.annotation_type_id, a.annotator_id, te.session_id, te.entry_index,
+	       a.id, COALESCE(a.content_hash, '')
+FROM annotation_target_entries te
+JOIN annotations a ON a.id = te.annotation_id
+WHERE te.session_id IN (%s)
+  AND a.annotation_type_id IN (%s)
+  AND a.annotator_id IN (%s)
+  AND a.superseded_by IS NULL
+ORDER BY a.created_at DESC`
 
 	// sqlSupersedeAnnotation marks an annotation as superseded by another.
 	sqlSupersedeAnnotation = `UPDATE annotations
@@ -1402,10 +1430,17 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 			endFn(&txnErr)
 		}
 	}()
+	dedupCache, prefetchErr := prefetchClassifierAnnotationDedupCache(conn, batches, stats)
+	if prefetchErr != nil {
+		// Fall back to the existing per-write lookup path when the optimization
+		// cannot prepare safely. This keeps batch persistence correct and lets the
+		// caller observe the same per-write behavior as the non-cached path.
+		dedupCache = nil
+	}
 
 	for i, batch := range batches {
 		storeWrites := sessionAnnotationBatchStoreWrites(batch.Writes)
-		writeResults, fatalErr := applyClassifierAnnotationWritesOnConn(conn, storeWrites, stats)
+		writeResults, fatalErr := applyClassifierAnnotationWritesOnConnWithCache(conn, storeWrites, stats, dedupCache)
 		results[i].Results = writeResults
 		if fatalErr != nil {
 			results[i].Err = fatalErr
@@ -1448,9 +1483,13 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 }
 
 func applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) ([]ingest.ClassifierAnnotationWriteResult, error) {
+	return applyClassifierAnnotationWritesOnConnWithCache(conn, writes, stats, nil)
+}
+
+func applyClassifierAnnotationWritesOnConnWithCache(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) ([]ingest.ClassifierAnnotationWriteResult, error) {
 	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
 	for i := range writes {
-		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats)
+		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats, dedupCache)
 		results[i] = outcome
 		if err != nil {
 			results[i].Err = err
@@ -1460,6 +1499,256 @@ func applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.Cl
 		}
 	}
 	return results, nil
+}
+
+type classifierAnnotationTargetKind uint8
+
+const (
+	classifierAnnotationTargetSession classifierAnnotationTargetKind = iota + 1
+	classifierAnnotationTargetEntry
+)
+
+type classifierAnnotationDedupKey struct {
+	annotationTypeID string
+	annotatorID      string
+	sessionID        string
+	entryIndex       int
+	targetKind       classifierAnnotationTargetKind
+}
+
+type classifierAnnotationDedupCache struct {
+	items map[classifierAnnotationDedupKey]ingest.ExistingAnnotation
+}
+
+func newClassifierAnnotationDedupCache() *classifierAnnotationDedupCache {
+	return &classifierAnnotationDedupCache{items: make(map[classifierAnnotationDedupKey]ingest.ExistingAnnotation)}
+}
+
+func (cache *classifierAnnotationDedupCache) find(p ingest.FindAnnotationParams) (*ingest.ExistingAnnotation, error) {
+	key, err := classifierAnnotationDedupKeyFromFind(p)
+	if err != nil {
+		return nil, err
+	}
+	existing, ok := cache.items[key]
+	if !ok {
+		return nil, nil
+	}
+	return &ingest.ExistingAnnotation{ID: existing.ID, ContentHash: existing.ContentHash}, nil
+}
+
+func (cache *classifierAnnotationDedupCache) put(p ingest.FindAnnotationParams, existing ingest.ExistingAnnotation) error {
+	key, err := classifierAnnotationDedupKeyFromFind(p)
+	if err != nil {
+		return err
+	}
+	cache.items[key] = existing
+	return nil
+}
+
+func (cache *classifierAnnotationDedupCache) putNewest(key classifierAnnotationDedupKey, existing ingest.ExistingAnnotation) {
+	if _, ok := cache.items[key]; ok {
+		return
+	}
+	cache.items[key] = existing
+}
+
+func classifierAnnotationDedupKeyFromFind(p ingest.FindAnnotationParams) (classifierAnnotationDedupKey, error) {
+	if p.SessionID == nil {
+		return classifierAnnotationDedupKey{}, fmt.Errorf("store: classifier annotation find requires a session target")
+	}
+	key := classifierAnnotationDedupKey{
+		annotationTypeID: p.AnnotationTypeID,
+		annotatorID:      p.AnnotatorID,
+		sessionID:        *p.SessionID,
+		targetKind:       classifierAnnotationTargetSession,
+	}
+	if p.EntryIndex != nil {
+		key.targetKind = classifierAnnotationTargetEntry
+		key.entryIndex = *p.EntryIndex
+	}
+	return key, nil
+}
+
+func prefetchClassifierAnnotationDedupCache(conn *sqlite.Conn, batches []ingest.SessionAnnotationBatch, stats *ingest.AnnotationProfileStats) (*classifierAnnotationDedupCache, error) {
+	inputs := collectClassifierAnnotationPrefetchInputs(batches)
+	cache := newClassifierAnnotationDedupCache()
+	if len(inputs.annotationTypeIDs) == 0 || len(inputs.annotatorIDs) == 0 {
+		return cache, nil
+	}
+	if len(inputs.sessionTargetIDs) > 0 {
+		started := annotationBatchProfileStart(stats)
+		if err := prefetchExistingSessionAnnotations(conn, cache, inputs.sessionTargetIDs, inputs.annotationTypeIDs, inputs.annotatorIDs); err != nil {
+			return nil, err
+		}
+		recordBatchDedupPrefetchProfile(stats, time.Since(started))
+	}
+	if len(inputs.entryTargetSessionIDs) > 0 {
+		started := annotationBatchProfileStart(stats)
+		if err := prefetchExistingEntryAnnotations(conn, cache, inputs.entryTargetSessionIDs, inputs.annotationTypeIDs, inputs.annotatorIDs); err != nil {
+			return nil, err
+		}
+		recordBatchDedupPrefetchProfile(stats, time.Since(started))
+	}
+	return cache, nil
+}
+
+type classifierAnnotationPrefetchInputs struct {
+	sessionTargetIDs      []string
+	entryTargetSessionIDs []string
+	annotationTypeIDs     []string
+	annotatorIDs          []string
+}
+
+func collectClassifierAnnotationPrefetchInputs(batches []ingest.SessionAnnotationBatch) classifierAnnotationPrefetchInputs {
+	sessionTargets := make(map[string]struct{})
+	entryTargetSessions := make(map[string]struct{})
+	annotationTypes := make(map[string]struct{})
+	annotators := make(map[string]struct{})
+	for _, batch := range batches {
+		for _, write := range batch.Writes {
+			find := write.Write.Find
+			if find.SessionID == nil {
+				continue
+			}
+			if find.AnnotationTypeID != "" {
+				annotationTypes[find.AnnotationTypeID] = struct{}{}
+			}
+			if find.AnnotatorID != "" {
+				annotators[find.AnnotatorID] = struct{}{}
+			}
+			if find.EntryIndex != nil {
+				entryTargetSessions[*find.SessionID] = struct{}{}
+			} else {
+				sessionTargets[*find.SessionID] = struct{}{}
+			}
+		}
+	}
+	return classifierAnnotationPrefetchInputs{
+		sessionTargetIDs:      sortedStringSet(sessionTargets),
+		entryTargetSessionIDs: sortedStringSet(entryTargetSessions),
+		annotationTypeIDs:     sortedStringSet(annotationTypes),
+		annotatorIDs:          sortedStringSet(annotators),
+	}
+}
+
+func prefetchExistingSessionAnnotations(conn *sqlite.Conn, cache *classifierAnnotationDedupCache, sessionIDs, annotationTypeIDs, annotatorIDs []string) error {
+	return prefetchExistingSessionAnnotationsInChunks(conn, cache, sessionIDs, annotationTypeIDs, annotatorIDs, prefetchClassifierAnnotationSessionChunkSize(annotationTypeIDs, annotatorIDs))
+}
+
+func prefetchExistingSessionAnnotationsInChunks(conn *sqlite.Conn, cache *classifierAnnotationDedupCache, sessionIDs, annotationTypeIDs, annotatorIDs []string, chunkSize int) error {
+	for start := 0; start < len(sessionIDs); start += chunkSize {
+		end := start + chunkSize
+		if end > len(sessionIDs) {
+			end = len(sessionIDs)
+		}
+		if err := prefetchExistingSessionAnnotationChunk(conn, cache, sessionIDs[start:end], annotationTypeIDs, annotatorIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func prefetchExistingSessionAnnotationChunk(conn *sqlite.Conn, cache *classifierAnnotationDedupCache, sessionIDs, annotationTypeIDs, annotatorIDs []string) error {
+	query := fmt.Sprintf(sqlPrefetchExistingSessionAnnotationsFmt,
+		sqlPlaceholders(len(sessionIDs)),
+		sqlPlaceholders(len(annotationTypeIDs)),
+		sqlPlaceholders(len(annotatorIDs)),
+	)
+	args := prefetchClassifierAnnotationArgs(sessionIDs, annotationTypeIDs, annotatorIDs)
+	return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			key := classifierAnnotationDedupKey{
+				annotationTypeID: stmt.ColumnText(0),
+				annotatorID:      stmt.ColumnText(1),
+				sessionID:        stmt.ColumnText(2),
+				targetKind:       classifierAnnotationTargetSession,
+			}
+			cache.putNewest(key, ingest.ExistingAnnotation{ID: stmt.ColumnText(3), ContentHash: stmt.ColumnText(4)})
+			return nil
+		},
+	})
+}
+
+func prefetchExistingEntryAnnotations(conn *sqlite.Conn, cache *classifierAnnotationDedupCache, sessionIDs, annotationTypeIDs, annotatorIDs []string) error {
+	return prefetchExistingEntryAnnotationsInChunks(conn, cache, sessionIDs, annotationTypeIDs, annotatorIDs, prefetchClassifierAnnotationSessionChunkSize(annotationTypeIDs, annotatorIDs))
+}
+
+func prefetchExistingEntryAnnotationsInChunks(conn *sqlite.Conn, cache *classifierAnnotationDedupCache, sessionIDs, annotationTypeIDs, annotatorIDs []string, chunkSize int) error {
+	for start := 0; start < len(sessionIDs); start += chunkSize {
+		end := start + chunkSize
+		if end > len(sessionIDs) {
+			end = len(sessionIDs)
+		}
+		if err := prefetchExistingEntryAnnotationChunk(conn, cache, sessionIDs[start:end], annotationTypeIDs, annotatorIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func prefetchExistingEntryAnnotationChunk(conn *sqlite.Conn, cache *classifierAnnotationDedupCache, sessionIDs, annotationTypeIDs, annotatorIDs []string) error {
+	query := fmt.Sprintf(sqlPrefetchExistingEntryAnnotationsFmt,
+		sqlPlaceholders(len(sessionIDs)),
+		sqlPlaceholders(len(annotationTypeIDs)),
+		sqlPlaceholders(len(annotatorIDs)),
+	)
+	args := prefetchClassifierAnnotationArgs(sessionIDs, annotationTypeIDs, annotatorIDs)
+	return sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
+		Args: args,
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			key := classifierAnnotationDedupKey{
+				annotationTypeID: stmt.ColumnText(0),
+				annotatorID:      stmt.ColumnText(1),
+				sessionID:        stmt.ColumnText(2),
+				entryIndex:       stmt.ColumnInt(3),
+				targetKind:       classifierAnnotationTargetEntry,
+			}
+			cache.putNewest(key, ingest.ExistingAnnotation{ID: stmt.ColumnText(4), ContentHash: stmt.ColumnText(5)})
+			return nil
+		},
+	})
+}
+
+func prefetchClassifierAnnotationSessionChunkSize(annotationTypeIDs, annotatorIDs []string) int {
+	const conservativeSQLiteVariableLimit = 900
+	reserved := len(annotationTypeIDs) + len(annotatorIDs)
+	chunkSize := conservativeSQLiteVariableLimit - reserved
+	if chunkSize < 1 {
+		return 1
+	}
+	return chunkSize
+}
+
+func prefetchClassifierAnnotationArgs(sessionIDs, annotationTypeIDs, annotatorIDs []string) []any {
+	args := make([]any, 0, len(sessionIDs)+len(annotationTypeIDs)+len(annotatorIDs))
+	for _, value := range sessionIDs {
+		args = append(args, value)
+	}
+	for _, value := range annotationTypeIDs {
+		args = append(args, value)
+	}
+	for _, value := range annotatorIDs {
+		args = append(args, value)
+	}
+	return args
+}
+
+func sqlPlaceholders(n int) string {
+	placeholders := make([]string, n)
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	return strings.Join(placeholders, ",")
+}
+
+func sortedStringSet(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func sessionAnnotationBatchStoreWrites(writes []ingest.SessionAnnotationWrite) []ingest.ClassifierAnnotationWrite {
@@ -1487,7 +1776,7 @@ func classifierAnnotationFailedResults(count int, err error) []ingest.Classifier
 	return results
 }
 
-func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) (ingest.ClassifierAnnotationWriteResult, error, bool) {
+func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) (ingest.ClassifierAnnotationWriteResult, error, bool) {
 	const savepointName = "classifier_annotation_batch_item"
 	result := ingest.ClassifierAnnotationWriteResult{}
 	savepointStarted := annotationBatchProfileStart(stats)
@@ -1497,7 +1786,7 @@ func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.Classifi
 	}
 	recordBatchSavepointProfile(stats, &result.Profile, time.Since(savepointStarted))
 
-	applied, err := applyClassifierAnnotationOnConn(conn, write, stats)
+	applied, err := applyClassifierAnnotationOnConn(conn, write, stats, dedupCache)
 	applied.Profile.Add(result.Profile)
 	result = applied
 	if err != nil {
@@ -1533,18 +1822,14 @@ func rollbackClassifierAnnotationSavepoint(conn *sqlite.Conn, savepointName stri
 	return cause, false
 }
 
-func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) (ingest.ClassifierAnnotationWriteResult, error) {
+func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) (ingest.ClassifierAnnotationWriteResult, error) {
 	result := ingest.ClassifierAnnotationWriteResult{Dedup: ingest.DedupCreate}
 	if write.ContentHash == "" {
 		return result, fmt.Errorf("store: classifier annotation write requires non-empty content hash")
 	}
 
-	query, args, err := classifierAnnotationFindQuery(write.Find)
-	if err != nil {
-		return result, err
-	}
 	dedupStarted := annotationBatchProfileStart(stats)
-	existing, err := findExistingAnnotationOnConn(conn, query, args)
+	existing, err := findExistingClassifierAnnotation(conn, write.Find, dedupCache)
 	recordBatchDedupLookupProfile(stats, &result.Profile, time.Since(dedupStarted))
 	if err != nil {
 		return result, fmt.Errorf("store: find existing classifier annotation: %w", err)
@@ -1575,7 +1860,23 @@ func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierA
 		}
 		recordBatchSupersedeProfile(stats, &result.Profile, time.Since(supersedeStarted))
 	}
+	if dedupCache != nil {
+		if err := dedupCache.put(write.Find, ingest.ExistingAnnotation{ID: newID, ContentHash: write.ContentHash}); err != nil {
+			return result, err
+		}
+	}
 	return result, nil
+}
+
+func findExistingClassifierAnnotation(conn *sqlite.Conn, find ingest.FindAnnotationParams, dedupCache *classifierAnnotationDedupCache) (*ingest.ExistingAnnotation, error) {
+	if dedupCache != nil {
+		return dedupCache.find(find)
+	}
+	query, args, err := classifierAnnotationFindQuery(find)
+	if err != nil {
+		return nil, err
+	}
+	return findExistingAnnotationOnConn(conn, query, args)
 }
 
 func classifierAnnotationFindQuery(p ingest.FindAnnotationParams) (string, []any, error) {
@@ -1597,12 +1898,12 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 	}
 	nowMs := time.Now().UnixMilli()
 	parentStarted := annotationBatchProfileStart(stats)
-	if err := sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
+	if err := sqlitex.ExecuteTransient(conn, sqlInsertClassifierAnnotation, &sqlitex.ExecOptions{
 		Args: []any{
 			newID, targetKindName,
 			p.AnnotationTypeID, p.AnnotatorID, p.Value,
 			ptrFloat64ToAny(p.Confidence), ptrStringToAny(p.Reason), provenanceJSON,
-			0, nowMs,
+			0, contentHash, nowMs,
 		},
 	}); err != nil {
 		recordBatchInsertParentProfile(stats, profile, time.Since(parentStarted))
@@ -1624,12 +1925,6 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 			return "", fmt.Errorf("store: persist classifier annotation target anchor: %w", err)
 		}
 	}
-	hashStarted := annotationBatchProfileStart(stats)
-	if err := sqlitex.ExecuteTransient(conn, sqlUpdateContentHash, &sqlitex.ExecOptions{Args: []any{contentHash, newID}}); err != nil {
-		recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
-		return "", fmt.Errorf("store: set classifier annotation content hash on %s: %w", newID, err)
-	}
-	recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
 	return newID, nil
 }
 
@@ -1670,6 +1965,12 @@ func recordBatchDedupLookupProfile(stats *ingest.AnnotationProfileStats, profile
 	}
 	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
 		s.BatchDedupLookupCount++
+		s.BatchDedupLookupTime += elapsed
+	})
+}
+
+func recordBatchDedupPrefetchProfile(stats *ingest.AnnotationProfileStats, elapsed time.Duration) {
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
 		s.BatchDedupLookupTime += elapsed
 	})
 }
