@@ -158,6 +158,7 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	//   its normalized annotation target table. V43 adds the publication receipt
 	//   and attempt diagnostic tables. V44 adds the Claude discovery evidence
 	//   cache. V45 adds the OpenCode change cursor. V48 adds annotation_run_state.
+	//   V49 adds annotation_target_anchors.
 	var tableCount int
 	err := sqlitex.ExecuteTransient(conn, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';`, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -168,8 +169,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count tables: %v", err)
 	}
-	if tableCount != 53 {
-		t.Errorf("expected 53 tables including annotation_run_state, got %d", tableCount)
+	if tableCount != 54 {
+		t.Errorf("expected 54 tables including annotation_target_anchors, got %d", tableCount)
 	}
 
 	// Verify all 44 indexes exist (v1-v24 base + idx_lessons_session/annotation from V28
@@ -187,8 +188,8 @@ func TestStore_Migrations_ApplyV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count indexes: %v", err)
 	}
-	if indexCount != 46 {
-		t.Errorf("expected 46 indexes including publication receipt and retry-target lookups, got %d", indexCount)
+	if indexCount != 47 {
+		t.Errorf("expected 47 indexes including annotation target anchor state lookup, got %d", indexCount)
 	}
 
 	// Verify STRICT mode by inserting TEXT into an INTEGER column on a table

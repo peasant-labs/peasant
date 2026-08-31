@@ -27,6 +27,7 @@ type stubAnnotationStore struct {
 	err           error
 	superseded    []ingest.AnnotationPushRow // returned by ListSupersededAnnotations
 	supersededErr error
+	unresolved    []ingest.AnnotationTargetAnchorRow
 }
 
 // Compile-time guard: stubAnnotationStore must satisfy ingest.AnnotationQueryStore.
@@ -38,6 +39,10 @@ func (s *stubAnnotationStore) ListSystemAnnotations(_ context.Context) ([]ingest
 
 func (s *stubAnnotationStore) ListSupersededAnnotations(_ context.Context) ([]ingest.AnnotationPushRow, error) {
 	return s.superseded, s.supersededErr
+}
+
+func (s *stubAnnotationStore) ListUnresolvedAnnotationTargetAnchors(_ context.Context, _ string) ([]ingest.AnnotationTargetAnchorRow, error) {
+	return s.unresolved, nil
 }
 
 // newSessionAnnotationRow returns a session-level AnnotationPushRow for testing.
@@ -264,6 +269,31 @@ func TestPushAnnotationsSelected_FiltersBySession(t *testing.T) {
 	// 2 from session-A + 1 project-level (nil session) = 3; session-B excluded.
 	if summary.Total != 3 {
 		t.Errorf("Total: want 3 (2 session-A + 1 non-session), got %d", summary.Total)
+	}
+}
+
+func TestPushAnnotationsSelected_UnresolvedTargetRespectsSessionSelection(t *testing.T) {
+	t.Parallel()
+	store := &stubAnnotationStore{
+		rows: []ingest.AnnotationPushRow{
+			newSessionAnnotationRow("session-B", "outcome", "ok"),
+		},
+		unresolved: []ingest.AnnotationTargetAnchorRow{{
+			AnnotationID:  "unresolved-A",
+			SessionID:     "session-A",
+			AnnotatorName: "human-web",
+			TypeID:        "quality.frustration_signal",
+		}},
+	}
+
+	if _, err := push.PushAnnotationsSelected(context.Background(), nil, store, push.AnnotationSelection{SessionIDs: map[string]bool{"session-B": true}}, true, 1); err != nil {
+		t.Fatalf("unresolved target outside selected session blocked push: %v", err)
+	}
+	if _, err := push.PushAnnotationsSelected(context.Background(), nil, store, push.AnnotationSelection{SessionIDs: map[string]bool{"session-A": true}}, true, 1); err == nil {
+		t.Fatal("unresolved target inside selected session did not block push")
+	}
+	if _, err := push.PushAnnotationsSelected(context.Background(), nil, store, push.AnnotationSelection{}, true, 1); err == nil {
+		t.Fatal("unresolved target did not block unscoped push")
 	}
 }
 

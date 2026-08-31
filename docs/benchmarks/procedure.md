@@ -101,7 +101,8 @@ When you create a public PR or issue comment, include:
 - script status and whether that status is expected;
 - outer wall time and CLI wall time;
 - session count, entry count, and byte count;
-- stage timings;
+- stage timings and INDEX write-cause details, including target-repair timings
+  when repair work runs;
 - warning counts;
 - known cleanup state for mutable copied corpora;
 - interpretation of the next bottleneck.

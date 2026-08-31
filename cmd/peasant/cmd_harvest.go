@@ -677,7 +677,18 @@ func printIndexProfileWriteStats(w io.Writer, stats ingest.SessionEntryWriteStat
 	fmt.Fprintf(w, "    projection repair rewrites: %d\n", stats.ProjectionRepairRewrites)
 	fmt.Fprintf(w, "    annotation rollback failures: %d\n", stats.AnnotationRollbackFailures)
 	fmt.Fprintf(w, "    annotation targets carried: %d\n", stats.AnnotationTargetsCarried)
+	fmt.Fprintf(w, "    annotation targets preserved: %d\n", stats.AnnotationTargetsPreserved)
 	fmt.Fprintf(w, "    annotation targets remapped: %d\n", stats.AnnotationTargetsRemapped)
+	fmt.Fprintf(w, "    annotation targets unresolved: %d\n", stats.AnnotationTargetsUnresolved)
+	fmt.Fprintf(w, "    annotation targets superseded: %d\n", stats.AnnotationTargetsSuperseded)
+	fmt.Fprintf(w, "    annotation target repair errors: %d\n", stats.AnnotationTargetRepairErrors)
+	if stats.AnnotationTargetReadTime != 0 || stats.AnnotationTargetMatchTime != 0 || stats.AnnotationTargetRestoreTime != 0 || stats.AnnotationTargetAnchorUpsertTime != 0 {
+		fmt.Fprintln(w, "  annotation target repair timing:")
+		fmt.Fprintf(w, "    read targets: %s\n", stats.AnnotationTargetReadTime)
+		fmt.Fprintf(w, "    match anchors: %s\n", stats.AnnotationTargetMatchTime)
+		fmt.Fprintf(w, "    restore target rows: %s\n", stats.AnnotationTargetRestoreTime)
+		fmt.Fprintf(w, "    anchor upserts: %s\n", stats.AnnotationTargetAnchorUpsertTime)
+	}
 }
 
 func printIndexProfileStages(w io.Writer, stages []ingest.IndexProfileStage) {

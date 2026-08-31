@@ -256,6 +256,9 @@ var migrationV24 = createSessionCommands + ";\n" +
 // migrationV48 creates annotation_run_state for classifier annotation skip
 // decisions. See schema_v48.go.
 
+// migrationV49 creates annotation_target_anchors for durable entry annotation
+// target repair state. See schema_v49.go.
+
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
 	Migrations: []string{
@@ -307,6 +310,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV46,
 		migrationV47,
 		migrationV48,
+		migrationV49,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -349,5 +353,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V46: ALTER TABLE ADD COLUMN on sessions + claude_transcript_evidence (no FKs)
 		nil,                        // V47: ALTER TABLE ADD COLUMN sessions.session_entries_hash (no FKs)
 		nil,                        // V48: CREATE TABLE annotation_run_state
+		nil,                        // V49: CREATE TABLE annotation_target_anchors
 	},
 }

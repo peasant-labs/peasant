@@ -215,7 +215,7 @@ const (
     v.is_primary, v.content_hash, v.created_at, v.updated_at, v.superseded_by`
 
 	// annotationPushRowColumns is the SELECT column list for an annotation push
-	// row, shared by sqlListSystemAnnotations and sqlListSupersededAnnotations. It
+	// row, shared by active and retraction annotation queries. It
 	// matches the column layout scanAnnotationPushRow expects (cols 0-17):
 	//  0: v.id                      (TEXT UUID)
 	//  1: v.target_kind             (TEXT)
@@ -237,7 +237,7 @@ const (
 	// 17: v.content_hash            (TEXT, nullable)
 	annotationPushRowColumns = `
     v.id, v.target_kind,
-    v.target_session_id, v.target_entry_session_id,
+	    v.target_session_id, COALESCE(v.target_entry_session_id, ata.session_id),
 	    v.target_entry_index, v.target_entry_end_index,
 	    v.target_annotation_id, v.target_project_hash, v.target_association_id,
 	    sca.session_id AS target_association_session_id,
@@ -245,31 +245,30 @@ const (
     v.confidence, v.reason, v.annotator_name,
     v.provenance, v.content_hash`
 
-	// annotationPushRowQueryHead and annotationPushRowQueryTail bracket the ONLY
-	// difference between the two annotation-push queries — the supersession
-	// predicate (IS NULL vs IS NOT NULL), spliced in below. Everything else (the
-	// column list, joins, system-origin filter, ordering) is shared.
-	annotationPushRowQueryHead = `SELECT` + annotationPushRowColumns + `
+	annotationPushRowBase = `SELECT` + annotationPushRowColumns + `
 FROM annotations_with_target v
 LEFT JOIN session_commit_associations sca ON sca.association_id = v.target_association_id
+LEFT JOIN annotation_target_anchors ata ON ata.annotation_id = v.id
 JOIN annotation_types t ON t.type_id = v.type_id
 JOIN type_origins o ON o.id = t.origin_id
-WHERE o.name = 'system'
-  AND v.superseded_by IS `
+WHERE o.name = 'system'`
 	annotationPushRowQueryTail = `
 ORDER BY v.created_at DESC`
 
 	// sqlListSystemAnnotations returns all NON-superseded system-origin annotations.
 	// Used by the push pipeline to build the annotation push payload; the village
 	// rejects unknown or user-defined type_ids.
-	sqlListSystemAnnotations = annotationPushRowQueryHead + `NULL` + annotationPushRowQueryTail
+	sqlListSystemAnnotations = annotationPushRowBase + `
+  AND v.superseded_by IS NULL
+  AND COALESCE(ata.state, 'resolved') = 'resolved'` + annotationPushRowQueryTail
 
-	// sqlListSupersededAnnotations is sqlListSystemAnnotations with the supersession
-	// predicate INVERTED: it returns SUPERSEDED system-origin annotations (the rows
-	// ListSystemAnnotations excludes). It is the retraction source:
-	// each superseded row still carries its original content-bearing fields, so the
-	// caller recomputes the SAME content hash it was pushed with.
-	sqlListSupersededAnnotations = annotationPushRowQueryHead + `NOT NULL` + annotationPushRowQueryTail
+	// sqlListSupersededAnnotations returns system-origin retraction candidates.
+	// Rows come from annotations superseded by another annotation, or active
+	// classifier annotations whose repaired entry target became superseded. The
+	// target-loss path relies on the persisted content hash to retract the exact
+	// annotation Village already stored.
+	sqlListSupersededAnnotations = annotationPushRowBase + `
+  AND (v.superseded_by IS NOT NULL OR ata.state = 'superseded')` + annotationPushRowQueryTail
 
 	// sqlFindExistingSessionAnnotation finds the most recent non-superseded annotation
 	// for a given (annotation_type_id, annotator_id, session_id) triple.
@@ -645,6 +644,15 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 		Args: childArgs,
 	}); err != nil {
 		return "", fmt.Errorf("store: CreateAnnotation: insert target: %w", err)
+	}
+	if params.EntryTarget != nil {
+		endIdx := params.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = params.EntryTarget.EntryIndex + 1
+		}
+		if err = upsertAnnotationTargetAnchorOnConn(conn, newID, params.EntryTarget.SessionID, params.EntryTarget.EntryIndex, endIdx, AnnotationTargetAnchorResolved); err != nil {
+			return "", fmt.Errorf("store: CreateAnnotation: persist entry target anchor: %w", err)
+		}
 	}
 
 	return newID, nil
@@ -1243,6 +1251,15 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 	}); err != nil {
 		return "", fmt.Errorf("store: CreateAnnotationAndSupersede: insert target: %w", err)
 	}
+	if p.EntryTarget != nil {
+		endIdx := p.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = p.EntryTarget.EntryIndex + 1
+		}
+		if err = upsertAnnotationTargetAnchorOnConn(conn, newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx, AnnotationTargetAnchorResolved); err != nil {
+			return "", fmt.Errorf("store: CreateAnnotationAndSupersede: persist entry target anchor: %w", err)
+		}
+	}
 
 	// 3. Supersede old annotation: set superseded_by = newID and updated_at = now.
 	if err = sqlitex.ExecuteTransient(conn, sqlSupersedeAnnotation, &sqlitex.ExecOptions{
@@ -1598,6 +1615,15 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 		return "", fmt.Errorf("store: insert classifier annotation target: %w", err)
 	}
 	recordBatchInsertTargetProfile(stats, profile, time.Since(targetStarted))
+	if p.EntryTarget != nil {
+		endIdx := p.EntryTarget.EndIndex
+		if endIdx == 0 {
+			endIdx = p.EntryTarget.EntryIndex + 1
+		}
+		if err := upsertAnnotationTargetAnchorOnConn(conn, newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx, AnnotationTargetAnchorResolved); err != nil {
+			return "", fmt.Errorf("store: persist classifier annotation target anchor: %w", err)
+		}
+	}
 	hashStarted := annotationBatchProfileStart(stats)
 	if err := sqlitex.ExecuteTransient(conn, sqlUpdateContentHash, &sqlitex.ExecOptions{Args: []any{contentHash, newID}}); err != nil {
 		recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
@@ -2633,6 +2659,16 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 		}); err != nil {
 			err = fmt.Errorf("store: BatchCreateAnnotations[%d]: insert target: %w", i, err)
 			return nil, err
+		}
+		if p.EntryTarget != nil {
+			endIdx := p.EntryTarget.EndIndex
+			if endIdx == 0 {
+				endIdx = p.EntryTarget.EntryIndex + 1
+			}
+			if err = upsertAnnotationTargetAnchorOnConn(conn, newID, p.EntryTarget.SessionID, p.EntryTarget.EntryIndex, endIdx, AnnotationTargetAnchorResolved); err != nil {
+				err = fmt.Errorf("store: BatchCreateAnnotations[%d]: persist entry target anchor: %w", i, err)
+				return nil, err
+			}
 		}
 	}
 

@@ -59,16 +59,25 @@ type IndexProfileStage struct {
 // SessionEntryWriteStats records the branch decisions made by the INDEX writer.
 // Counters, not logs, make warm dirty-corpus profiles explainable.
 type SessionEntryWriteStats struct {
-	HashMatches                int
-	HashMisses                 int
-	FallbackCompares           int
-	SkippedByHash              int
-	SkippedByCompare           int
-	Rewrites                   int
-	ProjectionRepairRewrites   int
-	AnnotationRollbackFailures int
-	AnnotationTargetsCarried   int
-	AnnotationTargetsRemapped  int
+	HashMatches                  int
+	HashMisses                   int
+	FallbackCompares             int
+	SkippedByHash                int
+	SkippedByCompare             int
+	Rewrites                     int
+	ProjectionRepairRewrites     int
+	AnnotationRollbackFailures   int
+	AnnotationTargetsCarried     int
+	AnnotationTargetsPreserved   int
+	AnnotationTargetsRemapped    int
+	AnnotationTargetsUnresolved  int
+	AnnotationTargetsSuperseded  int
+	AnnotationTargetRepairErrors int
+
+	AnnotationTargetReadTime         time.Duration
+	AnnotationTargetMatchTime        time.Duration
+	AnnotationTargetRestoreTime      time.Duration
+	AnnotationTargetAnchorUpsertTime time.Duration
 }
 
 // Add folds other into s.
@@ -82,7 +91,15 @@ func (s *SessionEntryWriteStats) Add(other SessionEntryWriteStats) {
 	s.ProjectionRepairRewrites += other.ProjectionRepairRewrites
 	s.AnnotationRollbackFailures += other.AnnotationRollbackFailures
 	s.AnnotationTargetsCarried += other.AnnotationTargetsCarried
+	s.AnnotationTargetsPreserved += other.AnnotationTargetsPreserved
 	s.AnnotationTargetsRemapped += other.AnnotationTargetsRemapped
+	s.AnnotationTargetsUnresolved += other.AnnotationTargetsUnresolved
+	s.AnnotationTargetsSuperseded += other.AnnotationTargetsSuperseded
+	s.AnnotationTargetRepairErrors += other.AnnotationTargetRepairErrors
+	s.AnnotationTargetReadTime += other.AnnotationTargetReadTime
+	s.AnnotationTargetMatchTime += other.AnnotationTargetMatchTime
+	s.AnnotationTargetRestoreTime += other.AnnotationTargetRestoreTime
+	s.AnnotationTargetAnchorUpsertTime += other.AnnotationTargetAnchorUpsertTime
 }
 
 // Any reports whether any counter is non-zero.
@@ -96,7 +113,15 @@ func (s SessionEntryWriteStats) Any() bool {
 		s.ProjectionRepairRewrites != 0 ||
 		s.AnnotationRollbackFailures != 0 ||
 		s.AnnotationTargetsCarried != 0 ||
-		s.AnnotationTargetsRemapped != 0
+		s.AnnotationTargetsPreserved != 0 ||
+		s.AnnotationTargetsRemapped != 0 ||
+		s.AnnotationTargetsUnresolved != 0 ||
+		s.AnnotationTargetsSuperseded != 0 ||
+		s.AnnotationTargetRepairErrors != 0 ||
+		s.AnnotationTargetReadTime != 0 ||
+		s.AnnotationTargetMatchTime != 0 ||
+		s.AnnotationTargetRestoreTime != 0 ||
+		s.AnnotationTargetAnchorUpsertTime != 0
 }
 
 // AnnotationProfileStats records aggregate work inside the ANNOTATE stage.

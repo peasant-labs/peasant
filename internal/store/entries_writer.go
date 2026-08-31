@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
-	"github.com/peasant-labs/peasant/internal/githooks"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/crypto/sha3"
@@ -40,10 +40,11 @@ const (
 	// sqlSelectTargetEntriesForSession reads the entry-annotation attachments a
 	// re-index has to carry across its DELETE. Ordered so a restore is
 	// deterministic and a failure names the same row every time.
-	sqlSelectTargetEntriesForSession = `SELECT targets.annotation_id, targets.entry_index, targets.end_index, annotators.name
+	sqlSelectTargetEntriesForSession = `SELECT targets.annotation_id, targets.entry_index, targets.end_index, annotators.name, annotator_kinds.name
 FROM annotation_target_entries targets
 JOIN annotations ON annotations.id = targets.annotation_id
 JOIN annotators ON annotators.id = annotations.annotator_id
+JOIN annotator_kinds ON annotator_kinds.id = annotators.kind_id
 WHERE targets.session_id = ?
 ORDER BY targets.entry_index, targets.annotation_id`
 
@@ -286,8 +287,11 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		}
 	}
 
+	targetReadStarted := time.Now()
 	carried, err := readEntryAnnotationTargets(conn, string(sessionID))
+	outcome.stats.AnnotationTargetReadTime += time.Since(targetReadStarted)
 	if err != nil {
+		outcome.stats.AnnotationTargetRepairErrors++
 		return outcome, fmt.Errorf("store: read annotation_target_entries for %s: %w — "+
 			"what: the entry-targeted annotations of this session could not be read before re-indexing; "+
 			"why: a query against annotation_target_entries failed; "+
@@ -354,12 +358,9 @@ func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, en
 		}
 	}
 
-	remappedTargets, err := restoreEntryAnnotationTargets(conn, string(sessionID), carried, entries)
+	remappedTargets, err := restoreEntryAnnotationTargets(conn, string(sessionID), carried, entries, &outcome.stats)
 	if err != nil {
-		var refused *annotationRemapRefusedError
-		if errors.As(err, &refused) {
-			outcome.stats.AnnotationRollbackFailures++
-		}
+		outcome.stats.AnnotationTargetRepairErrors++
 		return outcome, err
 	}
 	outcome.stats.AnnotationTargetsRemapped += remappedTargets
@@ -1006,6 +1007,7 @@ func bindNullableStopReason(stmt *sqlite.Stmt, param int, value *schema.StopReas
 type entryAnnotationTarget struct {
 	annotationID  string
 	annotatorName string
+	annotatorKind string
 	entryIndex    int
 	endIndex      int
 	anchors       []entryTargetAnchor
@@ -1021,14 +1023,6 @@ type entryTargetAnchor struct {
 	contentPreview string
 }
 
-type annotationRemapRefusedError struct {
-	err error
-}
-
-func (e *annotationRemapRefusedError) Error() string { return e.err.Error() }
-
-func (e *annotationRemapRefusedError) Unwrap() error { return e.err }
-
 // readEntryAnnotationTargets reads the entry-annotation attachments of one
 // session, so a re-index can put them back.
 func readEntryAnnotationTargets(conn *sqlite.Conn, sessionID string) ([]entryAnnotationTarget, error) {
@@ -1039,6 +1033,7 @@ func readEntryAnnotationTargets(conn *sqlite.Conn, sessionID string) ([]entryAnn
 			targets = append(targets, entryAnnotationTarget{
 				annotationID:  stmt.ColumnText(0),
 				annotatorName: stmt.ColumnText(3),
+				annotatorKind: stmt.ColumnText(4),
 				entryIndex:    stmt.ColumnInt(1),
 				endIndex:      stmt.ColumnInt(2),
 			})
@@ -1119,11 +1114,13 @@ func restoreEntryAnnotationTargets(
 	sessionID string,
 	carried []entryAnnotationTarget,
 	entries []schema.SessionEntry,
+	stats *ingest.SessionEntryWriteStats,
 ) (int, error) {
 	if len(carried) == 0 {
 		return 0, nil
 	}
 	remappedTargets := 0
+	matchStarted := time.Now()
 	present := make(map[int]bool, len(entries))
 	for i := range entries {
 		present[entries[i].EntryIndex] = true
@@ -1132,37 +1129,68 @@ func restoreEntryAnnotationTargets(
 	for i := range entries {
 		newAnchors = append(newAnchors, entryTargetAnchorFromEntry(&entries[i]))
 	}
+	if stats != nil {
+		stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+	}
 	for _, target := range carried {
 		start, end := target.entryIndex, target.endIndex
+		matchStarted := time.Now()
 		missingIndex := missingSpanIndex(target, present)
-		if missingIndex < 0 && entryAnnotationSpanStillMatches(target, newAnchors) {
-			if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end); err != nil {
+		spanStillMatches := missingIndex < 0 && entryAnnotationSpanStillMatches(target, newAnchors)
+		if stats != nil {
+			stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+		}
+		if spanStillMatches {
+			if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end, stats); err != nil {
 				return remappedTargets, err
+			}
+			if stats != nil {
+				stats.AnnotationTargetsPreserved++
 			}
 			continue
 		}
-		if missingIndex < 0 {
-			missingIndex = target.entryIndex
-		}
 		{
 			var remapped bool
+			matchStarted := time.Now()
 			if start, end, remapped = remapEntryAnnotationTarget(target, newAnchors); !remapped {
-				dryRun := fmt.Sprintf("peasant annotate prune %s --session %s --dry-run",
-					githooks.ShellQuote(target.annotatorName), githooks.ShellQuote(sessionID))
-				return remappedTargets, &annotationRemapRefusedError{err: fmt.Errorf("store: preserve annotation_target_entries for %s[%d,%d): the re-index no longer contains the complete span targeted by annotation %s — "+
-					"what: an entry annotation could not be carried onto the replacement index; "+
-					"why: entry %d disappeared from the newly indexed transcript and no unique contiguous anchor match was found; "+
-					"user impact: the re-index was rolled back, so the previous entries and annotation target remain intact and later village pushes are not poisoned by an orphan; "+
-					"how to fix: using the same global --config-dir/--data-dir overrides as this ingest, inspect the annotation with 'peasant annotate list %s'. If it no longer applies, preview the annotator-and-session-scoped cleanup with '%s', remove or recreate the affected annotation, then re-run the same peasant ingest command",
-					sessionID, target.entryIndex, target.endIndex, target.annotationID, missingIndex,
-					githooks.ShellQuote(sessionID), dryRun)}
+				if stats != nil {
+					stats.AnnotationTargetMatchTime += time.Since(matchStarted)
+				}
+				state := AnnotationTargetAnchorSuperseded
+				if target.annotatorKind == "human" {
+					state = AnnotationTargetAnchorUnresolved
+				}
+				anchorStarted := time.Now()
+				if err := upsertAnnotationTargetAnchorOnConn(conn, target.annotationID, sessionID, target.entryIndex, target.endIndex, state); err != nil {
+					if stats != nil {
+						stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
+					}
+					return remappedTargets, err
+				}
+				if stats != nil {
+					stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
+					if state == AnnotationTargetAnchorUnresolved {
+						stats.AnnotationTargetsUnresolved++
+					} else {
+						stats.AnnotationTargetsSuperseded++
+					}
+				}
+				continue
+			}
+			if stats != nil {
+				stats.AnnotationTargetMatchTime += time.Since(matchStarted)
 			}
 		}
-		if start != target.entryIndex || end != target.endIndex {
-			remappedTargets++
-		}
-		if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end); err != nil {
+		sameSpan := start == target.entryIndex && end == target.endIndex
+		if err := insertEntryAnnotationTarget(conn, sessionID, target, start, end, stats); err != nil {
 			return remappedTargets, err
+		}
+		if sameSpan {
+			if stats != nil {
+				stats.AnnotationTargetsPreserved++
+			}
+		} else {
+			remappedTargets++
 		}
 	}
 	return remappedTargets, nil
@@ -1211,16 +1239,33 @@ func anchorsShareKey(a, b entryTargetAnchor) bool {
 	return false
 }
 
-func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target entryAnnotationTarget, start, end int) error {
+func insertEntryAnnotationTarget(conn *sqlite.Conn, sessionID string, target entryAnnotationTarget, start, end int, stats *ingest.SessionEntryWriteStats) error {
+	restoreStarted := time.Now()
 	if err := sqlitex.ExecuteTransient(conn, sqlInsertTargetEntry, &sqlitex.ExecOptions{
 		Args: []any{target.annotationID, sessionID, start, end},
 	}); err != nil {
+		if stats != nil {
+			stats.AnnotationTargetRestoreTime += time.Since(restoreStarted)
+		}
 		return fmt.Errorf("store: restore annotation_target_entries for %s[%d]: %w — "+
 			"what: an entry annotation could not be re-attached to the entry it targets after re-indexing; "+
 			"why: the insert into annotation_target_entries failed; "+
 			"user impact: session %s was NOT re-indexed (the whole re-index is rolled back), because completing it would have left annotation %s with no publishable target; "+
 			"how to fix: check the analytics store for constraint or corruption errors, then re-run the same peasant ingest command with the same global --config-dir/--data-dir overrides",
 			sessionID, start, err, sessionID, target.annotationID)
+	}
+	if stats != nil {
+		stats.AnnotationTargetRestoreTime += time.Since(restoreStarted)
+	}
+	anchorStarted := time.Now()
+	if err := upsertAnnotationTargetAnchorOnConn(conn, target.annotationID, sessionID, start, end, AnnotationTargetAnchorResolved); err != nil {
+		if stats != nil {
+			stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
+		}
+		return err
+	}
+	if stats != nil {
+		stats.AnnotationTargetAnchorUpsertTime += time.Since(anchorStarted)
 	}
 	return nil
 }
