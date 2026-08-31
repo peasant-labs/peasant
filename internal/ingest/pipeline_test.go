@@ -4445,7 +4445,7 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Pipeline must call ListStaleIndexSessions with exactly CurrentIndexVersion=4.
+	// Pipeline must call ListStaleIndexSessions with exactly CurrentIndexVersion.
 	if metricsStore.ListStaleCalledWithVersion != ingest.CurrentIndexVersion {
 		t.Errorf("ListStaleIndexSessions called with version=%d, want CurrentIndexVersion=%d",
 			metricsStore.ListStaleCalledWithVersion, ingest.CurrentIndexVersion)
