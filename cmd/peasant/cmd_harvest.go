@@ -1173,8 +1173,8 @@ func printJSON(w io.Writer, result *ingest.PipelineResult) error {
 
 // printSummary outputs the human-readable pipeline summary.
 //
-// Default (no --verbose): path header + summary line + per-session rows with provider and output path.
-// --verbose: same rows but subagents are expanded underneath their parent instead of collapsed.
+// Default (no --verbose): path header + summary line + changed/error rows with provider and output path.
+// --verbose: same rows but visible subagents are expanded underneath their parent instead of collapsed.
 func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, includeActive bool, outputDir string, configPath string, sources map[defaults.Harness]ingest.SourceConfig, customPatternCount int) {
 	// Path header.
 	fmt.Fprintf(w, "Output:  %s\n", outputDir)
@@ -1197,6 +1197,7 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	if customPatternCount > 0 {
 		fmt.Fprintf(w, "Custom patterns: %d\n", customPatternCount)
 	}
+	fmt.Fprintln(w)
 
 	s := result.Summary
 	total := s.New + s.Updated + s.Unchanged + s.Active + s.Errors
@@ -1206,11 +1207,13 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	if includeActive {
 		activeLabel = "(included)"
 	}
-	fmt.Fprintf(w, "peasant harvest: %d sessions (%d new, %d updated, %d unchanged, %d errors), %d active %s [%s]\n",
-		total,
-		s.New, s.Updated, s.Unchanged, s.Errors, s.Active,
-		activeLabel,
-		result.Duration.Round(100*time.Millisecond))
+	fmt.Fprintf(w, "peasant harvest: %d sessions\n", total)
+	fmt.Fprintf(w, "   - %-5d new\n", s.New)
+	fmt.Fprintf(w, "   - %-5d updated\n", s.Updated)
+	fmt.Fprintf(w, "   - %-5d unchanged\n", s.Unchanged)
+	fmt.Fprintf(w, "   - %-5d errors\n", s.Errors)
+	fmt.Fprintf(w, "   - %-5d active %s\n", s.Active, activeLabel)
+	fmt.Fprintf(w, "duration: %s\n", result.Duration.Round(100*time.Millisecond))
 	// The index line is printed whenever there is anything to say, INCLUDING when
 	// nothing was indexed because indexing failed.
 	//
@@ -1223,36 +1226,54 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	// import itself succeeded.
 	indexFailures := countIndexFailures(result.IndexLog)
 	if s.Indexed > 0 || s.Computed > 0 || indexFailures > 0 {
-		fmt.Fprintf(w, "  index: %d indexed, %d computed (index_version=%d, metadata_version=%d)\n",
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "index: %d indexed, %d computed (index_version=%d, metadata_version=%d)\n",
 			s.Indexed, s.Computed, s.IndexVersion, s.MetadataVersion)
 	}
 	if indexFailures > 0 {
 		fmt.Fprintf(w, "  warning: %d session(s) were imported but NOT indexed, so they are empty in the viewer, in "+
-			"search, in metrics, and in anything published. Run 'peasant harvest --json' for the reason on each.\n",
+			"search, in metrics, and in anything published.\n",
 			indexFailures)
+		fmt.Fprintln(w, "  Run 'peasant harvest --json' for the reason on each.")
 	}
 
 	if len(result.Sessions) == 0 {
 		return
 	}
 
+	shouldPrintSession := func(sr ingest.SessionResult) bool {
+		return sr.Error != nil || sr.Status != ingest.DiffUnchanged
+	}
+
 	// Build subagent maps using ParentUUID (semantic, not path-based).
 	subagentCount := map[ingest.SessionID]int{}
 	subagentsByParent := map[ingest.SessionID][]ingest.SessionResult{}
 	for _, sr := range result.Sessions {
-		if sr.ParentUUID != nil {
+		if sr.ParentUUID != nil && shouldPrintSession(sr) {
 			subagentCount[*sr.ParentUUID]++
 			subagentsByParent[*sr.ParentUUID] = append(subagentsByParent[*sr.ParentUUID], sr)
 		}
 	}
 
-	// Collect root sessions (non-subagents) preserving original order.
+	// Collect visible root sessions preserving original order. Unchanged rows stay
+	// out of the detail list because large warm harvests can contain thousands.
 	var rootSessions []ingest.SessionResult
+	printedRoot := map[ingest.SessionID]bool{}
 	for _, sr := range result.Sessions {
-		if sr.ParentUUID == nil {
+		if sr.ParentUUID == nil && shouldPrintSession(sr) {
+			rootSessions = append(rootSessions, sr)
+			printedRoot[sr.SessionID] = true
+		}
+	}
+	for _, sr := range result.Sessions {
+		if sr.ParentUUID != nil && shouldPrintSession(sr) && !printedRoot[*sr.ParentUUID] {
 			rootSessions = append(rootSessions, sr)
 		}
 	}
+	if len(rootSessions) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
 
 	// printRoot outputs one root session row and, in verbose mode, expands its subagents.
 	printRoot := func(sr ingest.SessionResult) {

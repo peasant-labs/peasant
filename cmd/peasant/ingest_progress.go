@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,15 +10,16 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"golang.org/x/term"
 )
 
 // progressRenderer renders per-stage progress bars inline in a terminal.
-// It redraws the same lines in-place using ANSI cursor control at a fixed
-// 10 Hz tick rate. In non-TTY environments (CI, pipes) it is a no-op;
-// the existing printSummary output is unaffected.
+// It uses Bubble Tea's renderer instead of hand-rolled ANSI erase/redraw logic,
+// so redraws are diffed and capped. In non-TTY environments (CI, pipes) it is a
+// no-op; the existing printSummary output is unaffected.
 //
 // Usage:
 //
@@ -30,38 +32,55 @@ import (
 //	r.Wait()            // blocks until renderer goroutine exits
 //	r.Clear()           // erase progress lines before printing final summary
 type progressRenderer struct {
-	w         io.Writer
-	state     *ingest.ProgressState
-	anim      *animation.Animation
-	isTTY     bool
-	mu        sync.Mutex
-	order     []ingest.Stage
-	drawn     int // number of lines currently on screen
-	animFrame int // current animation frame index
-	animTick  int // tick counter for animation frame rate
-	wg        sync.WaitGroup
+	w     io.Writer
+	input io.Reader
+	state *ingest.ProgressState
+	anim  *animation.Animation
+	isTTY bool
+	order []ingest.Stage
+	wg    sync.WaitGroup
 }
 
 const (
-	barWidth          = 24
-	barFill           = '█'
-	barEmpty          = '░'
-	ansiUp            = "\x1b[%dA" // move cursor up N lines
-	ansiEraseLn       = "\x1b[2K"  // erase current line
-	ansiCR            = "\r"
-	animTicksPerFrame = 3 // at 10 Hz tick, advance animation every 3 ticks (~3.3 fps)
+	barWidth               = 24
+	barFill                = '█'
+	barEmpty               = '░'
+	progressRendererFPS    = 24
+	progressTickInterval   = time.Second / progressRendererFPS
+	animationFrameInterval = 300 * time.Millisecond
 )
+
+type progressTickMsg time.Time
+
+type progressStopMsg struct{}
+
+type progressModel struct {
+	state        *ingest.ProgressState
+	anim         *animation.Animation
+	order        []ingest.Stage
+	animFrame    int
+	lastAnimTick time.Time
+	stopped      bool
+}
 
 // newProgressRenderer creates a tick-based renderer that reads from state and writes to w.
 // TTY detection is performed on w if it is an *os.File; otherwise rendering
 // is disabled (no-op mode for pipes/CI).
 func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animation.Animation) *progressRenderer {
 	isTTY := false
+	var input io.Reader
 	if f, ok := w.(*os.File); ok {
 		isTTY = term.IsTerminal(int(f.Fd()))
 	}
+	if isTTY && term.IsTerminal(int(os.Stdin.Fd())) {
+		// Bubble Tea's renderer can ask the terminal about supported modes. Reading
+		// stdin lets it consume those replies instead of leaking them back to the
+		// shell after harvest exits. The model still ignores all key input.
+		input = os.Stdin
+	}
 	r := &progressRenderer{
 		w:     w,
+		input: input,
 		state: state,
 		anim:  anim,
 		isTTY: isTTY,
@@ -72,10 +91,10 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 	return r
 }
 
-// Run ticks at 10 Hz, reading a snapshot from state and redrawing the progress
-// display. Runs until ctx is cancelled, then does a final paint before returning.
-// Call as a goroutine; wg.Add(1) is called by newProgressRenderer so Wait() is
-// safe to call immediately after go r.Run(ctx) without a startup race.
+// Run starts a small Bubble Tea program that reads a snapshot from state at a
+// capped frame rate. Call as a goroutine; wg.Add(1) is called by
+// newProgressRenderer so Wait() is safe to call immediately after go r.Run(ctx)
+// without a startup race.
 func (r *progressRenderer) Run(ctx context.Context) {
 	defer r.wg.Done()
 	if !r.isTTY {
@@ -83,26 +102,25 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		<-ctx.Done()
 		return
 	}
-	ticker := time.NewTicker(100 * time.Millisecond) // 10 Hz
-	defer ticker.Stop()
-	for {
+	program := tea.NewProgram(
+		progressModel{state: r.state, anim: r.anim, order: r.order},
+		tea.WithOutput(r.w),
+		tea.WithInput(r.input),
+		tea.WithFPS(progressRendererFPS),
+		tea.WithoutSignalHandler(),
+	)
+	finished := make(chan struct{})
+	go func() {
 		select {
 		case <-ctx.Done():
-			r.mu.Lock()
-			r.redraw() // final paint to show completed state
-			r.mu.Unlock()
-			return
-		case <-ticker.C:
-			r.mu.Lock()
-			if r.anim != nil && len(r.anim.Frames) > 0 {
-				r.animTick++
-				if r.animTick%animTicksPerFrame == 0 {
-					r.animFrame = (r.animFrame + 1) % len(r.anim.Frames)
-				}
-			}
-			r.redraw()
-			r.mu.Unlock()
+			program.Send(progressStopMsg{})
+		case <-finished:
 		}
+	}()
+	_, err := program.Run()
+	close(finished)
+	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
+		fmt.Fprintf(r.w, "warning: harvest progress renderer failed: %v\n", err)
 	}
 }
 
@@ -113,68 +131,69 @@ func (r *progressRenderer) Wait() { r.wg.Wait() }
 // When false, rendering is a no-op and log suppression is not needed.
 func (r *progressRenderer) IsTTY() bool { return r.isTTY }
 
-// Clear erases all progress lines from the terminal so the final summary
-// prints cleanly from the top of the progress block.
-func (r *progressRenderer) Clear() {
-	if !r.isTTY {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.erase()
+// Clear is retained for the command path. Bubble Tea clears the rendered block
+// when the model returns a blank view during shutdown, so no extra ANSI erase is
+// necessary here.
+func (r *progressRenderer) Clear() {}
+
+func progressTick() tea.Cmd {
+	return tea.Tick(progressTickInterval, func(t time.Time) tea.Msg {
+		return progressTickMsg(t)
+	})
 }
 
-// erase moves the cursor up and clears all drawn lines.
-// Must be called with r.mu held.
-func (r *progressRenderer) erase() {
-	if r.drawn == 0 {
-		return
-	}
-	// Move up to the first drawn line.
-	fmt.Fprintf(r.w, ansiUp, r.drawn)
-	// Erase each line.
-	for i := 0; i < r.drawn; i++ {
-		fmt.Fprint(r.w, ansiEraseLn+ansiCR)
-		if i < r.drawn-1 {
-			fmt.Fprint(r.w, "\n")
+func (m progressModel) Init() tea.Cmd { return progressTick() }
+
+func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case progressStopMsg:
+		m.stopped = true
+		return m, tea.Quit
+	case progressTickMsg:
+		if m.anim != nil && len(m.anim.Frames) > 0 {
+			tickTime := time.Time(msg)
+			if m.lastAnimTick.IsZero() || tickTime.Sub(m.lastAnimTick) >= animationFrameInterval {
+				m.animFrame = (m.animFrame + 1) % len(m.anim.Frames)
+				m.lastAnimTick = tickTime
+			}
 		}
+		return m, progressTick()
 	}
-	// Return cursor to the start of the first drawn line.
-	fmt.Fprintf(r.w, ansiUp, r.drawn-1)
-	r.drawn = 0
+	return m, nil
 }
 
-// redraw erases current lines and redraws all stage bars from the current snapshot.
-// Must be called with r.mu held.
-func (r *progressRenderer) redraw() {
-	snap := r.state.Snapshot()
-	r.erase()
-	lines := 0
+func (m progressModel) View() tea.View {
+	if m.stopped {
+		return tea.NewView("")
+	}
+	return tea.NewView(m.render())
+}
+
+func (m progressModel) render() string {
+	snap := m.state.Snapshot()
+	var lines []string
 
 	// Render animation frame above progress bars.
-	if r.anim != nil && len(r.anim.Frames) > 0 {
-		f := r.anim.Frames[r.animFrame]
+	if m.anim != nil && len(m.anim.Frames) > 0 {
+		f := m.anim.Frames[m.animFrame]
 		for _, line := range f {
-			fmt.Fprint(r.w, line+"\n")
-			lines++
+			lines = append(lines, line)
 		}
-		fmt.Fprint(r.w, "\n")
-		lines++
+		lines = append(lines, "")
 	}
 
-	for _, stage := range r.order {
+	for _, stage := range m.order {
 		sp, ok := snap[stage]
 		if !ok {
 			continue
 		}
-		fmt.Fprint(r.w, r.renderBar(stage, sp)+"\n")
-		lines++
+		lines = append(lines, renderProgressBar(stage, sp))
 	}
-	r.drawn = lines
+	return strings.Join(lines, "\n")
 }
 
-// renderBar formats a single stage bar as a fixed-width string.
-func (r *progressRenderer) renderBar(stage ingest.Stage, sp ingest.StageProgress) string {
+// renderProgressBar formats a single stage bar as a fixed-width string.
+func renderProgressBar(stage ingest.Stage, sp ingest.StageProgress) string {
 	// Status icon.
 	icon := "○" // not started
 	switch {
@@ -190,6 +209,9 @@ func (r *progressRenderer) renderBar(stage ingest.Stage, sp ingest.StageProgress
 	var filled int
 	if sp.Total > 0 {
 		filled = sp.Done * barWidth / sp.Total
+		if sp.Done > 0 && filled == 0 {
+			filled = 1
+		}
 		if filled > barWidth {
 			filled = barWidth
 		}

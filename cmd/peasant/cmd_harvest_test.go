@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,9 +362,7 @@ func TestDebugFlagHidden(t *testing.T) {
 	}
 }
 
-// TestPrintSummary_ErrorsInParenthetical verifies printSummary includes errors
-// in the parenthetical and active separately (1sq).
-func TestPrintSummary_ErrorsInParenthetical(t *testing.T) {
+func TestPrintSummary_ExpandsSessionCounts(t *testing.T) {
 	t.Parallel()
 	result := &ingest.PipelineResult{
 		Summary: ingest.PipelineSummary{
@@ -383,17 +382,41 @@ func TestPrintSummary_ErrorsInParenthetical(t *testing.T) {
 	printSummary(&buf, result, false, false, "/tmp/out", "", sources, 0)
 	output := buf.String()
 
-	// The format should be: N sessions (X new, Y updated, Z unchanged, W errors), A active (debounced)
-	if !strings.Contains(output, "3 new, 2 updated, 1 unchanged, 2 errors)") {
-		t.Errorf("errors should be in parenthetical; got: %s", output)
+	for _, text := range []string{
+		"peasant harvest: 9 sessions",
+		"active (debounced)",
+		"duration: 1.5s",
+	} {
+		if !strings.Contains(output, text) {
+			t.Errorf("summary should include %q; got: %s", text, output)
+		}
 	}
-	if !strings.Contains(output, "1 active (debounced)") {
-		t.Errorf("active should be shown separately as 'N active (debounced)'; got: %s", output)
+	for label, count := range map[string]int{"new": 3, "updated": 2, "unchanged": 1, "errors": 2, "active": 1} {
+		if !harvestSummaryHasCount(output, count, label) {
+			t.Errorf("summary should include count %d for %s; got: %s", count, label, output)
+		}
 	}
-	// Total should be 3+2+1+1+2 = 9
-	if !strings.Contains(output, "9 sessions") {
-		t.Errorf("total should be 9 sessions; got: %s", output)
+}
+
+func harvestSummaryHasCount(output string, count int, label string) bool {
+	countText := fmt.Sprint(count)
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		hasCount := false
+		hasLabel := false
+		for _, field := range fields {
+			if field == countText {
+				hasCount = true
+			}
+			if strings.Trim(field, ":,()[]") == label {
+				hasLabel = true
+			}
+		}
+		if hasCount && hasLabel {
+			return true
+		}
 	}
+	return false
 }
 
 // TestPrintSummary_IncludeActiveLabel verifies the dynamic active-session label.
@@ -415,6 +438,140 @@ func TestPrintSummary_IncludeActiveLabel(t *testing.T) {
 	printSummary(&buf, result, false, true, "/out", "", sources, 0)
 	if !strings.Contains(buf.String(), "(included)") {
 		t.Errorf("includeActive=true should show '(included)'; got: %s", buf.String())
+	}
+}
+
+func TestPrintSummary_PrintsExplicitDuration(t *testing.T) {
+	t.Parallel()
+	result := &ingest.PipelineResult{
+		Summary:  ingest.PipelineSummary{New: 1},
+		Duration: 1500 * time.Millisecond,
+	}
+
+	var buf bytes.Buffer
+	printSummary(&buf, result, false, false, "/out", "", map[ingest.Harness]ingest.SourceConfig{}, 0)
+	if !strings.Contains(buf.String(), "duration: 1.5s") {
+		t.Errorf("summary should print explicit wall-clock duration; got: %s", buf.String())
+	}
+}
+
+func TestPrintSummary_HidesUnchangedDetailsButKeepsChangedRows(t *testing.T) {
+	t.Parallel()
+	parentID := ingest.SessionID("unchanged-parent-id")
+	result := &ingest.PipelineResult{
+		Summary: ingest.PipelineSummary{
+			New:       1,
+			Updated:   1,
+			Unchanged: 2,
+			Errors:    1,
+		},
+		Duration: 100 * time.Millisecond,
+		Sessions: []ingest.SessionResult{
+			{
+				SessionID:  parentID,
+				Harness:    ingest.HarnessClaudeCode,
+				Status:     ingest.DiffUnchanged,
+				OutputPath: "/output/unchanged-parent-id",
+			},
+			{
+				SessionID:  "updated-child-id",
+				Harness:    ingest.HarnessClaudeCode,
+				ParentUUID: &parentID,
+				Status:     ingest.DiffUpdated,
+				OutputPath: "/output/updated-child-id",
+			},
+			{
+				SessionID:  "error-child-id",
+				Harness:    ingest.HarnessClaudeCode,
+				ParentUUID: &parentID,
+				Status:     ingest.DiffUnchanged,
+				Error:      errors.New("extract failed"),
+			},
+			{
+				SessionID:  "unchanged-root-id",
+				Harness:    ingest.HarnessCodex,
+				Status:     ingest.DiffUnchanged,
+				OutputPath: "/output/unchanged-root-id",
+			},
+			{
+				SessionID:  "new-root-id",
+				Harness:    ingest.HarnessOpenCode,
+				Status:     ingest.DiffNew,
+				OutputPath: "/output/new-root-id",
+			},
+		},
+	}
+
+	var normal bytes.Buffer
+	printSummary(&normal, result, false, false, "/output", "", map[ingest.Harness]ingest.SourceConfig{}, 0)
+	assertHarvestSummaryShowsOnlyChangedRows(t, normal.String())
+
+	var verbose bytes.Buffer
+	printSummary(&verbose, result, true, false, "/output", "", map[ingest.Harness]ingest.SourceConfig{}, 0)
+	assertHarvestSummaryShowsOnlyChangedRows(t, verbose.String())
+}
+
+func assertHarvestSummaryShowsOnlyChangedRows(t *testing.T, output string) {
+	t.Helper()
+	if !harvestSummaryHasCount(output, 2, "unchanged") {
+		t.Errorf("summary count should still report unchanged sessions; got: %s", output)
+	}
+	if strings.Contains(output, "UNCHANGED") {
+		t.Errorf("summary details should not print UNCHANGED rows; got: %s", output)
+	}
+	if strings.Contains(output, "unchanged-parent-id") || strings.Contains(output, "unchanged-root-id") {
+		t.Errorf("summary details should hide unchanged session identifiers; got: %s", output)
+	}
+	if !strings.Contains(output, "updated-child-id") {
+		t.Errorf("summary details should keep a changed subagent even when its parent is unchanged; got: %s", output)
+	}
+	if !strings.Contains(output, "ERROR") || !strings.Contains(output, "error-child-id") {
+		t.Errorf("summary details should keep an error subagent even when its parent is unchanged; got: %s", output)
+	}
+	if !strings.Contains(output, "new-root-id") {
+		t.Errorf("summary details should keep changed root sessions; got: %s", output)
+	}
+}
+
+func TestPrintJSON_PreservesUnchangedSessions(t *testing.T) {
+	t.Parallel()
+	result := &ingest.PipelineResult{
+		Summary: ingest.PipelineSummary{
+			New:       1,
+			Updated:   1,
+			Unchanged: 1,
+			Errors:    1,
+		},
+		Duration: 100 * time.Millisecond,
+		Sessions: []ingest.SessionResult{
+			{SessionID: "unchanged-id", Harness: ingest.HarnessCodex, Status: ingest.DiffUnchanged},
+			{SessionID: "new-id", Harness: ingest.HarnessOpenCode, Status: ingest.DiffNew},
+			{SessionID: "error-id", Harness: ingest.HarnessClaudeCode, Status: ingest.DiffUpdated, Error: errors.New("write failed")},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := printJSON(&buf, result); err != nil {
+		t.Fatalf("printJSON: %v", err)
+	}
+	var decoded jsonPipelineResult
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode JSON output: %v", err)
+	}
+	if len(decoded.Sessions) != 3 {
+		t.Fatalf("JSON output has %d sessions, want 3", len(decoded.Sessions))
+	}
+	seenUnchanged := false
+	for _, session := range decoded.Sessions {
+		if session.SessionID == "unchanged-id" && session.Status == ingest.DiffUnchanged.String() {
+			seenUnchanged = true
+		}
+		if session.SessionID == "error-id" && session.Error != "write failed" {
+			t.Fatalf("JSON error session error = %q, want %q", session.Error, "write failed")
+		}
+	}
+	if !seenUnchanged {
+		t.Fatal("JSON output should preserve unchanged sessions")
 	}
 }
 

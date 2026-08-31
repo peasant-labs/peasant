@@ -47,14 +47,7 @@ func TestProgressRenderer_IsTTY_NonFileWriter(t *testing.T) {
 	}
 }
 
-// TestProgressRenderer_redraw_WritesOutput verifies that the internal redraw()
-// method produces non-empty output when isTTY is forced to true and the progress
-// state contains started stages.
-//
-// We set isTTY=true directly (bypassing the os.File / term.IsTerminal check) to
-// exercise the rendering path in a test environment. This tests the bar-drawing
-// logic without requiring a real terminal.
-func TestProgressRenderer_redraw_WritesOutput(t *testing.T) {
+func TestProgressModelRenderWritesOutput(t *testing.T) {
 	state := ingest.NewProgressState()
 	// Emit a start event so the stage appears in the snapshot.
 	state.Update(ingest.ProgressEvent{
@@ -69,22 +62,29 @@ func TestProgressRenderer_redraw_WritesOutput(t *testing.T) {
 		Total: 5,
 	})
 
-	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, state, nil)
-	// Force TTY mode so redraw() actually writes.
-	r.isTTY = true
-
-	r.mu.Lock()
-	r.redraw()
-	r.mu.Unlock()
-
-	out := buf.String()
+	out := progressModel{state: state, order: ingest.StageOrder}.render()
 	if out == "" {
-		t.Fatal("redraw() wrote nothing, want non-empty output")
+		t.Fatal("render() wrote nothing, want non-empty output")
 	}
 	// The output should contain the stage name.
 	if !strings.Contains(out, ingest.StageDiscover.String()) {
-		t.Errorf("redraw() output %q does not contain stage name %q", out, ingest.StageDiscover.String())
+		t.Errorf("render() output %q does not contain stage name %q", out, ingest.StageDiscover.String())
+	}
+}
+
+func TestProgressRendererUsesGentleFrameRate(t *testing.T) {
+	if progressRendererFPS != 24 {
+		t.Fatalf("progressRendererFPS = %d, want 24", progressRendererFPS)
+	}
+}
+
+func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) {
+	line := renderProgressBar(ingest.StageExtract, ingest.StageProgress{Started: true, Done: 126, Total: 4953})
+	if !strings.Contains(line, string(barFill)) {
+		t.Fatalf("progress bar should show at least one filled cell for non-zero work; got %q", line)
+	}
+	if !strings.Contains(line, "126/4953") {
+		t.Fatalf("progress bar count should remain precise; got %q", line)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 	cancel()
 	r.Wait()
 
-	// At least one redraw should have occurred (either from tick or final paint).
+	// At least one Bubble Tea render should have occurred before shutdown.
 	if buf.Len() == 0 {
 		t.Error("TTY renderer wrote 0 bytes after ticks + cancel, want some output")
 	}

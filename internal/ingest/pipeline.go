@@ -502,7 +502,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// Stage 2: DIFF
 	diffProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(allSessions)})
-	diffResult := p.diff(allSessions)
+	diffResult := p.diff(allSessions, prog)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
 	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(diffResult.Sessions), len(diffResult.Sessions))
 
@@ -526,7 +526,6 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	}
 
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: len(diffResult.Sessions)})
-	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: toProcess, Total: len(diffResult.Sessions)})
 
 	// (indexedMeta defined at package level for use by helper methods)
 
@@ -553,7 +552,10 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// can inherit their parent's fate (rejected parent → rejected children).
 	filterPassedParents := make(map[SessionID]bool)
 
-	for _, entry := range diffResult.Sessions {
+	for index, entry := range diffResult.Sessions {
+		advanceFilter := func() {
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageFilter, Done: index + 1, Total: len(diffResult.Sessions)})
+		}
 		// AllowedSessionIDs filter: skip sessions not in the allowed set.
 		if p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[entry.Session.SessionID] {
 			recordDryRun(entry, DiffUnchanged)
@@ -563,6 +565,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
 			})
+			advanceFilter()
 			continue
 		}
 
@@ -576,6 +579,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 				ParentUUID: entry.Session.ParentUUID,
 				Status:     DiffUnchanged,
 			})
+			advanceFilter()
 			continue
 		}
 
@@ -592,6 +596,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 						ParentUUID: entry.Session.ParentUUID,
 						Status:     DiffUnchanged,
 					})
+					advanceFilter()
 					continue
 				}
 				filterPassedParents[entry.Session.SessionID] = true
@@ -603,6 +608,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 					ParentUUID: entry.Session.ParentUUID,
 					Status:     DiffUnchanged,
 				})
+				advanceFilter()
 				continue
 			}
 		}
@@ -621,6 +627,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 					ParentUUID: entry.Session.ParentUUID,
 					Status:     DiffUnchanged,
 				})
+				advanceFilter()
 				continue
 			}
 		}
@@ -650,7 +657,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			recordDryRun(entry, entry.Status)
 			toProcessEntries = append(toProcessEntries, entry)
 		}
+		advanceFilter()
 	}
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
 
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
@@ -1677,17 +1686,18 @@ func (p *Pipeline) originEvidenceMiners() map[Harness]OriginEvidenceMiner {
 }
 
 // diff categorizes each discovered session.
-func (p *Pipeline) diff(sessions []DiscoveredSession) DiffResult {
+func (p *Pipeline) diff(sessions []DiscoveredSession, prog *ProgressState) DiffResult {
 	result := DiffResult{
 		Sessions: make([]DiffEntry, 0, len(sessions)),
 	}
 
-	for _, session := range sessions {
+	for index, session := range sessions {
 		status := p.classifySession(session)
 		result.Sessions = append(result.Sessions, DiffEntry{
 			Session: session,
 			Status:  status,
 		})
+		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(sessions)})
 	}
 
 	return result
@@ -3193,6 +3203,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	if p.config.Force {
 		// --force --reindex: target ALL sessions.
 		targeted = scanned
+		for index := range scanned {
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
+		}
 	} else {
 		// --reindex only: target sessions with stale index_version.
 		staleSet := make(map[SessionID]bool)
@@ -3205,19 +3218,23 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 				staleSet[sid] = true
 			}
 		}
-		for _, t := range scanned {
+		for index, t := range scanned {
 			if staleSet[t.session.SessionID] {
 				targeted = append(targeted, t)
 			}
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
 		}
 	}
-	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(targeted), Total: len(scanned)})
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(targeted), len(scanned))
 
-	// Stage 3: FILTER — emit targeted count.
+	// Stage 3: FILTER — scan progress; targeted counts stay in the profile data.
 	filterProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: len(scanned)})
-	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(targeted), Total: len(scanned)})
+	for index := range scanned {
+		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageFilter, Done: index + 1, Total: len(scanned)})
+	}
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(targeted), len(scanned))
 
 	if p.config.DryRun {
