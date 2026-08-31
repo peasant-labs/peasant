@@ -80,8 +80,9 @@ type e2eWorkflowContractFixture struct {
 	} `yaml:"release_guard"`
 	ReusableCallers []reusableWorkflowCallerExpectation `yaml:"reusable_callers"`
 	ReleaseValidate struct {
-		Workflow      string          `yaml:"workflow"`
-		RequiredPaths nonEmptyStrings `yaml:"required_paths"`
+		Workflow          string          `yaml:"workflow"`
+		RequiredTriggers  nonEmptyStrings `yaml:"required_triggers"`
+		ForbiddenTriggers nonEmptyStrings `yaml:"forbidden_triggers"`
 	} `yaml:"release_validate"`
 	TestsWorkflow struct {
 		Triggers      nonEmptyStrings `yaml:"triggers"`
@@ -112,6 +113,9 @@ type workflowEnvExpectation struct {
 
 type workflowJobPermissionsExpectation struct {
 	Job         string                   `yaml:"job"`
+	Uses        string                   `yaml:"uses"`
+	Needs       string                   `yaml:"needs"`
+	IfContains  nonEmptyStrings          `yaml:"if_contains"`
 	Permissions []workflowEnvExpectation `yaml:"permissions"`
 }
 
@@ -179,7 +183,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		len(fixture.ReleaseGuard.RequiredJobPermissions) != 2 || len(fixture.ReleaseGuard.RequiredJobEnv) != 2 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
-		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredPaths) != 15 ||
+		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
 		len(fixture.TestsWorkflow.Triggers) != 2 || len(fixture.TestsWorkflow.RequiredPaths) != 2 {
 		t.Fatalf("e2e: workflow contract fixture is incomplete: %+v", fixture)
 	}
@@ -194,7 +198,7 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		seenCallers[caller.Workflow] = struct{}{}
 		seenJobs := make(map[string]struct{}, len(caller.Jobs))
 		for jobIndex, job := range caller.Jobs {
-			if strings.TrimSpace(job.Job) == "" || len(job.Permissions) != 1 {
+			if strings.TrimSpace(job.Job) == "" || strings.TrimSpace(job.Uses) == "" || len(job.Permissions) != 1 {
 				t.Fatalf("e2e: reusable caller fixture %d job %d is incomplete: %+v", callerIndex, jobIndex, job)
 			}
 			if _, exists := seenJobs[job.Job]; exists {
@@ -293,20 +297,57 @@ func TestReusableWorkflowCallerPermissions(t *testing.T) {
 		}
 		for _, expectation := range caller.Jobs {
 			job := yamlMappingValue(jobs, expectation.Job)
-			if job == nil || yamlMappingValue(job, "uses") == nil {
+			uses := yamlMappingValue(job, "uses")
+			if job == nil || uses == nil {
 				t.Fatalf("%s: workflow must define reusable job %q", caller.Workflow, expectation.Job)
+			}
+			if uses.Value != expectation.Uses {
+				t.Fatalf("%s: reusable job %q uses %q, want %q", caller.Workflow, expectation.Job, uses.Value, expectation.Uses)
+			}
+			if expectation.Needs != "" {
+				needs := yamlMappingValue(job, "needs")
+				gotNeeds := "<nil>"
+				if needs != nil {
+					gotNeeds = needs.Value
+				}
+				if needs == nil || needs.Value != expectation.Needs {
+					t.Fatalf("%s: reusable job %q needs %q, want %q", caller.Workflow, expectation.Job, gotNeeds, expectation.Needs)
+				}
+			}
+			if len(expectation.IfContains) > 0 {
+				condition := yamlMappingValue(job, "if")
+				if condition == nil {
+					t.Fatalf("%s: reusable job %q must define an if condition", caller.Workflow, expectation.Job)
+				}
+				for _, want := range expectation.IfContains {
+					if !strings.Contains(condition.Value, want) {
+						t.Fatalf("%s: reusable job %q if condition missing %q: %q", caller.Workflow, expectation.Job, want, condition.Value)
+					}
+				}
 			}
 			assertYAMLMappingExact(t, yamlMappingValue(job, "permissions"), expectation.Permissions, caller.Workflow+" reusable job "+expectation.Job+" permissions")
 		}
 	}
 }
 
-func TestReleaseValidateTracksPackagingInputs(t *testing.T) {
+func TestReleaseValidateRunsOnlyFromReleaseFlows(t *testing.T) {
 	fixture := loadE2EWorkflowContractFixture(t)
 	path := filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseValidate.Workflow)
 	doc := readWorkflowDoc(t, path)
-	paths := yamlMappingValue(yamlMappingValue(yamlMappingValue(doc, "on"), "pull_request"), "paths")
-	assertYAMLSequenceExact(t, paths, fixture.ReleaseValidate.RequiredPaths, "release-validate pull_request paths")
+	on := yamlMappingValue(doc, "on")
+	if on == nil || on.Kind != yaml.MappingNode {
+		t.Fatalf("release-validate: workflow must define an on mapping")
+	}
+	for _, trigger := range fixture.ReleaseValidate.RequiredTriggers {
+		if yamlMappingValue(on, trigger) == nil {
+			t.Fatalf("release-validate: missing required trigger %q", trigger)
+		}
+	}
+	for _, trigger := range fixture.ReleaseValidate.ForbiddenTriggers {
+		if yamlMappingValue(on, trigger) != nil {
+			t.Fatalf("release-validate: forbidden direct trigger %q is present", trigger)
+		}
+	}
 }
 
 func TestReleaseValidateRPMPreparationFailsClosed(t *testing.T) {

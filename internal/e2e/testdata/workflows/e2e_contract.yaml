@@ -111,49 +111,50 @@ reusable_callers:
   - workflow: .github/workflows/release.yml
     jobs:
       - job: e2e
+        uses: ./.github/workflows/e2e.yml
         permissions:
           - key: contents
             value: read
       - job: release-e2e
+        uses: ./.github/workflows/release-e2e.yml
         permissions:
           - key: contents
             value: read
       - job: validate-packaging
+        uses: ./.github/workflows/release-validate.yml
+        needs: guard
+        if_contains:
+          - contains(github.ref_name, '-rc')
         permissions:
           - key: contents
             value: read
   - workflow: .github/workflows/release-pr.yml
     jobs:
       - job: tests
+        uses: ./.github/workflows/tests.yml
         permissions:
           - key: contents
             value: read
       - job: e2e
+        uses: ./.github/workflows/e2e.yml
         permissions:
           - key: contents
             value: read
       - job: release-validate
+        uses: ./.github/workflows/release-validate.yml
+        needs: validate
+        if_contains:
+          - startsWith(github.event.pull_request.title, 'release(')
+          - contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action)
         permissions:
           - key: contents
             value: read
 release_validate:
   workflow: .github/workflows/release-validate.yml
-  required_paths:
-    - .goreleaser.yml
-    - .github/workflows/release.yml
-    - .github/workflows/release-e2e.yml
-    - .github/workflows/release-pr.yml
-    - .github/workflows/release-validate.yml
-    - scripts/install-goreleaser
-    - scripts/goreleaser-v2.17.1-homebrew.patch
-    - flake.nix
-    - flake.lock
-    - go.mod
-    - go.sum
-    - web/package.json
-    - web/pnpm-lock.yaml
-    - "**.go"
-    - Makefile
+  required_triggers:
+    - workflow_call
+  forbidden_triggers:
+    - pull_request
 tests_workflow:
   triggers:
     - pull_request

@@ -69,11 +69,10 @@ jobs:
         run: go run github.com/peasant-labs/schema/cmd/release-guard check-maintainer --user "$PR_AUTHOR"
 
   # Full validation matrices on an OPEN release PR — REGARDLESS of files touched.
-  # tests.yml / e2e.yml / release-validate.yml are path-filtered on their own
-  # pull_request triggers, so a release marker commit that touches no .go /
-  # packaging / e2e paths would otherwise skip them entirely (zero pre-merge
-  # signal). Call them here as reusable workflows, gated on the same release(
-  # title as `validate`, so every release PR proves the full gate before merge.
+  # tests.yml and e2e.yml are path-filtered on their own pull_request triggers,
+  # while release-validate.yml is workflow_call-only. Call all of them here as
+  # reusable workflows, gated on the same release( title as `validate`, so every
+  # release PR proves the full gate before merge.
   # (On the bootstrap PR that EDITS tests.yml, tests also fires standalone via its
   # own path filter; cancel-in-progress collapses the two — the called run, which
   # starts after `validate`, is the survivor. Future release PRs run it once.)
