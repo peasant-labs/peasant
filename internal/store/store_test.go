@@ -2344,11 +2344,25 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 	}
 }
 
+// indexVersionBeforeOpenCodeGraph is the index version in force before the
+// OpenCode entry graph shape changed. A session stored at this version must be
+// re-read as stale under the current version, so the OpenCode indexer output
+// change actually re-indexes existing sessions.
+const indexVersionBeforeOpenCodeGraph = 12
+
 // indexVersionBeforeOpenCodeSyntheticPart is the index version in force before
 // the OpenCode synthetic-part rule changed. A session stored at this version
 // must be re-read as stale under the current version, so the OpenCode indexer
 // output change actually re-indexes existing sessions.
 const indexVersionBeforeOpenCodeSyntheticPart = 14
+
+// TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterGraphVersionBump proves
+// that an OpenCode session indexed at the version before the entry graph changed
+// is stale under the current index version, so the version bump re-indexes it.
+func TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterGraphVersionBump(t *testing.T) {
+	t.Parallel()
+	assertOpenCodeSessionAtIndexVersionIsStale(t, indexVersionBeforeOpenCodeGraph, "pre-graph version")
+}
 
 // TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterSyntheticPartVersionBump
 // proves that an OpenCode session indexed at the version before the synthetic
@@ -2356,6 +2370,11 @@ const indexVersionBeforeOpenCodeSyntheticPart = 14
 // bump re-indexes it.
 func TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterSyntheticPartVersionBump(t *testing.T) {
 	t.Parallel()
+	assertOpenCodeSessionAtIndexVersionIsStale(t, indexVersionBeforeOpenCodeSyntheticPart, "pre-synthetic-part version")
+}
+
+func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int, versionLabel string) {
+	t.Helper()
 	s := openTestStore(t)
 	ctx := context.Background()
 
@@ -2368,8 +2387,8 @@ func TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterSyntheticPartVersionB
 		t.Fatalf("InsertSessions: %v", err)
 	}
 	sid, _ := ingest.NewSessionID(rawSession)
-	if err := s.UpdateIndexState(ctx, sid, indexVersionBeforeOpenCodeSyntheticPart, 1705276800000); err != nil {
-		t.Fatalf("UpdateIndexState(opencode, pre-synthetic-part version): %v", err)
+	if err := s.UpdateIndexState(ctx, sid, storedVersion, 1705276800000); err != nil {
+		t.Fatalf("UpdateIndexState(opencode, %s): %v", versionLabel, err)
 	}
 
 	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
@@ -2383,6 +2402,6 @@ func TestStore_ListStaleIndexSessionsReindexesOpenCodeAfterSyntheticPartVersionB
 		}
 	}
 	if !found {
-		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", indexVersionBeforeOpenCodeSyntheticPart, ingest.CurrentIndexVersion)
+		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", storedVersion, ingest.CurrentIndexVersion)
 	}
 }
