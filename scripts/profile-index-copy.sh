@@ -6,14 +6,15 @@
 # state, logs, and a peasant symlink that points at the copied corpus.
 #
 # Usage:
-#   scripts/profile-index-copy.sh
-#   scripts/profile-index-copy.sh --work /tmp/opencode/peasant-index-profile-control-develop
-#   scripts/profile-index-copy.sh --corpus /tmp/opencode/peasant-index-profile-live-source --clean
+#   scripts/profile-index-copy.sh --summary-output /tmp/opencode/profile.summary.log
+#   scripts/profile-index-copy.sh --work /tmp/opencode/peasant-index-profile-control-develop --summary-output /tmp/opencode/develop.summary.log
+#   scripts/profile-index-copy.sh --corpus /tmp/opencode/peasant-index-profile-live-source --summary-output /tmp/opencode/live.summary.log --clean
 
 set -uo pipefail
 
 CORPUS="/tmp/opencode/peasant-index-profile-live-source"
 WORK="/tmp/opencode/peasant-index-profile-control"
+SUMMARY_OUTPUT=""
 CLEAN=0
 
 usage() {
@@ -46,6 +47,11 @@ while [ "$#" -gt 0 ]; do
       WORK=$2
       shift 2
       ;;
+    --summary-output)
+      [ "$#" -ge 2 ] || fatal "--summary-output needs a path"
+      SUMMARY_OUTPUT=$2
+      shift 2
+      ;;
     --clean)
       CLEAN=1
       shift
@@ -64,6 +70,17 @@ command -v go >/dev/null 2>&1 || fatal "go is required"
 command -v node >/dev/null 2>&1 || fatal "node is required"
 command -v rg >/dev/null 2>&1 || fatal "rg is required"
 
+[ -n "$SUMMARY_OUTPUT" ] || fatal "--summary-output is required"
+case "$SUMMARY_OUTPUT" in
+  /*) ;;
+  *) fatal "--summary-output must be an absolute path" ;;
+esac
+SUMMARY_DIR=${SUMMARY_OUTPUT%/*}
+if [ -z "$SUMMARY_DIR" ]; then
+  SUMMARY_DIR=/
+fi
+[ -d "$SUMMARY_DIR" ] || fatal "--summary-output parent does not exist: $SUMMARY_DIR"
+
 case "$CORPUS" in
   /tmp/opencode/peasant-index-profile-*) ;;
   *) fatal "corpus must be a copied profile corpus under /tmp/opencode/peasant-index-profile-*" ;;
@@ -77,6 +94,11 @@ esac
 [ -f "$CORPUS/peasant.db" ] || fatal "copied corpus has no peasant.db: $CORPUS"
 [ -d "$CORPUS/peasant-sync" ] || fatal "copied corpus has no peasant-sync/: $CORPUS"
 [ "$WORK" != "$CORPUS" ] || fatal "work directory must not be the copied corpus"
+if [ "$CLEAN" -eq 1 ]; then
+  case "$SUMMARY_OUTPUT" in
+    "$WORK"/*) fatal "--summary-output must not be inside --work when --clean is set" ;;
+  esac
+fi
 
 cleanup() {
   if [ "$CLEAN" -eq 1 ]; then
@@ -88,8 +110,9 @@ trap cleanup EXIT
 rm -rf "$WORK"
 mkdir -p "$WORK/data-home" "$WORK/config-home/peasant" "$WORK/state-home"
 ln -s "$CORPUS" "$WORK/data-home/peasant"
+: >"$SUMMARY_OUTPUT"
 
-CORPUS="$CORPUS" WORK="$WORK" node <<'NODE'
+CORPUS="$CORPUS" WORK="$WORK" node >"$SUMMARY_OUTPUT" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 
@@ -165,6 +188,7 @@ PREP_STATUS=$?
 [ "$PREP_STATUS" -eq 0 ] || fatal "copied-corpus preparation failed; control directory kept at $WORK"
 
 LOG="$WORK/profile.log"
+[ "$SUMMARY_OUTPUT" != "$LOG" ] || fatal "--summary-output must not be the raw profile log path"
 START_SECONDS=$(date +%s)
 if go run ./cmd/peasant \
   --data-dir "$WORK/data-home" \
@@ -177,17 +201,23 @@ else
 fi
 END_SECONDS=$(date +%s)
 
+{
+  printf 'profile status: %d\n' "$STATUS"
+  printf 'wall seconds: %d\n' "$((END_SECONDS - START_SECONDS))"
+  printf 'copied corpus: %s\n' "$CORPUS"
+  printf 'control directory: %s\n' "$WORK"
+  printf 'profile log: %s\n' "$LOG"
+  printf '\nprofile lines:\n'
+  PROFILE_LINE_RE="^(INDEX profile|  batch sizes|  work items|  write txs|  write causes:|  annotation target repair timing:|  annotation detail:|    (hash matches|hash misses|fallback compares|skipped by hash|skipped by compare|rewrites|projection repair rewrites|annotation rollback failures|annotation targets carried|annotation targets preserved|annotation targets remapped|annotation targets unresolved|annotation targets superseded|annotation target repair errors|read targets:|match anchors:|restore target rows:|anchor upserts:|note:|list entries:|get metrics:|classifier run:|results:|id cache:|batch persistence:|batch persistence detail:|annotation results by type:|dedup lookup:|create session annotation:|create entry annotation:|update content hash:|supersede annotation:|dedup decisions:|[A-Z][A-Z ]+:)|      (mutex wait:|connection checkout:|savepoint SQL:|dedup lookup:|insert annotation row:|insert target row:|update content hash:|supersede annotation:|commit:|type=)|  parse|  stage timings:|peasant harvest|  index:|  warning:)"
+  rg "$PROFILE_LINE_RE" "$LOG" || true
+  printf '\nwarning counts:\n'
+  count_log_pattern "database is locked" "database is locked"
+  count_log_pattern "annotation target carry failures" "preserve annotation_target_entries"
+  count_log_pattern "missing provider roots" "harness stores entries under a provider root"
+} >>"$SUMMARY_OUTPUT"
+
 printf 'profile status: %d\n' "$STATUS"
-printf 'wall seconds: %d\n' "$((END_SECONDS - START_SECONDS))"
-printf 'copied corpus: %s\n' "$CORPUS"
-printf 'control directory: %s\n' "$WORK"
+printf 'profile summary: %s\n' "$SUMMARY_OUTPUT"
 printf 'profile log: %s\n' "$LOG"
-printf '\nprofile lines:\n'
-PROFILE_LINE_RE="^(INDEX profile|  batch sizes|  work items|  write txs|  write causes:|  annotation target repair timing:|  annotation detail:|    (hash matches|hash misses|fallback compares|skipped by hash|skipped by compare|rewrites|projection repair rewrites|annotation rollback failures|annotation targets carried|annotation targets preserved|annotation targets remapped|annotation targets unresolved|annotation targets superseded|annotation target repair errors|read targets:|match anchors:|restore target rows:|anchor upserts:|note:|list entries:|get metrics:|classifier run:|results:|id cache:|batch persistence:|batch persistence detail:|annotation results by type:|dedup lookup:|create session annotation:|create entry annotation:|update content hash:|supersede annotation:|dedup decisions:|[A-Z][A-Z ]+:)|      (mutex wait:|connection checkout:|savepoint SQL:|dedup lookup:|insert annotation row:|insert target row:|update content hash:|supersede annotation:|commit:|type=)|  parse|  stage timings:|peasant harvest|  index:|  warning:)"
-rg "$PROFILE_LINE_RE" "$LOG" || true
-printf '\nwarning counts:\n'
-count_log_pattern "database is locked" "database is locked"
-count_log_pattern "annotation target carry failures" "preserve annotation_target_entries"
-count_log_pattern "missing provider roots" "harness stores entries under a provider root"
 
 exit "$STATUS"
