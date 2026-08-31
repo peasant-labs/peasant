@@ -1001,6 +1001,9 @@ var _ ingest.AnnotationQueryStore = (*Store)(nil)
 // batch persistence capability.
 var _ ingest.ClassifierAnnotationBatchStore = (*Store)(nil)
 
+// Compile-time guard: *Store can report profile detail for classifier batch writes.
+var _ ingest.ProfiledClassifierAnnotationBatchStore = (*Store)(nil)
+
 // ---------------------------------------------------------------------------
 // Dedup / Supersession (R9)
 // ---------------------------------------------------------------------------
@@ -1258,15 +1261,33 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 // validation or insert failure for one result is reported on that result and does
 // not roll back other results from the same Annotate call.
 func (s *Store) ApplyClassifierAnnotations(ctx context.Context, writes []ingest.ClassifierAnnotationWrite) []ingest.ClassifierAnnotationWriteResult {
+	return s.applyClassifierAnnotations(ctx, writes, nil)
+}
+
+func (s *Store) ApplyClassifierAnnotationsWithProfile(ctx context.Context, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) []ingest.ClassifierAnnotationWriteResult {
+	return s.applyClassifierAnnotations(ctx, writes, stats)
+}
+
+func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) []ingest.ClassifierAnnotationWriteResult {
 	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
 	if len(writes) == 0 {
 		return results
 	}
 
+	mutexStarted := annotationBatchProfileStart(stats)
 	s.annotationWriteMu.Lock()
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchMutexWaitCount++
+		s.BatchMutexWaitTime += time.Since(mutexStarted)
+	})
 	defer s.annotationWriteMu.Unlock()
 
+	connStarted := annotationBatchProfileStart(stats)
 	conn, err := s.pool.Take(ctx)
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchConnectionCount++
+		s.BatchConnectionTime += time.Since(connStarted)
+	})
 	if err != nil {
 		setupErr := fmt.Errorf("store: take connection for classifier annotation batch: %w", err)
 		for i := range results {
@@ -1286,7 +1307,7 @@ func (s *Store) ApplyClassifierAnnotations(ctx context.Context, writes []ingest.
 	}()
 
 	for i := range writes {
-		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i])
+		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats)
 		results[i] = outcome
 		if err != nil {
 			results[i].Err = err
@@ -1297,7 +1318,12 @@ func (s *Store) ApplyClassifierAnnotations(ctx context.Context, writes []ingest.
 		}
 	}
 
+	commitStarted := annotationBatchProfileStart(stats)
 	endFn(&txnErr)
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchCommitCount++
+		s.BatchCommitTime += time.Since(commitStarted)
+	})
 	txnOpen = false
 	if txnErr != nil {
 		commitErr := fmt.Errorf("store: commit classifier annotation batch: %w", txnErr)
@@ -1311,26 +1337,39 @@ func (s *Store) ApplyClassifierAnnotations(ctx context.Context, writes []ingest.
 	return results
 }
 
-func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite) (ingest.ClassifierAnnotationWriteResult, error, bool) {
+func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) (ingest.ClassifierAnnotationWriteResult, error, bool) {
 	const savepointName = "classifier_annotation_batch_item"
+	result := ingest.ClassifierAnnotationWriteResult{}
+	savepointStarted := annotationBatchProfileStart(stats)
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
-		return ingest.ClassifierAnnotationWriteResult{}, fmt.Errorf("store: start classifier annotation savepoint: %w", err), true
+		recordBatchSavepointProfile(stats, &result.Profile, time.Since(savepointStarted))
+		return result, fmt.Errorf("store: start classifier annotation savepoint: %w", err), true
 	}
+	recordBatchSavepointProfile(stats, &result.Profile, time.Since(savepointStarted))
 
-	result, err := applyClassifierAnnotationOnConn(conn, write)
+	applied, err := applyClassifierAnnotationOnConn(conn, write, stats)
+	applied.Profile.Add(result.Profile)
+	result = applied
 	if err != nil {
-		rollbackErr, fatal := rollbackClassifierAnnotationSavepoint(conn, savepointName, err)
+		rollbackErr, fatal := rollbackClassifierAnnotationSavepoint(conn, savepointName, err, stats, &result.Profile)
 		return result, rollbackErr, fatal
 	}
+	releaseStarted := annotationBatchProfileStart(stats)
 	if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil); err != nil {
+		recordBatchSavepointProfile(stats, &result.Profile, time.Since(releaseStarted))
 		return result, fmt.Errorf("store: release classifier annotation savepoint: %w", err), true
 	}
+	recordBatchSavepointProfile(stats, &result.Profile, time.Since(releaseStarted))
 	return result, nil, false
 }
 
-func rollbackClassifierAnnotationSavepoint(conn *sqlite.Conn, savepointName string, cause error) (error, bool) {
+func rollbackClassifierAnnotationSavepoint(conn *sqlite.Conn, savepointName string, cause error, stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile) (error, bool) {
+	rollbackStarted := annotationBatchProfileStart(stats)
 	rollbackErr := sqlitex.ExecuteTransient(conn, "ROLLBACK TO SAVEPOINT "+savepointName, nil)
+	recordBatchSavepointProfile(stats, profile, time.Since(rollbackStarted))
+	releaseStarted := annotationBatchProfileStart(stats)
 	releaseErr := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil)
+	recordBatchSavepointProfile(stats, profile, time.Since(releaseStarted))
 	if rollbackErr != nil || releaseErr != nil {
 		errs := []error{fmt.Errorf("store: classifier annotation savepoint failed: %w", cause)}
 		if rollbackErr != nil {
@@ -1344,7 +1383,7 @@ func rollbackClassifierAnnotationSavepoint(conn *sqlite.Conn, savepointName stri
 	return cause, false
 }
 
-func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite) (ingest.ClassifierAnnotationWriteResult, error) {
+func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) (ingest.ClassifierAnnotationWriteResult, error) {
 	result := ingest.ClassifierAnnotationWriteResult{Dedup: ingest.DedupCreate}
 	if write.ContentHash == "" {
 		return result, fmt.Errorf("store: classifier annotation write requires non-empty content hash")
@@ -1354,7 +1393,9 @@ func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierA
 	if err != nil {
 		return result, err
 	}
+	dedupStarted := annotationBatchProfileStart(stats)
 	existing, err := findExistingAnnotationOnConn(conn, query, args)
+	recordBatchDedupLookupProfile(stats, &result.Profile, time.Since(dedupStarted))
 	if err != nil {
 		return result, fmt.Errorf("store: find existing classifier annotation: %w", err)
 	}
@@ -1368,18 +1409,21 @@ func applyClassifierAnnotationOnConn(conn *sqlite.Conn, write ingest.ClassifierA
 		result.Dedup = ingest.DedupSupersede
 	}
 
-	newID, err := createClassifierAnnotationOnConn(conn, write.Create, write.ContentHash)
+	newID, err := createClassifierAnnotationOnConn(conn, write.Create, write.ContentHash, stats, &result.Profile)
 	if err != nil {
 		return result, err
 	}
 	result.AnnotationID = newID
 	if existing != nil {
 		nowMs := time.Now().UnixMilli()
+		supersedeStarted := annotationBatchProfileStart(stats)
 		if err := sqlitex.ExecuteTransient(conn, sqlSupersedeAnnotation, &sqlitex.ExecOptions{
 			Args: []any{newID, nowMs, existing.ID},
 		}); err != nil {
+			recordBatchSupersedeProfile(stats, &result.Profile, time.Since(supersedeStarted))
 			return result, fmt.Errorf("store: supersede classifier annotation %s with %s: %w", existing.ID, newID, err)
 		}
+		recordBatchSupersedeProfile(stats, &result.Profile, time.Since(supersedeStarted))
 	}
 	return result, nil
 }
@@ -1395,13 +1439,14 @@ func classifierAnnotationFindQuery(p ingest.FindAnnotationParams) (string, []any
 	}
 }
 
-func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotationParams, contentHash string) (string, error) {
+func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotationParams, contentHash string, stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile) (string, error) {
 	newID := uuid.New().String()
 	targetKindName, childSQL, childArgs, provenanceJSON, err := classifierAnnotationInsertParts(newID, p)
 	if err != nil {
 		return "", err
 	}
 	nowMs := time.Now().UnixMilli()
+	parentStarted := annotationBatchProfileStart(stats)
 	if err := sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
 		Args: []any{
 			newID, targetKindName,
@@ -1410,15 +1455,120 @@ func createClassifierAnnotationOnConn(conn *sqlite.Conn, p ingest.CreateAnnotati
 			0, nowMs,
 		},
 	}); err != nil {
+		recordBatchInsertParentProfile(stats, profile, time.Since(parentStarted))
 		return "", fmt.Errorf("store: insert classifier annotation: %w", err)
 	}
+	recordBatchInsertParentProfile(stats, profile, time.Since(parentStarted))
+	targetStarted := annotationBatchProfileStart(stats)
 	if err := sqlitex.ExecuteTransient(conn, childSQL, &sqlitex.ExecOptions{Args: childArgs}); err != nil {
+		recordBatchInsertTargetProfile(stats, profile, time.Since(targetStarted))
 		return "", fmt.Errorf("store: insert classifier annotation target: %w", err)
 	}
+	recordBatchInsertTargetProfile(stats, profile, time.Since(targetStarted))
+	hashStarted := annotationBatchProfileStart(stats)
 	if err := sqlitex.ExecuteTransient(conn, sqlUpdateContentHash, &sqlitex.ExecOptions{Args: []any{contentHash, newID}}); err != nil {
+		recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
 		return "", fmt.Errorf("store: set classifier annotation content hash on %s: %w", newID, err)
 	}
+	recordBatchUpdateHashProfile(stats, profile, time.Since(hashStarted))
 	return newID, nil
+}
+
+func annotationBatchProfileStart(stats *ingest.AnnotationProfileStats) time.Time {
+	if stats == nil {
+		return time.Time{}
+	}
+	return time.Now()
+}
+
+func addAnnotationBatchProfile(stats *ingest.AnnotationProfileStats, add func(*ingest.AnnotationProfileStats)) {
+	if stats != nil {
+		add(stats)
+	}
+}
+
+func recordBatchSavepointProfile(stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile, elapsed time.Duration) {
+	if stats == nil {
+		return
+	}
+	if profile != nil {
+		profile.SavepointCount++
+		profile.SavepointTime += elapsed
+	}
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchSavepointCount++
+		s.BatchSavepointTime += elapsed
+	})
+}
+
+func recordBatchDedupLookupProfile(stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile, elapsed time.Duration) {
+	if stats == nil {
+		return
+	}
+	if profile != nil {
+		profile.DedupLookupCount++
+		profile.DedupLookupTime += elapsed
+	}
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchDedupLookupCount++
+		s.BatchDedupLookupTime += elapsed
+	})
+}
+
+func recordBatchInsertParentProfile(stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile, elapsed time.Duration) {
+	if stats == nil {
+		return
+	}
+	if profile != nil {
+		profile.InsertParentCount++
+		profile.InsertParentTime += elapsed
+	}
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchInsertParentCount++
+		s.BatchInsertParentTime += elapsed
+	})
+}
+
+func recordBatchInsertTargetProfile(stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile, elapsed time.Duration) {
+	if stats == nil {
+		return
+	}
+	if profile != nil {
+		profile.InsertTargetCount++
+		profile.InsertTargetTime += elapsed
+	}
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchInsertTargetCount++
+		s.BatchInsertTargetTime += elapsed
+	})
+}
+
+func recordBatchUpdateHashProfile(stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile, elapsed time.Duration) {
+	if stats == nil {
+		return
+	}
+	if profile != nil {
+		profile.UpdateHashCount++
+		profile.UpdateHashTime += elapsed
+	}
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchUpdateHashCount++
+		s.BatchUpdateHashTime += elapsed
+	})
+}
+
+func recordBatchSupersedeProfile(stats *ingest.AnnotationProfileStats, profile *ingest.ClassifierAnnotationWriteProfile, elapsed time.Duration) {
+	if stats == nil {
+		return
+	}
+	if profile != nil {
+		profile.SupersedeCount++
+		profile.SupersedeTime += elapsed
+	}
+	addAnnotationBatchProfile(stats, func(s *ingest.AnnotationProfileStats) {
+		s.BatchSupersedeCount++
+		s.BatchSupersedeTime += elapsed
+	})
 }
 
 func classifierAnnotationInsertParts(newID string, p ingest.CreateAnnotationParams) (string, string, []any, any, error) {

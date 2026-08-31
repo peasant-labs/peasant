@@ -183,7 +183,7 @@ printf 'copied corpus: %s\n' "$CORPUS"
 printf 'control directory: %s\n' "$WORK"
 printf 'profile log: %s\n' "$LOG"
 printf '\nprofile lines:\n'
-rg "^(INDEX profile|  batch sizes|  work items|  write txs|  write causes:|  annotation detail:|    (hash matches|hash misses|fallback compares|skipped by hash|skipped by compare|rewrites|projection repair rewrites|annotation rollback failures|annotation targets carried|annotation targets remapped|note:|list entries:|get metrics:|classifier run:|results:|id cache:|batch persistence:|dedup lookup:|create session annotation:|create entry annotation:|update content hash:|supersede annotation:|dedup decisions:|[A-Z][A-Z ]+:)|  parse|  stage timings:|peasant harvest|  index:|  warning:)" "$LOG" || true
+rg "^(INDEX profile|  batch sizes|  work items|  write txs|  write causes:|  annotation detail:|    (hash matches|hash misses|fallback compares|skipped by hash|skipped by compare|rewrites|projection repair rewrites|annotation rollback failures|annotation targets carried|annotation targets remapped|note:|list entries:|get metrics:|classifier run:|results:|id cache:|batch persistence:|batch persistence detail:|annotation results by type:|dedup lookup:|create session annotation:|create entry annotation:|update content hash:|supersede annotation:|dedup decisions:|[A-Z][A-Z ]+:)|      (mutex wait:|connection checkout:|savepoint SQL:|dedup lookup:|insert annotation row:|insert target row:|update content hash:|supersede annotation:|commit:|type=)|  parse|  stage timings:|peasant harvest|  index:|  warning:)" "$LOG" || true
 printf '\nwarning counts:\n'
 count_log_pattern "database is locked" "database is locked"
 count_log_pattern "annotation target carry failures" "preserve annotation_target_entries"

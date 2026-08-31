@@ -111,6 +111,33 @@ func (s *batchAnnotationStore) ApplyClassifierAnnotations(_ context.Context, wri
 	return results
 }
 
+func (s *batchAnnotationStore) ApplyClassifierAnnotationsWithProfile(ctx context.Context, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) []ingest.ClassifierAnnotationWriteResult {
+	results := s.ApplyClassifierAnnotations(ctx, writes)
+	if stats != nil {
+		for i := range results {
+			results[i].Profile = ingest.ClassifierAnnotationWriteProfile{
+				DedupLookupCount:  1,
+				DedupLookupTime:   time.Millisecond,
+				InsertParentCount: 1,
+				InsertParentTime:  time.Millisecond,
+				InsertTargetCount: 1,
+				InsertTargetTime:  time.Millisecond,
+				UpdateHashCount:   1,
+				UpdateHashTime:    time.Millisecond,
+			}
+			stats.BatchDedupLookupCount++
+			stats.BatchDedupLookupTime += results[i].Profile.DedupLookupTime
+			stats.BatchInsertParentCount++
+			stats.BatchInsertParentTime += results[i].Profile.InsertParentTime
+			stats.BatchInsertTargetCount++
+			stats.BatchInsertTargetTime += results[i].Profile.InsertTargetTime
+			stats.BatchUpdateHashCount++
+			stats.BatchUpdateHashTime += results[i].Profile.UpdateHashTime
+		}
+	}
+	return results
+}
+
 func (s *stubAnnotationStore) GetAnnotatorIDByName(_ context.Context, name string) (string, error) {
 	s.annotatorCalls = append(s.annotatorCalls, name)
 	return s.annotatorIDs[name], nil
@@ -2000,7 +2027,30 @@ func TestClassifierAnnotator_AnnotateWithProfile_RecordsBatchPersistence(t *test
 	if stats.BatchWriteCount != 1 || stats.BatchResultCount != len(as.writes) || stats.DedupCreateCount != len(as.writes) {
 		t.Fatalf("batch profile counters do not match writes %d: %+v", len(as.writes), stats)
 	}
+	if stats.BatchDedupLookupCount != len(as.writes) || stats.BatchInsertParentCount != len(as.writes) || stats.BatchInsertTargetCount != len(as.writes) || stats.BatchUpdateHashCount != len(as.writes) {
+		t.Fatalf("profiled batch store counters do not match writes %d: %+v", len(as.writes), stats)
+	}
 	if stats.DedupLookupCount != 0 || stats.CreateSessionCount != 0 || stats.CreateEntryCount != 0 || stats.UpdateContentHashCount != 0 {
 		t.Fatalf("batch profile double-counted per-result operations: %+v", stats)
+	}
+	breakdownTotal := 0
+	breakdownPersist := time.Duration(0)
+	foundSession := false
+	foundEntry := false
+	for _, row := range stats.SortedAnnotationResults() {
+		breakdownTotal += row.SkipCount + row.CreateCount + row.SupersedeCount
+		breakdownPersist += row.PersistTime
+		if row.TargetKind == ingest.AnnotationProfileTargetSession {
+			foundSession = true
+		}
+		if row.TargetKind == ingest.AnnotationProfileTargetEntry {
+			foundEntry = true
+		}
+	}
+	if breakdownTotal != len(as.writes) || !foundSession || !foundEntry {
+		t.Fatalf("annotation result breakdown total=%d session=%t entry=%t, want total=%d and both targets: %+v", breakdownTotal, foundSession, foundEntry, len(as.writes), stats.SortedAnnotationResults())
+	}
+	if breakdownPersist == 0 {
+		t.Fatalf("annotation result breakdown did not receive persistence timing: %+v", stats.SortedAnnotationResults())
 	}
 }

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
@@ -27,6 +28,11 @@ type namedClassifierFunc struct {
 type namedEntryClassifierFunc struct {
 	name string
 	fn   EntryClassifierFunc
+}
+
+type ProfiledClassifierResult struct {
+	Result         *ClassifierResult
+	ClassifierTime time.Duration
 }
 
 // Compile-time guard: ClassifierEngine must be usable as the annotation engine.
@@ -81,6 +87,50 @@ func (e *ClassifierEngine) Run(
 			if r != nil {
 				results = append(results, r)
 			}
+		}
+	}
+
+	return results
+}
+
+func (e *ClassifierEngine) RunWithProfile(
+	ctx context.Context,
+	sessionID ingest.SessionID,
+	entries []schema.SessionEntry,
+	metrics *ingest.SessionMetrics,
+) []ProfiledClassifierResult {
+	var results []ProfiledClassifierResult
+
+	for _, c := range e.classifiers {
+		started := time.Now()
+		result := c.fn(ctx, sessionID, entries, metrics)
+		elapsed := time.Since(started)
+		if result != nil {
+			results = append(results, ProfiledClassifierResult{Result: result, ClassifierTime: elapsed})
+		}
+	}
+
+	for _, ec := range e.entryClassifiers {
+		started := time.Now()
+		entryResults := ec.fn(ctx, sessionID, entries, metrics)
+		elapsed := time.Since(started)
+		valid := make([]*ClassifierResult, 0, len(entryResults))
+		for _, r := range entryResults {
+			if r != nil {
+				valid = append(valid, r)
+			}
+		}
+		if len(valid) == 0 {
+			continue
+		}
+		share := elapsed / time.Duration(len(valid))
+		remainder := elapsed - share*time.Duration(len(valid))
+		for i, r := range valid {
+			timing := share
+			if i == 0 {
+				timing += remainder
+			}
+			results = append(results, ProfiledClassifierResult{Result: r, ClassifierTime: timing})
 		}
 	}
 

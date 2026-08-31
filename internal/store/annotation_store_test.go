@@ -276,6 +276,43 @@ func TestApplyClassifierAnnotations_CreatesSessionAndEntryWithHashes(t *testing.
 	}
 }
 
+func TestApplyClassifierAnnotationsWithProfile_RecordsBatchDetail(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openTestStore(t)
+	sessionID := "c1305555-0000-0000-0000-000000000211"
+	seedTestSessionV13(t, ctx, s, sessionID)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 0)
+	annotatorID := seedAnnotatorIDForTest(t, s)
+	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
+	var stats ingest.AnnotationProfileStats
+
+	results := s.ApplyClassifierAnnotationsWithProfile(ctx, []ingest.ClassifierAnnotationWrite{
+		classifierSessionWrite(typeID, annotatorID, sessionID, "resolved", "hash-session-profile"),
+		classifierEntryWrite(typeID, annotatorID, sessionID, 0, "resolved", "hash-entry-profile"),
+	}, &stats)
+	for i, result := range results {
+		if result.Err != nil {
+			t.Fatalf("result %d error: %v", i, result.Err)
+		}
+		if result.Profile.DedupLookupCount != 1 || result.Profile.InsertParentCount != 1 || result.Profile.InsertTargetCount != 1 || result.Profile.UpdateHashCount != 1 {
+			t.Fatalf("result %d profile counters mismatch: %+v", i, result.Profile)
+		}
+		if result.Profile.PersistenceTime() <= 0 {
+			t.Fatalf("result %d persistence time = %s, want > 0", i, result.Profile.PersistenceTime())
+		}
+	}
+	if stats.BatchMutexWaitCount != 1 || stats.BatchConnectionCount != 1 || stats.BatchCommitCount != 1 {
+		t.Fatalf("batch setup counters = mutex:%d connection:%d commit:%d, want 1 each", stats.BatchMutexWaitCount, stats.BatchConnectionCount, stats.BatchCommitCount)
+	}
+	if stats.BatchSavepointCount != 4 || stats.BatchDedupLookupCount != 2 || stats.BatchInsertParentCount != 2 || stats.BatchInsertTargetCount != 2 || stats.BatchUpdateHashCount != 2 {
+		t.Fatalf("batch detail counters mismatch: %+v", stats)
+	}
+	if stats.BatchSupersedeCount != 0 {
+		t.Fatalf("batch supersede count = %d, want 0", stats.BatchSupersedeCount)
+	}
+}
+
 func TestApplyClassifierAnnotations_SkipsMatchingContentHash(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
