@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -114,7 +113,7 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("first mounted harvest: %v\n%s", err, output)
 			}
-			if !strings.Contains(output, "1 new") {
+			if !harvestSummaryHasCount(output, 1, "new") {
 				t.Fatalf("first harvest did not ingest the session:\n%s", output)
 			}
 
@@ -135,7 +134,7 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("second mounted harvest: %v\n%s", err, output)
 			}
-			if !strings.Contains(output, "1 updated") {
+			if !harvestSummaryHasCount(output, 1, "updated") {
 				t.Fatalf("moved freshness did not re-ingest the session:\n%s", output)
 			}
 		})

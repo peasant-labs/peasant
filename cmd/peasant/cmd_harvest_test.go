@@ -384,10 +384,6 @@ func TestPrintSummary_ExpandsSessionCounts(t *testing.T) {
 
 	for _, text := range []string{
 		"peasant harvest: 9 sessions",
-		"new",
-		"updated",
-		"unchanged",
-		"errors",
 		"active (debounced)",
 		"duration: 1.5s",
 	} {
@@ -395,6 +391,32 @@ func TestPrintSummary_ExpandsSessionCounts(t *testing.T) {
 			t.Errorf("summary should include %q; got: %s", text, output)
 		}
 	}
+	for label, count := range map[string]int{"new": 3, "updated": 2, "unchanged": 1, "errors": 2, "active": 1} {
+		if !harvestSummaryHasCount(output, count, label) {
+			t.Errorf("summary should include count %d for %s; got: %s", count, label, output)
+		}
+	}
+}
+
+func harvestSummaryHasCount(output string, count int, label string) bool {
+	countText := fmt.Sprint(count)
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		hasCount := false
+		hasLabel := false
+		for _, field := range fields {
+			if field == countText {
+				hasCount = true
+			}
+			if strings.Trim(field, ":,()[]") == label {
+				hasLabel = true
+			}
+		}
+		if hasCount && hasLabel {
+			return true
+		}
+	}
+	return false
 }
 
 // TestPrintSummary_IncludeActiveLabel verifies the dynamic active-session label.
@@ -491,7 +513,7 @@ func TestPrintSummary_HidesUnchangedDetailsButKeepsChangedRows(t *testing.T) {
 
 func assertHarvestSummaryShowsOnlyChangedRows(t *testing.T, output string) {
 	t.Helper()
-	if !strings.Contains(output, "unchanged") {
+	if !harvestSummaryHasCount(output, 2, "unchanged") {
 		t.Errorf("summary count should still report unchanged sessions; got: %s", output)
 	}
 	if strings.Contains(output, "UNCHANGED") {

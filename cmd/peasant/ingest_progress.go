@@ -33,6 +33,7 @@ import (
 //	r.Clear()           // erase progress lines before printing final summary
 type progressRenderer struct {
 	w     io.Writer
+	input io.Reader
 	state *ingest.ProgressState
 	anim  *animation.Animation
 	isTTY bool
@@ -67,11 +68,19 @@ type progressModel struct {
 // is disabled (no-op mode for pipes/CI).
 func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animation.Animation) *progressRenderer {
 	isTTY := false
+	var input io.Reader
 	if f, ok := w.(*os.File); ok {
 		isTTY = term.IsTerminal(int(f.Fd()))
 	}
+	if isTTY && term.IsTerminal(int(os.Stdin.Fd())) {
+		// Bubble Tea's renderer can ask the terminal about supported modes. Reading
+		// stdin lets it consume those replies instead of leaking them back to the
+		// shell after harvest exits. The model still ignores all key input.
+		input = os.Stdin
+	}
 	r := &progressRenderer{
 		w:     w,
+		input: input,
 		state: state,
 		anim:  anim,
 		isTTY: isTTY,
@@ -96,7 +105,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 	program := tea.NewProgram(
 		progressModel{state: r.state, anim: r.anim, order: r.order},
 		tea.WithOutput(r.w),
-		tea.WithInput(nil),
+		tea.WithInput(r.input),
 		tea.WithFPS(progressRendererFPS),
 		tea.WithoutSignalHandler(),
 	)

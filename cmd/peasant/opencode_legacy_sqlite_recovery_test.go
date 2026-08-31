@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -291,7 +290,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 	if err != nil {
 		t.Fatalf("rerun mounted harvest after WAL-only update: %v\n%s", err, output)
 	}
-	if !strings.Contains(output, strings.Join([]string{strconv.Itoa(testCase.ExpectedUpdateCount), "updated"}, " ")) {
+	if !harvestSummaryHasCount(output, testCase.ExpectedUpdateCount, "updated") {
 		t.Fatalf("WAL-only update was not classified as updated:\n%s", output)
 	}
 	if !bytes.Equal(mustReadFile(t, materialized.Path), mainBefore) || !bytes.Equal(mustReadFile(t, materialized.Path+"-wal"), walBeforeRerun) {

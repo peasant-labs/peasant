@@ -319,7 +319,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if err != nil {
 				t.Fatalf("harvest changed synthetic source: %v\n%s", err, output)
 			}
-			if !strings.Contains(output, "1 updated") || !strings.Contains(output, "1 unchanged") {
+			if !harvestSummaryHasCount(output, 1, "updated") || !harvestSummaryHasCount(output, 1, "unchanged") {
 				t.Fatalf("selected SQLite session change did not isolate freshness from the unchanged sibling session:\n%s", output)
 			}
 			changedStore, err := store.Open(databasePath, store.WithPoolSize(1))
