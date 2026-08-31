@@ -54,12 +54,12 @@ func TestStreamingIndex_DrainKeepsArenaUntilBatchDone(t *testing.T) {
 	indexDoneCh := make(chan DrainBatch, 1)
 	drainDone := make(chan []SessionResult, 1)
 	go func() {
-		drainDone <- pipeline.drainLoop(context.Background(), staging, &workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas))
+		drainDone <- pipeline.drainLoop(context.Background(), staging, &workersDone, indexCh, indexDoneCh, make(chan error, 1), progress, len(metas), nil)
 		close(indexCh)
 	}()
 	indexDone := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil)
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil, nil)
 		close(indexDone)
 	}()
 
@@ -116,7 +116,7 @@ func TestStreamingIndex_ProgressAdvancesPerSessionWithinDrainBatch(t *testing.T)
 	indexDoneCh := make(chan DrainBatch, 1)
 	done := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil)
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", nil, nil)
 		close(done)
 	}()
 
@@ -157,7 +157,7 @@ func TestStreamingIndex_ParallelismOneWritesInFixtureOrder(t *testing.T) {
 	indexDoneCh := make(chan DrainBatch, 1)
 	done := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "test", nil)
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "test", nil, nil)
 		close(done)
 	}()
 
@@ -228,7 +228,7 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 		release:          releaseSecondWrite,
 	}
 	analyzer := &recordingStreamAnalyzer{computeStarted: make(chan SessionID, len(metas)), computeDone: make(chan SessionID, len(metas))}
-	classifier := &recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}
+	classifier := &recordingStreamBufferedClassifier{prepared: make(chan SessionID, len(metas))}
 	pipeline := &Pipeline{
 		config:       PipelineConfig{Parallelism: 1},
 		indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}},
@@ -243,11 +243,11 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 	downstreamCh := make(chan indexedMeta, len(metas))
 	downstreamDone := make(chan streamedDownstreamResult, 1)
 	go func() {
-		downstreamDone <- pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test")
+		downstreamDone <- pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test", nil)
 	}()
 	indexDone := make(chan struct{})
 	go func() {
-		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", downstreamCh)
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", downstreamCh, nil)
 		close(downstreamCh)
 		close(indexDone)
 	}()
@@ -269,12 +269,12 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 	default:
 	}
 	select {
-	case got := <-classifier.annotated:
+	case got := <-classifier.prepared:
 		if got != metas[0].session.SessionID {
-			t.Fatalf("first streamed ANNOTATE session = %s, want %s", got, metas[0].session.SessionID)
+			t.Fatalf("first streamed ANNOTATE prepare session = %s, want %s", got, metas[0].session.SessionID)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("ANNOTATE did not start after COMPUTE finished for the first indexed session")
+		t.Fatal("ANNOTATE prepare did not start after COMPUTE finished for the first indexed session")
 	}
 
 	for _, im := range metas[1:] {
@@ -303,12 +303,91 @@ func TestStreamingIndex_StartsDownstreamBeforeAllIndexCompletes(t *testing.T) {
 	}
 }
 
+func TestStreamingIndex_StoreWriteLaneSerializesDownstreamWrites(t *testing.T) {
+	fixture := loadStreamComputeAnnotateFixture(t)
+	metas, entries := buildIndexParallelMetas(t, fixture)
+	if len(metas) < 2 {
+		t.Fatalf("stream compute fixture has %d sessions, want at least 2", len(metas))
+	}
+	tracker := &writeOverlapTracker{}
+	releaseCompute := make(chan struct{})
+	store := &trackedIndexStore{
+		serialIndexStore: serialIndexStore{entries: make(map[SessionID][]schema.SessionEntry)},
+		tracker:          tracker,
+	}
+	analyzer := &blockingTrackedAnalyzer{
+		tracker: tracker,
+		entered: make(chan struct{}),
+		release: releaseCompute,
+	}
+	classifier := &trackedBufferedClassifier{tracker: tracker}
+	pipeline := &Pipeline{
+		config:       PipelineConfig{Parallelism: 1},
+		indexers:     map[Harness]TranscriptIndexer{HarnessClaudeCode: &immediateIndexer{entries: entries}},
+		metricsStore: store,
+		analyzer:     analyzer,
+		classifier:   classifier,
+	}
+	progress := NewProgressState()
+	progress.Update(ProgressEvent{Kind: KindStart, Stage: StageIndex, Total: len(metas)})
+	indexCh := make(chan streamedIndexWork, len(metas))
+	indexDoneCh := make(chan DrainBatch, 1)
+	downstreamCh := make(chan indexedMeta, len(metas))
+	writeLane := newStoreWriteLane(1)
+
+	downstreamDone := make(chan streamedDownstreamResult, 1)
+	go func() {
+		downstreamDone <- pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test", writeLane)
+	}()
+	indexDone := make(chan struct{})
+	go func() {
+		pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, progress, IndexOutcomeIndexed, "test", downstreamCh, writeLane)
+		close(downstreamCh)
+		close(indexDone)
+	}()
+
+	completion := newIndexBatchCompletion(DrainBatch{Metas: metas}, len(metas))
+	indexCh <- streamedIndexWork{meta: metas[0], batch: completion}
+	select {
+	case <-analyzer.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamed COMPUTE did not enter the writer lane")
+	}
+	for _, im := range metas[1:] {
+		indexCh <- streamedIndexWork{meta: im, batch: completion}
+	}
+	close(indexCh)
+	time.Sleep(25 * time.Millisecond)
+	if got := tracker.maxActive.Load(); got != 1 {
+		t.Fatalf("concurrent store writes while COMPUTE was blocked = %d, want 1", got)
+	}
+	close(releaseCompute)
+
+	select {
+	case <-indexDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("indexLoop did not finish")
+	}
+	select {
+	case got := <-downstreamDone:
+		if got.ComputeDone != len(metas) || got.AnnotateDone != len(metas) {
+			t.Fatalf("downstream result = %+v, want all %d sessions processed", got, len(metas))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamed downstream worker did not finish")
+	}
+	writeLane.close()
+	if got := tracker.maxActive.Load(); got != 1 {
+		t.Fatalf("max concurrent store writes = %d, want 1", got)
+	}
+}
+
 func TestStreamedDownstream_StopsSafelyAfterCancellation(t *testing.T) {
 	fixture := loadStreamComputeAnnotateFixture(t)
 	metas, _ := buildIndexParallelMetas(t, fixture)
 	ctx, cancel := context.WithCancel(context.Background())
 	analyzer := &cancelingStreamAnalyzer{cancel: cancel, started: make(chan SessionID, len(metas))}
-	classifier := &recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}
+	classifier := &recordingStreamBufferedClassifier{prepared: make(chan SessionID, len(metas))}
 	pipeline := &Pipeline{
 		config:     PipelineConfig{Parallelism: 1},
 		analyzer:   analyzer,
@@ -319,7 +398,7 @@ func TestStreamedDownstream_StopsSafelyAfterCancellation(t *testing.T) {
 	downstreamCh <- indexedMeta{session: metas[0].session, startMs: metas[0].startMs, indexed: true}
 	close(downstreamCh)
 
-	result := pipeline.runStreamedDownstream(ctx, downstreamCh, progress, len(metas), "test")
+	result := pipeline.runStreamedDownstream(ctx, downstreamCh, progress, len(metas), "test", nil)
 	if result.ComputeDone != 1 {
 		t.Fatalf("computed work after cancellation = %d, want 1", result.ComputeDone)
 	}
@@ -335,7 +414,7 @@ func TestStreamedDownstream_ComputeErrorStillAnnotatesIndexedSessions(t *testing
 	fixture := loadStreamComputeAnnotateFixture(t)
 	metas, _ := buildIndexParallelMetas(t, fixture)
 	analyzer := &erroringStreamAnalyzer{err: fmt.Errorf("compute failed")}
-	classifier := &recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}
+	classifier := &recordingStreamBufferedClassifier{prepared: make(chan SessionID, len(metas))}
 	pipeline := &Pipeline{
 		config:     PipelineConfig{Parallelism: 1},
 		analyzer:   analyzer,
@@ -348,7 +427,7 @@ func TestStreamedDownstream_ComputeErrorStillAnnotatesIndexedSessions(t *testing
 	}
 	close(downstreamCh)
 
-	result := pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test")
+	result := pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test", nil)
 	if result.Computed != 0 {
 		t.Fatalf("computed count after compute error = %d, want 0", result.Computed)
 	}
@@ -360,21 +439,21 @@ func TestStreamedDownstream_ComputeErrorStillAnnotatesIndexedSessions(t *testing
 	}
 	for _, im := range metas {
 		select {
-		case got := <-classifier.annotated:
+		case got := <-classifier.prepared:
 			if got != im.session.SessionID {
-				t.Fatalf("annotated session = %s, want %s", got, im.session.SessionID)
+				t.Fatalf("prepared session = %s, want %s", got, im.session.SessionID)
 			}
 		default:
-			t.Fatalf("missing annotation call for %s", im.session.SessionID)
+			t.Fatalf("missing annotation prepare call for %s", im.session.SessionID)
 		}
 	}
 }
 
-func TestStreamedDownstream_AnnotateErrorAdvancesBestEffortProgress(t *testing.T) {
+func TestStreamedDownstream_PrepareErrorAdvancesBestEffortProgress(t *testing.T) {
 	fixture := loadStreamComputeAnnotateFixture(t)
 	metas, _ := buildIndexParallelMetas(t, fixture)
 	analyzer := &recordingStreamAnalyzer{computeStarted: make(chan SessionID, len(metas)), computeDone: make(chan SessionID, len(metas))}
-	classifier := &erroringStreamClassifier{recordingStreamClassifier: recordingStreamClassifier{annotated: make(chan SessionID, len(metas))}, err: fmt.Errorf("annotate failed")}
+	classifier := &recordingStreamBufferedClassifier{prepared: make(chan SessionID, len(metas)), prepareErr: fmt.Errorf("prepare failed")}
 	pipeline := &Pipeline{
 		config:     PipelineConfig{Parallelism: 1},
 		analyzer:   analyzer,
@@ -387,12 +466,12 @@ func TestStreamedDownstream_AnnotateErrorAdvancesBestEffortProgress(t *testing.T
 	}
 	close(downstreamCh)
 
-	result := pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test")
+	result := pipeline.runStreamedDownstream(context.Background(), downstreamCh, progress, len(metas), "test", nil)
 	if result.Computed != len(metas) || result.ComputeDone != len(metas) {
 		t.Fatalf("compute result after annotate error = %+v, want %d computed", result, len(metas))
 	}
 	if result.AnnotateDone != len(metas) {
-		t.Fatalf("annotate progress after annotate error = %d, want %d", result.AnnotateDone, len(metas))
+		t.Fatalf("annotate progress after prepare error = %d, want %d", result.AnnotateDone, len(metas))
 	}
 	if got := progress.Snapshot()[StageAnnotate].Done; got != len(metas) {
 		t.Fatalf("ANNOTATE progress snapshot = %d, want %d", got, len(metas))
@@ -468,6 +547,94 @@ type serialIndexStore struct {
 	maxActive  atomic.Int64
 }
 
+type writeOverlapTracker struct {
+	active    atomic.Int64
+	maxActive atomic.Int64
+}
+
+func (tracker *writeOverlapTracker) enter() func() {
+	active := tracker.active.Add(1)
+	recordMax(&tracker.maxActive, active)
+	return func() { tracker.active.Add(-1) }
+}
+
+type trackedIndexStore struct {
+	serialIndexStore
+	tracker *writeOverlapTracker
+}
+
+func (store *trackedIndexStore) IndexSessionEntries(ctx context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
+	done := store.tracker.enter()
+	defer done()
+	select {
+	case <-time.After(10 * time.Millisecond):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return store.serialIndexStore.IndexSessionEntries(ctx, sessionID, entries)
+}
+
+type blockingTrackedAnalyzer struct {
+	tracker *writeOverlapTracker
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (a *blockingTrackedAnalyzer) ComputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error) {
+	done := a.tracker.enter()
+	defer done()
+	a.once.Do(func() { close(a.entered) })
+	select {
+	case <-a.release:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	return len(sessionIDs), nil
+}
+
+func (*blockingTrackedAnalyzer) ComputeInsights(context.Context, []string) error { return nil }
+
+type trackedBufferedClassifier struct {
+	tracker *writeOverlapTracker
+}
+
+var _ BufferedSessionClassifier = (*trackedBufferedClassifier)(nil)
+
+func (*trackedBufferedClassifier) Annotate(context.Context, SessionID) error {
+	panic("unexpected direct Annotate call for buffered classifier")
+}
+
+func (*trackedBufferedClassifier) PrepareAnnotations(_ context.Context, sessionID SessionID, _ *IndexProfiler) (SessionAnnotationBatch, error) {
+	return SessionAnnotationBatch{
+		SessionID: sessionID,
+		Writes: []SessionAnnotationWrite{{
+			TypeID:     "test.annotation",
+			Value:      "prepared",
+			TargetKind: AnnotationProfileTargetSession,
+		}},
+	}, nil
+}
+
+func (c *trackedBufferedClassifier) FlushAnnotationBatches(ctx context.Context, batches []SessionAnnotationBatch, _ *IndexProfiler) []SessionAnnotationBatchResult {
+	done := c.tracker.enter()
+	defer done()
+	select {
+	case <-time.After(10 * time.Millisecond):
+	case <-ctx.Done():
+		results := make([]SessionAnnotationBatchResult, len(batches))
+		for i, batch := range batches {
+			results[i] = SessionAnnotationBatchResult{SessionID: batch.SessionID, Err: ctx.Err()}
+		}
+		return results
+	}
+	results := make([]SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		results[i] = SessionAnnotationBatchResult{SessionID: batch.SessionID}
+	}
+	return results
+}
+
 type blockingSecondIndexStore struct {
 	serialIndexStore
 	blocked SessionID
@@ -525,23 +692,46 @@ func (a *recordingStreamAnalyzer) ComputeMetrics(_ context.Context, sessionIDs [
 
 func (*recordingStreamAnalyzer) ComputeInsights(context.Context, []string) error { return nil }
 
-type recordingStreamClassifier struct {
-	annotated chan SessionID
+type recordingStreamBufferedClassifier struct {
+	prepared   chan SessionID
+	flushed    chan []SessionID
+	prepareErr error
 }
 
-func (c *recordingStreamClassifier) Annotate(_ context.Context, sessionID SessionID) error {
-	c.annotated <- sessionID
-	return nil
+var _ BufferedSessionClassifier = (*recordingStreamBufferedClassifier)(nil)
+
+func (*recordingStreamBufferedClassifier) Annotate(context.Context, SessionID) error {
+	panic("unexpected direct Annotate call for buffered classifier")
 }
 
-type erroringStreamClassifier struct {
-	recordingStreamClassifier
-	err error
+func (c *recordingStreamBufferedClassifier) PrepareAnnotations(_ context.Context, sessionID SessionID, _ *IndexProfiler) (SessionAnnotationBatch, error) {
+	if c.prepared != nil {
+		c.prepared <- sessionID
+	}
+	if c.prepareErr != nil {
+		return SessionAnnotationBatch{SessionID: sessionID}, c.prepareErr
+	}
+	return SessionAnnotationBatch{
+		SessionID: sessionID,
+		Writes: []SessionAnnotationWrite{{
+			TypeID:     "test.annotation",
+			Value:      "prepared",
+			TargetKind: AnnotationProfileTargetSession,
+		}},
+	}, nil
 }
 
-func (c *erroringStreamClassifier) Annotate(_ context.Context, sessionID SessionID) error {
-	c.annotated <- sessionID
-	return c.err
+func (c *recordingStreamBufferedClassifier) FlushAnnotationBatches(_ context.Context, batches []SessionAnnotationBatch, _ *IndexProfiler) []SessionAnnotationBatchResult {
+	ids := make([]SessionID, len(batches))
+	results := make([]SessionAnnotationBatchResult, len(batches))
+	for i, batch := range batches {
+		ids[i] = batch.SessionID
+		results[i] = SessionAnnotationBatchResult{SessionID: batch.SessionID}
+	}
+	if c.flushed != nil {
+		c.flushed <- ids
+	}
+	return results
 }
 
 func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
@@ -738,7 +928,7 @@ func BenchmarkIndexLoopParallelParse(b *testing.B) {
 					indexCh <- streamedIndexWork{meta: im, batch: completion}
 				}
 				close(indexCh)
-				pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "benchmark", nil)
+				pipeline.indexLoop(context.Background(), indexCh, indexDoneCh, nil, IndexOutcomeIndexed, "benchmark", nil, nil)
 			}
 		})
 	}
