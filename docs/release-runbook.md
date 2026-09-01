@@ -10,7 +10,7 @@ package consumers, and why the Nix hash gate sits before tag publication — see
 [Release Architecture](release-architecture.md).
 
 > **Status:** the release pipeline is configured and locally validated. The first
-> public-root tag uses the exact `v0.1.0` initial-final bootstrap. Downstream AUR and
+> public-root tag used the exact `v0.1.0` initial-final bootstrap. Downstream AUR and
 > Homebrew publication stays disabled until the publication checklist is complete
 > (`skip_upload: true`).
 
