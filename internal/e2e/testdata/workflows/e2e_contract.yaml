@@ -74,20 +74,12 @@ release_guard:
     - .github/workflows/e2e.yml
     - .github/workflows/release-e2e.yml
     - .github/workflows/release-validate.yml
-  step: Final-release guard (initial final or green same-version rc)
-  if_condition: steps.parse.outputs.kind == 'final'
-  initial_final: v0.1.0
-  expected_run: 'go run github.com/peasant-labs/schema/cmd/release-guard check-final --tag "$TAG" --initial-final v0.1.0'
   required_job_permissions:
     - key: contents
-      value: read
-    - key: actions
       value: read
   required_job_env:
     - key: TAG
       value: '${{ github.ref_name }}'
-    - key: GH_TOKEN
-      value: '${{ github.token }}'
   actor_step: Verify release tag actor
   actor_env:
     - key: RELEASE_ACTOR

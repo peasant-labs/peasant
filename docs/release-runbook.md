@@ -2,8 +2,8 @@
 
 This runbook is the operator's guide for cutting Peasant releases and for the
 external package-publication rollout. It documents the release ceremony, the
-secrets/permissions inventory, the publication checklist, the
-deferred work ladder, and a known limitation of the final-vs-rc guard.
+secrets/permissions inventory, the publication checklist, and the
+deferred work ladder.
 
 For the maintainer-facing system reference — workflow ownership, release data flow,
 package consumers, and why the Nix hash gate sits before tag publication — see
@@ -51,8 +51,7 @@ testable instead of buried in workflow bash:
   typed `ReleaseKind` grammar (`KindRC` / `KindFinal` / `KindInvalid`), the `Version`
   newtype, and the `ParseReleaseTitle` / `ParseTag` / guard functions. The workflows invoke
   it via `go run github.com/peasant-labs/schema/cmd/release-guard …`
-  (`… parse-title`, `… check-final --tag vX.Y.Z`; exact initial final `v0.1.0`
-  additionally passes `--initial-final v0.1.0`).
+  (`… parse-title`, `… parse-tag`).
 - **`.github/release-guard.policy.yml`** — peasant's per-repo policy file. It declares this
   repo's release-pipeline publication gates (the `e2e` / `release-e2e` reusable-workflow
   gates and the goreleaser `release` job graph) so the shared `release-guard check-workflow`
@@ -70,9 +69,8 @@ and on the rc path).
 every source-level publication gate:
 
 - `guard` rejects tags whose push actor is not `peasant-labs-releaser[bot]`
-  (actor ID `291504229`) and malformed/non-Peasant tags. It permits the exact first
-  final `v0.1.0` only while no other `v*` tag or published `v0.1.0` Release exists;
-  later finals require a green, same-version ancestor rc.
+  (actor ID `291504229`) and malformed/non-Peasant tags. It does not require a prior
+  rc for final tags.
 - `nix-vendor-hash` proves the tag points at a source tree with a current `flake.nix`
   vendor hash.
 - `e2e` calls the reusable `.github/workflows/e2e.yml` full-stack harness on every
@@ -152,9 +150,8 @@ The public-root repository began without inherited product tags, so release PR #
 used the exact `--initial-final v0.1.0` exception instead of manufacturing an rc for
 already validated private history. The guard proved the complete `v*` namespace was
 empty and no `v0.1.0` Release existed before the releaser App created the annotated
-tag. The published GitHub Release is now the durable evidence that self-disables this
-bootstrap. Every later final follows the normal same-version ancestor-rc flow. The
-`skip_upload: true` settings kept AUR and Homebrew untouched by this final.
+tag. Final releases no longer use this bootstrap-only path. The `skip_upload: true`
+settings kept AUR and Homebrew untouched by this final.
 
 ### `v0.1.0` startup recovery record
 
@@ -237,54 +234,28 @@ success, so this incident record is not an executable redispatch procedure.
 
 This section describes finals after the exact initial `v0.1.0` bootstrap.
 
-1. There **must** already be a green, same-version rc (e.g. `v0.2.0-rc1` with a
-   successful `release.yml` run) whose tag is an **ancestor** of the final commit.
-2. Open a PR into `develop` titled `release(vX.Y.Z): <summary>`. Same validation as an
+1. Open a PR into `develop` titled `release(vX.Y.Z): <summary>`. Same validation as an
    rc, plus `release-validate.yml` skips the macOS cask install (rc-only).
-3. Merge (approval assertion deferred during the single-maintainer period - §2).
+2. Merge (approval assertion deferred during the single-maintainer period - §2).
    `release-pr.yml` updates the Nix vendor hash if
    needed and mints the annotated final tag on the hash-current commit.
-4. `release.yml` runs; the **guard** job now enforces the final-requires-rc rule
-   (§5), followed by the tag-time **nix-vendor-hash** freshness gate and the full-stack
+3. `release.yml` runs; the **guard** job verifies the release App actor and tag grammar,
+   followed by the tag-time **nix-vendor-hash** freshness gate and the full-stack
    e2e and installed-package release e2e publication gates. On success goreleaser
    publishes a **full** (non-prerelease) Release. AUR and Homebrew remain untouched
    while their explicit `skip_upload: true` safety settings remain in force. The smoke
    job re-checks static linkage + `peasant version`.
-5. Verify the full Release and complete artifact set. Verify AUR, the tap, and nixpkgs
+4. Verify the full Release and complete artifact set. Verify AUR, the tap, and nixpkgs
    only after their separate publication checklist items are approved and enabled.
 
 ---
 
-## 5. Release guard rules & the ancestor-check limitation
+## 5. Release guard rules
 
-The `release.yml` **guard** job (via `release-guard check-final`) enforces, for a
-final tag `vX.Y.Z`:
-
-For exact initial final `v0.1.0`, a complete product-tag scan must show no other `v*`
-tag and the GitHub Release lookup must prove that `v0.1.0` publication has not already
-completed. Only that exact version can use the bootstrap.
-
-For every later final:
-
-1. A same-version rc tag (`vX.Y.Z-rc*`) exists **and** had a successful `release.yml`
-   run.
-2. The rc tag is an **ancestor** of the final commit:
-   `git merge-base --is-ancestor <rcTag> <finalCommit>`.
-
-If either fails, the guard hard-fails with an actionable message and **nothing is
-published**.
-
-> ### ⚠️ Known limitation: ancestor-checked, not tree-identical
->
-> The guard proves the final commit **descends from** the validated rc commit — it
-> does **not** prove the final release tree is byte-identical to what the rc
-> validated. By construction, the rc and final are **different merge commits**, so a
-> tree-hash equality check is impossible here; ancestry is the strongest *cheap*
-> lineage invariant that actually holds. In practice this means: commits added to
-> `develop` **between** the rc and the final are included in the final without
-> re-running the full rc validation against that exact tree. Keep the rc→final window
-> small, and treat a final as "rc plus a known, reviewed delta," not "the rc,
-> bit-for-bit."
+The `release.yml` **guard** job verifies that the tag push came from the release App
+and that the tag parses as a Peasant rc or final release. Final tags can publish full
+releases without a prior rc. RC tags still publish prereleases and still run the
+rc-only packaging validation matrix.
 
 ### Nix vendorHash freshness gate
 
