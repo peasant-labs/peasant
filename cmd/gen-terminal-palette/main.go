@@ -45,7 +45,7 @@ func main() {
 				"where: cmd/gen-terminal-palette/main.go, reading %s.\n"+
 				"when: at generator startup, before any output was produced.\n"+
 				"means: no palette can be generated without the token source.\n"+
-				"fix: run `corepack pnpm install` in web/ (this repo is pnpm), then re-run `go run ./cmd/gen-terminal-palette`.",
+				"fix: run `pnpm install` in web/ (this repo is pnpm), then re-run `go run ./cmd/gen-terminal-palette`.",
 			tokensPath, err, tokensRelPath)
 	}
 

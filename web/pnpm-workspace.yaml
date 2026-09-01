@@ -3,3 +3,29 @@
 # `pnpm install --frozen-lockfile` works without sibling repositories.
 packages:
   - '.'
+
+# --- pnpm 11 install policy ---
+#
+# No build script may run. `allowBuilds` is the pnpm 11 mechanism that
+# replaced the old `onlyBuiltDependencies` / `ignoredBuiltDependencies`
+# settings (https://pnpm.io/settings/build#allowbuilds); every package pnpm
+# reports under ERR_PNPM_IGNORED_BUILDS is listed here as `false`, which
+# explicitly IGNORES its build script instead of leaving it unreviewed. Do
+# not set any entry to `true`. This repo's lockfile currently flags:
+#   - esbuild (dev-only, pulled in by vite and vitest)
+#   - sharp (image optimization)
+# Their binaries come from platform-specific optional packages resolved by
+# pnpm at install time, not from the build script, so the app still works
+# with the build script ignored (verified: `pnpm build` + `tsc --noEmit`).
+allowBuilds:
+  esbuild: false
+  sharp: false
+
+# minimumReleaseAge delays installing a newly published version until it has
+# been out for 3 days (4320 minutes), to reduce the risk of installing a
+# compromised release (https://pnpm.io/settings/dependency-resolution#minimumreleaseage).
+# First-party @peasant-labs packages are excluded: we publish and pin them
+# ourselves, so there is no third-party supply-chain gap to wait out.
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - '@peasant-labs/*'
