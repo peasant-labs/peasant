@@ -22,10 +22,10 @@ allowBuilds:
   sharp: false
 
 # minimumReleaseAge delays installing a newly published version until it has
-# been out for 7 days (10080 minutes), to reduce the risk of installing a
+# been out for 3 days (4320 minutes), to reduce the risk of installing a
 # compromised release (https://pnpm.io/settings/dependency-resolution#minimumreleaseage).
 # First-party @peasant-labs packages are excluded: we publish and pin them
 # ourselves, so there is no third-party supply-chain gap to wait out.
-minimumReleaseAge: 10080
+minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - '@peasant-labs/*'
