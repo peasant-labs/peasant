@@ -17,7 +17,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.2.0
 	github.com/peasant-labs/redact v0.1.5
-	github.com/peasant-labs/schema v0.1.3-rc1
+	github.com/peasant-labs/schema v0.1.3
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
