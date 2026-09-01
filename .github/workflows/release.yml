@@ -28,9 +28,8 @@ concurrency:
 permissions: {}
 
 jobs:
-  # Gate the build: reject non-peasant tags. The exact first final v0.1.0 may
-  # bootstrap a tag-free repository; every later final requires a same-version
-  # rc that is green AND an ancestor of the final commit.
+  # Gate the build: reject tags not created by the release App and tags outside
+  # the Peasant release grammar. Final releases no longer require a prior rc.
   guard:
     name: guard
     if: github.event_name == 'push'
@@ -38,10 +37,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read # release-guard check-final reads rc release-run conclusions
     env:
       TAG: ${{ github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Verify release tag actor
         env:
@@ -70,10 +67,6 @@ jobs:
       - name: Parse + classify the tag
         id: parse
         run: go run github.com/peasant-labs/schema/cmd/release-guard parse-tag "$TAG"
-
-      - name: Final-release guard (initial final or green same-version rc)
-        if: steps.parse.outputs.kind == 'final'
-        run: go run github.com/peasant-labs/schema/cmd/release-guard check-final --tag "$TAG" --initial-final v0.1.0
 
   nix-vendor-hash:
     name: assert nix vendorHash current

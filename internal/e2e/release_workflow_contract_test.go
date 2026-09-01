@@ -64,10 +64,6 @@ type e2eWorkflowContractFixture struct {
 		JobIfCondition         string                   `yaml:"job_if_condition"`
 		RequiredPRBranches     nonEmptyStrings          `yaml:"required_pr_branches"`
 		RequiredPRPaths        nonEmptyStrings          `yaml:"required_pr_paths"`
-		Step                   string                   `yaml:"step"`
-		IfCondition            string                   `yaml:"if_condition"`
-		InitialFinal           string                   `yaml:"initial_final"`
-		ExpectedRun            string                   `yaml:"expected_run"`
 		RequiredJobPermissions []workflowEnvExpectation `yaml:"required_job_permissions"`
 		RequiredJobEnv         []workflowEnvExpectation `yaml:"required_job_env"`
 		ActorStep              string                   `yaml:"actor_step"`
@@ -177,10 +173,8 @@ func loadE2EWorkflowContractFixture(t *testing.T) e2eWorkflowContractFixture {
 		fixture.Release.ParityEnv.Key == "" || fixture.Release.ParityEnv.Value == "" ||
 		fixture.Release.DriverStep == "" || fixture.Release.DriverEnv.Key == "" || fixture.Release.DriverEnv.Value == "" ||
 		len(fixture.Release.DriverContains) != 4 || len(fixture.Release.OutputGuards) != 3 ||
-		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 4 || fixture.ReleaseGuard.Step == "" || fixture.ReleaseGuard.IfCondition == "" ||
-		!regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(fixture.ReleaseGuard.InitialFinal) ||
-		fixture.ReleaseGuard.ExpectedRun == "" || strings.Count(fixture.ReleaseGuard.ExpectedRun, "--initial-final "+fixture.ReleaseGuard.InitialFinal) != 1 ||
-		len(fixture.ReleaseGuard.RequiredJobPermissions) != 2 || len(fixture.ReleaseGuard.RequiredJobEnv) != 2 ||
+		fixture.ReleaseGuard.Workflow == "" || fixture.ReleaseGuard.Job == "" || fixture.ReleaseGuard.JobIfCondition == "" || len(fixture.ReleaseGuard.RequiredPRBranches) != 1 || len(fixture.ReleaseGuard.RequiredPRPaths) != 4 ||
+		len(fixture.ReleaseGuard.RequiredJobPermissions) != 1 || len(fixture.ReleaseGuard.RequiredJobEnv) != 1 ||
 		fixture.ReleaseGuard.ActorStep == "" || len(fixture.ReleaseGuard.ActorEnv) != 4 || strings.TrimSpace(fixture.ReleaseGuard.ActorRun) == "" ||
 		fixture.ReleaseGuard.CheckoutStep == "" || fixture.ReleaseGuard.ParseStep == "" || fixture.ReleaseGuard.CheckoutFetchDepth == "" || fixture.ReleaseGuard.CheckoutFetchTags == "" ||
 		len(fixture.ReusableCallers) != 2 || fixture.ReleaseValidate.Workflow == "" || len(fixture.ReleaseValidate.RequiredTriggers) == 0 || len(fixture.ReleaseValidate.ForbiddenTriggers) == 0 ||
@@ -221,7 +215,7 @@ func TestReleaseArtifactWorkflowsRequireRealDashboard(t *testing.T) {
 	assertReleaseWorkflowBuildsRealDashboard(t, ".github/workflows/release-validate.yml", "snapshot", "goreleaser release --snapshot")
 }
 
-func TestReleaseWorkflowInitialFinalBootstrap(t *testing.T) {
+func TestReleaseWorkflowGuardDoesNotRequirePriorRC(t *testing.T) {
 	fixture := loadE2EWorkflowContractFixture(t)
 	path := filepath.Join(releaseWorkflowRepoRoot(t), fixture.ReleaseGuard.Workflow)
 	doc := readWorkflowDoc(t, path)
@@ -255,14 +249,11 @@ func TestReleaseWorkflowInitialFinalBootstrap(t *testing.T) {
 		t.Fatalf("release: actor guard run script = %q, want exact fail-closed script %q", actorGuard, fixture.ReleaseGuard.ActorRun)
 	}
 
-	guard := workflowStepRun(t, steps.Content, fixture.ReleaseGuard.Step)
-	guardStep := workflowStepNode(t, steps.Content, fixture.ReleaseGuard.Step)
-	condition := yamlMappingValue(guardStep, "if")
-	if condition == nil || condition.Value != fixture.ReleaseGuard.IfCondition {
-		t.Fatalf("release: initial-final guard condition = %v, want %q", condition, fixture.ReleaseGuard.IfCondition)
-	}
-	if strings.TrimSpace(guard) != strings.TrimSpace(fixture.ReleaseGuard.ExpectedRun) {
-		t.Fatalf("release: initial-final guard run = %q, want exact command %q", guard, fixture.ReleaseGuard.ExpectedRun)
+	for _, step := range steps.Content {
+		run := yamlMappingValue(step, "run")
+		if run != nil && strings.Contains(run.Value, "check-final") {
+			t.Fatalf("release: final release guard must not require a prior rc: %q", run.Value)
+		}
 	}
 
 	checkout := workflowStepNode(t, steps.Content, fixture.ReleaseGuard.CheckoutStep)
@@ -270,11 +261,10 @@ func TestReleaseWorkflowInitialFinalBootstrap(t *testing.T) {
 	depth := yamlMappingValue(with, "fetch-depth")
 	tags := yamlMappingValue(with, "fetch-tags")
 	if depth == nil || depth.Value != fixture.ReleaseGuard.CheckoutFetchDepth || tags == nil || tags.Value != fixture.ReleaseGuard.CheckoutFetchTags {
-		t.Fatalf("release: initial-final guard requires full tag history; fetch-depth=%v fetch-tags=%v", depth, tags)
+		t.Fatalf("release: guard checkout must match the workflow contract; fetch-depth=%v fetch-tags=%v", depth, tags)
 	}
 	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.ActorStep, fixture.ReleaseGuard.CheckoutStep)
 	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.CheckoutStep, fixture.ReleaseGuard.ParseStep)
-	assertStepBefore(t, steps.Content, fixture.ReleaseGuard.ParseStep, fixture.ReleaseGuard.Step)
 }
 
 func TestReusableWorkflowCallerPermissions(t *testing.T) {

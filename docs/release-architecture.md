@@ -47,7 +47,7 @@ flowchart TD
   L --> M[release.yml on tag]
   M --> V{Tag actor is the releaser App?}
   V -- no --> X
-  V -- yes --> N[Guard: parse tag and enforce initial-final or green ancestor rc]
+  V -- yes --> N[Guard: parse Peasant release tag]
   N --> O[Tag-time Nix vendorHash freshness gate]
   O --> E2[e2e gate: TestSkipGateE2E PASS]
   E2 --> RE[release-e2e gate: TestReleasePerDistro PASS]
@@ -81,11 +81,10 @@ before creating the tag. If `flake.nix` changes, the release bot commits
 matters because a release tag is immutable source: a stale `vendorHash` cannot be
 repaired after the tag has already published without moving the tag.
 
-RC tags publish GitHub prereleases. The exact first final `v0.1.0` may bootstrap only
-while a complete tag scan proves no other `v*` tag exists and the GitHub Release lookup
-proves that `v0.1.0` has not already published. That durable Release self-disables the
-exception. Later final tags publish full releases only if a same-version rc tag exists,
-that rc's `release.yml` run succeeded, and the rc tag is an ancestor of the final commit.
+RC tags publish GitHub prereleases. Final tags publish full releases without requiring
+a prior same-version rc. Both paths still require the release App actor, valid Peasant
+tag grammar, the Nix vendor-hash freshness gate, full-stack e2e, release e2e,
+Goreleaser, and smoke validation.
 
 An active repository ruleset permits only GitHub App ID `3988034`
 (`peasant-labs-releaser`) to create or mutate `v*` tags. `release.yml` independently
@@ -113,7 +112,7 @@ sequenceDiagram
   end
   Tag->>Rel: Push v* tag
   Rel->>Rel: Verify releaser App actor login and ID
-  Rel->>Rel: Parse tag and enforce initial-final or rc lineage policy
+  Rel->>Rel: Parse Peasant release tag
   Rel->>Rel: make nix-vendor-hash must be clean
   Rel->>Rel: e2e gate (TestSkipGateE2E PASS)
   Rel->>Rel: release-e2e gate (TestReleasePerDistro PASS)
@@ -251,7 +250,6 @@ are deferred release-hardening work.
 | Existing release tag | `release-pr.yml` | Tag step hard-fails and refuses to move it | Bump to a new version or rc number |
 | Invalid release PR title | `release-pr.yml` | Open-PR validation fails | Rename the PR to the exact title grammar |
 | Missing maintainer approval | `release-pr.yml` (step disabled during the single-maintainer period) | n/a while independent approval is unsatisfiable | Re-enable the assertion once another active maintainer can approve, then get an `admin`/`maintain` approval and rerun |
-| Final tag without green ancestor rc | `release.yml` guard | Release stops before publication | Cut and validate an rc first, or ensure the final descends from the validated rc |
 | Web dashboard build failure | `release.yml` / `release-e2e.yml` / `release-validate.yml` | Artifact production stops before Goreleaser; no stub dashboard is publishable | Fix the frontend build or dependency pin and rerun the gate |
 | `e2e` / `release-e2e` gate SKIP or failure | `release.yml` | Publication blocked — no positive `--- PASS: TestSkipGateE2E` / `TestReleasePerDistro` line means no asserted product / installed-package e2e coverage. A SKIP (`no tests to run`, missing podman/runner) is treated as **failure**, never green | Fix the harness/runner so the gate actually runs and passes; never bypass — a green publish requires proven e2e coverage |
 | Package validation failure | `release-validate.yml` | Blocks the **release PR** (pre-tag). On rc **tags** it runs as **non-blocking** parallel coverage (`needs: guard`, `if: -rc`; NOT in `release.needs`) — it does not gate the rc prerelease publish | Fix the package metadata, install script, flake, or Goreleaser config and rerun validation |
