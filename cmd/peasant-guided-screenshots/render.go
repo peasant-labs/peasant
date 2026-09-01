@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
@@ -103,6 +105,22 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		pushCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
 	}
 
+	ingestProgressCaptures := make(map[string]terminalCapture, len(document.IngestProgressCaptures))
+	ingestProgressStates := make(map[ingestProgressState]ingestProgressStateFixture, len(document.IngestProgressStates))
+	for _, state := range document.IngestProgressStates {
+		ingestProgressStates[state.Key] = state
+	}
+	for index, capture := range document.IngestProgressCaptures {
+		view, renderErr := renderIngestProgressCapture(workingDirectory, index, capture)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		if err := validateTerminalCapture(capture.Name, view, capture.Width, capture.Height, ingestProgressStates[capture.State].WantContains, nil); err != nil {
+			return nil, err
+		}
+		ingestProgressCaptures[capture.Name] = terminalCapture{name: capture.Name, view: view}
+	}
+
 	sheets := make([]renderedSheet, 0, len(document.Sheets))
 	for _, sheet := range document.Sheets {
 		var content string
@@ -114,6 +132,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composeSelectionSheet(sheet, document.SelectionStates, document.SelectionCaptures, selectionCaptures)
 		case sheetKindPush:
 			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
+		case sheetKindIngest:
+			content, rows, err = composeIngestProgressSheet(sheet, document.IngestProgressStates, document.IngestProgressCaptures, ingestProgressCaptures)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}
@@ -123,6 +143,42 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 		sheets = append(sheets, renderedSheet{fixture: sheet, ansi: content, rows: rows})
 	}
 	return sheets, nil
+}
+
+func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
+	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("ingest-progress-%02d", index), true)
+	if err != nil {
+		return "", err
+	}
+	clock := fixedCaptureClock{now: timeDateForCapture()}
+	progress := ingest.NewProgressState()
+	var tick func(time.Time) tea.Msg
+	program := kickstart.NewProgram(kickstart.ProgramDeps{
+		Theme:             captureThemeValue(capture.Theme),
+		Draft:             draft,
+		Source:            scannerfix.NewFixtureTreeSource("standard"),
+		AlreadyConnected:  true,
+		Clock:             clock,
+		Progress:          progress,
+		ProgressAnimation: animation.IngestAnimation(),
+		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
+			tick = callback
+			return func() tea.Msg { return callback(clock.Now()) }
+		},
+		Ingest: func(context.Context) (*ftue.IngestResult, error) {
+			return &ftue.IngestResult{New: 1}, nil
+		},
+	})
+	program.SetSize(capture.Width, capture.Height)
+	program = drainProgram(program, program.Init())
+	program, command := advanceProgramToIngest(program)
+	if program.Phase() != kickstart.PhaseIngest || command == nil || tick == nil {
+		return "", fmt.Errorf("render ingest progress capture %q: phase=%s command=%t tick=%t, want active ingest", capture.Name, program.Phase(), command != nil, tick != nil)
+	}
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	program, _ = program.Update(tick(clock.Now().Add(time.Second)))
+	return program.View(), nil
 }
 
 func renderGuidedCapture(workingDirectory string, index int, capture guidedCaptureFixture) (string, error) {
@@ -219,6 +275,29 @@ func renderSelectionCapture(
 		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil
+}
+
+type fixedCaptureClock struct{ now time.Time }
+
+func (c fixedCaptureClock) Now() time.Time { return c.now }
+
+func timeDateForCapture() time.Time {
+	return time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+}
+
+func advanceProgramToIngest(program kickstart.Program) (kickstart.Program, tea.Cmd) {
+	for step := 0; step < 32; step++ {
+		if strings.Contains(ansi.Strip(program.View()), "review your changes") {
+			program, command := program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if program.ConfirmingNoProjects() {
+				program, _ = program.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+				program, command = program.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			}
+			return program, command
+		}
+		program = sendProgramMessage(program, tea.KeyPressMsg{Code: tea.KeyTab})
+	}
+	return program, nil
 }
 
 // advanceToMarkers steps the tree cursor one visible row at a time until the
@@ -606,6 +685,50 @@ func composePushSheet(
 		}
 	}
 	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+func composeIngestProgressSheet(
+	sheet sheetFixture,
+	states []ingestProgressStateFixture,
+	cases []ingestProgressCaptureFixture,
+	captures map[string]terminalCapture,
+) (string, []sheetRow, error) {
+	rows := make([]string, 0, len(states)*2)
+	meta := make([]sheetRow, 0, len(states)*2)
+	for _, state := range states {
+		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
+			left, err := ingestProgressCaptureFor(cases, captures, state.Key, name, 80, 24)
+			if err != nil {
+				return "", nil, err
+			}
+			right, err := ingestProgressCaptureFor(cases, captures, state.Key, name, 120, 40)
+			if err != nil {
+				return "", nil, err
+			}
+			row := joinCapturePair(left, right)
+			rows = append(rows, row)
+			meta = append(meta, sheetRow{
+				label: fmt.Sprintf("ingest progress state %q (%s)", state.Key, name),
+				lines: strings.Count(row, "\n") + 1,
+			})
+		}
+	}
+	return renderContactSheet(sheet.Title, rows), meta, nil
+}
+
+func ingestProgressCaptureFor(
+	cases []ingestProgressCaptureFixture,
+	captures map[string]terminalCapture,
+	state ingestProgressState,
+	captureTheme captureTheme,
+	width, height int,
+) (terminalCapture, error) {
+	for _, capture := range cases {
+		if capture.State == state && capture.Theme == captureTheme && capture.Width == width && capture.Height == height {
+			return captures[capture.Name], nil
+		}
+	}
+	return terminalCapture{}, fmt.Errorf("compose ingest progress sheet: no capture for %s/%s/%dx%d", state, captureTheme, width, height)
 }
 
 func pushCaptureFor(

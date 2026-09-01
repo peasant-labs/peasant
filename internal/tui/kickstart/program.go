@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -105,6 +106,10 @@ type ProgramDeps struct {
 	// Progress is the concurrent-safe pull source populated by the same local
 	// ingest run. Program observes it on Tick without blocking pipeline workers.
 	Progress ProgressSource
+	// ProgressAnimation is the optional frame set shown above local-import
+	// progress. Production uses the same ingest animation as harvest; tests can
+	// leave it nil when they only need text-state assertions.
+	ProgressAnimation *animation.Animation
 	// Clock and Tick are the injected timing boundaries for honest elapsed and
 	// qualified ETA presentation.
 	Clock Clock
@@ -160,7 +165,7 @@ type progressTickMsg struct {
 	generation uint64
 }
 
-const progressPollInterval = 100 * time.Millisecond
+const progressPollInterval = time.Second / 24
 
 const (
 	oauthPrompt      = "connect to a village now?"
@@ -235,6 +240,8 @@ type Program struct {
 	ingestGeneration   uint64
 	attemptStarted     time.Time
 	stageObservations  map[ingest.Stage]stageObservation
+	progressAnimFrame  int
+	lastProgressAnimAt time.Time
 	nextSteps          []NextStepKind
 	nextStepsErr       error
 
@@ -789,6 +796,8 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	p.retryAttempt = retry
 	p.attemptStarted = p.deps.Clock.Now()
 	p.stageObservations = map[ingest.Stage]stageObservation{}
+	p.progressAnimFrame = 0
+	p.lastProgressAnimAt = time.Time{}
 	if p.deps.Progress != nil {
 		p.deps.Progress.Reset()
 	}
@@ -844,6 +853,7 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		if m.generation != p.ingestGeneration {
 			return p, nil
 		}
+		p = p.advanceProgressAnimation(m.at)
 		p = p.observeProgress(m.at)
 		return p, p.progressTick(m.generation)
 	default:
@@ -851,6 +861,22 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		p.spinner, cmd = p.spinner.Update(m)
 		return p, cmd
 	}
+}
+
+func (p Program) advanceProgressAnimation(at time.Time) Program {
+	anim := p.deps.ProgressAnimation
+	if anim == nil || len(anim.Frames) == 0 {
+		return p
+	}
+	interval := anim.Interval
+	if interval <= 0 {
+		interval = 300 * time.Millisecond
+	}
+	if p.lastProgressAnimAt.IsZero() || at.Sub(p.lastProgressAnimAt) >= interval {
+		p.progressAnimFrame = (p.progressAnimFrame + 1) % len(anim.Frames)
+		p.lastProgressAnimAt = at
+	}
+	return p
 }
 
 // resolveNextSteps validates the provider's complete typed result once. Invalid
@@ -1166,13 +1192,19 @@ func (p Program) viewVisibility() string {
 func (p Program) viewIngest() string {
 	styles := p.deps.Theme.Styles()
 	panel := kit.NewPanel(p.deps.Theme)
-	panel.SetSize(p.width, 0)
+	panel.SetSize(p.width, p.height)
 	lines := []string{
 		p.spinner.View(),
-		"",
-		styles.Header.Render("local import progress"),
 	}
-	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now())...)
+	if anim := p.deps.ProgressAnimation; anim != nil && len(anim.Frames) > 0 {
+		lines = append(lines, "")
+		frame := anim.Frames[p.progressAnimFrame%len(anim.Frames)]
+		for _, line := range frame {
+			lines = append(lines, styles.Muted.Render(line))
+		}
+	}
+	lines = append(lines, "", styles.Header.Render("local import progress"))
+	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines))...)
 	if p.height > 0 && len(lines) > p.height {
 		lines = lines[:p.height]
 	}
@@ -1182,7 +1214,7 @@ func (p Program) viewIngest() string {
 	return panel.View()
 }
 
-func (p Program) progressLines(styles theme.Styles, now time.Time) []string {
+func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines int) []string {
 	if now.Before(p.attemptStarted) {
 		now = p.attemptStarted
 	}
@@ -1223,8 +1255,7 @@ func (p Program) progressLines(styles theme.Styles, now time.Time) []string {
 			styles.Muted.Render("waiting for the first progress update"),
 			styles.Muted.Render("estimate unavailable"))
 	}
-	const ingestHeaderLines = 3
-	available := p.height - ingestHeaderLines
+	available := p.height - reservedLines
 	if p.height > 0 && len(lines) > available {
 		if available <= 0 {
 			return nil

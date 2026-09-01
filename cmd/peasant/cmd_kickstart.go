@@ -66,7 +66,7 @@ func defaultKickstartCommandDeps() kickstartCommandDeps {
 		},
 		runFlow: runKickstartFlow,
 		runModel: func(model tea.Model) error {
-			_, err := tea.NewProgram(model).Run()
+			_, err := tea.NewProgram(model, tea.WithFPS(progressRendererFPS)).Run()
 			return err
 		},
 		readRetention: ftue.ReadClaudeCleanupDays,

@@ -24,6 +24,11 @@ sheets:
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
     theme: dark
     viewport: {width: 1800, height: 6000}
+  - name: ingest-progress
+    kind: ingest-progress
+    title: "mounted kickstart local import progress after save"
+    theme: dark
+    viewport: {width: 1800, height: 1200}
 
 guidedSections:
   - key: auto-ingest
@@ -78,6 +83,10 @@ selectionStates:
     # resolving the discovered subagent relation.
     wantContains: ["user driv", "parent se", "+ 2 child"]
     wantAbsent: ["agent driven session"]
+
+ingestProgressStates:
+  - key: running
+    wantContains: [importing transcripts, local import progress, discover 1/4, "_|||_"]
 
 selection:
   repositories:
@@ -285,3 +294,9 @@ pushCaptures:
   - {name: push-receipt-dark-120x40, state: receipt, theme: dark, width: 120, height: 40}
   - {name: push-receipt-light-80x24, state: receipt, theme: light, width: 80, height: 24}
   - {name: push-receipt-light-120x40, state: receipt, theme: light, width: 120, height: 40}
+
+ingestProgressCaptures:
+  - {name: ingest-progress-running-dark-80x24, state: running, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-running-dark-120x40, state: running, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-running-light-80x24, state: running, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-running-light-120x40, state: running, theme: light, width: 120, height: 40}

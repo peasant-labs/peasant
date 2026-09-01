@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -440,6 +441,7 @@ func newProgressProgram(
 		Retention:             retention,
 		Ingest:                ingestRun,
 		Progress:              progress,
+		ProgressAnimation:     animation.IngestAnimation(),
 		Clock:                 clock,
 		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
 			*tickCapture = callback
@@ -502,6 +504,30 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProgramProgressShowsSharedIngestAnimationBeforeProgressEvents(t *testing.T) {
+	clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
+	progress := &fixtureProgressSource{}
+	var tick func(time.Time) tea.Msg
+	program, _, _ := newProgressProgram(t, progress, clock, func(context.Context) (*ftue.IngestResult, error) {
+		return &ftue.IngestResult{New: 1}, nil
+	}, nil, &tick)
+	program.SetSize(80, 24)
+	if tick == nil {
+		t.Fatal("starting local ingest did not schedule the injected animation tick")
+	}
+
+	first := stripRender(program.View())
+	if !strings.Contains(first, "_|||_") || !strings.Contains(strings.ToLower(first), "waiting for the first progress update") {
+		t.Fatalf("initial local import view does not show active animation and pending progress state:\n%s", first)
+	}
+	clock.Advance(1)
+	program, _ = program.Update(tick(clock.Now()))
+	second := stripRender(program.View())
+	if second == first {
+		t.Fatalf("local import animation did not advance before progress events arrived:\n%s", second)
 	}
 }
 

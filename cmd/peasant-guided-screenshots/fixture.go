@@ -23,6 +23,7 @@ const (
 	sheetGuidedLight sheetName = "guided-light"
 	sheetSelection   sheetName = "selection"
 	sheetPush        sheetName = "push"
+	sheetIngest      sheetName = "ingest-progress"
 )
 
 type sheetKind string
@@ -31,6 +32,7 @@ const (
 	sheetKindGuided    sheetKind = "guided"
 	sheetKindSelection sheetKind = "selection"
 	sheetKindPush      sheetKind = "push"
+	sheetKindIngest    sheetKind = "ingest-progress"
 )
 
 type captureTheme string
@@ -43,6 +45,12 @@ const (
 func (t captureTheme) valid() bool {
 	return t == captureThemeDark || t == captureThemeLight
 }
+
+type ingestProgressState string
+
+const ingestProgressStateRunning ingestProgressState = "running"
+
+func (s ingestProgressState) valid() bool { return s == ingestProgressStateRunning }
 
 type guidedSection string
 
@@ -147,6 +155,19 @@ func (s pushRedactionState) valid() bool {
 type pushStateFixture struct {
 	Key          pushState `yaml:"key"`
 	WantContains []string  `yaml:"wantContains"`
+}
+
+type ingestProgressStateFixture struct {
+	Key          ingestProgressState `yaml:"key"`
+	WantContains []string            `yaml:"wantContains"`
+}
+
+type ingestProgressCaptureFixture struct {
+	Name   string              `yaml:"name"`
+	State  ingestProgressState `yaml:"state"`
+	Theme  captureTheme        `yaml:"theme"`
+	Width  int                 `yaml:"width"`
+	Height int                 `yaml:"height"`
 }
 
 // pushCaptureFixture is one push screen at one palette and one region.
@@ -274,16 +295,18 @@ type captureDocument struct {
 	// RequiredPushSessionNames is a deletion-protection manifest: every
 	// listed session id must be present in Push.Sessions. It does not bound
 	// how many push sessions exist.
-	RequiredPushSessionNames []string                  `yaml:"requiredPushSessionNames"`
-	PushStates               []pushStateFixture        `yaml:"pushStates"`
-	PushCaptures             []pushCaptureFixture      `yaml:"pushCaptures"`
-	Push                     pushFixture               `yaml:"push"`
-	Sheets                   []sheetFixture            `yaml:"sheets"`
-	GuidedSections           []guidedSectionFixture    `yaml:"guidedSections"`
-	SelectionStates          []selectionStateFixture   `yaml:"selectionStates"`
-	Selection                selectionFixture          `yaml:"selection"`
-	GuidedCaptures           []guidedCaptureFixture    `yaml:"guidedCaptures"`
-	SelectionCaptures        []selectionCaptureFixture `yaml:"selectionCaptures"`
+	RequiredPushSessionNames []string                       `yaml:"requiredPushSessionNames"`
+	PushStates               []pushStateFixture             `yaml:"pushStates"`
+	PushCaptures             []pushCaptureFixture           `yaml:"pushCaptures"`
+	IngestProgressStates     []ingestProgressStateFixture   `yaml:"ingestProgressStates"`
+	IngestProgressCaptures   []ingestProgressCaptureFixture `yaml:"ingestProgressCaptures"`
+	Push                     pushFixture                    `yaml:"push"`
+	Sheets                   []sheetFixture                 `yaml:"sheets"`
+	GuidedSections           []guidedSectionFixture         `yaml:"guidedSections"`
+	SelectionStates          []selectionStateFixture        `yaml:"selectionStates"`
+	Selection                selectionFixture               `yaml:"selection"`
+	GuidedCaptures           []guidedCaptureFixture         `yaml:"guidedCaptures"`
+	SelectionCaptures        []selectionCaptureFixture      `yaml:"selectionCaptures"`
 }
 
 //go:embed testdata/captures.yaml
@@ -321,7 +344,45 @@ func decodeCaptureDocument(data []byte) (captureDocument, error) {
 	if err := validatePushData(document.Push, document.RequiredPushSessionNames); err != nil {
 		return document, err
 	}
+	if err := validateIngestProgressMatrix(document.IngestProgressStates, document.IngestProgressCaptures); err != nil {
+		return document, err
+	}
 	return document, nil
+}
+
+func validateIngestProgressMatrix(states []ingestProgressStateFixture, captures []ingestProgressCaptureFixture) error {
+	stateRows := make(map[ingestProgressState]ingestProgressStateFixture, len(states))
+	for _, state := range states {
+		if !state.Key.valid() || stateRows[state.Key].Key != "" || !nonEmptyStrings(state.WantContains) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate ingest progress state: %#v", state)
+		}
+		stateRows[state.Key] = state
+	}
+	if stateRows[ingestProgressStateRunning].Key == "" {
+		return fmt.Errorf("screenshot fixture omits ingest progress state %q", ingestProgressStateRunning)
+	}
+	seenNames := make(map[string]bool, len(captures))
+	pairs := make(map[string]int, len(captures))
+	for _, capture := range captures {
+		wantName := fmt.Sprintf("ingest-progress-%s-%s-%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)
+		if capture.Name != wantName || seenNames[capture.Name] || stateRows[capture.State].Key == "" ||
+			!capture.Theme.valid() || !validCaptureSize(capture.Width, capture.Height) {
+			return fmt.Errorf("screenshot fixture has an invalid or duplicate ingest progress capture: %#v", capture)
+		}
+		seenNames[capture.Name] = true
+		pairs[fmt.Sprintf("%s/%s/%dx%d", capture.State, capture.Theme, capture.Width, capture.Height)]++
+	}
+	for state := range stateRows {
+		for _, name := range []captureTheme{captureThemeDark, captureThemeLight} {
+			for _, viewport := range []viewportFixture{{Width: 80, Height: 24}, {Width: 120, Height: 40}} {
+				pair := fmt.Sprintf("%s/%s/%dx%d", state, name, viewport.Width, viewport.Height)
+				if pairs[pair] != 1 {
+					return fmt.Errorf("screenshot fixture ingest progress pair %q has %d captures, want exactly one", pair, pairs[pair])
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // validatePushMatrix requires one capture per push screen, per palette, per
@@ -438,6 +499,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
 		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
+		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 1200},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {
