@@ -1,0 +1,3 @@
+requiredNames:
+  - sanitizer-replaces-unsafe-values
+  - sanitizer-drops-unknown-keys

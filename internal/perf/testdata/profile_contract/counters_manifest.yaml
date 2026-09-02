@@ -1,0 +1,19 @@
+requiredNames:
+  - push.sessions.selected
+  - push.sessions.published
+  - push.sessions.failed
+  - push.sessions.skipped
+  - push.db.reads
+  - push.http.requests
+  - push.http.retries
+  - push.payload.bytes
+  - push.response.bytes
+  - push.visibility.patch.requests
+  - push.annotation.requests
+  - push.concurrency.high_water
+  - redaction.entries.scanned
+  - redaction.bytes.scanned
+  - redaction.findings
+  - redaction.rules.matched
+  - redaction.replacements
+  - redaction.failures

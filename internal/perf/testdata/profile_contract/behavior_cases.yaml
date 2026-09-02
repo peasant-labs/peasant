@@ -1,0 +1,27 @@
+cases:
+  - name: sanitizer-replaces-unsafe-values
+    forbiddenValues:
+      - /home/example/private-project/session.jsonl
+      - https://example.invalid/private/repo.git
+      - branch main with private history
+      - sentinel transcript body
+      - sentinel matched secret text
+    safeAttrs:
+      safeSubjectId: session:safe-123
+      redaction.level: standard
+      operation: publish
+    unsafeAttrs:
+      safeSubjectId: /home/example/private-project/session.jsonl
+      operation: https://example.invalid/private/repo.git
+      selectionMode: branch main with private history
+      category: sentinel transcript body
+      ruleId: sentinel matched secret text
+  - name: sanitizer-drops-unknown-keys
+    forbiddenValues:
+      - private/raw/path/key
+      - git@example.invalid:repo/private.git
+    safeAttrs:
+      safeSubjectId: session:safe-456
+      operation: publish
+    unsafeAttrs:
+      private/raw/path/key: git@example.invalid:repo/private.git
