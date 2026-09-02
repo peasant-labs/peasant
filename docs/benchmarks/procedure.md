@@ -1,4 +1,98 @@
-# Harvest Benchmark Procedure
+# Benchmark Procedures
+
+This page gives local-only procedures for repeatable profiling evidence. Use
+copied or synthetic data. Do not run these procedures against the live Peasant
+data directory.
+
+## Village Push Profile Evidence
+
+Use `scripts/profile-push-copy.sh` to prepare repeatable `peasant village push`
+profile evidence when push profiling is enabled. The harness is only a safe
+runner. It does not choose the profile command for you, and it does not compare
+runs by a hard maximum duration.
+
+### Goals
+
+- Keep profile outputs under `/tmp/opencode`.
+- Keep the work directory under `/tmp/opencode/peasant-push-profile-*`.
+- Record whether JSON and JSONL files were created.
+- Compare structural metrics: keys, stage names, counter names, outcomes, safe
+  subject identifiers, and forbidden-string absence.
+- Treat wall time as context, not as a pass or fail threshold.
+
+### Dry Run
+
+The dry run validates paths and writes a safe summary without running a push:
+
+```bash
+scripts/profile-push-copy.sh \
+  --dry-run \
+  --work /tmp/opencode/peasant-push-profile-dry-run \
+  --profile-output /tmp/opencode/push-profile.json \
+  --trace-output /tmp/opencode/push-profile.jsonl \
+  --summary-output /tmp/opencode/push-profile.summary.log
+```
+
+Expected output:
+
+```text
+push profile dry run: ok
+profile summary: /tmp/opencode/push-profile.summary.log
+```
+
+### Real Run Shape
+
+When the CLI profiling flags are available, pass the exact command to the
+harness after `--`. The harness exports these variables for the command:
+
+| Variable | Meaning |
+| --- | --- |
+| `PROFILE_WORK` | Local-only work directory. |
+| `PROFILE_JSON` | JSON v1 profile output file. |
+| `PROFILE_TRACE` | Optional JSONL trace output file. |
+| `PROFILE_SUMMARY` | Summary file written by the harness. |
+
+Example shape:
+
+```bash
+scripts/profile-push-copy.sh \
+  --work /tmp/opencode/peasant-push-profile-candidate \
+  --profile-output /tmp/opencode/push-profile.json \
+  --trace-output /tmp/opencode/push-profile.jsonl \
+  --summary-output /tmp/opencode/push-profile.summary.log \
+  -- bash -c 'go run ./cmd/peasant --data-dir "$PROFILE_WORK/data-home" --config-dir "$PROFILE_WORK/config-home" --state-dir "$PROFILE_WORK/state-home" village push --profile-output "$PROFILE_JSON" --profile-trace "$PROFILE_TRACE"'
+```
+
+### Public-Safe Push Evidence
+
+When you summarize a run, include only:
+
+- commit under test;
+- command shape, without local data paths other than `/tmp/opencode` files;
+- profile status;
+- whether JSON and JSONL files were created;
+- counts for selected, published, failed, and skipped sessions;
+- stage totals and distribution keys from injected or collected profile data;
+- request, retry, payload, response, and receipt counters;
+- redaction counts by category and rule identifier;
+- safe error codes and safe recovery text.
+
+Do not include transcript text, matched redaction text, raw local paths, raw git
+remotes, branch output, raw logs, annotation values, or private project history.
+
+### Comparison Rules
+
+- Compare two runs only when they use the same command shape, input shape, and
+  profile fields.
+- Do not mark a run better only because wall time is lower. First confirm it
+  published the same sessions and did not fail earlier.
+- Prefer structural checks over duration limits: required stage names, required
+  counters, stable ordering, safe subject identifiers, and forbidden-string
+  absence.
+- Keep raw profile files local. Public evidence should quote only aggregate,
+  privacy-safe fields.
+
+## Harvest Benchmark Procedure
 
 This procedure describes how to run repeatable `peasant harvest index` profiles
 against copied data. It is for local performance work only. Do not run it against
