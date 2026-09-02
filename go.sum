@@ -119,8 +119,8 @@ github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdh
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/peasant-labs/redact v0.1.5 h1:51so/YX6vXiTHx4uHB3RcWpD8WRUmj7lJssGq5PvOKo=
 github.com/peasant-labs/redact v0.1.5/go.mod h1:X3C7ssZnus4U/t4+HnbbQ4IE9e7txyPIlZYSftvp3Cs=
-github.com/peasant-labs/schema v0.1.3-rc1 h1:7MedSK/M1fM2aQDsOhcH8EPzbPpJIYgj15hTRyb9PoQ=
-github.com/peasant-labs/schema v0.1.3-rc1/go.mod h1:zuSUP1kUd6Bn3QcNPFfjJbMqZHV6HLpsKPSihU+Q1qo=
+github.com/peasant-labs/schema v0.1.3 h1:bKs5mHqYFuBAoO2Rf3MYuS1ugoeAC9aR9f3c7hWHwa4=
+github.com/peasant-labs/schema v0.1.3/go.mod h1:zuSUP1kUd6Bn3QcNPFfjJbMqZHV6HLpsKPSihU+Q1qo=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
 github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
