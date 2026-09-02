@@ -1,0 +1,4 @@
+requiredNames:
+  - json_v1_top_level_shape
+  - summary_distribution_keys
+  - privacy_safe_error_shape

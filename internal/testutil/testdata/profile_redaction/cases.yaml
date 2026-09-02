@@ -1,0 +1,95 @@
+cases:
+  - name: redaction_secrets_count
+    description: records credential category counts without matched text
+    subject: redaction
+    expectedStages:
+      - redaction.scan
+      - redaction.rule.evaluate
+      - redaction.apply
+    expectedCounters:
+      - redaction.findings
+    expectedOutputKeys:
+      - findingsByCategory
+      - rulesMatched
+    evidenceRules:
+      - assert category counts and rule identifiers only
+      - assert matched content is absent
+    forbiddenInputs:
+      - MATCHED_SECRET_SENTINEL
+  - name: redaction_pii_count
+    description: records PII category counts without transcript text
+    subject: redaction
+    expectedStages:
+      - redaction.scan
+      - redaction.rule.evaluate
+    expectedCounters:
+      - redaction.findings
+    expectedOutputKeys:
+      - findingsByCategory
+    evidenceRules:
+      - assert PII counts are aggregate only
+      - assert no person-like example text appears in output
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+  - name: redaction_paths_count
+    description: records path category counts without raw local paths
+    subject: redaction
+    expectedStages:
+      - redaction.scan
+      - redaction.rule.evaluate
+    expectedCounters:
+      - redaction.findings
+    expectedOutputKeys:
+      - findingsByCategory
+    evidenceRules:
+      - assert path counts are aggregate only
+      - assert raw paths are absent from JSON and trace output
+    forbiddenInputs:
+      - RAW_PATH_SENTINEL
+  - name: redaction_project_count
+    description: records project category counts without remotes or branch output
+    subject: redaction
+    expectedStages:
+      - redaction.scan
+      - redaction.rule.evaluate
+    expectedCounters:
+      - redaction.findings
+    expectedOutputKeys:
+      - findingsByCategory
+    evidenceRules:
+      - assert project counts are aggregate only
+      - assert raw remotes and branch output are absent
+    forbiddenInputs:
+      - RAW_REMOTE_SENTINEL
+      - PRIVATE_PROJECT_HISTORY_SENTINEL
+  - name: redaction_failure_safe_error
+    description: records a fail-closed redaction failure as a safe error
+    subject: redaction
+    expectedStages:
+      - redaction.scan
+    expectedCounters:
+      - redaction.failures
+    expectedOutputKeys:
+      - errors
+      - safeMessage
+    evidenceRules:
+      - assert failure keeps the push result failed or blocked
+      - assert safe error text explains recovery without raw input
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+  - name: redaction_no_findings
+    description: records scan totals when no findings occur
+    subject: redaction
+    expectedStages:
+      - redaction.scan
+    expectedCounters:
+      - redaction.findings
+    expectedOutputKeys:
+      - entriesScanned
+      - bytesScanned
+      - findingsByCategory
+    evidenceRules:
+      - assert zero finding categories are explicit counts
+      - assert duration uses injected clock values in tests
+    forbiddenInputs:
+      - MATCHED_SECRET_SENTINEL

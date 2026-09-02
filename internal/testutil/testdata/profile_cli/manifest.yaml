@@ -1,0 +1,5 @@
+requiredNames:
+  - profile_json_only
+  - profile_json_plus_trace
+  - profile_invalid_output_path
+  - profile_summary_output
