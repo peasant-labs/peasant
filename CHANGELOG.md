@@ -7,9 +7,21 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.5.0-rc3] - 2026-09-01
+
+### Build
+- Web build and validation now use Node.js 26 with pnpm workspace catalog
+  policy, keeping frontend dependency resolution aligned with the release
+  environment (#235).
+
+### CI
+- Release automation can cut a final release without first requiring a
+  same-version release candidate, while keeping the existing guard, e2e, and
+  package-validation gates (#289).
+
 ### Dependencies
 - Contract pins: schema `v0.1.3` (Village API 0.14.0, Local API 0.9.0,
-  Types 0.14.0).
+  Types 0.14.0) (#290).
 
 ## [0.5.0-rc2] - 2026-08-31
 
@@ -209,6 +221,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.5.0-rc3]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc3
 [0.5.0-rc2]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc2
 [0.5.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc1
 [0.4.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.4.0
