@@ -183,6 +183,7 @@ type SummaryReducer interface {
 
 type Span interface {
 	End(Outcome, Attributes)
+	ID() string
 }
 
 type EventKind string
@@ -226,6 +227,7 @@ type Options struct {
 type Sanitizer struct{}
 
 var unsafeValueRE = regexp.MustCompile(`(?i)([a-z]:\\|/[^\s]+|git@|https?://|-----BEGIN|password|branch\s+|commit\s+[0-9a-f]{7,40})`)
+var unsafeErrorRE = regexp.MustCompile(`(?i)([a-z]:\\|/[^\s]+|git@|https?://|-----BEGIN|secret|token|password|branch\s+|commit\s+[0-9a-f]{7,40})`)
 var safeTokenRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]*$`)
 
 func (Sanitizer) SanitizeAttributes(attrs Attributes) Attributes {
@@ -289,7 +291,7 @@ func sanitizeAttributeValue(key AttributeKey, value string) (string, bool) {
 
 func (s Sanitizer) SafeError(stage StageID, code string, err error, retryable bool) SafeError {
 	message := "Profiled operation failed during " + stage.String() + "; the profile records only a safe error code. Check the command output and service availability, then retry the operation."
-	if err != nil && !unsafeValueRE.MatchString(err.Error()) && len(err.Error()) <= 180 {
+	if err != nil && !unsafeErrorRE.MatchString(err.Error()) && len(err.Error()) <= 180 {
 		message = err.Error() + "; this happened during " + stage.String() + ". Check the related service or input, then retry if it is safe."
 	}
 	return SafeError{Stage: stage, Code: sanitizeCode(code), SafeMessage: message, Retryable: retryable}
@@ -387,6 +389,7 @@ type UploadSample struct {
 // stays trivial to satisfy and cheap to call.
 type Recorder interface {
 	StartSpan(stage StageID, attrs Attributes) Span
+	StartChildSpan(stage StageID, parentSpanID string, attrs Attributes) Span
 	Count(name CounterName, delta int64, unit Unit, attrs Attributes)
 	Error(stage StageID, err error, attrs Attributes)
 	// RecordPhase records one duration sample for a phase (e.g. a session's
@@ -417,13 +420,17 @@ func (Nop) RecordUpload(UploadSample) {}
 // Enabled always reports false.
 func (Nop) Enabled() bool { return false }
 
-func (Nop) StartSpan(StageID, Attributes) Span         { return nopSpan{} }
+func (Nop) StartSpan(StageID, Attributes) Span { return nopSpan{} }
+func (Nop) StartChildSpan(StageID, string, Attributes) Span {
+	return nopSpan{}
+}
 func (Nop) Count(CounterName, int64, Unit, Attributes) {}
 func (Nop) Error(StageID, error, Attributes)           {}
 
 type nopSpan struct{}
 
 func (nopSpan) End(Outcome, Attributes) {}
+func (nopSpan) ID() string              { return "" }
 
 // Collector is the active Recorder. It accumulates phase-duration samples and
 // per-upload samples under a mutex (uploads run concurrently) and produces a
@@ -479,12 +486,16 @@ func (c *Collector) RecordPhase(phase Phase, d time.Duration) {
 }
 
 func (c *Collector) StartSpan(stage StageID, attrs Attributes) Span {
+	return c.StartChildSpan(stage, "", attrs)
+}
+
+func (c *Collector) StartChildSpan(stage StageID, parentSpanID string, attrs Attributes) Span {
 	if err := stage.Validate(); err != nil {
 		c.Error(stage, err, attrs)
 		return nopSpan{}
 	}
 	id := c.nextID.Add(1)
-	return &collectorSpan{collector: c, spanID: fmt.Sprintf("span-%d", id), stage: stage, attrs: c.sanitizer.SanitizeAttributes(attrs), startedAt: c.clock.Now(), order: id}
+	return &collectorSpan{collector: c, spanID: fmt.Sprintf("span-%d", id), parentSpanID: sanitizeParentSpanID(parentSpanID), stage: stage, attrs: c.sanitizer.SanitizeAttributes(attrs), startedAt: c.clock.Now(), order: id}
 }
 
 func (c *Collector) Count(name CounterName, delta int64, unit Unit, attrs Attributes) {
@@ -545,6 +556,18 @@ func (s *collectorSpan) End(outcome Outcome, attrs Attributes) {
 		merged := mergeAttrs(s.attrs, s.collector.sanitizer.SanitizeAttributes(attrs))
 		s.collector.appendEvent(Event{Kind: EventKindSpanEnd, Order: s.order, SpanID: s.spanID, ParentSpanID: s.parentSpanID, Stage: s.stage, StartedAt: s.startedAt, EndedAt: endedAt, Duration: endedAt.Sub(s.startedAt), DurationMs: durationMs(endedAt.Sub(s.startedAt)), Outcome: outcome, Attributes: merged})
 	})
+}
+
+func (s *collectorSpan) ID() string { return s.spanID }
+
+func sanitizeParentSpanID(id string) string {
+	if id == "" || unsafeValueRE.MatchString(id) {
+		return ""
+	}
+	if safeTokenRE.MatchString(id) {
+		return id
+	}
+	return ""
 }
 
 func mergeAttrs(a, b Attributes) Attributes {

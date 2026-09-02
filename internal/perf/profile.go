@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"time"
@@ -161,6 +163,39 @@ func WriteProfileJSON(w io.Writer, doc ProfileDocument) error {
 	if err := enc.Encode(doc); err != nil {
 		return fmt.Errorf("write profile JSON v1: encode profile document failed; profile was not written and caller should retry with a writable destination: %w", err)
 	}
+	return nil
+}
+
+func WriteProfileJSONFile(path string, doc ProfileDocument) error {
+	if path == "" {
+		return fmt.Errorf("write profile JSON v1 file: output path is empty; pass a writable file path for the local diagnostic profile")
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".profile-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("write profile JSON v1 file: create temporary file in %s failed; check directory permissions and retry: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := WriteProfileJSON(tmp, doc); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write profile JSON v1 file: close temporary file %s failed; profile was not committed and caller should retry: %w", tmpName, err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fmt.Errorf("write profile JSON v1 file: set private permissions on %s failed; profile was not committed and caller should retry: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("write profile JSON v1 file: atomic rename to %s failed; profile was not committed and caller should retry: %w", path, err)
+	}
+	committed = true
 	return nil
 }
 

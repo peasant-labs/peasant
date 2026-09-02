@@ -5,6 +5,8 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +87,8 @@ func TestProfileRecorderReducesSafeJSONV1FromFixture(t *testing.T) {
 			var trace bytes.Buffer
 			collector := perf.NewCollectorWithOptions(clock, perf.NewJSONLTraceSink(&trace), perf.Options{Enabled: true})
 
-			span := collector.StartSpan(perf.StagePushSessionRedact, attrsFromStrings(tc.SafeAttrs))
+			root := collector.StartSpan(perf.StagePushSession, perf.Attributes{perf.AttrSafeSubjectID: "session:parent"})
+			span := collector.StartChildSpan(perf.StagePushSessionRedact, root.ID(), attrsFromStrings(tc.SafeAttrs))
 			collector.Count(perf.CounterRedactionEntriesScanned, 2, perf.UnitCount, nil)
 			collector.Count(perf.CounterRedactionBytesScanned, 128, perf.UnitBytes, nil)
 			collector.Count(perf.CounterRedactionFindings, 1, perf.UnitCount, perf.Attributes{perf.AttrCategory: "secrets"})
@@ -100,6 +103,17 @@ func TestProfileRecorderReducesSafeJSONV1FromFixture(t *testing.T) {
 			var output bytes.Buffer
 			if err := perf.WriteProfileJSON(&output, doc); err != nil {
 				t.Fatalf("WriteProfileJSON: %v", err)
+			}
+			jsonPath := filepath.Join(t.TempDir(), "profile.json")
+			if err := perf.WriteProfileJSONFile(jsonPath, doc); err != nil {
+				t.Fatalf("WriteProfileJSONFile: %v", err)
+			}
+			info, err := os.Stat(jsonPath)
+			if err != nil {
+				t.Fatalf("stat profile file: %v", err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Fatalf("profile file mode = %v, want 0600", got)
 			}
 
 			assertJSONV1Shape(t, output.Bytes())
