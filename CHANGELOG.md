@@ -7,6 +7,46 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-01
+
+### Added
+- `peasant upgrade` installs newer release artifacts from GitHub, protects raw
+  archive installs with an explicit confirmation step, and reports safe
+  downgrade guidance (#17, #269, #270).
+
+### Changed
+- Push sends repository labels and git remotes by default while keeping project
+  paths as a fallback, and the push wizard and kickstart privacy guide use the
+  same user-facing consent language (#224).
+- The web transcript viewer now uses the shared Fairtrade transcript graph and
+  helper components (#228).
+
+### Fixed
+- Harvest progress, OpenCode injected-turn classification, Claude meta-turn
+  handling, and discovery filtering now match the intended recorded-session
+  model (#217, #231, #253, #284).
+
+### Performance
+- Harvest indexing, annotation skip checks, and annotation persistence avoid
+  repeated transcript and store work on warm runs (#230, #250, #255, #256,
+  #273).
+
+### Database
+- Store migrations V47 through V49 add warm-index state, annotation run state,
+  and durable annotation target anchors (#250, #254).
+
+### Build
+- Web build and validation now use Node.js 26 with pnpm workspace catalog
+  policy (#235).
+
+### CI
+- Release packaging validation now runs only through release flows, and final
+  releases no longer require a same-version release candidate (#280, #289).
+
+### Dependencies
+- Contract pins: schema `v0.1.3` (Village API 0.14.0, Local API 0.9.0,
+  Types 0.14.0), redact `v0.1.5`, fairtrade `0.0.18` (#290).
+
 ## [0.5.0-rc3] - 2026-09-01
 
 ### Build
@@ -221,6 +261,7 @@ Second public release. See the
 Initial public release. See the
 [v0.1.0 release](https://github.com/peasant-labs/peasant/releases/tag/v0.1.0).
 
+[0.5.0]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0
 [0.5.0-rc3]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc3
 [0.5.0-rc2]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc2
 [0.5.0-rc1]: https://github.com/peasant-labs/peasant/releases/tag/v0.5.0-rc1
