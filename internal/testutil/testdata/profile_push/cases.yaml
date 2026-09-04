@@ -1,0 +1,107 @@
+cases:
+  - name: push_success_with_receipt
+    description: records a successful selected session publish and receipt write
+    subject: push
+    expectedStages:
+      - push.discovery
+      - push.selection
+      - push.session
+      - push.session.load
+      - push.payload.build
+      - push.publish
+      - push.receipt.persist
+    expectedCounters:
+      - push.sessions.selected
+      - push.sessions.published
+      - push.http.requests
+      - push.payload.bytes
+    expectedOutputKeys:
+      - safeSubjectId
+      - outcome
+      - resources
+    evidenceRules:
+      - assert receipt persistence remains required for a successful publish
+      - assert output has stable order for sessions and counters
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+      - RAW_PATH_SENTINEL
+  - name: push_partial_failure
+    description: records honest mixed outcomes without hiding failed sessions
+    subject: push
+    expectedStages:
+      - push.session
+      - push.publish
+    expectedCounters:
+      - push.sessions.published
+      - push.sessions.failed
+    expectedOutputKeys:
+      - errors
+      - outcomes
+    evidenceRules:
+      - assert a failed session is not counted as published
+      - assert the command result stays honest about partial failure
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+      - RAW_REMOTE_SENTINEL
+  - name: push_retryable_publish_failure
+    description: records retryable publish failure and retry counters
+    subject: push
+    expectedStages:
+      - push.publish
+      - push.retry
+    expectedCounters:
+      - push.http.retries
+      - push.sessions.failed
+    expectedOutputKeys:
+      - retryable
+      - code
+    evidenceRules:
+      - assert retry accounting is structural and deterministic
+      - assert the safe error explains when retry may help
+    forbiddenInputs:
+      - RAW_REMOTE_SENTINEL
+  - name: push_visibility_update
+    description: records the private-before-widening visibility request
+    subject: push
+    expectedStages:
+      - push.visibility.update
+    expectedCounters:
+      - push.visibility.patch.requests
+    expectedOutputKeys:
+      - resources
+      - counters
+    evidenceRules:
+      - assert visibility update is measured after publish
+      - assert profiling does not skip safety ordering
+    forbiddenInputs:
+      - PRIVATE_PROJECT_HISTORY_SENTINEL
+  - name: push_annotation_publish
+    description: records annotation publication after transcript publish
+    subject: push
+    expectedStages:
+      - push.annotations.publish
+    expectedCounters:
+      - push.annotation.requests
+      - push.http.requests
+    expectedOutputKeys:
+      - counters
+    evidenceRules:
+      - assert annotation requests are counted separately from transcript publish
+      - assert annotation text is not present in profile output
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+  - name: push_receipt_persist
+    description: records local receipt validation and persistence
+    subject: push
+    expectedStages:
+      - push.receipt.persist
+    expectedCounters:
+      - push.db.reads
+    expectedOutputKeys:
+      - outcome
+      - resources
+    evidenceRules:
+      - assert receipt work is measured and remains required
+      - assert DB counters are counts, not copied query text
+    forbiddenInputs:
+      - RAW_PATH_SENTINEL

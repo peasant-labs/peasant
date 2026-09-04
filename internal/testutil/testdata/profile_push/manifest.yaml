@@ -1,0 +1,7 @@
+requiredNames:
+  - push_success_with_receipt
+  - push_partial_failure
+  - push_retryable_publish_failure
+  - push_visibility_update
+  - push_annotation_publish
+  - push_receipt_persist
