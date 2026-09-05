@@ -15,8 +15,8 @@ import (
 //go:embed testdata/opencode_native_rows.yaml
 var openCodeNativeRowsYAML []byte
 
-//go:embed testdata/opencode_beta_rows.yaml
-var openCodeBetaRowsYAML []byte
+//go:embed testdata/opencode_v2_rows.yaml
+var openCodeV2RowsYAML []byte
 
 type openCodeNativeRowsFixture struct {
 	RequiredNames      []string                            `yaml:"required_names"`
@@ -194,8 +194,8 @@ func TestOpenCodeNativeRowsNormalizationBoundaries(t *testing.T) {
 	runOpenCodeNativeNormalizationCases(t, loadOpenCodeNativeRowsFixtures(t, openCodeNativeRowsYAML))
 }
 
-func TestOpenCodeBetaRowsNormalizationBoundaries(t *testing.T) {
-	runOpenCodeNativeNormalizationCases(t, loadOpenCodeNativeRowsFixtures(t, openCodeBetaRowsYAML))
+func TestOpenCodeV2RowsNormalizationBoundaries(t *testing.T) {
+	runOpenCodeNativeNormalizationCases(t, loadOpenCodeNativeRowsFixtures(t, openCodeV2RowsYAML))
 }
 
 func runOpenCodeNativeNormalizationCases(t *testing.T, fixture openCodeNativeRowsFixture) {

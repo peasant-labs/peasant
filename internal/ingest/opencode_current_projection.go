@@ -28,7 +28,7 @@ type openCodeCurrentProjection struct {
 }
 
 // The historical shapes follow upstream 4643e65ad6334de3e4e68dedc201d5fbb828c9fe.
-// Native identity and assistant timing compatibility follows the beta schema at
+// Native identity and assistant timing compatibility follows the V2 schema at
 // 52685d451777fbccc99736ab31ffc37de8475a45 (packages/schema/src/session-message.ts).
 // The projector stores type and id in columns and the remaining fields in data.
 // Redundant payload identities are accepted only when they agree with the columns.
@@ -82,15 +82,15 @@ type openCodeCurrentFile struct {
 type openCodeCurrentAgent struct {
 	Name    string                 `json:"name"`
 	Source  *openCodeCurrentSource `json:"source,omitempty"`
-	Mention *openCodeBetaMention   `json:"mention,omitempty"`
+	Mention *openCodeV2Mention     `json:"mention,omitempty"`
 }
 
 type openCodeCurrentUser struct {
 	openCodeCurrentBase
-	Text   string                        `json:"text"`
-	Files  []json.RawMessage             `json:"files,omitempty"`
-	Agents []openCodeCurrentAgent        `json:"agents,omitempty"`
-	Skills []openCodeBetaSkillAttachment `json:"skills,omitempty"`
+	Text   string                      `json:"text"`
+	Files  []json.RawMessage           `json:"files,omitempty"`
+	Agents []openCodeCurrentAgent      `json:"agents,omitempty"`
+	Skills []openCodeV2SkillAttachment `json:"skills,omitempty"`
 }
 
 type openCodeCurrentAssistant struct {
@@ -107,7 +107,7 @@ type openCodeCurrentAssistant struct {
 	Tokens        *openCodeCurrentTokens       `json:"tokens,omitempty"`
 	Error         *openCodeCurrentUnknownError `json:"error,omitempty"`
 	ProviderState map[string]json.RawMessage   `json:"providerState,omitempty"`
-	Retry         *openCodeBetaRetry           `json:"retry,omitempty"`
+	Retry         *openCodeV2Retry             `json:"retry,omitempty"`
 }
 
 type openCodeCurrentSnapshot struct {
@@ -588,7 +588,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 	}
 	var err error
-	data, err = normalizeOpenCodeBetaStructuralRow(row, data, envelope)
+	data, err = normalizeOpenCodeV2StructuralRow(row, data, envelope)
 	if err != nil {
 		return message, err
 	}
@@ -613,7 +613,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			}
 		}
 		for _, raw := range value.Files {
-			file, err := decodeOpenCodeBetaFile(raw)
+			file, err := decodeOpenCodeV2File(raw)
 			if err != nil {
 				return message, err
 			}
@@ -650,7 +650,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := requireOpenCodeCurrentFields(data, "agent", "model", "content", "time"); err != nil {
 			return message, err
 		}
-		if err := validateOpenCodeBetaError(value.Error); err != nil {
+		if err := validateOpenCodeV2Error(value.Error); err != nil {
 			return message, err
 		}
 		if value.Retry != nil {
@@ -660,7 +660,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			if value.Retry.Attempt <= 0 || value.Retry.Error == nil {
 				return message, errors.New("assistant retry requires positive attempt and error")
 			}
-			if err := validateOpenCodeBetaError(value.Retry.Error); err != nil {
+			if err := validateOpenCodeV2Error(value.Retry.Error); err != nil {
 				return message, err
 			}
 		}
@@ -684,7 +684,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			if err := messageData(RoleAssistant.String(), "", "", "", "", value.Metadata, value.Time, nil); err != nil {
 				return message, err
 			}
-			state, err := normalizeOpenCodeBetaShellState(value, envelope)
+			state, err := normalizeOpenCodeV2ShellState(value, envelope)
 			if err != nil {
 				return message, err
 			}
@@ -733,7 +733,7 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			return message, err
 		}
 	case "skill":
-		var value openCodeBetaSkillMessage
+		var value openCodeV2SkillMessage
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
@@ -902,7 +902,7 @@ func appendOpenCodeCurrentAssistantContent(message *openCodeLegacyProjectionMess
 		if value.ID == "" {
 			return errors.New("assistant tool requires id")
 		}
-		if state, native, err := decodeOpenCodeBetaToolState(value.State); native {
+		if state, native, err := decodeOpenCodeV2ToolState(value.State); native {
 			if err != nil {
 				return err
 			}

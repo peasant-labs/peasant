@@ -1,10 +1,10 @@
-# Native identity and timing shapes match the public beta schema:
+# Native identity and timing shapes match the public V2 schema:
 # https://github.com/anomalyco/opencode/blob/52685d451777fbccc99736ab31ffc37de8475a45/packages/schema/src/session-message.ts
 # The observed installed CLI version is 0.0.0-beta-19151. Its npm metadata has no
 # gitHead or matching public tag; the source reference is not an exact build pin.
 required_names:
   - native_user_and_assistant_rows
-  - native_beta_tools_and_reasoning
+  - native_v2_tools_and_reasoning
   - native_current_shared_corpus
   - native_semantic_shared_corpus
   - native_optional_user_arrays_absent
@@ -35,10 +35,10 @@ cases:
     session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
     expected_text: [native user question, native assistant answer]
     expected_model: synthetic-model
-  - name: native_beta_tools_and_reasoning
-    source_fixture: native-beta-rows
+  - name: native_v2_tools_and_reasoning
+    source_fixture: native-v2-rows
     session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
-    expected_text: [native beta request, native beta reasoning, native beta partial input, native beta running input, native beta completed output, native beta tool error, native beta answer]
+    expected_text: [native v2 request, native v2 reasoning, native v2 partial input, native v2 running input, native v2 completed output, native v2 tool error, native v2 answer]
     expected_model: synthetic-model
   - name: native_current_shared_corpus
     source_fixture: current-session-message
