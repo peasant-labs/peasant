@@ -1267,16 +1267,17 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 	if now.Before(p.attemptStarted) {
 		now = p.attemptStarted
 	}
-	lines := []string{styles.Base.Render("local import elapsed: " + displayDuration(now.Sub(p.attemptStarted)))}
 	focus, hasFocus := p.progressFocusStage()
-	shown := false
+	var lines []string
+	// Every pipeline stage renders from the first tick, started or not, so
+	// the full scope of the import is visible before any stage begins — the
+	// same upfront matrix the harvest renderer shows. Unobserved stages
+	// render from the zero progress: not-started icon, empty bar, no count.
 	for _, stage := range ingest.StageOrder {
-		observation, ok := p.stageObservations[stage]
-		if !ok || !observation.progress.Started {
-			continue
+		sp := ingest.StageProgress{}
+		if observation, ok := p.stageObservations[stage]; ok && observation.progress.Started {
+			sp = observation.progress
 		}
-		shown = true
-		sp := observation.progress
 		// The row matches the harvest TTY bar exactly; only the stage name
 		// stays lowercase per the lowercase-chrome rule.
 		lines = append(lines, styles.Base.Render(
@@ -1284,21 +1285,17 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		if !hasFocus || stage != focus {
 			continue
 		}
+		observation := p.stageObservations[stage]
 		end := now
 		if sp.Ended && observation.lastAt.Before(end) {
 			end = observation.lastAt
 		}
-		lines = append(lines, styles.Muted.Render("  observed elapsed: "+displayDuration(end.Sub(observation.startedAt))))
+		lines = append(lines, styles.Muted.Render("  total elapsed: "+displayDuration(end.Sub(observation.startedAt))))
 		if observation.estimateValid {
 			lines = append(lines, styles.Muted.Render("  estimate: "+displayDuration(observation.estimate)))
 		} else {
 			lines = append(lines, styles.Muted.Render("  estimate unavailable"))
 		}
-	}
-	if !shown {
-		lines = append(lines,
-			styles.Muted.Render("waiting for the first progress update"),
-			styles.Muted.Render("estimate unavailable"))
 	}
 	available := p.height - reservedLines
 	if p.height > 0 && len(lines) > available {
@@ -1308,8 +1305,8 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		if available == 1 {
 			return lines[:1]
 		}
-		// Whole-run elapsed is always the first line. Keep it plus the newest
-		// stage window so the current or latest stage survives a short terminal.
+		// The first row is the earliest stage. Keep it plus the newest stage
+		// window so the current or latest stage survives a short terminal.
 		window := make([]string, 0, available)
 		window = append(window, lines[0])
 		window = append(window, lines[len(lines)-(available-1):]...)

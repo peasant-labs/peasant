@@ -10,7 +10,7 @@ progress:
         stages: [{stage: DISCOVER, started: true, done: 0, total: 10}]
       - advanceSeconds: 2
         stages: [{stage: DISCOVER, started: true, done: 4, total: 10}]
-    wantContains: ['local import elapsed: 2s', 'discover', '4/10', 'observed elapsed: 2s', 'estimate: 3s']
+    wantContains: ['discover', '4/10', 'total elapsed: 2s', 'estimate: 3s']
     wantMissing: [estimate unavailable]
   - name: unknown-total
     observations:
@@ -80,7 +80,7 @@ progress:
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
           - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
           - {stage: REPORT, started: true, done: 4, total: 10}
-    wantContains: ['local import elapsed: 2s', 'report', '4/10', 'observed elapsed: 2s', 'estimate: 3s']
+    wantContains: ['report', '4/10', 'total elapsed: 2s', 'estimate: 3s']
     wantMissing: [estimate unavailable]
   - name: full-pipeline-late-failure-at-common-height
     terminalWidth: 80
@@ -111,7 +111,7 @@ progress:
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
           - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
           - {stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}
-    wantContains: ['local import elapsed: 1s', 'report', '1/2', '✗', 'observed elapsed: 1s', 'estimate unavailable']
+    wantContains: ['report', '1/2', '✗', 'total elapsed: 1s', 'estimate unavailable']
   - name: latest-active-stage-owns-detail
     focusProbe: latest-active
     observations:
@@ -128,7 +128,7 @@ progress:
           - {stage: INDEX, started: true, done: 3, total: 10}
     wantContains: ['extract+write', '6/10', 'index', '3/10']
     wantFocusStage: INDEX
-    wantFocusElapsed: 'observed elapsed: 3s'
+    wantFocusElapsed: 'total elapsed: 3s'
     wantFocusEstimate: estimate unavailable
   - name: latest-failure-wins-over-active-and-completed
     focusProbe: failed-before-active
@@ -149,7 +149,7 @@ progress:
           - {stage: REPORT, started: true, done: 4, total: 10}
     wantContains: ['discover', '2/2', 'diff', '1/2', '✗', 'report', '4/10']
     wantFocusStage: DIFF
-    wantFocusElapsed: 'observed elapsed: 5s'
+    wantFocusElapsed: 'total elapsed: 5s'
     wantFocusEstimate: estimate unavailable
   - name: latest-completed-stage-owns-detail
     focusProbe: latest-completed
@@ -167,7 +167,7 @@ progress:
           - {stage: INDEX, started: true, done: 3, total: 3, ended: true}
     wantContains: ['diff', '2/2', 'index', '3/3']
     wantFocusStage: INDEX
-    wantFocusElapsed: 'observed elapsed: 3s'
+    wantFocusElapsed: 'total elapsed: 3s'
     wantFocusEstimate: estimate unavailable
 
 expectedCompletionCount: 3
@@ -212,10 +212,12 @@ completion:
       - retry local import only
       - kickstart published nothing
     wantRetryContains:
-      - 'local import elapsed: 0s'
-      - estimate unavailable
+      - 'local import progress'
+      - '○'
+      - discover
     wantRetryMissing:
-      - 'report'
+      - '1/2'
+      - '✗'
       - stale prior-attempt progress
     wantPreamble:
       - these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.

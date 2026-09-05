@@ -520,8 +520,19 @@ func TestProgramProgressShowsSharedIngestAnimationBeforeProgressEvents(t *testin
 	}
 
 	first := stripRender(program.View())
-	if !strings.Contains(first, "_|||_") || !strings.Contains(strings.ToLower(first), "waiting for the first progress update") {
-		t.Fatalf("initial local import view does not show active animation and pending progress state:\n%s", first)
+	if !strings.Contains(first, "_|||_") {
+		t.Fatalf("initial local import view does not show the active animation:\n%s", first)
+	}
+	// Every pipeline stage renders before any progress event arrives, all
+	// not-started: the full scope of the import is visible from the first tick.
+	lowered := strings.ToLower(first)
+	for _, stage := range ingest.StageOrder {
+		if !strings.Contains(lowered, strings.ToLower(stage.String())) {
+			t.Errorf("initial local import view omits the %q stage row:\n%s", stage, first)
+		}
+	}
+	if got := strings.Count(first, "○"); got != len(ingest.StageOrder) {
+		t.Errorf("initial local import view shows %d not-started rows, want all %d stages:\n%s", got, len(ingest.StageOrder), first)
 	}
 	clock.Advance(1)
 	program, _ = program.Update(tick(clock.Now()))
@@ -548,7 +559,7 @@ func assertProgressFocusDetail(t *testing.T, row progressFixture, rendered strin
 			(strings.Contains(trimmed, "█") || strings.Contains(trimmed, "░")) {
 			stageLine = index
 		}
-		if strings.Contains(trimmed, "observed elapsed:") {
+		if strings.Contains(trimmed, "total elapsed:") {
 			detailLines++
 		}
 	}

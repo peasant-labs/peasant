@@ -79,7 +79,7 @@ func loadMountedJourneyDocument(t *testing.T) mountedJourneyDocument {
 	seen := map[string]bool{}
 	for _, row := range document.Rows {
 		if strings.TrimSpace(row.Name) == "" || seen[row.Name] || len(row.ConnectCopy) != 2 || len(row.ConsentCopy) == 0 ||
-			len(row.ProgressCopy) != 4 || len(row.ProgressForbidden) == 0 || len(row.CompletionPreamble) != 1 ||
+			len(row.ProgressCopy) != 3 || len(row.ProgressForbidden) == 0 || len(row.CompletionPreamble) != 1 ||
 			len(row.CompletionCopy) != 12 || len(row.ForbiddenCopy) == 0 || row.TerminalWidth != 80 || row.TerminalHeight != 24 ||
 			row.WantIngestCalls != 1 || row.WantTerminalCalls != 1 {
 			t.Fatalf("mounted journey row is incomplete or duplicated: %#v", row)
