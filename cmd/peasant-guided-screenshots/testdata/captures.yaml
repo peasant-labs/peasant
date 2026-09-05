@@ -86,7 +86,7 @@ selectionStates:
 
 ingestProgressStates:
   - key: running
-    wantContains: [importing transcripts, local import progress, discover 1/4, "_|||_"]
+    wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", ctrl+c to quit]
 
 selection:
   repositories:

@@ -238,6 +238,8 @@ type Program struct {
 	retentionApplied   bool
 	retryAttempt       bool
 	ingestGeneration   uint64
+	ingestCtx          context.Context
+	ingestCancel       context.CancelFunc
 	attemptStarted     time.Time
 	stageObservations  map[ingest.Stage]stageObservation
 	progressAnimFrame  int
@@ -796,6 +798,10 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	p.retryAttempt = retry
 	p.attemptStarted = p.deps.Clock.Now()
 	p.stageObservations = map[ingest.Stage]stageObservation{}
+	// Each attempt owns a cancellable context, mirroring beginLogin, so an
+	// interrupt key can stop an ingest the runner would otherwise block on.
+	ctx, cancel := context.WithCancel(p.deps.Context)
+	p.ingestCtx, p.ingestCancel = ctx, cancel
 	p.progressAnimFrame = 0
 	p.lastProgressAnimAt = time.Time{}
 	if p.deps.Progress != nil {
@@ -821,10 +827,15 @@ func (p Program) retentionDays() int {
 	return p.deps.RetentionDays
 }
 
-// runIngest issues the injected ingest runner as a command.
+// runIngest issues the injected ingest runner as a command on the current
+// attempt's context. A nil attempt context falls back to the shared deps
+// context so runners started outside startIngest keep working.
 func (p Program) runIngest() tea.Cmd {
 	ingest := p.deps.Ingest
-	ctx := p.deps.Context
+	ctx := p.ingestCtx
+	if ctx == nil {
+		ctx = p.deps.Context
+	}
 	return func() tea.Msg {
 		res, err := ingest(ctx)
 		return ingestDoneMsg{result: res, err: err}
@@ -838,9 +849,14 @@ func (p Program) progressTick(generation uint64) tea.Cmd {
 }
 
 // updateIngest advances the spinner until the pipeline reports its result.
+// ctrl+c (or q) cancels the attempt and quits; every other key only feeds the
+// spinner while the import runs.
 func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
+	case tea.KeyPressMsg:
+		return p.interruptIngest(m)
 	case ingestDoneMsg:
+		p = p.clearIngestAttempt()
 		p = p.observeProgress(p.deps.Clock.Now())
 		p.ingestRes = m.result
 		p.ingestErr = m.err
@@ -861,6 +877,36 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		p.spinner, cmd = p.spinner.Update(m)
 		return p, cmd
 	}
+}
+
+// interruptIngest lets the user escape the local-import screen. ctrl+c (or q)
+// cancels the in-flight ingest attempt and quits kickstart; the already-saved
+// config and retention effect are untouched. Any other key is ignored while
+// the import runs.
+func (p Program) interruptIngest(msg tea.KeyPressMsg) (Program, tea.Cmd) {
+	action, ok := keymap.Match(keymap.Default(), msg,
+		programActionAvailability{keymap.ActionQuit})
+	if !ok {
+		return p, nil
+	}
+	switch action {
+	case keymap.ActionQuit:
+		p = p.clearIngestAttempt()
+		return p, tea.Quit
+	default:
+		return p, nil
+	}
+}
+
+// clearIngestAttempt releases the in-flight ingest context so a resolved or
+// interrupted attempt cannot leak its goroutine, mirroring clearLogin.
+func (p Program) clearIngestAttempt() Program {
+	if p.ingestCancel != nil {
+		p.ingestCancel()
+		p.ingestCancel = nil
+	}
+	p.ingestCtx = nil
+	return p
 }
 
 func (p Program) advanceProgressAnimation(at time.Time) Program {
@@ -1204,7 +1250,10 @@ func (p Program) viewIngest() string {
 		}
 	}
 	lines = append(lines, "", styles.Header.Render("local import progress"))
-	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines))...)
+	// The footer hint owns two lines of the height budget so the height cut
+	// below never removes the only escape affordance on a short terminal.
+	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines)+2)...)
+	lines = append(lines, "", styles.Muted.Render("ctrl+c to quit"))
 	if p.height > 0 && len(lines) > p.height {
 		lines = lines[:p.height]
 	}
@@ -1228,14 +1277,10 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		}
 		shown = true
 		sp := observation.progress
-		label := strings.ToLower(stage.String()) + " " + fmt.Sprintf("%d", sp.Done)
-		if sp.Total > 0 {
-			label += fmt.Sprintf("/%d", sp.Total)
-		}
-		if sp.HasErr {
-			label += " failed"
-		}
-		lines = append(lines, styles.Base.Render(label))
+		// The row matches the harvest TTY bar exactly; only the stage name
+		// stays lowercase per the lowercase-chrome rule.
+		lines = append(lines, styles.Base.Render(
+			ingest.RenderProgressBar(strings.ToLower(stage.String()), sp)))
 		if !hasFocus || stage != focus {
 			continue
 		}

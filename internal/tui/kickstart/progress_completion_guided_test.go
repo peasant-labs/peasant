@@ -537,12 +537,15 @@ func assertProgressFocusDetail(t *testing.T, row progressFixture, rendered strin
 		return
 	}
 	lines := strings.Split(strings.ToLower(rendered), "\n")
-	wantStage := strings.ToLower(row.WantFocusStage.String()) + " "
+	wantStage := strings.ToLower(row.WantFocusStage.String())
 	stageLine := -1
 	detailLines := 0
 	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, wantStage) {
+		// The stage row is a harvest-format bar (icon, padded name, cells,
+		// counts), so the name no longer prefixes the row.
+		if strings.Contains(trimmed, wantStage) &&
+			(strings.Contains(trimmed, "█") || strings.Contains(trimmed, "░")) {
 			stageLine = index
 		}
 		if strings.Contains(trimmed, "observed elapsed:") {

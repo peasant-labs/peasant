@@ -79,8 +79,8 @@ func TestProgressRendererUsesGentleFrameRate(t *testing.T) {
 }
 
 func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) {
-	line := renderProgressBar(ingest.StageExtract, ingest.StageProgress{Started: true, Done: 126, Total: 4953})
-	if !strings.Contains(line, string(barFill)) {
+	line := ingest.RenderProgressBar(ingest.StageExtract.String(), ingest.StageProgress{Started: true, Done: 126, Total: 4953})
+	if !strings.Contains(line, "█") {
 		t.Fatalf("progress bar should show at least one filled cell for non-zero work; got %q", line)
 	}
 	if !strings.Contains(line, "126/4953") {

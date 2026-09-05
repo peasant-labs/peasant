@@ -12,7 +12,8 @@ rows:
       - publish nothing; sharing requires a later explicit push
     progressCopy:
       - 'local import elapsed:'
-      - discover 1
+      - discover
+      - '░'
       - estimate unavailable
     progressForbidden:
       - 'estimate:'
