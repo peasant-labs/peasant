@@ -52,6 +52,8 @@ func BuildPushCommand() *cobra.Command {
 		annotationIDs      []string
 		annotationHash     []string
 		timing             bool
+		profileOutput      string
+		profileTrace       string
 		concurrency        int
 		repository         string
 		timeout            time.Duration
@@ -100,6 +102,14 @@ func BuildPushCommand() *cobra.Command {
 			level, levelErr := resolveOutputLevel(quiet, verbose)
 			if levelErr != nil {
 				return levelErr
+			}
+
+			// Profile output paths are validated before any push work: a
+			// profile that cannot be written must refuse the run rather than
+			// publish and then report the evidence is missing.
+			if err := validateProfilePaths(profileOutput, profileTrace,
+				cmd.Flags().Changed("profile-output"), cmd.Flags().Changed("profile-trace")); err != nil {
+				return err
 			}
 			nonInteractive := nonInteractiveFlag || yesFlag
 
@@ -492,11 +502,40 @@ func BuildPushCommand() *cobra.Command {
 				// pipeline (per-session redact + per-upload httptrace split) and the
 				// annotation path (per-batch timing) record into it. Off by default —
 				// runCtx == ctx and every recorder resolves to Nop (no overhead).
+				//
+				// --profile-output shares this ONE collector rather than building a
+				// second profiler: the same recorder feeds the legacy timing rollup
+				// and the JSON v1 profile document, plus an optional JSONL trace
+				// sink when --profile-trace names one.
 				runCtx := ctx
 				var timingCollector *perf.Collector
-				if timing {
-					timingCollector = perf.NewCollector()
+				profileEnabled := strings.TrimSpace(profileOutput) != ""
+				if timing || profileEnabled {
+					var traceSink *perf.JSONLTraceSink
+					if strings.TrimSpace(profileTrace) != "" {
+						traceFile, traceErr := openProfileTraceFile(profileTrace)
+						if traceErr != nil {
+							return traceErr
+						}
+						defer traceFile.Close()
+						traceSink = perf.NewJSONLTraceSinkCloser(traceFile)
+					}
+					if traceSink != nil {
+						timingCollector = perf.NewCollectorWithOptions(nil, traceSink, perf.Options{Enabled: true})
+					} else {
+						timingCollector = perf.NewCollector()
+					}
 					runCtx = perf.ContextWithRecorder(ctx, timingCollector)
+				}
+
+				// The profile's own run span brackets the measured stages so the
+				// document carries at least the run itself even before per-stage
+				// pipeline instrumentation records finer spans.
+				profileStart := time.Now().UTC()
+				var profileRunSpan perf.Span
+				if profileEnabled {
+					profileRunSpan = timingCollector.StartSpan(perf.StagePushRun,
+						perf.Attributes{perf.AttrSelectionMode: string(cfg.Selection.Mode)})
 				}
 
 				// Complete transcript publishing before starting annotation publishing.
@@ -523,6 +562,18 @@ func BuildPushCommand() *cobra.Command {
 				run.result = result
 				run.annotationSummary = annSummary
 
+				// Close the profile run span over the measured stages. A failed
+				// stage marks the run failed; an empty run that reached no error
+				// is still an honestly measured ok run.
+				profileEnd := time.Now().UTC()
+				if profileRunSpan != nil {
+					outcome := perf.OutcomeOK
+					if transcErr != nil || annErr != nil {
+						outcome = perf.OutcomeFailed
+					}
+					profileRunSpan.End(outcome, nil)
+				}
+
 				// Stop animation before printing results.
 				if stopAnim != nil {
 					stopAnim()
@@ -532,7 +583,7 @@ func BuildPushCommand() *cobra.Command {
 				// the result-nil/empty branches below so timing is reported on every
 				// real run regardless of push outcome. JSONL path is announced on
 				// stderr so --json stdout stays clean.
-				if timingCollector != nil {
+				if timingCollector != nil && timing {
 					if rollupErr := perf.WriteRollup(cmd.ErrOrStderr(), timingCollector.Rollup()); rollupErr != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "warning: write timing rollup: %v\n", rollupErr)
 					}
@@ -541,6 +592,26 @@ func BuildPushCommand() *cobra.Command {
 					} else if logPath != "" {
 						fmt.Fprintf(cmd.ErrOrStderr(), "timing log written to %s\n", logPath)
 					}
+				}
+
+				// Write the JSON v1 profile and its human summary (both stderr).
+				// Done next to the timing report so a profile exists on every real
+				// run regardless of push outcome, and --json/--quiet stdout stays
+				// exactly what it is without profiling.
+				if profileEnabled {
+					sessionCount := 0
+					if result != nil {
+						sessionCount = len(result.Sessions)
+					}
+					writePushProfile(cmd.ErrOrStderr(), timingCollector, profileOutput, profileTrace, perf.ProfileRun{
+						RunID:            fmt.Sprintf("push-%s-%d", profileStart.Format("20060102T150405"), os.Getpid()),
+						StartedAt:        profileStart,
+						EndedAt:          profileEnd,
+						ProfiledSubject:  "push",
+						SelectionMode:    string(cfg.Selection.Mode),
+						SessionCount:     sessionCount,
+						ConcurrencyLimit: resolvedConcurrency,
+					})
 				}
 
 				// Handle nil transcript result (pipeline returned nothing — fatal).
@@ -644,6 +715,8 @@ func BuildPushCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&annotationIDs, "annotation-id", nil, "Only push these annotation IDs (repeatable; default: all). Counterpart to the share wizard's label selection.")
 	cmd.Flags().StringArrayVar(&annotationHash, "annotation-hash", nil, "Only push annotations with these content hashes (repeatable; default: all).")
 	cmd.Flags().BoolVar(&timing, "timing", false, "Measure and report per-phase push timing (connection setup/server split, redaction, annotation batches) to stderr, plus a per-upload JSONL log under the state dir. Off by default.")
+	cmd.Flags().StringVar(&profileOutput, "profile-output", "", "Write a local JSON v1 push profile to this file (local diagnostic only, mode 0600). Enables profiling for this run.")
+	cmd.Flags().StringVar(&profileTrace, "profile-trace", "", "Write an optional JSONL trace of profile events to this file (mode 0600). Requires --profile-output.")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "Number of parallel uploads and HTTP connection-pool size. Must be >= 1. Overrides push.concurrency in config. Default: max(1, NumCPU/2) (tuned for steady-state re-push). For a one-time large COLD push, use ~22 to saturate the village pool toward the <5s target.")
 	cmd.Flags().StringVar(&repository, "repository", "", "Only push sessions carrying this Git repository's canonical project identity (a path). Identity comes from the normalized origin remote when there is one Peasant can normalize, so separate clones of that origin share it; with no origin remote — or an origin that is not a network remote, such as a local path or a file:// URL — it is instead the worktree paths the sessions were recorded in, which belong to that directory alone. A repository nested inside another keeps its own identity and never inherits the outer one's. Which of the two was used is printed when the push runs. Default: every configured session")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "Overall time budget for the whole upload (e.g. 5s). The per-request client timeout does not bound a push, which issues several requests in sequence, so a village that accepts a connection and never answers can stall for minutes. On expiry the push gives up and reports what did and did not reach the village. Default: no budget. Git hooks always pass one.")
@@ -1476,6 +1549,196 @@ func writeTimingLog(c *perf.Collector, stateDirOv string) (string, error) {
 		return "", fmt.Errorf("write timing log %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// validateProfilePaths checks the --profile-output / --profile-trace flag pair
+// before any push work starts. An unwritable profile path must refuse the run
+// rather than publish and then report the evidence is missing, so every failure
+// here is a usage error: nothing was read, uploaded, or written.
+func validateProfilePaths(profileOutput, profileTrace string, outputChanged, traceChanged bool) error {
+	const where = "peasant village push flag validation"
+	const when = "at startup, before credentials were loaded and before any session was read or uploaded"
+	const impact = "Nothing was uploaded and no profile file was written."
+
+	// A trace sidecar is referenced from the JSON profile document, so it is
+	// only meaningful alongside --profile-output.
+	if strings.TrimSpace(profileTrace) != "" && strings.TrimSpace(profileOutput) == "" {
+		return fmt.Errorf(
+			"village push: --profile-trace %q was given without --profile-output\n"+
+				"What went wrong: the JSONL trace is a sidecar referenced from the JSON v1 profile, so a trace file alone is not a complete profile.\n"+
+				"Why: --profile-trace only names the optional trace file; the profile document it belongs to is named by --profile-output.\n"+
+				"Where: %s.\n"+
+				"When: %s.\n"+
+				"Impact: %s\n"+
+				"Fix: add --profile-output <file> alongside --profile-trace, or drop --profile-trace to write only the JSON profile",
+			profileTrace, where, when, impact)
+	}
+	if outputChanged && strings.TrimSpace(profileOutput) == "" {
+		return fmt.Errorf(
+			"village push: --profile-output was given an empty value\n" +
+				"What went wrong: an empty value names no file, so the profile would have nowhere to go.\n" +
+				"Why: the flag was passed explicitly with nothing after it (for example --profile-output \"\").\n" +
+				"Where: " + where + ".\n" +
+				"When: " + when + ".\n" +
+				"Impact: " + impact + "\n" +
+				"Fix: pass a writable file path such as --profile-output /tmp/opencode/push-profile.json, or drop the flag to run without profiling")
+	}
+	if traceChanged && strings.TrimSpace(profileTrace) == "" && strings.TrimSpace(profileOutput) != "" {
+		return fmt.Errorf(
+			"village push: --profile-trace was given an empty value\n" +
+				"What went wrong: an empty value names no file, so the trace would have nowhere to go.\n" +
+				"Why: the flag was passed explicitly with nothing after it (for example --profile-trace \"\").\n" +
+				"Where: " + where + ".\n" +
+				"When: " + when + ".\n" +
+				"Impact: " + impact + "\n" +
+				"Fix: pass a writable file path such as --profile-trace /tmp/opencode/push-profile.jsonl, or drop the flag to write only the JSON profile")
+	}
+	if strings.TrimSpace(profileOutput) == "" {
+		return nil
+	}
+	if err := checkProfilePathWritable("--profile-output", profileOutput, where, when, impact); err != nil {
+		return err
+	}
+	if strings.TrimSpace(profileTrace) == "" {
+		return nil
+	}
+	if err := checkProfilePathWritable("--profile-trace", profileTrace, where, when, impact); err != nil {
+		return err
+	}
+	if filepath.Clean(profileOutput) == filepath.Clean(profileTrace) {
+		return fmt.Errorf(
+			"village push: --profile-output and --profile-trace name the same file %q\n"+
+				"What went wrong: the JSON profile and the JSONL trace are different documents and cannot share one file.\n"+
+				"Why: both flags were given the same path, so writing the second document would destroy the first.\n"+
+				"Where: %s.\n"+
+				"When: %s.\n"+
+				"Impact: %s\n"+
+				"Fix: give the two documents different paths, for example --profile-output /tmp/opencode/push-profile.json --profile-trace /tmp/opencode/push-profile.jsonl",
+			profileOutput, where, when, impact)
+	}
+	return nil
+}
+
+// checkProfilePathWritable proves a profile path can receive a file before the
+// run starts: the path must not be an existing directory, its parent directory
+// must exist, and a temporary file must be creatable there (then removed).
+func checkProfilePathWritable(flag, path, where, when, impact string) error {
+	fix := fmt.Sprintf("pass a writable file path for %s (its parent directory must already exist), or drop the flag to run without profiling", flag)
+	if info, statErr := os.Stat(path); statErr == nil {
+		if info.IsDir() {
+			return fmt.Errorf(
+				"village push: %s names %q, which is a directory\n"+
+					"What went wrong: the profile is one file, and a directory cannot be overwritten with it.\n"+
+					"Why: %s already exists as a directory.\n"+
+					"Where: %s.\n"+
+					"When: %s.\n"+
+					"Impact: %s\n"+
+					"Fix: %s",
+				flag, path, path, where, when, impact, fix)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf(
+			"village push: %s path %q could not be checked: %v\n"+
+				"What went wrong: the profile destination could not even be inspected, so the run cannot promise to write it.\n"+
+				"Why: checking the path failed before any push work started.\n"+
+				"Where: %s.\n"+
+				"When: %s.\n"+
+				"Impact: %s\n"+
+				"Fix: %s",
+			flag, path, statErr, where, when, impact, fix)
+	}
+	parent := filepath.Dir(path)
+	if info, statErr := os.Stat(parent); statErr != nil || !info.IsDir() {
+		return fmt.Errorf(
+			"village push: %s names %q, whose parent directory %q does not exist\n"+
+				"What went wrong: the profile file cannot be created because the directory it would live in is missing.\n"+
+				"Why: the run never creates parent directories for profile output, so a path under a missing directory can never be written.\n"+
+				"Where: %s.\n"+
+				"When: %s.\n"+
+				"Impact: %s\n"+
+				"Fix: create the directory first (for example mkdir -p %s), or %s",
+			flag, path, parent, where, when, impact, parent, fix)
+	}
+	probe, probeErr := os.CreateTemp(parent, ".profile-writable-*.tmp")
+	if probeErr != nil {
+		return fmt.Errorf(
+			"village push: %s names %q, which is not writable: %v\n"+
+				"What went wrong: a probe file could not be created in the destination directory, so the profile could not be written there.\n"+
+				"Why: the destination directory refused the write (permissions or disk state).\n"+
+				"Where: %s.\n"+
+				"When: %s.\n"+
+				"Impact: %s\n"+
+				"Fix: %s",
+			flag, path, probeErr, where, when, impact, fix)
+	}
+	probeName := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(probeName)
+	return nil
+}
+
+// openProfileTraceFile opens the JSONL trace destination for streaming writes.
+// The file carries profile evidence, so it is created private (0600) like the
+// JSON profile itself.
+func openProfileTraceFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, defaults.PrivateFilePerm)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"village push: the profile trace file %q could not be opened: %v; "+
+				"nothing was uploaded; pass a writable --profile-trace path, or drop the flag to write only the JSON profile",
+			path, err)
+	}
+	return f, nil
+}
+
+// writePushProfile builds the JSON v1 profile document from the run collector
+// and writes it to outputPath (mode 0600), then prints the human summary. A
+// profile that cannot be built or written is a warning, never a push failure:
+// the upload already happened, and profiling must not mark a failed push as
+// successful nor a successful push as failed. The summary goes to w (stderr),
+// so --json and --quiet stdout stay exactly what they are without profiling.
+func writePushProfile(w io.Writer, collector *perf.Collector, outputPath, tracePath string, run perf.ProfileRun) {
+	traceRef := ""
+	if strings.TrimSpace(tracePath) != "" {
+		// The document carries only the file name, never the raw local path.
+		traceRef = filepath.Base(tracePath)
+	}
+	doc, err := perf.BuildProfileDocument(collector,
+		perf.ProfileProducer{App: "peasant", Command: "village push", Version: defaults.Version.String()},
+		run, traceRef)
+	if err != nil {
+		fmt.Fprintf(w, "warning: build push profile: %v\n", err)
+		return
+	}
+	if err := perf.WriteProfileJSONFile(outputPath, doc); err != nil {
+		fmt.Fprintf(w, "warning: write push profile: %v\n", err)
+		return
+	}
+	printProfileSummary(w, outputPath, doc)
+}
+
+// printProfileSummary prints the short human summary for a written profile: the
+// file path plus the top bottleneck hints from the stage summaries. Only closed
+// stage identifiers, totals, and shares are named — never transcript content,
+// paths, or project history.
+func printProfileSummary(w io.Writer, profilePath string, doc perf.ProfileDocument) {
+	fmt.Fprintf(w, "profile written to %s\n", profilePath)
+	top := doc.Summaries.TopBottlenecks
+	if len(top) == 0 {
+		fmt.Fprintln(w, "profile bottlenecks: no stage timings recorded")
+		return
+	}
+	fmt.Fprintln(w, "profile bottlenecks:")
+	for _, bottleneck := range top {
+		fmt.Fprintf(w, "  %-28s total=%-9s %5.1f%% of run\n",
+			bottleneck.Stage.String(), formatProfileDurationMs(bottleneck.TotalMs), bottleneck.ShareOfRun*100)
+	}
+}
+
+// formatProfileDurationMs renders whole milliseconds compactly for the human
+// summary (for example "12.0ms").
+func formatProfileDurationMs(ms int64) string {
+	return fmt.Sprintf("%.1fms", float64(ms))
 }
 
 // resolveOutputLevel maps the --quiet/--verbose flags to a typed outputLevel.
