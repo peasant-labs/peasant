@@ -4,6 +4,7 @@
 # gitHead or matching public tag; the source reference is not an exact build pin.
 required_names:
   - native_user_and_assistant_rows
+  - native_beta_tools_and_reasoning
   - native_optional_user_arrays_absent
   - native_assistant_finish_and_stream_clock
   - native_shell_column_identity
@@ -31,6 +32,11 @@ cases:
     source_fixture: native-current-rows
     session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
     expected_text: [native user question, native assistant answer]
+    expected_model: synthetic-model
+  - name: native_beta_tools_and_reasoning
+    source_fixture: native-beta-rows
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+    expected_text: [native beta request, native beta reasoning, native beta partial input, native beta running input, native beta completed output, native beta tool error, native beta answer]
     expected_model: synthetic-model
 normalization_cases:
   - name: native_optional_user_arrays_absent

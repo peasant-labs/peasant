@@ -43,6 +43,7 @@ required_cases:
   - native-current-rows
   - native-v2-only
   - native-v2-preferred
+  - native-beta-rows
 cases:
   # Captured from native session_message rows through a read-only connection.
   # Text, identities, model names, timestamps, and usage values are replaced
@@ -87,6 +88,24 @@ cases:
         time_created: 1000
         time_updated: 2000
         data: '{"agent":"build","content":[{"text":"native assistant answer","type":"text"}],"cost":0,"finish":"stop","model":{"id":"synthetic-model","providerID":"synthetic-provider","variant":"redacted"},"rawFinish":"stop","snapshot":{"end":"redacted","files":[],"start":"redacted"},"time":{"completed":2000,"created":1000,"streamed":2000},"tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0}}'
+        seq: 1
+
+  - <<: *native_current_rows
+    name: native-beta-rows
+    current_messages:
+      - id: msg_beta_user
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+        type: user
+        time_created: 1000
+        time_updated: 1000
+        data: '{"text":"native beta request","time":{"created":1000}}'
+        seq: 0
+      - id: msg_beta_assistant
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+        type: assistant
+        time_created: 1000
+        time_updated: 2000
+        data: '{"agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"reasoning","text":"native beta reasoning","state":{"synthetic-provider":{}},"time":{"created":1000}},{"type":"tool","id":"call_beta_streaming","name":"read","state":{"status":"streaming","input":"native beta partial input"},"time":{"created":1000}},{"type":"tool","id":"call_beta_running","name":"read","state":{"status":"running","input":{"path":"native beta running input"},"metadata":{"title":"reading"}},"time":{"created":1000,"ran":1500}},{"type":"tool","id":"call_beta_completed","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"native beta completed output"}]},"time":{"created":1000,"completed":2000}},{"type":"tool","id":"call_beta_error","name":"read","state":{"status":"error","input":{},"error":{"type":"permission","message":"native beta tool error","status":403}},"time":{"created":1000,"completed":2000}},{"type":"text","text":"native beta answer","state":{"synthetic-provider":{}}}],"rawFinish":"stop","time":{"created":1000,"streamed":2000,"completed":2000}}'
         seq: 1
 
   - <<: *native_current_rows

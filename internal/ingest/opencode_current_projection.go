@@ -80,30 +80,34 @@ type openCodeCurrentFile struct {
 }
 
 type openCodeCurrentAgent struct {
-	Name   string                 `json:"name"`
-	Source *openCodeCurrentSource `json:"source,omitempty"`
+	Name    string                 `json:"name"`
+	Source  *openCodeCurrentSource `json:"source,omitempty"`
+	Mention *openCodeBetaMention   `json:"mention,omitempty"`
 }
 
 type openCodeCurrentUser struct {
 	openCodeCurrentBase
-	Text   string                 `json:"text"`
-	Files  []openCodeCurrentFile  `json:"files,omitempty"`
-	Agents []openCodeCurrentAgent `json:"agents,omitempty"`
+	Text   string                        `json:"text"`
+	Files  []json.RawMessage             `json:"files,omitempty"`
+	Agents []openCodeCurrentAgent        `json:"agents,omitempty"`
+	Skills []openCodeBetaSkillAttachment `json:"skills,omitempty"`
 }
 
 type openCodeCurrentAssistant struct {
 	openCodeCurrentBase
-	Time      openCodeCurrentAssistantTime `json:"time"`
-	ParentID  string                       `json:"parentID,omitempty"`
-	Agent     string                       `json:"agent"`
-	Model     openCodeCurrentModel         `json:"model"`
-	Content   []json.RawMessage            `json:"content"`
-	Snapshot  *openCodeCurrentSnapshot     `json:"snapshot,omitempty"`
-	Finish    string                       `json:"finish,omitempty"`
-	RawFinish string                       `json:"rawFinish,omitempty"`
-	Cost      *float64                     `json:"cost,omitempty"`
-	Tokens    *openCodeCurrentTokens       `json:"tokens,omitempty"`
-	Error     *openCodeCurrentUnknownError `json:"error,omitempty"`
+	Time          openCodeCurrentAssistantTime `json:"time"`
+	ParentID      string                       `json:"parentID,omitempty"`
+	Agent         string                       `json:"agent"`
+	Model         openCodeCurrentModel         `json:"model"`
+	Content       []json.RawMessage            `json:"content"`
+	Snapshot      *openCodeCurrentSnapshot     `json:"snapshot,omitempty"`
+	Finish        string                       `json:"finish,omitempty"`
+	RawFinish     string                       `json:"rawFinish,omitempty"`
+	Cost          *float64                     `json:"cost,omitempty"`
+	Tokens        *openCodeCurrentTokens       `json:"tokens,omitempty"`
+	Error         *openCodeCurrentUnknownError `json:"error,omitempty"`
+	ProviderState map[string]json.RawMessage   `json:"providerState,omitempty"`
+	Retry         *openCodeBetaRetry           `json:"retry,omitempty"`
 }
 
 type openCodeCurrentSnapshot struct {
@@ -115,12 +119,14 @@ type openCodeCurrentSnapshot struct {
 type openCodeCurrentUnknownError struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+	Status  *int   `json:"status,omitempty"`
 }
 
 type openCodeCurrentAssistantText struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	Type  string                     `json:"type"`
+	ID    string                     `json:"id"`
+	Text  string                     `json:"text"`
+	State map[string]json.RawMessage `json:"state,omitempty"`
 }
 
 type openCodeCurrentAssistantReasoning struct {
@@ -129,15 +135,19 @@ type openCodeCurrentAssistantReasoning struct {
 	Text             string                                `json:"text"`
 	ProviderMetadata map[string]map[string]json.RawMessage `json:"providerMetadata,omitempty"`
 	Time             *openCodeCurrentTime                  `json:"time,omitempty"`
+	State            map[string]json.RawMessage            `json:"state,omitempty"`
 }
 
 type openCodeCurrentAssistantTool struct {
-	Type     string                       `json:"type"`
-	ID       string                       `json:"id"`
-	Name     string                       `json:"name"`
-	Provider *openCodeCurrentToolProvider `json:"provider,omitempty"`
-	State    json.RawMessage              `json:"state"`
-	Time     openCodeCurrentToolTime      `json:"time"`
+	Type                string                       `json:"type"`
+	ID                  string                       `json:"id"`
+	Name                string                       `json:"name"`
+	Provider            *openCodeCurrentToolProvider `json:"provider,omitempty"`
+	State               json.RawMessage              `json:"state"`
+	Time                openCodeCurrentToolTime      `json:"time"`
+	Executed            *bool                        `json:"executed,omitempty"`
+	ProviderState       map[string]json.RawMessage   `json:"providerState,omitempty"`
+	ProviderResultState map[string]json.RawMessage   `json:"providerResultState,omitempty"`
 }
 
 type openCodeCurrentToolProvider struct {
@@ -174,13 +184,15 @@ type openCodeCurrentToolContent struct {
 
 type openCodeCurrentTextMessage struct {
 	openCodeCurrentBase
-	Text string `json:"text"`
+	Text        string `json:"text"`
+	Description string `json:"description,omitempty"`
 }
 
 type openCodeCurrentSynthetic struct {
 	openCodeCurrentBase
-	SessionID string `json:"sessionID"`
-	Text      string `json:"text"`
+	SessionID   string `json:"sessionID"`
+	Text        string `json:"text"`
+	Description string `json:"description,omitempty"`
 }
 
 type openCodeCurrentShell struct {
@@ -199,12 +211,14 @@ type openCodeCurrentCompaction struct {
 
 type openCodeCurrentAgentSwitched struct {
 	openCodeCurrentBase
-	Agent string `json:"agent"`
+	Agent    string `json:"agent"`
+	Previous string `json:"previous,omitempty"`
 }
 
 type openCodeCurrentModelSwitched struct {
 	openCodeCurrentBase
-	Model openCodeCurrentModel `json:"model"`
+	Model    openCodeCurrentModel  `json:"model"`
+	Previous *openCodeCurrentModel `json:"previous,omitempty"`
 }
 
 type openCodeCurrentIdentityRegistry struct {
@@ -573,6 +587,11 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 			return message, fmt.Errorf("upstream message type %q conflicts with SQLite row type %q", rowType, row.Type.String())
 		}
 	}
+	var err error
+	data, err = normalizeOpenCodeBetaStructuralRow(row, data, envelope)
+	if err != nil {
+		return message, err
+	}
 	switch row.Type.String() {
 	case "user":
 		var value openCodeCurrentUser
@@ -593,6 +612,36 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 				return message, err
 			}
 		}
+		for _, raw := range value.Files {
+			file, err := decodeOpenCodeBetaFile(raw)
+			if err != nil {
+				return message, err
+			}
+			text := file.Name
+			if text == "" {
+				text = file.URI
+			}
+			if text == "" {
+				text = file.Description
+			}
+			if text != "" {
+				if err := appendPart("", value.Time.Created, map[string]any{"type": "text", "text": text}); err != nil {
+					return message, err
+				}
+			}
+		}
+		for _, skill := range value.Skills {
+			if skill.ID == "" || skill.Name == "" {
+				return message, errors.New("user skill attachment requires id and name")
+			}
+			text := skill.Text
+			if text == "" {
+				text = skill.Name
+			}
+			if err := appendPart("", value.Time.Created, map[string]any{"type": "text", "text": text}); err != nil {
+				return message, err
+			}
+		}
 	case "assistant":
 		var value openCodeCurrentAssistant
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
@@ -600,6 +649,20 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 		if err := requireOpenCodeCurrentFields(data, "agent", "model", "content", "time"); err != nil {
 			return message, err
+		}
+		if err := validateOpenCodeBetaError(value.Error); err != nil {
+			return message, err
+		}
+		if value.Retry != nil {
+			if err := requireOpenCodeCurrentFields(envelope["retry"], "attempt", "at", "error"); err != nil {
+				return message, err
+			}
+			if value.Retry.Attempt <= 0 || value.Retry.Error == nil {
+				return message, errors.New("assistant retry requires positive attempt and error")
+			}
+			if err := validateOpenCodeBetaError(value.Retry.Error); err != nil {
+				return message, err
+			}
 		}
 		if err := messageData(RoleAssistant.String(), "", value.Model.ID, value.Agent, value.ParentID, value.Metadata, value.Time.openCodeCurrentTime, value.Tokens); err != nil {
 			return message, err
@@ -616,6 +679,19 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 		if err := requireOpenCodeCurrentFields(data, "callID", "command", "output", "time"); err != nil {
 			return message, err
+		}
+		if envelope["shellID"] != nil {
+			if err := messageData(RoleAssistant.String(), "", "", "", "", value.Metadata, value.Time, nil); err != nil {
+				return message, err
+			}
+			state, err := normalizeOpenCodeBetaShellState(value, envelope)
+			if err != nil {
+				return message, err
+			}
+			if err := appendPart(value.CallID, value.Time.Created, map[string]any{"id": value.CallID, "type": "tool", "name": "shell", "state": state, "time": value.Time}); err != nil {
+				return message, err
+			}
+			break
 		}
 		if err := registry.add(value.CallID, "shell tool call"); err != nil {
 			return message, err
@@ -636,10 +712,10 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
 			return message, err
 		}
-		if err := requireOpenCodeCurrentFields(data, "sessionID", "text", "time"); err != nil {
+		if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
 			return message, err
 		}
-		if value.SessionID != message.SessionID {
+		if raw, present := envelope["sessionID"]; present && (bytes.Equal(raw, []byte("null")) || value.SessionID != message.SessionID) {
 			return message, errors.New("synthetic sessionID must match SQLite row session")
 		}
 		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
@@ -652,6 +728,20 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 		if err := requireOpenCodeCurrentFields(data, "text", "time"); err != nil {
 			return message, err
+		}
+		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
+			return message, err
+		}
+	case "skill":
+		var value openCodeBetaSkillMessage
+		if err := decodeOpenCodeCurrentJSON(data, &value); err != nil {
+			return message, err
+		}
+		if err := requireOpenCodeCurrentFields(data, "skill", "name", "text", "time"); err != nil {
+			return message, err
+		}
+		if value.Skill == "" || value.Name == "" {
+			return message, errors.New("native skill message requires skill and name")
 		}
 		if err := messageData(RoleSystem.String(), value.Text, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
@@ -669,6 +759,11 @@ func normalizeOpenCodeCurrentRow(row OpenCodeCurrentMessageRow, registry *openCo
 		}
 		if err := messageData(RoleSystem.String(), value.Summary, "", "", "", value.Metadata, value.Time, nil); err != nil {
 			return message, err
+		}
+		// A failed native compaction contributes its actual error as system
+		// context, but must not acquire a successful compaction marker.
+		if envelope["error"] != nil {
+			break
 		}
 		if err := appendPart("", value.Time.Created, map[string]any{"type": "compaction", "text": value.Summary, "content": value.Recent, "time": map[string]any{"created": value.Time.Created}}); err != nil {
 			return message, err
@@ -777,6 +872,7 @@ func appendOpenCodeCurrentAssistantContent(message *openCodeLegacyProjectionMess
 		if err := validateOpenCodeCurrentContentIdentity(raw, value.ID); err != nil {
 			return err
 		}
+		value.State = nil // Provider continuation state is not transcript content.
 		return appendPart(value.ID, 0, value)
 	case "reasoning":
 		var value openCodeCurrentAssistantReasoning
@@ -793,6 +889,7 @@ func appendOpenCodeCurrentAssistantContent(message *openCodeLegacyProjectionMess
 		if value.Time != nil {
 			created = value.Time.Created
 		}
+		value.State = nil
 		return appendPart(value.ID, created, value)
 	case "tool":
 		var value openCodeCurrentAssistantTool
@@ -804,6 +901,12 @@ func appendOpenCodeCurrentAssistantContent(message *openCodeLegacyProjectionMess
 		}
 		if value.ID == "" {
 			return errors.New("assistant tool requires id")
+		}
+		if state, native, err := decodeOpenCodeBetaToolState(value.State); native {
+			if err != nil {
+				return err
+			}
+			return appendPart(value.ID, value.Time.Created, map[string]any{"id": value.ID, "type": "tool", "name": value.Name, "state": state, "time": value.Time})
 		}
 		var state openCodeCurrentToolState
 		if err := decodeOpenCodeCurrentJSON(value.State, &state); err != nil {

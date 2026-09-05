@@ -15,6 +15,9 @@ import (
 //go:embed testdata/opencode_native_rows.yaml
 var openCodeNativeRowsYAML []byte
 
+//go:embed testdata/opencode_beta_rows.yaml
+var openCodeBetaRowsYAML []byte
+
 type openCodeNativeRowsFixture struct {
 	RequiredNames      []string                            `yaml:"required_names"`
 	NormalizationCases []openCodeNativeNormalizationCase   `yaml:"normalization_cases"`
@@ -30,16 +33,18 @@ type openCodeNativeMaterializationCase struct {
 }
 
 type openCodeNativeNormalizationCase struct {
-	Name          string                       `yaml:"name"`
-	Rows          []openCodeSemanticCurrentRow `yaml:"rows"`
-	ExpectedText  string                       `yaml:"expected_text"`
-	ErrorContains string                       `yaml:"error_contains"`
+	Name             string                       `yaml:"name"`
+	Rows             []openCodeSemanticCurrentRow `yaml:"rows"`
+	ExpectedText     string                       `yaml:"expected_text"`
+	ErrorContains    string                       `yaml:"error_contains"`
+	ExpectedManaged  []string                     `yaml:"expected_managed"`
+	ForbiddenManaged []string                     `yaml:"forbidden_managed"`
 }
 
-func loadOpenCodeNativeRowsFixtures(t testing.TB) openCodeNativeRowsFixture {
+func loadOpenCodeNativeRowsFixtures(t testing.TB, data []byte) openCodeNativeRowsFixture {
 	t.Helper()
 	var fixture openCodeNativeRowsFixture
-	if err := yaml.Unmarshal(openCodeNativeRowsYAML, &fixture); err != nil {
+	if err := yaml.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	names := make(map[string]bool)
@@ -77,7 +82,7 @@ func (environment nativeRowsEnvironment) LookupEnv(key string) (string, bool) {
 }
 
 func TestOpenCodeNativeRowsProductionMaterializationAndIndexing(t *testing.T) {
-	fixture := loadOpenCodeNativeRowsFixtures(t)
+	fixture := loadOpenCodeNativeRowsFixtures(t, openCodeNativeRowsYAML)
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			source := testfixture.MaterializeByName(t, testCase.SourceFixture)
@@ -114,6 +119,12 @@ func TestOpenCodeNativeRowsProductionMaterializationAndIndexing(t *testing.T) {
 					if entry.ContentPreview != nil && strings.Contains(*entry.ContentPreview, text) {
 						found = true
 					}
+					if entry.ToolInput != nil && strings.Contains(*entry.ToolInput, text) {
+						found = true
+					}
+					if entry.ToolOutput != nil && strings.Contains(*entry.ToolOutput, text) {
+						found = true
+					}
 				}
 				if !found {
 					t.Errorf("native text %q missing from indexed entries: %+v", text, entries)
@@ -124,7 +135,14 @@ func TestOpenCodeNativeRowsProductionMaterializationAndIndexing(t *testing.T) {
 }
 
 func TestOpenCodeNativeRowsNormalizationBoundaries(t *testing.T) {
-	fixture := loadOpenCodeNativeRowsFixtures(t)
+	runOpenCodeNativeNormalizationCases(t, loadOpenCodeNativeRowsFixtures(t, openCodeNativeRowsYAML))
+}
+
+func TestOpenCodeBetaRowsNormalizationBoundaries(t *testing.T) {
+	runOpenCodeNativeNormalizationCases(t, loadOpenCodeNativeRowsFixtures(t, openCodeBetaRowsYAML))
+}
+
+func runOpenCodeNativeNormalizationCases(t *testing.T, fixture openCodeNativeRowsFixture) {
 	for _, testCase := range fixture.NormalizationCases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			rows := semanticCurrentRows(t, testCase.Rows)
@@ -149,6 +167,16 @@ func TestOpenCodeNativeRowsNormalizationBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			for _, marker := range testCase.ExpectedManaged {
+				if !strings.Contains(string(data), marker) {
+					t.Errorf("managed projection lacks %q", marker)
+				}
+			}
+			for _, marker := range testCase.ForbiddenManaged {
+				if strings.Contains(string(data), marker) {
+					t.Errorf("managed projection contains forbidden %q", marker)
+				}
+			}
 			id, err := NewSessionID(rows[0].SessionID.String())
 			if err != nil {
 				t.Fatal(err)
@@ -163,6 +191,9 @@ func TestOpenCodeNativeRowsNormalizationBoundaries(t *testing.T) {
 					return
 				}
 				if entry.ToolOutput != nil && strings.Contains(*entry.ToolOutput, testCase.ExpectedText) {
+					return
+				}
+				if entry.ToolInput != nil && strings.Contains(*entry.ToolInput, testCase.ExpectedText) {
 					return
 				}
 			}
