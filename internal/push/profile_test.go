@@ -148,6 +148,31 @@ type pushProfileEvidence struct {
 	summaries []perf.StageSummary
 }
 
+// A barrier inside the real pipeline's redaction dependency proves that profile
+// attribution does not serialize engine calls across independent sessions.
+type concurrentProfileRedactor struct {
+	ingest.TextRedactor
+	arrivals atomic.Int64
+	expected int64
+	release  chan struct{}
+	ctx      context.Context
+	t        *testing.T
+}
+
+var _ ingest.TextRedactor = (*concurrentProfileRedactor)(nil)
+
+func (r *concurrentProfileRedactor) RedactMetadata(meta *ingest.UnifiedMetadata) *ingest.UnifiedMetadata {
+	if r.arrivals.Add(1) == r.expected {
+		close(r.release)
+	}
+	select {
+	case <-r.release:
+	case <-r.ctx.Done():
+		r.t.Error("concurrent sessions did not reach the redaction barrier before cancellation")
+	}
+	return r.TextRedactor.RedactMetadata(meta)
+}
+
 func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence {
 	t.Helper()
 	var requests, requestBytes, responseBytes, arrivals atomic.Int64
@@ -290,13 +315,18 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 	client := village.NewVillageClient(server.URL, testAPIKey, server.Client())
 	var output, trace bytes.Buffer
 	collector := perf.NewCollectorWithOptions(profileClock{}, perf.NewJSONLTraceSink(&trace), perf.Options{Enabled: true})
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if tc.ConfigRecorder {
 		runCfg.Recorder = collector
 	} else if !tc.Disabled {
 		ctx = perf.ContextWithRecorder(ctx, collector)
 	}
-	pipeline, err := push.NewPipeline(st, client, creds, cfg, fs, runCfg, &testutil.NoopRedactor{}, &output)
+	var redactor ingest.TextRedactor = &testutil.NoopRedactor{}
+	if tc.Barrier {
+		redactor = &concurrentProfileRedactor{TextRedactor: redactor, expected: int64(len(tc.Sessions)), release: make(chan struct{}), ctx: ctx, t: t}
+	}
+	pipeline, err := push.NewPipeline(st, client, creds, cfg, fs, runCfg, redactor, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +364,7 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 		}
 		return evidence
 	}
+	assertStandaloneProfileAncestry(t, doc.Spans)
 	for _, counter := range doc.Counters {
 		evidence.counters[counter.Name] += counter.Value
 		if counter.Attrs[string(perf.AttrOperation)] == "publish" && counter.Attrs[string(perf.AttrSafeSubjectID)] == "" {
@@ -435,4 +466,41 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 		t.Error("profile leaked remote URL")
 	}
 	return evidence
+}
+
+func assertStandaloneProfileAncestry(t *testing.T, spans []perf.ProfileSpan) {
+	t.Helper()
+	byID := make(map[string]perf.ProfileSpan, len(spans))
+	for _, span := range spans {
+		if _, exists := byID[span.SpanID]; exists || span.SpanID == "" {
+			t.Fatalf("duplicate or missing span ID %q", span.SpanID)
+		}
+		byID[span.SpanID] = span
+	}
+	for _, span := range spans {
+		if span.Stage == perf.StagePushSession && span.ParentSpanID != "" {
+			t.Error("standalone session must not fabricate a run parent")
+		}
+		if span.Stage == perf.StageRedactionApply {
+			parent := byID[span.ParentSpanID]
+			if parent.Stage != perf.StagePushSession || parent.SafeSubjectID != span.SafeSubjectID {
+				t.Fatalf("redaction span %s lost its own session parent or attribution", span.SpanID)
+			}
+		}
+		seen := make(map[string]bool)
+		for current := span; current.ParentSpanID != ""; {
+			if seen[current.SpanID] {
+				t.Fatalf("cycle in ancestry of %s", span.SpanID)
+			}
+			seen[current.SpanID] = true
+			parent, exists := byID[current.ParentSpanID]
+			if !exists {
+				t.Fatalf("dangling parent %s from %s", current.ParentSpanID, span.SpanID)
+			}
+			if parent.Stage == perf.StagePushSession && current.SafeSubjectID != parent.SafeSubjectID {
+				t.Fatalf("span %s attached to another session", current.SpanID)
+			}
+			current = parent
+		}
+	}
 }

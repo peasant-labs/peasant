@@ -11,6 +11,29 @@ config: |
     method: all
     visibility: private
 cases:
+  - name: profile_connected_negotiate_retry_tree
+    description: connects fail-open negotiation and detailed session and annotation work to the CLI root
+    mode: json
+    trace: true
+    seedSessions: true
+    seedAnnotation: true
+    publishStatus: 201
+    negotiateStatus: 503
+    annotationResponse: '{"created":1,"updated":0,"skipped":0,"errors":0}'
+    expectStages: [push.run, push.discovery, push.selection, push.negotiate, push.retry, push.session, push.session.load, push.session.redact, redaction.apply, push.payload.build, push.publish, push.receipt.persist, push.annotations.publish]
+    expectStdoutContains: ['"new": 1', '"created": 1']
+  - name: profile_connected_annotation_retry_tree
+    description: connects failed annotation transport work without attributing it to a completed session
+    mode: json
+    trace: true
+    seedSessions: true
+    seedAnnotation: true
+    publishStatus: 201
+    annotationStatus: 503
+    annotationResponse: '{}'
+    outcome: failed
+    expectError: true
+    expectStages: [push.run, push.annotations.publish, push.retry]
   - name: profile_json_only
     description: writes only the JSON profile file and points at it from stderr
     mode: default

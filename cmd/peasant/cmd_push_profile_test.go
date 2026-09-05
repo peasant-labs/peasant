@@ -31,29 +31,32 @@ var pushProfileCasesYAML []byte
 var pushProfileManifestYAML []byte
 
 type pushProfileCase struct {
-	Name                 string       `yaml:"name"`
-	Description          string       `yaml:"description"`
-	Mode                 string       `yaml:"mode"`
-	Trace                bool         `yaml:"trace"`
-	SeedSessions         bool         `yaml:"seedSessions"`
-	SeedAnnotation       bool         `yaml:"seedAnnotation"`
-	AnnotationMutation   string       `yaml:"annotationMutation"`
-	AnnotationResponse   string       `yaml:"annotationResponse"`
-	Disabled             bool         `yaml:"disabled"`
-	Timing               bool         `yaml:"timing"`
-	ExistingFiles        bool         `yaml:"existingFiles"`
-	ConfigOverride       string       `yaml:"configOverride"`
-	PublishStatus        int          `yaml:"publishStatus"`
-	ExpectError          bool         `yaml:"expectError"`
-	Outcome              perf.Outcome `yaml:"outcome"`
-	OutputFailure        bool         `yaml:"outputFailure"`
-	TraceFailure         bool         `yaml:"traceFailure"`
-	ExpectStdoutContains []string     `yaml:"expectStdoutContains"`
-	ForbidStdoutContains []string     `yaml:"forbidStdoutContains"`
-	ExpectStderrContains []string     `yaml:"expectStderrContains"`
-	ForbidStderrContains []string     `yaml:"forbidStderrContains"`
-	Stdout               string       `yaml:"stdout"`
-	Stderr               string       `yaml:"stderr"`
+	Name                 string         `yaml:"name"`
+	Description          string         `yaml:"description"`
+	Mode                 string         `yaml:"mode"`
+	Trace                bool           `yaml:"trace"`
+	SeedSessions         bool           `yaml:"seedSessions"`
+	SeedAnnotation       bool           `yaml:"seedAnnotation"`
+	AnnotationMutation   string         `yaml:"annotationMutation"`
+	AnnotationResponse   string         `yaml:"annotationResponse"`
+	Disabled             bool           `yaml:"disabled"`
+	Timing               bool           `yaml:"timing"`
+	ExistingFiles        bool           `yaml:"existingFiles"`
+	ConfigOverride       string         `yaml:"configOverride"`
+	PublishStatus        int            `yaml:"publishStatus"`
+	NegotiateStatus      int            `yaml:"negotiateStatus"`
+	AnnotationStatus     int            `yaml:"annotationStatus"`
+	ExpectStages         []perf.StageID `yaml:"expectStages"`
+	ExpectError          bool           `yaml:"expectError"`
+	Outcome              perf.Outcome   `yaml:"outcome"`
+	OutputFailure        bool           `yaml:"outputFailure"`
+	TraceFailure         bool           `yaml:"traceFailure"`
+	ExpectStdoutContains []string       `yaml:"expectStdoutContains"`
+	ForbidStdoutContains []string       `yaml:"forbidStdoutContains"`
+	ExpectStderrContains []string       `yaml:"expectStderrContains"`
+	ForbidStderrContains []string       `yaml:"forbidStderrContains"`
+	Stdout               string         `yaml:"stdout"`
+	Stderr               string         `yaml:"stderr"`
 }
 
 type pushProfileInvalidCase struct {
@@ -138,7 +141,14 @@ func TestPushCmd_Profile(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/annotations") {
+						if c.AnnotationStatus != 0 {
+							w.WriteHeader(c.AnnotationStatus)
+						}
 						_, _ = io.WriteString(w, c.AnnotationResponse)
+						return
+					}
+					if strings.HasSuffix(r.URL.Path, "/schema/version") && c.NegotiateStatus != 0 {
+						w.WriteHeader(c.NegotiateStatus)
 						return
 					}
 					if !strings.Contains(r.URL.Path, "/transcripts/publish") {
@@ -243,6 +253,16 @@ func TestPushCmd_Profile(t *testing.T) {
 			}
 			if doc.FormatVersion != perf.JSONFormatVersion || doc.Producer.Command != "village push" {
 				t.Fatalf("wrong profile identity: %+v", doc.Producer)
+			}
+			assertPushProfileTree(t, doc.Spans)
+			for _, expected := range c.ExpectStages {
+				found := false
+				for _, span := range doc.Spans {
+					found = found || span.Stage == expected
+				}
+				if !found {
+					t.Errorf("mounted profile is missing required stage %s", expected)
+				}
 			}
 			runCount := 0
 			for _, span := range doc.Spans {

@@ -41,7 +41,6 @@ func (s *profileStage) finish(err error) {
 type sessionRecorder struct {
 	perf.Recorder
 	subject string
-	parent  string
 }
 
 var _ perf.Recorder = sessionRecorder{}
@@ -56,7 +55,7 @@ func (r sessionRecorder) attributes(attrs perf.Attributes) perf.Attributes {
 }
 
 func (r sessionRecorder) StartSpan(stage perf.StageID, attrs perf.Attributes) perf.Span {
-	return r.Recorder.StartChildSpan(stage, r.parent, r.attributes(attrs))
+	return r.Recorder.StartSpan(stage, r.attributes(attrs))
 }
 
 func (r sessionRecorder) StartChildSpan(stage perf.StageID, parent string, attrs perf.Attributes) perf.Span {

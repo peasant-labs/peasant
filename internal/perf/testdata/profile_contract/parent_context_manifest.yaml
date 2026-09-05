@@ -1,0 +1,5 @@
+requiredNames:
+  - standalone_recorder_has_no_parent
+  - nested_scopes_preserve_ancestors
+  - empty_parent_clears_scope
+  - disabled_scopes_preserve_noop

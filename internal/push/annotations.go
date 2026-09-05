@@ -288,7 +288,8 @@ func PushAnnotationsSelected(
 	concurrency int,
 ) (result *AnnotationPushSummary, resultErr error) {
 	rec := perf.RecorderFromContext(ctx)
-	span := rec.StartSpan(perf.StagePushAnnotationsPublish, nil)
+	span := rec.StartChildSpan(perf.StagePushAnnotationsPublish, perf.ParentSpanFromContext(ctx), nil)
+	ctx = perf.ContextWithParentSpan(ctx, span.ID())
 	defer func() {
 		outcome := perf.OutcomeOK
 		if resultErr != nil || (result != nil && (result.Errors > 0 || len(result.Unpublishable) > 0)) {

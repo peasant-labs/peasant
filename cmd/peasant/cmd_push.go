@@ -540,6 +540,7 @@ func BuildPushCommand() *cobra.Command {
 				if profileEnabled {
 					profileRunSpan = timingCollector.StartSpan(perf.StagePushRun,
 						perf.Attributes{perf.AttrSelectionMode: string(cfg.Selection.Mode)})
+					runCtx = perf.ContextWithParentSpan(runCtx, profileRunSpan.ID())
 				}
 
 				// Complete transcript publishing before starting annotation publishing.
