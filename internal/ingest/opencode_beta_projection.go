@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type openCodeBetaToolStatus string
@@ -258,6 +259,27 @@ func decodeOpenCodeBetaToolState(raw json.RawMessage) (openCodeCurrentToolState,
 			return state, true, fmt.Errorf("native tool content type %q is unsupported", value.Type)
 		}
 		state.Content = append(state.Content, value)
+	}
+	// Text-only completed output has the same user-visible meaning as the
+	// historical result string. Keep file/mixed output structured and preserve
+	// the established precedence of an error over any partial content.
+	if status == openCodeBetaToolCompletedStatus {
+		var output strings.Builder
+		textOnly := len(state.Content) > 0
+		for _, content := range state.Content {
+			if content.Type != "text" {
+				textOnly = false
+				break
+			}
+			output.WriteString(content.Text)
+		}
+		if textOnly {
+			result, err := json.Marshal(output.String())
+			if err != nil {
+				return state, true, err
+			}
+			state.Result = result
+		}
 	}
 	return state, true, nil
 }

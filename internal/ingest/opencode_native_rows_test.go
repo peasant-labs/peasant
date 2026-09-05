@@ -33,12 +33,13 @@ type openCodeNativeMaterializationCase struct {
 }
 
 type openCodeNativeNormalizationCase struct {
-	Name             string                       `yaml:"name"`
-	Rows             []openCodeSemanticCurrentRow `yaml:"rows"`
-	ExpectedText     string                       `yaml:"expected_text"`
-	ErrorContains    string                       `yaml:"error_contains"`
-	ExpectedManaged  []string                     `yaml:"expected_managed"`
-	ForbiddenManaged []string                     `yaml:"forbidden_managed"`
+	Name               string                       `yaml:"name"`
+	Rows               []openCodeSemanticCurrentRow `yaml:"rows"`
+	ExpectedText       string                       `yaml:"expected_text"`
+	ErrorContains      string                       `yaml:"error_contains"`
+	ExpectedManaged    []string                     `yaml:"expected_managed"`
+	ForbiddenManaged   []string                     `yaml:"forbidden_managed"`
+	ExpectedToolOutput *string                      `yaml:"expected_tool_output"`
 }
 
 func loadOpenCodeNativeRowsFixtures(t testing.TB, data []byte) openCodeNativeRowsFixture {
@@ -185,6 +186,17 @@ func runOpenCodeNativeNormalizationCases(t *testing.T, fixture openCodeNativeRow
 			entries, err := indexer.IndexTranscriptBytes(t.Context(), DiscoveredSession{SessionID: id, TranscriptOrigin: TranscriptOriginOpenCodeCurrentSQLite}, data)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if testCase.ExpectedToolOutput != nil {
+				found := false
+				for _, entry := range entries {
+					if entry.ToolOutput != nil && *entry.ToolOutput == *testCase.ExpectedToolOutput {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("indexed tool output does not equal %q", *testCase.ExpectedToolOutput)
+				}
 			}
 			for _, entry := range entries {
 				if entry.ContentPreview != nil && strings.Contains(*entry.ContentPreview, testCase.ExpectedText) {

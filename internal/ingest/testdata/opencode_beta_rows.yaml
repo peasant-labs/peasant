@@ -26,6 +26,10 @@ required_names:
   - beta_retry_requires_error
   - beta_skill_attachment_requires_id
   - beta_shell_running_keeps_partial_output
+  - beta_tool_error_text_output
+  - beta_tool_mixed_output_stays_structured
+  - beta_tool_text_fragments_preserve_boundaries
+  - historical_tool_empty_completion
 normalization_cases:
   - name: beta_tool_streaming
     rows: [{id: msg_beta, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_stream","name":"read","state":{"status":"streaming","input":"partial input"},"time":{"created":1000}}],"time":{"created":1000}}'}]
@@ -37,6 +41,7 @@ normalization_cases:
   - name: beta_tool_completed
     rows: [{id: msg_beta, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","providerResultState":{"provider":{"key":"value"}},"state":{"status":"completed","input":{},"content":[{"type":"text","text":"native completed output"}],"metadata":{"title":"read"}},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'}]
     expected_text: native completed output
+    expected_tool_output: native completed output
   - name: beta_tool_error
     rows: [{id: msg_beta, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_error","name":"read","state":{"status":"error","input":{},"error":{"type":"permission","message":"native error message","status":403}},"time":{"created":1000,"completed":2000}}],"time":{"created":1000}}'}]
     expected_text: native error message
@@ -108,3 +113,19 @@ normalization_cases:
     expected_text: native partial output
     expected_managed: ['"status":"running"']
     forbidden_managed: ['"status":"completed"']
+  - name: beta_tool_error_text_output
+    rows: [{id: msg_beta, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_error","name":"read","state":{"status":"error","input":{},"content":[{"type":"text","text":"partial "},{"type":"text","text":"output"}],"error":{"type":"failure","message":"tool failed"}},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: tool failed
+    expected_tool_output: '{"type":"failure","message":"tool failed"}'
+  - name: beta_tool_mixed_output_stays_structured
+    rows: [{id: msg_beta, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"output file"},{"type":"file","uri":"file:///synthetic/result","mime":"text/plain"}]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: output file
+    expected_tool_output: '[{"type":"text","text":"output file"},{"type":"file","uri":"file:///synthetic/result","mime":"text/plain"}]'
+  - name: beta_tool_text_fragments_preserve_boundaries
+    rows: [{id: msg_beta, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"first "},{"type":"text","text":"second"}]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: first second
+    expected_tool_output: first second
+  - name: historical_tool_empty_completion
+    rows: [{id: msg_beta, row_type: assistant, data: '{"id":"msg_beta","agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{"path":"historical request"},"structured":{},"content":[]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: historical request
+    expected_tool_output: '[]'
