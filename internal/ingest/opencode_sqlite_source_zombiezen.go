@@ -68,6 +68,21 @@ const (
 	openCodeSessionClockAfterStatement               = "SELECT id, time_updated FROM session WHERE id > ?1 ORDER BY id LIMIT ?2"
 )
 
+const (
+	openCodeSessionV2RecordsFirstStatement     = "SELECT id, parent_id, time_updated FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2RecordsAfterStatement     = "SELECT id, parent_id, time_updated FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2AttributionFirstStatement = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2AttributionAfterStatement = "SELECT id, parent_id, time_updated, directory, title, time_created FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ExtendedFirstStatement    = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2ExtendedAfterStatement    = "SELECT id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ParentsFirstStatement     = "SELECT id, parent_id FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2ParentsAfterStatement     = "SELECT id, parent_id FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2ClockFirstStatement       = "SELECT id, time_updated FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2ClockAfterStatement       = "SELECT id, time_updated FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+	openCodeSessionV2IDsFirstStatement         = "SELECT id FROM session_v2 ORDER BY id LIMIT ?1"
+	openCodeSessionV2IDsAfterStatement         = "SELECT id FROM session_v2 WHERE id > ?1 ORDER BY id LIMIT ?2"
+)
+
 type zombiezenOpenCodeSQLiteSource struct {
 	path    OpenCodeSQLiteSourcePath
 	options OpenCodeSQLiteSourceOptions
@@ -80,9 +95,8 @@ type zombiezenOpenCodeSQLiteSource struct {
 	activeCancel context.CancelFunc
 	denied       string
 
-	// sessionColumns caches the session table's column support. The schema of a
-	// read-only source never changes, so the pragma runs once instead of on
-	// every session-record page.
+	// Cache the selected metadata authority and column support for this source's
+	// lifetime. An upstream schema change fails its read without switching tables.
 	sessionColumnsChecked bool
 	sessionColumns        openCodeSessionColumnSupport
 }
@@ -93,6 +107,8 @@ type zombiezenOpenCodeSQLiteSource struct {
 // when all three exist alongside the parent link and clock, so an older layout
 // that lacks any of them simply yields empty attribution rather than failing.
 type openCodeSessionColumnSupport struct {
+	table           OpenCodeSessionTable
+	hasID           bool
 	present         bool
 	hasParent       bool
 	hasClock        bool
@@ -476,10 +492,9 @@ func validateLegacySessionPartPageRequest(request OpenCodeLegacySessionPartPageR
 	return nil
 }
 
-// SessionRecords returns session rows in identifier order with their parent
-// link and update clock. A database without a session table, or without the
-// parent_id and time_updated columns, reports Supported=false with no rows, so
-// older layouts stay discoverable as roots with file-based freshness.
+// SessionRecords pages one schema-selected metadata authority. Supported v2
+// always wins, including an empty table. An unavailable or structurally unusable
+// v2 table permits legacy selection; a failed selected-table read never does.
 func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
 	var cursor *string
 	if request.After != nil {
@@ -495,9 +510,9 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	defer lease.release()
 	support, err := s.sessionColumnSupportLocked(lease.ctx)
 	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session)", "supported OpenCode session")
+		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session_v2/session)", "supported OpenCode session metadata")
 	}
-	if !support.present {
+	if !support.present || !support.hasID {
 		// The session table is absent, so there is nothing to read. Older
 		// layouts stay discoverable as roots with file-based freshness.
 		return OpenCodeSessionRecordPage{}, nil
@@ -505,8 +520,8 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	hasParent, hasClock := support.hasParent, support.hasClock
 	readAttribution := support.attribution()
 	readExtended := support.extendedAttribution()
-	page := OpenCodeSessionRecordPage{Supported: true, HasParent: hasParent, HasClock: hasClock}
-	if !hasParent && !hasClock {
+	page := OpenCodeSessionRecordPage{Supported: true, Table: support.table, HasParent: hasParent, HasClock: hasClock}
+	if !hasParent && !hasClock && support.table != OpenCodeSessionTableV2 {
 		// The session table exists but carries neither the parent link nor the
 		// changed clock, so it can supply nothing. The caller records a
 		// diagnostic and keeps the sessions as roots.
@@ -626,41 +641,89 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	}
 	// The statements stay compile-time constants at each call site so the
 	// read-only source-statement guard resolves the fixed statement set.
-	projection := "session(id, parent_id, time_updated)"
-	switch {
-	case readExtended:
-		projection = "session(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
-		if request.After == nil {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedFirstStatement, []any{request.PageSize.value + 1}, decode)
-		} else {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+	projection := ""
+	if support.table == OpenCodeSessionTableV2 {
+		projection = "session_v2(id, parent_id, time_updated)"
+		switch {
+		case readExtended:
+			projection = "session_v2(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ExtendedFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ExtendedAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case readAttribution:
+			projection = "session_v2(id, parent_id, time_updated, directory, title, time_created)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2AttributionFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2AttributionAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case hasParent && hasClock:
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2RecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2RecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case hasParent:
+			projection = "session_v2(id, parent_id)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ParentsFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ParentsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case hasClock:
+			projection = "session_v2(id, time_updated)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ClockFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2ClockAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		default:
+			projection = "session_v2(id)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2IDsFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionV2IDsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
 		}
-	case readAttribution:
-		projection = "session(id, parent_id, time_updated, directory, title, time_created)"
-		if request.After == nil {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionFirstStatement, []any{request.PageSize.value + 1}, decode)
-		} else {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
-		}
-	case hasParent && hasClock:
-		if request.After == nil {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
-		} else {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
-		}
-	case hasParent:
-		projection = "session(id, parent_id)"
-		if request.After == nil {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsFirstStatement, []any{request.PageSize.value + 1}, decode)
-		} else {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
-		}
-	default:
-		projection = "session(id, time_updated)"
-		if request.After == nil {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionClockFirstStatement, []any{request.PageSize.value + 1}, decode)
-		} else {
-			err = s.executeRowsLocked(lease.ctx, openCodeSessionClockAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+	} else {
+		projection = "session(id, parent_id, time_updated)"
+		switch {
+		case readExtended:
+			projection = "session(id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionExtendedAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case readAttribution:
+			projection = "session(id, parent_id, time_updated, directory, title, time_created)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionAttributionAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case hasParent && hasClock:
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionRecordsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		case hasParent:
+			projection = "session(id, parent_id)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionParentsAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
+		default:
+			projection = "session(id, time_updated)"
+			if request.After == nil {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionClockFirstStatement, []any{request.PageSize.value + 1}, decode)
+			} else {
+				err = s.executeRowsLocked(lease.ctx, openCodeSessionClockAfterStatement, []any{request.After.sessionID.value, request.PageSize.value + 1}, decode)
+			}
 		}
 	}
 	if err != nil || lease.ctx.Err() != nil {
@@ -687,6 +750,9 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		case len(records) > 0:
 			page.Next = &OpenCodeSessionRecordCursor{sessionID: records[len(records)-1].SessionID}
 		}
+		if page.Next == nil {
+			return OpenCodeSessionRecordPage{}, fmt.Errorf("read bounded OpenCode %s records could not advance beyond a page of invalid identifiers; existence enumeration is incomplete and cannot prove deletion; inspect the source schema and retry", support.table)
+		}
 	}
 	return page, nil
 }
@@ -703,13 +769,36 @@ func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.C
 	}
 	s.stateMu.Unlock()
 
-	columns, err := s.columnsLocked(ctx, "session")
+	columns, err := s.columnsLocked(ctx, string(OpenCodeSessionTableV2))
 	if err != nil {
 		return openCodeSessionColumnSupport{}, err
 	}
-	support := openCodeSessionColumnSupport{present: len(columns) > 0}
+	support := openCodeSessionColumns(OpenCodeSessionTableV2, columns)
+	if !support.hasID {
+		columns, err = s.columnsLocked(ctx, string(OpenCodeSessionTableLegacy))
+		if err != nil {
+			return openCodeSessionColumnSupport{}, err
+		}
+		support = openCodeSessionColumns(OpenCodeSessionTableLegacy, columns)
+	}
+
+	s.stateMu.Lock()
+	s.sessionColumnsChecked = true
+	s.sessionColumns = support
+	s.stateMu.Unlock()
+	return support, nil
+}
+
+func openCodeSessionColumns(table OpenCodeSessionTable, columns []OpenCodeColumnEvidence) openCodeSessionColumnSupport {
+	support := openCodeSessionColumnSupport{table: table, present: len(columns) > 0}
+	primaryColumns := 0
 	for _, column := range columns {
+		if column.Primary {
+			primaryColumns++
+		}
 		switch column.Name {
+		case "id":
+			support.hasID = table == OpenCodeSessionTableLegacy || column.Primary
 		case "parent_id":
 			support.hasParent = true
 		case "time_updated":
@@ -742,11 +831,10 @@ func (s *zombiezenOpenCodeSQLiteSource) sessionColumnSupportLocked(ctx context.C
 			support.hasRevert = true
 		}
 	}
-	s.stateMu.Lock()
-	s.sessionColumnsChecked = true
-	s.sessionColumns = support
-	s.stateMu.Unlock()
-	return support, nil
+	if table == OpenCodeSessionTableV2 && primaryColumns != 1 {
+		support.hasID = false
+	}
+	return support
 }
 
 // projectColumnsPresent reports whether a table carries every named column, so

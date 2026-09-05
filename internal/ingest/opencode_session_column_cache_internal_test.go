@@ -36,7 +36,7 @@ func TestSessionColumnSupportIsCachedPerSource(t *testing.T) {
 	// Poison the cache with a support value the real schema does not have. A
 	// second read must return the cached value, proving the pragma is not re-run.
 	source.stateMu.Lock()
-	source.sessionColumns = openCodeSessionColumnSupport{present: true, hasParent: false, hasClock: false}
+	source.sessionColumns = openCodeSessionColumnSupport{table: OpenCodeSessionTableLegacy, hasID: true, present: true, hasParent: false, hasClock: false}
 	source.stateMu.Unlock()
 
 	second, err := source.SessionRecords(t.Context(), OpenCodeSessionRecordPageRequest{PageSize: pageSize})

@@ -383,15 +383,23 @@ type OpenCodeSessionRecordSkip struct {
 	Reason string
 }
 
-// OpenCodeSessionRecordPage is one bounded page of session records. Supported
-// is false when the database has no session table at all; the page is then
-// empty. HasParent and HasClock report which of the parent_id and time_updated
-// columns the session table carries, so parent links are read whether or not the
-// clock column exists. When the session table exists but carries neither column,
-// Supported is true while HasParent and HasClock are both false and the page is
-// empty. Skipped names the rows that could not be decoded; an undecodable row is
-// dropped rather than failing the whole read.
+// OpenCodeSessionTable names the closed set of metadata authorities. Its zero
+// value means no supported table was selected.
+type OpenCodeSessionTable string
+
+const (
+	OpenCodeSessionTableLegacy OpenCodeSessionTable = "session"
+	OpenCodeSessionTableV2     OpenCodeSessionTable = "session_v2"
+)
+
+// OpenCodeSessionRecordPage is a bounded page from the selected metadata table.
+// Supported is false without a usable identity column. Table is selected once
+// per source from schema evidence, preferring session_v2 with id as its sole
+// primary key. Missing optional columns degrade metadata; an id-only v2 table
+// still enumerates existence. Legacy clockless layouts retain their previous
+// compatibility behavior. Skipped rows with valid IDs still prove presence.
 type OpenCodeSessionRecordPage struct {
+	Table     OpenCodeSessionTable
 	Supported bool
 	HasParent bool
 	HasClock  bool

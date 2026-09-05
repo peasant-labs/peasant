@@ -14,6 +14,8 @@ import (
 func discoverOpenCodeSessionsByID(t *testing.T, fixtureName string) map[string]ingest.DiscoveredSession {
 	t.Helper()
 	materialized := testfixture.MaterializeByName(t, fixtureName)
+	before := testfixture.SnapshotSource(t, materialized)
+	t.Cleanup(func() { testfixture.AssertUnchanged(t, materialized, before) })
 	root, err := ingest.NewResolvedPath(filepath.Dir(materialized.Path))
 	if err != nil {
 		t.Fatalf("resolve synthetic OpenCode root: %v", err)
@@ -28,6 +30,13 @@ func discoverOpenCodeSessionsByID(t *testing.T, fixtureName string) map[string]i
 		byID[string(session.SessionID)] = session
 	}
 	return byID
+}
+
+func TestOpenCodeDiscoveryPrefersNativeSessionAuthority(t *testing.T) {
+	byID := discoverOpenCodeSessionsByID(t, "native-v2-preferred")
+	if _, ok := byID["ses_3cd91f52effeXd3QAJ54jOyzn1"]; !ok {
+		t.Fatalf("native session present in session_v2 was lost through the empty legacy table: %v", byID)
+	}
 }
 
 // TestOpenCodeDiscoveryAttributesSQLiteSessions proves that discovery sets the

@@ -1,0 +1,98 @@
+required_cases:
+  - v2-only-session-records
+  - hybrid-v2-metadata-wins
+  - empty-v2-is-authoritative
+  - v2-optional-columns-missing
+  - unusable-v2-falls-back-to-legacy
+  - v2-missing-id-falls-back
+  - v2-malformed-record-keeps-presence
+  - v2-paged-records
+  - legacy-clockless-keeps-candidates
+  - v2-read-failure-never-falls-back
+cases:
+  - name: v2-only-session-records
+    fixture: native-v2-only
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: hybrid-v2-metadata-wins
+    fixture: native-current-rows
+    setup: |
+      ALTER TABLE session RENAME TO session_v2;
+      CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, time_updated INTEGER);
+      INSERT INTO session VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn1', NULL, 999999);
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: empty-v2-is-authoritative
+    fixture: native-current-rows
+    setup: CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+    table: session_v2
+    record_ids: []
+    present_ids: []
+    discovered_ids: []
+  - name: v2-optional-columns-missing
+    fixture: native-current-rows
+    setup: |
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+      INSERT INTO session_v2 SELECT id FROM session;
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+  - name: unusable-v2-falls-back-to-legacy
+    fixture: native-current-rows
+    setup: CREATE TABLE session_v2 (id TEXT, time_updated INTEGER);
+    table: session
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: v2-missing-id-falls-back
+    fixture: native-current-rows
+    setup: CREATE TABLE session_v2 (time_updated INTEGER);
+    table: session
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: v2-malformed-record-keeps-presence
+    fixture: native-v2-only
+    setup: UPDATE session_v2 SET time_updated = 'malformed';
+    table: session_v2
+    record_ids: []
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    skipped: true
+  - name: v2-paged-records
+    fixture: native-v2-only
+    setup: |
+      INSERT INTO session_v2 (id, time_created, time_updated) VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn2', 4000, 5000);
+      INSERT INTO session_v2 (id, time_created, time_updated) VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn3', 6000, 7000);
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1, ses_3cd91f52effeXd3QAJ54jOyzn2, ses_3cd91f52effeXd3QAJ54jOyzn3]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1, ses_3cd91f52effeXd3QAJ54jOyzn2, ses_3cd91f52effeXd3QAJ54jOyzn3]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: legacy-clockless-keeps-candidates
+    fixture: native-current-rows
+    setup: |
+      DROP TABLE session;
+      CREATE TABLE session (id TEXT PRIMARY KEY);
+    table: session
+    record_ids: []
+    present_ids: []
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+  - name: v2-read-failure-never-falls-back
+    fixture: native-v2-only
+    setup: CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, time_updated INTEGER);
+    after_read: DROP TABLE session_v2;
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title

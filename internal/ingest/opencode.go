@@ -394,7 +394,7 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 	// rather than resurrected from stale rows. A session table without the clock
 	// column is a degraded or synthetic shape, so the rule fails safe and keeps
 	// every discovered session as a root rather than risk skipping a live one.
-	if records.present && records.hasClock {
+	if records.present && (records.hasClock || records.table == OpenCodeSessionTableV2) {
 		surviving := candidates[:0]
 		survivingIDs := make(map[SessionID]struct{}, len(candidates))
 		var deleted []string
@@ -589,6 +589,7 @@ type openCodeSessionClock struct {
 // which of the parent link and changed clock columns the session table carries,
 // so parent links are read whether or not the clock column exists.
 type openCodeSessionRecords struct {
+	table     OpenCodeSessionTable
 	present   bool
 	hasParent bool
 	hasClock  bool
@@ -625,6 +626,7 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 			return records, fmt.Errorf("read OpenCode session records from %q failed while enumerating a bounded session page: %w; sessions remain discoverable as roots; verify the session table and retry", candidate.Path, readErr)
 		}
 		records.present = page.Supported
+		records.table = page.Table
 		records.hasParent = page.HasParent
 		records.hasClock = page.HasClock
 		for _, skip := range page.Skipped {

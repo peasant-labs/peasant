@@ -116,8 +116,12 @@ readable_session_columns:
   - slug
   - revert
 required_session_column_mutations:
+  - reject-forbidden-v2-session-projection
   - reject-forbidden-session-projection
 session_column_mutations:
+  - name: reject-forbidden-v2-session-projection
+    statement: 'select id, fork_session_id from session_v2 order by id limit ?1'
+    forbidden_column: fork_session_id
   - name: reject-forbidden-session-projection
     statement: 'select id, parent_id, time_updated, share_url from session order by id limit ?1'
     forbidden_column: share_url
@@ -160,6 +164,30 @@ table_column_mutations:
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
 allowed_query_statements:
+  - name: session-v2-records-first
+    statement: 'select id, parent_id, time_updated from session_v2 order by id limit ?1'
+  - name: session-v2-records-after
+    statement: 'select id, parent_id, time_updated from session_v2 where id > ?1 order by id limit ?2'
+  - name: session-v2-attribution-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session_v2 order by id limit ?1'
+  - name: session-v2-attribution-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created from session_v2 where id > ?1 order by id limit ?2'
+  - name: session-v2-extended-first
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session_v2 order by id limit ?1'
+  - name: session-v2-extended-after
+    statement: 'select id, parent_id, time_updated, directory, title, time_created, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert from session_v2 where id > ?1 order by id limit ?2'
+  - name: session-v2-parents-first
+    statement: 'select id, parent_id from session_v2 order by id limit ?1'
+  - name: session-v2-parents-after
+    statement: 'select id, parent_id from session_v2 where id > ?1 order by id limit ?2'
+  - name: session-v2-clock-first
+    statement: 'select id, time_updated from session_v2 order by id limit ?1'
+  - name: session-v2-clock-after
+    statement: 'select id, time_updated from session_v2 where id > ?1 order by id limit ?2'
+  - name: session-v2-ids-first
+    statement: 'select id from session_v2 order by id limit ?1'
+  - name: session-v2-ids-after
+    statement: 'select id from session_v2 where id > ?1 order by id limit ?2'
   - name: current-substantive-probe
     statement: "select 1 from session_message where session_id = ?1 and type not in ('agent-switched', 'model-switched') limit 1"
   - name: enable-query-only
