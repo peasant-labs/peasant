@@ -206,6 +206,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	// behavior, so the disabled path stays byte-identical.
 	rec := p.recorder(ctx)
 	ctx = perf.ContextWithRecorder(ctx, rec)
+	p, finishRedactionProfile := profileRedactionRun(ctx, p)
+	defer finishRedactionProfile()
 	// The CLI owns push.run around both transcript and annotation stages.
 	// Pipeline instrumentation must not add a second run duration.
 	var tracker ConcurrencyTracker

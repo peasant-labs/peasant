@@ -73,7 +73,7 @@ type MapOptions struct {
 // own output - receives redacted entries. This runs where one particular document
 // is assembled. The two cover different populations: remove either and a real
 // path goes unredacted.
-func MapMetadata(opts MapOptions) ([]byte, error) {
+func MapMetadata(opts MapOptions) (_ []byte, err error) {
 	meta := opts.Meta
 	req := schema.PublishRequest{
 		Identity: schema.SessionIdentity{
@@ -190,6 +190,7 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 	if opts.Redactor == nil {
 		return result, nil
 	}
+	defer observeRedactionDocument(opts.Redactor, &err, redactionMetadataValidation)
 	redacted, err := redactJSONDocument(opts.Redactor, result, "publish request")
 	if err != nil {
 		return nil, err

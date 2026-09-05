@@ -1,0 +1,163 @@
+cases:
+  - name: secrets
+    input: 'deploy key sk-ant-api03-zzprobe00000000000000123456 in config'
+    forbidden: ['sk-ant-api03-zzprobe00000000000000123456']
+    rules: {anthropic_key: 1}
+    categories: {CREDENTIAL: 1}
+  - name: pii-email
+    input: 'contact zz-redact-probe-01@example.com for access'
+    forbidden: ['zz-redact-probe-01@example.com']
+    rules: {email: 1}
+    categories: {PII: 1}
+  - name: paths
+    input: 'open /home/zzprobeuser/projects/billing/main.go now'
+    forbidden: ['/home/zzprobeuser/projects/billing/main.go', zzprobeuser]
+    # The placeholder still matches the path rule in both assembled documents.
+    # These are match counts across passes, not three distinct replacements.
+    rules: {unix_home_path: 3}
+    categories: {PATH: 3}
+  - name: remote-https-not-active
+    input: 'clone https://github.com/zzprobeorg/zzproberepo.git today'
+    forbidden: ['https://github.com/zzprobeorg/zzproberepo.git', zzprobeorg]
+    rules: {}
+    categories: {}
+  - name: remote-ssh-not-active
+    input: 'origin git@github.com:zzprobeorg/zzproberepo.git pushed'
+    forbidden: ['git@github.com:zzprobeorg/zzproberepo.git', zzprobeorg]
+    rules: {}
+    categories: {}
+  - name: project-image
+    input: 'pull ghcr.io/zzprobeorg/zzprobeimg:latest now'
+    forbidden: ['ghcr.io/zzprobeorg/zzprobeimg:latest', zzprobeorg]
+    rules: {ghcr_image_ref: 1}
+    categories: {INTERNAL: 1}
+  - name: pii-phone
+    input: 'call +1-415-555-0132 after lunch today please'
+    forbidden: ['+1-415-555-0132']
+    rules: {phone_us: 1}
+    categories: {PII: 1}
+  - name: transcript-no-findings
+    input: 'Here is the fix for the deploy pipeline we discussed.'
+    rules: {}
+    categories: {}
+  - name: project-import
+    input: 'import "github.com/zzprobeorg/zzprobepkg/v2" here'
+    forbidden: ['github.com/zzprobeorg/zzprobepkg/v2', zzprobeorg]
+    rules: {go_import_path: 1}
+    categories: {INTERNAL: 1}
+  - name: private-history
+    input: 'branch zz-private-history-sentinel commit abc1234567890'
+    forbidden: [zz-private-history-sentinel]
+    rules: {}
+    categories: {}
+  - name: invalid-category
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidCategory: private_category_sentinel
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: invalid-rule-path
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidRule: '/home/zz-rule-sentinel/private'
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: invalid-rule-token-shaped
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidRule: private_rule_sentinel
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: disabled
+    input: 'contact zz-redact-probe-01@example.com for access'
+    disabled: true
+    rules: {}
+    categories: {}
+  - name: concurrent-sessions
+    input: 'contact zz-redact-probe-01@example.com for access'
+    sessionIDs:
+      - 'aaaaaaaa-0000-4000-8000-000000000001'
+      - 'aaaaaaaa-0000-4000-8000-000000000002'
+      - 'aaaaaaaa-0000-4000-8000-000000000003'
+    rules: {email: 3}
+    categories: {PII: 3}
+  - name: report-unavailable
+    input: 'contact zz-redact-probe-01@example.com for access'
+    reportUnavailable: true
+    rules: {}
+    categories: {}
+  - name: report-invalid-total
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidTotal: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: report-inconsistent-category
+    input: 'contact zz-redact-probe-01@example.com for access'
+    inconsistentCategory: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: report-negative-count
+    input: 'contact zz-redact-probe-01@example.com for access'
+    negativeCount: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: report-decreasing-count
+    input: 'contact zz-redact-probe-01@example.com for access'
+    decreasingReport: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: custom-rule-id-withheld
+    input: 'custom-sensitive-input-sentinel'
+    customRuleID: private_custom_rule_sentinel
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: disabled-invalid-report
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidCategory: private_category_sentinel
+    disabled: true
+    rules: {}
+    categories: {}
+  - name: entries-encoding-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: entries
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: metadata-encoding-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: metadata
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
+  - name: transcript-encoding-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: transcript
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
+  - name: entries-shape-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: entries
+    failureShape: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: metadata-shape-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: metadata
+    failureShape: true
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
+  - name: transcript-shape-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: transcript
+    failureShape: true
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
