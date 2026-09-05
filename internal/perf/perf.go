@@ -7,9 +7,8 @@
 // Design goals:
 //   - OFF by default. When timing is disabled the caller holds a Nop recorder,
 //     whose methods are empty and inlinable — negligible overhead on the hot path.
-//   - Dependency-free. perf imports only the standard library, so it can be reused
-//     by the ingest pipeline later (out of scope here — do NOT wire ingest now)
-//     without creating an import cycle.
+//   - Independent of pipeline packages. The redaction engine supplies canonical
+//     category labels; no ingest or push dependency is needed.
 //   - Concurrency-safe. Uploads run in parallel (errgroup), so the Collector and
 //     the per-request UploadTrace both guard their state with a mutex; the package
 //     is exercised under `go test -race`.
@@ -23,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/peasant-labs/redact"
 )
 
 const (
@@ -266,6 +267,11 @@ func sanitizeAttributeValue(key AttributeKey, value string) (string, bool) {
 		}
 		return "redacted", true
 	case AttrCategory:
+		for _, category := range redact.AllCategories() {
+			if value == category.String().String() {
+				return value, true
+			}
+		}
 		switch value {
 		case "secrets", "pii", "paths", "project":
 			return value, true

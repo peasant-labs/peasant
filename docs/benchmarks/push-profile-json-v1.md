@@ -42,6 +42,45 @@ Each stage summary includes:
 Tests should compare these values with an injected clock or fixed fixture data.
 They must not require a hard wall-clock threshold.
 
+## Redaction Measurement Boundary
+
+Push attaches a run-scoped decorator to its existing `ingest.TextRedactor`.
+It calls the same engine methods and retains the existing fail-closed document
+validation. Disabled profiling does not wrap the engine or read its report.
+
+| Measurement | Meaning and limits |
+| --- | --- |
+| `redaction.apply` | Combined engine-call duration. The `operation` is `metadata_scan_apply` or `json_scan_apply`. It includes detection and application, not replacement-only time. An `ok` outcome means the call returned; subsequent document validation can still refuse publication. |
+| `entriesScanned` | Stored entries submitted to the entry-redaction boundary, once per session. It is not the count of strings or repeated copies in assembled documents. |
+| `bytesScanned` | UTF-8 bytes in decoded JSON **string values** submitted to `RedactJSON`, across all passes. Keys, JSON syntax, numeric scalars and metadata-specific field normalization are excluded. Repeated passes count again. Failed document validation does not undo the submitted-byte count. |
+| `rulesMatched` | Run delta of the engine's cumulative built-in rule match counts. These are not exact replacements: overlapping matches and matches that rewrite an existing placeholder can be counted. |
+| `findingsByCategory` | The same match deltas grouped by the engine's validated rule categories. Labels come from `Category.String()`: `CREDENTIAL`, `PII`, `PATH`, `INTERNAL`. Existing raw-category tokens remain readable by the recorder for compatibility. |
+| `failures` | Document-boundary and aggregate-report validation failures. Counter `operation` attributes distinguish `entries_validation`, `metadata_validation`, `transcript_validation`, and `report_validation`. A report validation failure withholds profile counts; it does not change the push result. A document validation failure still stops publication. |
+
+The current seam does **not** expose separate scan-only, per-rule evaluation, or
+replacement-only durations. Therefore push does not emit `redaction.scan`,
+`redaction.rule.evaluate`, or `redaction.replacements`. It also cannot count
+contextual metadata replacements or recover engine-internal fallback failures.
+Those metrics need an upstream engine contract, not a second scan or a guess.
+
+Rule/category counts use validated reports taken before the run and after its
+concurrent sessions join. Earlier use of the engine is subtracted. Counts are
+run-level, not attributed to individual sessions. Do not share the same engine
+with unrelated concurrent runs: the cumulative report cannot separate them.
+
+Only rule IDs from the engine's built-in catalogue can enter a profile. A custom
+rule name can contain private content even when it looks like a safe token.
+Unknown IDs (including custom and generated XDG rule IDs), unknown/inconsistent
+categories, negative counts, inconsistent totals, or decreasing reports withhold
+the whole run's finding/rule counts and produce a safe `report_validation`
+failure. The engine still runs unchanged. Implementations without `Report()`
+retain timing and volume metrics but emit a `report_unavailable` error and no
+finding/rule counts. Empty maps in either case mean **unavailable**, not proof of
+no findings; consult the errors and operation attributes.
+
+Report match text and residue warnings are never forwarded, even through the
+general error sanitizer. Safe errors use fixed local descriptions.
+
 ## Sorting Rules
 
 Profile output must be deterministic:

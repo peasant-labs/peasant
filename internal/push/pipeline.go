@@ -163,6 +163,8 @@ func NewPipeline(
 //   - Receipt persistence failures become per-session errors; InsertPushLog
 //     failures are logged to stderr rather than returned.
 func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
+	p, finishRedactionProfile := profileRedactionRun(ctx, p)
+	defer finishRedactionProfile()
 	startedAt := time.Now().UnixMilli()
 
 	// 1. Resolve effective visibility + content license (both uniform for the run).
