@@ -250,6 +250,9 @@ func buildSQLite(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	if err := deleteSessionRows(conn, fixtureCase.DeletedSessionRows); err != nil {
 		return err
 	}
+	if err := applySessionTableLayout(conn, fixtureCase); err != nil {
+		return err
+	}
 	if err := createHistoryTables(conn, fixtureCase.IgnoredHistory); err != nil {
 		return err
 	}
@@ -284,7 +287,7 @@ func applyCatalogPadding(conn *sqlite.Conn, padding catalogPaddingSpec) error {
 	return nil
 }
 
-func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution, extended bool) error {
+func sessionTableSchema(clock sessionClockMode, attribution, extended bool) string {
 	sessionSchema := sessionSchemaSQL
 	if extended {
 		// The session table carries every column the extended record read
@@ -300,6 +303,35 @@ func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, 
 		// so discovery falls back to the database and WAL mtime floor.
 		sessionSchema = sessionSchemaNoClockSQL
 	}
+	return sessionSchema
+}
+
+// applySessionTableLayout models the migration only in a materializer-owned
+// temporary database. Message foreign keys follow the renamed v2 table. In a
+// mixed layout the recreated legacy table can retain stale historical rows.
+func applySessionTableLayout(conn *sqlite.Conn, fixtureCase caseSpec) error {
+	if fixtureCase.SessionTables == sessionTablesLegacy {
+		return nil
+	}
+	if err := sqlitex.Execute(conn, "ALTER TABLE session RENAME TO session_v2", nil); err != nil {
+		return fmt.Errorf("create synthetic v2 session table: %w", err)
+	}
+	if fixtureCase.SessionTables == sessionTablesV2 {
+		return nil
+	}
+	if err := sqlitex.ExecuteScript(conn, sessionTableSchema(fixtureCase.SessionClock, len(fixtureCase.SessionAttribution) > 0, fixtureCase.SessionExtended), nil); err != nil {
+		return fmt.Errorf("recreate frozen synthetic legacy session table: %w", err)
+	}
+	if fixtureCase.SessionClock != sessionClockAbsent {
+		if err := insertSessionRows(conn, fixtureCase); err != nil {
+			return err
+		}
+	}
+	return deleteSessionRows(conn, fixtureCase.LegacyOnlyDeletedRows)
+}
+
+func createSchema(conn *sqlite.Conn, schema schemaKind, clock sessionClockMode, attribution, extended bool) error {
+	sessionSchema := sessionTableSchema(clock, attribution, extended)
 	var script string
 	switch schema {
 	case schemaEmpty:

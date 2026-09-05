@@ -40,7 +40,72 @@ required_cases:
   - content-aware-selection
   - legacy-scrollable-session
   - legacy-out-of-order-parts
+  - native-current-rows
+  - native-v2-only
+  - native-v2-preferred
 cases:
+  # Captured from native session_message rows through a read-only connection.
+  # Text, identities, model names, timestamps, and usage values are replaced
+  # with synthetic values. Absent keys stay absent, including content text IDs.
+  - &native_current_rows
+    name: native-current-rows
+    logical_path: native/opencode.db
+    format: sqlite
+    schema: current
+    journal_mode: delete
+    session_extended: true
+    session_attribution:
+      - session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+        directory: /fixtures/native-project
+        title: native session title
+        agent: build
+        version: native-fixture
+        slug: native-session
+        tokens_input: 120
+        tokens_output: 80
+        cost: 0.01
+    declared_rows:
+      legacy_messages: 0
+      legacy_parts: 0
+      current_messages: 2
+      ignored_history: 0
+    expected_catalog:
+      tables: [session, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+    current_messages:
+      - id: msg_native_user
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+        type: user
+        time_created: 1000
+        time_updated: 1000
+        data: '{"text":"native user question","time":{"created":1000}}'
+        seq: 0
+      - id: msg_native_assistant
+        session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+        type: assistant
+        time_created: 1000
+        time_updated: 2000
+        data: '{"agent":"build","content":[{"text":"native assistant answer","type":"text"}],"cost":0,"finish":"stop","model":{"id":"synthetic-model","providerID":"synthetic-provider","variant":"redacted"},"rawFinish":"stop","snapshot":{"end":"redacted","files":[],"start":"redacted"},"time":{"completed":2000,"created":1000,"streamed":2000},"tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0}}'
+        seq: 1
+
+  - <<: *native_current_rows
+    name: native-v2-only
+    session_tables: v2_only
+    expected_catalog:
+      tables: [session_v2, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+
+  - <<: *native_current_rows
+    name: native-v2-preferred
+    session_tables: both
+    legacy_only_deleted_rows: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    expected_catalog:
+      tables: [session, session_v2, session_message]
+      indexes: [session_message_seq_idx, session_message_session_seq_idx]
+      seq: not_null
+
   - name: empty-valid
     logical_path: stable/opencode.db
     format: sqlite

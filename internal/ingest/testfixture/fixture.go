@@ -45,6 +45,14 @@ const (
 	journalWAL    journalMode = "wal"
 )
 
+type sessionTableLayout string
+
+const (
+	sessionTablesLegacy sessionTableLayout = ""
+	sessionTablesV2     sessionTableLayout = "v2_only"
+	sessionTablesBoth   sessionTableLayout = "both"
+)
+
 // sessionClockMode controls how the synthetic session table carries the
 // per-session update clock, so tests can cover the floor path and clock lag.
 type sessionClockMode string
@@ -100,6 +108,7 @@ type caseSpec struct {
 	Schema          schemaKind          `yaml:"schema"`
 	JournalMode     journalMode         `yaml:"journal_mode"`
 	SessionClock    sessionClockMode    `yaml:"session_clock"`
+	SessionTables   sessionTableLayout  `yaml:"session_tables"`
 	Corruption      corruptionKind      `yaml:"corruption"`
 	DeclaredRows    declaredRowCounts   `yaml:"declared_rows"`
 	ExpectedCatalog expectedCatalogSpec `yaml:"expected_catalog"`
@@ -114,6 +123,9 @@ type caseSpec struct {
 	// its historical rows linger, so discovery can prove that a deleted session
 	// is skipped rather than resurrected.
 	DeletedSessionRows []string `yaml:"deleted_session_rows"`
+	// LegacyOnlyDeletedRows removes rows from the frozen legacy table after
+	// constructing both tables. The corresponding v2 records remain live.
+	LegacyOnlyDeletedRows []string `yaml:"legacy_only_deleted_rows"`
 	// SessionAttribution adds the directory and title columns to the session
 	// table and sets them for the named sessions, modelling the real OpenCode
 	// shape whose session row carries its working directory, title, and creation
@@ -291,6 +303,18 @@ func (c caseSpec) validate() error {
 	}
 	if err := c.Format.validate(); err != nil {
 		return fmt.Errorf("validate synthetic OpenCode source fixture %q: %w", c.Name, err)
+	}
+	switch c.SessionTables {
+	case sessionTablesLegacy:
+	case sessionTablesV2, sessionTablesBoth:
+		if c.Format != sourceFormatSQLite || (c.Schema != schemaLegacy && c.Schema != schemaCurrent && c.Schema != schemaHybrid) {
+			return fmt.Errorf("validate synthetic OpenCode source fixture %q: v2 session tables require a legacy, current, or hybrid SQLite schema", c.Name)
+		}
+	default:
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: unknown session table layout %q", c.Name, c.SessionTables)
+	}
+	if len(c.LegacyOnlyDeletedRows) > 0 && c.SessionTables != sessionTablesBoth {
+		return fmt.Errorf("validate synthetic OpenCode source fixture %q: legacy-only deletion requires both session tables", c.Name)
 	}
 	if c.Format == sourceFormatCorrupt {
 		if c.Schema != "" || c.JournalMode != "" || c.SessionClock != sessionClockMirror {
