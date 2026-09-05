@@ -31,10 +31,10 @@ denied_statements:
     mutation_proof: true
     expected_session_count: 2
   - name: update-row
-    statement: "UPDATE session_message SET type = 'forbidden' WHERE id = 'sm_current_1'"
+    statement: "UPDATE session_message SET type = 'forbidden' WHERE id = 'msg_current_1'"
     error_contains: forbidden SQLite action
   - name: delete-row
-    statement: "DELETE FROM session_message WHERE id = 'sm_current_1'"
+    statement: "DELETE FROM session_message WHERE id = 'msg_current_1'"
     error_contains: forbidden SQLite action
   - name: disable-query-only
     statement: "PRAGMA query_only=OFF"

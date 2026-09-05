@@ -21,7 +21,7 @@ cases:
       - id: msg_04_skill
         data: '{"id":"msg_04_skill","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1120,"completed":1125}}'
         parts:
-          - {id: skill_call, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}'}
+          - {id: skill_call, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[{"type":"text","text":"fixture skill loaded"}],"structured":{},"result":"fixture skill loaded"},"time":{"created":1121,"completed":1122}}'}
       - id: msg_05_agent
         data: '{"id":"msg_05_agent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1130,"completed":1130},"content":"reviewer"}'
         parts:
@@ -58,7 +58,8 @@ current_variants:
   - {id: msg_variant_compaction, row_type: compaction, data: '{"id":"msg_variant_compaction","reason":"manual","summary":"summary","recent":"recent","time":{"created":2060}}'}
   - {id: msg_variant_agent, row_type: agent-switched, data: '{"id":"msg_variant_agent","agent":"reviewer","time":{"created":2070}}'}
   - {id: msg_variant_model, row_type: model-switched, data: '{"id":"msg_variant_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":2080}}'}
-expected_current_identities: [pending_tool, running_tool, completed_tool, error_tool, shell_call]
+expected_current_identities: [reason_variant, pending_tool, running_tool, completed_tool, error_tool, shell_call]
+expected_current_projection_identities: [text_variant]
 
 declared_negative_cases: 11
 negative_cases:

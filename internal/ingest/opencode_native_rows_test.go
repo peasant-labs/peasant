@@ -89,6 +89,7 @@ func TestOpenCodeNativeRowsProductionMaterializationAndIndexing(t *testing.T) {
 			source := testfixture.MaterializeByName(t, testCase.SourceFixture)
 			before := testfixture.SnapshotSource(t, source)
 			defer testfixture.AssertUnchanged(t, source, before)
+			assertOpenCodeNativeCorpusShape(t, source.Path, testCase.SessionID)
 			fs := &OSFileSystem{}
 			adapter, err := NewOpenCodeAdapterWithCandidateProbe(fs, semanticNoGit{}, salt.Salt{}, "latest", nativeRowsEnvironment{"OPENCODE_DB": source.Path}, fs, OpenOpenCodeSQLiteSource, DefaultOpenCodeSQLiteSourceOptions())
 			if err != nil {
@@ -132,6 +133,60 @@ func TestOpenCodeNativeRowsProductionMaterializationAndIndexing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func assertOpenCodeNativeCorpusShape(t testing.TB, path, session string) {
+	t.Helper()
+	source := openSemanticSource(t, path)
+	defer func() {
+		if err := source.Close(t.Context()); err != nil {
+			t.Error(err)
+		}
+	}()
+	id, err := NewOpenCodeCurrentSessionID(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, err := NewOpenCodeCurrentPageSize(MaxOpenCodeCurrentPageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cursor *OpenCodeCurrentCursor
+	for {
+		page, err := source.CurrentMessages(t.Context(), OpenCodeCurrentPageRequest{SessionID: id, PageSize: size, After: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range page.Messages {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(row.Data), &fields); err != nil {
+				t.Fatal(err)
+			}
+			if fields["id"] != nil || fields["type"] != nil {
+				t.Fatalf("native corpus row %q duplicates column-owned identity or type in its data", row.ID.String())
+			}
+			if row.Type.String() != "assistant" {
+				continue
+			}
+			var contents []map[string]json.RawMessage
+			if err := json.Unmarshal(fields["content"], &contents); err != nil {
+				t.Fatal(err)
+			}
+			for _, content := range contents {
+				var kind string
+				if err := json.Unmarshal(content["type"], &kind); err != nil {
+					t.Fatal(err)
+				}
+				if (kind == "text" || kind == "reasoning") && content["id"] != nil {
+					t.Fatalf("native corpus row %q invents a nested %s identity", row.ID.String(), kind)
+				}
+			}
+		}
+		if page.Next == nil {
+			return
+		}
+		cursor = page.Next
 	}
 }
 

@@ -200,19 +200,19 @@ cases:
     legacy_messages: []
     legacy_parts: []
     current_messages:
-      - id: sm_current_1
+      - id: msg_current_1
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
-        type: message
+        type: user
         time_created: 2000
         time_updated: 2000
-        data: '{"role":"user","parts":[{"type":"text","text":"synthetic question"}]}'
+        data: '{"text":"synthetic question","time":{"created":2000}}'
         seq: 0
-      - id: sm_current_2
+      - id: msg_current_2
         session_id: ses_3cd91f52effeXd3QAJ54jOyzv5
-        type: message
+        type: assistant
         time_created: 2001
         time_updated: 2001
-        data: '{"role":"assistant","parts":[{"type":"text","text":"synthetic answer"}]}'
+        data: '{"agent":"build","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"text","text":"synthetic answer"}],"rawFinish":"stop","time":{"created":2001,"streamed":2001,"completed":2001}}'
         seq: 1
     ignored_history: []
 
@@ -824,7 +824,7 @@ cases:
       - {id: part_01_reasoning, message_id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1021, time_updated: 1021, data: '{"id":"part_01_reasoning","messageID":"msg_02_assistant","type":"reasoning","text":"synthetic reasoning","time":{"created":1021}}'}
       - {id: call_semantic, message_id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1030, time_updated: 1040, data: '{"id":"call_semantic","messageID":"msg_02_assistant","type":"tool","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":"synthetic output"},"time":{"created":1030,"completed":1040}}'}
       - {id: part_01_compaction, message_id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1100, time_updated: 1100, data: '{"id":"part_01_compaction","messageID":"msg_03_system","type":"compaction","text":"synthetic compacted context","time":{"created":1100}}'}
-      - {id: skill_call, message_id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1121, time_updated: 1122, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}'}
+      - {id: skill_call, message_id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1121, time_updated: 1122, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[{"type":"text","text":"fixture skill loaded"}],"structured":{},"result":"fixture skill loaded"},"time":{"created":1121,"completed":1122}}'}
       - {id: part_agent, message_id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1130, time_updated: 1130, data: '{"id":"part_agent","messageID":"msg_05_agent","type":"agent","name":"reviewer","text":"reviewer","time":{"created":1130}}'}
       - {id: part_subtask, message_id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, time_created: 1140, time_updated: 1140, data: '{"id":"part_subtask","messageID":"msg_06_model","type":"subtask","name":"next-model","text":"next-model","time":{"created":1140}}'}
     current_messages: []
@@ -844,12 +844,12 @@ cases:
     legacy_messages: []
     legacy_parts: []
     current_messages:
-      - {id: msg_01_user, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: user, time_created: 1000, time_updated: 1010, data: '{"id":"msg_01_user","text":"synthetic request","files":[],"agents":[],"metadata":{"cwd":"/synthetic/parity"},"time":{"created":1000}}', seq: 2}
-      - {id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: assistant, time_created: 1020, time_updated: 1090, data: '{"id":"msg_02_assistant","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_semantic","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"structured":{},"content":[{"type":"text","text":"synthetic output"}],"result":"synthetic output"},"time":{"created":1030,"ran":1031,"completed":1040}},{"type":"reasoning","id":"part_01_reasoning","text":"synthetic reasoning","time":{"created":1021,"completed":1029}}],"tokens":{"input":7,"output":11,"reasoning":3,"cache":{"read":2,"write":1}},"time":{"created":1020,"completed":1090}}', seq: 7}
-      - {id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: compaction, time_created: 1100, time_updated: 1110, data: '{"id":"msg_03_system","reason":"auto","summary":"synthetic compacted context","recent":"synthetic recent context","time":{"created":1100}}', seq: 20}
-      - {id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: assistant, time_created: 1120, time_updated: 1125, data: '{"id":"msg_04_skill","agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"skill_call","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}],"time":{"created":1120,"completed":1125}}', seq: 21}
-      - {id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: agent-switched, time_created: 1130, time_updated: 1130, data: '{"id":"msg_05_agent","agent":"reviewer","time":{"created":1130}}', seq: 22}
-      - {id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: model-switched, time_created: 1140, time_updated: 1140, data: '{"id":"msg_06_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":1140}}', seq: 23}
+      - {id: msg_01_user, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: user, time_created: 1000, time_updated: 1010, data: '{"text":"synthetic request","metadata":{"cwd":"/synthetic/parity"},"time":{"created":1000}}', seq: 2}
+      - {id: msg_02_assistant, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: assistant, time_created: 1020, time_updated: 1090, data: '{"agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"call_semantic","name":"read","state":{"status":"completed","input":{"path":"/synthetic/file"},"content":[{"type":"text","text":"synthetic output"}]},"time":{"created":1030,"ran":1031,"completed":1040}},{"type":"reasoning","text":"synthetic reasoning","time":{"created":1021,"completed":1029}}],"tokens":{"input":7,"output":11,"reasoning":3,"cache":{"read":2,"write":1}},"rawFinish":"stop","time":{"created":1020,"streamed":1090,"completed":1090}}', seq: 7}
+      - {id: msg_03_system, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: compaction, time_created: 1100, time_updated: 1110, data: '{"status":"completed","reason":"auto","summary":"synthetic compacted context","recent":"synthetic recent context","time":{"created":1100}}', seq: 20}
+      - {id: msg_04_skill, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: assistant, time_created: 1120, time_updated: 1125, data: '{"agent":"synthetic-agent","model":{"id":"synthetic-model","providerID":"synthetic-provider"},"content":[{"type":"tool","id":"skill_call","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[{"type":"text","text":"fixture skill loaded"}]},"time":{"created":1121,"completed":1122}}],"time":{"created":1120,"completed":1125}}', seq: 21}
+      - {id: msg_05_agent, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: agent-switched, time_created: 1130, time_updated: 1130, data: '{"agent":"reviewer","time":{"created":1130}}', seq: 22}
+      - {id: msg_06_model, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, type: model-switched, time_created: 1140, time_updated: 1140, data: '{"model":{"id":"next-model","providerID":"next-provider"},"time":{"created":1140}}', seq: 23}
     ignored_history:
       - {kind: event, id: ignored_semantic_history, session_id: ses_3cd91f52effeXd3QAJ54jOyzv5, stable_id: msg_02_assistant, time_created: 1019, data: '{"marker":"HISTORY_MUST_NOT_APPEAR"}'}
 

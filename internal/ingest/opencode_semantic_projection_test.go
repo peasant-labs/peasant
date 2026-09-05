@@ -32,21 +32,22 @@ const (
 )
 
 type openCodeSemanticFixture struct {
-	DeclaredCases             int                              `yaml:"declared_cases"`
-	Cases                     []openCodeSemanticCase           `yaml:"cases"`
-	DeclaredNegativeCases     int                              `yaml:"declared_negative_cases"`
-	NegativeCases             []openCodeSemanticNegativeCase   `yaml:"negative_cases"`
-	DeclaredLoaderMutations   int                              `yaml:"declared_loader_mutations"`
-	LoaderMutations           []openCodeSemanticLoaderMutation `yaml:"loader_mutations"`
-	DeclaredCurrentVariants   int                              `yaml:"declared_current_variants"`
-	CurrentVariants           []openCodeSemanticCurrentRow     `yaml:"current_variants"`
-	ExpectedCurrentIdentities []string                         `yaml:"expected_current_identities"`
-	DeclaredSemanticMutants   int                              `yaml:"declared_semantic_mutants"`
-	SemanticMutants           []openCodeSemanticMutant         `yaml:"semantic_mutants"`
-	DeclaredSourceMutations   int                              `yaml:"declared_source_mutations"`
-	SourceMutations           []openCodeSemanticSourceMutation `yaml:"source_mutations"`
-	DeclaredManagedErrors     int                              `yaml:"declared_managed_errors"`
-	ManagedErrors             []openCodeManagedErrorCase       `yaml:"managed_errors"`
+	DeclaredCases                       int                              `yaml:"declared_cases"`
+	Cases                               []openCodeSemanticCase           `yaml:"cases"`
+	DeclaredNegativeCases               int                              `yaml:"declared_negative_cases"`
+	NegativeCases                       []openCodeSemanticNegativeCase   `yaml:"negative_cases"`
+	DeclaredLoaderMutations             int                              `yaml:"declared_loader_mutations"`
+	LoaderMutations                     []openCodeSemanticLoaderMutation `yaml:"loader_mutations"`
+	DeclaredCurrentVariants             int                              `yaml:"declared_current_variants"`
+	CurrentVariants                     []openCodeSemanticCurrentRow     `yaml:"current_variants"`
+	ExpectedCurrentIdentities           []string                         `yaml:"expected_current_identities"`
+	ExpectedCurrentProjectionIdentities []string                         `yaml:"expected_current_projection_identities"`
+	DeclaredSemanticMutants             int                              `yaml:"declared_semantic_mutants"`
+	SemanticMutants                     []openCodeSemanticMutant         `yaml:"semantic_mutants"`
+	DeclaredSourceMutations             int                              `yaml:"declared_source_mutations"`
+	SourceMutations                     []openCodeSemanticSourceMutation `yaml:"source_mutations"`
+	DeclaredManagedErrors               int                              `yaml:"declared_managed_errors"`
+	ManagedErrors                       []openCodeManagedErrorCase       `yaml:"managed_errors"`
 }
 
 type openCodeSemanticCase struct {
@@ -211,6 +212,19 @@ func TestOpenCodeCurrentPinnedSessionMessageVariants(t *testing.T) {
 	}
 	if len(projection.Messages) != expectedOpenCodeCurrentVariants {
 		t.Fatalf("normalized messages=%d want %d", len(projection.Messages), expectedOpenCodeCurrentVariants)
+	}
+	// Text parts may merge into the parent preview during indexing; their
+	// explicit historical identity must still survive materialization.
+	projectionIdentities := make(map[string]bool)
+	for _, message := range projection.Messages {
+		for _, part := range message.Parts {
+			projectionIdentities[part.ID] = true
+		}
+	}
+	for _, required := range fixture.ExpectedCurrentProjectionIdentities {
+		if !projectionIdentities[required] {
+			t.Errorf("materialized variants omit stable identity %q", required)
+		}
 	}
 	data, _ := json.Marshal(projection)
 	indexer := NewOpenCodeIndexer(&OSFileSystem{}, WithOpenCodeFullDepth(true), WithOpenCodeFullContent(true))
@@ -449,6 +463,11 @@ func TestOpenCodeThreeSourceSemanticProjectionParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("index production current projection: %v", err)
 			}
+			for _, entry := range currentEntries {
+				if entry.PartType != nil && *entry.PartType == "reasoning" && entry.EntryID != nil {
+					t.Fatal("native reasoning acquired an identity absent from the source")
+				}
+			}
 
 			jsonSession := materializeSemanticJSONTree(t, testCase)
 			jsonEntries, err := indexer.IndexTranscript(t.Context(), jsonSession)
@@ -663,10 +682,11 @@ func canonicalSemanticEntries(entries []schema.SessionEntry) []schema.SessionEnt
 	for index := range canonical {
 		canonical[index].RawByteLength = nil
 	}
-	// Structural current messages have no upstream nested identity. Their parent
-	// row identity remains stable; nested structural EntryID is source-specific.
+	// Native structural and reasoning content has no upstream nested identity.
+	// Their parent row identity remains stable; these nested EntryIDs are
+	// source-specific and not part of cross-format semantic equivalence.
 	for index := range canonical {
-		if canonical[index].PartType != nil && (*canonical[index].PartType == "compaction" || *canonical[index].PartType == "agent" || *canonical[index].PartType == "subtask") {
+		if canonical[index].PartType != nil && (*canonical[index].PartType == "compaction" || *canonical[index].PartType == "agent" || *canonical[index].PartType == "subtask" || *canonical[index].PartType == "reasoning") {
 			canonical[index].EntryID = nil
 		}
 	}
