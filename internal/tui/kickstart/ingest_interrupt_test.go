@@ -89,7 +89,7 @@ func TestProgram_IngestCtrlCCancelsAndQuits(t *testing.T) {
 	ingestCtx := awaitIngestStart(t, started)
 
 	view := stripRender(p.View())
-	for _, want := range []string{"importing transcripts", "local import progress", "discover", "1/4", "█", "ctrl+c to quit"} {
+	for _, want := range []string{"importing transcripts", "local import progress", "discover", "1/4", "█", "time elapsed:", "ctrl+c to quit"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("local import view omits %q:\n%s", want, view)
 		}
@@ -99,6 +99,22 @@ func TestProgram_IngestCtrlCCancelsAndQuits(t *testing.T) {
 	requireCanceled(t, ingestCtx, "ctrl+c")
 	if quit == nil || quit() != (tea.QuitMsg{}) {
 		t.Fatal("ctrl+c on the local import screen did not quit kickstart")
+	}
+}
+
+// TestProgram_IngestQQuitsLikeCtrlC proves plain q cancels the in-flight
+// ingest and quits kickstart exactly like ctrl+c: both keys share the quit
+// binding the import screen matches.
+func TestProgram_IngestQQuitsLikeCtrlC(t *testing.T) {
+	t.Parallel()
+	started := make(chan context.Context, 1)
+	p := startCommittedIngest(t, started)
+	ingestCtx := awaitIngestStart(t, started)
+
+	p, quit := p.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	requireCanceled(t, ingestCtx, "q")
+	if quit == nil || quit() != (tea.QuitMsg{}) {
+		t.Fatal("q on the local import screen did not quit kickstart")
 	}
 }
 
@@ -123,5 +139,13 @@ func TestProgram_IngestEscIsIgnored(t *testing.T) {
 	case <-ingestCtx.Done():
 		t.Fatal("esc canceled the in-flight local import")
 	default:
+	}
+
+	// Release the blocking runner through the quit path so no goroutine
+	// outlives the test.
+	p, quit := p.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	requireCanceled(t, ingestCtx, "cleanup")
+	if quit == nil || quit() != (tea.QuitMsg{}) {
+		t.Fatal("q on the local import screen did not quit kickstart")
 	}
 }

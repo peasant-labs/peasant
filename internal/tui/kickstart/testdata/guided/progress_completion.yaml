@@ -128,7 +128,7 @@ progress:
           - {stage: INDEX, started: true, done: 3, total: 10}
     wantContains: ['extract+write', '6/10', 'index', '3/10']
     wantFocusStage: INDEX
-    wantFocusElapsed: 'total elapsed: 3s'
+    wantFocusElapsed: 'total elapsed: 5s'
     wantFocusEstimate: estimate unavailable
   - name: latest-failure-wins-over-active-and-completed
     focusProbe: failed-before-active
@@ -167,7 +167,7 @@ progress:
           - {stage: INDEX, started: true, done: 3, total: 3, ended: true}
     wantContains: ['diff', '2/2', 'index', '3/3']
     wantFocusStage: INDEX
-    wantFocusElapsed: 'total elapsed: 3s'
+    wantFocusElapsed: 'total elapsed: 5s'
     wantFocusEstimate: estimate unavailable
 
 expectedCompletionCount: 3

@@ -150,10 +150,13 @@ type loginURLMsg struct {
 	epoch uint64
 }
 
-// ingestDoneMsg carries the result of the injected IngestFunc.
+// ingestDoneMsg carries the result of the injected IngestFunc, tagged with
+// the attempt generation that started it so a superseded attempt can never
+// resolve into a newer one.
 type ingestDoneMsg struct {
-	result *ftue.IngestResult
-	err    error
+	result     *ftue.IngestResult
+	err        error
+	generation uint64
 }
 
 // progressTickMsg asks Program to take one non-blocking snapshot from the
@@ -812,7 +815,7 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	// extending a second animation chain into the retry.
 	p.spinner = kit.NewSpinner(p.deps.Theme, "importing transcripts")
 	p.spinner.SetSize(p.width, p.height)
-	return p, tea.Batch(p.runIngest(), p.progressTick(generation), p.spinner.Tick())
+	return p, tea.Batch(p.runIngest(generation), p.progressTick(generation), p.spinner.Tick())
 }
 
 // retentionDays reports the Claude Code cleanup period to write. A Draft value
@@ -828,9 +831,11 @@ func (p Program) retentionDays() int {
 }
 
 // runIngest issues the injected ingest runner as a command on the current
-// attempt's context. A nil attempt context falls back to the shared deps
-// context so runners started outside startIngest keep working.
-func (p Program) runIngest() tea.Cmd {
+// attempt's context, tagging the result with the attempt generation so a
+// superseded attempt can never resolve into a newer one. A nil attempt
+// context falls back to the shared deps context so runners started outside
+// startIngest keep working.
+func (p Program) runIngest(generation uint64) tea.Cmd {
 	ingest := p.deps.Ingest
 	ctx := p.ingestCtx
 	if ctx == nil {
@@ -838,7 +843,7 @@ func (p Program) runIngest() tea.Cmd {
 	}
 	return func() tea.Msg {
 		res, err := ingest(ctx)
-		return ingestDoneMsg{result: res, err: err}
+		return ingestDoneMsg{result: res, err: err, generation: generation}
 	}
 }
 
@@ -856,6 +861,9 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return p.interruptIngest(m)
 	case ingestDoneMsg:
+		if m.generation != p.ingestGeneration {
+			return p, nil
+		}
 		p = p.clearIngestAttempt()
 		p = p.observeProgress(p.deps.Clock.Now())
 		p.ingestRes = m.result
@@ -1250,13 +1258,15 @@ func (p Program) viewIngest() string {
 		}
 	}
 	lines = append(lines, "", styles.Header.Render("local import progress"))
-	// The footer hint owns two lines of the height budget so the height cut
-	// below never removes the only escape affordance on a short terminal.
+	// The footer hint owns two lines of the progress height budget, and is
+	// pinned after the height cut, so a short terminal never removes the
+	// only escape affordance.
 	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines)+2)...)
-	lines = append(lines, "", styles.Muted.Render("ctrl+c to quit"))
-	if p.height > 0 && len(lines) > p.height {
-		lines = lines[:p.height]
+	footer := []string{"", styles.Muted.Render("ctrl+c to quit")}
+	if p.height > 0 && len(lines)+len(footer) > p.height {
+		lines = lines[:max(p.height-len(footer), 0)]
 	}
+	lines = append(lines, footer...)
 	for _, line := range lines {
 		panel.Rendered(line)
 	}
@@ -1268,52 +1278,111 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		now = p.attemptStarted
 	}
 	focus, hasFocus := p.progressFocusStage()
-	var lines []string
-	var detail []string
-	// Every pipeline stage renders from the first tick, started or not, so
-	// the full scope of the import is visible before any stage begins — the
-	// same upfront matrix the harvest renderer shows. Unobserved stages
-	// render from the zero progress: not-started icon, empty bar, no count.
+	// One group per pipeline stage, upfront, started or not, so the full
+	// scope of the import is visible before any stage begins — the same
+	// upfront matrix the harvest renderer shows. Unobserved stages render
+	// from the zero progress: not-started icon, empty bar, no count, and no
+	// time line. Observed stages carry their own elapsed line under the bar.
+	type stageGroup struct {
+		bar   string
+		time  string
+		focus bool
+	}
+	groups := make([]stageGroup, 0, len(ingest.StageOrder))
 	for _, stage := range ingest.StageOrder {
 		sp := ingest.StageProgress{}
+		group := stageGroup{focus: hasFocus && stage == focus}
 		if observation, ok := p.stageObservations[stage]; ok && observation.progress.Started {
 			sp = observation.progress
+			end := now
+			if sp.Ended && observation.lastAt.Before(end) {
+				end = observation.lastAt
+			}
+			group.time = styles.Muted.Render("  time elapsed: " + displayDuration(end.Sub(observation.startedAt)))
 		}
 		// The row matches the harvest TTY bar exactly; only the stage name
 		// stays lowercase per the lowercase-chrome rule.
-		lines = append(lines, styles.Base.Render(
-			kit.ProgressBar(strings.ToLower(stage.String()), sp.Done, sp.Total, sp.Ended, sp.HasErr)))
-		if !hasFocus || stage != focus {
-			continue
+		group.bar = styles.Base.Render(
+			kit.ProgressBar(strings.ToLower(stage.String()), sp.Done, sp.Total, sp.Ended, sp.HasErr))
+		groups = append(groups, group)
+	}
+	// Trailing roll-up below the whole matrix: the whole-run total always,
+	// plus the focused stage estimate, unavailable before anything starts.
+	detail := []string{
+		styles.Muted.Render("  total elapsed: " + displayDuration(now.Sub(p.attemptStarted))),
+		styles.Muted.Render("  estimate unavailable"),
+	}
+	if hasFocus {
+		if observation := p.stageObservations[focus]; observation.estimateValid {
+			detail[1] = styles.Muted.Render("  estimate: " + displayDuration(observation.estimate))
 		}
-		// The focused stage owns trailing detail lines below the whole bar
-		// matrix, never interleaved between stage rows.
-		observation := p.stageObservations[stage]
-		end := now
-		if sp.Ended && observation.lastAt.Before(end) {
-			end = observation.lastAt
+	}
+	available := p.height - reservedLines
+	lineCount := func() int {
+		n := len(groups) + len(detail)
+		for _, group := range groups {
+			if group.time != "" {
+				n++
+			}
 		}
-		detail = append(detail, styles.Muted.Render("  total elapsed: "+displayDuration(end.Sub(observation.startedAt))))
-		if observation.estimateValid {
-			detail = append(detail, styles.Muted.Render("  estimate: "+displayDuration(observation.estimate)))
-		} else {
-			detail = append(detail, styles.Muted.Render("  estimate unavailable"))
+		return n
+	}
+	// Shed per-bar times oldest-first; bars and the trailing roll-up always
+	// win over per-bar times.
+	for i := range groups {
+		if p.height <= 0 || lineCount() <= available {
+			break
+		}
+		groups[i].time = ""
+	}
+	var lines []string
+	for _, group := range groups {
+		lines = append(lines, group.bar)
+		if group.time != "" {
+			lines = append(lines, group.time)
 		}
 	}
 	lines = append(lines, detail...)
-	available := p.height - reservedLines
 	if p.height > 0 && len(lines) > available {
 		if available <= 0 {
 			return nil
 		}
-		if available == 1 {
-			return lines[:1]
+		// Degenerate terminal: select bars newest-first, always keeping the
+		// focus bar, and keep the trailing roll-up only when it still fits.
+		// The roll-up is trimmed before its bar, so detail never survives
+		// without the stage it describes.
+		selected := map[int]bool{}
+		used := 0
+		for gi := range groups {
+			if groups[gi].focus && used+1 <= available {
+				selected[gi] = true
+				used++
+			}
 		}
-		// The first row is the earliest stage. Keep it plus the newest stage
-		// window so the current or latest stage survives a short terminal.
-		window := make([]string, 0, available)
-		window = append(window, lines[0])
-		window = append(window, lines[len(lines)-(available-1):]...)
+		useDetail := used+len(detail) <= available
+		if useDetail {
+			used += len(detail)
+		}
+		for gi := len(groups) - 1; gi >= 0; gi-- {
+			if selected[gi] {
+				continue
+			}
+			if used+1 > available {
+				break
+			}
+			selected[gi] = true
+			used++
+		}
+		var window []string
+		for gi, group := range groups {
+			if !selected[gi] {
+				continue
+			}
+			window = append(window, group.bar)
+		}
+		if useDetail {
+			window = append(window, detail...)
+		}
 		return window
 	}
 	return lines
