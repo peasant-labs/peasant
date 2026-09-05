@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
 // ProgressSource is the narrow pull boundary between the concurrent ingest
@@ -180,48 +181,11 @@ type stageObservation struct {
 	estimateEligible bool
 	estimateValid    bool
 	estimate         time.Duration
-	// samples holds recent (tick, done) pairs, oldest first, for the
-	// windowed estimate rate. See estimateWindow.
-	samples []rateSample
+	// estimator tracks completion samples for the windowed estimate rate.
+	// Eligibility and focus policy stay here; rate math lives in kit.
+	estimator kit.Estimator
 }
 
-// rateSample is one observed completion count at one tick time.
-type rateSample struct {
-	at   time.Time
-	done int
-}
-
-// estimateWindow bounds how far back the estimate rate looks: about 120
-// ticks at the progress poll rate. A fast start ages out instead of
-// anchoring the average forever, and one bursty batch cannot collapse the
-// display for a frame. Stages younger than the window use their full
-// history.
+// estimateWindow bounds how far back the estimate rate looks, passed to
+// kit.NewEstimator. See its documentation for the windowing contract.
 const estimateWindow = 5 * time.Second
-
-// recordRateSample appends one completion sample and drops samples older
-// than the estimate window. Samples stay ordered oldest-first.
-func recordRateSample(observation stageObservation, at time.Time, done int) stageObservation {
-	observation.samples = append(observation.samples, rateSample{at: at, done: done})
-	cutoff := at.Add(-estimateWindow)
-	keep := 0
-	for keep < len(observation.samples) && observation.samples[keep].at.Before(cutoff) {
-		keep++
-	}
-	observation.samples = observation.samples[keep:]
-	return observation
-}
-
-// windowRate reports completions per second across the retained samples:
-// the observed pace with stale history aged out, not the lifetime average.
-func windowRate(samples []rateSample) (float64, bool) {
-	if len(samples) < 2 {
-		return 0, false
-	}
-	first, last := samples[0], samples[len(samples)-1]
-	span := last.at.Sub(first.at)
-	delta := last.done - first.done
-	if span <= 0 || delta <= 0 {
-		return 0, false
-	}
-	return float64(delta) / span.Seconds(), true
-}

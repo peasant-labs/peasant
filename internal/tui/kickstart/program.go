@@ -984,8 +984,9 @@ func (p Program) observeProgress(at time.Time) Program {
 				lastTotal:        sp.Total,
 				progress:         sp,
 				estimateEligible: sp.Total > 0 && !sp.HasErr && !p.retryAttempt,
+				estimator:        kit.NewEstimator(estimateWindow),
 			}
-			observation = recordRateSample(observation, at, sp.Done)
+			observation.estimator.Observe(at, sp.Done)
 			p.stageObservations[stage] = observation
 			continue
 		}
@@ -1007,18 +1008,18 @@ func (p Program) observeProgress(at time.Time) Program {
 			observation.lastTotal = sp.Total
 			observation.progress = sp
 			observation.estimateEligible = sp.Total > 0 && !sp.HasErr && !p.retryAttempt
-			observation = recordRateSample(observation, at, sp.Done)
+			observation.estimator.Observe(at, sp.Done)
 			p.stageObservations[stage] = observation
 			continue
 		}
 		if sp.Total <= 0 || sp.HasErr || p.retryAttempt || sp.Done < observation.lastDone {
 			observation.estimateEligible = false
 		}
-		observation = recordRateSample(observation, at, sp.Done)
+		observation.estimator.Observe(at, sp.Done)
 		if observation.estimateEligible && hasFocus && stage == focus && !sp.Ended && sp.Done < sp.Total {
-			if rate, ok := windowRate(observation.samples); ok {
-				observation.estimate = time.Duration(float64(sp.Total-sp.Done) / rate * float64(time.Second))
-				observation.estimateValid = observation.estimate >= 0
+			if eta, ok := observation.estimator.ETA(sp.Total, sp.Done); ok {
+				observation.estimate = eta
+				observation.estimateValid = true
 			}
 		}
 		observation.lastAt = at
