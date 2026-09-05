@@ -11,8 +11,8 @@ rows:
       - import the selected transcripts into the local peasant store
       - publish nothing; sharing requires a later explicit push
     progressCopy:
-      - 'local import elapsed:'
-      - discover 1
+      - discover
+      - '░'
       - estimate unavailable
     progressForbidden:
       - 'estimate:'

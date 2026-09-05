@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
 // TestProgressRenderer_Run_NonTTY verifies that in non-TTY mode (the default
@@ -79,8 +80,8 @@ func TestProgressRendererUsesGentleFrameRate(t *testing.T) {
 }
 
 func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) {
-	line := renderProgressBar(ingest.StageExtract, ingest.StageProgress{Started: true, Done: 126, Total: 4953})
-	if !strings.Contains(line, string(barFill)) {
+	line := kit.ProgressBar(ingest.StageExtract.String(), 126, 4953, false, false)
+	if !strings.Contains(line, "█") {
 		t.Fatalf("progress bar should show at least one filled cell for non-zero work; got %q", line)
 	}
 	if !strings.Contains(line, "126/4953") {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/auth"
 	"github.com/peasant-labs/peasant/internal/config"
@@ -146,6 +147,7 @@ func runKickstartFlow(
 		Login:                 kickstartLoginFunc(cmd, configPath),
 		Ingest:                ingestRun,
 		Progress:              progress,
+		ProgressAnimation:     animation.IngestAnimation(),
 		AlreadyConnected:      alreadyConnected,
 		Retention:             kickstart.DefaultRetentionWriter(),
 		// The retention value now comes from the flow's retention field, carried

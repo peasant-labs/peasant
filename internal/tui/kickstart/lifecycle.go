@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
 // ProgressSource is the narrow pull boundary between the concurrent ingest
@@ -180,4 +181,11 @@ type stageObservation struct {
 	estimateEligible bool
 	estimateValid    bool
 	estimate         time.Duration
+	// estimator tracks completion samples for the windowed estimate rate.
+	// Eligibility and focus policy stay here; rate math lives in kit.
+	estimator kit.Estimator
 }
+
+// estimateWindow bounds how far back the estimate rate looks, passed to
+// kit.NewEstimator. See its documentation for the windowing contract.
+const estimateWindow = 5 * time.Second

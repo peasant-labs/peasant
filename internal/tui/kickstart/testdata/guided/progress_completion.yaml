@@ -1,4 +1,4 @@
-expectedProgressCount: 11
+expectedProgressCount: 13
 expectedFocusPriorityCount: 3
 expectedLatestActiveFocusCount: 1
 expectedFailedFocusCount: 1
@@ -10,29 +10,51 @@ progress:
         stages: [{stage: DISCOVER, started: true, done: 0, total: 10}]
       - advanceSeconds: 2
         stages: [{stage: DISCOVER, started: true, done: 4, total: 10}]
-    wantContains: ['local import elapsed: 2s', 'discover 4/10', 'observed elapsed: 2s', 'estimate: 3s']
+    wantContains: ['discover', '4/10', 'total elapsed: 2s', 'estimate: 3s']
     wantMissing: [estimate unavailable]
+  - name: bursty-progress-smooths-estimate
+    observations:
+      - advanceSeconds: 0
+        stages: [{stage: DISCOVER, started: true, done: 0, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 10, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 12, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 90, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 92, total: 100}]
+    wantContains: ['discover', '92/100', 'estimate: 0s']
+  - name: unknown-total-recovers-estimate
+    observations:
+      - advanceSeconds: 0
+        stages: [{stage: DISCOVER, started: true, done: 2, total: 0}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 2, total: 5}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 4, total: 5}]
+    wantContains: ['discover', '4/5', 'estimate: 1s']
   - name: unknown-total
     observations:
       - advanceSeconds: 0
         stages: [{stage: DISCOVER, started: true, done: 0, total: 0}]
       - advanceSeconds: 2
         stages: [{stage: DISCOVER, started: true, done: 3, total: 0}]
-    wantContains: ['discover 3', 'estimate unavailable']
+    wantContains: ['discover', '░', 'estimate unavailable']
   - name: changing-total
     observations:
       - advanceSeconds: 0
         stages: [{stage: DIFF, started: true, done: 1, total: 10}]
       - advanceSeconds: 2
         stages: [{stage: DIFF, started: true, done: 4, total: 12}]
-    wantContains: ['diff 4/12', 'estimate unavailable']
+    wantContains: ['diff', '4/12', 'estimate unavailable']
   - name: non-monotonic-progress
     observations:
       - advanceSeconds: 0
         stages: [{stage: FILTER, started: true, done: 4, total: 10}]
       - advanceSeconds: 2
         stages: [{stage: FILTER, started: true, done: 3, total: 10}]
-    wantContains: ['filter 3/10', 'estimate unavailable']
+    wantContains: ['filter', '3/10', 'estimate unavailable']
   - name: concurrent-aggregate
     observations:
       - advanceSeconds: 0
@@ -43,14 +65,14 @@ progress:
         stages:
           - {stage: EXTRACT+WRITE, started: true, done: 4, total: 10}
           - {stage: INDEX, started: true, done: 3, total: 10}
-    wantContains: ['extract+write 4/10', 'index 3/10', 'estimate unavailable']
+    wantContains: ['extract+write', '4/10', 'index', '3/10', 'estimate: 7s']
   - name: failed-stage
     observations:
       - advanceSeconds: 0
         stages: [{stage: REPORT, started: true, done: 0, total: 2}]
       - advanceSeconds: 1
         stages: [{stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}]
-    wantContains: ['report 1/2', 'failed', 'estimate unavailable']
+    wantContains: ['report', '1/2', '✗', 'estimate unavailable']
   - name: full-pipeline-report-active-at-common-height
     terminalWidth: 80
     terminalHeight: 24
@@ -80,7 +102,7 @@ progress:
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
           - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
           - {stage: REPORT, started: true, done: 4, total: 10}
-    wantContains: ['local import elapsed: 2s', 'report 4/10', 'observed elapsed: 2s', 'estimate: 3s']
+    wantContains: ['report', '4/10', 'total elapsed: 2s', 'estimate: 3s']
     wantMissing: [estimate unavailable]
   - name: full-pipeline-late-failure-at-common-height
     terminalWidth: 80
@@ -111,7 +133,7 @@ progress:
           - {stage: ANNOTATE, started: true, done: 10, total: 10, ended: true}
           - {stage: CLEANUP, started: true, done: 10, total: 10, ended: true}
           - {stage: REPORT, started: true, done: 1, total: 2, ended: true, hasErr: true}
-    wantContains: ['local import elapsed: 1s', 'report 1/2 failed', 'observed elapsed: 1s', 'estimate unavailable']
+    wantContains: ['report', '1/2', '✗', 'total elapsed: 1s', 'estimate unavailable']
   - name: latest-active-stage-owns-detail
     focusProbe: latest-active
     observations:
@@ -126,10 +148,10 @@ progress:
         stages:
           - {stage: EXTRACT+WRITE, started: true, done: 6, total: 10}
           - {stage: INDEX, started: true, done: 3, total: 10}
-    wantContains: ['extract+write 6/10', 'index 3/10']
+    wantContains: ['extract+write', '6/10', 'index', '3/10', 'estimate: 11s']
     wantFocusStage: INDEX
-    wantFocusElapsed: 'observed elapsed: 3s'
-    wantFocusEstimate: estimate unavailable
+    wantFocusElapsed: 'total elapsed: 5s'
+    wantFocusEstimate: 'estimate: 11s'
   - name: latest-failure-wins-over-active-and-completed
     focusProbe: failed-before-active
     observations:
@@ -147,9 +169,9 @@ progress:
           - {stage: DISCOVER, started: true, done: 2, total: 2, ended: true}
           - {stage: DIFF, started: true, done: 1, total: 2, ended: true, hasErr: true}
           - {stage: REPORT, started: true, done: 4, total: 10}
-    wantContains: ['discover 2/2', 'diff 1/2 failed', 'report 4/10']
+    wantContains: ['discover', '2/2', 'diff', '1/2', '✗', 'report', '4/10']
     wantFocusStage: DIFF
-    wantFocusElapsed: 'observed elapsed: 5s'
+    wantFocusElapsed: 'total elapsed: 5s'
     wantFocusEstimate: estimate unavailable
   - name: latest-completed-stage-owns-detail
     focusProbe: latest-completed
@@ -165,9 +187,9 @@ progress:
         stages:
           - {stage: DIFF, started: true, done: 2, total: 2, ended: true}
           - {stage: INDEX, started: true, done: 3, total: 3, ended: true}
-    wantContains: ['diff 2/2', 'index 3/3']
+    wantContains: ['diff', '2/2', 'index', '3/3']
     wantFocusStage: INDEX
-    wantFocusElapsed: 'observed elapsed: 3s'
+    wantFocusElapsed: 'total elapsed: 5s'
     wantFocusEstimate: estimate unavailable
 
 expectedCompletionCount: 3
@@ -212,10 +234,12 @@ completion:
       - retry local import only
       - kickstart published nothing
     wantRetryContains:
-      - 'local import elapsed: 0s'
-      - estimate unavailable
+      - 'local import progress'
+      - '○'
+      - discover
     wantRetryMissing:
-      - 'report 1/2'
+      - '1/2'
+      - '✗'
       - stale prior-attempt progress
     wantPreamble:
       - these useful next steps let you modify config, open the local dashboard, connect to a village, or explicitly publish later; kickstart runs none of them.

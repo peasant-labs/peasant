@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -105,6 +106,10 @@ type ProgramDeps struct {
 	// Progress is the concurrent-safe pull source populated by the same local
 	// ingest run. Program observes it on Tick without blocking pipeline workers.
 	Progress ProgressSource
+	// ProgressAnimation is the optional frame set shown above local-import
+	// progress. Production uses the same ingest animation as harvest; tests can
+	// leave it nil when they only need text-state assertions.
+	ProgressAnimation *animation.Animation
 	// Clock and Tick are the injected timing boundaries for honest elapsed and
 	// qualified ETA presentation.
 	Clock Clock
@@ -145,10 +150,13 @@ type loginURLMsg struct {
 	epoch uint64
 }
 
-// ingestDoneMsg carries the result of the injected IngestFunc.
+// ingestDoneMsg carries the result of the injected IngestFunc, tagged with
+// the attempt generation that started it so a superseded attempt can never
+// resolve into a newer one.
 type ingestDoneMsg struct {
-	result *ftue.IngestResult
-	err    error
+	result     *ftue.IngestResult
+	err        error
+	generation uint64
 }
 
 // progressTickMsg asks Program to take one non-blocking snapshot from the
@@ -160,7 +168,7 @@ type progressTickMsg struct {
 	generation uint64
 }
 
-const progressPollInterval = 100 * time.Millisecond
+const progressPollInterval = time.Second / 24
 
 const (
 	oauthPrompt      = "connect to a village now?"
@@ -233,8 +241,12 @@ type Program struct {
 	retentionApplied   bool
 	retryAttempt       bool
 	ingestGeneration   uint64
+	ingestCtx          context.Context
+	ingestCancel       context.CancelFunc
 	attemptStarted     time.Time
 	stageObservations  map[ingest.Stage]stageObservation
+	progressAnimFrame  int
+	lastProgressAnimAt time.Time
 	nextSteps          []NextStepKind
 	nextStepsErr       error
 
@@ -789,6 +801,12 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	p.retryAttempt = retry
 	p.attemptStarted = p.deps.Clock.Now()
 	p.stageObservations = map[ingest.Stage]stageObservation{}
+	// Each attempt owns a cancellable context, mirroring beginLogin, so an
+	// interrupt key can stop an ingest the runner would otherwise block on.
+	ctx, cancel := context.WithCancel(p.deps.Context)
+	p.ingestCtx, p.ingestCancel = ctx, cancel
+	p.progressAnimFrame = 0
+	p.lastProgressAnimAt = time.Time{}
 	if p.deps.Progress != nil {
 		p.deps.Progress.Reset()
 	}
@@ -797,7 +815,7 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	// extending a second animation chain into the retry.
 	p.spinner = kit.NewSpinner(p.deps.Theme, "importing transcripts")
 	p.spinner.SetSize(p.width, p.height)
-	return p, tea.Batch(p.runIngest(), p.progressTick(generation), p.spinner.Tick())
+	return p, tea.Batch(p.runIngest(generation), p.progressTick(generation), p.spinner.Tick())
 }
 
 // retentionDays reports the Claude Code cleanup period to write. A Draft value
@@ -812,13 +830,20 @@ func (p Program) retentionDays() int {
 	return p.deps.RetentionDays
 }
 
-// runIngest issues the injected ingest runner as a command.
-func (p Program) runIngest() tea.Cmd {
+// runIngest issues the injected ingest runner as a command on the current
+// attempt's context, tagging the result with the attempt generation so a
+// superseded attempt can never resolve into a newer one. A nil attempt
+// context falls back to the shared deps context so runners started outside
+// startIngest keep working.
+func (p Program) runIngest(generation uint64) tea.Cmd {
 	ingest := p.deps.Ingest
-	ctx := p.deps.Context
+	ctx := p.ingestCtx
+	if ctx == nil {
+		ctx = p.deps.Context
+	}
 	return func() tea.Msg {
 		res, err := ingest(ctx)
-		return ingestDoneMsg{result: res, err: err}
+		return ingestDoneMsg{result: res, err: err, generation: generation}
 	}
 }
 
@@ -829,9 +854,17 @@ func (p Program) progressTick(generation uint64) tea.Cmd {
 }
 
 // updateIngest advances the spinner until the pipeline reports its result.
+// ctrl+c (or q) cancels the attempt and quits; every other key only feeds the
+// spinner while the import runs.
 func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 	switch m := msg.(type) {
+	case tea.KeyPressMsg:
+		return p.interruptIngest(m)
 	case ingestDoneMsg:
+		if m.generation != p.ingestGeneration {
+			return p, nil
+		}
+		p = p.clearIngestAttempt()
 		p = p.observeProgress(p.deps.Clock.Now())
 		p.ingestRes = m.result
 		p.ingestErr = m.err
@@ -844,6 +877,7 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		if m.generation != p.ingestGeneration {
 			return p, nil
 		}
+		p = p.advanceProgressAnimation(m.at)
 		p = p.observeProgress(m.at)
 		return p, p.progressTick(m.generation)
 	default:
@@ -851,6 +885,55 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		p.spinner, cmd = p.spinner.Update(m)
 		return p, cmd
 	}
+}
+
+// interruptIngest lets the user escape the local-import screen. ctrl+c (or q)
+// cancels the in-flight ingest attempt and quits kickstart; the already-saved
+// config and retention effect are untouched. Any other key is ignored while
+// the import runs.
+func (p Program) interruptIngest(msg tea.KeyPressMsg) (Program, tea.Cmd) {
+	action, ok := keymap.Match(keymap.Default(), msg,
+		programActionAvailability{keymap.ActionQuit})
+	if !ok {
+		return p, nil
+	}
+	switch action {
+	case keymap.ActionQuit:
+		p = p.clearIngestAttempt()
+		// Invalidate the attempt so a late tick or result still in flight
+		// cannot land after the quit.
+		p.ingestGeneration++
+		return p, tea.Quit
+	default:
+		return p, nil
+	}
+}
+
+// clearIngestAttempt releases the in-flight ingest context so a resolved or
+// interrupted attempt cannot leak its goroutine, mirroring clearLogin.
+func (p Program) clearIngestAttempt() Program {
+	if p.ingestCancel != nil {
+		p.ingestCancel()
+		p.ingestCancel = nil
+	}
+	p.ingestCtx = nil
+	return p
+}
+
+func (p Program) advanceProgressAnimation(at time.Time) Program {
+	anim := p.deps.ProgressAnimation
+	if anim == nil || len(anim.Frames) == 0 {
+		return p
+	}
+	interval := anim.Interval
+	if interval <= 0 {
+		interval = 300 * time.Millisecond
+	}
+	if p.lastProgressAnimAt.IsZero() || at.Sub(p.lastProgressAnimAt) >= interval {
+		p.progressAnimFrame = (p.progressAnimFrame + 1) % len(anim.Frames)
+		p.lastProgressAnimAt = at
+	}
+	return p
 }
 
 // resolveNextSteps validates the provider's complete typed result once. Invalid
@@ -870,8 +953,14 @@ func (p Program) resolveNextSteps(result *ftue.IngestResult) Program {
 
 // observeProgress records presentation timing from one non-blocking snapshot.
 // An estimate is qualified only after the same positive total is observed twice
-// with monotonic forward progress, for one active non-error stage on a first
-// attempt. Every unsupported state remains explicit rather than guessed.
+// with monotonic forward progress, for a non-error stage on a first attempt.
+// Totals that move re-anchor the stability baseline without touching the
+// display clock. Only the focused stage computes an estimate — it is the only
+// one ever displayed — so concurrent stages no longer suppress each other.
+// The estimate divides the remaining work by the recent windowed rate, never
+// by one tick's instantaneous flash (which collapses on a bursty batch) nor
+// by the lifetime average (which a fast start anchors forever). Every
+// unsupported state remains explicit rather than guessed.
 func (p Program) observeProgress(at time.Time) Program {
 	if at.IsZero() {
 		at = p.deps.Clock.Now()
@@ -880,13 +969,7 @@ func (p Program) observeProgress(at time.Time) Program {
 		return p
 	}
 	snapshot := p.deps.Progress.Snapshot()
-	active := 0
-	for _, stage := range ingest.StageOrder {
-		sp := snapshot[stage]
-		if sp.Started && !sp.Ended {
-			active++
-		}
-	}
+	focus, hasFocus := p.progressFocusStage()
 	for _, stage := range ingest.StageOrder {
 		sp := snapshot[stage]
 		if !sp.Started {
@@ -901,25 +984,43 @@ func (p Program) observeProgress(at time.Time) Program {
 				lastTotal:        sp.Total,
 				progress:         sp,
 				estimateEligible: sp.Total > 0 && !sp.HasErr && !p.retryAttempt,
+				estimator:        kit.NewEstimator(estimateWindow),
 			}
+			observation.estimator.Estimate(at, sp.Done, sp.Total)
 			p.stageObservations[stage] = observation
+			continue
+		}
+		if observation.progress.Ended {
+			// Terminal state is immutable: keep the first ended snapshot so
+			// the elapsed clock stops at completion instead of tracking the
+			// wall clock on every later tick.
 			continue
 		}
 
 		observation.estimateValid = false
-		stableTotal := sp.Total > 0 && sp.Total == observation.lastTotal
-		monotonic := sp.Done >= observation.lastDone
-		if !stableTotal || !monotonic || sp.HasErr || p.retryAttempt {
+		if sp.Total != observation.lastTotal {
+			// The total moved (growth, shrinkage, or unknown-to-known):
+			// re-anchor the stability baseline and wait for the next stable
+			// reading. The display clock (startedAt) is untouched, so stage
+			// times never jump when discovery revises a total.
+			observation.lastAt = at
+			observation.lastDone = sp.Done
+			observation.lastTotal = sp.Total
+			observation.progress = sp
+			observation.estimateEligible = sp.Total > 0 && !sp.HasErr && !p.retryAttempt
+			observation.estimator.Estimate(at, sp.Done, sp.Total)
+			p.stageObservations[stage] = observation
+			continue
+		}
+		if sp.Total <= 0 || sp.HasErr || p.retryAttempt || sp.Done < observation.lastDone {
 			observation.estimateEligible = false
 		}
-		advanced := sp.Done > observation.lastDone
-		interval := at.Sub(observation.lastAt)
-		if observation.estimateEligible && active == 1 && advanced && interval > 0 &&
-			!sp.Ended && sp.Done < sp.Total {
-			remaining := sp.Total - sp.Done
-			delta := sp.Done - observation.lastDone
-			observation.estimate = time.Duration(int64(interval) * int64(remaining) / int64(delta))
-			observation.estimateValid = observation.estimate >= 0
+		eta, etaOK := observation.estimator.Estimate(at, sp.Done, sp.Total)
+		if observation.estimateEligible && hasFocus && stage == focus && !sp.Ended && sp.Done < sp.Total {
+			if etaOK {
+				observation.estimate = eta
+				observation.estimateValid = true
+			}
 		}
 		observation.lastAt = at
 		observation.lastDone = sp.Done
@@ -1166,77 +1267,129 @@ func (p Program) viewVisibility() string {
 func (p Program) viewIngest() string {
 	styles := p.deps.Theme.Styles()
 	panel := kit.NewPanel(p.deps.Theme)
-	panel.SetSize(p.width, 0)
+	panel.SetSize(p.width, p.height)
 	lines := []string{
 		p.spinner.View(),
-		"",
-		styles.Header.Render("local import progress"),
 	}
-	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now())...)
-	if p.height > 0 && len(lines) > p.height {
-		lines = lines[:p.height]
+	if anim := p.deps.ProgressAnimation; anim != nil && len(anim.Frames) > 0 {
+		lines = append(lines, "")
+		frame := anim.Frames[p.progressAnimFrame%len(anim.Frames)]
+		for _, line := range frame {
+			lines = append(lines, styles.Muted.Render(line))
+		}
 	}
+	lines = append(lines, "", styles.Header.Render("local import progress"))
+	// The footer hint owns two lines of the progress height budget, and is
+	// pinned after the height cut, so a short terminal never removes the
+	// only escape affordance.
+	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines)+2)...)
+	footer := []string{"", styles.Muted.Render("ctrl+c to quit")}
+	if p.height == 1 {
+		// One row holds the hint, not its blank separator.
+		footer = footer[1:]
+	}
+	if p.height > 0 && len(lines)+len(footer) > p.height {
+		lines = lines[:max(p.height-len(footer), 0)]
+	}
+	lines = append(lines, footer...)
 	for _, line := range lines {
 		panel.Rendered(line)
 	}
 	return panel.View()
 }
 
-func (p Program) progressLines(styles theme.Styles, now time.Time) []string {
+func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines int) []string {
 	if now.Before(p.attemptStarted) {
 		now = p.attemptStarted
 	}
-	lines := []string{styles.Base.Render("local import elapsed: " + displayDuration(now.Sub(p.attemptStarted)))}
 	focus, hasFocus := p.progressFocusStage()
-	shown := false
+	// One row per pipeline stage, upfront, started or not, so the full scope
+	// of the import is visible before any stage begins — the same upfront
+	// matrix the harvest renderer shows. Unobserved stages render from the
+	// zero progress: not-started icon, empty bar, no count, no duration.
+	// Observed stages carry their elapsed duration right of the counts, in a
+	// column the matrix aligns across all rows.
+	rows := make([]kit.ProgressRow, 0, len(ingest.StageOrder))
+	focusIdx := -1
 	for _, stage := range ingest.StageOrder {
-		observation, ok := p.stageObservations[stage]
-		if !ok || !observation.progress.Started {
-			continue
+		sp := ingest.StageProgress{}
+		row := kit.ProgressRow{Label: strings.ToLower(stage.String())}
+		if observation, ok := p.stageObservations[stage]; ok && observation.progress.Started {
+			sp = observation.progress
+			end := now
+			if sp.Ended && observation.lastAt.Before(end) {
+				end = observation.lastAt
+			}
+			row.Elapsed = displayDuration(end.Sub(observation.startedAt))
 		}
-		shown = true
-		sp := observation.progress
-		label := strings.ToLower(stage.String()) + " " + fmt.Sprintf("%d", sp.Done)
-		if sp.Total > 0 {
-			label += fmt.Sprintf("/%d", sp.Total)
+		row.Done, row.Total, row.Ended, row.HasErr = sp.Done, sp.Total, sp.Ended, sp.HasErr
+		if hasFocus && stage == focus {
+			focusIdx = len(rows)
 		}
-		if sp.HasErr {
-			label += " failed"
+		rows = append(rows, row)
+	}
+	// The rows match the harvest TTY bars exactly; only the stage names stay
+	// lowercase per the lowercase-chrome rule. The duration paints muted,
+	// like the trailing roll-up timings.
+	lines := make([]string, 0, len(rows))
+	for _, line := range kit.ProgressMatrix(rows) {
+		rendered := styles.Base.Render(line.Bar)
+		if line.Elapsed != "" {
+			rendered += styles.Muted.Render("  " + line.Elapsed)
 		}
-		lines = append(lines, styles.Base.Render(label))
-		if !hasFocus || stage != focus {
-			continue
-		}
-		end := now
-		if sp.Ended && observation.lastAt.Before(end) {
-			end = observation.lastAt
-		}
-		lines = append(lines, styles.Muted.Render("  observed elapsed: "+displayDuration(end.Sub(observation.startedAt))))
-		if observation.estimateValid {
-			lines = append(lines, styles.Muted.Render("  estimate: "+displayDuration(observation.estimate)))
-		} else {
-			lines = append(lines, styles.Muted.Render("  estimate unavailable"))
+		lines = append(lines, rendered)
+	}
+	// Trailing roll-up below the whole matrix: the whole-run total always,
+	// plus the focused stage estimate, unavailable before anything starts.
+	detail := []string{
+		styles.Muted.Render("  total elapsed: " + displayDuration(now.Sub(p.attemptStarted))),
+		styles.Muted.Render("  estimate unavailable"),
+	}
+	if hasFocus {
+		if observation := p.stageObservations[focus]; observation.estimateValid {
+			detail[1] = styles.Muted.Render("  estimate: " + displayDuration(observation.estimate))
 		}
 	}
-	if !shown {
-		lines = append(lines,
-			styles.Muted.Render("waiting for the first progress update"),
-			styles.Muted.Render("estimate unavailable"))
-	}
-	const ingestHeaderLines = 3
-	available := p.height - ingestHeaderLines
+	lines = append(lines, detail...)
+	available := p.height - reservedLines
 	if p.height > 0 && len(lines) > available {
 		if available <= 0 {
 			return nil
 		}
-		if available == 1 {
-			return lines[:1]
+		// Degenerate terminal: select rows newest-first, always keeping the
+		// focus row, and keep the trailing roll-up only when it still fits.
+		// The roll-up is trimmed before its row, so detail never survives
+		// without the stage it describes.
+		selected := map[int]bool{}
+		used := 0
+		if focusIdx >= 0 && used+1 <= available {
+			selected[focusIdx] = true
+			used++
 		}
-		// Whole-run elapsed is always the first line. Keep it plus the newest
-		// stage window so the current or latest stage survives a short terminal.
-		window := make([]string, 0, available)
-		window = append(window, lines[0])
-		window = append(window, lines[len(lines)-(available-1):]...)
+		useDetail := used+len(detail) <= available
+		if useDetail {
+			used += len(detail)
+		}
+		for ri := len(rows) - 1; ri >= 0; ri-- {
+			if selected[ri] {
+				continue
+			}
+			if used+1 > available {
+				break
+			}
+			selected[ri] = true
+			used++
+		}
+		var window []string
+		for ri := range rows {
+			if !selected[ri] {
+				continue
+			}
+			window = append(window, lines[ri])
+		}
+		if useDetail {
+			window = append(window, detail...)
+		}
 		return window
 	}
 	return lines

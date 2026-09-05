@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
@@ -25,7 +26,7 @@ import (
 )
 
 const (
-	expectedProgressRows             = 11
+	expectedProgressRows             = 13
 	expectedProgressFocusRows        = 3
 	expectedLatestActiveFocusRows    = 1
 	expectedFailedFocusRows          = 1
@@ -440,6 +441,7 @@ func newProgressProgram(
 		Retention:             retention,
 		Ingest:                ingestRun,
 		Progress:              progress,
+		ProgressAnimation:     animation.IngestAnimation(),
 		Clock:                 clock,
 		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
 			*tickCapture = callback
@@ -505,31 +507,73 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 	}
 }
 
+func TestProgramProgressShowsSharedIngestAnimationBeforeProgressEvents(t *testing.T) {
+	clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
+	progress := &fixtureProgressSource{}
+	var tick func(time.Time) tea.Msg
+	program, _, _ := newProgressProgram(t, progress, clock, func(context.Context) (*ftue.IngestResult, error) {
+		return &ftue.IngestResult{New: 1}, nil
+	}, nil, &tick)
+	program.SetSize(80, 24)
+	if tick == nil {
+		t.Fatal("starting local ingest did not schedule the injected animation tick")
+	}
+
+	first := stripRender(program.View())
+	if !strings.Contains(first, "_|||_") {
+		t.Fatalf("initial local import view does not show the active animation:\n%s", first)
+	}
+	// Every pipeline stage renders before any progress event arrives, all
+	// not-started: the full scope of the import is visible from the first tick.
+	lowered := strings.ToLower(first)
+	for _, stage := range ingest.StageOrder {
+		if !strings.Contains(lowered, strings.ToLower(stage.String())) {
+			t.Errorf("initial local import view omits the %q stage row:\n%s", stage, first)
+		}
+	}
+	if got := strings.Count(first, "○"); got != len(ingest.StageOrder) {
+		t.Errorf("initial local import view shows %d not-started rows, want all %d stages:\n%s", got, len(ingest.StageOrder), first)
+	}
+	clock.Advance(1)
+	program, _ = program.Update(tick(clock.Now()))
+	second := stripRender(program.View())
+	if second == first {
+		t.Fatalf("local import animation did not advance before progress events arrived:\n%s", second)
+	}
+}
+
 func assertProgressFocusDetail(t *testing.T, row progressFixture, rendered string) {
 	t.Helper()
 	if row.FocusProbe == "" {
 		return
 	}
 	lines := strings.Split(strings.ToLower(rendered), "\n")
-	wantStage := strings.ToLower(row.WantFocusStage.String()) + " "
+	wantStage := strings.ToLower(row.WantFocusStage.String())
 	stageLine := -1
 	detailLines := 0
 	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, wantStage) {
+		// The stage row is a harvest-format bar (icon, padded name, cells,
+		// counts), so the name no longer prefixes the row.
+		if strings.Contains(trimmed, wantStage) &&
+			(strings.Contains(trimmed, "█") || strings.Contains(trimmed, "░")) {
 			stageLine = index
 		}
-		if strings.Contains(trimmed, "observed elapsed:") {
+		if strings.Contains(trimmed, "total elapsed:") {
 			detailLines++
 		}
 	}
-	if stageLine < 0 || stageLine+2 >= len(lines) {
-		t.Fatalf("focus probe %q cannot find complete detail after %s:\n%s", row.FocusProbe, row.WantFocusStage, rendered)
+	if stageLine < 0 {
+		t.Fatalf("focus probe %q cannot find the %s stage row:\n%s", row.FocusProbe, row.WantFocusStage, rendered)
 	}
-	if !strings.Contains(lines[stageLine+1], strings.ToLower(row.WantFocusElapsed)) ||
-		!strings.Contains(lines[stageLine+2], strings.ToLower(row.WantFocusEstimate)) {
-		t.Fatalf("focus probe %q attached detail to the wrong stage or timing; want %s then %q/%q:\n%s",
-			row.FocusProbe, row.WantFocusStage, row.WantFocusElapsed, row.WantFocusEstimate, rendered)
+	// The focused stage owns trailing detail below the whole bar matrix,
+	// never interleaved between stage rows.
+	rest := strings.Join(lines[stageLine+1:], "\n")
+	elapsedAt := strings.Index(rest, strings.ToLower(row.WantFocusElapsed))
+	estimateAt := strings.Index(rest, strings.ToLower(row.WantFocusEstimate))
+	if elapsedAt < 0 || estimateAt < 0 || estimateAt < elapsedAt {
+		t.Fatalf("focus probe %q wants trailing detail %q then %q after %s:\n%s",
+			row.FocusProbe, row.WantFocusElapsed, row.WantFocusEstimate, row.WantFocusStage, rendered)
 	}
 	if detailLines != 1 {
 		t.Fatalf("focus probe %q rendered %d expanded stage details, want exactly one:\n%s",

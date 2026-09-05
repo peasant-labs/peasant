@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"golang.org/x/term"
 )
 
@@ -42,9 +43,6 @@ type progressRenderer struct {
 }
 
 const (
-	barWidth               = 24
-	barFill                = '█'
-	barEmpty               = '░'
 	progressRendererFPS    = 24
 	progressTickInterval   = time.Second / progressRendererFPS
 	animationFrameInterval = 300 * time.Millisecond
@@ -187,54 +185,7 @@ func (m progressModel) render() string {
 		if !ok {
 			continue
 		}
-		lines = append(lines, renderProgressBar(stage, sp))
+		lines = append(lines, kit.ProgressBar(stage.String(), sp.Done, sp.Total, sp.Ended, sp.HasErr))
 	}
 	return strings.Join(lines, "\n")
-}
-
-// renderProgressBar formats a single stage bar as a fixed-width string.
-func renderProgressBar(stage ingest.Stage, sp ingest.StageProgress) string {
-	// Status icon.
-	icon := "○" // not started
-	switch {
-	case sp.HasErr:
-		icon = "✗"
-	case sp.Ended:
-		icon = "✓"
-	case sp.Done > 0 || sp.Total > 0:
-		icon = "●"
-	}
-
-	// Fill fraction.
-	var filled int
-	if sp.Total > 0 {
-		filled = sp.Done * barWidth / sp.Total
-		if sp.Done > 0 && filled == 0 {
-			filled = 1
-		}
-		if filled > barWidth {
-			filled = barWidth
-		}
-	} else if sp.Ended {
-		filled = barWidth
-	}
-	barStr := strings.Repeat(string(barFill), filled) +
-		strings.Repeat(string(barEmpty), barWidth-filled)
-
-	// Count label.
-	var count string
-	if sp.Total > 0 {
-		count = fmt.Sprintf("%d/%d", sp.Done, sp.Total)
-	} else if sp.Ended {
-		count = "done"
-	}
-
-	// Stage name padded to a fixed width.
-	const nameWidth = 13
-	name := stage.String()
-	if len(name) < nameWidth {
-		name = name + strings.Repeat(" ", nameWidth-len(name))
-	}
-
-	return fmt.Sprintf(" %s %s  %s  %s", icon, name, barStr, count)
 }
