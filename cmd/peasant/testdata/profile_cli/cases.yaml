@@ -1,0 +1,274 @@
+sessionID: dddd4444-dddd-4ddd-8ddd-dddddddddddd
+forbiddenInputs:
+  - PRIVATE_HISTORY_SENTINEL
+  - PRIVATE_TRANSCRIPT_SENTINEL
+  - https://private.example.test/repository.git
+  - sk-ant-api03-CLIDOORKEY000000000000x
+config: |
+  version: 1
+  push:
+    method: all
+    visibility: private
+cases:
+  - name: profile_json_only
+    description: writes only the JSON profile file and points at it from stderr
+    mode: default
+    trace: false
+    seedSessions: false
+    expectStdoutContains:
+      - Nothing to push
+    forbidStdoutContains:
+      - profile written to
+      - 'profile bottlenecks:'
+    expectStderrContains:
+      - profile written to
+      - 'profile bottlenecks:'
+      - push.run
+  - name: profile_json_plus_trace
+    description: writes the JSON profile and the JSONL trace sidecar together
+    mode: default
+    trace: true
+    seedSessions: false
+    expectStdoutContains:
+      - Nothing to push
+    forbidStdoutContains:
+      - profile written to
+      - 'profile bottlenecks:'
+    expectStderrContains:
+      - profile written to
+      - 'profile bottlenecks:'
+      - push.run
+  - name: profile_summary_output
+    description: prints a short human summary naming structural bottlenecks only
+    mode: default
+    trace: false
+    seedSessions: true
+    expectStdoutContains:
+      - 'Dry run summary:'
+    forbidStdoutContains:
+      - dddd4444-dddd-4ddd-8ddd-dddddddddddd
+      - profile written to
+      - 'profile bottlenecks:'
+    expectStderrContains:
+      - profile written to
+      - 'profile bottlenecks:'
+      - push.run
+  - name: profile_quiet_mode
+    description: keeps the terse quiet result line and suppresses the human summary
+    mode: quiet
+    trace: true
+    seedSessions: true
+    expectStdoutContains:
+      - 'pushed 0 (dry run): 1 would push'
+    forbidStdoutContains:
+      - 'Summary:'
+      - profile written to
+      - 'profile bottlenecks:'
+    forbidStderrContains:
+      - profile written to
+      - 'profile bottlenecks:'
+      - profile trace written to
+  - name: profile_json_mode
+    description: keeps push JSON parseable on stdout while the summary stays on stderr
+    mode: json
+    trace: false
+    seedSessions: false
+    expectStdoutContains:
+      - empty_reason
+    forbidStdoutContains:
+      - profile written to
+      - 'profile bottlenecks:'
+    expectStderrContains:
+      - profile written to
+      - 'profile bottlenecks:'
+  - name: profile_verbose_mode
+    description: keeps per-session detail on stdout while the summary stays on stderr
+    mode: verbose
+    trace: false
+    seedSessions: true
+    expectStdoutContains:
+      - 'Dry run summary:'
+      - dddd4444-dddd-4ddd-8ddd-dddddddddddd
+    forbidStdoutContains:
+      - profile written to
+      - 'profile bottlenecks:'
+    expectStderrContains:
+      - profile written to
+      - 'profile bottlenecks:'
+      - push.run
+  - name: profile_disabled_invariance
+    description: leaves ordinary output byte-identical when profiling is off
+    mode: default
+    disabled: true
+    stdout: "Dry run — no uploads will be made\n\nNothing to push. Run 'peasant ingest' first to import your sessions.\nAnnotations (dry run): 0 would push\n"
+    stderr: ""
+    trace: false
+    seedSessions: false
+    expectStdoutContains:
+      - Nothing to push
+    forbidStdoutContains:
+      - profile written to
+      - 'profile bottlenecks:'
+      - per-phase rollup
+    expectStderrContains: []
+  - name: profile_existing_private_files
+    description: replaces pre-existing broadly readable files with private artifacts
+    mode: default
+    trace: true
+    existingFiles: true
+  - name: profile_timing_coexistence
+    description: writes legacy timing and the new profile from the same collector
+    mode: default
+    trace: true
+    timing: true
+    expectStderrContains:
+      - per-phase rollup
+      - timing log written to
+      - profile written to
+  - name: profile_publish_success
+    description: completes a real publish and receipt through a controlled Village
+    mode: json
+    trace: true
+    seedSessions: true
+    publishStatus: 201
+    expectStdoutContains: ['"new": 1']
+    expectStderrContains: [profile written to]
+  - name: profile_publish_failure
+    description: writes a failed run without leaking a remote response body
+    mode: json
+    trace: true
+    seedSessions: true
+    publishStatus: 400
+    outcome: failed
+    expectError: false
+    expectStdoutContains: ['"errors": 1']
+    expectStderrContains: [profile written to]
+  - name: profile_pipeline_failure
+    description: preserves a fatal pipeline error while still writing failed evidence
+    mode: default
+    trace: true
+    configOverride: |
+      version: 1
+      push:
+        method: individual
+        visibility: private
+    expectError: true
+    outcome: failed
+    expectStderrContains: [profile written to]
+  - name: profile_output_write_failure
+    description: reports a destination that changed after validation without changing the publish result
+    mode: json
+    seedSessions: true
+    publishStatus: 201
+    outputFailure: true
+    expectStdoutContains: ['"new": 1']
+    expectStderrContains: ['warning: write push profile', atomic rename]
+  - name: profile_trace_commit_failure
+    description: warns about failed trace commit and omits its reference from the valid profile
+    mode: json
+    trace: true
+    seedSessions: true
+    publishStatus: 201
+    traceFailure: true
+    expectStdoutContains: ['"new": 1']
+    expectStderrContains: ['warning:', trace evidence is unavailable, profile written to]
+  - name: profile_disabled_quiet_invariance
+    description: preserves the exact quiet empty result without diagnostic files
+    mode: quiet
+    disabled: true
+    stdout: "Nothing to push. Run 'peasant ingest' first to import your sessions.\n"
+    stderr: ""
+  - name: profile_disabled_verbose_invariance
+    description: preserves the exact verbose empty output without diagnostic files
+    mode: verbose
+    disabled: true
+    stdout: "Dry run — no uploads will be made\n\nNothing to push. Run 'peasant ingest' first to import your sessions.\nAnnotations (dry run): 0 would push\n"
+    stderr: ""
+  - name: profile_disabled_json_invariance
+    description: preserves the exact JSON empty result without diagnostic files
+    mode: json
+    disabled: true
+    stdout: |
+      {
+        "new": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": 0,
+        "held": 0,
+        "empty_reason": "Nothing to push. Run 'peasant ingest' first to import your sessions.",
+        "sessions": null,
+        "annotations": {
+          "total": 0,
+          "created": 0,
+          "updated": 0,
+          "skipped": 0,
+          "retracted": 0,
+          "errors": 0
+        }
+      }
+    stderr: ""
+invalidCases:
+  - name: profile_invalid_output_path
+    description: refuses a profile path under a missing parent directory before any work
+    shape: missing-parent
+    expectErrorContains:
+      - --profile-output
+      - parent directory
+      - 'Fix:'
+  - name: profile_invalid_trace_without_output
+    description: refuses a trace sidecar without its JSON profile
+    shape: trace-without-output
+    expectErrorContains:
+      - --profile-trace
+      - --profile-output
+      - 'Fix:'
+  - name: profile_invalid_path_is_directory
+    description: refuses a profile path that names an existing directory
+    shape: path-is-directory
+    expectErrorContains:
+      - --profile-output
+      - directory
+      - 'Fix:'
+  - name: profile_invalid_same_path
+    description: refuses one file shared by the profile and its trace
+    shape: same-path
+    expectErrorContains:
+      - --profile-output
+      - --profile-trace
+      - same file
+      - 'Fix:'
+  - name: profile_invalid_empty_value
+    description: refuses an explicitly empty profile path
+    shape: empty-value
+    expectErrorContains:
+      - --profile-output
+      - empty
+      - 'Fix:'
+  - name: profile_invalid_empty_trace
+    description: refuses an explicitly empty trace even without profile output
+    shape: empty-trace
+    expectErrorContains: [--profile-trace, empty, 'Fix:']
+  - name: profile_invalid_relative_alias
+    description: refuses relative and absolute aliases of one destination
+    shape: relative-alias
+    expectErrorContains: [same file, 'Fix:']
+  - name: profile_invalid_symlink
+    description: refuses a symbolic link without altering its target
+    shape: symlink
+    expectErrorContains: [--profile-trace, 'Fix:']
+  - name: profile_invalid_hardlink
+    description: refuses a hard link to the profile without altering either file
+    shape: hardlink
+    expectErrorContains: [same file, 'Fix:']
+  - name: profile_invalid_parent_alias
+    description: refuses one destination through symbolic links in its parent path
+    shape: parent-alias
+    expectErrorContains: [same file, 'Fix:']
+  - name: profile_invalid_unwritable_parent
+    description: refuses a destination in a directory that cannot create files
+    shape: unwritable-parent
+    expectErrorContains: [--profile-output, not writable, 'Fix:']
+  - name: profile_auth_failure_cleanup
+    description: cleans temporary trace evidence if authentication refuses the push
+    shape: no-credentials
+    expectErrorContains: [not logged in, peasant village login]

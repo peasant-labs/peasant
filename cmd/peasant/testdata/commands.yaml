@@ -100,6 +100,8 @@ commands:
       - { name: annotation-id, type: stringArray, default: "[]" }
       - { name: annotation-hash, type: stringArray, default: "[]" }
       - { name: timing, type: bool, default: "false" }
+      - { name: profile-output, type: string, default: "" }
+      - { name: profile-trace, type: string, default: "" }
       - { name: concurrency, type: int, default: "0" }
       - { name: repository, type: string, default: "" }
       - { name: timeout, type: duration, default: "0s" }
