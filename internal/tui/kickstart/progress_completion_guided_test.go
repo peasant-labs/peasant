@@ -563,13 +563,17 @@ func assertProgressFocusDetail(t *testing.T, row progressFixture, rendered strin
 			detailLines++
 		}
 	}
-	if stageLine < 0 || stageLine+2 >= len(lines) {
-		t.Fatalf("focus probe %q cannot find complete detail after %s:\n%s", row.FocusProbe, row.WantFocusStage, rendered)
+	if stageLine < 0 {
+		t.Fatalf("focus probe %q cannot find the %s stage row:\n%s", row.FocusProbe, row.WantFocusStage, rendered)
 	}
-	if !strings.Contains(lines[stageLine+1], strings.ToLower(row.WantFocusElapsed)) ||
-		!strings.Contains(lines[stageLine+2], strings.ToLower(row.WantFocusEstimate)) {
-		t.Fatalf("focus probe %q attached detail to the wrong stage or timing; want %s then %q/%q:\n%s",
-			row.FocusProbe, row.WantFocusStage, row.WantFocusElapsed, row.WantFocusEstimate, rendered)
+	// The focused stage owns trailing detail below the whole bar matrix,
+	// never interleaved between stage rows.
+	rest := strings.Join(lines[stageLine+1:], "\n")
+	elapsedAt := strings.Index(rest, strings.ToLower(row.WantFocusElapsed))
+	estimateAt := strings.Index(rest, strings.ToLower(row.WantFocusEstimate))
+	if elapsedAt < 0 || estimateAt < 0 || estimateAt < elapsedAt {
+		t.Fatalf("focus probe %q wants trailing detail %q then %q after %s:\n%s",
+			row.FocusProbe, row.WantFocusElapsed, row.WantFocusEstimate, row.WantFocusStage, rendered)
 	}
 	if detailLines != 1 {
 		t.Fatalf("focus probe %q rendered %d expanded stage details, want exactly one:\n%s",

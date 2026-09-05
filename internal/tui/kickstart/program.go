@@ -1269,6 +1269,7 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 	}
 	focus, hasFocus := p.progressFocusStage()
 	var lines []string
+	var detail []string
 	// Every pipeline stage renders from the first tick, started or not, so
 	// the full scope of the import is visible before any stage begins — the
 	// same upfront matrix the harvest renderer shows. Unobserved stages
@@ -1285,18 +1286,21 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		if !hasFocus || stage != focus {
 			continue
 		}
+		// The focused stage owns trailing detail lines below the whole bar
+		// matrix, never interleaved between stage rows.
 		observation := p.stageObservations[stage]
 		end := now
 		if sp.Ended && observation.lastAt.Before(end) {
 			end = observation.lastAt
 		}
-		lines = append(lines, styles.Muted.Render("  total elapsed: "+displayDuration(end.Sub(observation.startedAt))))
+		detail = append(detail, styles.Muted.Render("  total elapsed: "+displayDuration(end.Sub(observation.startedAt))))
 		if observation.estimateValid {
-			lines = append(lines, styles.Muted.Render("  estimate: "+displayDuration(observation.estimate)))
+			detail = append(detail, styles.Muted.Render("  estimate: "+displayDuration(observation.estimate)))
 		} else {
-			lines = append(lines, styles.Muted.Render("  estimate unavailable"))
+			detail = append(detail, styles.Muted.Render("  estimate unavailable"))
 		}
 	}
+	lines = append(lines, detail...)
 	available := p.height - reservedLines
 	if p.height > 0 && len(lines) > available {
 		if available <= 0 {
