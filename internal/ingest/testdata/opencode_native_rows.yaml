@@ -1,0 +1,101 @@
+# Native identity and timing shapes match the public beta schema:
+# https://github.com/anomalyco/opencode/blob/52685d451777fbccc99736ab31ffc37de8475a45/packages/schema/src/session-message.ts
+# The observed installed CLI version is 0.0.0-beta-19151. Its npm metadata has no
+# gitHead or matching public tag; the source reference is not an exact build pin.
+required_names:
+  - native_user_and_assistant_rows
+  - native_optional_user_arrays_absent
+  - native_assistant_finish_and_stream_clock
+  - native_shell_column_identity
+  - native_synthetic_column_identity
+  - native_system_column_identity
+  - native_compaction_column_identity
+  - native_payload_identity_conflict
+  - native_payload_type_conflict
+  - native_payload_matching_identity_and_type
+  - native_malformed_payload
+  - native_wrong_text_type
+  - native_null_text
+  - native_wrong_stream_clock_type
+  - native_wrong_finish_type
+  - native_tool_identity_required
+  - native_cross_session_synthetic
+  - native_reasoning_without_identity
+  - native_user_stream_clock_rejected
+  - native_tool_identity_empty
+  - native_text_explicit_identity_empty
+  - native_text_explicit_identity_null
+  - native_text_payload_absent
+cases:
+  - name: native_user_and_assistant_rows
+    source_fixture: native-current-rows
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+    expected_text: [native user question, native assistant answer]
+    expected_model: synthetic-model
+normalization_cases:
+  - name: native_optional_user_arrays_absent
+    rows: [{id: msg_native_user, row_type: user, data: '{"text":"optional arrays absent","time":{"created":1000}}'}]
+    expected_text: optional arrays absent
+  - name: native_assistant_finish_and_stream_clock
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","text":"native answer"}],"finish":"stop","rawFinish":"stop","time":{"created":1000,"streamed":2000,"completed":2000}}'}]
+    expected_text: native answer
+  - name: native_shell_column_identity
+    rows: [{id: msg_native_shell, row_type: shell, data: '{"callID":"call_native_shell","command":"pwd","output":"native shell output","time":{"created":1000,"completed":2000}}'}]
+    expected_text: native shell output
+  - name: native_synthetic_column_identity
+    rows: [{id: msg_native_synthetic, row_type: synthetic, data: '{"sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","text":"native synthetic context","time":{"created":1000}}'}]
+    expected_text: native synthetic context
+  - name: native_system_column_identity
+    rows: [{id: msg_native_system, row_type: system, data: '{"text":"native system context","time":{"created":1000}}'}]
+    expected_text: native system context
+  - name: native_compaction_column_identity
+    rows: [{id: msg_native_compaction, row_type: compaction, data: '{"reason":"auto","summary":"native compaction summary","recent":"recent context","time":{"created":1000}}'}]
+    expected_text: native compaction summary
+  - name: native_payload_identity_conflict
+    rows: [{id: msg_native_user, row_type: user, data: '{"id":"msg_other","text":"request","time":{"created":1000}}'}]
+    error_contains: conflicts with SQLite row id
+  - name: native_payload_type_conflict
+    rows: [{id: msg_native_user, row_type: user, data: '{"type":"system","text":"request","time":{"created":1000}}'}]
+    error_contains: conflicts with SQLite row type
+  - name: native_payload_matching_identity_and_type
+    rows: [{id: msg_native_user, row_type: user, data: '{"id":"msg_native_user","type":"user","text":"matching identity","time":{"created":1000}}'}]
+    expected_text: matching identity
+  - name: native_malformed_payload
+    rows: [{id: msg_native_user, row_type: user, data: '{"text":'}]
+    error_contains: unexpected end of JSON input
+  - name: native_wrong_text_type
+    rows: [{id: msg_native_user, row_type: user, data: '{"text":42,"time":{"created":1000}}'}]
+    error_contains: cannot unmarshal number
+  - name: native_null_text
+    rows: [{id: msg_native_user, row_type: user, data: '{"text":null,"time":{"created":1000}}'}]
+    error_contains: required upstream field "text" is null
+  - name: native_wrong_stream_clock_type
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[],"time":{"created":1000,"streamed":"later"}}'}]
+    error_contains: cannot unmarshal string
+  - name: native_wrong_finish_type
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[],"rawFinish":42,"time":{"created":1000}}'}]
+    error_contains: cannot unmarshal number
+  - name: native_tool_identity_required
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","name":"read","state":{"status":"pending","input":""},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: required upstream field "id" is absent
+  - name: native_cross_session_synthetic
+    rows: [{id: msg_native_synthetic, row_type: synthetic, data: '{"sessionID":"ses_other","text":"context","time":{"created":1000}}'}]
+    error_contains: synthetic sessionID must match SQLite row session
+  - name: native_reasoning_without_identity
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"reasoning","text":"thinking"}],"time":{"created":1000}}'}]
+    expected_text: thinking
+  - name: native_user_stream_clock_rejected
+    rows: [{id: msg_native_user, row_type: user, data: '{"text":"request","time":{"created":1000,"streamed":2000}}'}]
+    error_contains: unknown field "streamed"
+  - name: native_tool_identity_empty
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"","name":"read","state":{"status":"pending","input":""},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: assistant tool requires id
+  - name: native_text_explicit_identity_empty
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","id":"","text":"answer"}],"time":{"created":1000}}'}]
+    error_contains: assistant content explicit id is empty
+  - name: native_text_explicit_identity_null
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","id":null,"text":"answer"}],"time":{"created":1000}}'}]
+    error_contains: assistant content explicit id is empty
+  - name: native_text_payload_absent
+    rows: [{id: msg_native_assistant, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"text"}],"time":{"created":1000}}'}]
+    error_contains: required upstream field "text" is absent
