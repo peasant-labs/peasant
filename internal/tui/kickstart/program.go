@@ -900,6 +900,9 @@ func (p Program) interruptIngest(msg tea.KeyPressMsg) (Program, tea.Cmd) {
 	switch action {
 	case keymap.ActionQuit:
 		p = p.clearIngestAttempt()
+		// Invalidate the attempt so a late tick or result still in flight
+		// cannot land after the quit.
+		p.ingestGeneration++
 		return p, tea.Quit
 	default:
 		return p, nil
@@ -993,6 +996,20 @@ func (p Program) observeProgress(at time.Time) Program {
 			// Terminal state is immutable: keep the first ended snapshot so
 			// the elapsed clock stops at completion instead of tracking the
 			// wall clock on every later tick.
+			continue
+		}
+		if observation.lastTotal == 0 && sp.Total > 0 {
+			// The total just became known: re-baseline the observation so
+			// the next stable positive reading can qualify, instead of
+			// latching unknown-total ineligibility forever. Positive-total
+			// changes below still disqualify permanently.
+			observation.startedAt = at
+			observation.lastAt = at
+			observation.lastDone = sp.Done
+			observation.lastTotal = sp.Total
+			observation.progress = sp
+			observation.estimateEligible = !sp.HasErr && !p.retryAttempt
+			p.stageObservations[stage] = observation
 			continue
 		}
 
@@ -1272,6 +1289,10 @@ func (p Program) viewIngest() string {
 	// only escape affordance.
 	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines)+2)...)
 	footer := []string{"", styles.Muted.Render("ctrl+c to quit")}
+	if p.height == 1 {
+		// One row holds the hint, not its blank separator.
+		footer = footer[1:]
+	}
 	if p.height > 0 && len(lines)+len(footer) > p.height {
 		lines = lines[:max(p.height-len(footer), 0)]
 	}

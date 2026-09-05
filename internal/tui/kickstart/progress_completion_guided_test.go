@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	expectedProgressRows             = 12
+	expectedProgressRows             = 13
 	expectedProgressFocusRows        = 3
 	expectedLatestActiveFocusRows    = 1
 	expectedFailedFocusRows          = 1

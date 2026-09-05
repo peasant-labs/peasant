@@ -132,7 +132,25 @@ func TestProgram_IngestQQuitsLikeCtrlC(t *testing.T) {
 	}
 }
 
-// TestProgram_IngestEscIsIgnored proves esc neither quits kickstart nor stops
+// TestProgram_IngestHintSurvivesSingleRowTerminal proves the quit hint is
+// pinned even when the terminal holds a single row: the blank footer
+// separator yields instead of the affordance.
+func TestProgram_IngestHintSurvivesSingleRowTerminal(t *testing.T) {
+	t.Parallel()
+	started := make(chan context.Context, 1)
+	p := startCommittedIngest(t, started)
+	p.SetSize(80, 1)
+	if view := stripRender(p.View()); !strings.Contains(view, "ctrl+c to quit") {
+		t.Errorf("single-row local import view omits the quit hint:\n%s", view)
+	}
+	// Release the blocking runner so no goroutine outlives the test.
+	p, quit := p.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	requireCanceled(t, awaitIngestStart(t, started), "cleanup")
+	if quit == nil || quit() != (tea.QuitMsg{}) {
+		t.Fatal("q on the local import screen did not quit kickstart")
+	}
+}
+
 // the in-flight import: quitting stays on ctrl+c or q only.
 func TestProgram_IngestEscIsIgnored(t *testing.T) {
 	t.Parallel()

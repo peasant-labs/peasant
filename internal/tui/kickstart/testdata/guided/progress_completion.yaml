@@ -1,4 +1,4 @@
-expectedProgressCount: 12
+expectedProgressCount: 13
 expectedFocusPriorityCount: 3
 expectedLatestActiveFocusCount: 1
 expectedFailedFocusCount: 1
@@ -25,6 +25,15 @@ progress:
       - advanceSeconds: 1
         stages: [{stage: DISCOVER, started: true, done: 92, total: 100}]
     wantContains: ['discover', '92/100', 'estimate: 0s']
+  - name: unknown-total-recovers-estimate
+    observations:
+      - advanceSeconds: 0
+        stages: [{stage: DISCOVER, started: true, done: 2, total: 0}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 2, total: 5}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 4, total: 5}]
+    wantContains: ['discover', '4/5', 'estimate: 0s']
   - name: unknown-total
     observations:
       - advanceSeconds: 0
