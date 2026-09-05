@@ -48,8 +48,10 @@ type StageSummary struct {
 }
 
 type BottleneckSummary struct {
-	Stage      StageID `json:"stage"`
-	TotalMs    int64   `json:"totalMs"`
+	Stage   StageID `json:"stage"`
+	TotalMs int64   `json:"totalMs"`
+	// ShareOfRun is inclusive stage time divided by elapsed run time. Concurrent
+	// samples may exceed one; nested stages are not independent elapsed work.
 	ShareOfRun float64 `json:"shareOfRun"`
 }
 
@@ -102,13 +104,19 @@ type ProfileDocument struct {
 	TraceFile     string           `json:"traceFile,omitempty"`
 }
 
-type Reducer struct{}
+type Reducer struct {
+	// RunDurationMs is the fallback elapsed duration when events do not contain
+	// exactly one root push.run span. Zero means no usable fallback measurement.
+	RunDurationMs int64
+}
 
 var _ SummaryReducer = Reducer{}
 
-func (Reducer) Reduce(events []Event) (ProfileSummary, error) {
+func (r Reducer) Reduce(events []Event) (ProfileSummary, error) {
 	byStage := map[StageID][]Event{}
 	errors := map[StageID]int{}
+	var rootCount int
+	var rootDurationMs int64
 	for _, event := range events {
 		switch event.Kind {
 		case EventKindSpanEnd:
@@ -116,6 +124,10 @@ func (Reducer) Reduce(events []Event) (ProfileSummary, error) {
 				return ProfileSummary{}, err
 			}
 			byStage[event.Stage] = append(byStage[event.Stage], event)
+			if event.Stage == StagePushRun && event.ParentSpanID == "" {
+				rootCount++
+				rootDurationMs = event.DurationMs
+			}
 		case EventKindError:
 			errors[event.Stage]++
 		}
@@ -134,7 +146,12 @@ func (Reducer) Reduce(events []Event) (ProfileSummary, error) {
 		stages = append(stages, StageSummary{Stage: stage, Count: len(stageEvents), TotalMs: total, MinMs: minValue(durations), MaxMs: maxValue(durations), P50Ms: percentileValue(durations, 50), P95Ms: percentileValue(durations, 95), P99Ms: percentileValue(durations, 99), Errors: errors[stage], Outcomes: outcomes})
 	}
 	sort.Slice(stages, func(i, j int) bool { return stages[i].Stage < stages[j].Stage })
-	top := bottlenecks(stages)
+	runDurationMs := r.RunDurationMs
+	if rootCount == 1 {
+		// Even a measured zero takes precedence: it cannot support a run share.
+		runDurationMs = rootDurationMs
+	}
+	top := bottlenecks(stages, runDurationMs)
 	return ProfileSummary{Stages: stages, TopBottlenecks: top}, nil
 }
 
@@ -143,15 +160,15 @@ func BuildProfileDocument(c *Collector, producer ProfileProducer, run ProfileRun
 		return ProfileDocument{}, fmt.Errorf("build profile document: collector is nil; create an enabled perf.Collector before writing JSON v1")
 	}
 	events := c.Events()
-	summary, err := (Reducer{}).Reduce(events)
+	if run.DurationMs == 0 && !run.StartedAt.IsZero() && !run.EndedAt.IsZero() {
+		run.DurationMs = durationMs(run.EndedAt.Sub(run.StartedAt))
+	}
+	summary, err := (Reducer{RunDurationMs: run.DurationMs}).Reduce(events)
 	if err != nil {
 		return ProfileDocument{}, err
 	}
 	if producer.ProfileAPIVersion == "" {
 		producer.ProfileAPIVersion = ProfileAPIVersion
-	}
-	if run.DurationMs == 0 && !run.StartedAt.IsZero() && !run.EndedAt.IsZero() {
-		run.DurationMs = durationMs(run.EndedAt.Sub(run.StartedAt))
 	}
 	spans, counters, resources, redaction, errors := reduceProfileParts(events)
 	return ProfileDocument{FormatVersion: JSONFormatVersion, Producer: producer, Run: run, Summaries: summary, Spans: spans, Counters: counters, Resources: resources, Redaction: redaction, Errors: errors, TraceFile: traceFile}, nil
@@ -300,17 +317,18 @@ func percentileValue(values []int64, p int) int64 {
 	return values[rank-1]
 }
 
-func bottlenecks(stages []StageSummary) []BottleneckSummary {
-	var grand int64
-	for _, stage := range stages {
-		grand += stage.TotalMs
-	}
+func bottlenecks(stages []StageSummary, runDurationMs int64) []BottleneckSummary {
 	out := make([]BottleneckSummary, 0, len(stages))
+	if runDurationMs <= 0 {
+		// Keep stage distributions, but do not fabricate shares without elapsed
+		// run time. The CLI can explain that bottleneck evidence is unavailable.
+		return out
+	}
 	for _, stage := range stages {
-		share := 0.0
-		if grand > 0 {
-			share = float64(stage.TotalMs) / float64(grand)
+		if stage.Stage == StagePushRun {
+			continue
 		}
+		share := float64(stage.TotalMs) / float64(runDurationMs)
 		out = append(out, BottleneckSummary{Stage: stage.Stage, TotalMs: stage.TotalMs, ShareOfRun: share})
 	}
 	sort.Slice(out, func(i, j int) bool {

@@ -1,0 +1,11 @@
+requiredNames:
+  - generic-transcript-prose
+  - wrapped-generic-prose
+  - safe-transport-classification
+  - wrapped-safe-transport-classification
+  - wrapped-pointer-safe-classification
+  - invalid-safe-code
+  - empty-safe-message
+  - unsafe-safe-message-defense
+  - generic-error-prose-never-read
+  - unsafe-safe-code-defense

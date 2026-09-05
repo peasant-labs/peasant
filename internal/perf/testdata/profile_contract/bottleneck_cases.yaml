@@ -1,0 +1,77 @@
+cases:
+  - name: nested-inclusive-stages-use-root-duration
+    runDurationMs: 200
+    spans:
+      - {id: run, stage: push.run, startMs: 0, endMs: 100}
+      - {id: session, parent: run, stage: push.session, startMs: 10, endMs: 90}
+      - {id: load, parent: session, stage: push.session.load, startMs: 10, endMs: 30}
+      - {id: redact, parent: session, stage: push.session.redact, startMs: 30, endMs: 90}
+    expected:
+      - {stage: push.session, totalMs: 80, shareOfRun: 0.8}
+      - {stage: push.session.redact, totalMs: 60, shareOfRun: 0.6}
+      - {stage: push.session.load, totalMs: 20, shareOfRun: 0.2}
+  - name: concurrent-inclusive-share-exceeds-one
+    spans:
+      - {id: run, stage: push.run, startMs: 0, endMs: 100}
+      - {id: first, parent: run, stage: push.session, startMs: 0, endMs: 100}
+      - {id: second, parent: run, stage: push.session, startMs: 0, endMs: 100}
+      - {id: first-publish, parent: first, stage: push.publish, startMs: 20, endMs: 100}
+      - {id: second-publish, parent: second, stage: push.publish, startMs: 20, endMs: 100}
+    expected:
+      - {stage: push.session, totalMs: 200, shareOfRun: 2}
+      - {stage: push.publish, totalMs: 160, shareOfRun: 1.6}
+  - name: root-only-has-no-bottlenecks
+    spans:
+      - {id: run, stage: push.run, startMs: 0, endMs: 100}
+    expected: []
+  - name: absent-root-uses-run-duration
+    runDurationMs: 100
+    spans:
+      - {id: load, stage: push.session.load, startMs: 0, endMs: 20}
+    expected:
+      - {stage: push.session.load, totalMs: 20, shareOfRun: 0.2}
+  - name: absent-root-uses-run-timestamps
+    runEndedMs: 100
+    spans:
+      - {id: load, stage: push.session.load, startMs: 0, endMs: 20}
+    expected:
+      - {stage: push.session.load, totalMs: 20, shareOfRun: 0.2}
+  - name: absent-run-duration-retains-stages-without-hints
+    spans:
+      - {id: load, stage: push.session.load, startMs: 0, endMs: 20}
+    expected: []
+  - name: zero-measured-root-does-not-fabricate-share
+    runDurationMs: 100
+    spans:
+      - {id: run, stage: push.run, startMs: 0, endMs: 0}
+      - {id: load, stage: push.session.load, startMs: 0, endMs: 0}
+    expected: []
+  - name: zero-stage-with-positive-run-has-zero-share
+    spans:
+      - {id: run, stage: push.run, startMs: 0, endMs: 100}
+      - {id: load, parent: run, stage: push.session.load, startMs: 0, endMs: 0}
+    expected:
+      - {stage: push.session.load, totalMs: 0, shareOfRun: 0}
+  - name: multiple-roots-use-metadata-not-summed-durations
+    runDurationMs: 100
+    spans:
+      - {id: run-first, stage: push.run, startMs: 0, endMs: 100}
+      - {id: run-second, stage: push.run, startMs: 0, endMs: 100}
+      - {id: load, stage: push.session.load, startMs: 0, endMs: 20}
+    expected:
+      - {stage: push.session.load, totalMs: 20, shareOfRun: 0.2}
+  - name: nested-run-is-not-the-root-denominator
+    spans:
+      - {id: run, stage: push.run, startMs: 0, endMs: 100}
+      - {id: nested-run, parent: run, stage: push.run, startMs: 10, endMs: 50}
+      - {id: load, parent: nested-run, stage: push.session.load, startMs: 10, endMs: 30}
+    expected:
+      - {stage: push.session.load, totalMs: 20, shareOfRun: 0.2}
+  - name: tied-stages-sort-by-stage
+    runDurationMs: 100
+    spans:
+      - {id: redact, stage: push.session.redact, startMs: 0, endMs: 20}
+      - {id: load, stage: push.session.load, startMs: 0, endMs: 20}
+    expected:
+      - {stage: push.session.load, totalMs: 20, shareOfRun: 0.2}
+      - {stage: push.session.redact, totalMs: 20, shareOfRun: 0.2}

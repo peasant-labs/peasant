@@ -42,6 +42,21 @@ Each stage summary includes:
 Tests should compare these values with an injected clock or fixed fixture data.
 They must not require a hard wall-clock threshold.
 
+`topBottlenecks` excludes `push.run` and ranks up to five child stages by
+descending inclusive `totalMs`, breaking ties by stage identifier. `shareOfRun`
+is that total divided by the duration of the single root `push.run` span (a run
+span with no parent), never by the sum of stage totals. If there is no unique
+root, the reducer uses `run.durationMs`, derived from run timestamps when needed.
+Concurrent samples can produce a share greater than `1`: this means aggregate
+inclusive stage time exceeds elapsed run time, not that the measurement is
+clamped or that each stage is independent work. Do not add nested stage shares.
+
+A measured zero root duration takes precedence over metadata. With a zero or
+unavailable denominator, `topBottlenecks` is empty rather than reporting invented
+shares; stage distributions are still retained. A root-only run likewise has no
+child bottleneck hints. With a positive denominator, a measured zero-duration
+child has a real zero share.
+
 ## Push Measurement Boundaries
 
 - The CLI owns one `push.run` span across transcript and annotation work. Session
@@ -120,7 +135,7 @@ Profile output must be deterministic:
 - stages sort by stage identifier;
 - spans sort by stage, safe subject identifier, then recorded order where needed;
 - counters sort by counter name and safe attributes;
-- error lists sort by stage, code, and safe subject where present.
+- error lists sort by stage and code; errors do not carry a safe subject identifier.
 
 ## Safe Evidence Rules
 
@@ -153,6 +168,19 @@ Forbidden data:
 
 If a field could contain unsafe data, the profile writer must drop it, replace it
 with a safe code, or fail closed before writing the profile.
+
+Generic errors always produce fixed recovery text. Their `Error()` prose is
+never copied, even when it contains no recognizable path, credential, or other
+pattern. Only the explicit `perf.SafeDiagnostic` interface (implemented by
+`perf.SafeError`) can supply recovery text, code, and retryability. Its caller
+must supply locally authored, privacy-safe constants, never dependency error
+text, transcript content, or user input. The sanitizer reads that diagnostic
+through wrapped errors without copying wrapper prose. Codes are trimmed and
+lowercased, then must match `[a-z0-9][a-z0-9_-]*` and pass the unsafe-value check.
+Invalid codes become `profile_error`, not a transformed copy of arbitrary text.
+Empty, overlong, or recognizably unsafe trusted messages use the fixed fallback
+as defense in depth.
+The pattern check does not certify arbitrary prose as safe.
 
 ## Future Village Stage Names
 

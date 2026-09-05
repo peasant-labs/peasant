@@ -150,7 +150,7 @@ func TestProfileValidationErrorsAreActionable(t *testing.T) {
 	if err := perf.CounterName("push.raw.path").Validate(); err == nil || !strings.Contains(err.Error(), "typed perf.Counter") {
 		t.Fatalf("counter validation error = %v, want typed-counter guidance", err)
 	}
-	safe := (perf.Sanitizer{}).SafeError(perf.StagePushPublish, "HTTP Status", errors.New("failed for /home/private/project secret token"), true)
+	safe := (perf.Sanitizer{}).SafeError(perf.StagePushPublish, "HTTP_STATUS", errors.New("failed for /home/private/project secret token"), true)
 	if strings.Contains(safe.SafeMessage, "/home/private") || strings.Contains(safe.SafeMessage, "secret token") {
 		t.Fatalf("safe error leaked unsafe input: %+v", safe)
 	}

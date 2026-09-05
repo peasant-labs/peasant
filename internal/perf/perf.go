@@ -215,6 +215,15 @@ type Event struct {
 	SafeError    *SafeError    `json:"error,omitempty"`
 }
 
+// SafeDiagnostic explicitly opts a diagnostic into profile output. Implementations
+// must return only locally authored recovery text and codes, never dependency
+// errors, transcript content, or other user-controlled text. Wrapping an error
+// does not make its Error() prose safe; only this method's result is trusted.
+type SafeDiagnostic interface {
+	error
+	ProfileDiagnostic() SafeError
+}
+
 type SafeError struct {
 	Stage       StageID `json:"stage"`
 	Code        string  `json:"code"`
@@ -223,10 +232,12 @@ type SafeError struct {
 }
 
 // Error lets instrumentation pass a classified diagnostic through Recorder.Error.
-// The collector still sanitizes its code and message at the recording boundary.
+// SafeMessage and Code must satisfy the SafeDiagnostic trust contract.
 func (e SafeError) Error() string { return e.SafeMessage }
 
-var _ error = SafeError{}
+func (e SafeError) ProfileDiagnostic() SafeError { return e }
+
+var _ SafeDiagnostic = SafeError{}
 
 type Options struct {
 	Enabled   bool
@@ -238,6 +249,7 @@ type Sanitizer struct{}
 var unsafeValueRE = regexp.MustCompile(`(?i)([a-z]:\\|/[^\s]+|git@|https?://|-----BEGIN|password|branch\s+|commit\s+[0-9a-f]{7,40})`)
 var unsafeErrorRE = regexp.MustCompile(`(?i)([a-z]:\\|/[^\s]+|git@|https?://|-----BEGIN|secret|token|password|branch\s+|commit\s+[0-9a-f]{7,40})`)
 var safeTokenRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]*$`)
+var safeErrorCodeRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 func (Sanitizer) SanitizeAttributes(attrs Attributes) Attributes {
 	if len(attrs) == 0 {
@@ -305,8 +317,15 @@ func sanitizeAttributeValue(key AttributeKey, value string) (string, bool) {
 
 func (s Sanitizer) SafeError(stage StageID, code string, err error, retryable bool) SafeError {
 	message := "Profiled operation failed during " + stage.String() + "; the profile records only a safe error code. Check the command output and service availability, then retry the operation."
-	if err != nil && !unsafeErrorRE.MatchString(err.Error()) && len(err.Error()) <= 180 {
-		message = err.Error() + "; this happened during " + stage.String() + ". Check the related service or input, then retry if it is safe."
+	var carrier SafeDiagnostic
+	if errors.As(err, &carrier) {
+		diagnostic := carrier.ProfileDiagnostic()
+		code, retryable = diagnostic.Code, diagnostic.Retryable
+		// This check is defense in depth for explicitly trusted diagnostics, not
+		// permission to copy arbitrary Error() prose (including wrapper text).
+		if diagnostic.SafeMessage != "" && len(diagnostic.SafeMessage) <= 180 && !unsafeErrorRE.MatchString(diagnostic.SafeMessage) {
+			message = diagnostic.SafeMessage
+		}
 	}
 	return SafeError{Stage: stage, Code: sanitizeCode(code), SafeMessage: message, Retryable: retryable}
 }
@@ -321,19 +340,11 @@ func isAllowedAttribute(key AttributeKey) bool {
 }
 
 func sanitizeCode(code string) string {
-	code = strings.TrimSpace(code)
-	if code == "" || unsafeValueRE.MatchString(code) {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if !safeErrorCodeRE.MatchString(code) || unsafeValueRE.MatchString(code) {
 		return "profile_error"
 	}
-	return strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			return r
-		}
-		if r >= 'A' && r <= 'Z' {
-			return r + ('a' - 'A')
-		}
-		return '_'
-	}, code)
+	return code
 }
 
 // Phase identifies a measured segment of a push run. It is a typed enum (not a
@@ -525,11 +536,7 @@ func (c *Collector) Count(name CounterName, delta int64, unit Unit, attrs Attrib
 }
 
 func (c *Collector) Error(stage StageID, err error, attrs Attributes) {
-	safe := c.sanitizer.SafeError(stage, string(AttrErrorCode), err, false)
-	var classified SafeError
-	if errors.As(err, &classified) {
-		safe = c.sanitizer.SafeError(stage, classified.Code, err, classified.Retryable)
-	}
+	safe := c.sanitizer.SafeError(stage, "error_code", err, false)
 	c.appendEvent(Event{Kind: EventKindError, Order: c.nextID.Add(1), Stage: stage, Attributes: c.sanitizer.SanitizeAttributes(attrs), SafeError: &safe})
 }
 
