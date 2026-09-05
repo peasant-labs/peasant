@@ -1,0 +1,12 @@
+requiredNames:
+  - negotiate_success
+  - retryable_rate_limit_is_not_retried
+  - nonretryable_validation_is_not_retried
+  - retryable_server_failure_is_not_retried
+  - transport_failure_before_response
+  - partial_request_counts_consumed_bytes
+  - multipart_request_counts_consumed_bytes
+  - partial_response_counts_consumed_bytes
+  - disabled_transport_preserves_failure
+  - disabled_transport_preserves_success
+  - invalid_request_refused_before_http

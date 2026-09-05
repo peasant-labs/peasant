@@ -16,6 +16,7 @@
 package perf
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -114,6 +115,7 @@ const (
 	CounterPushSessionsSkipped        CounterName = "push.sessions.skipped"
 	CounterPushDBReads                CounterName = "push.db.reads"
 	CounterPushHTTPRequests           CounterName = "push.http.requests"
+	CounterPushHTTPResponses          CounterName = "push.http.responses"
 	CounterPushHTTPRetries            CounterName = "push.http.retries"
 	CounterPushPayloadBytes           CounterName = "push.payload.bytes"
 	CounterPushResponseBytes          CounterName = "push.response.bytes"
@@ -131,7 +133,7 @@ const (
 func (n CounterName) String() string { return string(n) }
 
 func AllCounterNames() []CounterName {
-	return []CounterName{CounterPushSessionsSelected, CounterPushSessionsPublished, CounterPushSessionsFailed, CounterPushSessionsSkipped, CounterPushDBReads, CounterPushHTTPRequests, CounterPushHTTPRetries, CounterPushPayloadBytes, CounterPushResponseBytes, CounterPushVisibilityPatchRequest, CounterPushAnnotationRequests, CounterPushConcurrencyHighWater, CounterRedactionEntriesScanned, CounterRedactionBytesScanned, CounterRedactionFindings, CounterRedactionRulesMatched, CounterRedactionReplacements, CounterRedactionFailures}
+	return []CounterName{CounterPushSessionsSelected, CounterPushSessionsPublished, CounterPushSessionsFailed, CounterPushSessionsSkipped, CounterPushDBReads, CounterPushHTTPRequests, CounterPushHTTPResponses, CounterPushHTTPRetries, CounterPushPayloadBytes, CounterPushResponseBytes, CounterPushVisibilityPatchRequest, CounterPushAnnotationRequests, CounterPushConcurrencyHighWater, CounterRedactionEntriesScanned, CounterRedactionBytesScanned, CounterRedactionFindings, CounterRedactionRulesMatched, CounterRedactionReplacements, CounterRedactionFailures}
 }
 
 func (n CounterName) Validate() error {
@@ -218,6 +220,12 @@ type SafeError struct {
 	SafeMessage string  `json:"safeMessage"`
 	Retryable   bool    `json:"retryable"`
 }
+
+// Error lets instrumentation pass a classified diagnostic through Recorder.Error.
+// The collector still sanitizes its code and message at the recording boundary.
+func (e SafeError) Error() string { return e.SafeMessage }
+
+var _ error = SafeError{}
 
 type Options struct {
 	Enabled   bool
@@ -512,6 +520,10 @@ func (c *Collector) Count(name CounterName, delta int64, unit Unit, attrs Attrib
 
 func (c *Collector) Error(stage StageID, err error, attrs Attributes) {
 	safe := c.sanitizer.SafeError(stage, string(AttrErrorCode), err, false)
+	var classified SafeError
+	if errors.As(err, &classified) {
+		safe = c.sanitizer.SafeError(stage, classified.Code, err, classified.Retryable)
+	}
 	c.appendEvent(Event{Kind: EventKindError, Order: c.nextID.Add(1), Stage: stage, Attributes: c.sanitizer.SanitizeAttributes(attrs), SafeError: &safe})
 }
 

@@ -286,11 +286,25 @@ func PushAnnotationsSelected(
 	selection AnnotationSelection,
 	dryRun bool,
 	concurrency int,
-) (*AnnotationPushSummary, error) {
+) (result *AnnotationPushSummary, resultErr error) {
+	rec := perf.RecorderFromContext(ctx)
+	span := rec.StartSpan(perf.StagePushAnnotationsPublish, nil)
+	defer func() {
+		outcome := perf.OutcomeOK
+		if resultErr != nil || (result != nil && (result.Errors > 0 || len(result.Unpublishable) > 0)) {
+			outcome = perf.OutcomeFailed
+			rec.Error(perf.StagePushAnnotationsPublish, fmt.Errorf("annotation publication was incomplete; inspect command diagnostics and repair failed annotations before retrying"), nil)
+		} else if dryRun || (result != nil && (result.SkipReason != "" || result.Created+result.Updated+result.Retracted == 0)) {
+			outcome = perf.OutcomeSkipped
+		}
+		span.End(outcome, nil)
+	}()
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	rows, err := store.ListSystemAnnotations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list system annotations: %w", err)
 	}
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	unresolved, err := store.ListUnresolvedAnnotationTargetAnchors(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("check unresolved annotation targets before publish: %w", err)
@@ -348,6 +362,7 @@ func PushAnnotationsSelected(
 	// The retraction source is the locally-superseded annotations. Queried up
 	// front (cheap local DB read) so that when there is neither anything to push
 	// NOR anything locally retired, we make NO network call at all.
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	superseded, err := store.ListSupersededAnnotations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list superseded annotations: %w", err)

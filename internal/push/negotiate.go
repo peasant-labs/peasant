@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/schema"
 )
@@ -40,11 +41,22 @@ type Transport interface {
 // body), the push proceeds at the CLI version — the village's server-side
 // validation still rejects bad harness/model. A village that advertises
 // [Min,Current] drives the within/older/ahead matrix.
-func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, []schema.ContentCapability, error) {
+func (p *Pipeline) negotiate(ctx context.Context) (emit schema.PushContractVersion, capabilities []schema.ContentCapability, negotiateErr error) {
+	rec := perf.RecorderFromContext(ctx)
+	span := rec.StartSpan(perf.StagePushNegotiate, nil)
+	defer func() {
+		outcome := perf.OutcomeOK
+		if negotiateErr != nil {
+			outcome = perf.OutcomeFailed
+			rec.Error(perf.StagePushNegotiate, fmt.Errorf("contract negotiation failed; check CLI compatibility before retrying"), nil)
+		}
+		span.End(outcome, nil)
+	}()
 	cli := defaults.PublishSchemaVersion
 
 	resp, _, err := p.transport.GetSchemaVersion(ctx)
 	if err != nil {
+		span.End(perf.OutcomeSkipped, nil) // Existing fail-open fallback, not a successful handshake.
 		// Fail-open, so this is a note about a degraded preflight and not a
 		// failure. --quiet promises errors and one final result line, and a hook
 		// runs with it: an unreachable village would otherwise print this into
@@ -56,6 +68,7 @@ func (p *Pipeline) negotiate(ctx context.Context) (schema.PushContractVersion, [
 		return cli, nil, nil
 	}
 	if resp == nil {
+		span.End(perf.OutcomeSkipped, nil)
 		return cli, nil, nil
 	}
 

@@ -1,0 +1,66 @@
+cases:
+  - &base
+    name: negotiate_success
+    status: 200
+    responseBody: '{}'
+    expectedResponses: 1
+    expectedResponseBytes: 2
+  - <<: *base
+    name: retryable_rate_limit_is_not_retried
+    status: 429
+    wantError: true
+    retryable: true
+    retryDecision: true
+  - <<: *base
+    name: nonretryable_validation_is_not_retried
+    status: 422
+    wantError: true
+    retryDecision: true
+  - <<: *base
+    name: retryable_server_failure_is_not_retried
+    status: 503
+    wantError: true
+    retryable: true
+    retryDecision: true
+  - <<: *base
+    name: transport_failure_before_response
+    transportError: true
+    wantError: true
+    retryable: true
+    retryDecision: true
+    expectedResponses: 0
+    expectedResponseBytes: 0
+  - <<: *base
+    name: partial_request_counts_consumed_bytes
+    publish: true
+    readRequestBytes: 7
+    transportError: true
+    wantError: true
+    retryable: true
+    retryDecision: true
+    expectedResponses: 0
+    expectedResponseBytes: 0
+  - <<: *base
+    name: multipart_request_counts_consumed_bytes
+    publish: true
+  - <<: *base
+    name: partial_response_counts_consumed_bytes
+    responseBody: '{'
+    responseError: true
+    wantError: true
+    expectedResponseBytes: 1
+  - <<: *base
+    name: disabled_transport_preserves_failure
+    status: 503
+    wantError: true
+    disabled: true
+  - <<: *base
+    name: disabled_transport_preserves_success
+    publish: true
+    disabled: true
+  - <<: *base
+    name: invalid_request_refused_before_http
+    invalidRequest: true
+    wantError: true
+    expectedResponses: 0
+    expectedResponseBytes: 0

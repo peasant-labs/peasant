@@ -42,6 +42,38 @@ Each stage summary includes:
 Tests should compare these values with an injected clock or fixed fixture data.
 They must not require a hard wall-clock threshold.
 
+## Push Measurement Boundaries
+
+- The CLI owns one `push.run` span across transcript and annotation work. Session
+  stages are nested under `push.session`; early failures end their active stage
+  as failed. A failed-open negotiation is skipped, not a successful handshake.
+- Session subjects are stable SHA-256 tokens, not raw session identifiers.
+  Transport request, byte, response and retry-decision events carry the same
+  subject, so counters can be grouped per session as well as per operation.
+- `push.db.reads` counts each invoked store read, including failed reads,
+  preflight re-reads, per-provider queries, and annotation queries. It does not
+  estimate SQL statements inside a store method. Writes are not reads.
+- `push.http.requests` counts calls at the HTTP `RoundTripper` boundary, including
+  redirects. `push.http.responses` counts returned responses by status class.
+  These do not measure TCP packets or replay attempts internal to a transport.
+- Payload bytes count request-body bytes consumed by the transport, including
+  multipart framing. Response bytes count bytes consumed by the client decoder,
+  subject to its existing read limits. Neither counter copies body content.
+- The client has no application retry loop. `push.http.retries` is explicitly
+  zero for observed requests. On remote failure, `push.retry` records a skipped
+  retry decision; safe error retryability describes eligibility, not an attempt.
+- Annotation requests include manifest GETs and batch POSTs, distinguished by
+  the `operation` attribute. Visibility requests count owner visibility PATCHes.
+- Published totals count only terminal successes; a dry-run forecast is not a
+  publication. Selected sessions not reached after preflight or connection abort
+  count as skipped, without changing the ordinary command result.
+- Concurrency high water is the observed overlap of real session work. It can
+  vary with scheduling. Tests use barriers, not time thresholds, to prove it.
+- Payload construction includes whole-document redaction performed inside the
+  existing builders. Coarse redaction spans isolate metadata and entry redaction;
+  decorator metrics describe combined application calls separately. Inclusive
+  parent and child durations must not be added as independent elapsed work.
+
 ## Sorting Rules
 
 Profile output must be deterministic:
