@@ -26,7 +26,8 @@ var _ redactionReporter = (redact.Redactor)(nil)
 // is cumulative and cannot attribute matches to callers.
 type profiledRedactor struct {
 	ingest.TextRedactor
-	rec perf.Recorder
+	rec    perf.Recorder
+	parent string
 }
 
 var _ ingest.TextRedactor = (*profiledRedactor)(nil)
@@ -54,7 +55,7 @@ func profileRedactionRun(ctx context.Context, pipeline *Pipeline) (*Pipeline, fu
 		return pipeline, func() {}
 	}
 	copy := *pipeline
-	copy.redactor = &profiledRedactor{TextRedactor: pipeline.redactor, rec: rec}
+	copy.redactor = &profiledRedactor{TextRedactor: pipeline.redactor, rec: rec, parent: perf.ParentSpanFromContext(ctx)}
 	reporter, ok := pipeline.redactor.(redactionReporter)
 	if !ok {
 		// Timing still works for implementations of the narrower ingest seam.
@@ -90,6 +91,22 @@ func profileRedactionRun(ctx context.Context, pipeline *Pipeline) (*Pipeline, fu
 			}
 		}
 	}
+}
+
+// profileRedactionSession binds context-free engine calls to this session using
+// immutable copies. The engine and collector stay shared, with no lock around
+// calls and no second aggregate report snapshot or flush.
+func profileRedactionSession(ctx context.Context, pipeline *Pipeline) *Pipeline {
+	redactor, ok := pipeline.redactor.(*profiledRedactor)
+	if !ok {
+		return pipeline
+	}
+	copy := *pipeline
+	bound := *redactor
+	bound.rec = perf.RecorderFromContext(ctx)
+	bound.parent = perf.ParentSpanFromContext(ctx)
+	copy.redactor = &bound
+	return &copy
 }
 
 type safeRedactionCount struct {
@@ -152,7 +169,7 @@ func monotonicRedactionCounts(before, after map[string]safeRedactionCount) bool 
 }
 
 func (r *profiledRedactor) RedactMetadata(meta *ingest.UnifiedMetadata) *ingest.UnifiedMetadata {
-	span := r.rec.StartSpan(perf.StageRedactionApply, redactionMetadataScanApply.attributes())
+	span := r.rec.StartChildSpan(perf.StageRedactionApply, r.parent, redactionMetadataScanApply.attributes())
 	// No metadata-byte estimate: the engine rewrites a hand-selected field list
 	// after contextual normalization, not the metadata's serialized bytes.
 	out := r.TextRedactor.RedactMetadata(meta)
@@ -162,7 +179,7 @@ func (r *profiledRedactor) RedactMetadata(meta *ingest.UnifiedMetadata) *ingest.
 
 func (r *profiledRedactor) RedactJSON(value any) any {
 	r.rec.Count(perf.CounterRedactionBytesScanned, jsonStringBytes(value), perf.UnitBytes, redactionJSONStringValues.attributes())
-	span := r.rec.StartSpan(perf.StageRedactionApply, redactionJSONScanApply.attributes())
+	span := r.rec.StartChildSpan(perf.StageRedactionApply, r.parent, redactionJSONScanApply.attributes())
 	out := r.TextRedactor.RedactJSON(value)
 	span.End(perf.OutcomeOK, nil)
 	return out

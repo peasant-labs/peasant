@@ -43,7 +43,8 @@ type Transport interface {
 // [Min,Current] drives the within/older/ahead matrix.
 func (p *Pipeline) negotiate(ctx context.Context) (emit schema.PushContractVersion, capabilities []schema.ContentCapability, negotiateErr error) {
 	rec := perf.RecorderFromContext(ctx)
-	span := rec.StartSpan(perf.StagePushNegotiate, nil)
+	span := rec.StartChildSpan(perf.StagePushNegotiate, perf.ParentSpanFromContext(ctx), nil)
+	ctx = perf.ContextWithParentSpan(ctx, span.ID())
 	defer func() {
 		outcome := perf.OutcomeOK
 		if negotiateErr != nil {

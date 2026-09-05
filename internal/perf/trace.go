@@ -14,7 +14,22 @@ type ctxKey int
 const (
 	recorderKey ctxKey = iota
 	uploadTraceKey
+	parentSpanKey
 )
+
+// ContextWithParentSpan returns an immutable scope for downstream span ancestry.
+// It carries only the parent ID; recorder ownership and cancellation are unchanged.
+// An empty ID explicitly clears the parent for standalone or disabled recording.
+func ContextWithParentSpan(ctx context.Context, spanID string) context.Context {
+	return context.WithValue(ctx, parentSpanKey, spanID)
+}
+
+// ParentSpanFromContext returns the current parent ID, or empty for an unrooted
+// caller. It never creates a synthetic root or changes recorder resolution.
+func ParentSpanFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(parentSpanKey).(string)
+	return id
+}
 
 // ContextWithRecorder returns a child context carrying rec. The push path reads
 // it back via RecorderFromContext, which lets a single --timing toggle at the CLI

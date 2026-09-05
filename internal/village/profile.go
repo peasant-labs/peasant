@@ -76,7 +76,7 @@ func (t *profileTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		}
 		t.rec.Error(t.operation.stage(), perf.SafeError{Code: code, Retryable: retryable, SafeMessage: "Village request failed; inspect command diagnostics and service availability before retrying"}, attrs)
 		// This is the no-retry policy decision, not a fabricated timed attempt.
-		t.rec.StartSpan(perf.StagePushRetry, perf.Attributes{perf.AttrOperation: string(t.operation), perf.AttrHTTPStatusClass: status}).End(perf.OutcomeSkipped, nil)
+		t.rec.StartChildSpan(perf.StagePushRetry, perf.ParentSpanFromContext(req.Context()), perf.Attributes{perf.AttrOperation: string(t.operation), perf.AttrHTTPStatusClass: status}).End(perf.OutcomeSkipped, nil)
 	}
 	return resp, err
 }

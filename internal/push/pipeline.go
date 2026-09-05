@@ -232,7 +232,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	}
 
 	// 3. Query sessions from store.
-	sessions, baseCount, err := p.getTargetSessions(ctx, "")
+	sessions, baseCount, err := p.getTargetSessions(ctx, perf.ParentSpanFromContext(ctx))
 	if err != nil {
 		rec.Error(perf.StagePushDiscovery, fmt.Errorf("candidate database query failed; check local storage before retrying"), nil)
 		return nil, fmt.Errorf("get target sessions: %w", err)
@@ -259,7 +259,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	// contract version; no audit log.
 	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
 		for _, sess := range sessions {
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil, "")
+			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil, perf.ParentSpanFromContext(ctx))
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
@@ -274,7 +274,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 		if rec.Enabled() {
 			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
 		}
-		load := rec.StartSpan(perf.StagePushSessionLoad, attrs)
+		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
 		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
 			load.End(perf.OutcomeFailed, nil)
 			rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
@@ -327,7 +327,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 			if rec.Enabled() {
 				tracker.Enter()
 			}
-			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities, "")
+			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities, perf.ParentSpanFromContext(gctx))
 			if rec.Enabled() {
 				tracker.Exit()
 			}
@@ -895,7 +895,9 @@ func (p *Pipeline) pushSession(
 	}
 	sessionSpan := rec.StartChildSpan(perf.StagePushSession, parentSpanID, subjectAttrs)
 	if rec.Enabled() {
-		ctx = perf.ContextWithRecorder(ctx, sessionRecorder{Recorder: rec, subject: subjectAttrs[perf.AttrSafeSubjectID], parent: sessionSpan.ID()})
+		ctx = perf.ContextWithRecorder(ctx, sessionRecorder{Recorder: rec, subject: subjectAttrs[perf.AttrSafeSubjectID]})
+		ctx = perf.ContextWithParentSpan(ctx, sessionSpan.ID())
+		p = profileRedactionSession(ctx, p)
 	}
 	defer func() {
 		sessionSpan.End(outcomeForStatus(sr.Status), nil)
