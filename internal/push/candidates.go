@@ -6,6 +6,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/perf"
 )
 
 // PushCandidateQuery captures the inputs that select the BASE candidate set for a
@@ -42,8 +43,10 @@ type CandidateStore interface {
 // The returned rows are NOT yet branch-filtered — callers apply ApplySelection
 // (and, for the pipeline, the wizard whitelist) afterward.
 func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandidateQuery) ([]ingest.PushSessionRow, error) {
+	rec := perf.RecorderFromContext(ctx)
 	switch {
 	case q.Force:
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 		// --force: all sessions regardless of pushed_at, optionally provider-filtered.
 		sessions, err := store.AllPushableSessions(ctx)
 		if err != nil {
@@ -55,6 +58,7 @@ func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandid
 		return sessions, nil
 
 	case q.SourceProvider != "":
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 		// --source-provider: unpushed sessions for one provider.
 		return store.UnpushedSessionsByProvider(ctx, q.SourceProvider)
 
@@ -62,6 +66,7 @@ func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandid
 		// push.method by-source: iterate over configured providers.
 		var sessions []ingest.PushSessionRow
 		for _, provider := range q.Sources {
+			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 			provSessions, provErr := store.UnpushedSessionsByProvider(ctx, provider)
 			if provErr != nil {
 				return nil, fmt.Errorf("query provider %q: %w", provider, provErr)
@@ -71,6 +76,7 @@ func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandid
 		return sessions, nil
 
 	default:
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 		// Default (method=all or empty): all unpushed sessions.
 		return store.UnpushedSessions(ctx)
 	}

@@ -126,11 +126,24 @@ func (c *VillageClient) SetRequestObserver(observer func()) {
 	c.beforeRequest = observer
 }
 
-func (c *VillageClient) do(req *http.Request) (*http.Response, error) {
+func (c *VillageClient) do(req *http.Request, operation clientOperation) (*http.Response, error) {
 	if c.beforeRequest != nil {
 		c.beforeRequest()
 	}
-	return c.httpClient.Do(req)
+	rec := perf.RecorderFromContext(req.Context())
+	if !rec.Enabled() {
+		return c.httpClient.Do(req)
+	}
+	// A private client copy preserves configured redirects, cookies and timeouts.
+	// The wrapper observes each actual RoundTrip, including redirected requests,
+	// without changing the shared client used concurrently by other sessions.
+	client := *c.httpClient
+	transport := client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.Transport = &profileTransport{base: transport, rec: rec, operation: operation}
+	return client.Do(req)
 }
 
 // newPooledHTTPClient builds an *http.Client backed by ONE shared *http.Transport
@@ -202,7 +215,7 @@ func (c *VillageClient) Publish(
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.do(req)
+	resp, err := c.do(req, operationPublish)
 	if err != nil {
 		return nil, 0, fmt.Errorf("execute request: %w", err)
 	}
@@ -218,6 +231,7 @@ func (c *VillageClient) Publish(
 	var result ingest.PublishResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		// Non-fatal: server did not return a parseable body.
+		profileResponseFailure(ctx, operationPublish)
 		// Return the status code but no result.
 		return nil, statusCode, nil
 	}
@@ -261,13 +275,14 @@ func (c *VillageClient) PublishAuthoritative(ctx context.Context, request schema
 	}
 	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, operationPublish)
 	if err != nil {
 		return schema.AuthoritativePublishResponse{}, 0, fmt.Errorf("authoritative publish: execute HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if readErr != nil {
+		profileResponseFailure(ctx, operationPublish)
 		return schema.AuthoritativePublishResponse{}, resp.StatusCode, fmt.Errorf("authoritative publish: read terminal response: %w", readErr)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -275,6 +290,7 @@ func (c *VillageClient) PublishAuthoritative(ctx context.Context, request schema
 	}
 	receipt, err := schema.DecodePublishResponse(raw)
 	if err != nil {
+		profileResponseFailure(ctx, operationPublish)
 		return schema.AuthoritativePublishResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStagePublishDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("authoritative publish: village returned malformed 2xx receipt: %w", err)}
 	}
 	return receipt, resp.StatusCode, nil
@@ -292,13 +308,14 @@ func (c *VillageClient) UpdateOwner(ctx context.Context, id schema.TranscriptID,
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, operationVisibility)
 	if err != nil {
 		return schema.OwnerTranscriptUpdateResponse{}, 0, fmt.Errorf("owner update: execute HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if readErr != nil {
+		profileResponseFailure(ctx, operationVisibility)
 		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, fmt.Errorf("owner update: read terminal response: %w", readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -306,6 +323,7 @@ func (c *VillageClient) UpdateOwner(ctx context.Context, id schema.TranscriptID,
 	}
 	var result schema.OwnerTranscriptUpdateResponse
 	if err = json.Unmarshal(raw, &result); err != nil {
+		profileResponseFailure(ctx, operationVisibility)
 		return schema.OwnerTranscriptUpdateResponse{}, resp.StatusCode, &PublicationError{Stage: PublicationStageOwnerDecode, StatusCode: resp.StatusCode, Err: fmt.Errorf("owner update: village returned malformed 2xx response: %w", err)}
 	}
 	return result, resp.StatusCode, nil
@@ -334,7 +352,7 @@ func (c *VillageClient) UploadAnnotations(
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, operationAnnotations)
 	if err != nil {
 		return nil, 0, fmt.Errorf("execute request: %w", err)
 	}
@@ -349,6 +367,7 @@ func (c *VillageClient) UploadAnnotations(
 
 	var result schema.AnnotationPushResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		profileResponseFailure(ctx, operationAnnotations)
 		// Non-fatal: server did not return a parseable body.
 		return nil, statusCode, nil
 	}
@@ -366,7 +385,7 @@ func (c *VillageClient) GetSchemaVersion(ctx context.Context) (*schema.SchemaVer
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, operationNegotiate)
 	if err != nil {
 		return nil, 0, fmt.Errorf("execute request: %w", err)
 	}
@@ -381,6 +400,7 @@ func (c *VillageClient) GetSchemaVersion(ctx context.Context) (*schema.SchemaVer
 
 	var result schema.SchemaVersionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		profileResponseFailure(ctx, operationNegotiate)
 		return nil, statusCode, fmt.Errorf("decode schema version response: %w", err)
 	}
 
@@ -403,7 +423,7 @@ func (c *VillageClient) GetAnnotationManifest(ctx context.Context) (*schema.Anno
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, operationAnnotationManifest)
 	if err != nil {
 		return nil, 0, fmt.Errorf("execute request: %w", err)
 	}
@@ -418,6 +438,7 @@ func (c *VillageClient) GetAnnotationManifest(ctx context.Context) (*schema.Anno
 
 	var result schema.AnnotationManifestResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		profileResponseFailure(ctx, operationAnnotationManifest)
 		return nil, statusCode, fmt.Errorf("decode annotation manifest response: %w", err)
 	}
 

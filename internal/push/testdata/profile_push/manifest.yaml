@@ -1,0 +1,23 @@
+requiredNames:
+  - push_success_with_receipt
+  - push_partial_failure
+  - push_retryable_publish_failure
+  - push_nonretryable_publish_failure
+  - push_visibility_update
+  - push_visibility_failure
+  - push_annotation_publish
+  - push_annotation_partial_failure
+  - push_receipt_persist
+  - push_receipt_mismatch
+  - push_receipt_malformed
+  - push_concurrent_ordering
+  - push_disabled_invariance
+  - push_dry_run
+  - push_preflight_read_failure
+  - push_session_read_failure
+  - push_provider_query_accounting
+  - push_selection_excludes_everything
+  - push_preflight_counts_unstarted_sessions
+  - push_unsafe_subject_never_enters_profile
+  - push_negotiation_fallback_is_skipped
+  - push_config_recorder_reaches_transport

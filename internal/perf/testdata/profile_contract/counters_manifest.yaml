@@ -5,6 +5,7 @@ requiredNames:
   - push.sessions.skipped
   - push.db.reads
   - push.http.requests
+  - push.http.responses
   - push.http.retries
   - push.payload.bytes
   - push.response.bytes
