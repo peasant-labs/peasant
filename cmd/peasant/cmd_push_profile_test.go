@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/annotations"
 	"github.com/peasant-labs/peasant/internal/defaults"
@@ -69,7 +71,20 @@ type pushProfileFixtures struct {
 	AnnotationValue string                   `yaml:"annotationValue"`
 	ForbiddenInputs []string                 `yaml:"forbiddenInputs"`
 	Cases           []pushProfileCase        `yaml:"cases"`
+	SummaryCases    []pushProfileSummaryCase `yaml:"summaryCases"`
 	InvalidCases    []pushProfileInvalidCase `yaml:"invalidCases"`
+}
+
+type pushProfileSummaryCase struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	RecordSpans bool   `yaml:"recordSpans"`
+	Bottlenecks []struct {
+		Stage      perf.StageID `yaml:"stage"`
+		TotalMs    int64        `yaml:"totalMs"`
+		ShareOfRun float64      `yaml:"shareOfRun"`
+	} `yaml:"bottlenecks"`
+	Expected string `yaml:"expected"`
 }
 
 func loadPushProfileFixtures(t *testing.T) pushProfileFixtures {
@@ -93,6 +108,9 @@ func loadPushProfileFixtures(t *testing.T) pushProfileFixtures {
 		names = append(names, c.Name)
 	}
 	for _, c := range fixtures.InvalidCases {
+		names = append(names, c.Name)
+	}
+	for _, c := range fixtures.SummaryCases {
 		names = append(names, c.Name)
 	}
 	if err := testutil.ValidateRequiredNames(manifest, names, "push CLI"); err != nil {
@@ -244,6 +262,9 @@ func TestPushCmd_Profile(t *testing.T) {
 			if doc.FormatVersion != perf.JSONFormatVersion || doc.Producer.Command != "village push" {
 				t.Fatalf("wrong profile identity: %+v", doc.Producer)
 			}
+			if c.Mode != "quiet" {
+				assertMountedProfileBottlenecks(t, stderr, doc)
+			}
 			runCount := 0
 			for _, span := range doc.Spans {
 				if span.Stage == perf.StagePushRun {
@@ -290,6 +311,95 @@ func TestPushCmd_Profile(t *testing.T) {
 			}
 			if c.TraceFailure && strings.Contains(stderr, "profile trace written to") {
 				t.Error("claimed a trace that was not written")
+			}
+		})
+	}
+}
+
+// Compare the mounted command's hints with its persisted production profile,
+// without wall-clock thresholds or assumptions about concurrent stage ordering.
+func assertMountedProfileBottlenecks(t *testing.T, stderr string, doc perf.ProfileDocument) {
+	t.Helper()
+	_, summary, found := strings.Cut(stderr, "profile bottlenecks:")
+	if !found {
+		t.Fatalf("missing mounted bottleneck summary: %s", stderr)
+	}
+	var wantRows []string
+	for _, b := range doc.Summaries.TopBottlenecks {
+		if b.Stage == perf.StagePushRun {
+			continue
+		}
+		wantRows = append(wantRows, fmt.Sprintf("  %-28s total=%-9s %5.1f%% of run time", b.Stage.String(), formatProfileDurationMs(b.TotalMs), b.ShareOfRun*100))
+	}
+	var gotRows []string
+	for _, line := range strings.Split(summary, "\n") {
+		if strings.HasPrefix(line, "  ") {
+			gotRows = append(gotRows, line)
+		}
+	}
+	if strings.Join(gotRows, "\n") != strings.Join(wantRows, "\n") {
+		t.Errorf("mounted bottleneck rows = %v, want %v", gotRows, wantRows)
+	}
+	if len(wantRows) == 0 {
+		assertProfileText(t, summary, []string{"no child stage timings recorded"}, nil)
+	} else {
+		assertProfileText(t, summary, nil, []string{"no child stage timings recorded"})
+	}
+}
+
+func TestPushCmd_ProfileSummary(t *testing.T) {
+	for _, c := range loadPushProfileFixtures(t).SummaryCases {
+		t.Run(c.Name, func(t *testing.T) {
+			var doc perf.ProfileDocument
+			for _, b := range c.Bottlenecks {
+				if err := b.Stage.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				doc.Summaries.TopBottlenecks = append(doc.Summaries.TopBottlenecks, perf.BottleneckSummary{
+					Stage: b.Stage, TotalMs: b.TotalMs, ShareOfRun: b.ShareOfRun,
+				})
+			}
+			var out bytes.Buffer
+			printProfileSummary(&out, "profile.json", doc)
+			if out.String() != c.Expected {
+				t.Errorf("summary = %q, want %q", out.String(), c.Expected)
+			}
+		})
+	}
+}
+
+// Empty mounted pushes still measure discovery and annotations. Exercise the
+// no-child fallback through the actual collector/reducer/file writer as well,
+// without disabling those production stages just to force an empty summary.
+func TestPushCmd_ProfileSummaryWriter(t *testing.T) {
+	for _, c := range loadPushProfileFixtures(t).SummaryCases {
+		if !c.RecordSpans {
+			continue
+		}
+		t.Run(c.Name, func(t *testing.T) {
+			collector := perf.NewCollector()
+			start := time.Now().UTC()
+			for _, b := range c.Bottlenecks {
+				collector.StartSpan(b.Stage, nil).End(perf.OutcomeOK, nil)
+			}
+			path := filepath.Join(t.TempDir(), "profile.json")
+			var out bytes.Buffer
+			writePushProfile(&out, collector, path, "", perf.ProfileRun{StartedAt: start, EndedAt: time.Now().UTC()}, true)
+			want := strings.Replace(c.Expected, "profile.json", path, 1)
+			if out.String() != want {
+				t.Errorf("written profile summary = %q, want %q", out.String(), want)
+			}
+			var doc perf.ProfileDocument
+			if err := json.Unmarshal(readPrivateProfileFile(t, path), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if len(doc.Spans) != len(c.Bottlenecks) {
+				t.Fatalf("written spans = %v, want recorded fixture spans %v", doc.Spans, c.Bottlenecks)
+			}
+			for i, span := range doc.Spans {
+				if span.Stage != c.Bottlenecks[i].Stage {
+					t.Errorf("written stage = %s, want %s", span.Stage, c.Bottlenecks[i].Stage)
+				}
 			}
 		})
 	}

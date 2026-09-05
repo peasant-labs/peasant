@@ -1808,15 +1808,22 @@ func writePushProfile(w io.Writer, collector *perf.Collector, outputPath, traceP
 // transcript content or project history. The destination path is human-only.
 func printProfileSummary(w io.Writer, profilePath string, doc perf.ProfileDocument) {
 	fmt.Fprintf(w, "profile written to %s\n", profilePath)
-	top := doc.Summaries.TopBottlenecks
-	if len(top) == 0 {
-		fmt.Fprintln(w, "profile bottlenecks: no stage timings recorded")
-		return
-	}
-	fmt.Fprintln(w, "profile bottlenecks:")
-	for _, bottleneck := range top {
-		fmt.Fprintf(w, "  %-28s total=%-9s %5.1f%% of recorded stage time\n",
+	printed := false
+	for _, bottleneck := range doc.Summaries.TopBottlenecks {
+		// The whole-run wrapper is not an actionable stage, even if a
+		// supplied summary includes it. Keep the reducer's child ranking.
+		if bottleneck.Stage == perf.StagePushRun {
+			continue
+		}
+		if !printed {
+			fmt.Fprintln(w, "profile bottlenecks:")
+			printed = true
+		}
+		fmt.Fprintf(w, "  %-28s total=%-9s %5.1f%% of run time\n",
 			bottleneck.Stage.String(), formatProfileDurationMs(bottleneck.TotalMs), bottleneck.ShareOfRun*100)
+	}
+	if !printed {
+		fmt.Fprintln(w, "profile bottlenecks: no child stage timings recorded")
 	}
 }
 

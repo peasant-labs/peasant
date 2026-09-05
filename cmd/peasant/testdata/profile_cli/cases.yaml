@@ -24,7 +24,8 @@ cases:
     expectStderrContains:
       - profile written to
       - 'profile bottlenecks:'
-      - push.run
+      - push.discovery
+    forbidStderrContains: [push.run, no child stage timings recorded]
   - name: profile_json_plus_trace
     description: writes the JSON profile and the JSONL trace sidecar together
     mode: default
@@ -38,7 +39,8 @@ cases:
     expectStderrContains:
       - profile written to
       - 'profile bottlenecks:'
-      - push.run
+      - push.discovery
+    forbidStderrContains: [push.run, no child stage timings recorded]
   - name: profile_summary_output
     description: prints a short human summary naming structural bottlenecks only
     mode: default
@@ -53,7 +55,8 @@ cases:
     expectStderrContains:
       - profile written to
       - 'profile bottlenecks:'
-      - push.run
+      - '% of run time'
+    forbidStderrContains: [push.run, no child stage timings recorded]
   - name: profile_quiet_mode
     description: keeps the terse quiet result line and suppresses the human summary
     mode: quiet
@@ -82,6 +85,7 @@ cases:
     expectStderrContains:
       - profile written to
       - 'profile bottlenecks:'
+    forbidStderrContains: [push.run, no child stage timings recorded]
   - name: profile_verbose_mode
     description: keeps per-session detail on stdout while the summary stays on stderr
     mode: verbose
@@ -96,7 +100,8 @@ cases:
     expectStderrContains:
       - profile written to
       - 'profile bottlenecks:'
-      - push.run
+      - '% of run time'
+    forbidStderrContains: [push.run, no child stage timings recorded]
   - name: profile_disabled_invariance
     description: leaves ordinary output byte-identical when profiling is off
     mode: default
@@ -133,7 +138,8 @@ cases:
     seedSessions: true
     publishStatus: 201
     expectStdoutContains: ['"new": 1']
-    expectStderrContains: [profile written to]
+    expectStderrContains: [profile written to, 'profile bottlenecks:', '% of run time']
+    forbidStderrContains: [push.run, no child stage timings recorded]
   - name: profile_publish_failure
     description: writes a failed run without leaking a remote response body
     mode: json
@@ -230,6 +236,47 @@ cases:
         }
       }
     stderr: ""
+summaryCases:
+  - name: profile_summary_no_metrics
+    description: an empty bottleneck list explicitly reports absent child timings
+    recordSpans: true
+    bottlenecks: []
+    expected: "profile written to profile.json\nprofile bottlenecks: no child stage timings recorded\n"
+  - name: profile_summary_root_only
+    description: a run wrapper alone is never presented as a bottleneck
+    recordSpans: true
+    bottlenecks:
+      - stage: push.run
+        totalMs: 100
+        shareOfRun: 1
+    expected: "profile written to profile.json\nprofile bottlenecks: no child stage timings recorded\n"
+  - name: profile_summary_child_stages
+    description: preserves ranked child durations and shares of run time without renormalizing overlapping spans
+    bottlenecks:
+      - stage: push.session
+        totalMs: 120
+        shareOfRun: 1.2
+      - stage: push.publish
+        totalMs: 60
+        shareOfRun: 0.6
+    expected: |
+      profile written to profile.json
+      profile bottlenecks:
+        push.session                 total=120.0ms   120.0% of run time
+        push.publish                 total=60.0ms     60.0% of run time
+  - name: profile_summary_root_and_children
+    description: defensively omits a run wrapper without suppressing the actionable child
+    bottlenecks:
+      - stage: push.run
+        totalMs: 100
+        shareOfRun: 1
+      - stage: push.publish
+        totalMs: 60
+        shareOfRun: 0.6
+    expected: |
+      profile written to profile.json
+      profile bottlenecks:
+        push.publish                 total=60.0ms     60.0% of run time
 invalidCases:
   - name: profile_invalid_output_path
     description: refuses a profile path under a missing parent directory before any work
