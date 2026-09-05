@@ -19,6 +19,8 @@ requiredNames:
   - profile_timing_coexistence
   - profile_publish_success
   - profile_publish_failure
+  - profile_annotation_partial_failure
+  - profile_annotation_unpublishable
   - profile_pipeline_failure
   - profile_disabled_quiet_invariance
   - profile_disabled_verbose_invariance

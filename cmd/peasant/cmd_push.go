@@ -572,7 +572,8 @@ func BuildPushCommand() *cobra.Command {
 				profileEnd := time.Now().UTC()
 				if profileRunSpan != nil {
 					outcome := perf.OutcomeOK
-					if transcErr != nil || annErr != nil || result == nil || result.Errors > 0 {
+					annotationFailed := annSummary != nil && (annSummary.Errors > 0 || len(annSummary.Unpublishable) > 0)
+					if transcErr != nil || annErr != nil || result == nil || result.Errors > 0 || annotationFailed {
 						outcome = perf.OutcomeFailed
 						// Command errors can carry paths or remote response bodies.
 						// Record a fixed diagnostic, never their raw text.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -13,10 +14,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/annotations"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/perf"
+	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
+	"zombiezen.com/go/sqlite/sqlitex"
 )
 
 //go:embed testdata/profile_cli/cases.yaml
@@ -31,6 +36,9 @@ type pushProfileCase struct {
 	Mode                 string       `yaml:"mode"`
 	Trace                bool         `yaml:"trace"`
 	SeedSessions         bool         `yaml:"seedSessions"`
+	SeedAnnotation       bool         `yaml:"seedAnnotation"`
+	AnnotationMutation   string       `yaml:"annotationMutation"`
+	AnnotationResponse   string       `yaml:"annotationResponse"`
 	Disabled             bool         `yaml:"disabled"`
 	Timing               bool         `yaml:"timing"`
 	ExistingFiles        bool         `yaml:"existingFiles"`
@@ -58,6 +66,7 @@ type pushProfileInvalidCase struct {
 type pushProfileFixtures struct {
 	Config          string                   `yaml:"config"`
 	SessionID       string                   `yaml:"sessionID"`
+	AnnotationValue string                   `yaml:"annotationValue"`
 	ForbiddenInputs []string                 `yaml:"forbiddenInputs"`
 	Cases           []pushProfileCase        `yaml:"cases"`
 	InvalidCases    []pushProfileInvalidCase `yaml:"invalidCases"`
@@ -121,10 +130,17 @@ func TestPushCmd_Profile(t *testing.T) {
 				cfg = seedUploadableSession(t, dir, fixtures.SessionID)
 				seedEntryCarrying(t, dir, fixtures.SessionID, strings.Join(fixtures.ForbiddenInputs, " "))
 			}
+			if c.SeedAnnotation {
+				seedProfileAnnotation(t, dir, fixtures.SessionID, fixtures.AnnotationValue, c.AnnotationMutation)
+			}
 			captured := &capturedPublish{parts: map[string]string{}}
 			if c.PublishStatus != 0 {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
+					if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/annotations") {
+						_, _ = io.WriteString(w, c.AnnotationResponse)
+						return
+					}
 					if !strings.Contains(r.URL.Path, "/transcripts/publish") {
 						_, _ = w.Write([]byte(`{}`))
 						return
@@ -228,10 +244,10 @@ func TestPushCmd_Profile(t *testing.T) {
 			if doc.FormatVersion != perf.JSONFormatVersion || doc.Producer.Command != "village push" {
 				t.Fatalf("wrong profile identity: %+v", doc.Producer)
 			}
-			foundRun := false
+			runCount := 0
 			for _, span := range doc.Spans {
 				if span.Stage == perf.StagePushRun {
-					foundRun = true
+					runCount++
 					wantOutcome := c.Outcome
 					if wantOutcome == "" {
 						wantOutcome = perf.OutcomeOK
@@ -244,8 +260,8 @@ func TestPushCmd_Profile(t *testing.T) {
 					}
 				}
 			}
-			if !foundRun {
-				t.Error("missing push.run span")
+			if runCount != 1 {
+				t.Errorf("expected exactly one CLI-owned push.run span, got %d", runCount)
 			}
 			if c.Outcome == perf.OutcomeFailed && len(doc.Errors) == 0 {
 				t.Error("failed run has no safe diagnostic")
@@ -266,7 +282,7 @@ func TestPushCmd_Profile(t *testing.T) {
 					}
 					events = append(events, event)
 				}
-				if len(events) == 0 || doc.TraceFile == "" {
+				if len(events) == 0 || doc.TraceFile != "profile-trace" {
 					t.Error("missing trace events or reference")
 				}
 			} else if doc.TraceFile != "" {
@@ -276,6 +292,45 @@ func TestPushCmd_Profile(t *testing.T) {
 				t.Error("claimed a trace that was not written")
 			}
 		})
+	}
+}
+
+func seedProfileAnnotation(t *testing.T, dir, sessionID, value, mutation string) {
+	t.Helper()
+	db := openTestDB(t, dir)
+	ctx := context.Background()
+	annotatorID, err := db.CreateAnnotator(ctx, store.CreateAnnotatorParams{
+		Kind: schema.AnnotatorHuman, Name: humanCLIAnnotatorName, DisplayName: "Human (CLI)",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typeRow, err := annotations.NewTypeReader(db).GetType(ctx, testutil.TestTypeIDSessionApproval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.CreateAnnotation(ctx, store.CreateAnnotationParams{
+		SessionID: &sessionID, AnnotatorID: annotatorID, AnnotationTypeID: typeRow.ID, Value: value,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation == "" {
+		return
+	}
+	// Reproduce a legacy row whose target was lost, in the isolated fixture DB.
+	pool, err := sqlitex.NewPool(string(defaults.ResolveDBFilePathWith(dir)), sqlitex.PoolOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	conn, err := pool.Take(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Put(conn)
+	if err := sqlitex.ExecuteTransient(conn, mutation, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -19,7 +19,7 @@ Top-level keys:
 | `resources` | yes | DB read count, HTTP request count, retry count, byte counts, optional allocation bytes, and concurrency high water. |
 | `redaction` | yes | Entries scanned, bytes scanned, finding counts by category, rule counts, and failure count. |
 | `errors` | yes | Privacy-safe errors with code, stage, safe message, and retryability. |
-| `traceFile` | no | Relative or file-name reference to an optional JSONL trace. |
+| `traceFile` | no | Opaque logical reference `profile-trace` when the CLI successfully writes the optional JSONL trace. Never a basename or path; the actual destination is announced only in the human stderr summary (unless quiet). |
 
 Unavailable optional resource values use `null`. Do not write a misleading zero
 when the measurement was not collected.

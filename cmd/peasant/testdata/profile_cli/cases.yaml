@@ -1,4 +1,5 @@
 sessionID: dddd4444-dddd-4ddd-8ddd-dddddddddddd
+annotationValue: approve
 forbiddenInputs:
   - PRIVATE_HISTORY_SENTINEL
   - PRIVATE_TRANSCRIPT_SENTINEL
@@ -154,6 +155,28 @@ cases:
         visibility: private
     expectError: true
     outcome: failed
+    expectStderrContains: [profile written to]
+  - name: profile_annotation_partial_failure
+    description: marks the sole root failed when transcripts succeed but an annotation batch reports item errors without a fatal error
+    mode: json
+    trace: true
+    seedSessions: true
+    seedAnnotation: true
+    publishStatus: 201
+    annotationResponse: '{"created":0,"updated":0,"skipped":0,"errors":1}'
+    outcome: failed
+    expectStdoutContains: ['"new": 1', '"errors": 1']
+    expectStderrContains: [profile written to]
+  - name: profile_annotation_unpublishable
+    description: marks the sole root failed when a legacy annotation is withheld without a fatal error
+    mode: json
+    trace: true
+    seedSessions: true
+    seedAnnotation: true
+    annotationMutation: DELETE FROM annotation_target_sessions
+    publishStatus: 201
+    outcome: failed
+    expectStdoutContains: ['"new": 1', '"unpublishable"']
     expectStderrContains: [profile written to]
   - name: profile_output_write_failure
     description: reports a destination that changed after validation without changing the publish result

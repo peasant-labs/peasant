@@ -45,6 +45,7 @@ type redactionProfileFixture struct {
 	Rules                map[string]int64 `yaml:"rules"`
 	Categories           map[string]int64 `yaml:"categories"`
 	Disabled             bool             `yaml:"disabled"`
+	ConfigRecorder       bool             `yaml:"configRecorder"`
 	InvalidCategory      string           `yaml:"invalidCategory"`
 	InvalidRule          string           `yaml:"invalidRule"`
 	FailureSeam          string           `yaml:"failureSeam"`
@@ -190,10 +191,13 @@ func TestPipelineRedactionProfile(t *testing.T) {
 			sink := perf.NewJSONLTraceSink(&trace)
 			collector := perf.NewCollectorWithOptions(&redactionProfileClock{}, sink, perf.Options{Enabled: true})
 			ctx := context.Background()
-			if !fixture.Disabled {
+			runCfg := push.PipelineConfig{}
+			if fixture.ConfigRecorder {
+				runCfg.Recorder = collector
+			} else if !fixture.Disabled {
 				ctx = perf.ContextWithRecorder(ctx, collector)
 			}
-			pipeline, err := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{}, redactor, &stderr)
+			pipeline, err := push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs, runCfg, redactor, &stderr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,6 +227,14 @@ func TestPipelineRedactionProfile(t *testing.T) {
 			pub.Calls = nil
 			stderr.Reset()
 			eventCount, traceSize := len(collector.Events()), trace.Len()
+			if fixture.ConfigRecorder {
+				// A config-injected recorder intentionally persists across runs;
+				// compare disabled behavior using a fresh uninstrumented pipeline.
+				pipeline, err = push.NewPipeline(store, pub, baseCreds(), baseTestConfig(), fs, push.PipelineConfig{}, redactor, &stderr)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			plainResult, err := pipeline.Run(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -277,6 +289,11 @@ func TestPipelineRedactionProfile(t *testing.T) {
 			}
 			expectedErrors := fixture.ExpectedFailures
 			if fixture.ReportUnavailable {
+				expectedErrors++
+			}
+			if fixture.FailureSeam != "" {
+				// The pipeline also reports the failed enclosing preparation stage;
+				// its diagnostic does not add a second redaction failure count.
 				expectedErrors++
 			}
 			if int64(len(doc.Errors)) != expectedErrors {

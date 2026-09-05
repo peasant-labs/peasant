@@ -1,4 +1,10 @@
 cases:
+  - name: config-recorder
+    configRecorder: true
+    input: 'contact zz-redact-probe-01@example.com for access'
+    forbidden: ['zz-redact-probe-01@example.com']
+    rules: {email: 1}
+    categories: {PII: 1}
   - name: secrets
     input: 'deploy key sk-ant-api03-zzprobe00000000000000123456 in config'
     forbidden: ['sk-ant-api03-zzprobe00000000000000123456']

@@ -1,4 +1,5 @@
 requiredNames:
+  - config-recorder
   - secrets
   - pii-email
   - paths
