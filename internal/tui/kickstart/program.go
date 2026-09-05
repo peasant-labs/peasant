@@ -1280,7 +1280,7 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		// The row matches the harvest TTY bar exactly; only the stage name
 		// stays lowercase per the lowercase-chrome rule.
 		lines = append(lines, styles.Base.Render(
-			ingest.RenderProgressBar(strings.ToLower(stage.String()), sp)))
+			kit.ProgressBar(strings.ToLower(stage.String()), sp.Done, sp.Total, sp.Ended, sp.HasErr)))
 		if !hasFocus || stage != focus {
 			continue
 		}

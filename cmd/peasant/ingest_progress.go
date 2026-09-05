@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"golang.org/x/term"
 )
 
@@ -184,7 +185,7 @@ func (m progressModel) render() string {
 		if !ok {
 			continue
 		}
-		lines = append(lines, ingest.RenderProgressBar(stage.String(), sp))
+		lines = append(lines, kit.ProgressBar(stage.String(), sp.Done, sp.Total, sp.Ended, sp.HasErr))
 	}
 	return strings.Join(lines, "\n")
 }
