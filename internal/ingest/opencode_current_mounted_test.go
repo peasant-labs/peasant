@@ -71,6 +71,7 @@ type currentMountedNegativeCase struct {
 	Name          string `yaml:"name"`
 	Kind          string `yaml:"kind"`
 	ErrorContains string `yaml:"error_contains"`
+	RowData       string `yaml:"row_data"`
 }
 
 type currentMountedBehaviorMutation struct {
@@ -327,6 +328,7 @@ func snapshotIndependentlyMaterializedCurrentProjection(t testing.TB, metadata *
 type mountedCurrentFaultSource struct {
 	ingest.OpenCodeSQLiteSource
 	kind       string
+	rowData    string
 	controller *mountedFaultController
 }
 
@@ -354,15 +356,11 @@ func (source mountedCurrentFaultSource) CurrentMessages(ctx context.Context, req
 		return page, nil
 	}
 	switch source.kind {
-	case "unknown_row_type":
+	case "malformed_native_data":
 		if len(page.Messages) == 0 {
 			return page, errors.New("fault source received empty real page")
 		}
-		unknown, typeErr := ingest.NewOpenCodeCurrentMessageType("unknown")
-		if typeErr != nil {
-			return page, typeErr
-		}
-		page.Messages[0].Type = unknown
+		page.Messages[0].Data = source.rowData
 		return page, nil
 	case "canceled_page":
 		return ingest.OpenCodeCurrentPage{}, context.Canceled
@@ -623,7 +621,7 @@ func TestCurrentOpenCodeMountedFailuresLeaveNoPartialState(t *testing.T) {
 				if openErr != nil {
 					return nil, openErr
 				}
-				return mountedCurrentFaultSource{OpenCodeSQLiteSource: source, kind: negative.Kind, controller: controller}, nil
+				return mountedCurrentFaultSource{OpenCodeSQLiteSource: source, kind: negative.Kind, rowData: negative.RowData, controller: controller}, nil
 			}
 			adapterFactory := func(fs ingest.FileSystem, git ingest.GitResolver, installationSalt salt.Salt) ingest.SourceAdapter {
 				adapter, adapterErr := ingest.NewOpenCodeAdapterWithCandidateProbe(fs, git, installationSalt, "latest", environment, fs.(ingest.OpenCodeCandidateFileSystem), opener, ingest.DefaultOpenCodeSQLiteSourceOptions())

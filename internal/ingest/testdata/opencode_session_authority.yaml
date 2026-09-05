@@ -1,0 +1,198 @@
+required_cases:
+  - v2-catalog-boundary-supported
+  - v2-catalog-overflow-fails-closed
+  - v2-only-session-records
+  - hybrid-v2-metadata-wins
+  - empty-v2-is-authoritative
+  - v2-optional-columns-missing
+  - unusable-v2-falls-back-to-legacy
+  - v2-missing-id-falls-back
+  - v2-malformed-record-keeps-presence
+  - v2-paged-records
+  - legacy-clockless-keeps-candidates
+  - v2-read-failure-never-falls-back
+  - v2-read-failure-keeps-discovery
+cases:
+  - name: v2-catalog-boundary-supported
+    fixture: native-v2-only
+    setup: |
+      ALTER TABLE session_v2 ADD COLUMN future_0 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_1 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_2 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_3 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_4 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_5 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_6 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_7 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_8 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_9 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_10 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_11 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_12 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_13 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_14 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_15 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_16 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_17 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_18 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_19 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_20 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_21 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_22 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_23 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_24 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_25 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_26 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_27 TEXT;
+    table: session_v2
+    v2_layout: supported
+    catalog_columns: 64
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: v2-catalog-overflow-fails-closed
+    fixture: native-v2-only
+    catalog_overflow: true
+    setup: |
+      ALTER TABLE session_v2 ADD COLUMN future_0 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_1 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_2 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_3 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_4 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_5 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_6 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_7 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_8 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_9 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_10 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_11 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_12 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_13 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_14 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_15 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_16 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_17 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_18 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_19 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_20 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_21 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_22 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_23 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_24 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_25 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_26 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_27 TEXT;
+      ALTER TABLE session_v2 ADD COLUMN future_28 TEXT;
+  - name: v2-only-session-records
+    required_columns: [id, parent_id, time_created, time_updated, directory, title, agent, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, version, slug, revert, project_id, workspace_id, fork_session_id, fork_boundary, path, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, metadata, permission, model, time_idle, time_viewed, idle_outcome, time_compacting, time_archived, time_suspended, resume_attempts]
+    v2_layout: supported
+    fixture: native-v2-only
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: hybrid-v2-metadata-wins
+    v2_layout: supported
+    fixture: native-current-rows
+    setup: |
+      ALTER TABLE session RENAME TO session_v2;
+      CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, time_updated INTEGER);
+      INSERT INTO session VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn1', NULL, 999999);
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: empty-v2-is-authoritative
+    v2_layout: supported
+    diagnostic_contains: authoritative session_v2
+    fixture: native-current-rows
+    setup: CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+    table: session_v2
+    record_ids: []
+    present_ids: []
+    discovered_ids: []
+  - name: v2-optional-columns-missing
+    v2_layout: supported
+    diagnostic_contains: session_v2 carries neither
+    fixture: native-current-rows
+    setup: |
+      CREATE TABLE session_v2 (id TEXT PRIMARY KEY);
+      INSERT INTO session_v2 SELECT id FROM session;
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+  - name: unusable-v2-falls-back-to-legacy
+    v2_layout: unsupported
+    diagnostic_contains: session_v2 lacks id
+    fixture: native-current-rows
+    setup: CREATE TABLE session_v2 (id TEXT, time_updated INTEGER);
+    table: session
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: v2-missing-id-falls-back
+    v2_layout: unsupported
+    diagnostic_contains: session_v2 lacks id
+    fixture: native-current-rows
+    setup: CREATE TABLE session_v2 (time_updated INTEGER);
+    table: session
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: v2-malformed-record-keeps-presence
+    v2_layout: supported
+    diagnostic_contains: session_v2 metadata row(s) were dropped
+    fixture: native-v2-only
+    setup: UPDATE session_v2 SET time_updated = 'malformed';
+    table: session_v2
+    record_ids: []
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    skipped: true
+  - name: v2-paged-records
+    v2_layout: supported
+    fixture: native-v2-only
+    setup: |
+      INSERT INTO session_v2 (id, time_created, time_updated) VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn2', 4000, 5000);
+      INSERT INTO session_v2 (id, time_created, time_updated) VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn3', 6000, 7000);
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1, ses_3cd91f52effeXd3QAJ54jOyzn2, ses_3cd91f52effeXd3QAJ54jOyzn3]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1, ses_3cd91f52effeXd3QAJ54jOyzn2, ses_3cd91f52effeXd3QAJ54jOyzn3]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: legacy-clockless-keeps-candidates
+    v2_layout: absent
+    diagnostic_contains: session carries neither
+    fixture: native-current-rows
+    setup: |
+      DROP TABLE session;
+      CREATE TABLE session (id TEXT PRIMARY KEY);
+    table: session
+    record_ids: []
+    present_ids: []
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+  - name: v2-read-failure-never-falls-back
+    v2_layout: supported
+    fixture: native-v2-only
+    setup: CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, time_updated INTEGER);
+    after_read: DROP TABLE session_v2;
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    title: native session title
+  - name: v2-read-failure-keeps-discovery
+    fixture: native-v2-only
+    fail_read: true
+    v2_layout: supported
+    diagnostic_contains: could not be read
+    table: session_v2
+    record_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    present_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]
+    discovered_ids: [ses_3cd91f52effeXd3QAJ54jOyzn1]

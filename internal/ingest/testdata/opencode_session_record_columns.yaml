@@ -8,8 +8,11 @@
 required_cases:
   - populated-extended-layout
   - older-layout-empty
+  - v2-populated-extended-layout
+  - v2-base-attribution
 cases:
-  - name: populated-extended-layout
+  - &populated
+    name: populated-extended-layout
     extended: true
     rows:
       - id: ses_3cd91f52effeXd3QAJ54jOyzE1
@@ -28,7 +31,8 @@ cases:
         version: 1.1.53
         slug: glowing-wizard
         revert: '{"messageID":"msg_x"}'
-  - name: older-layout-empty
+  - &base
+    name: older-layout-empty
     extended: false
     rows:
       - id: ses_3cd91f52effeXd3QAJ54jOyzE2
@@ -47,3 +51,9 @@ cases:
         version: 1.1.53
         slug: glowing-wizard
         revert: '{"messageID":"msg_x"}'
+  - <<: *populated
+    name: v2-populated-extended-layout
+    table: session_v2
+  - <<: *base
+    name: v2-base-attribution
+    table: session_v2

@@ -1,0 +1,131 @@
+# V2 shapes from public commit 52685d451777fbccc99736ab31ffc37de8475a45,
+# packages/schema/src/{session-message,prompt,tool,shell,session-error}.ts.
+required_names:
+  - v2_tool_streaming
+  - v2_tool_running
+  - v2_tool_completed
+  - v2_tool_error
+  - v2_assistant_provider_state_and_retry
+  - v2_user_attachments_and_skills
+  - v2_shell_output_page
+  - v2_synthetic_without_session_id
+  - v2_system_description
+  - v2_compaction_running
+  - v2_compaction_completed
+  - v2_compaction_failed
+  - v2_skill_message
+  - v2_file_attachment_visible
+  - v2_running_tool_rejects_completed_fields
+  - v2_completed_tool_rejects_empty_content
+  - v2_error_tool_requires_error
+  - v2_streaming_tool_rejects_object_input
+  - v2_running_tool_rejects_missing_metadata
+  - v2_shell_rejects_mixed_identity
+  - v2_compaction_failed_rejects_summary
+  - v2_file_rejects_invalid_base64
+  - v2_retry_requires_error
+  - v2_skill_attachment_requires_id
+  - v2_shell_running_keeps_partial_output
+  - v2_tool_error_text_output
+  - v2_tool_mixed_output_stays_structured
+  - v2_tool_text_fragments_preserve_boundaries
+  - historical_tool_empty_completion
+normalization_cases:
+  - name: v2_tool_streaming
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_stream","name":"read","state":{"status":"streaming","input":"partial input"},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: partial input
+  - name: v2_tool_running
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_run","name":"read","executed":false,"providerState":{"provider":{"key":"value"}},"state":{"status":"running","input":{"path":"running input"},"metadata":{"title":"reading"}},"time":{"created":1000,"ran":1500}}],"time":{"created":1000}}'}]
+    expected_text: running input
+    expected_managed: ['"structured":{"title":"reading"}']
+  - name: v2_tool_completed
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","providerResultState":{"provider":{"key":"value"}},"state":{"status":"completed","input":{},"content":[{"type":"text","text":"native completed output"}],"metadata":{"title":"read"}},"time":{"created":1000,"completed":2000}}],"time":{"created":1000,"completed":2000}}'}]
+    expected_text: native completed output
+    expected_tool_output: native completed output
+  - name: v2_tool_error
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_error","name":"read","state":{"status":"error","input":{},"error":{"type":"permission","message":"native error message","status":403}},"time":{"created":1000,"completed":2000}}],"time":{"created":1000}}'}]
+    expected_text: native error message
+  - name: v2_assistant_provider_state_and_retry
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"providerState":{"provider":{"key":"value"}},"retry":{"attempt":1,"at":2000,"error":{"type":"rate_limit","message":"retry later","status":429}},"content":[{"type":"text","text":"native response","state":{"provider":{"key":"value"}}},{"type":"reasoning","text":"native reasoning","state":{"provider":{"key":"value"}},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: native response
+    forbidden_managed: [providerState, '"state":{"provider"']
+  - name: v2_user_attachments_and_skills
+    rows: [{id: msg_v2, row_type: user, data: '{"text":"native attachments","files":[{"data":"aGk=","mime":"text/plain","source":{"type":"inline"},"name":"note.txt","mention":{"start":0,"end":4,"text":"note"}}],"agents":[{"name":"build","mention":{"start":0,"end":5,"text":"build"}}],"skills":[{"id":"skill_review","name":"review","text":"review instructions"}],"time":{"created":1000}}'}]
+    expected_text: review instructions
+  - name: v2_shell_output_page
+    rows: [{id: msg_v2, row_type: shell, data: '{"shellID":"sh_native","command":"pwd","status":"exited","exit":0,"output":{"output":"native shell page","cursor":17,"size":17,"truncated":false},"time":{"created":1000,"completed":2000}}'}]
+    expected_text: native shell page
+  - name: v2_synthetic_without_session_id
+    rows: [{id: msg_v2, row_type: synthetic, data: '{"text":"native synthetic text","description":"synthetic description","time":{"created":1000}}'}]
+    expected_text: native synthetic text
+  - name: v2_system_description
+    rows: [{id: msg_v2, row_type: system, data: '{"text":"native system text","description":"system description","time":{"created":1000}}'}]
+    expected_text: native system text
+  - name: v2_compaction_running
+    rows: [{id: msg_v2, row_type: compaction, data: '{"status":"running","reason":"auto","summary":"native running summary","recent":"recent context","time":{"created":1000}}'}]
+    expected_text: native running summary
+  - name: v2_compaction_completed
+    rows: [{id: msg_v2, row_type: compaction, data: '{"status":"completed","reason":"manual","model":{"id":"model","providerID":"provider"},"providerState":{"provider":{}},"summary":"native completed summary","recent":"recent context","time":{"created":1000}}'}]
+    expected_text: native completed summary
+  - name: v2_compaction_failed
+    rows: [{id: msg_v2, row_type: compaction, data: '{"status":"failed","reason":"auto","error":{"type":"rate_limit","message":"native compaction error","status":429},"time":{"created":1000}}'}]
+    expected_text: native compaction error
+    forbidden_managed: ['"type":"compaction"']
+  - name: v2_skill_message
+    rows: [{id: msg_v2, row_type: skill, data: '{"skill":"skill_review","name":"review","text":"native skill context","time":{"created":1000}}'}]
+    expected_text: native skill context
+  - name: v2_file_attachment_visible
+    rows: [{id: msg_v2, row_type: user, data: '{"text":"request","files":[{"data":"aGk=","mime":"text/plain","source":{"type":"inline"},"name":"native-file.txt"}],"time":{"created":1000}}'}]
+    expected_text: native-file.txt
+    forbidden_managed: [aGk=]
+  - name: v2_running_tool_rejects_completed_fields
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_run","name":"read","state":{"status":"running","input":{},"metadata":{},"content":[{"type":"text","text":"output"}]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: unknown field "content"
+  - name: v2_completed_tool_rejects_empty_content
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{},"content":[]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: nonempty content
+  - name: v2_error_tool_requires_error
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_error","name":"read","state":{"status":"error","input":{}},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: requires object input and error
+  - name: v2_streaming_tool_rejects_object_input
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_stream","name":"read","state":{"status":"streaming","input":{}},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: cannot unmarshal object
+  - name: v2_running_tool_rejects_missing_metadata
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_run","name":"read","state":{"status":"running","input":{}},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    error_contains: requires object input and metadata
+  - name: v2_shell_rejects_mixed_identity
+    rows: [{id: msg_v2, row_type: shell, data: '{"shellID":"sh_native","callID":"call_other","command":"pwd","status":"running","time":{"created":1000}}'}]
+    error_contains: unknown field "callID"
+  - name: v2_compaction_failed_rejects_summary
+    rows: [{id: msg_v2, row_type: compaction, data: '{"status":"failed","reason":"auto","summary":"false summary","error":{"type":"error","message":"failure"},"time":{"created":1000}}'}]
+    error_contains: cannot carry summary
+  - name: v2_file_rejects_invalid_base64
+    rows: [{id: msg_v2, row_type: user, data: '{"text":"request","files":[{"data":"not base64!","mime":"text/plain","source":{"type":"inline"}}],"time":{"created":1000}}'}]
+    error_contains: data is not base64
+  - name: v2_retry_requires_error
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"retry":{"attempt":1,"at":1000},"content":[],"time":{"created":1000}}'}]
+    error_contains: required upstream field "error" is absent
+  - name: v2_skill_attachment_requires_id
+    rows: [{id: msg_v2, row_type: user, data: '{"text":"request","skills":[{"name":"review"}],"time":{"created":1000}}'}]
+    error_contains: skill attachment requires id and name
+  - name: v2_shell_running_keeps_partial_output
+    rows: [{id: msg_v2, row_type: shell, data: '{"shellID":"sh_native","command":"pwd","status":"running","output":{"output":"native partial output","cursor":21,"size":21,"truncated":false},"time":{"created":1000}}'}]
+    expected_text: native partial output
+    expected_managed: ['"status":"running"']
+    forbidden_managed: ['"status":"completed"']
+  - name: v2_tool_error_text_output
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_error","name":"read","state":{"status":"error","input":{},"content":[{"type":"text","text":"partial "},{"type":"text","text":"output"}],"error":{"type":"failure","message":"tool failed"}},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: tool failed
+    expected_tool_output: '{"type":"failure","message":"tool failed"}'
+  - name: v2_tool_mixed_output_stays_structured
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"output file"},{"type":"file","uri":"file:///synthetic/result","mime":"text/plain"}]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: output file
+    expected_tool_output: '[{"type":"text","text":"output file"},{"type":"file","uri":"file:///synthetic/result","mime":"text/plain"}]'
+  - name: v2_tool_text_fragments_preserve_boundaries
+    rows: [{id: msg_v2, row_type: assistant, data: '{"agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{},"content":[{"type":"text","text":"first "},{"type":"text","text":"second"}]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: first second
+    expected_tool_output: first second
+  - name: historical_tool_empty_completion
+    rows: [{id: msg_v2, row_type: assistant, data: '{"id":"msg_v2","agent":"build","model":{"id":"model","providerID":"provider"},"content":[{"type":"tool","id":"call_done","name":"read","state":{"status":"completed","input":{"path":"historical request"},"structured":{},"content":[]},"time":{"created":1000}}],"time":{"created":1000}}'}]
+    expected_text: historical request
+    expected_tool_output: '[]'
