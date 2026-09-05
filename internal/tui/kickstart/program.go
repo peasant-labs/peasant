@@ -953,12 +953,11 @@ func (p Program) resolveNextSteps(result *ftue.IngestResult) Program {
 
 // observeProgress records presentation timing from one non-blocking snapshot.
 // An estimate is qualified only after the same positive total is observed twice
-// with monotonic forward progress, for one active non-error stage on a first
-// attempt. The estimate divides the remaining work by the cumulative average
-// rate (total completed over total observed time), never by one tick's
-// instantaneous rate: a single bursty batch would otherwise collapse the
-// display for exactly one frame on every burst. Every unsupported state
-// remains explicit rather than guessed.
+// with monotonic forward progress, for a non-error stage on a first attempt.
+// Totals that move re-anchor the stability baseline without touching the
+// display clock. Only the focused stage computes an estimate — it is the only
+// one ever displayed — so concurrent stages no longer suppress each other.
+// Every unsupported state remains explicit rather than guessed.
 func (p Program) observeProgress(at time.Time) Program {
 	if at.IsZero() {
 		at = p.deps.Clock.Now()
@@ -967,13 +966,7 @@ func (p Program) observeProgress(at time.Time) Program {
 		return p
 	}
 	snapshot := p.deps.Progress.Snapshot()
-	active := 0
-	for _, stage := range ingest.StageOrder {
-		sp := snapshot[stage]
-		if sp.Started && !sp.Ended {
-			active++
-		}
-	}
+	focus, hasFocus := p.progressFocusStage()
 	for _, stage := range ingest.StageOrder {
 		sp := snapshot[stage]
 		if !sp.Started {
@@ -998,28 +991,25 @@ func (p Program) observeProgress(at time.Time) Program {
 			// wall clock on every later tick.
 			continue
 		}
-		if observation.lastTotal == 0 && sp.Total > 0 {
-			// The total just became known: re-baseline the observation so
-			// the next stable positive reading can qualify, instead of
-			// latching unknown-total ineligibility forever. Positive-total
-			// changes below still disqualify permanently.
-			observation.startedAt = at
+
+		observation.estimateValid = false
+		if sp.Total != observation.lastTotal {
+			// The total moved (growth, shrinkage, or unknown-to-known):
+			// re-anchor the stability baseline and wait for the next stable
+			// reading. The display clock (startedAt) is untouched, so stage
+			// times never jump when discovery revises a total.
 			observation.lastAt = at
 			observation.lastDone = sp.Done
 			observation.lastTotal = sp.Total
 			observation.progress = sp
-			observation.estimateEligible = !sp.HasErr && !p.retryAttempt
+			observation.estimateEligible = sp.Total > 0 && !sp.HasErr && !p.retryAttempt
 			p.stageObservations[stage] = observation
 			continue
 		}
-
-		observation.estimateValid = false
-		stableTotal := sp.Total > 0 && sp.Total == observation.lastTotal
-		monotonic := sp.Done >= observation.lastDone
-		if !stableTotal || !monotonic || sp.HasErr || p.retryAttempt {
+		if sp.Total <= 0 || sp.HasErr || p.retryAttempt || sp.Done < observation.lastDone {
 			observation.estimateEligible = false
 		}
-		if observation.estimateEligible && active == 1 && !sp.Ended && sp.Done < sp.Total {
+		if observation.estimateEligible && hasFocus && stage == focus && !sp.Ended && sp.Done < sp.Total {
 			elapsed := at.Sub(observation.startedAt)
 			if elapsed > 0 && sp.Done > 0 {
 				remaining := sp.Total - sp.Done
