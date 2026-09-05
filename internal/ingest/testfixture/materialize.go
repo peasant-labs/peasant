@@ -316,6 +316,11 @@ func applySessionTableLayout(conn *sqlite.Conn, fixtureCase caseSpec) error {
 	if err := sqlitex.Execute(conn, "ALTER TABLE session RENAME TO session_v2", nil); err != nil {
 		return fmt.Errorf("create synthetic v2 session table: %w", err)
 	}
+	if fixtureCase.SessionExtended {
+		if err := sqlitex.ExecuteScript(conn, nativeSessionV2ExtraColumnsSQL, nil); err != nil {
+			return fmt.Errorf("create complete synthetic native v2 column shape: %w", err)
+		}
+	}
 	if fixtureCase.SessionTables == sessionTablesV2 {
 		return nil
 	}
@@ -384,9 +389,35 @@ CREATE TABLE session (
 );
 `
 
-// sessionSchemaWithExtendedSQL mirrors the real OpenCode session table columns
-// the extended record read consumes: the base attribution columns plus the
-// agent label, the five token aggregates, cost, version, slug, and revert.
+// Native v2 column names from anomalyco/opencode commit
+// 52685d451777fbccc99736ab31ffc37de8475a45, packages/opencode/src/session/sql.ts.
+// Unconsumed columns remain empty: their presence tests bounded catalog reads,
+// not adoption of their payload or fork semantics.
+const nativeSessionV2ExtraColumnsSQL = `
+ALTER TABLE session_v2 ADD COLUMN project_id TEXT;
+ALTER TABLE session_v2 ADD COLUMN workspace_id TEXT;
+ALTER TABLE session_v2 ADD COLUMN fork_session_id TEXT;
+ALTER TABLE session_v2 ADD COLUMN fork_boundary TEXT;
+ALTER TABLE session_v2 ADD COLUMN path TEXT;
+ALTER TABLE session_v2 ADD COLUMN share_url TEXT;
+ALTER TABLE session_v2 ADD COLUMN summary_additions INTEGER;
+ALTER TABLE session_v2 ADD COLUMN summary_deletions INTEGER;
+ALTER TABLE session_v2 ADD COLUMN summary_files INTEGER;
+ALTER TABLE session_v2 ADD COLUMN summary_diffs TEXT;
+ALTER TABLE session_v2 ADD COLUMN metadata TEXT;
+ALTER TABLE session_v2 ADD COLUMN permission TEXT;
+ALTER TABLE session_v2 ADD COLUMN model TEXT;
+ALTER TABLE session_v2 ADD COLUMN time_idle INTEGER;
+ALTER TABLE session_v2 ADD COLUMN time_viewed INTEGER;
+ALTER TABLE session_v2 ADD COLUMN idle_outcome TEXT;
+ALTER TABLE session_v2 ADD COLUMN time_compacting INTEGER;
+ALTER TABLE session_v2 ADD COLUMN time_archived INTEGER;
+ALTER TABLE session_v2 ADD COLUMN time_suspended INTEGER;
+ALTER TABLE session_v2 ADD COLUMN resume_attempts INTEGER NOT NULL DEFAULT 0;
+`
+
+// sessionSchemaWithExtendedSQL contains the columns consumed by the extended
+// metadata read; native v2 fixtures add the remaining public column names.
 const sessionSchemaWithExtendedSQL = `
 CREATE TABLE session (
   id TEXT PRIMARY KEY,

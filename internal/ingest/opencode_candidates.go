@@ -18,6 +18,7 @@ const (
 	openCodeSQLiteHeader           = "SQLite format 3\x00"
 	openCodeCatalogRowLimit        = 256
 	openCodeColumnRowLimit         = 32
+	openCodeSessionColumnRowLimit  = 64
 	openCodeIndexRowLimit          = 64
 )
 
@@ -329,20 +330,36 @@ type OpenCodeIndexEvidence struct {
 // transcript payloads, session rows, migration history, or event data.
 type OpenCodeSchemaEvidence struct {
 	Tables                []string
+	SessionColumns        []OpenCodeColumnEvidence
+	SessionV2Columns      []OpenCodeColumnEvidence
 	LegacyMessageColumns  []OpenCodeColumnEvidence
 	LegacyPartColumns     []OpenCodeColumnEvidence
 	CurrentMessageColumns []OpenCodeColumnEvidence
 	CurrentIndexes        []OpenCodeIndexEvidence
 }
 
+// OpenCodeSessionV2Layout reports structural evidence independently of the
+// transcript representation. The zero value means catalog inspection failed.
+type OpenCodeSessionV2Layout string
+
+const (
+	OpenCodeSessionV2Absent      OpenCodeSessionV2Layout = "absent"
+	OpenCodeSessionV2Supported   OpenCodeSessionV2Layout = "supported"
+	OpenCodeSessionV2Unsupported OpenCodeSessionV2Layout = "unsupported"
+)
+
 // OpenCodeProbeResult is the complete, non-ingestible observation for one
 // candidate. Candidate failures do not prevent later candidates from probing.
 type OpenCodeProbeResult struct {
-	Candidate   OpenCodeCandidate
-	Capability  OpenCodeSchemaCapability
-	Support     OpenCodeSchemaSupport
-	Evidence    OpenCodeSchemaEvidence
-	Diagnostics []OpenCodeProbeDiagnostic
+	V2Layout OpenCodeSessionV2Layout
+	// SessionTable is the authority actually read during discovery, including a
+	// read that failed after selection. Zero means none was selected.
+	SessionTable OpenCodeSessionTable
+	Candidate    OpenCodeCandidate
+	Capability   OpenCodeSchemaCapability
+	Support      OpenCodeSchemaSupport
+	Evidence     OpenCodeSchemaEvidence
+	Diagnostics  []OpenCodeProbeDiagnostic
 }
 
 // OpenCodeEnvironmentLookup keeps environment access injectable.
@@ -540,6 +557,13 @@ func (p *OpenCodeCandidateProber) probeCandidate(ctx context.Context, candidate 
 		return failedOpenCodeProbe(result, OpenCodeSupportUnreadable, OpenCodeProbeCatalog, "bounded SQLite catalog inspection failed", joined.Error(), candidate.Path, "while reading explicit schema catalog columns", "schema capability is incomplete and the candidate is not ingestible", "verify source readability and retry; do not migrate, checkpoint, or repair it through Peasant")
 	}
 	result.Evidence = evidence
+	result.V2Layout = OpenCodeSessionV2Absent
+	if len(evidence.SessionV2Columns) > 0 {
+		result.V2Layout = OpenCodeSessionV2Unsupported
+		if openCodeSessionColumns(OpenCodeSessionTableV2, evidence.SessionV2Columns).hasID {
+			result.V2Layout = OpenCodeSessionV2Supported
+		}
+	}
 	result.Capability, result.Support = classifyOpenCodeEvidence(evidence)
 	if err := result.Support.Validate(); err != nil {
 		return failedOpenCodeProbe(result, OpenCodeSupportUnsupported, OpenCodeProbeCatalog, "schema support classification is invalid", err.Error(), candidate.Path, "after bounded catalog inspection", "the candidate cannot be trusted or ingested", "report the unsupported classification and update the typed implementation")

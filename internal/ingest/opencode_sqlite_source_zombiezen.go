@@ -20,6 +20,7 @@ const (
 	openCodeReadQueryOnlyStatement           = "PRAGMA query_only"
 	openCodeCatalogTablesStatement           = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name LIMIT 257"
 	openCodeCatalogColumnsStatement          = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 33"
+	openCodeSessionCatalogColumnsStatement   = "SELECT name, \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid LIMIT 65"
 	openCodeCatalogIndexesStatement          = "SELECT il.name, il.\"unique\", il.partial, xi.seqno, xi.cid, xi.name, xi.desc, xi.coll, xi.key FROM pragma_index_list(?1) AS il JOIN pragma_index_xinfo(il.name) AS xi ORDER BY il.name, xi.seqno LIMIT 65"
 	openCodeLegacySessionsFirstStatement     = "SELECT DISTINCT session_id FROM message ORDER BY session_id LIMIT ?1"
 	openCodeLegacySessionsAfterStatement     = "SELECT DISTINCT session_id FROM message WHERE session_id > ?1 ORDER BY session_id LIMIT ?2"
@@ -727,7 +728,7 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 		}
 	}
 	if err != nil || lease.ctx.Err() != nil {
-		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, projection, "supported OpenCode session")
+		return page, s.sourceReadError(lease.ctx, "read bounded session record page", err, projection, "supported OpenCode session metadata")
 	}
 	// The shared bounded page counts every row seen, valid or skipped, so dropped
 	// rows never shrink a page below its bound and hide later sessions.
@@ -1587,6 +1588,18 @@ func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (Open
 	sort.Strings(evidence.Tables)
 
 	var err error
+	if tables["session"] {
+		evidence.SessionColumns, err = s.columnsLocked(ctx, "session")
+		if err != nil {
+			return evidence, err
+		}
+	}
+	if tables["session_v2"] {
+		evidence.SessionV2Columns, err = s.columnsLocked(ctx, "session_v2")
+		if err != nil {
+			return evidence, err
+		}
+	}
 	if tables["message"] {
 		evidence.LegacyMessageColumns, err = s.columnsLocked(ctx, "message")
 		if err != nil {
@@ -1615,8 +1628,13 @@ func (s *zombiezenOpenCodeSQLiteSource) catalogLocked(ctx context.Context) (Open
 func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table string) ([]OpenCodeColumnEvidence, error) {
 	columns := make([]OpenCodeColumnEvidence, 0)
 	overflow := false
-	err := s.executeRowsLocked(ctx, openCodeCatalogColumnsStatement, []any{table}, func(stmt *sqlite.Stmt) error {
-		if len(columns) == openCodeColumnRowLimit {
+	limit := openCodeColumnRowLimit
+	sessionMetadata := table == string(OpenCodeSessionTableLegacy) || table == string(OpenCodeSessionTableV2)
+	if sessionMetadata {
+		limit = openCodeSessionColumnRowLimit
+	}
+	decode := func(stmt *sqlite.Stmt) error {
+		if len(columns) == limit {
 			overflow = true
 			return nil
 		}
@@ -1626,12 +1644,18 @@ func (s *zombiezenOpenCodeSQLiteSource) columnsLocked(ctx context.Context, table
 			Primary: stmt.ColumnInt64(2) != 0,
 		})
 		return nil
-	})
+	}
+	var err error
+	if sessionMetadata {
+		err = s.executeRowsLocked(ctx, openCodeSessionCatalogColumnsStatement, []any{table}, decode)
+	} else {
+		err = s.executeRowsLocked(ctx, openCodeCatalogColumnsStatement, []any{table}, decode)
+	}
 	if err != nil {
-		return columns, fmt.Errorf("read pragma_table_info explicit columns for %q with %d-row retained limit: %w", table, openCodeColumnRowLimit, err)
+		return columns, fmt.Errorf("read pragma_table_info explicit columns for %q with %d-row retained limit: %w", table, limit, err)
 	}
 	if overflow {
-		return columns, &OpenCodeCatalogOverflowError{Scope: OpenCodeCatalogColumns, Table: table, Limit: openCodeColumnRowLimit}
+		return columns, &OpenCodeCatalogOverflowError{Scope: OpenCodeCatalogColumns, Table: table, Limit: limit}
 	}
 	return columns, nil
 }

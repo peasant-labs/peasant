@@ -164,6 +164,8 @@ table_column_mutations:
     statement: 'select aggregate_id, seq, data from event_sequence order by aggregate_id limit ?1'
     forbidden_column: data
 allowed_query_statements:
+  - name: session-catalog-columns
+    statement: 'select name, "notnull", pk from pragma_table_info(?1) order by cid limit 65'
   - name: session-v2-records-first
     statement: 'select id, parent_id, time_updated from session_v2 order by id limit ?1'
   - name: session-v2-records-after

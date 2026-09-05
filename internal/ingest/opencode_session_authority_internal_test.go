@@ -1,9 +1,12 @@
 package ingest
 
 import (
+	"context"
 	_ "embed"
+	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
@@ -22,16 +25,22 @@ type sessionAuthorityFixture struct {
 }
 
 type sessionAuthorityCase struct {
-	Name          string   `yaml:"name"`
-	Fixture       string   `yaml:"fixture"`
-	Setup         string   `yaml:"setup"`
-	AfterRead     string   `yaml:"after_read"`
-	Table         string   `yaml:"table"`
-	RecordIDs     []string `yaml:"record_ids"`
-	PresentIDs    []string `yaml:"present_ids"`
-	DiscoveredIDs []string `yaml:"discovered_ids"`
-	Title         string   `yaml:"title"`
-	Skipped       bool     `yaml:"skipped"`
+	RequiredColumns    []string `yaml:"required_columns"`
+	CatalogColumns     int      `yaml:"catalog_columns"`
+	CatalogOverflow    bool     `yaml:"catalog_overflow"`
+	V2Layout           string   `yaml:"v2_layout"`
+	DiagnosticContains string   `yaml:"diagnostic_contains"`
+	FailRead           bool     `yaml:"fail_read"`
+	Name               string   `yaml:"name"`
+	Fixture            string   `yaml:"fixture"`
+	Setup              string   `yaml:"setup"`
+	AfterRead          string   `yaml:"after_read"`
+	Table              string   `yaml:"table"`
+	RecordIDs          []string `yaml:"record_ids"`
+	PresentIDs         []string `yaml:"present_ids"`
+	DiscoveredIDs      []string `yaml:"discovered_ids"`
+	Title              string   `yaml:"title"`
+	Skipped            bool     `yaml:"skipped"`
 }
 
 func loadSessionAuthorityFixtures(t *testing.T) []sessionAuthorityCase {
@@ -93,6 +102,15 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = source.Close(t.Context()) }()
+			if c.CatalogOverflow {
+				_, err := source.Catalog(t.Context())
+				var overflow *OpenCodeCatalogOverflowError
+				if !errors.As(err, &overflow) || overflow.Scope != OpenCodeCatalogColumns || overflow.Table != "session_v2" || overflow.Limit != 64 {
+					t.Fatalf("metadata column overflow = %v, want session_v2 retained limit 64", err)
+				}
+				testfixture.AssertUnchanged(t, materialized, before)
+				return
+			}
 			pageSize, err := NewOpenCodeCurrentPageSize(1)
 			if err != nil {
 				t.Fatal(err)
@@ -135,7 +153,18 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := NewOpenCodeAdapter(&OSFileSystem{}, nil, salt.Salt{})
+			filesystem := &OSFileSystem{}
+			opener := func(ctx context.Context, path OpenCodeSQLiteSourcePath, options OpenCodeSQLiteSourceOptions) (OpenCodeSQLiteSource, error) {
+				opened, openErr := OpenOpenCodeSQLiteSource(ctx, path, options)
+				if openErr != nil || !c.FailRead {
+					return opened, openErr
+				}
+				return metadataReadFailingSource{OpenCodeSQLiteSource: opened}, nil
+			}
+			adapter, err := NewOpenCodeAdapterWithCandidateProbe(filesystem, nil, salt.Salt{}, "latest", canonicalTieEnvironment{}, filesystem, opener, DefaultOpenCodeSQLiteSourceOptions())
+			if err != nil {
+				t.Fatal(err)
+			}
 			discovered, err := adapter.Discover(t.Context(), SourceConfig{Enabled: true, Paths: []ResolvedPath{root}})
 			if err != nil {
 				t.Fatal(err)
@@ -148,6 +177,7 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 				}
 			}
 			assertSessionAuthorityIDs(t, "discovery", discoveredIDs, c.DiscoveredIDs)
+			assertSessionAuthorityEvidence(t, adapter, materialized.Path, c)
 			testfixture.AssertUnchanged(t, materialized, before)
 			if c.AfterRead != "" {
 				applySessionAuthoritySetup(t, materialized, c.AfterRead)
@@ -160,6 +190,64 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 			}
 		})
 	}
+}
+
+type metadataReadFailingSource struct{ OpenCodeSQLiteSource }
+
+func (s metadataReadFailingSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
+	page, err := s.OpenCodeSQLiteSource.SessionRecords(ctx, request)
+	if err != nil {
+		return page, err
+	}
+	return OpenCodeSessionRecordPage{Table: page.Table}, errors.New("synthetic authoritative metadata read failed")
+}
+
+func assertSessionAuthorityEvidence(t *testing.T, adapter *OpenCodeAdapter, path string, c sessionAuthorityCase) {
+	t.Helper()
+	for _, result := range adapter.CandidateEvidence() {
+		if result.Candidate.Path != path {
+			continue
+		}
+		if string(result.SessionTable) != c.Table || string(result.V2Layout) != c.V2Layout {
+			t.Fatalf("selected table/layout = %q/%q, want %q/%q", result.SessionTable, result.V2Layout, c.Table, c.V2Layout)
+		}
+		if c.V2Layout != "absent" && len(result.Evidence.SessionV2Columns) == 0 {
+			t.Fatal("v2 catalog evidence missing")
+		}
+		if c.CatalogColumns != 0 && len(result.Evidence.SessionV2Columns) != c.CatalogColumns {
+			t.Fatalf("metadata catalog retained %d columns, want boundary %d", len(result.Evidence.SessionV2Columns), c.CatalogColumns)
+		}
+		if len(c.RequiredColumns) > 0 {
+			columns := map[string]bool{}
+			for _, column := range result.Evidence.SessionV2Columns {
+				columns[column.Name] = true
+			}
+			assertSessionAuthorityIDs(t, "native metadata columns", columns, c.RequiredColumns)
+		}
+		if c.Table == "session" && len(result.Evidence.SessionColumns) == 0 {
+			t.Fatal("legacy catalog evidence missing")
+		}
+		found := c.DiagnosticContains == ""
+		for _, diagnostic := range result.Diagnostics {
+			if strings.Contains(diagnostic.What, c.DiagnosticContains) {
+				found = true
+			}
+			if diagnostic.Meaning == "" || diagnostic.Remediation == "" {
+				t.Fatalf("diagnostic lacks actionable outcome: %+v", diagnostic)
+			}
+			if strings.Contains(diagnostic.Meaning, "sessions from this candidate were skipped") {
+				t.Fatalf("metadata diagnostic misrepresents retention: %+v", diagnostic)
+			}
+			if strings.Contains(diagnostic.What+diagnostic.Why, "native user question") {
+				t.Fatal("diagnostic leaked transcript payload")
+			}
+		}
+		if !found {
+			t.Fatalf("missing diagnostic containing %q: %+v", c.DiagnosticContains, result.Diagnostics)
+		}
+		return
+	}
+	t.Fatal("source catalog evidence missing")
 }
 
 func assertSessionAuthorityIDs(t *testing.T, kind string, actual map[string]bool, expected []string) {
