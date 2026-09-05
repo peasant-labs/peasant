@@ -957,7 +957,10 @@ func (p Program) resolveNextSteps(result *ftue.IngestResult) Program {
 // Totals that move re-anchor the stability baseline without touching the
 // display clock. Only the focused stage computes an estimate — it is the only
 // one ever displayed — so concurrent stages no longer suppress each other.
-// Every unsupported state remains explicit rather than guessed.
+// The estimate divides the remaining work by the recent windowed rate, never
+// by one tick's instantaneous flash (which collapses on a bursty batch) nor
+// by the lifetime average (which a fast start anchors forever). Every
+// unsupported state remains explicit rather than guessed.
 func (p Program) observeProgress(at time.Time) Program {
 	if at.IsZero() {
 		at = p.deps.Clock.Now()
@@ -982,6 +985,7 @@ func (p Program) observeProgress(at time.Time) Program {
 				progress:         sp,
 				estimateEligible: sp.Total > 0 && !sp.HasErr && !p.retryAttempt,
 			}
+			observation = recordRateSample(observation, at, sp.Done)
 			p.stageObservations[stage] = observation
 			continue
 		}
@@ -1003,17 +1007,17 @@ func (p Program) observeProgress(at time.Time) Program {
 			observation.lastTotal = sp.Total
 			observation.progress = sp
 			observation.estimateEligible = sp.Total > 0 && !sp.HasErr && !p.retryAttempt
+			observation = recordRateSample(observation, at, sp.Done)
 			p.stageObservations[stage] = observation
 			continue
 		}
 		if sp.Total <= 0 || sp.HasErr || p.retryAttempt || sp.Done < observation.lastDone {
 			observation.estimateEligible = false
 		}
+		observation = recordRateSample(observation, at, sp.Done)
 		if observation.estimateEligible && hasFocus && stage == focus && !sp.Ended && sp.Done < sp.Total {
-			elapsed := at.Sub(observation.startedAt)
-			if elapsed > 0 && sp.Done > 0 {
-				remaining := sp.Total - sp.Done
-				observation.estimate = time.Duration(int64(elapsed) * int64(remaining) / int64(sp.Done))
+			if rate, ok := windowRate(observation.samples); ok {
+				observation.estimate = time.Duration(float64(sp.Total-sp.Done) / rate * float64(time.Second))
 				observation.estimateValid = observation.estimate >= 0
 			}
 		}

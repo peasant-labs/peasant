@@ -65,7 +65,7 @@ progress:
         stages:
           - {stage: EXTRACT+WRITE, started: true, done: 4, total: 10}
           - {stage: INDEX, started: true, done: 3, total: 10}
-    wantContains: ['extract+write', '4/10', 'index', '3/10', 'estimate: 5s']
+    wantContains: ['extract+write', '4/10', 'index', '3/10', 'estimate: 7s']
   - name: failed-stage
     observations:
       - advanceSeconds: 0
@@ -148,10 +148,10 @@ progress:
         stages:
           - {stage: EXTRACT+WRITE, started: true, done: 6, total: 10}
           - {stage: INDEX, started: true, done: 3, total: 10}
-    wantContains: ['extract+write', '6/10', 'index', '3/10', 'estimate: 7s']
+    wantContains: ['extract+write', '6/10', 'index', '3/10', 'estimate: 11s']
     wantFocusStage: INDEX
     wantFocusElapsed: 'total elapsed: 5s'
-    wantFocusEstimate: 'estimate: 7s'
+    wantFocusEstimate: 'estimate: 11s'
   - name: latest-failure-wins-over-active-and-completed
     focusProbe: failed-before-active
     observations:
