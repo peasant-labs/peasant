@@ -951,7 +951,11 @@ func (p Program) resolveNextSteps(result *ftue.IngestResult) Program {
 // observeProgress records presentation timing from one non-blocking snapshot.
 // An estimate is qualified only after the same positive total is observed twice
 // with monotonic forward progress, for one active non-error stage on a first
-// attempt. Every unsupported state remains explicit rather than guessed.
+// attempt. The estimate divides the remaining work by the cumulative average
+// rate (total completed over total observed time), never by one tick's
+// instantaneous rate: a single bursty batch would otherwise collapse the
+// display for exactly one frame on every burst. Every unsupported state
+// remains explicit rather than guessed.
 func (p Program) observeProgress(at time.Time) Program {
 	if at.IsZero() {
 		at = p.deps.Clock.Now()
@@ -985,6 +989,12 @@ func (p Program) observeProgress(at time.Time) Program {
 			p.stageObservations[stage] = observation
 			continue
 		}
+		if observation.progress.Ended {
+			// Terminal state is immutable: keep the first ended snapshot so
+			// the elapsed clock stops at completion instead of tracking the
+			// wall clock on every later tick.
+			continue
+		}
 
 		observation.estimateValid = false
 		stableTotal := sp.Total > 0 && sp.Total == observation.lastTotal
@@ -992,14 +1002,13 @@ func (p Program) observeProgress(at time.Time) Program {
 		if !stableTotal || !monotonic || sp.HasErr || p.retryAttempt {
 			observation.estimateEligible = false
 		}
-		advanced := sp.Done > observation.lastDone
-		interval := at.Sub(observation.lastAt)
-		if observation.estimateEligible && active == 1 && advanced && interval > 0 &&
-			!sp.Ended && sp.Done < sp.Total {
-			remaining := sp.Total - sp.Done
-			delta := sp.Done - observation.lastDone
-			observation.estimate = time.Duration(int64(interval) * int64(remaining) / int64(delta))
-			observation.estimateValid = observation.estimate >= 0
+		if observation.estimateEligible && active == 1 && !sp.Ended && sp.Done < sp.Total {
+			elapsed := at.Sub(observation.startedAt)
+			if elapsed > 0 && sp.Done > 0 {
+				remaining := sp.Total - sp.Done
+				observation.estimate = time.Duration(int64(elapsed) * int64(remaining) / int64(sp.Done))
+				observation.estimateValid = observation.estimate >= 0
+			}
 		}
 		observation.lastAt = at
 		observation.lastDone = sp.Done
@@ -1278,33 +1287,36 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		now = p.attemptStarted
 	}
 	focus, hasFocus := p.progressFocusStage()
-	// One group per pipeline stage, upfront, started or not, so the full
-	// scope of the import is visible before any stage begins — the same
-	// upfront matrix the harvest renderer shows. Unobserved stages render
-	// from the zero progress: not-started icon, empty bar, no count, and no
-	// time line. Observed stages carry their own elapsed line under the bar.
-	type stageGroup struct {
-		bar   string
-		time  string
-		focus bool
-	}
-	groups := make([]stageGroup, 0, len(ingest.StageOrder))
+	// One row per pipeline stage, upfront, started or not, so the full scope
+	// of the import is visible before any stage begins — the same upfront
+	// matrix the harvest renderer shows. Unobserved stages render from the
+	// zero progress: not-started icon, empty bar, no count, no duration.
+	// Observed stages carry their elapsed duration right of the counts, in a
+	// column the matrix aligns across all rows.
+	rows := make([]kit.ProgressRow, 0, len(ingest.StageOrder))
+	focusIdx := -1
 	for _, stage := range ingest.StageOrder {
 		sp := ingest.StageProgress{}
-		group := stageGroup{focus: hasFocus && stage == focus}
+		row := kit.ProgressRow{Label: strings.ToLower(stage.String())}
 		if observation, ok := p.stageObservations[stage]; ok && observation.progress.Started {
 			sp = observation.progress
 			end := now
 			if sp.Ended && observation.lastAt.Before(end) {
 				end = observation.lastAt
 			}
-			group.time = styles.Muted.Render("  time elapsed: " + displayDuration(end.Sub(observation.startedAt)))
+			row.Elapsed = displayDuration(end.Sub(observation.startedAt))
 		}
-		// The row matches the harvest TTY bar exactly; only the stage name
-		// stays lowercase per the lowercase-chrome rule.
-		group.bar = styles.Base.Render(
-			kit.ProgressBar(strings.ToLower(stage.String()), sp.Done, sp.Total, sp.Ended, sp.HasErr))
-		groups = append(groups, group)
+		row.Done, row.Total, row.Ended, row.HasErr = sp.Done, sp.Total, sp.Ended, sp.HasErr
+		if hasFocus && stage == focus {
+			focusIdx = len(rows)
+		}
+		rows = append(rows, row)
+	}
+	// The rows match the harvest TTY bars exactly; only the stage names stay
+	// lowercase per the lowercase-chrome rule.
+	lines := make([]string, 0, len(rows))
+	for _, line := range kit.ProgressMatrix(rows) {
+		lines = append(lines, styles.Base.Render(line))
 	}
 	// Trailing roll-up below the whole matrix: the whole-run total always,
 	// plus the focused stage estimate, unavailable before anything starts.
@@ -1317,68 +1329,42 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 			detail[1] = styles.Muted.Render("  estimate: " + displayDuration(observation.estimate))
 		}
 	}
-	available := p.height - reservedLines
-	lineCount := func() int {
-		n := len(groups) + len(detail)
-		for _, group := range groups {
-			if group.time != "" {
-				n++
-			}
-		}
-		return n
-	}
-	// Shed per-bar times oldest-first; bars and the trailing roll-up always
-	// win over per-bar times.
-	for i := range groups {
-		if p.height <= 0 || lineCount() <= available {
-			break
-		}
-		groups[i].time = ""
-	}
-	var lines []string
-	for _, group := range groups {
-		lines = append(lines, group.bar)
-		if group.time != "" {
-			lines = append(lines, group.time)
-		}
-	}
 	lines = append(lines, detail...)
+	available := p.height - reservedLines
 	if p.height > 0 && len(lines) > available {
 		if available <= 0 {
 			return nil
 		}
-		// Degenerate terminal: select bars newest-first, always keeping the
-		// focus bar, and keep the trailing roll-up only when it still fits.
-		// The roll-up is trimmed before its bar, so detail never survives
+		// Degenerate terminal: select rows newest-first, always keeping the
+		// focus row, and keep the trailing roll-up only when it still fits.
+		// The roll-up is trimmed before its row, so detail never survives
 		// without the stage it describes.
 		selected := map[int]bool{}
 		used := 0
-		for gi := range groups {
-			if groups[gi].focus && used+1 <= available {
-				selected[gi] = true
-				used++
-			}
+		if focusIdx >= 0 && used+1 <= available {
+			selected[focusIdx] = true
+			used++
 		}
 		useDetail := used+len(detail) <= available
 		if useDetail {
 			used += len(detail)
 		}
-		for gi := len(groups) - 1; gi >= 0; gi-- {
-			if selected[gi] {
+		for ri := len(rows) - 1; ri >= 0; ri-- {
+			if selected[ri] {
 				continue
 			}
 			if used+1 > available {
 				break
 			}
-			selected[gi] = true
+			selected[ri] = true
 			used++
 		}
 		var window []string
-		for gi, group := range groups {
-			if !selected[gi] {
+		for ri := range rows {
+			if !selected[ri] {
 				continue
 			}
-			window = append(window, group.bar)
+			window = append(window, lines[ri])
 		}
 		if useDetail {
 			window = append(window, detail...)

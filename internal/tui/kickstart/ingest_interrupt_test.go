@@ -89,10 +89,24 @@ func TestProgram_IngestCtrlCCancelsAndQuits(t *testing.T) {
 	ingestCtx := awaitIngestStart(t, started)
 
 	view := stripRender(p.View())
-	for _, want := range []string{"importing transcripts", "local import progress", "discover", "1/4", "█", "time elapsed:", "ctrl+c to quit"} {
+	for _, want := range []string{"importing transcripts", "local import progress", "discover", "1/4", "█", "ctrl+c to quit"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("local import view omits %q:\n%s", want, view)
 		}
+	}
+	// The started stage carries its elapsed duration on its own bar row,
+	// right of the counts.
+	discoverRow := ""
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "discover") {
+			discoverRow = strings.TrimSpace(line)
+		}
+	}
+	if discoverRow == "" {
+		t.Fatalf("local import view omits the discover bar row:\n%s", view)
+	}
+	if !strings.Contains(discoverRow, "1/4  ") {
+		t.Errorf("discover row omits the duration column after its counts in %q", discoverRow)
 	}
 
 	p, quit := p.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})

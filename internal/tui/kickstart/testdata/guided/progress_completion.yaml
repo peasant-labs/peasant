@@ -1,4 +1,4 @@
-expectedProgressCount: 11
+expectedProgressCount: 12
 expectedFocusPriorityCount: 3
 expectedLatestActiveFocusCount: 1
 expectedFailedFocusCount: 1
@@ -12,6 +12,19 @@ progress:
         stages: [{stage: DISCOVER, started: true, done: 4, total: 10}]
     wantContains: ['discover', '4/10', 'total elapsed: 2s', 'estimate: 3s']
     wantMissing: [estimate unavailable]
+  - name: bursty-progress-smooths-estimate
+    observations:
+      - advanceSeconds: 0
+        stages: [{stage: DISCOVER, started: true, done: 0, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 10, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 12, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 90, total: 100}]
+      - advanceSeconds: 1
+        stages: [{stage: DISCOVER, started: true, done: 92, total: 100}]
+    wantContains: ['discover', '92/100', 'estimate: 0s']
   - name: unknown-total
     observations:
       - advanceSeconds: 0
