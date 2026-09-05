@@ -13,9 +13,10 @@ func TestEstimatorUsesFullHistoryWhenYoung(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, time.September, 5, 12, 0, 0, 0, time.UTC)
 	estimator := kit.NewEstimator(5 * time.Second)
-	estimator.Observe(start, 0)
-	estimator.Observe(start.Add(2*time.Second), 4)
-	eta, ok := estimator.ETA(10, 4)
+	if _, ok := estimator.Estimate(start, 0, 10); ok {
+		t.Error("ETA with a single sample must be invalid")
+	}
+	eta, ok := estimator.Estimate(start.Add(2*time.Second), 4, 10)
 	if !ok || eta != 3*time.Second {
 		t.Errorf("ETA = %v, %t; want 3s, true", eta, ok)
 	}
@@ -28,30 +29,32 @@ func TestEstimatorAgesOutFastStarts(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, time.September, 5, 12, 0, 0, 0, time.UTC)
 	estimator := kit.NewEstimator(5 * time.Second)
-	estimator.Observe(start, 0)
-	estimator.Observe(start.Add(4*time.Second), 8)
-	estimator.Observe(start.Add(9*time.Second), 10)
-	eta, ok := estimator.ETA(20, 10)
+	estimator.Estimate(start, 0, 20)
+	estimator.Estimate(start.Add(4*time.Second), 8, 20)
+	eta, ok := estimator.Estimate(start.Add(9*time.Second), 10, 20)
 	if !ok || eta != 25*time.Second {
 		t.Errorf("ETA = %v, %t; want 25s, true", eta, ok)
 	}
 }
 
-// TestEstimatorRefusesStallAndSingleSample proves no estimate without
-// observed forward progress over a positive span.
-func TestEstimatorRefusesStallAndSingleSample(t *testing.T) {
+// TestEstimatorRefusesStallAndFinishedWork proves no estimate without
+// observed forward progress over a positive span, or when nothing remains.
+func TestEstimatorRefusesStallAndFinishedWork(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, time.September, 5, 12, 0, 0, 0, time.UTC)
 	estimator := kit.NewEstimator(5 * time.Second)
-	if _, ok := estimator.ETA(10, 0); ok {
-		t.Error("ETA with no samples must be invalid")
+	if _, ok := estimator.Estimate(start, 0, 10); ok {
+		t.Error("ETA with no history must be invalid")
 	}
-	estimator.Observe(start, 4)
-	if _, ok := estimator.ETA(10, 4); ok {
-		t.Error("ETA with a single sample must be invalid")
-	}
-	estimator.Observe(start.Add(2*time.Second), 4)
-	if _, ok := estimator.ETA(10, 4); ok {
+	estimator2 := kit.NewEstimator(5 * time.Second)
+	estimator2.Estimate(start, 4, 10)
+	estimator2.Estimate(start.Add(2*time.Second), 4, 10)
+	if _, ok := estimator2.Estimate(start.Add(4*time.Second), 4, 10); ok {
 		t.Error("ETA with stalled progress must be invalid")
+	}
+	estimator3 := kit.NewEstimator(5 * time.Second)
+	estimator3.Estimate(start, 10, 10)
+	if _, ok := estimator3.Estimate(start.Add(time.Second), 10, 10); ok {
+		t.Error("ETA with nothing remaining must be invalid")
 	}
 }
