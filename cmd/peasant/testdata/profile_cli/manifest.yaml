@@ -2,6 +2,10 @@ requiredNames:
   - profile_json_only
   - profile_json_plus_trace
   - profile_summary_output
+  - profile_summary_no_metrics
+  - profile_summary_root_only
+  - profile_summary_child_stages
+  - profile_summary_root_and_children
   - profile_quiet_mode
   - profile_json_mode
   - profile_verbose_mode
