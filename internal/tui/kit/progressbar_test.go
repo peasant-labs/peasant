@@ -39,19 +39,22 @@ func TestProgressMatrixAlignsDurations(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("matrix rendered %d rows, want 3", len(lines))
 	}
-	first := strings.Index(lines[0], "0s")
-	last := strings.Index(lines[2], "8s")
-	if first < 0 || first != last {
-		t.Errorf("durations start at columns %d and %d, want one aligned column:\n%s", first, last, strings.Join(lines, "\n"))
+	first := lines[0].Bar + "  " + lines[0].Elapsed
+	last := lines[2].Bar + "  " + lines[2].Elapsed
+	if a, b := strings.Index(first, "0s"), strings.Index(last, "8s"); a < 0 || a != b {
+		t.Errorf("durations start at columns %d and %d, want one aligned column:\n%s\n%s", a, b, first, last)
+	}
+	if lines[1].Elapsed != "" {
+		t.Errorf("duration-less row carries %q", lines[1].Elapsed)
 	}
 	// Duration-less rows pad the count cell for alignment; trimming that
 	// pad must recover the legacy single-row rendering exactly.
-	if wantDiff := kit.ProgressBar("diff", 0, 0, false, false); strings.TrimRight(lines[1], " ") != strings.TrimRight(wantDiff, " ") {
-		t.Errorf("duration-less row %q does not match the legacy row %q", lines[1], wantDiff)
+	if wantDiff := kit.ProgressBar("diff", 0, 0, false, false); strings.TrimRight(lines[1].Bar, " ") != strings.TrimRight(wantDiff, " ") {
+		t.Errorf("duration-less row %q does not match the legacy row %q", lines[1].Bar, wantDiff)
 	}
 	for _, line := range lines {
-		if !strings.Contains(line, "░") && !strings.Contains(line, "█") {
-			t.Errorf("matrix row lost its bar cells in %q", line)
+		if !strings.Contains(line.Bar, "░") && !strings.Contains(line.Bar, "█") {
+			t.Errorf("matrix row lost its bar cells in %q", line.Bar)
 		}
 	}
 }

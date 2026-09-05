@@ -1313,10 +1313,15 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 		rows = append(rows, row)
 	}
 	// The rows match the harvest TTY bars exactly; only the stage names stay
-	// lowercase per the lowercase-chrome rule.
+	// lowercase per the lowercase-chrome rule. The duration paints muted,
+	// like the trailing roll-up timings.
 	lines := make([]string, 0, len(rows))
 	for _, line := range kit.ProgressMatrix(rows) {
-		lines = append(lines, styles.Base.Render(line))
+		rendered := styles.Base.Render(line.Bar)
+		if line.Elapsed != "" {
+			rendered += styles.Muted.Render("  " + line.Elapsed)
+		}
+		lines = append(lines, rendered)
 	}
 	// Trailing roll-up below the whole matrix: the whole-run total always,
 	// plus the focused stage estimate, unavailable before anything starts.
