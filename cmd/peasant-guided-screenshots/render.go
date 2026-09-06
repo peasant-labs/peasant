@@ -148,7 +148,7 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 }
 
 func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
-	if capture.State == ingestProgressStateHarvestInline {
+	if capture.State != ingestProgressStateRunning {
 		return renderHarvestInlineCapture(capture)
 	}
 	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("ingest-progress-%02d", index), true)
@@ -197,6 +197,12 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 	model = updated.(ingestprogress.Model)
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
 	updated, _ = model.Update(ingestprogress.TickMsg(started.Add(2 * time.Second)))
+	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
+		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	}
+	if capture.State == ingestProgressStateHarvestCanceled {
+		updated, _ = updated.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(2 * time.Second)})
+	}
 	view := updated.(ingestprogress.Model).View().Content
 	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {
 		return "", fmt.Errorf("inline harvest overflows the capture terminal")

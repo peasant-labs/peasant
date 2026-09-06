@@ -18,7 +18,15 @@ const (
 )
 
 type TickMsg time.Time
-type StopMsg struct{}
+
+// CancelMsg reports operation cancellation without ending presentation lifetime.
+type CancelMsg struct{}
+
+// StopMsg is sent only after the operation returns. At freezes the final clock.
+type StopMsg struct {
+	Canceled bool
+	At       time.Time
+}
 
 // ProgressSource supplies a non-blocking pipeline snapshot to the inline model.
 type ProgressSource interface {
@@ -33,6 +41,7 @@ type Model struct {
 	lastAnimation time.Time
 	now           time.Time
 	stopped       bool
+	canceling     bool
 	width, height int
 	presentation  Presentation
 	theme         theme.Theme
@@ -48,20 +57,30 @@ func Tick() tea.Cmd                                 { return tea.Tick(TickInterv
 func (m Model) Init() tea.Cmd                       { return Tick() }
 func (m Model) AvailableActions() []keymap.ActionID { return []keymap.ActionID{keymap.ActionQuit} }
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if m.stopped {
+		return m, nil
+	}
 	switch msg := message.(type) {
 	case tea.KeyPressMsg:
 		if action, ok := keymap.Match(keymap.Default(), msg, m); ok && action == keymap.ActionQuit {
 			if m.cancel != nil {
 				m.cancel()
 			}
-			m.stopped = true
-			return m, tea.Quit
+			m.canceling = true
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case StopMsg:
+		m.canceling = m.canceling || msg.Canceled
+		if !msg.At.IsZero() {
+			m.now = msg.At
+		}
+		m.presentation.Observe(m.now, m.state.Snapshot())
 		m.stopped = true
 		return m, tea.Quit
+	case CancelMsg:
+		m.canceling = true
 	case TickMsg:
 		m.now = time.Time(msg)
 		m.presentation.Observe(m.now, m.state.Snapshot())
@@ -74,7 +93,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m Model) View() tea.View {
-	if m.stopped {
+	if m.stopped && !m.canceling {
 		return tea.NewView("")
 	}
 	return tea.NewView(m.Render())
@@ -94,6 +113,13 @@ func (m Model) Render() string {
 		lines = append(lines, styles.Header.Render("local import progress"))
 	}
 	footer := []string{"", styles.Muted.Render("ctrl+c to cancel")}
+	if m.canceling {
+		status := "canceling harvest; waiting for current work to stop"
+		if m.stopped {
+			status = "harvest canceled"
+		}
+		footer[1] = styles.Muted.Render(status)
+	}
 	if m.height == 1 {
 		footer = footer[1:]
 	}

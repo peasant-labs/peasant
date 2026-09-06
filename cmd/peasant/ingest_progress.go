@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,23 +25,25 @@ import (
 //
 //	progState := ingest.NewProgressState()
 //	ctx, cancel := context.WithCancel(ctx)
-//	r := newProgressRenderer(os.Stderr, progState)
-//	go r.Run(ctx)       // tick-based rendering until ctx is cancelled
+//	r := newProgressRenderer(os.Stderr, progState, nil, cancel)
+//	go r.Run(ctx)       // cancellation stays mounted until operation returns
 //	pipeline.Run(ctx)
-//	cancel()            // stop renderer
+//	r.Stop(ctx.Err() != nil)
 //	r.Wait()            // blocks until renderer goroutine exits
 //	r.Clear()           // erase progress lines before printing final summary
 type progressRenderer struct {
-	w      io.Writer
-	input  io.Reader
-	state  *ingest.ProgressState
-	anim   *animation.Animation
-	isTTY  bool
-	theme  theme.Theme
-	wg     sync.WaitGroup
-	cancel context.CancelFunc
-	errMu  sync.Mutex
-	err    error
+	w        io.Writer
+	input    io.Reader
+	state    *ingest.ProgressState
+	anim     *animation.Animation
+	isTTY    bool
+	theme    theme.Theme
+	wg       sync.WaitGroup
+	cancel   context.CancelFunc
+	errMu    sync.Mutex
+	err      error
+	stop     chan bool
+	stopOnce sync.Once
 }
 
 const progressRendererFPS = 24
@@ -69,6 +70,7 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 		anim:  anim,
 		isTTY: isTTY,
 		theme: theme.New(theme.ModeDark),
+		stop:  make(chan bool, 1),
 	}
 	if len(cancel) > 0 {
 		r.cancel = cancel[0]
@@ -84,9 +86,12 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 // without a startup race.
 func (r *progressRenderer) Run(ctx context.Context) {
 	defer r.wg.Done()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if !r.isTTY {
-		// Non-TTY: drain context without rendering.
-		<-ctx.Done()
+		// Operation cancellation is not renderer completion, even without a TTY.
+		<-r.stop
 		return
 	}
 	model := ingestprogress.NewModel(r.state, r.anim, r.theme, time.Now(), r.cancel)
@@ -98,16 +103,27 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		tea.WithoutSignalHandler(),
 	)
 	finished := make(chan struct{})
+	watcherDone := make(chan struct{})
 	go func() {
-		select {
-		case <-ctx.Done():
-			program.Send(ingestprogress.StopMsg{})
-		case <-finished:
+		defer close(watcherDone)
+		operationDone := ctx.Done()
+		for {
+			select {
+			case <-operationDone:
+				program.Send(ingestprogress.CancelMsg{})
+				operationDone = nil
+			case canceled := <-r.stop:
+				program.Send(ingestprogress.StopMsg{Canceled: canceled || ctx.Err() != nil, At: time.Now()})
+				return
+			case <-finished:
+				return
+			}
 		}
 	}()
 	_, err := program.Run()
 	close(finished)
-	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
+	<-watcherDone
+	if err != nil {
 		r.errMu.Lock()
 		r.err = err
 		r.errMu.Unlock()
@@ -116,6 +132,12 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		}
 		fmt.Fprintf(r.w, "warning: harvest progress renderer failed: %v\n", err)
 	}
+}
+
+// Stop acknowledges operation completion. Cancellation alone must not unmount
+// progress while the pipeline is still unwinding.
+func (r *progressRenderer) Stop(canceled bool) {
+	r.stopOnce.Do(func() { r.stop <- canceled })
 }
 
 // Wait blocks until Run has returned.

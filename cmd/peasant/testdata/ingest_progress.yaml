@@ -1,3 +1,9 @@
+lifecycle:
+  required_cases: [raw-key-awaits-acknowledgment, external-context-awaits-acknowledgment, successful-completion]
+  cases:
+    - {name: raw-key-awaits-acknowledgment, key: true}
+    - {name: external-context-awaits-acknowledgment, external: true}
+    - {name: successful-completion}
 interrupt:
   required_cases:
     - raw-control-c
@@ -38,6 +44,10 @@ inline:
     - light-wide
     - short-retains-focus-and-timings
     - one-row-retains-interrupt
+    - canceling-retains-stage-and-clock
+    - canceled-retains-stage-and-clock
+    - short-canceled-retains-timings
+    - one-row-canceling-status
   cases:
     - name: dark-standard
       theme: dark
@@ -63,3 +73,33 @@ inline:
       height: 1
       contains: [ctrl+c to cancel]
       absent: [local import progress, _|||_]
+    - name: canceling-retains-stage-and-clock
+      theme: dark
+      width: 80
+      height: 24
+      cancel: true
+      contains: [local import progress, 4/10, "total elapsed: 8s", canceling harvest]
+      absent: [ctrl+c to cancel, harvest canceled]
+    - name: canceled-retains-stage-and-clock
+      theme: light
+      width: 120
+      height: 40
+      cancel: true
+      stop: true
+      contains: [local import progress, 4/10, "total elapsed: 8s", harvest canceled]
+      absent: [ctrl+c to cancel, canceling harvest]
+    - name: short-canceled-retains-timings
+      theme: dark
+      width: 80
+      height: 6
+      cancel: true
+      stop: true
+      contains: [index, 4/10, "total elapsed: 8s", harvest canceled]
+      absent: [_|||_, ctrl+c to cancel]
+    - name: one-row-canceling-status
+      theme: light
+      width: 80
+      height: 1
+      cancel: true
+      contains: [canceling harvest]
+      absent: [local import progress, _|||_, ctrl+c to cancel]
