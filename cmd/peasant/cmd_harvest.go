@@ -246,8 +246,10 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
-	ctx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
+	ctx, cancelOperation := context.WithCancel(signalCtx)
+	defer cancelOperation()
 	// resolveConfigPath, not the raw flag: reading --config directly returns its
 	// default when unset, so --config-dir was ignored and this command read a
 	// DIFFERENT configuration than the one the user pointed at - including its
@@ -470,14 +472,13 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
 	}
-	renderCtx, stopRenderer := context.WithCancel(context.Background())
-	renderer := newProgressRenderer(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), stopSignals)
+	renderer := newProgressRenderer(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
 	renderer.theme = theme.New(themeModeFor(cfg))
 	if flags.jsonOutput {
 		renderer.isTTY = false
 		renderer.input = nil
 	}
-	go renderer.Run(renderCtx)
+	go renderer.Run(ctx)
 	var restoreLogger func()
 	if renderer.IsTTY() {
 		orig := slog.Default().Handler()
@@ -485,7 +486,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
 	}
 	stopProgress := func() {
-		stopRenderer()
+		renderer.Stop(ctx.Err() != nil)
 		renderer.Wait()
 		renderer.Clear()
 		if restoreLogger != nil {

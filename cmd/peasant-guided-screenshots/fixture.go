@@ -49,12 +49,14 @@ func (t captureTheme) valid() bool {
 type ingestProgressState string
 
 const (
-	ingestProgressStateRunning       ingestProgressState = "running"
-	ingestProgressStateHarvestInline ingestProgressState = "harvest-inline"
+	ingestProgressStateRunning          ingestProgressState = "running"
+	ingestProgressStateHarvestInline    ingestProgressState = "harvest-inline"
+	ingestProgressStateHarvestCanceling ingestProgressState = "harvest-canceling"
+	ingestProgressStateHarvestCanceled  ingestProgressState = "harvest-canceled"
 )
 
 func (s ingestProgressState) valid() bool {
-	return s == ingestProgressStateRunning || s == ingestProgressStateHarvestInline
+	return s == ingestProgressStateRunning || s == ingestProgressStateHarvestInline || s == ingestProgressStateHarvestCanceling || s == ingestProgressStateHarvestCanceled
 }
 
 type guidedSection string
@@ -363,7 +365,7 @@ func validateIngestProgressMatrix(states []ingestProgressStateFixture, captures 
 		}
 		stateRows[state.Key] = state
 	}
-	for _, required := range []ingestProgressState{ingestProgressStateRunning, ingestProgressStateHarvestInline} {
+	for _, required := range []ingestProgressState{ingestProgressStateRunning, ingestProgressStateHarvestInline, ingestProgressStateHarvestCanceling, ingestProgressStateHarvestCanceled} {
 		if stateRows[required].Key == "" {
 			return fmt.Errorf("screenshot fixture omits ingest progress state %q", required)
 		}
@@ -506,7 +508,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
 		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
-		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 2295},
+		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 	}
 	seen := make(map[sheetName]bool, len(sheets))
 	for _, sheet := range sheets {

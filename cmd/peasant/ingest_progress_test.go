@@ -50,6 +50,8 @@ type harvestInterruptCase struct {
 
 type inlineFixture struct {
 	Name     string   `yaml:"name"`
+	Cancel   bool     `yaml:"cancel"`
+	Stop     bool     `yaml:"stop"`
 	Theme    string   `yaml:"theme"`
 	Width    int      `yaml:"width"`
 	Height   int      `yaml:"height"`
@@ -58,6 +60,14 @@ type inlineFixture struct {
 }
 
 type ingestProgressFixtures struct {
+	Lifecycle struct {
+		Required []string `yaml:"required_cases"`
+		Cases    []struct {
+			Name     string `yaml:"name"`
+			Key      bool   `yaml:"key"`
+			External bool   `yaml:"external"`
+		} `yaml:"cases"`
+	} `yaml:"lifecycle"`
 	Interrupt struct {
 		Required []string               `yaml:"required_cases"`
 		Cases    []harvestInterruptCase `yaml:"cases"`
@@ -95,7 +105,151 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 		c := doc.Inline.Cases[i]
 		return c.Name, c.Width > 0 && c.Height > 0 && len(c.Contains) > 0
 	})
+	validateNamedFixtures(t, "lifecycle", doc.Lifecycle.Required, len(doc.Lifecycle.Cases), func(i int) (string, bool) {
+		c := doc.Lifecycle.Cases[i]
+		return c.Name, !(c.Key && c.External)
+	})
 	return doc
+}
+
+// The operation deliberately withholds completion after acknowledging cancel.
+// Raw terminal input and inherited cancellation must keep the same renderer alive.
+func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
+	for _, c := range loadIngestProgressFixtures(t).Lifecycle.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			state := ingest.NewProgressState()
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
+			out := newSignalWriter("ctrl+c to cancel")
+			r := newProgressRenderer(out, state, nil, cancel)
+			r.isTTY = true
+			master, terminal := openTestTerminal(t)
+			if err := unix.IoctlSetWinsize(int(terminal.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
+				t.Fatal(err)
+			}
+			defer master.Close()
+			defer terminal.Close()
+			r.input = terminal
+			r.w = terminal
+			copied := make(chan struct{})
+			go func() { _, _ = io.Copy(out, master); close(copied) }()
+			defer func() { _ = terminal.Close(); _ = master.Close(); <-copied }()
+			go r.Run(ctx)
+			done := make(chan struct{})
+			go func() { r.Wait(); close(done) }()
+			defer func() { r.Stop(ctx.Err() != nil); <-done }()
+			waitFor := func(text string) {
+				t.Helper()
+				deadline := time.NewTimer(5 * time.Second)
+				defer deadline.Stop()
+				tick := time.NewTicker(10 * time.Millisecond)
+				defer tick.Stop()
+				for !strings.Contains(out.String(), text) {
+					select {
+					case <-deadline.C:
+						t.Fatalf("missing %q: %s", text, out.String())
+					case <-tick.C:
+					}
+				}
+			}
+			waitFor("ctrl+c to cancel")
+			if c.Key {
+				if _, err := master.Write([]byte{3}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.External {
+				cancel()
+			}
+			if c.Key || c.External {
+				// The diff renderer reuses the initial 'c' from the old hint.
+				waitFor("waiting for current work to stop")
+				if ctx.Err() != context.Canceled {
+					t.Fatal("key did not cancel operation")
+				}
+				select {
+				case <-done:
+					t.Fatal("renderer quit before operation acknowledged cancellation")
+				default:
+				}
+			}
+			r.Stop(ctx.Err() != nil)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("renderer did not stop after completion")
+			}
+			if err := r.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if c.Key || c.External {
+				if !strings.Contains(out.String(), "harvest canceled") || !strings.Contains(out.String(), "4/10") {
+					t.Fatalf("lost final snapshot: %s", out.String())
+				}
+			} else if strings.Contains(out.String(), "harvest canceled") {
+				t.Fatal("success labeled canceled")
+			}
+		})
+	}
+}
+
+func TestProgressModelSuccessClears(t *testing.T) {
+	m := ingestprogress.NewModel(ingest.NewProgressState(), nil, theme.New(theme.ModeDark), time.Now(), nil)
+	updated, cmd := m.Update(ingestprogress.StopMsg{})
+	if cmd == nil || updated.View().Content != "" {
+		t.Fatal("success must clear the live view")
+	}
+}
+
+func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
+	started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	state := ingest.NewProgressState()
+	state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
+	m := ingestprogress.NewModel(state, nil, theme.New(theme.ModeDark), started, nil)
+	updated, _ := m.Update(ingestprogress.CancelMsg{})
+	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
+	updated, cmd := updated.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(8 * time.Second)})
+	if cmd == nil {
+		t.Fatal("acknowledged cancellation did not quit")
+	}
+	view := updated.View().Content
+	if !strings.Contains(view, "4/10") || !strings.Contains(view, "total elapsed: 8s") || !strings.Contains(view, "harvest canceled") {
+		t.Fatalf("final snapshot omitted last operation progress or clock: %s", view)
+	}
+	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 9, Total: 10})
+	updated, _ = updated.Update(ingestprogress.TickMsg(started.Add(time.Minute)))
+	if updated.View().Content != view {
+		t.Fatal("completed cancellation snapshot changed after termination")
+	}
+}
+
+func TestProgressRendererFailureCancelsOperation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	master, terminal := openTestTerminal(t)
+	defer master.Close()
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	r := newProgressRenderer(&output, ingest.NewProgressState(), nil, cancel)
+	r.isTTY = true
+	r.input = terminal
+	go r.Run(ctx)
+	done := make(chan struct{})
+	go func() { r.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		r.Stop(true)
+		<-done
+		t.Fatal("renderer setup failure did not terminate")
+	}
+	if r.Err() == nil || ctx.Err() != context.Canceled {
+		t.Fatalf("renderer failure lost cause or left operation running: %v, %v", r.Err(), ctx.Err())
+	}
 }
 
 func validateNamedFixtures(t *testing.T, family string, required []string, count int, fixture func(int) (string, bool)) {
@@ -125,7 +279,7 @@ func validateNamedFixtures(t *testing.T, family string, required []string, count
 
 // TestProgressRenderer_Run_NonTTY verifies that in non-TTY mode (the default
 // in test environments, where the writer is a bytes.Buffer rather than *os.File),
-// Run() exits cleanly when ctx is cancelled without deadlocking or panicking.
+// Run() exits cleanly when completion is acknowledged without emitting ANSI.
 func TestProgressRenderer_Run_NonTTY(t *testing.T) {
 	state := ingest.NewProgressState()
 	var buf bytes.Buffer
@@ -138,8 +292,9 @@ func TestProgressRenderer_Run_NonTTY(t *testing.T) {
 	// the WaitGroup so Wait() is safe immediately after go r.Run(ctx).
 	go r.Run(ctx)
 
-	// Cancel immediately; in non-TTY mode Run() just reads from ctx.Done().
+	// Acknowledge completion immediately, even if cancellation preceded startup.
 	cancel()
+	r.Stop(true)
 	r.Wait()
 
 	// In non-TTY mode no bytes are written to the buffer.
@@ -203,8 +358,8 @@ func TestRenderProgressBarShowsNonZeroProgressBeforeFirstFullCell(t *testing.T) 
 }
 
 // TestProgressRenderer_Run_TTY_StartStop verifies that when isTTY is true the
-// tick loop terminates cleanly after ctx is cancelled, without deadlocking.
-// The renderer does a final redraw on cancel, so the buffer gets output.
+// tick loop terminates cleanly after completion is acknowledged.
+// The renderer retains a final snapshot for a canceled operation.
 func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 	state := ingest.NewProgressState()
 	state.Update(ingest.ProgressEvent{
@@ -224,6 +379,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 	// Allow a couple of ticks (100 ms each) so the ticker fires at least once.
 	time.Sleep(250 * time.Millisecond)
 	cancel()
+	r.Stop(true)
 	r.Wait()
 
 	// At least one Bubble Tea render should have occurred before shutdown.
@@ -237,14 +393,18 @@ func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 	m := ingestprogress.NewModel(ingest.NewProgressState(), nil, theme.New(theme.ModeDark), time.Now(), cancel)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	if cmd == nil {
-		t.Fatal("ctrl+c returned no quit command")
+	if cmd != nil {
+		t.Fatal("ctrl+c must not quit before operation completion")
 	}
 	if ctx.Err() != context.Canceled {
 		t.Fatalf("pipeline context error = %v, want context.Canceled", ctx.Err())
 	}
-	if updated.(ingestprogress.Model).View().Content != "" {
-		t.Fatal("ctrl+c did not stop renderer model")
+	if !strings.Contains(updated.View().Content, "canceling harvest") {
+		t.Fatal("ctrl+c must retain progress while cancellation unwinds")
+	}
+	updated, cmd = updated.Update(ingestprogress.StopMsg{})
+	if cmd == nil || !strings.Contains(updated.View().Content, "harvest canceled") {
+		t.Fatal("completion racing with a cancellation request must retain canceled progress")
 	}
 }
 
@@ -262,6 +422,12 @@ func TestInlineProgressLayout(t *testing.T) {
 			model := ingestprogress.NewModel(state, animation.IngestAnimation(), theme.New(mode), started, nil)
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: c.Width, Height: c.Height})
 			updated, _ = updated.Update(ingestprogress.TickMsg(started.Add(8 * time.Second)))
+			if c.Cancel {
+				updated, _ = updated.Update(ingestprogress.CancelMsg{})
+			}
+			if c.Stop {
+				updated, _ = updated.Update(ingestprogress.StopMsg{Canceled: c.Cancel, At: started.Add(8 * time.Second)})
+			}
 			view := updated.View()
 			if view.AltScreen {
 				t.Fatal("harvest must stay inline in the user's terminal")
@@ -443,6 +609,9 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			}
 			if (!c.Terminal || c.JSON) && strings.Contains(stderr.String(), "\x1b[") {
 				t.Fatalf("non-terminal harvest animated progress: %q", stderr.String())
+			}
+			if c.Terminal && !c.JSON && !strings.Contains(stderr.String(), "harvest canceled") {
+				t.Fatalf("terminal cancellation lost final progress: %s", stderr.String())
 			}
 		})
 	}

@@ -28,7 +28,7 @@ sheets:
     kind: ingest-progress
     title: "shared local import progress: kickstart and inline harvest"
     theme: dark
-    viewport: {width: 1800, height: 2295}
+    viewport: {width: 1800, height: 4590}
 
 guidedSections:
   - key: auto-ingest
@@ -89,6 +89,10 @@ ingestProgressStates:
     wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
   - key: harvest-inline
     wantContains: [local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
+  - key: harvest-canceling
+    wantContains: [local import progress, discover, 1/4, "total elapsed: 2s", canceling harvest]
+  - key: harvest-canceled
+    wantContains: [local import progress, discover, 1/4, "total elapsed: 2s", harvest canceled]
 
 selection:
   repositories:
@@ -306,3 +310,11 @@ ingestProgressCaptures:
   - {name: ingest-progress-harvest-inline-dark-120x40, state: harvest-inline, theme: dark, width: 120, height: 40}
   - {name: ingest-progress-harvest-inline-light-80x24, state: harvest-inline, theme: light, width: 80, height: 24}
   - {name: ingest-progress-harvest-inline-light-120x40, state: harvest-inline, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceling-dark-80x24, state: harvest-canceling, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceling-dark-120x40, state: harvest-canceling, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceling-light-80x24, state: harvest-canceling, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceling-light-120x40, state: harvest-canceling, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceled-dark-80x24, state: harvest-canceled, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceled-dark-120x40, state: harvest-canceled, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-harvest-canceled-light-80x24, state: harvest-canceled, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-harvest-canceled-light-120x40, state: harvest-canceled, theme: light, width: 120, height: 40}
