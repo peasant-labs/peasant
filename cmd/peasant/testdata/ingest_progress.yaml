@@ -7,6 +7,7 @@ lifecycle:
 interrupt:
   required_cases:
     - raw-control-c
+    - diff-raw-control-c
     - pipe-sigint
     - pipe-sigterm
     - json-sigint
@@ -18,6 +19,10 @@ interrupt:
     - name: raw-control-c
       terminal: true
       interrupt: key
+    - name: diff-raw-control-c
+      terminal: true
+      interrupt: key
+      diff_session: ses_3cd91f52effeXd3QAJ54jOyzn1
     - name: pipe-sigint
       interrupt: sigint
     - name: pipe-sigterm
