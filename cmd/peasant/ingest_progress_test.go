@@ -68,7 +68,7 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 		t.Fatal("render() wrote nothing, want non-empty output")
 	}
 	// The output should contain the stage name.
-	if !strings.Contains(out, ingest.StageDiscover.String()) {
+	if !strings.Contains(strings.ToLower(out), strings.ToLower(ingest.StageDiscover.String())) {
 		t.Errorf("render() output %q does not contain stage name %q", out, ingest.StageDiscover.String())
 	}
 }

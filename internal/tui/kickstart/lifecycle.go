@@ -8,7 +8,6 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
-	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
 
 // ProgressSource is the narrow pull boundary between the concurrent ingest
@@ -168,24 +167,3 @@ func nextStepsActionableError(reason string) error {
 			"means: no unverified or incoherent command guidance was shown; setup remains complete.\n"+
 			"fix: use supported unique NextStepKind values and rerun kickstart.", reason)
 }
-
-// stageObservation is presentation-only state derived from successive progress
-// snapshots. It deliberately does not feed back into the ingest pipeline.
-type stageObservation struct {
-	startedAt time.Time
-	lastAt    time.Time
-	lastDone  int
-	lastTotal int
-	progress  ingest.StageProgress
-
-	estimateEligible bool
-	estimateValid    bool
-	estimate         time.Duration
-	// estimator tracks completion samples for the windowed estimate rate.
-	// Eligibility and focus policy stay here; rate math lives in kit.
-	estimator kit.Estimator
-}
-
-// estimateWindow bounds how far back the estimate rate looks, passed to
-// kit.NewEstimator. See its documentation for the windowing contract.
-const estimateWindow = 5 * time.Second

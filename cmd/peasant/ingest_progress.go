@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"golang.org/x/term"
 )
 
@@ -59,6 +60,10 @@ type progressModel struct {
 	animFrame    int
 	lastAnimTick time.Time
 	stopped      bool
+	width        int
+	height       int
+	presentation ingestprogress.Presentation
+	theme        theme.Theme
 }
 
 // newProgressRenderer creates a tick-based renderer that reads from state and writes to w.
@@ -101,7 +106,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		return
 	}
 	program := tea.NewProgram(
-		progressModel{state: r.state, anim: r.anim, order: r.order},
+		newProgressModel(r.state, r.anim, r.order, theme.New(theme.ModeDark), time.Now()),
 		tea.WithOutput(r.w),
 		tea.WithInput(r.input),
 		tea.WithFPS(progressRendererFPS),
@@ -142,14 +147,22 @@ func progressTick() tea.Cmd {
 
 func (m progressModel) Init() tea.Cmd { return progressTick() }
 
+func newProgressModel(state *ingest.ProgressState, anim *animation.Animation, order []ingest.Stage, th theme.Theme, startedAt time.Time) progressModel {
+	return progressModel{state: state, anim: anim, order: order, theme: th, presentation: ingestprogress.New(startedAt, false)}
+}
+
 func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
 	case progressStopMsg:
 		m.stopped = true
 		return m, tea.Quit
 	case progressTickMsg:
+		tickTime := time.Time(msg)
+		m.presentation.Observe(tickTime, m.state.Snapshot())
 		if m.anim != nil && len(m.anim.Frames) > 0 {
-			tickTime := time.Time(msg)
 			if m.lastAnimTick.IsZero() || tickTime.Sub(m.lastAnimTick) >= animationFrameInterval {
 				m.animFrame = (m.animFrame + 1) % len(m.anim.Frames)
 				m.lastAnimTick = tickTime
@@ -168,24 +181,31 @@ func (m progressModel) View() tea.View {
 }
 
 func (m progressModel) render() string {
-	snap := m.state.Snapshot()
+	if !m.theme.Mode.IsValid() {
+		m.theme = theme.New(theme.ModeDark)
+	}
+	if m.presentation.StartedAt().IsZero() {
+		m.presentation.Reset(time.Now(), false)
+	}
+	now := time.Now()
+	m.presentation.Observe(now, m.state.Snapshot())
 	var lines []string
-
-	// Render animation frame above progress bars.
+	styles := m.theme.Styles()
 	if m.anim != nil && len(m.anim.Frames) > 0 {
-		f := m.anim.Frames[m.animFrame]
-		for _, line := range f {
-			lines = append(lines, line)
-		}
+		lines = append(lines, m.anim.Frames[m.animFrame]...)
 		lines = append(lines, "")
 	}
-
-	for _, stage := range m.order {
-		sp, ok := snap[stage]
-		if !ok {
-			continue
-		}
-		lines = append(lines, kit.ProgressBar(stage.String(), sp.Done, sp.Total, sp.Ended, sp.HasErr))
+	lines = append(lines, styles.Header.Render("local import progress"))
+	available := 0
+	if m.height > 0 {
+		available = max(m.height-len(lines)-2, 0)
 	}
-	return strings.Join(lines, "\n")
+	lines = append(lines, m.presentation.Lines(styles, now, available)...)
+	lines = append(lines, "", styles.Muted.Render("ctrl+c to cancel"))
+	panel := kit.NewPanel(m.theme)
+	panel.SetSize(m.width, 0)
+	for _, line := range lines {
+		panel.Rendered(line)
+	}
+	return panel.View()
 }
