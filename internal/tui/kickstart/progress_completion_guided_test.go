@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -112,6 +114,8 @@ type progressCompletionDocument struct {
 	ExpectedFailedFocusCount          int                                 `yaml:"expectedFailedFocusCount"`
 	ExpectedLatestCompletedFocusCount int                                 `yaml:"expectedLatestCompletedFocusCount"`
 	Progress                          []progressFixture                   `yaml:"progress"`
+	RequiredTimingNames               []string                            `yaml:"requiredTimingNames"`
+	Timing                            []progressFixture                   `yaml:"timing"`
 	ExpectedCompletionCount           int                                 `yaml:"expectedCompletionCount"`
 	Completion                        []completionFixture                 `yaml:"completion"`
 	ExpectedPreambleMutationCount     int                                 `yaml:"expectedPreambleMutationCount"`
@@ -181,6 +185,49 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 	}
 	if err := validateProgressFocusCounts(document, focusCounts); err != nil {
 		t.Fatal(err)
+	}
+	timingNames := map[string]bool{}
+	for _, row := range document.Timing {
+		if strings.TrimSpace(row.Name) == "" || timingNames[row.Name] || len(row.Observations) == 0 {
+			t.Fatalf("timing row is incomplete or duplicated: %#v", row)
+		}
+		timingNames[row.Name] = true
+		for observationIndex, observation := range row.Observations {
+			if observation.AdvanceSeconds < 0 || len(observation.Stages) == 0 ||
+				len(observation.WantContains) == 0 || len(observation.WantElapsed) == 0 {
+				t.Fatalf("timing row %q observation %d lacks independent expectations", row.Name, observationIndex)
+			}
+			seenStages := map[ingest.Stage]bool{}
+			for _, stage := range observation.Stages {
+				if !validStages[stage.Stage] || seenStages[stage.Stage] || !stage.Started || stage.Done < 0 || stage.Total < 0 {
+					t.Fatalf("timing row %q has invalid or duplicate stage observation: %#v", row.Name, stage)
+				}
+				seenStages[stage.Stage] = true
+			}
+			for stage := range observation.WantElapsed {
+				if !seenStages[stage] {
+					t.Fatalf("timing row %q expects elapsed time for absent stage %s", row.Name, stage)
+				}
+			}
+		}
+	}
+	if len(document.RequiredTimingNames) == 0 {
+		t.Fatal("timing fixtures need required names")
+	}
+	requiredTimingNames := map[string]bool{}
+	for _, name := range document.RequiredTimingNames {
+		if strings.TrimSpace(name) == "" || requiredTimingNames[name] {
+			t.Fatalf("required timing name is empty or duplicated: %q", name)
+		}
+		requiredTimingNames[name] = true
+		if !timingNames[name] {
+			t.Fatalf("missing timing fixture %q", name)
+		}
+	}
+	for name := range timingNames {
+		if !requiredTimingNames[name] {
+			t.Fatalf("timing fixture %q is absent from requiredTimingNames", name)
+		}
 	}
 	completionNames := map[string]bool{}
 	for _, row := range document.Completion {
@@ -508,6 +555,87 @@ func TestProgramProgressShowsHonestElapsedAndQualifiedEstimate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHarvestAndKickstartProgressParity(t *testing.T) {
+	document := loadProgressCompletionDocument(t)
+	cases := append(append([]progressFixture(nil), document.Progress...), document.Timing...)
+	for _, row := range cases {
+		t.Run(row.Name, func(t *testing.T) {
+			clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
+			progress := &fixtureProgressSource{}
+			var tick func(time.Time) tea.Msg
+			wizard, _, _ := newProgressProgram(t, progress, clock, func(context.Context) (*ftue.IngestResult, error) {
+				return &ftue.IngestResult{New: 1}, nil
+			}, nil, &tick)
+			inline := ingestprogress.NewModel(progress, animation.IngestAnimation(), theme.New(theme.ModeDark), clock.Now(), nil)
+			for _, observation := range row.Observations {
+				clock.Advance(observation.AdvanceSeconds)
+				progress.Set(observation.Stages)
+				wizard, _ = wizard.Update(tick(clock.Now()))
+				updated, _ := inline.Update(ingestprogress.TickMsg(clock.Now()))
+				inline = updated.(ingestprogress.Model)
+				want := progressMatrixLines(wizard.View())
+				got := progressMatrixLines(inline.View().Content)
+				if len(want) == 0 || !reflect.DeepEqual(got, want) {
+					t.Fatalf("mounted progress differs at %s\nharvest: %v\nkickstart: %v", clock.Now(), got, want)
+				}
+				assertHarvestTiming(t, "kickstart", want, observation)
+				assertHarvestTiming(t, "harvest", got, observation)
+				first := inline.View().Content
+				if inline.View().Content != first {
+					t.Fatal("rendering alone changed the progress clock or estimate")
+				}
+			}
+		})
+	}
+}
+
+func assertHarvestTiming(t *testing.T, surface string, lines []string, observation progressObservationFixture) {
+	t.Helper()
+	text := strings.Join(lines, "\n")
+	for _, want := range observation.WantContains {
+		if !strings.Contains(text, want) {
+			t.Errorf("%s missing %q:\n%s", surface, want, text)
+		}
+	}
+	for _, missing := range observation.WantMissing {
+		if strings.Contains(text, missing) {
+			t.Errorf("%s unexpectedly contains %q:\n%s", surface, missing, text)
+		}
+	}
+	for stage, elapsed := range observation.WantElapsed {
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, strings.ToLower(stage.String())) {
+				found = true
+				if !strings.HasSuffix(line, "  "+elapsed) {
+					t.Errorf("%s %s elapsed should be %s: %s", surface, stage, elapsed, line)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s missing timed stage %s", surface, stage)
+		}
+	}
+}
+
+func progressMatrixLines(view string) []string {
+	var result []string
+	for _, line := range strings.Split(stripRender(view), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "total elapsed:") || strings.Contains(line, "estimate") {
+			result = append(result, line)
+			continue
+		}
+		for _, stage := range ingest.StageOrder {
+			if strings.Contains(line, strings.ToLower(stage.String())) {
+				result = append(result, line)
+				break
+			}
+		}
+	}
+	return result
 }
 
 func TestProgramProgressShowsSharedIngestAnimationBeforeProgressEvents(t *testing.T) {
