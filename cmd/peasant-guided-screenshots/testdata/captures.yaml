@@ -28,7 +28,7 @@ sheets:
     kind: ingest-progress
     title: "mounted kickstart local import progress after save"
     theme: dark
-    viewport: {width: 1800, height: 1200}
+    viewport: {width: 1800, height: 2295}
 
 guidedSections:
   - key: auto-ingest
@@ -87,6 +87,8 @@ selectionStates:
 ingestProgressStates:
   - key: running
     wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", ctrl+c to quit]
+  - key: harvest-inline
+    wantContains: [local import progress, discover, 1/4, "█", "total elapsed: 2s", ctrl+c to cancel]
 
 selection:
   repositories:
@@ -300,3 +302,7 @@ ingestProgressCaptures:
   - {name: ingest-progress-running-dark-120x40, state: running, theme: dark, width: 120, height: 40}
   - {name: ingest-progress-running-light-80x24, state: running, theme: light, width: 80, height: 24}
   - {name: ingest-progress-running-light-120x40, state: running, theme: light, width: 120, height: 40}
+  - {name: ingest-progress-harvest-inline-dark-80x24, state: harvest-inline, theme: dark, width: 80, height: 24}
+  - {name: ingest-progress-harvest-inline-dark-120x40, state: harvest-inline, theme: dark, width: 120, height: 40}
+  - {name: ingest-progress-harvest-inline-light-80x24, state: harvest-inline, theme: light, width: 80, height: 24}
+  - {name: ingest-progress-harvest-inline-light-120x40, state: harvest-inline, theme: light, width: 120, height: 40}

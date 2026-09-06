@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -146,6 +147,9 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 }
 
 func renderIngestProgressCapture(workingDirectory string, index int, capture ingestProgressCaptureFixture) (string, error) {
+	if capture.State == ingestProgressStateHarvestInline {
+		return renderHarvestInlineCapture(capture), nil
+	}
 	draft, err := newCaptureDraft(workingDirectory, fmt.Sprintf("ingest-progress-%02d", index), true)
 	if err != nil {
 		return "", err
@@ -179,6 +183,18 @@ func renderIngestProgressCapture(workingDirectory string, index int, capture ing
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
 	program, _ = program.Update(tick(clock.Now().Add(time.Second)))
 	return program.View(), nil
+}
+
+func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) string {
+	started := timeDateForCapture()
+	progress := ingest.NewProgressState()
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+	model := ingestprogress.NewModel(progress, animation.IngestAnimation(), captureThemeValue(capture.Theme), started, nil)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
+	model = updated.(ingestprogress.Model)
+	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+	updated, _ = model.Update(ingestprogress.TickMsg(started.Add(2 * time.Second)))
+	return updated.(ingestprogress.Model).View().Content
 }
 
 func renderGuidedCapture(workingDirectory string, index int, capture guidedCaptureFixture) (string, error) {

@@ -9,7 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
 
 // TestProgressRenderer_Run_NonTTY verifies that in non-TTY mode (the default
@@ -64,7 +66,8 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 		Total: 5,
 	})
 
-	out := progressModel{state: state, order: ingest.StageOrder}.render()
+	model := ingestprogress.NewModel(state, nil, theme.New(theme.ModeDark), time.Now(), nil)
+	out := model.Render()
 	if out == "" {
 		t.Fatal("render() wrote nothing, want non-empty output")
 	}
@@ -122,7 +125,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 
 func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := progressModel{state: ingest.NewProgressState(), cancel: cancel}
+	m := ingestprogress.NewModel(ingest.NewProgressState(), nil, theme.New(theme.ModeDark), time.Now(), cancel)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
@@ -131,7 +134,7 @@ func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 	if ctx.Err() != context.Canceled {
 		t.Fatalf("pipeline context error = %v, want context.Canceled", ctx.Err())
 	}
-	if !updated.(progressModel).stopped {
+	if updated.(ingestprogress.Model).View().Content != "" {
 		t.Fatal("ctrl+c did not stop renderer model")
 	}
 }

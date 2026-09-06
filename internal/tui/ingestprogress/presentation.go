@@ -156,10 +156,10 @@ func (p Presentation) Lines(styles theme.Styles, now time.Time, height int) []st
 		detail[1] = styles.Muted.Render("  estimate: " + DisplayDuration(p.observations[focus].estimate))
 	}
 	lines = append(lines, detail...)
-	if height <= 0 || len(lines) <= height {
+	if height < 0 || len(lines) <= height {
 		return lines
 	}
-	if height <= 0 {
+	if height == 0 {
 		return nil
 	}
 	selected, used := map[int]bool{}, 0
