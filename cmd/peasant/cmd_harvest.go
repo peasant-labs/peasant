@@ -25,6 +25,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"github.com/spf13/cobra"
 )
 
@@ -471,6 +472,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 	renderCtx, stopRenderer := context.WithCancel(context.Background())
 	renderer := newProgressRenderer(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), stopSignals)
+	renderer.theme = theme.New(themeModeFor(cfg))
 	if flags.jsonOutput {
 		renderer.isTTY = false
 		renderer.input = nil
@@ -496,9 +498,11 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	result, err := pipeline.Run(ctx)
 	stopProgress()
 	if rendererErr := renderer.Err(); rendererErr != nil {
-		return fmt.Errorf("harvest canceled because the terminal progress renderer failed and interrupt handling could not be kept safe: %w; restore the terminal and rerun 'peasant harvest'", rendererErr)
+		cmd.SilenceUsage = true
+		return fmt.Errorf("harvest progress failed: %w; rerun 'peasant harvest' to continue", rendererErr)
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
+		cmd.SilenceUsage = true
 		return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", ctxErr)
 	}
 	if err != nil {

@@ -2,12 +2,12 @@ package ingestprogress
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 )
@@ -20,8 +20,13 @@ const (
 type TickMsg time.Time
 type StopMsg struct{}
 
+// ProgressSource supplies a non-blocking pipeline snapshot to the inline model.
+type ProgressSource interface {
+	Snapshot() map[ingest.Stage]ingest.StageProgress
+}
+
 type Model struct {
-	state         *ingest.ProgressState
+	state         ProgressSource
 	anim          *animation.Animation
 	cancel        context.CancelFunc
 	frame         int
@@ -33,18 +38,19 @@ type Model struct {
 	theme         theme.Theme
 }
 
-func NewModel(state *ingest.ProgressState, anim *animation.Animation, th theme.Theme, startedAt time.Time, cancel context.CancelFunc) Model {
+func NewModel(state ProgressSource, anim *animation.Animation, th theme.Theme, startedAt time.Time, cancel context.CancelFunc) Model {
 	m := Model{state: state, anim: anim, cancel: cancel, now: startedAt, theme: th, presentation: New(startedAt, false)}
 	m.presentation.Observe(startedAt, state.Snapshot())
 	return m
 }
 
-func Tick() tea.Cmd           { return tea.Tick(TickInterval, func(t time.Time) tea.Msg { return TickMsg(t) }) }
-func (m Model) Init() tea.Cmd { return Tick() }
+func Tick() tea.Cmd                                 { return tea.Tick(TickInterval, func(t time.Time) tea.Msg { return TickMsg(t) }) }
+func (m Model) Init() tea.Cmd                       { return Tick() }
+func (m Model) AvailableActions() []keymap.ActionID { return []keymap.ActionID{keymap.ActionQuit} }
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
+		if action, ok := keymap.Match(keymap.Default(), msg, m); ok && action == keymap.ActionQuit {
 			if m.cancel != nil {
 				m.cancel()
 			}
@@ -53,12 +59,6 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-	case tea.BackgroundColorMsg:
-		if msg.IsDark() {
-			m.theme = theme.New(theme.ModeDark)
-		} else {
-			m.theme = theme.New(theme.ModeLight)
-		}
 	case StopMsg:
 		m.stopped = true
 		return m, tea.Quit
@@ -82,12 +82,21 @@ func (m Model) View() tea.View {
 func (m Model) Render() string {
 	styles := m.theme.Styles()
 	lines := []string{}
-	if m.anim != nil && len(m.anim.Frames) > 0 {
-		lines = append(lines, m.anim.Frames[m.frame]...)
+	// In a short terminal, reclaim decoration before sacrificing the active
+	// stage, timing roll-up or interrupt hint.
+	if m.anim != nil && len(m.anim.Frames) > 0 && (m.height <= 0 || m.height >= len(m.anim.Frames[m.frame])+7) {
+		for _, line := range m.anim.Frames[m.frame] {
+			lines = append(lines, styles.Muted.Render(line))
+		}
 		lines = append(lines, "")
 	}
-	lines = append(lines, styles.Header.Render("local import progress"))
+	if m.height <= 0 || m.height > 3 {
+		lines = append(lines, styles.Header.Render("local import progress"))
+	}
 	footer := []string{"", styles.Muted.Render("ctrl+c to cancel")}
+	if m.height == 1 {
+		footer = footer[1:]
+	}
 	available := -1
 	if m.height > 0 {
 		available = max(m.height-len(lines)-len(footer), 0)
@@ -101,12 +110,15 @@ func (m Model) Render() string {
 		lines = lines[:m.height]
 	}
 	panel := kit.NewPanel(m.theme)
-	panel.SetSize(m.width, m.height)
+	// Inline output consumes only its content rows, unlike the full-screen
+	// kickstart panel; leave the user's scrollback above it intact.
+	panel.SetSize(m.width, 0)
 	for _, line := range lines {
 		panel.Rendered(line)
 	}
 	return panel.View()
 }
-func Plain(v string) string { return strings.TrimSpace(v) }
 
 var _ tea.Model = Model{}
+var _ keymap.Availability = Model{}
+var _ ProgressSource = (*ingest.ProgressState)(nil)

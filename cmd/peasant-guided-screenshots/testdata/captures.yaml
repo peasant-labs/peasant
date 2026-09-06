@@ -26,7 +26,7 @@ sheets:
     viewport: {width: 1800, height: 6000}
   - name: ingest-progress
     kind: ingest-progress
-    title: "mounted kickstart local import progress after save"
+    title: "shared local import progress: kickstart and inline harvest"
     theme: dark
     viewport: {width: 1800, height: 2295}
 
@@ -86,9 +86,9 @@ selectionStates:
 
 ingestProgressStates:
   - key: running
-    wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", ctrl+c to quit]
+    wantContains: [importing transcripts, local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to quit]
   - key: harvest-inline
-    wantContains: [local import progress, discover, 1/4, "█", "total elapsed: 2s", ctrl+c to cancel]
+    wantContains: [local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
 
 selection:
   repositories:

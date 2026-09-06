@@ -38,7 +38,7 @@ type progressRenderer struct {
 	state  *ingest.ProgressState
 	anim   *animation.Animation
 	isTTY  bool
-	order  []ingest.Stage
+	theme  theme.Theme
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
 	errMu  sync.Mutex
@@ -59,7 +59,7 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 	if isTTY && term.IsTerminal(int(os.Stdin.Fd())) {
 		// Bubble Tea's renderer can ask the terminal about supported modes. Reading
 		// stdin lets it consume those replies instead of leaking them back to the
-		// shell after harvest exits. The model still ignores all key input.
+		// shell after harvest exits. Ctrl+C cancels the pipeline from raw mode.
 		input = os.Stdin
 	}
 	r := &progressRenderer{
@@ -68,7 +68,7 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 		state: state,
 		anim:  anim,
 		isTTY: isTTY,
-		order: ingest.StageOrder,
+		theme: theme.New(theme.ModeDark),
 	}
 	if len(cancel) > 0 {
 		r.cancel = cancel[0]
@@ -89,7 +89,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		<-ctx.Done()
 		return
 	}
-	model := ingestprogress.NewModel(r.state, r.anim, theme.New(theme.ModeDark), time.Now(), r.cancel)
+	model := ingestprogress.NewModel(r.state, r.anim, r.theme, time.Now(), r.cancel)
 	program := tea.NewProgram(
 		model,
 		tea.WithOutput(r.w),
