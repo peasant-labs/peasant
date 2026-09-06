@@ -1,3 +1,15 @@
+estimate:
+  required_cases: [raw-key-retains-estimate, external-cancel-retains-estimate, stop-only-retains-estimate, raw-key-retains-unavailable, external-cancel-retains-unavailable, stop-only-retains-unavailable, raw-key-retains-expired, external-cancel-retains-expired, stop-only-retains-expired]
+  cases:
+    - {name: raw-key-retains-estimate, key: true, want: "estimate: 6s"}
+    - {name: external-cancel-retains-estimate, external: true, want: "estimate: 6s"}
+    - {name: stop-only-retains-estimate, want: "estimate: 6s"}
+    - {name: raw-key-retains-unavailable, key: true, unavailable: true, want: estimate unavailable}
+    - {name: external-cancel-retains-unavailable, external: true, unavailable: true, want: estimate unavailable}
+    - {name: stop-only-retains-unavailable, unavailable: true, want: estimate unavailable}
+    - {name: raw-key-retains-expired, key: true, unavailable: true, expired: true, want: estimate unavailable}
+    - {name: external-cancel-retains-expired, external: true, unavailable: true, expired: true, want: estimate unavailable}
+    - {name: stop-only-retains-expired, unavailable: true, expired: true, want: estimate unavailable}
 lifecycle:
   required_cases: [raw-key-awaits-acknowledgment, external-context-awaits-acknowledgment, successful-completion]
   cases:

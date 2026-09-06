@@ -120,6 +120,19 @@ func (p Presentation) Focus() (ingest.Stage, bool) {
 // Lines renders the canonical lower-case stage matrix and timing roll-up. The
 // height budget is optional; when constrained, focus and detail are retained.
 func (p Presentation) Lines(styles theme.Styles, now time.Time, height int) []string {
+	return p.lines(styles, now, height, "")
+}
+
+func (p Presentation) estimateText() string {
+	if focus, ok := p.Focus(); ok && p.observations[focus].estimateValid {
+		return "  estimate: " + DisplayDuration(p.observations[focus].estimate)
+	}
+	return "  estimate unavailable"
+}
+
+// retainedEstimate is used only by the canceled inline surface; other consumers
+// continue to render the live estimate, including its normal stall expiration.
+func (p Presentation) lines(styles theme.Styles, now time.Time, height int, retainedEstimate string) []string {
 	if now.Before(p.startedAt) {
 		now = p.startedAt
 	}
@@ -151,10 +164,10 @@ func (p Presentation) Lines(styles theme.Styles, now time.Time, height int) []st
 		}
 		lines = append(lines, rendered)
 	}
-	detail := []string{styles.Muted.Render("  total elapsed: " + DisplayDuration(now.Sub(p.startedAt))), styles.Muted.Render("  estimate unavailable")}
-	if hasFocus && p.observations[focus].estimateValid {
-		detail[1] = styles.Muted.Render("  estimate: " + DisplayDuration(p.observations[focus].estimate))
+	if retainedEstimate == "" {
+		retainedEstimate = p.estimateText()
 	}
+	detail := []string{styles.Muted.Render("  total elapsed: " + DisplayDuration(now.Sub(p.startedAt))), styles.Muted.Render(retainedEstimate)}
 	lines = append(lines, detail...)
 	if height < 0 || len(lines) <= height {
 		return lines

@@ -34,17 +34,18 @@ type ProgressSource interface {
 }
 
 type Model struct {
-	state         ProgressSource
-	anim          *animation.Animation
-	cancel        context.CancelFunc
-	frame         int
-	lastAnimation time.Time
-	now           time.Time
-	stopped       bool
-	canceling     bool
-	width, height int
-	presentation  Presentation
-	theme         theme.Theme
+	state            ProgressSource
+	anim             *animation.Animation
+	cancel           context.CancelFunc
+	frame            int
+	lastAnimation    time.Time
+	now              time.Time
+	stopped          bool
+	canceling        bool
+	canceledEstimate string
+	width, height    int
+	presentation     Presentation
+	theme            theme.Theme
 }
 
 func NewModel(state ProgressSource, anim *animation.Animation, th theme.Theme, startedAt time.Time, cancel context.CancelFunc) Model {
@@ -63,16 +64,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.KeyPressMsg:
 		if action, ok := keymap.Match(keymap.Default(), msg, m); ok && action == keymap.ActionQuit {
+			m.beginCancel()
 			if m.cancel != nil {
 				m.cancel()
 			}
-			m.canceling = true
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case StopMsg:
-		m.canceling = m.canceling || msg.Canceled
+		if msg.Canceled {
+			m.beginCancel()
+		}
 		if !msg.At.IsZero() {
 			m.now = msg.At
 		}
@@ -80,7 +83,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.stopped = true
 		return m, tea.Quit
 	case CancelMsg:
-		m.canceling = true
+		m.beginCancel()
 	case TickMsg:
 		m.now = time.Time(msg)
 		m.presentation.Observe(m.now, m.state.Snapshot())
@@ -92,6 +95,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+func (m *Model) beginCancel() {
+	if !m.canceling {
+		// Keep only the displayed estimate. Continue observing final counts,
+		// errors and clocks while the operation acknowledges cancellation.
+		m.canceledEstimate = m.presentation.estimateText()
+		m.canceling = true
+	}
+}
+
 func (m Model) View() tea.View {
 	if m.stopped && !m.canceling {
 		return tea.NewView("")
@@ -127,7 +140,7 @@ func (m Model) Render() string {
 	if m.height > 0 {
 		available = max(m.height-len(lines)-len(footer), 0)
 	}
-	lines = append(lines, m.presentation.Lines(styles, m.now, available)...)
+	lines = append(lines, m.presentation.lines(styles, m.now, available, m.canceledEstimate)...)
 	if m.height > 0 && len(lines)+len(footer) > m.height {
 		lines = lines[:max(m.height-len(footer), 0)]
 	}

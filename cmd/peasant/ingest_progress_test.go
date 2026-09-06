@@ -61,6 +61,17 @@ type inlineFixture struct {
 }
 
 type ingestProgressFixtures struct {
+	Estimate struct {
+		Required []string `yaml:"required_cases"`
+		Cases    []struct {
+			Name        string `yaml:"name"`
+			Key         bool   `yaml:"key"`
+			External    bool   `yaml:"external"`
+			Unavailable bool   `yaml:"unavailable"`
+			Expired     bool   `yaml:"expired"`
+			Want        string `yaml:"want"`
+		} `yaml:"cases"`
+	} `yaml:"estimate"`
 	Lifecycle struct {
 		Required []string `yaml:"required_cases"`
 		Cases    []struct {
@@ -114,6 +125,83 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 		return c.Name, !(c.Key && c.External)
 	})
 	return doc
+}
+
+func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
+	doc := loadIngestProgressFixtures(t)
+	validateNamedFixtures(t, "estimate", doc.Estimate.Required, len(doc.Estimate.Cases), func(i int) (string, bool) {
+		c := doc.Estimate.Cases[i]
+		return c.Name, !(c.Key && c.External) && (!c.Expired || c.Unavailable) && c.Want != ""
+	})
+	for _, c := range doc.Estimate.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			started := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			state := ingest.NewProgressState()
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
+			var model tea.Model = ingestprogress.NewModel(state, nil, theme.New(theme.ModeDark), started, nil)
+			if !c.Unavailable || c.Expired {
+				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
+			}
+			model, _ = model.Update(ingestprogress.TickMsg(started.Add(2 * time.Second)))
+			initialClock := "total elapsed: 2s"
+			if c.Expired {
+				if !strings.Contains(ansi.Strip(model.View().Content), "estimate: 6s") {
+					t.Fatal("fixture did not establish a live estimate before the stall")
+				}
+				model, _ = model.Update(ingestprogress.TickMsg(started.Add(8 * time.Second)))
+				initialClock = "total elapsed: 8s"
+			}
+			assertView := func(markers ...string) {
+				t.Helper()
+				view := ansi.Strip(model.View().Content)
+				for _, marker := range append(markers, c.Want) {
+					if !strings.Contains(view, marker) {
+						t.Fatalf("missing %q in\n%s", marker, view)
+					}
+				}
+				if !c.Unavailable && strings.Contains(view, "estimate unavailable") {
+					t.Fatalf("lost estimate:\n%s", view)
+				}
+			}
+			assertView(initialClock)
+			// The operation can publish its failure before the renderer receives
+			// any cancellation message. Capture the displayed estimate, not this snapshot.
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 2, Total: 4, Err: context.Canceled})
+			if c.Key {
+				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+			} else if c.External {
+				model, _ = model.Update(ingestprogress.CancelMsg{})
+			}
+			if c.Key || c.External {
+				assertView("canceling harvest", initialClock)
+				model, _ = model.Update(ingestprogress.TickMsg(started.Add(9 * time.Second)))
+				assertView("canceling harvest", "✗ discover", "2/4", "total elapsed: 9s")
+				// Repeated notification must not capture the now failed/expired ETA.
+				model, _ = model.Update(ingestprogress.CancelMsg{})
+				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+				assertView("canceling harvest", "2/4")
+			}
+			model, _ = model.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(12 * time.Second)})
+			assertView("harvest canceled", "✗ discover", "2/4", "total elapsed: 12s")
+			wantStageClock := "12s"
+			if c.Key || c.External {
+				wantStageClock = "9s"
+			}
+			for _, line := range strings.Split(ansi.Strip(model.View().Content), "\n") {
+				if strings.Contains(line, "✗ discover") {
+					fields := strings.Fields(line)
+					if fields[len(fields)-1] != wantStageClock {
+						t.Fatalf("ended stage clock = %q, want %s", line, wantStageClock)
+					}
+				}
+			}
+			final := model.View().Content
+			model, _ = model.Update(ingestprogress.TickMsg(started.Add(time.Hour)))
+			if model.View().Content != final {
+				t.Fatal("final snapshot changed after stop")
+			}
+		})
+	}
 }
 
 // The operation deliberately withholds completion after acknowledging cancel.
