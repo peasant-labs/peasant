@@ -350,21 +350,6 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 
 	progState := ingest.NewProgressState()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renderer := newProgressRenderer(os.Stderr, progState, animation.IngestAnimation(), cancel)
-	go renderer.Run(ctx)
-	defer func() {
-		cancel()
-		renderer.Wait()
-		renderer.Clear()
-	}()
-
-	if renderer.IsTTY() {
-		orig := slog.Default().Handler()
-		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-		defer slog.SetDefault(slog.New(orig))
-	}
 
 	// For index-only mode, use the existing Reindex code path.
 	reindex := mode == harvestIndexOnly
@@ -484,12 +469,37 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
 	}
-	result, err := pipeline.Run(ctx)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", ctxErr)
+	renderCtx, stopRenderer := context.WithCancel(context.Background())
+	renderer := newProgressRenderer(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), stopSignals)
+	if flags.jsonOutput {
+		renderer.isTTY = false
+		renderer.input = nil
 	}
+	go renderer.Run(renderCtx)
+	var restoreLogger func()
+	if renderer.IsTTY() {
+		orig := slog.Default().Handler()
+		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
+	}
+	stopProgress := func() {
+		stopRenderer()
+		renderer.Wait()
+		renderer.Clear()
+		if restoreLogger != nil {
+			restoreLogger()
+			restoreLogger = nil
+		}
+	}
+	defer stopProgress()
+
+	result, err := pipeline.Run(ctx)
+	stopProgress()
 	if rendererErr := renderer.Err(); rendererErr != nil {
 		return fmt.Errorf("harvest canceled because the terminal progress renderer failed and interrupt handling could not be kept safe: %w; restore the terminal and rerun 'peasant harvest'", rendererErr)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", ctxErr)
 	}
 	if err != nil {
 		return fmt.Errorf("pipeline failed: %w", err)
