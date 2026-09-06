@@ -199,9 +199,11 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 	updated, _ = model.Update(ingestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 2, Total: 4, Err: context.Canceled})
+		updated, _ = updated.Update(ingestprogress.TickMsg(started.Add(9 * time.Second)))
 	}
 	if capture.State == ingestProgressStateHarvestCanceled {
-		updated, _ = updated.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(2 * time.Second)})
+		updated, _ = updated.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(12 * time.Second)})
 	}
 	view := updated.(ingestprogress.Model).View().Content
 	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {

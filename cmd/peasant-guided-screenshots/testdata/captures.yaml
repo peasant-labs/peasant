@@ -90,9 +90,9 @@ ingestProgressStates:
   - key: harvest-inline
     wantContains: [local import progress, discover, 1/4, "█", "_|||_", "total elapsed: 2s", "estimate: 6s", ctrl+c to cancel]
   - key: harvest-canceling
-    wantContains: [local import progress, discover, 1/4, "total elapsed: 2s", canceling harvest]
+    wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 9s", "estimate: 6s", canceling harvest]
   - key: harvest-canceled
-    wantContains: [local import progress, discover, 1/4, "total elapsed: 2s", harvest canceled]
+    wantContains: [local import progress, "✗ discover", 2/4, "total elapsed: 12s", "estimate: 6s", harvest canceled]
 
 selection:
   repositories:
