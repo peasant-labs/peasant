@@ -13,7 +13,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
-	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"golang.org/x/term"
 )
@@ -46,29 +45,7 @@ type progressRenderer struct {
 	err    error
 }
 
-const (
-	progressRendererFPS    = 24
-	progressTickInterval   = time.Second / progressRendererFPS
-	animationFrameInterval = 300 * time.Millisecond
-)
-
-type progressTickMsg time.Time
-
-type progressStopMsg struct{}
-
-type progressModel struct {
-	state        *ingest.ProgressState
-	anim         *animation.Animation
-	order        []ingest.Stage
-	animFrame    int
-	lastAnimTick time.Time
-	stopped      bool
-	cancel       context.CancelFunc
-	width        int
-	height       int
-	presentation ingestprogress.Presentation
-	theme        theme.Theme
-}
+const progressRendererFPS = 24
 
 // newProgressRenderer creates a tick-based renderer that reads from state and writes to w.
 // TTY detection is performed on w if it is an *os.File; otherwise rendering
@@ -112,8 +89,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		<-ctx.Done()
 		return
 	}
-	model := newProgressModel(r.state, r.anim, r.order, theme.New(theme.ModeDark), time.Now())
-	model.cancel = r.cancel
+	model := ingestprogress.NewModel(r.state, r.anim, theme.New(theme.ModeDark), time.Now(), r.cancel)
 	program := tea.NewProgram(
 		model,
 		tea.WithOutput(r.w),
@@ -125,7 +101,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 	go func() {
 		select {
 		case <-ctx.Done():
-			program.Send(progressStopMsg{})
+			program.Send(ingestprogress.StopMsg{})
 		case <-finished:
 		}
 	}()
@@ -159,82 +135,3 @@ func (r *progressRenderer) IsTTY() bool { return r.isTTY }
 // when the model returns a blank view during shutdown, so no extra ANSI erase is
 // necessary here.
 func (r *progressRenderer) Clear() {}
-
-func progressTick() tea.Cmd {
-	return tea.Tick(progressTickInterval, func(t time.Time) tea.Msg {
-		return progressTickMsg(t)
-	})
-}
-
-func (m progressModel) Init() tea.Cmd { return progressTick() }
-
-func newProgressModel(state *ingest.ProgressState, anim *animation.Animation, order []ingest.Stage, th theme.Theme, startedAt time.Time) progressModel {
-	return progressModel{state: state, anim: anim, order: order, theme: th, presentation: ingestprogress.New(startedAt, false)}
-}
-
-func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
-			if m.cancel != nil {
-				m.cancel()
-			}
-			m.stopped = true
-			return m, tea.Quit
-		}
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		return m, nil
-	case progressStopMsg:
-		m.stopped = true
-		return m, tea.Quit
-	case progressTickMsg:
-		tickTime := time.Time(msg)
-		m.presentation.Observe(tickTime, m.state.Snapshot())
-		if m.anim != nil && len(m.anim.Frames) > 0 {
-			if m.lastAnimTick.IsZero() || tickTime.Sub(m.lastAnimTick) >= animationFrameInterval {
-				m.animFrame = (m.animFrame + 1) % len(m.anim.Frames)
-				m.lastAnimTick = tickTime
-			}
-		}
-		return m, progressTick()
-	}
-	return m, nil
-}
-
-func (m progressModel) View() tea.View {
-	if m.stopped {
-		return tea.NewView("")
-	}
-	return tea.NewView(m.render())
-}
-
-func (m progressModel) render() string {
-	if !m.theme.Mode.IsValid() {
-		m.theme = theme.New(theme.ModeDark)
-	}
-	if m.presentation.StartedAt().IsZero() {
-		m.presentation.Reset(time.Now(), false)
-	}
-	now := time.Now()
-	m.presentation.Observe(now, m.state.Snapshot())
-	var lines []string
-	styles := m.theme.Styles()
-	if m.anim != nil && len(m.anim.Frames) > 0 {
-		lines = append(lines, m.anim.Frames[m.animFrame]...)
-		lines = append(lines, "")
-	}
-	lines = append(lines, styles.Header.Render("local import progress"))
-	available := 0
-	if m.height > 0 {
-		available = max(m.height-len(lines)-2, 0)
-	}
-	lines = append(lines, m.presentation.Lines(styles, now, available)...)
-	lines = append(lines, "", styles.Muted.Render("ctrl+c to cancel"))
-	panel := kit.NewPanel(m.theme)
-	panel.SetSize(m.width, 0)
-	for _, line := range lines {
-		panel.Rendered(line)
-	}
-	return panel.View()
-}

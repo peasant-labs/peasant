@@ -1243,7 +1243,7 @@ func (p Program) viewIngest() string {
 func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines int) []string {
 	available := p.height - reservedLines
 	if p.height <= 0 {
-		available = 0
+		available = -1
 	}
 	return p.progressView.Lines(styles, now, available)
 }
