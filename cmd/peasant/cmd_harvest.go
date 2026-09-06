@@ -9,11 +9,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/animation"
@@ -243,7 +245,8 @@ func countIndexFailures(log []ingest.IndexLogEntry) int {
 }
 
 func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error {
-	ctx := cmd.Context()
+	ctx, stopSignals := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
 	// resolveConfigPath, not the raw flag: reading --config directly returns its
 	// default when unset, so --config-dir was ignored and this command read a
 	// DIFFERENT configuration than the one the user pointed at - including its
@@ -349,8 +352,13 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	progState := ingest.NewProgressState()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	renderer := newProgressRenderer(os.Stderr, progState, animation.IngestAnimation())
+	renderer := newProgressRenderer(os.Stderr, progState, animation.IngestAnimation(), cancel)
 	go renderer.Run(ctx)
+	defer func() {
+		cancel()
+		renderer.Wait()
+		renderer.Clear()
+	}()
 
 	if renderer.IsTTY() {
 		orig := slog.Default().Handler()
@@ -477,9 +485,12 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		return fmt.Errorf("create pipeline: %w", err)
 	}
 	result, err := pipeline.Run(ctx)
-	cancel()
-	renderer.Wait()
-	renderer.Clear()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", ctxErr)
+	}
+	if rendererErr := renderer.Err(); rendererErr != nil {
+		return fmt.Errorf("harvest canceled because the terminal progress renderer failed and interrupt handling could not be kept safe: %w; restore the terminal and rerun 'peasant harvest'", rendererErr)
+	}
 	if err != nil {
 		return fmt.Errorf("pipeline failed: %w", err)
 	}
