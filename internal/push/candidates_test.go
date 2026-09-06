@@ -24,7 +24,7 @@ func ids(rows []ingest.PushSessionRow) []string {
 
 // TestQueryPushCandidates_Modes asserts the single shared base-query helper
 // resolves each query mode against the store the same way the old per-path
-// switches did: default, force, source-provider, and by-source.
+// switches did: default, force, source-harness, and by-source.
 func TestQueryPushCandidates_Modes(t *testing.T) {
 	t.Parallel()
 
@@ -53,12 +53,12 @@ func TestQueryPushCandidates_Modes(t *testing.T) {
 			want:  []string{"claude-all", "claude-unpushed", "open-unpushed"},
 		},
 		{
-			name:  "force with source-provider filter",
+			name:  "force with source-harness filter",
 			query: push.PushCandidateQuery{Force: true, SourceProvider: string(defaults.HarnessClaudeCode)},
 			want:  []string{"claude-all", "claude-unpushed"},
 		},
 		{
-			name:  "source-provider",
+			name:  "source-harness",
 			query: push.PushCandidateQuery{SourceProvider: string(defaults.HarnessClaudeCode)},
 			want:  []string{"claude-unpushed"},
 		},

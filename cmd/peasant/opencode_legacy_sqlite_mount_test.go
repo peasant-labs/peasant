@@ -176,7 +176,7 @@ func TestLegacyOpenCodeMixedRootPreservesJSONBytes(t *testing.T) {
 		sourceBytes := mustReadFile(t, sourcePath)
 		commandRoot := t.TempDir()
 		outputRoot := filepath.Join(commandRoot, "managed")
-		output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
+		output, err := executeHarvestCmd(t, commandRoot, []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 		if err != nil {
 			t.Fatalf("harvest mixed OpenCode root: %v\n%s", err, output)
 		}
@@ -213,7 +213,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			before := mustReadFile(t, materialized.Path)
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			args := []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
+			args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 			output, err := executeHarvestCmd(t, commandRoot, args)
 			if testCase.Harvest == legacySQLiteHarvestSessionError {
 				if err == nil || !strings.Contains(err.Error(), "session(s) failed") {

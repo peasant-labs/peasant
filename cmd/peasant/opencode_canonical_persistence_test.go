@@ -243,7 +243,7 @@ func TestCanonicalOpenCodeRealStoreDetailAndAnalytics(t *testing.T) {
 			writeCanonicalPersistenceJSON(t, root, testCase.JSONSessions)
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
+			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 			if err != nil {
 				t.Fatalf("mounted canonical harvest: %v\n%s", err, output)
 			}

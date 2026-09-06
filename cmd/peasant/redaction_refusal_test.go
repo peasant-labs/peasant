@@ -473,7 +473,7 @@ func driveRefusalSurface(t *testing.T, testCase redactionRefusalCase) (string, e
 		root.SetArgs(append(append([]string{"push"}, scoped...), "--non-interactive", "--timeout", "30s"))
 	case surfaceHarvest:
 		root.AddCommand(BuildHarvestCommand())
-		root.SetArgs(append(append([]string{"harvest"}, scoped...), "--source-provider=claude-code",
+		root.SetArgs(append(append([]string{"harvest"}, scoped...), "--source-harness=claude-code",
 			"--source-path="+t.TempDir(), "--output="+filepath.Join(dir, "sync")))
 	case surfaceRedactFlag:
 		root.AddCommand(BuildRedactCommand())

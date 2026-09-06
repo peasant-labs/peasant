@@ -153,7 +153,7 @@ func NewPipeline(
 // Run executes the push pipeline and returns the aggregate result.
 //
 // Behavior:
-//   - "individual" push method without --source-provider returns an error.
+//   - "individual" push method without --source-harness returns an error.
 //   - Sessions without metrics are held back; a notice is printed to stderr.
 //   - With --dry-run: store queries run but no HTTP calls, publication receipts,
 //     push_log writes, or local publication-cursor updates occur.
@@ -174,7 +174,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 		return nil, fmt.Errorf(
 			"push.method is set to %q in your config, which requires an interactive session "+
 				"picker (not yet implemented). To push now, either run 'peasant kickstart' to "+
-				"change your push method, or use --source-provider to filter by provider",
+				"change your push method, or use --source-harness to filter by harness",
 			config.PushMethodIndividual)
 	}
 

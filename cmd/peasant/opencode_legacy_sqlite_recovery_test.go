@@ -233,7 +233,7 @@ func TestLegacyOpenCodeSQLiteCommittedWALUpdateRefreshesMountedState(t *testing.
 
 	commandRoot := t.TempDir()
 	outputRoot := filepath.Join(commandRoot, "managed")
-	args := []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
+	args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 	initialArgs := append(append([]string(nil), args...), "--force", "--include-active")
 	if output, err := executeHarvestCmd(t, commandRoot, initialArgs); err != nil {
 		t.Fatalf("initial mounted WAL harvest: %v\n%s", err, output)
@@ -360,7 +360,7 @@ func TestLegacyOpenCodeSQLiteSelectsAcrossEligibleCandidates(t *testing.T) {
 
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
+			output, err := executeHarvestCmd(t, commandRoot, []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + root, "--output=" + outputRoot, "--force", "--include-active"})
 			if err != nil {
 				t.Fatalf("harvest canonical eligible candidates: %v\n%s", err, output)
 			}
@@ -397,7 +397,7 @@ func TestLegacyOpenCodeSQLiteSourceInfoRecoveryValidatesManagedEnvelope(t *testi
 			setSyntheticSQLiteContentModTime(t, materialized.Path, time.UnixMilli(1_700_000_000_000))
 			commandRoot := t.TempDir()
 			outputRoot := filepath.Join(commandRoot, "managed")
-			args := []string{"--source-provider=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
+			args := []string{"--source-harness=" + defaults.HarnessOpenCode.String(), "--source-path=" + filepath.Dir(materialized.Path), "--output=" + outputRoot}
 			initialArgs := append(append([]string(nil), args...), "--force", "--include-active")
 			if output, err := executeHarvestCmd(t, commandRoot, initialArgs); err != nil {
 				t.Fatalf("initial mounted recovery harvest: %v\n%s", err, output)

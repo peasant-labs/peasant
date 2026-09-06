@@ -72,7 +72,7 @@ them.
 
 | Surface | Behavior |
 |---------|----------|
-| CLI `--source-provider` | Legacy `claude`/`gemini` → "renamed to X, rerun with X"; the `defaults.LegacyHarnessClaude`/`LegacyHarnessGemini` constants exist solely for this (`resolveHarnessFlag`, `cmd/peasant/cmd_harvest.go`). |
+| CLI `--source-harness` | Legacy `claude`/`gemini` → "renamed to X, rerun with X"; the `defaults.LegacyHarnessClaude`/`LegacyHarnessGemini` constants exist solely for this (`resolveHarnessFlag`, `cmd/peasant/cmd_harvest.go`). |
 | config YAML | Deprecated keys are **rejected with remediation, never silently mapped**: `sources.claude:` (→ `claude-code:`) and `selection.providers:` (→ `selection.harnesses:`). Implemented via `Deprecated*` capture fields + `validate()` in `internal/config/config.go`. |
 | CLI + adapters | `cursor`/`antigravity` are recognized but unsupported → "planned for a future release", with **no specific version commitment**. |
 

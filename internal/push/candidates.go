@@ -34,7 +34,7 @@ type CandidateStore interface {
 }
 
 // QueryPushCandidates returns the base unfiltered candidate rows for a push run,
-// resolving force / source-provider / method against the store. This is the
+// resolving force / source-harness / method against the store. This is the
 // SINGLE base-query path: both the pipeline's getTargetSessions and the CLI's
 // buildPushWizardSessions call it, so the wizard view, the dry-run set, and the
 // real push set cannot diverge.
@@ -55,7 +55,7 @@ func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandid
 		return sessions, nil
 
 	case q.SourceProvider != "":
-		// --source-provider: unpushed sessions for one provider.
+		// --source-harness: unpushed sessions for one provider.
 		return store.UnpushedSessionsByProvider(ctx, q.SourceProvider)
 
 	case q.Method == config.PushMethodBySource:

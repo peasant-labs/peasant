@@ -2292,7 +2292,7 @@ func indexWithSourceKind(
 					"Where: ingest.indexWithSourceKind, for harness %s.\n"+
 					"When: at the INDEX stage, after the transcript copy was already written.\n"+
 					"Means: this session imported but has no indexed entries, so it is empty in the viewer, in search, in metrics, and in anything published. Other sessions in this run are unaffected.\n"+
-					"Fix: enable %s in your configuration (sources.%s.enabled: true) and re-run, so discovery resolves its storage root. If you are pointing at sessions with --source-provider and --source-path, name %s and give the path to its storage directory rather than to a single file.",
+					"Fix: enable %s in your configuration (sources.%s.enabled: true) and re-run, so discovery resolves its storage root. If you are pointing at sessions with --source-harness and --source-path, name %s and give the path to its storage directory rather than to a single file.",
 				session.SessionID, session.Harness, session.Harness, session.Harness, session.Harness, session.Harness)
 		}
 		return indexer.IndexTranscript(ctx, session)

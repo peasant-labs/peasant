@@ -72,20 +72,20 @@ const (
 
 // harvestFlags holds all CLI flags shared across harvest subcommands.
 type harvestFlags struct {
-	sourceProvider string
-	sourcePath     string
-	outputPath     string
-	dryRun         bool
-	force          bool
-	all            bool
-	includeActive  bool
-	verbose        bool
-	debug          bool
-	jsonOutput     bool
-	detectCommits  bool
-	profileIndex   bool
-	sessionIDs     []string
-	since          string
+	sourceHarness string
+	sourcePath    string
+	outputPath    string
+	dryRun        bool
+	force         bool
+	all           bool
+	includeActive bool
+	verbose       bool
+	debug         bool
+	jsonOutput    bool
+	detectCommits bool
+	profileIndex  bool
+	sessionIDs    []string
+	since         string
 }
 
 // BuildHarvestCommand constructs the harvest command with logs/index subcommands.
@@ -161,8 +161,8 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 
 	// Source flags are relevant for logs and all modes.
 	if mode != harvestIndexOnly {
-		cmd.Flags().StringVar(&flags.sourceProvider, "source-provider", "", "Override source provider (claude-code, opencode, codex, cursor, strike)")
-		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the provider (replaces config, not additive)")
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike)")
+		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", false, "Also process sessions still being written")
 	}
 
@@ -275,14 +275,14 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 
 	// 3. Apply CLI flag overrides (source flags only for logs/all modes).
 	if mode != harvestIndexOnly {
-		if flags.sourceProvider != "" || flags.sourcePath != "" {
-			if flags.sourceProvider == "" {
-				return fmt.Errorf("--source-path requires --source-provider")
+		if flags.sourceHarness != "" || flags.sourcePath != "" {
+			if flags.sourceHarness == "" {
+				return fmt.Errorf("--source-path requires --source-harness")
 			}
 			if flags.sourcePath == "" {
-				return fmt.Errorf("--source-provider requires --source-path")
+				return fmt.Errorf("--source-harness requires --source-path")
 			}
-			provider, err := resolveHarnessFlag(flags.sourceProvider)
+			provider, err := resolveHarnessFlag(flags.sourceHarness)
 			if err != nil {
 				return err
 			}
@@ -291,12 +291,12 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 				return fmt.Errorf("resolve source path: %w", err)
 			}
 			applySourceOverride(cfg, provider, resolved)
-			// --source-path (which requires --source-provider) scopes the run to
+			// --source-path (which requires --source-harness) scopes the run to
 			// the NAMED provider as the SOLE active source: disable default
 			// discovery of the OTHER providers so "ingest from THIS path" does not
 			// also read their real default dirs (~/.claude, opencode, codex) — the
 			// isolation leak exposed by the source-scoped integration path.
-			isolateSourceProvider(cfg, provider)
+			isolateSourceHarness(cfg, provider)
 		}
 	}
 
@@ -980,21 +980,21 @@ func runAnnotationEngineSection(ctx context.Context, db *store.Store, out io.Wri
 	return nil
 }
 
-// resolveHarnessFlag converts a --source-provider flag value to a typed Harness,
+// resolveHarnessFlag converts a --source-harness flag value to a typed Harness,
 // returning a clear error for unknown values. Legacy harness names that were
 // renamed in the bestiary migration get a specific deprecation message.
 func resolveHarnessFlag(raw string) (defaults.Harness, error) {
 	switch defaults.Harness(raw) {
 	case defaults.LegacyHarnessClaude:
 		return "", fmt.Errorf(
-			"--source-provider=%q is deprecated: the harness was renamed to %q.\n"+
-				"  Rerun with: --source-provider=%s",
+			"--source-harness=%q is deprecated: the harness was renamed to %q.\n"+
+				"  Rerun with: --source-harness=%s",
 			raw, defaults.HarnessClaudeCode, defaults.HarnessClaudeCode,
 		)
 	case defaults.LegacyHarnessGemini:
 		return "", fmt.Errorf(
-			"--source-provider=%q is deprecated: the harness was renamed to %q.\n"+
-				"  Rerun with: --source-provider=%s",
+			"--source-harness=%q is deprecated: the harness was renamed to %q.\n"+
+				"  Rerun with: --source-harness=%s",
 			raw, defaults.HarnessGeminiCLI, defaults.HarnessGeminiCLI,
 		)
 	}
@@ -1022,13 +1022,13 @@ func resolveHarnessFlag(raw string) (defaults.Harness, error) {
 	return h, nil
 }
 
-// isolateSourceProvider scopes ingestion to a single named provider: it enables
+// isolateSourceHarness scopes ingestion to a single named provider: it enables
 // that provider and DISABLES default discovery of every other provider for this
 // run. Used with --source-path so a path-scoped ingest reads ONLY that provider
 // from that path, not the other providers' real default source dirs. Bare
 // `peasant ingest` (no source flags) is unaffected — it uses the config's enabled
 // set as-is; multi-provider mixes remain available via config (sources.*.enabled).
-func isolateSourceProvider(cfg *config.Config, provider defaults.Harness) {
+func isolateSourceHarness(cfg *config.Config, provider defaults.Harness) {
 	cfg.Sources.ClaudeCode.Enabled = provider == defaults.HarnessClaudeCode
 	cfg.Sources.OpenCode.Enabled = provider == defaults.HarnessOpenCode
 	cfg.Sources.Codex.Enabled = provider == defaults.HarnessCodex

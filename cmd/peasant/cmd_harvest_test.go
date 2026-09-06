@@ -20,7 +20,7 @@ import (
 )
 
 // testConfigYAML is a minimal config that disables all source providers.
-// Tests that need a specific provider use --source-provider + --source-path
+// Tests that need a specific provider use --source-harness + --source-path
 // flags to enable it with a temp dir, preventing accidental ingestion of
 // real session data from the developer's home directory.
 const testConfigYAML = `version: 1
@@ -59,7 +59,7 @@ func writeTestConfigFile(t *testing.T, dir string) string {
 //
 // The config written under dir disables all source providers, so tests never
 // load ambient local configuration or ingest local session data. Tests that need
-// a provider re-enable it via --source-provider
+// a provider re-enable it via --source-harness
 // + --source-path; tests that need a bespoke config pass their own --config.
 func executeHarvestCmd(t *testing.T, dir string, args []string) (string, error) {
 	t.Helper()
@@ -95,7 +95,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 	}
 
 	stringFlags := []flagCheck{
-		{"source-provider", ""},
+		{"source-harness", ""},
 		{"source-path", ""},
 		{"output", ""},
 		{"since", ""},
@@ -151,14 +151,14 @@ func TestHarvestCmd_Flags(t *testing.T) {
 }
 
 // TestHarvestCmd_InvalidProvider checks that providing an unrecognized
-// --source-provider value produces an appropriate error message.
+// --source-harness value produces an appropriate error message.
 func TestHarvestCmd_InvalidProvider(t *testing.T) {
 	t.Parallel()
 	// We need a real path for --source-path to pass the NewResolvedPath check,
 	// and a real directory for --output so the pipeline can resolve paths.
 	tmpDir := t.TempDir()
 	output, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-provider=bogus",
+		"--source-harness=bogus",
 		"--source-path=" + tmpDir,
 		"--output=" + tmpDir,
 		"--dry-run",
@@ -181,7 +181,7 @@ func TestHarvestCmd_DryRun(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -213,7 +213,7 @@ func TestHarvestCmd_JSONOutput(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -244,7 +244,7 @@ func TestHarvestCmd_VerboseOutput(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -270,7 +270,7 @@ func TestHarvestCmd_SourcePathReplaces(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -282,7 +282,7 @@ func TestHarvestCmd_SourcePathReplaces(t *testing.T) {
 }
 
 // TestHarvestCmd_SourcePathWithoutProvider verifies that passing --source-path
-// without --source-provider returns a clear error.
+// without --source-harness returns a clear error.
 func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
@@ -291,28 +291,28 @@ func TestHarvestCmd_SourcePathWithoutProvider(t *testing.T) {
 		"--dry-run",
 	})
 	if err == nil {
-		t.Fatal("expected error when --source-path given without --source-provider, got nil")
+		t.Fatal("expected error when --source-path given without --source-harness, got nil")
 	}
-	if !strings.Contains(err.Error(), "--source-path requires --source-provider") {
-		t.Errorf("error should mention '--source-path requires --source-provider', got: %v", err)
+	if !strings.Contains(err.Error(), "--source-path requires --source-harness") {
+		t.Errorf("error should mention '--source-path requires --source-harness', got: %v", err)
 	}
 }
 
-// TestHarvestCmd_SourceProviderWithoutPath verifies that passing --source-provider
+// TestHarvestCmd_SourceHarnessWithoutPath verifies that passing --source-harness
 // without --source-path returns a clear error.
-func TestHarvestCmd_SourceProviderWithoutPath(t *testing.T) {
+func TestHarvestCmd_SourceHarnessWithoutPath(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 	_, err := executeHarvestCmd(t, tmpDir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--output=" + tmpDir,
 		"--dry-run",
 	})
 	if err == nil {
-		t.Fatal("expected error when --source-provider given without --source-path, got nil")
+		t.Fatal("expected error when --source-harness given without --source-path, got nil")
 	}
-	if !strings.Contains(err.Error(), "--source-provider requires --source-path") {
-		t.Errorf("error should mention '--source-provider requires --source-path', got: %v", err)
+	if !strings.Contains(err.Error(), "--source-harness requires --source-path") {
+		t.Errorf("error should mention '--source-harness requires --source-path', got: %v", err)
 	}
 }
 
@@ -869,7 +869,7 @@ func TestHarvestCmd_AllImpliesIncludeActive(t *testing.T) {
 
 	// Run with --all (which should imply --include-active and --force).
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -899,7 +899,7 @@ func TestHarvestCmd_DryRun_DoesNotCreateDB(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -924,7 +924,7 @@ func TestHarvestCmd_NonDryRun_CreatesDB(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -956,7 +956,7 @@ func TestHarvestVerify_AnnotationEngineSection(t *testing.T) {
 
 	// Step 1: Non-dry-run ingest creates DB with migrations + seed data.
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -1039,7 +1039,7 @@ func TestHarvestVerify_AnnotationEngineSection_Verbose(t *testing.T) {
 
 	// Create DB with seed data.
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -1106,7 +1106,7 @@ func TestHarvestCmd_NonDryRun_WiresV2Stages(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--json",
@@ -1233,7 +1233,7 @@ func TestHarvestCmd_SessionFlag_InvalidID(t *testing.T) {
 	outputDir := t.TempDir()
 
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -1255,7 +1255,7 @@ func TestHarvestCmd_SinceFlag_InvalidDuration(t *testing.T) {
 	outputDir := t.TempDir()
 
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -1277,7 +1277,7 @@ func TestHarvestCmd_SinceFlag_ValidDuration(t *testing.T) {
 	outputDir := t.TempDir()
 
 	output, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 		"--dry-run",
@@ -1636,7 +1636,7 @@ func TestHarvestVerify_AnnotationEngineSection_SeedFail(t *testing.T) {
 
 	// Step 1: Create DB with seed data via a non-dry-run ingest.
 	_, err := executeHarvestCmd(t, dir, []string{
-		"--source-provider=claude-code",
+		"--source-harness=claude-code",
 		"--source-path=" + sourceDir,
 		"--output=" + outputDir,
 	})
@@ -1674,11 +1674,11 @@ func TestHarvestVerify_AnnotationEngineSection_SeedFail(t *testing.T) {
 	}
 }
 
-// TestIsolateSourceProvider verifies that --source-path scoping
+// TestIsolateSourceHarness verifies that --source-path scoping
 // makes the NAMED provider the sole active source: it enables that provider and
 // disables default discovery of the others, so a path-scoped ingest never reads
 // the other providers' real default dirs (~/.claude, opencode, codex).
-func TestIsolateSourceProvider(t *testing.T) {
+func TestIsolateSourceHarness(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		named   defaults.Harness
@@ -1697,12 +1697,12 @@ func TestIsolateSourceProvider(t *testing.T) {
 		cfg.Sources.OpenCode.Enabled = true
 		cfg.Sources.Codex.Enabled = true
 
-		isolateSourceProvider(cfg, tc.named)
+		isolateSourceHarness(cfg, tc.named)
 
 		if cfg.Sources.ClaudeCode.Enabled != tc.wantCC ||
 			cfg.Sources.OpenCode.Enabled != tc.wantOC ||
 			cfg.Sources.Codex.Enabled != tc.wantCdx {
-			t.Errorf("isolateSourceProvider(%s): enabled = {cc:%v oc:%v codex:%v}, want {cc:%v oc:%v codex:%v} — only the named provider must stay active",
+			t.Errorf("isolateSourceHarness(%s): enabled = {cc:%v oc:%v codex:%v}, want {cc:%v oc:%v codex:%v} — only the named provider must stay active",
 				tc.named,
 				cfg.Sources.ClaudeCode.Enabled, cfg.Sources.OpenCode.Enabled, cfg.Sources.Codex.Enabled,
 				tc.wantCC, tc.wantOC, tc.wantCdx)
@@ -1713,7 +1713,7 @@ func TestIsolateSourceProvider(t *testing.T) {
 // TestHarvestCmd_SourcePathIsolatesProvider is the end-to-end proof that
 // 0mp4l: with defaults that enable ALL providers, a seeded codex session at the
 // codex DEFAULT dir is discovered by a bare harvest, but
-// `harvest --source-provider claude-code --source-path <dir>` scopes the run to
+// `harvest --source-harness claude-code --source-path <dir>` scopes the run to
 // claude-code only — the codex default is NOT read (its session is absent from
 // the output), while the claude session at the scoped path IS discovered.
 func TestHarvestCmd_SourcePathIsolatesProvider(t *testing.T) {
@@ -1752,7 +1752,7 @@ func TestHarvestCmd_SourcePathIsolatesProvider(t *testing.T) {
 	}
 
 	// Scoped: --source-path claude-code must isolate → codex default NOT read.
-	out := runHarvestNoTestConfig(t, "--source-provider", string(defaults.HarnessClaudeCode), "--source-path", claudeDir)
+	out := runHarvestNoTestConfig(t, "--source-harness", string(defaults.HarnessClaudeCode), "--source-path", claudeDir)
 	if !strings.Contains(out, claudeID) {
 		t.Errorf("scoped harvest did not discover the claude session %s:\n%s", claudeID, out)
 	}

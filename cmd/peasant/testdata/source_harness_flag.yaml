@@ -1,0 +1,42 @@
+required_names:
+  - harvest-rejects-old-flag
+  - logs-rejects-old-flag
+  - index-rejects-old-flag
+  - push-rejects-old-flag
+  - harvest-help-uses-harness
+  - logs-help-uses-harness
+  - push-help-uses-harness
+  - harvest-ingests-named-harness
+  - logs-extracts-named-harness
+cases:
+  - name: harvest-rejects-old-flag
+    args: [harvest, --source-provider=strike]
+    error_contains: "unknown flag: --source-provider"
+  - name: logs-rejects-old-flag
+    args: [harvest, logs, --source-provider=strike]
+    error_contains: "unknown flag: --source-provider"
+  - name: index-rejects-old-flag
+    args: [harvest, index, --source-provider=strike]
+    error_contains: "unknown flag: --source-provider"
+  - name: push-rejects-old-flag
+    args: [village, push, --source-provider=strike]
+    error_contains: "unknown flag: --source-provider"
+  - name: harvest-help-uses-harness
+    args: [harvest, --help]
+    output_contains: [--source-harness]
+    output_excludes: [--source-provider]
+  - name: logs-help-uses-harness
+    args: [harvest, logs, --help]
+    output_contains: [--source-harness]
+    output_excludes: [--source-provider]
+  - name: push-help-uses-harness
+    args: [village, push, --help]
+    output_contains: [--source-harness]
+    output_excludes: [--source-provider]
+  - name: harvest-ingests-named-harness
+    args: [harvest, --source-harness=strike, "--source-path={source}", "--output={output}", --include-active, --json]
+    output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA, BBBBBBBBBBBBBBBBBBBBBBBBBB]
+    stored_session: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+  - name: logs-extracts-named-harness
+    args: [harvest, logs, --source-harness=strike, "--source-path={source}", "--output={output}", --include-active, --json]
+    output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA, BBBBBBBBBBBBBBBBBBBBBBBBBB]

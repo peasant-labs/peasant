@@ -163,7 +163,7 @@ are replayed once through the ordinary push candidate path.
 | `--include-active` | Also ingest sessions still being written |
 | `--session <ids>` | Filter to specific session IDs (repeatable, comma-separated). Overrides the selection index. |
 | `--since <duration>` | Filter to sessions from the last N period (e.g. `2w`, `3m`, `7d`) |
-| `--source-provider <p>` | Override source provider (`claude`, `opencode`) |
+| `--source-harness <h>` | Override source harness (`claude-code`, `opencode`, `codex`, `cursor`, `strike`) |
 | `--source-path <path>` | Override source path for the provider (replaces config, not additive) |
 | `--output <path>` | Override output base path |
 | `--json` | Output as JSON instead of human-readable |
@@ -461,7 +461,7 @@ $XDG_CONFIG_HOME/peasant/config.yaml   # if XDG_CONFIG_HOME is set
 ```
 
 If no config file exists, Peasant uses built-in defaults and prints a notice directing you to
-`peasant kickstart`. CLI flags (`--source-provider`, `--source-path`, `--output`) override the
+`peasant kickstart`. CLI flags (`--source-harness`, `--source-path`, `--output`) override the
 config file for a single run.
 
 ### Selection index

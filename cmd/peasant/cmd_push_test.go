@@ -23,22 +23,22 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// TestPushCmd_SourceProviderHelpDerived pins the --source-provider flag's help
+// TestPushCmd_SourceHarnessHelpDerived pins the --source-harness flag's help
 // text to schema.AllHarnesses on the ACTUAL flag wired into BuildPushCommand().
-// sourceProviderHelp() derives the provider list so it can never go stale, but a
+// sourceHarnessHelp() derives the provider list so it can never go stale, but a
 // derived helper that is never attached to the flag (or a regression that
 // re-hardcodes the usage string) would still pass the rest of make check. This
 // test fails if the flag is missing/unwired or if any supported harness is absent
 // from its usage, preserving the derived rather than hardcoded contract.
-func TestPushCmd_SourceProviderHelpDerived(t *testing.T) {
+func TestPushCmd_SourceHarnessHelpDerived(t *testing.T) {
 	t.Parallel()
-	flag := BuildPushCommand().Flags().Lookup("source-provider")
+	flag := BuildPushCommand().Flags().Lookup("source-harness")
 	if flag == nil {
-		t.Fatal("--source-provider flag is not registered on the push command")
+		t.Fatal("--source-harness flag is not registered on the push command")
 	}
 	for _, h := range schema.AllHarnesses {
 		if !strings.Contains(flag.Usage, h.String()) {
-			t.Errorf("--source-provider usage %q is missing harness %q; help must be derived from schema.AllHarnesses, not hardcoded", flag.Usage, h.String())
+			t.Errorf("--source-harness usage %q is missing harness %q; help must be derived from schema.AllHarnesses, not hardcoded", flag.Usage, h.String())
 		}
 	}
 }
@@ -316,7 +316,7 @@ func dryRunIDSet(t *testing.T, dir string, args []string) map[string]bool {
 // wizardKeptIDSet builds the wizard's view via the TTY-free seam and returns the
 // approved (unlocked) session-ID set, mirroring how RunE constructs the query +
 // selection from config.
-func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvider string) map[string]bool {
+func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceHarness string) map[string]bool {
 	t.Helper()
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
@@ -330,7 +330,7 @@ func wizardKeptIDSet(t *testing.T, dir, cfgPath string, force bool, sourceProvid
 
 	q := push.PushCandidateQuery{
 		Force:          force,
-		SourceProvider: sourceProvider,
+		SourceProvider: sourceHarness,
 		Method:         cfg.Push.Method,
 		Sources:        cfg.Push.Sources,
 	}
@@ -422,24 +422,24 @@ selection:
 	claude := string(defaults.HarnessClaudeCode)
 
 	cases := []struct {
-		name           string
-		cfgPath        string
-		force          bool
-		sourceProvider string
-		// dryRunArgs are the extra CLI args (mirroring force/sourceProvider).
+		name          string
+		cfgPath       string
+		force         bool
+		sourceHarness string
+		// dryRunArgs are the extra CLI args (mirroring force/sourceHarness).
 		dryRunArgs []string
 	}{
 		{"default", cfgAll, false, "", nil},
 		{"selected", cfgSelected, false, "", nil},
 		{"force", cfgAll, true, "", []string{"--force"}},
-		{"source-provider", cfgAll, false, claude, []string{"--source-provider=" + claude}},
+		{"source-harness", cfgAll, false, claude, []string{"--source-harness=" + claude}},
 		{"by-source", cfgBySource, false, "", nil},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			pipelineSet := dryRunIDSet(t, dir, append([]string{"--config=" + tc.cfgPath}, tc.dryRunArgs...))
-			wizardSet := wizardKeptIDSet(t, dir, tc.cfgPath, tc.force, tc.sourceProvider)
+			wizardSet := wizardKeptIDSet(t, dir, tc.cfgPath, tc.force, tc.sourceHarness)
 
 			if !setsEqual(pipelineSet, wizardSet) {
 				t.Fatalf("wizard set != pipeline set\n  pipeline: %v\n  wizard:   %v", pipelineSet, wizardSet)
@@ -1105,7 +1105,7 @@ func TestPushCmd_Flags(t *testing.T) {
 	}
 
 	stringFlags := []flagCheck{
-		{"source-provider", ""},
+		{"source-harness", ""},
 		{"visibility", ""},
 		{"repository", ""},
 	}
@@ -1474,7 +1474,7 @@ func TestPushCmd_VerboseCLIFlag(t *testing.T) {
 }
 
 // TestPushCmd_IndividualMethodError verifies that push.method=individual in
-// config (without --source-provider) returns a clear error message.
+// config (without --source-harness) returns a clear error message.
 func TestPushCmd_IndividualMethodError(t *testing.T) {
 	// PARALLEL: credential gate reads via --config-dir; config passed via --config.
 	t.Parallel()

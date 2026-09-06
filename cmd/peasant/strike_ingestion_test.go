@@ -39,7 +39,7 @@ func TestStrikeIngestCommandPersistsSessionDetail(t *testing.T) {
 	}
 
 	result, err := executeHarvestCmd(t, testRoot, []string{
-		"--source-provider", schema.HarnessStrike.String(),
+		"--source-harness", schema.HarnessStrike.String(),
 		"--source-path", fixtureDir,
 		"--output", outputDir,
 		"--include-active",
@@ -143,7 +143,7 @@ func TestStrikeIngestCommandAddsChildAfterParentSourceDisappears(t *testing.T) {
 
 	outputDir := filepath.Join(testRoot, "sync")
 	args := []string{
-		"--source-provider", schema.HarnessStrike.String(),
+		"--source-harness", schema.HarnessStrike.String(),
 		"--source-path", sourceDir,
 		"--output", outputDir,
 		"--include-active",
@@ -238,7 +238,7 @@ func TestStrikeIngestOmitsOversizedRecordBeforePersistence(t *testing.T) {
 
 	outputDir := filepath.Join(testRoot, "sync")
 	result, err := executeHarvestCmd(t, testRoot, []string{
-		"--source-provider", schema.HarnessStrike.String(),
+		"--source-harness", schema.HarnessStrike.String(),
 		"--source-path", sourceDir,
 		"--output", outputDir,
 		"--include-active",
