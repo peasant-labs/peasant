@@ -1,6 +1,10 @@
 estimate:
-  required_cases: [raw-key-retains-estimate, external-cancel-retains-estimate, stop-only-retains-estimate, raw-key-retains-unavailable, external-cancel-retains-unavailable, stop-only-retains-unavailable, raw-key-retains-expired, external-cancel-retains-expired, stop-only-retains-expired]
+  required_cases: [raw-key-retains-estimate, external-cancel-retains-estimate, stop-only-retains-estimate, raw-key-retains-unavailable, external-cancel-retains-unavailable, stop-only-retains-unavailable, raw-key-retains-expired, external-cancel-retains-expired, stop-only-retains-expired, external-error-tick-before-delayed-cancel, external-unavailable-tick-before-delayed-cancel, external-expired-tick-before-delayed-cancel, external-stop-context-fallback]
   cases:
+    - {name: external-error-tick-before-delayed-cancel, external: true, delayed_cancel: true, want: "estimate: 6s"}
+    - {name: external-unavailable-tick-before-delayed-cancel, external: true, delayed_cancel: true, unavailable: true, want: estimate unavailable}
+    - {name: external-expired-tick-before-delayed-cancel, external: true, delayed_cancel: true, unavailable: true, expired: true, want: estimate unavailable}
+    - {name: external-stop-context-fallback, stop_fallback: true, want: "estimate: 6s"}
     - {name: raw-key-retains-estimate, key: true, want: "estimate: 6s"}
     - {name: external-cancel-retains-estimate, external: true, want: "estimate: 6s"}
     - {name: stop-only-retains-estimate, want: "estimate: 6s"}
@@ -11,10 +15,11 @@ estimate:
     - {name: external-cancel-retains-expired, external: true, unavailable: true, expired: true, want: estimate unavailable}
     - {name: stop-only-retains-expired, unavailable: true, expired: true, want: estimate unavailable}
 lifecycle:
-  required_cases: [raw-key-awaits-acknowledgment, external-context-awaits-acknowledgment, successful-completion]
+  required_cases: [raw-key-awaits-acknowledgment, external-context-awaits-acknowledgment, external-tick-before-watcher-notification, successful-completion]
   cases:
     - {name: raw-key-awaits-acknowledgment, key: true}
     - {name: external-context-awaits-acknowledgment, external: true}
+    - {name: external-tick-before-watcher-notification, external: true, delayed_notification: true}
     - {name: successful-completion}
 interrupt:
   required_cases:

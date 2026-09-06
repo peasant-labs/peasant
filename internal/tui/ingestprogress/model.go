@@ -37,6 +37,7 @@ type Model struct {
 	state            ProgressSource
 	anim             *animation.Animation
 	cancel           context.CancelFunc
+	operationErr     func() error
 	frame            int
 	lastAnimation    time.Time
 	now              time.Time
@@ -48,9 +49,14 @@ type Model struct {
 	theme            theme.Theme
 }
 
-func NewModel(state ProgressSource, anim *animation.Animation, th theme.Theme, startedAt time.Time, cancel context.CancelFunc) Model {
+// operationErr optionally probes the owning operation's context independently
+// of asynchronous CancelMsg delivery. Inline harvest supplies its context.Err.
+func NewModel(state ProgressSource, anim *animation.Animation, th theme.Theme, startedAt time.Time, cancel context.CancelFunc, operationErr ...func() error) Model {
 	m := Model{state: state, anim: anim, cancel: cancel, now: startedAt, theme: th, presentation: New(startedAt, false)}
-	m.presentation.Observe(startedAt, state.Snapshot())
+	if len(operationErr) > 0 {
+		m.operationErr = operationErr[0]
+	}
+	m.observe(startedAt)
 	return m
 }
 
@@ -77,16 +83,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.beginCancel()
 		}
 		if !msg.At.IsZero() {
-			m.now = msg.At
+			m.observe(msg.At)
+		} else {
+			m.observe(m.now)
 		}
-		m.presentation.Observe(m.now, m.state.Snapshot())
 		m.stopped = true
 		return m, tea.Quit
 	case CancelMsg:
 		m.beginCancel()
 	case TickMsg:
-		m.now = time.Time(msg)
-		m.presentation.Observe(m.now, m.state.Snapshot())
+		m.observe(time.Time(msg))
 		if m.anim != nil && len(m.anim.Frames) > 0 && (m.lastAnimation.IsZero() || m.now.Sub(m.lastAnimation) >= animationFrameInterval) {
 			m.frame = (m.frame + 1) % len(m.anim.Frames)
 			m.lastAnimation = m.now
@@ -94,6 +100,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, Tick()
 	}
 	return m, nil
+}
+
+func (m *Model) observe(at time.Time) {
+	snapshot := m.state.Snapshot()
+	// Check after acquiring the snapshot: a cancellation error published during
+	// the read must not invalidate the displayed estimate before we retain it.
+	if m.operationErr != nil && m.operationErr() != nil {
+		m.beginCancel()
+	}
+	m.now = at
+	m.presentation.Observe(at, snapshot)
 }
 
 func (m *Model) beginCancel() {
