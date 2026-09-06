@@ -42,10 +42,11 @@ const (
 )
 
 type harvestInterruptCase struct {
-	Name      string               `yaml:"name"`
-	Terminal  bool                 `yaml:"terminal"`
-	JSON      bool                 `yaml:"json"`
-	Interrupt harvestInterruptKind `yaml:"interrupt"`
+	Name        string               `yaml:"name"`
+	Terminal    bool                 `yaml:"terminal"`
+	JSON        bool                 `yaml:"json"`
+	Interrupt   harvestInterruptKind `yaml:"interrupt"`
+	DiffSession string               `yaml:"diff_session"`
 }
 
 type inlineFixture struct {
@@ -98,6 +99,9 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 			valid = c.Terminal && !c.JSON
 		case harvestInterruptINT, harvestInterruptTERM:
 			valid = true
+		}
+		if c.DiffSession != "" {
+			valid = valid && c.Interrupt == harvestInterruptKey
 		}
 		return c.Name, valid
 	})
@@ -494,11 +498,29 @@ func TestHarvestInterruptMounted(t *testing.T) {
 				t.Fatal(err)
 			}
 			ready := filepath.Join(dir, "git-ready")
+			var metadataWriter *os.File
+			if c.DiffSession != "" {
+				fifo = filepath.Join(dir, "output", "synthetic-host", "parent", "subagents", c.DiffSession, c.DiffSession+defaults.MetadataSuffix)
+				if err := os.MkdirAll(filepath.Dir(fifo), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if metadataWriter != nil {
+						_ = metadataWriter.Close()
+					}
+				})
+			}
 			// Only shell builtins: cancellation kills the actual CommandContext
 			// dependency, with no sleep process retaining its output pipes.
 			// Scope the block to this source's project: startup Git probes must
 			// finish before harvest registers its signal handler and renderer.
 			git := "#!/bin/sh\n[ \"$1\" = -C ] && [ \"$2\" = \"$PEASANT_INTERRUPT_PROJECT\" ] || exit 1\nprintf ready > \"$PEASANT_INTERRUPT_READY\"\nread value < \"$PEASANT_INTERRUPT_FIFO\"\n"
+			if c.DiffSession != "" {
+				git = "#!/bin/sh\nexit 1\n"
+			}
 			if err := os.WriteFile(filepath.Join(dir, "git"), []byte(git), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -549,6 +571,22 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			defer tick.Stop()
 			for {
 				_, err := os.Stat(ready)
+				if c.DiffSession != "" {
+					// A nonblocking writer opens only once the real DIFF ReadFile
+					// is waiting at the synthetic metadata FIFO. No timing-sized tree.
+					if metadataWriter == nil {
+						fd, openErr := unix.Open(fifo, unix.O_WRONLY|unix.O_NONBLOCK, 0)
+						if openErr == nil {
+							metadataWriter = os.NewFile(uintptr(fd), fifo)
+						}
+						if openErr != nil && !errors.Is(openErr, unix.ENXIO) {
+							t.Fatal(openErr)
+						}
+					}
+					if metadataWriter != nil && strings.Contains(ansi.Strip(stderr.String()), "0/1") {
+						err = nil
+					}
+				}
 				if err == nil && (!c.Terminal || c.JSON || strings.Contains(stderr.String(), "ctrl+c to cancel")) {
 					break
 				}
@@ -557,7 +595,7 @@ func TestHarvestInterruptMounted(t *testing.T) {
 					waited = true
 					t.Fatalf("harvest exited before blocked dependency and renderer readiness: %v\n%s\n%s", err, stdout.String(), stderr.String())
 				case <-deadline.C:
-					t.Fatalf("harvest did not reach blocked git and renderer readiness\n%s\n%s", stdout.String(), stderr.String())
+					t.Fatalf("harvest did not reach blocked dependency and renderer readiness\n%s\n%s", stdout.String(), stderr.String())
 				case <-tick.C:
 				}
 			}
@@ -584,6 +622,27 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if c.DiffSession != "" {
+				// Cancellation cannot interrupt an in-flight OS read. Retain the
+				// renderer until the dependency returns, then require bounded exit
+				// without another key. Backend tests cover cancellation between Stats.
+				ack := time.NewTimer(5 * time.Second)
+				defer ack.Stop()
+				for !strings.Contains(stderr.String(), "waiting for current work to stop") {
+					select {
+					case <-ack.C:
+						t.Fatalf("DIFF did not acknowledge first key: %s", stderr.String())
+					case err := <-done:
+						waited = true
+						t.Fatalf("harvest unmounted before DIFF dependency returned: %v", err)
+					case <-tick.C:
+					}
+				}
+				if err := metadataWriter.Close(); err != nil {
+					t.Fatal(err)
+				}
+				metadataWriter = nil
 			}
 			select {
 			case err = <-done:
@@ -612,6 +671,14 @@ func TestHarvestInterruptMounted(t *testing.T) {
 			}
 			if c.Terminal && !c.JSON && !strings.Contains(stderr.String(), "harvest canceled") {
 				t.Fatalf("terminal cancellation lost final progress: %s", stderr.String())
+			}
+			if c.DiffSession != "" {
+				// This checks the PTY transcript, not an emulated final screen;
+				// the frozen model and mounted screenshot tests check final layout.
+				plain := ansi.Strip(stderr.String())
+				if !strings.Contains(plain, "diff") || !strings.Contains(plain, "0/1") {
+					t.Fatalf("canceled DIFF lost its incomplete snapshot: %s", plain)
+				}
 			}
 		})
 	}
