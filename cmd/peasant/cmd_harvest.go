@@ -312,24 +312,8 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		return fmt.Errorf("resolve output path %q: %w", outputDir, err)
 	}
 
-	// 4. Build adapter registry.
-	adapters := map[defaults.Harness]ingest.AdapterFactory{
-		defaults.HarnessClaudeCode: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewClaudeAdapter(f, g, s)
-		},
-		defaults.HarnessOpenCode: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewOpenCodeAdapter(f, g, s)
-		},
-		defaults.HarnessCodex: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewCodexAdapter(f, g, s)
-		},
-		defaults.HarnessCursor: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewCursorAdapter(f, g, s)
-		},
-		defaults.HarnessStrike: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
-			return ingest.NewStrikeAdapter(f, g, s)
-		},
-	}
+	// 4. Use the canonical adapter registry shared with kickstart and web ingest.
+	adapters := ingest.DefaultAdapterRegistry
 
 	// 5. Build source configs from config.
 	sources := buildSourceConfigs(cfg)
@@ -1227,8 +1211,20 @@ func printSummary(w io.Writer, result *ingest.PipelineResult, verbose bool, incl
 	indexFailures := countIndexFailures(result.IndexLog)
 	if s.Indexed > 0 || s.Computed > 0 || indexFailures > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "index: %d indexed, %d computed (index_version=%d, metadata_version=%d)\n",
-			s.Indexed, s.Computed, s.IndexVersion, s.MetadataVersion)
+		fmt.Fprintf(w, "index: %d indexed, %d computed (metadata_version=%d)\n",
+			s.Indexed, s.Computed, s.MetadataVersion)
+	}
+	if len(s.HarvesterVersions) > 0 {
+		fmt.Fprintln(w, "harvester targets:")
+		harnesses := make([]ingest.Harness, 0, len(s.HarvesterVersions))
+		for harness := range s.HarvesterVersions {
+			harnesses = append(harnesses, harness)
+		}
+		sort.Slice(harnesses, func(i, j int) bool { return harnesses[i] < harnesses[j] })
+		for _, harness := range harnesses {
+			versions := s.HarvesterVersions[harness]
+			fmt.Fprintf(w, "  %s: adapter_version=%d indexer_version=%d index_version=%d\n", harness, versions.AdapterVersion, versions.IndexerVersion, versions.IndexVersion)
+		}
 	}
 	if indexFailures > 0 {
 		fmt.Fprintf(w, "  warning: %d session(s) were imported but NOT indexed, so they are empty in the viewer, in "+

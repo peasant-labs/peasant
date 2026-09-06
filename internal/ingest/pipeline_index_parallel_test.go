@@ -750,6 +750,15 @@ func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID 
 
 func (*serialIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error { return nil }
 
+func (store *serialIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+	results := make([]SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		err := store.IndexSessionEntries(ctx, write.SessionID, write.Entries)
+		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: err == nil, Err: err}
+	}
+	return results
+}
+
 type batchIndexStore struct {
 	MetricsStore
 	mu           sync.Mutex
@@ -961,4 +970,12 @@ func (*benchmarkIndexStore) IndexSessionEntries(context.Context, SessionID, []sc
 
 func (*benchmarkIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error {
 	return nil
+}
+
+func (*benchmarkIndexStore) IndexSessionEntryBatch(_ context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
+	results := make([]SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: true}
+	}
+	return results
 }

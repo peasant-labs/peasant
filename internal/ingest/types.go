@@ -208,56 +208,18 @@ func (o IndexOutcome) IsValid() bool {
 // Written during the INDEX stage of pipeline.Run(). Maps 1:1 to a row
 // in the index_log table.
 type IndexLogEntry struct {
-	SessionID    SessionID
-	Harness      Harness
-	Outcome      IndexOutcome
-	IndexVersion int
-	EntriesCount int
-	SourcePath   *string
-	OriginalRoot *string
-	Reason       *string
-	StartedAt    int64  // Unix millis
-	FinishedAt   *int64 // Unix millis — nil if indexing did not complete
-	ErrorMessage *string
+	SessionID      SessionID
+	Harness        Harness
+	Outcome        IndexOutcome
+	IndexerVersion int `json:"IndexVersion"` // legacy JSON key; SQL index_version stores the producing parser revision
+	EntriesCount   int
+	SourcePath     *string
+	OriginalRoot   *string
+	Reason         *string
+	StartedAt      int64  // Unix millis
+	FinishedAt     *int64 // Unix millis — nil if indexing did not complete
+	ErrorMessage   *string
 }
-
-// --- CurrentIndexVersion ---
-
-// CurrentIndexVersion tracks indexer evolution separately from metadata schema.
-// Bump when indexer logic changes and sessions need re-indexing.
-// v1: initial indexing support with index_log tracking.
-// v2: full-depth content block decomposition enabled in production.
-// v3: tool_kind and stop_reason columns populated (push-v2).
-// v4: project walk-up via WalkUpRemoteURL; provider roles reclassified during indexing.
-// v5: content-block detection for skill bodies; depth=1 role propagation; direct/progress/queue-operation types.
-// v6: suppress duplicate user text echo entries in OpenCode indexParts; inherit parent role for non-echo parts.
-// v7: skip empty text/thinking/default parts at index time (both OpenCode and Claude); remove read-time filters from EntriesToTurns.
-// v8: restore empty-part storage at index time; restore read-time empty suppression and consecutive dedup in EntriesToTurns; add part_type column.
-// v9: reclassify Claude compaction/context-continuation messages from role=user to role=system.
-// v10: Claude indexer writes canonical roles at index time: depth-1 tool_result → role=tool,
-//
-//	AskUserQuestion tool_results stay role=user; depth-0 tool_result wrappers → role=tool;
-//	content_preview migrated from depth-0 wrappers to depth-1 tool_result children (R1–R3, R6).
-//
-// v11: reclassify empty progress/direct/queue-operation entries to role=system;
-//
-//	reclassify "Tool loaded." wrappers with tool_result siblings to role=system.
-//
-// v12: preserve exact assistant model observations during Claude indexing and
-// retain observation boundaries through transcript suppression and deduplication.
-//
-// v13: carry the OpenCode message graph on ParentEntryID at depth 0 and render
-// orphan parts as root-level system entries, so already-indexed OpenCode
-// sessions are re-indexed to the new entry shape.
-//
-// v14: honour Claude Code's isMeta marker on user entries: harness-injected
-// user-role entries (skill bodies, image notes, usage-limit notices) are
-// reclassified to role=system regardless of content shape.
-//
-// v15: honour OpenCode's synthetic marker on message parts: messages whose
-// counted parts are all harness-authored are reclassified to role=system, so
-// injected background task results no longer appear as user turns.
-const CurrentIndexVersion = 15
 
 // --- PruneFilter ---
 

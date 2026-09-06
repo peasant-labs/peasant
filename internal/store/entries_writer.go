@@ -189,14 +189,20 @@ func indexSessionEntryWriteSavepoint(conn *sqlite.Conn, write ingest.SessionEntr
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
+	if write.IndexerVersion > 0 {
+		if err := validateIndexerRevisionOnConn(conn, write.SessionID, write.IndexerVersion); err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+	}
 
 	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, write.Entries, stmts)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return outcome, rollbackErr, fatal
 	}
-	if write.IndexVersion > 0 {
-		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexVersion, write.IndexedAtMs, outcome.sessionEntriesHash); err != nil {
+	if write.IndexerVersion > 0 {
+		if err := updateIndexStateWithSessionEntriesHashOnConn(conn, write.SessionID, write.IndexerVersion, write.IndexedAtMs, outcome.sessionEntriesHash); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
 			return outcome, rollbackErr, fatal
 		}

@@ -1,0 +1,9 @@
+requiredNames: [logs_dry_run, all_dry_run, logs_write, all_write]
+sessionID: 77777777-7777-4777-8777-777777777777
+transcript: |
+  {"sessionId":"77777777-7777-4777-8777-777777777777","type":"user","message":{"role":"user","content":"version summary fixture"},"timestamp":"2024-02-19T00:00:00Z","cwd":"/fixture/project"}
+cases:
+  - {name: logs_dry_run, command: logs, dryRun: true, indexed: 0}
+  - {name: all_dry_run, command: all, dryRun: true, indexed: 0}
+  - {name: logs_write, command: logs, dryRun: false, indexed: 0}
+  - {name: all_write, command: all, dryRun: false, indexed: 1}

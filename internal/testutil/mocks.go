@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -703,7 +704,7 @@ type StubMetricsStore struct {
 	StaleIndexSessions         []ingest.SessionID
 	StaleIndexErr              error
 	IndexStates                map[ingest.SessionID]int // tracks index_version per session
-	ListStaleCalledWithVersion int                      // last currentVersion argument passed to ListStaleIndexSessions
+	ListStaleCalledWithTargets map[ingest.Harness]ingest.HarvesterVersions
 	// SourceInfoByID allows per-session injection for LookupSourceInfo.
 	// Nil = return empty (fallback skipped).
 	SourceInfoByID map[ingest.SessionID]struct {
@@ -720,6 +721,7 @@ type StubMetricsStore struct {
 }
 
 var _ ingest.MetricsStore = (*StubMetricsStore)(nil)
+var _ ingest.SessionEntryBatchStore = (*StubMetricsStore)(nil)
 
 // NewStubMetricsStore creates a ready-to-use StubMetricsStore.
 func NewStubMetricsStore() *StubMetricsStore {
@@ -745,6 +747,27 @@ func (s *StubMetricsStore) IndexSessionEntries(_ context.Context, sessionID inge
 	}
 	s.IndexedEntries[sessionID] = entries
 	return nil
+}
+
+func (s *StubMetricsStore) IndexSessionEntryBatch(_ context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
+	results := make([]ingest.SessionEntryWriteResult, len(writes))
+	for i, write := range writes {
+		results[i].SessionID = write.SessionID
+		if err := errors.Join(s.IndexErr, s.UpdateIndexErr); err != nil {
+			results[i].Err = err
+			continue
+		}
+		if write.IndexerVersion > 0 && s.IndexStates[write.SessionID] > write.IndexerVersion {
+			results[i].Err = fmt.Errorf("newer indexer revision already stored for %s", write.SessionID)
+			continue
+		}
+		s.IndexedEntries[write.SessionID] = write.Entries
+		if write.IndexerVersion > 0 {
+			s.IndexStates[write.SessionID] = write.IndexerVersion
+		}
+		results[i].Written = true
+	}
+	return results
 }
 
 func (s *StubMetricsStore) SessionEntriesExist(_ context.Context, sessionID ingest.SessionID) (bool, error) {
@@ -812,8 +835,8 @@ func (s *StubMetricsStore) UpdateIndexState(_ context.Context, sessionID ingest.
 	return nil
 }
 
-func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, currentVersion int) ([]ingest.SessionID, error) {
-	s.ListStaleCalledWithVersion = currentVersion
+func (s *StubMetricsStore) ListStaleIndexSessions(_ context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+	s.ListStaleCalledWithTargets = maps.Clone(targets)
 	if s.StaleIndexErr != nil {
 		return nil, s.StaleIndexErr
 	}

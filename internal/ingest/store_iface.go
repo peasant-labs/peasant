@@ -111,9 +111,10 @@ type MetricsStore interface {
 	// UpdateIndexState sets the index_version and indexed_at for a session
 	// after successful indexing. indexed_at is in Unix milliseconds.
 	UpdateIndexState(ctx context.Context, sessionID SessionID, version int, indexedAtMs int64) error
-	// ListStaleIndexSessions returns session IDs where index_version < currentVersion.
-	// Used by the post-FILTER auto-detect step to find sessions needing re-indexing.
-	ListStaleIndexSessions(ctx context.Context, currentVersion int) ([]SessionID, error)
+	// ListStaleIndexSessions compares each session's historical index_version
+	// (the producing indexer revision) against its harness target. Harnesses absent
+	// from targets are excluded; an empty map selects nothing.
+	ListStaleIndexSessions(ctx context.Context, targets map[Harness]HarvesterVersions) ([]SessionID, error)
 	// LookupSessionLocation returns the host_slug and parent_id for a session.
 	// Returns ("", "", nil) if the session is not found in the DB.
 	// Used by reconstructFromMetadata to avoid scanning all host directories.
@@ -125,14 +126,14 @@ type MetricsStore interface {
 }
 
 // SessionEntryWrite is one session's replacement entry set for the INDEX stage.
-// IndexVersion zero means entries are written without updating the session's
-// index state. Non-zero IndexVersion updates sessions.index_version and
+// IndexerVersion zero means entries are written without updating the session's
+// index state. Non-zero IndexerVersion updates sessions.index_version and
 // sessions.indexed_at inside the same per-session atomic write.
 type SessionEntryWrite struct {
-	SessionID    SessionID
-	Entries      []schema.SessionEntry
-	IndexVersion int
-	IndexedAtMs  int64
+	SessionID      SessionID
+	Entries        []schema.SessionEntry
+	IndexerVersion int
+	IndexedAtMs    int64
 }
 
 // SessionEntryWriteResult reports the outcome for one SessionEntryWrite.
@@ -144,9 +145,10 @@ type SessionEntryWriteResult struct {
 	Err       error
 }
 
-// SessionEntryBatchStore is an optional MetricsStore capability. A store that
-// implements it can commit multiple session entry replacements in one outer
-// transaction while preserving per-session rollback with savepoints.
+// SessionEntryBatchStore is required to persist pipeline index results. Metrics
+// consumers may omit it, but indexing then refuses before modifying entries.
+// It commits replacements and producer stamps in one outer transaction while
+// preserving per-session rollback with savepoints, including single-item batches.
 type SessionEntryBatchStore interface {
 	IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult
 }

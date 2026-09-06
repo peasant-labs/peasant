@@ -526,7 +526,7 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			nonStaleMetric := *metrics.SavedMetrics[sessionID]
 			metrics.IndexedEntries[nonStaleID] = append([]schema.SessionEntry(nil), metrics.IndexedEntries[sessionID]...)
 			metrics.SavedMetrics[nonStaleID] = &nonStaleMetric
-			metrics.IndexStates[nonStaleID] = ingest.CurrentIndexVersion
+			metrics.IndexStates[nonStaleID] = ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode].IndexerVersion
 			canonicalSnapshot := captureMountedCurrentSnapshot(t, output, store, metrics, sessionID, metadata)
 
 			if err := os.Remove(materialized.Path); err != nil {
@@ -538,8 +538,8 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			metrics.IndexStates = make(map[ingest.SessionID]int)
 			metrics.IndexedEntries[nonStaleID] = append([]schema.SessionEntry(nil), canonicalSnapshot.Entries...)
 			metrics.SavedMetrics[nonStaleID] = &nonStaleMetric
-			metrics.IndexStates[nonStaleID] = ingest.CurrentIndexVersion
-			metrics.ListStaleCalledWithVersion = 0
+			metrics.IndexStates[nonStaleID] = ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode].IndexerVersion
+			metrics.ListStaleCalledWithTargets = nil
 			config.Reindex = true
 			config.Force = false
 			sourceOpenMu.Lock()
@@ -562,8 +562,8 @@ func TestCurrentOpenCodeMountedHarvestDetailMetricsRepeatAndReindex(t *testing.T
 			reindexOrigins := append([]ingest.TranscriptOrigin(nil), reindexer.origins...)
 			reindexByteRuns := reindexer.byteRuns
 			reindexer.mu.Unlock()
-			if metrics.ListStaleCalledWithVersion != ingest.CurrentIndexVersion || reindexByteRuns != 1 || len(reindexOrigins) != 1 || reindexOrigins[0] != ingest.TranscriptOriginOpenCodeCurrentSQLite || removedSourceOpens != 0 || !reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], canonicalSnapshot.Entries) || !reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric) || metrics.IndexStates[nonStaleID] != ingest.CurrentIndexVersion {
-				t.Fatalf("source-free stale reindex selected or mutated the wrong state: stale_version=%d managed_current_runs=%d origins=%v removed_source_opens=%d non_stale_entries=%t non_stale_metrics=%t non_stale_index_version=%d", metrics.ListStaleCalledWithVersion, reindexByteRuns, reindexOrigins, removedSourceOpens, reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], canonicalSnapshot.Entries), reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric), metrics.IndexStates[nonStaleID])
+			if metrics.ListStaleCalledWithTargets[ingest.HarnessOpenCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode].IndexerVersion || reindexByteRuns != 1 || len(reindexOrigins) != 1 || reindexOrigins[0] != ingest.TranscriptOriginOpenCodeCurrentSQLite || removedSourceOpens != 0 || !reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], canonicalSnapshot.Entries) || !reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric) || metrics.IndexStates[nonStaleID] != ingest.HarvesterVersionRegistry[ingest.HarnessOpenCode].IndexerVersion {
+				t.Fatalf("source-free stale reindex selected or mutated the wrong state: stale_version=%d managed_current_runs=%d origins=%v removed_source_opens=%d non_stale_entries=%t non_stale_metrics=%t non_stale_index_version=%d", metrics.ListStaleCalledWithTargets[ingest.HarnessOpenCode].IndexerVersion, reindexByteRuns, reindexOrigins, removedSourceOpens, reflect.DeepEqual(metrics.IndexedEntries[nonStaleID], canonicalSnapshot.Entries), reflect.DeepEqual(metrics.SavedMetrics[nonStaleID], &nonStaleMetric), metrics.IndexStates[nonStaleID])
 			}
 		})
 	}

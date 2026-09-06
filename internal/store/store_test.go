@@ -2094,17 +2094,17 @@ func TestStore_LogIndexEntry_RoundTrip(t *testing.T) {
 
 	// Entry 1: fully populated.
 	entry1 := ingest.IndexLogEntry{
-		SessionID:    sessionID,
-		Harness:      defaults.HarnessClaudeCode,
-		Outcome:      ingest.IndexOutcomeIndexed,
-		IndexVersion: 2,
-		EntriesCount: 15,
-		SourcePath:   &srcPath,
-		OriginalRoot: &origRoot,
-		Reason:       nil,
-		StartedAt:    1705276800000,
-		FinishedAt:   &finishedAt,
-		ErrorMessage: nil,
+		SessionID:      sessionID,
+		Harness:        defaults.HarnessClaudeCode,
+		Outcome:        ingest.IndexOutcomeIndexed,
+		IndexerVersion: 2,
+		EntriesCount:   15,
+		SourcePath:     &srcPath,
+		OriginalRoot:   &origRoot,
+		Reason:         nil,
+		StartedAt:      1705276800000,
+		FinishedAt:     &finishedAt,
+		ErrorMessage:   nil,
 	}
 
 	if err := s.LogIndexEntry(ctx, entry1); err != nil {
@@ -2181,17 +2181,17 @@ func TestStore_LogIndexEntry_RoundTrip(t *testing.T) {
 	errMsg := "file not found"
 
 	entry2 := ingest.IndexLogEntry{
-		SessionID:    sessionID2,
-		Harness:      defaults.HarnessOpenCode,
-		Outcome:      ingest.IndexOutcomeError,
-		IndexVersion: 1,
-		EntriesCount: 0,
-		SourcePath:   nil,
-		OriginalRoot: nil,
-		Reason:       &reason,
-		StartedAt:    1705276900000,
-		FinishedAt:   nil,
-		ErrorMessage: &errMsg,
+		SessionID:      sessionID2,
+		Harness:        defaults.HarnessOpenCode,
+		Outcome:        ingest.IndexOutcomeError,
+		IndexerVersion: 1,
+		EntriesCount:   0,
+		SourcePath:     nil,
+		OriginalRoot:   nil,
+		Reason:         &reason,
+		StartedAt:      1705276900000,
+		FinishedAt:     nil,
+		ErrorMessage:   &errMsg,
 	}
 
 	if err := s.LogIndexEntry(ctx, entry2); err != nil {
@@ -2309,7 +2309,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=2): sessions with version < 2.
 	// Session 2 (v=1) and Session 3 (v=0) should be returned.
-	stale2, err := s.ListStaleIndexSessions(ctx, 2)
+	stale2, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 2}})
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(2): %v", err)
 	}
@@ -2332,7 +2332,7 @@ func TestStore_ListStaleIndexSessions(t *testing.T) {
 
 	// ListStaleIndexSessions(currentVersion=1): sessions with version < 1.
 	// Only Session 3 (v=0) should be returned.
-	stale1, err := s.ListStaleIndexSessions(ctx, 1)
+	stale1, err := s.ListStaleIndexSessions(ctx, map[ingest.Harness]ingest.HarvesterVersions{ingest.HarnessClaudeCode: {IndexerVersion: 1}})
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(1): %v", err)
 	}
@@ -2391,7 +2391,7 @@ func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int,
 		t.Fatalf("UpdateIndexState(opencode, %s): %v", versionLabel, err)
 	}
 
-	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.HarvesterVersionRegistry)
 	if err != nil {
 		t.Fatalf("ListStaleIndexSessions(current): %v", err)
 	}
@@ -2402,6 +2402,6 @@ func assertOpenCodeSessionAtIndexVersionIsStale(t *testing.T, storedVersion int,
 		}
 	}
 	if !found {
-		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", storedVersion, ingest.CurrentIndexVersion)
+		t.Fatalf("OpenCode session at version %d is not stale under current version %d; the version bump does not re-index it", storedVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 }

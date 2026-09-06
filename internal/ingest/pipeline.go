@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -79,16 +80,16 @@ type PipelineResult struct {
 
 // PipelineSummary holds aggregate counts for a pipeline run.
 type PipelineSummary struct {
-	New             int
-	Updated         int
-	Unchanged       int
-	Active          int
-	Errors          int
-	Indexed         int   // sessions successfully indexed into session_entries
-	Computed        int   // sessions whose metrics were (re)computed
-	StoreError      error // non-nil if DB insert failed; pipeline continued normally
-	IndexVersion    int   // CurrentIndexVersion used this run
-	MetadataVersion int   // CurrentSchemaVersion used this run
+	New               int
+	Updated           int
+	Unchanged         int
+	Active            int
+	Errors            int
+	Indexed           int                           // sessions successfully indexed into session_entries
+	Computed          int                           // sessions whose metrics were (re)computed
+	StoreError        error                         // non-nil if DB insert failed; pipeline continued normally
+	HarvesterVersions map[Harness]HarvesterVersions // current targets, not successful per-session producer stamps
+	MetadataVersion   int                           // CurrentSchemaVersion used this run
 	// ReminedEvidenceRecords is how many cached discovery evidence records this
 	// run had to mine again. It is greater than zero on the first run after an
 	// upgrade that added a field the cached records do not carry, and zero on
@@ -122,6 +123,9 @@ type PipelineConfig struct {
 	StalenessThreshold time.Duration
 	DryRun             bool
 	Reindex            bool // scan peasant-sync output and re-process sessions with stale or missing index data
+	// Harness restricts stored-session maintenance independently from discovery
+	// source paths. Nil allows all registered harnesses.
+	Harness *Harness
 	// Parallelism controls the number of concurrent session workers.
 	// 0 means "use runtime.NumCPU()". Set to 1 for sequential (legacy) behavior.
 	Parallelism int
@@ -252,6 +256,7 @@ type Pipeline struct {
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
 	indexers               map[Harness]TranscriptIndexer // INDEX stage: parses transcripts into session_entries
+	harvesterVersions      map[Harness]HarvesterVersions // current targets, independent from stored producer stamps
 	metricsStore           MetricsStore                  // INDEX stage: persists session_entries
 	analyzer               SessionAnalyzer               // COMPUTE stage: computes metrics + insights
 	logger                 IngestLogger                  // AUDIT stage: records ingest run to ingest_log
@@ -417,6 +422,9 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 	for _, opt := range opts {
 		opt(p)
 	}
+	if err := p.validateHarvesterVersions(); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -433,6 +441,9 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 //  8. REPORT: Return PipelineResult
 //  9. AUDIT: Write ingest_log entry (best-effort)
 func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
+	if err := p.validateHarvesterVersions(); err != nil {
+		return nil, err
+	}
 	start := time.Now()
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
@@ -672,6 +683,8 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			DiscoveryDiagnostics: p.discoveryDiagnostics,
 		}
 		result.Summary.ReminedEvidenceRecords = p.reminedEvidence
+		result.Summary.HarvesterVersions = maps.Clone(p.versionTargets())
+		result.Summary.MetadataVersion = int(CurrentSchemaVersion)
 		result.Summary.OriginResolve = p.originResolve
 		result.Summary.OriginResolveError = p.originResolveErr
 		for _, session := range dryRunSessions {
@@ -861,12 +874,12 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	sessionResults = append(sessionResults, drainResults...)
 
 	// Stage 4c: AUTO-DETECT stale index sessions (post-FILTER).
-	// Query DB for sessions with index_version < CurrentIndexVersion.
+	// Query DB against each registered harness's indexer revision.
 	// For each stale session, read metadata from peasant-sync output to reconstruct
 	// a DiscoveredSession, then append to indexSessions (skips EXTRACT+WRITE,
 	// goes straight to INDEX+COMPUTE).
 	if p.metricsStore != nil {
-		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, CurrentIndexVersion)
+		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 		if staleErr != nil {
 			slog.Warn("pipeline: list stale index sessions",
 				"error", staleErr,
@@ -1385,9 +1398,6 @@ func (p *Pipeline) flushIndexParseResultsOneByOne(ctx context.Context, results [
 		flush.logEntries = append(flush.logEntries, logEntry)
 		flush.profileSessions = append(flush.profileSessions, profileSession)
 		flush.writeDuration += profileSession.WriteDuration
-		if len(result.entries) > 0 && p.metricsStore != nil {
-			flush.writeTxs++
-		}
 	}
 	return flush
 }
@@ -1409,10 +1419,10 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		writes = append(writes, SessionEntryWrite{
-			SessionID:    result.im.session.SessionID,
-			Entries:      result.entries,
-			IndexVersion: CurrentIndexVersion,
-			IndexedAtMs:  nowMs,
+			SessionID:      result.im.session.SessionID,
+			Entries:        result.entries,
+			IndexerVersion: p.versionTargets()[result.im.session.Harness].IndexerVersion,
+			IndexedAtMs:    nowMs,
 		})
 		writePositions = append(writePositions, i)
 	}
@@ -1499,23 +1509,11 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 	writeDuration := time.Duration(0)
 	entriesCount := len(result.entries)
 	if entriesCount > 0 && p.metricsStore != nil {
-		writeStart := time.Now()
-		p.runStoreWrite(writeLane, func() {
-			if err := p.metricsStore.IndexSessionEntries(ctx, im.session.SessionID, result.entries); err != nil {
-				writeDuration = time.Since(writeStart)
-				slog.Warn(logPrefix+": store session entries", "session_id", im.session.SessionID, "error", err)
-				errMsg := err.Error()
-				logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
-			} else {
-				indexedAtMs := time.Now().UnixMilli()
-				if err := p.metricsStore.UpdateIndexState(ctx, im.session.SessionID, CurrentIndexVersion, indexedAtMs); err != nil {
-					slog.Warn(logPrefix+": update index state", "session_id", im.session.SessionID, "error", err)
-				}
-				writeDuration = time.Since(writeStart)
-				ok = true
-				logEntry = p.makeIndexLogEntry(im, outcome, entriesCount, result.startedAt, nil, nil)
-			}
-		})
+		// A split entries/stamp fallback could overwrite last-good output and
+		// report success after the producer stamp failed. Refuse before any write.
+		errMsg := "index persistence requires atomic entry and indexer-state writes; configure a SessionEntryBatchStore and retry; existing entries were preserved"
+		slog.Warn(logPrefix+": store session entries", "session_id", im.session.SessionID, "error", errMsg)
+		logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
 	}
 
 	indexedResult := indexedMeta{session: im.session, startMs: im.startMs, indexed: ok}
@@ -2872,7 +2870,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	pipelineResult.Summary.StoreError = storeErr
 	pipelineResult.Summary.Indexed = indexed
 	pipelineResult.Summary.Computed = computed
-	pipelineResult.Summary.IndexVersion = CurrentIndexVersion
+	pipelineResult.Summary.HarvesterVersions = maps.Clone(p.versionTargets())
 	pipelineResult.Summary.MetadataVersion = int(CurrentSchemaVersion)
 	pipelineResult.Summary.ReminedEvidenceRecords = p.reminedEvidence
 	pipelineResult.Summary.OriginResolve = p.originResolve
@@ -2933,17 +2931,17 @@ func (p *Pipeline) makeIndexLogEntry(im indexedMeta, outcome IndexOutcome, entri
 		originalRoot = &or
 	}
 	return IndexLogEntry{
-		SessionID:    im.session.SessionID,
-		Harness:      im.session.Harness,
-		Outcome:      outcome,
-		IndexVersion: CurrentIndexVersion,
-		EntriesCount: entriesCount,
-		SourcePath:   sourcePath,
-		OriginalRoot: originalRoot,
-		Reason:       reason,
-		StartedAt:    startMs,
-		FinishedAt:   &finishedAt,
-		ErrorMessage: errMsg,
+		SessionID:      im.session.SessionID,
+		Harness:        im.session.Harness,
+		Outcome:        outcome,
+		IndexerVersion: p.versionTargets()[im.session.Harness].IndexerVersion,
+		EntriesCount:   entriesCount,
+		SourcePath:     sourcePath,
+		OriginalRoot:   originalRoot,
+		Reason:         reason,
+		StartedAt:      startMs,
+		FinishedAt:     &finishedAt,
+		ErrorMessage:   errMsg,
 	}
 }
 
@@ -3176,7 +3174,7 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 // Steps:
 //  1. Scan peasant-sync output to enumerate all existing sessions (by reading metadata JSONs)
 //  2. Filter to targeted sessions:
-//     - Default: sessions with index_version < CurrentIndexVersion (via DB query)
+//     - Default: sessions below their harness indexer target (via DB query)
 //     - With --force: ALL sessions
 //  3. For each targeted session:
 //     a. Try EXTRACT+WRITE from original source (if source file exists)
@@ -3201,8 +3199,12 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(scanned)})
 	var targeted []reindexTarget
 	if p.config.Force {
-		// --force --reindex: target ALL sessions.
-		targeted = scanned
+		// Explicit harness scope applies to force as well as stale maintenance.
+		for _, target := range scanned {
+			if p.config.Harness == nil || target.session.Harness == *p.config.Harness {
+				targeted = append(targeted, target)
+			}
+		}
 		for index := range scanned {
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
 		}
@@ -3210,7 +3212,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// --reindex only: target sessions with stale index_version.
 		staleSet := make(map[SessionID]bool)
 		if p.metricsStore != nil {
-			staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, CurrentIndexVersion)
+			staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 			if err != nil {
 				slog.Warn("reindex: list stale index sessions", "error", err)
 			}
@@ -3240,6 +3242,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	if p.config.DryRun {
 		result := &PipelineResult{
 			Duration: time.Since(start),
+			Summary:  PipelineSummary{HarvesterVersions: maps.Clone(p.versionTargets()), MetadataVersion: int(CurrentSchemaVersion)},
 		}
 		for _, t := range targeted {
 			result.Sessions = append(result.Sessions, SessionResult{

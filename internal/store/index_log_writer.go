@@ -31,7 +31,7 @@ func (s *Store) LogIndexEntry(ctx context.Context, entry ingest.IndexLogEntry) e
 			string(entry.SessionID),
 			string(entry.Harness),
 			entry.Outcome.String(),
-			entry.IndexVersion,
+			entry.IndexerVersion,
 			entry.EntriesCount,
 			derefString(entry.SourcePath),
 			derefString(entry.OriginalRoot),

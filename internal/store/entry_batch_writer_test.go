@@ -22,15 +22,15 @@ func TestStore_IndexSessionEntryBatch_WritesEntriesAndIndexState(t *testing.T) {
 	seedSession(t, s, string(sid2))
 
 	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{
-		{SessionID: sid1, Entries: batchTestEntries(sid1, "alpha", 2), IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000001000},
-		{SessionID: sid2, Entries: batchTestEntries(sid2, "bravo", 1), IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000002000},
+		{SessionID: sid1, Entries: batchTestEntries(sid1, "alpha", 2), IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000001000},
+		{SessionID: sid2, Entries: batchTestEntries(sid2, "bravo", 1), IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000002000},
 	})
 	assertBatchResult(t, results, 0, sid1, true)
 	assertBatchResult(t, results, 1, sid2, true)
 	assertEntryCount(t, s, sid1, 2)
 	assertEntryCount(t, s, sid2, 1)
-	assertIndexState(t, s, sid1, ingest.CurrentIndexVersion, 1700000001000)
-	assertIndexState(t, s, sid2, ingest.CurrentIndexVersion, 1700000002000)
+	assertIndexState(t, s, sid1, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000001000)
+	assertIndexState(t, s, sid2, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000002000)
 }
 
 func TestStore_IndexSessionEntryBatch_SavepointKeepsLaterSessions(t *testing.T) {
@@ -59,10 +59,10 @@ func TestStore_IndexSessionEntryBatch_SavepointKeepsLaterSessions(t *testing.T) 
 				Role:           schema.RoleUser,
 				ContentPreview: strPtr("bad foreign key"),
 			}},
-			IndexVersion: ingest.CurrentIndexVersion,
-			IndexedAtMs:  1700000003000,
+			IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion,
+			IndexedAtMs:    1700000003000,
 		},
-		{SessionID: goodSession, Entries: batchTestEntries(goodSession, "good", 1), IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000004000},
+		{SessionID: goodSession, Entries: batchTestEntries(goodSession, "good", 1), IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000004000},
 	})
 
 	assertBatchResult(t, results, 0, badSession, false)
@@ -71,7 +71,7 @@ func TestStore_IndexSessionEntryBatch_SavepointKeepsLaterSessions(t *testing.T) 
 	assertEntryContent(t, s, badSession, "old-0")
 	assertEntryCount(t, s, goodSession, 1)
 	assertEntryContent(t, s, goodSession, "good-0")
-	assertIndexState(t, s, goodSession, ingest.CurrentIndexVersion, 1700000004000)
+	assertIndexState(t, s, goodSession, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000004000)
 }
 
 func TestStore_IndexSessionEntryBatch_SkipsUnchangedEntriesAndUpdatesIndexState(t *testing.T) {
@@ -82,7 +82,7 @@ func TestStore_IndexSessionEntryBatch_SkipsUnchangedEntriesAndUpdatesIndexState(
 	seedSession(t, s, string(sid))
 	entries := batchTestEntries(sid, "same", 2)
 
-	first := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000005000}})
+	first := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000005000}})
 	assertBatchResult(t, first, 0, sid, true)
 	if first[0].Skipped {
 		t.Fatal("first write reported skipped, want replacement for a previously unindexed session")
@@ -92,7 +92,7 @@ func TestStore_IndexSessionEntryBatch_SkipsUnchangedEntriesAndUpdatesIndexState(
 		t.Fatalf("session_entries_hash length = %d, want 64", len(firstHash))
 	}
 
-	second := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000006000}})
+	second := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000006000}})
 	assertBatchResult(t, second, 0, sid, true)
 	if !second[0].Skipped {
 		t.Fatal("second identical write did not report skipped")
@@ -101,7 +101,7 @@ func TestStore_IndexSessionEntryBatch_SkipsUnchangedEntriesAndUpdatesIndexState(
 		t.Fatalf("session_entries_hash changed after skipped write: %q != %q", got, firstHash)
 	}
 	assertEntryCount(t, s, sid, 2)
-	assertIndexState(t, s, sid, ingest.CurrentIndexVersion, 1700000006000)
+	assertIndexState(t, s, sid, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000006000)
 }
 
 func TestStore_IndexSessionEntryBatch_RewritesWhenProjectionRowsAreMissing(t *testing.T) {
@@ -113,7 +113,7 @@ func TestStore_IndexSessionEntryBatch_RewritesWhenProjectionRowsAreMissing(t *te
 	entries := batchTestEntries(sid, "projected", 1)
 	entries[0].Extra = strPtr(`{"model_id":"claude-opus-4-6"}`)
 
-	first := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000007000}})
+	first := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000007000}})
 	assertBatchResult(t, first, 0, sid, true)
 	firstHash := sessionEntriesHash(t, s, sid)
 	deleteSessionEntryExtRows(t, s, sid)
@@ -121,7 +121,7 @@ func TestStore_IndexSessionEntryBatch_RewritesWhenProjectionRowsAreMissing(t *te
 		t.Fatalf("session_entries_ext rows after delete = %d, want 0", got)
 	}
 
-	second := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexVersion: ingest.CurrentIndexVersion, IndexedAtMs: 1700000008000}})
+	second := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: entries, IndexerVersion: ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, IndexedAtMs: 1700000008000}})
 	assertBatchResult(t, second, 0, sid, true)
 	if second[0].Skipped {
 		t.Fatal("write reported skipped while a derived projection row was missing")
@@ -132,7 +132,7 @@ func TestStore_IndexSessionEntryBatch_RewritesWhenProjectionRowsAreMissing(t *te
 	if got := sessionEntryExtCount(t, s, sid); got != 1 {
 		t.Fatalf("session_entries_ext rows after rewrite = %d, want 1", got)
 	}
-	assertIndexState(t, s, sid, ingest.CurrentIndexVersion, 1700000008000)
+	assertIndexState(t, s, sid, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion, 1700000008000)
 }
 
 func batchTestEntries(sessionID ingest.SessionID, prefix string, count int) []schema.SessionEntry {

@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"zombiezen.com/go/sqlite"
@@ -12,6 +15,28 @@ import (
 const sqlUpdateIndexState = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = NULL WHERE session_id = ?`
 
 const sqlUpdateIndexStateWithSessionEntriesHash = `UPDATE sessions SET index_version = ?, indexed_at = ?, session_entries_hash = ? WHERE session_id = ?`
+
+// validateIndexerRevisionOnConn runs under the same transaction as entry writes.
+// A force or source refresh must not replace output produced by a newer parser.
+func validateIndexerRevisionOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, version int) error {
+	found := false
+	if err := sqlitex.ExecuteTransient(conn, "SELECT index_version FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
+		Args: []any{string(sessionID)},
+		ResultFunc: func(stmt *sqlite.Stmt) error {
+			found = true
+			if stored := stmt.ColumnInt(0); stored > version {
+				return fmt.Errorf("session %s was indexed by revision %d, newer than this writer's revision %d; use a newer Peasant build to refresh it without losing parser output", sessionID, stored, version)
+			}
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("store: validate indexer revision before replacing entries: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("store: cannot index session %s before its metadata is stored; import the session and retry", sessionID)
+	}
+	return nil
+}
 
 // UpdateIndexState sets the index_version and indexed_at for a session after
 // successful indexing.
@@ -55,11 +80,22 @@ func updateIndexStateWithSessionEntriesHashOnConn(conn *sqlite.Conn, sessionID i
 	return nil
 }
 
-const sqlListStaleIndexSessions = `SELECT session_id FROM sessions WHERE index_version < ?`
-
-// ListStaleIndexSessions returns session IDs where index_version < currentVersion.
-// Used by the post-FILTER auto-detect step to find sessions needing re-indexing.
-func (s *Store) ListStaleIndexSessions(ctx context.Context, currentVersion int) ([]ingest.SessionID, error) {
+// ListStaleIndexSessions selects only registered harness targets. The legacy SQL
+// index_version column records the actual indexer revision, not an index format.
+func (s *Store) ListStaleIndexSessions(ctx context.Context, targets map[ingest.Harness]ingest.HarvesterVersions) ([]ingest.SessionID, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	conditions := make([]string, 0, len(targets))
+	args := make([]any, 0, len(targets)*2)
+	for _, harness := range slices.Sorted(maps.Keys(targets)) {
+		version := targets[harness].IndexerVersion
+		if !harness.IsKnown() || version < 1 {
+			return nil, fmt.Errorf("store: select stale indexes: harness %q has invalid indexer target %d; supply registered positive harvester versions", harness, version)
+		}
+		conditions = append(conditions, "(model_harness = ? AND index_version < ?)")
+		args = append(args, string(harness), version)
+	}
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
@@ -67,8 +103,8 @@ func (s *Store) ListStaleIndexSessions(ctx context.Context, currentVersion int) 
 	defer s.pool.Put(conn)
 
 	var sessions []ingest.SessionID
-	if err := sqlitex.ExecuteTransient(conn, sqlListStaleIndexSessions, &sqlitex.ExecOptions{
-		Args: []any{currentVersion},
+	if err := sqlitex.ExecuteTransient(conn, "SELECT session_id FROM sessions WHERE "+strings.Join(conditions, " OR ")+" ORDER BY session_id", &sqlitex.ExecOptions{
+		Args: args,
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			raw := stmt.ColumnText(0)
 			sid, err := ingest.NewSessionID(raw)

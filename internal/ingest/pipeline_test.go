@@ -809,13 +809,13 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 	session := makeDiscoveredSession(t, testSessionID, sourcePath, time.Now().Add(-1*time.Hour))
 	meta := makeMinimalMeta(t, testSessionID)
 
-	// Only Claude provider is enabled; Gemini is registered but disabled.
+	// Only Claude provider is enabled; Codex is registered but disabled.
 	adapters := map[ingest.Harness]ingest.AdapterFactory{
 		ingest.HarnessClaudeCode: makeStubAdapter(
 			[]ingest.DiscoveredSession{session},
 			map[ingest.SessionID]*ingest.UnifiedMetadata{session.SessionID: meta},
 		),
-		ingest.HarnessGeminiCLI: makeStubAdapter(
+		ingest.HarnessCodex: makeStubAdapter(
 			[]ingest.DiscoveredSession{session}, // would double-count if called
 			nil,
 		),
@@ -824,7 +824,7 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 	cfg := ingest.PipelineConfig{
 		Sources: map[ingest.Harness]ingest.SourceConfig{
 			ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(testSourceDir)}},
-			ingest.HarnessGeminiCLI:  {Enabled: false}, // explicitly disabled
+			ingest.HarnessCodex:      {Enabled: false}, // explicitly disabled
 		},
 		OutputDir:          ingest.ResolvedPath(testOutputDir),
 		StalenessThreshold: 5 * time.Minute,
@@ -839,9 +839,9 @@ func TestPipeline_MultipleProviders(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Only 1 session from Claude (Gemini is disabled).
+	// Only 1 session from Claude (Codex is disabled).
 	if result.Summary.New != 1 {
-		t.Errorf("Summary.New = %d, want 1 (Gemini disabled)", result.Summary.New)
+		t.Errorf("Summary.New = %d, want 1 (Codex disabled)", result.Summary.New)
 	}
 	if len(result.Sessions) != 1 {
 		t.Errorf("Sessions len = %d, want 1", len(result.Sessions))
@@ -4176,7 +4176,7 @@ func TestPipeline_Reindex_DryRun(t *testing.T) {
 }
 
 // TestPipeline_Reindex_UpdatesIndexState verifies that after successful reindexing,
-// the pipeline calls UpdateIndexState with CurrentIndexVersion.
+// the pipeline calls UpdateIndexState with the harness indexer target.
 func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -4222,8 +4222,8 @@ func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 	if !ok {
 		t.Fatal("UpdateIndexState not called for session")
 	}
-	if version != ingest.CurrentIndexVersion {
-		t.Errorf("IndexStates[%s] = %d, want %d", sid, version, ingest.CurrentIndexVersion)
+	if version != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("IndexStates[%s] = %d, want %d", sid, version, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 }
 
@@ -4396,15 +4396,15 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 
 // TestPipeline_AutoDetect_StaleVersionTriggersReindex verifies that the auto-detect
 // mechanism in Run() triggers re-indexing for a session whose index_version is
-// older than CurrentIndexVersion. This proves the version bump is wired correctly:
-// ListStaleIndexSessions is called with CurrentIndexVersion, the session is indexed,
+// older than the harness indexer target. This proves the version bump is wired correctly:
+// ListStaleIndexSessions is called with the harness indexer target, the session is indexed,
 // and UpdateIndexState is called with the new version.
 func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
 	// Arrange: write a session to peasant-sync output as if it was previously
-	// indexed at an older version than CurrentIndexVersion.
+	// indexed at an older version than the harness indexer target.
 	originalSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
@@ -4412,7 +4412,7 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	sid, _ := ingest.NewSessionID(testSessionID)
 
 	// metricsStore returns this session when asked for index_version < currentVersion.
-	// This simulates the DB returning sid because its stored version < CurrentIndexVersion.
+	// This simulates the DB returning sid because its stored version < the harness indexer target.
 	metricsStore := testutil.NewStubMetricsStore()
 	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
 
@@ -4445,26 +4445,26 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Pipeline must call ListStaleIndexSessions with exactly CurrentIndexVersion.
-	if metricsStore.ListStaleCalledWithVersion != ingest.CurrentIndexVersion {
-		t.Errorf("ListStaleIndexSessions called with version=%d, want CurrentIndexVersion=%d",
-			metricsStore.ListStaleCalledWithVersion, ingest.CurrentIndexVersion)
+	// Pipeline must call ListStaleIndexSessions with exactly the harness indexer target.
+	if metricsStore.ListStaleCalledWithTargets[ingest.HarnessClaudeCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("ListStaleIndexSessions called with version=%d, want the harness indexer target=%d",
+			metricsStore.ListStaleCalledWithTargets[ingest.HarnessClaudeCode].IndexerVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 
 	// The stale session must have been re-indexed.
 	if result.Summary.Indexed != 1 {
 		t.Errorf("Summary.Indexed = %d, want 1 (stale v3 session re-indexed to v%d)",
-			result.Summary.Indexed, ingest.CurrentIndexVersion)
+			result.Summary.Indexed, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 
-	// UpdateIndexState must have been called with CurrentIndexVersion (4).
+	// UpdateIndexState must have been called with the harness indexer target (4).
 	version, ok := metricsStore.IndexStates[sid]
 	if !ok {
 		t.Fatal("UpdateIndexState not called for stale session after re-indexing")
 	}
-	if version != ingest.CurrentIndexVersion {
-		t.Errorf("IndexStates[%s] = %d, want CurrentIndexVersion=%d",
-			sid, version, ingest.CurrentIndexVersion)
+	if version != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("IndexStates[%s] = %d, want the harness indexer target=%d",
+			sid, version, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 }
 
@@ -5398,7 +5398,7 @@ func TestPipeline_Reindex_EmitsProgressEvents(t *testing.T) {
 }
 
 // TestPipeline_Reindex_SummaryVersionFields verifies that PipelineSummary
-// includes IndexVersion and MetadataVersion after a reindex run.
+// includes per-harness targets and MetadataVersion after a reindex run.
 func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -5439,8 +5439,8 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if result.Summary.IndexVersion != ingest.CurrentIndexVersion {
-		t.Errorf("Summary.IndexVersion = %d, want %d", result.Summary.IndexVersion, ingest.CurrentIndexVersion)
+	if result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("summary Claude indexer target = %d, want %d", result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 	if result.Summary.MetadataVersion != int(ingest.CurrentSchemaVersion) {
 		t.Errorf("Summary.MetadataVersion = %d, want %d", result.Summary.MetadataVersion, int(ingest.CurrentSchemaVersion))
@@ -5448,7 +5448,7 @@ func TestPipeline_Reindex_SummaryVersionFields(t *testing.T) {
 }
 
 // TestPipeline_NormalIngest_SummaryVersionFields verifies that PipelineSummary
-// includes IndexVersion and MetadataVersion after a normal (non-reindex) run.
+// includes per-harness targets and MetadataVersion after a normal (non-reindex) run.
 func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -5494,8 +5494,8 @@ func TestPipeline_NormalIngest_SummaryVersionFields(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if result.Summary.IndexVersion != ingest.CurrentIndexVersion {
-		t.Errorf("Summary.IndexVersion = %d, want %d", result.Summary.IndexVersion, ingest.CurrentIndexVersion)
+	if result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion != ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion {
+		t.Errorf("summary Claude indexer target = %d, want %d", result.Summary.HarvesterVersions[ingest.HarnessClaudeCode].IndexerVersion, ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion)
 	}
 	if result.Summary.MetadataVersion != int(ingest.CurrentSchemaVersion) {
 		t.Errorf("Summary.MetadataVersion = %d, want %d", result.Summary.MetadataVersion, int(ingest.CurrentSchemaVersion))
