@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 )
@@ -116,5 +117,21 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 	// At least one Bubble Tea render should have occurred before shutdown.
 	if buf.Len() == 0 {
 		t.Error("TTY renderer wrote 0 bytes after ticks + cancel, want some output")
+	}
+}
+
+func TestProgressModelControlCCancelsPipeline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := progressModel{state: ingest.NewProgressState(), cancel: cancel}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+c returned no quit command")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("pipeline context error = %v, want context.Canceled", ctx.Err())
+	}
+	if !updated.(progressModel).stopped {
+		t.Fatal("ctrl+c did not stop renderer model")
 	}
 }

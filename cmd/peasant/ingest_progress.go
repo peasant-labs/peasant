@@ -33,13 +33,16 @@ import (
 //	r.Wait()            // blocks until renderer goroutine exits
 //	r.Clear()           // erase progress lines before printing final summary
 type progressRenderer struct {
-	w     io.Writer
-	input io.Reader
-	state *ingest.ProgressState
-	anim  *animation.Animation
-	isTTY bool
-	order []ingest.Stage
-	wg    sync.WaitGroup
+	w      io.Writer
+	input  io.Reader
+	state  *ingest.ProgressState
+	anim   *animation.Animation
+	isTTY  bool
+	order  []ingest.Stage
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
+	errMu  sync.Mutex
+	err    error
 }
 
 const (
@@ -59,12 +62,13 @@ type progressModel struct {
 	animFrame    int
 	lastAnimTick time.Time
 	stopped      bool
+	cancel       context.CancelFunc
 }
 
 // newProgressRenderer creates a tick-based renderer that reads from state and writes to w.
 // TTY detection is performed on w if it is an *os.File; otherwise rendering
 // is disabled (no-op mode for pipes/CI).
-func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animation.Animation) *progressRenderer {
+func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animation.Animation, cancel ...context.CancelFunc) *progressRenderer {
 	isTTY := false
 	var input io.Reader
 	if f, ok := w.(*os.File); ok {
@@ -84,6 +88,9 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 		isTTY: isTTY,
 		order: ingest.StageOrder,
 	}
+	if len(cancel) > 0 {
+		r.cancel = cancel[0]
+	}
 	// Add before the caller launches go r.Run(ctx) so Wait() has no race window.
 	r.wg.Add(1)
 	return r
@@ -101,7 +108,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		return
 	}
 	program := tea.NewProgram(
-		progressModel{state: r.state, anim: r.anim, order: r.order},
+		progressModel{state: r.state, anim: r.anim, order: r.order, cancel: r.cancel},
 		tea.WithOutput(r.w),
 		tea.WithInput(r.input),
 		tea.WithFPS(progressRendererFPS),
@@ -118,12 +125,24 @@ func (r *progressRenderer) Run(ctx context.Context) {
 	_, err := program.Run()
 	close(finished)
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
+		r.errMu.Lock()
+		r.err = err
+		r.errMu.Unlock()
+		if r.cancel != nil {
+			r.cancel()
+		}
 		fmt.Fprintf(r.w, "warning: harvest progress renderer failed: %v\n", err)
 	}
 }
 
 // Wait blocks until Run has returned.
 func (r *progressRenderer) Wait() { r.wg.Wait() }
+
+func (r *progressRenderer) Err() error {
+	r.errMu.Lock()
+	defer r.errMu.Unlock()
+	return r.err
+}
 
 // IsTTY reports whether the renderer is writing to an interactive terminal.
 // When false, rendering is a no-op and log suppression is not needed.
@@ -144,6 +163,14 @@ func (m progressModel) Init() tea.Cmd { return progressTick() }
 
 func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+c" {
+			if m.cancel != nil {
+				m.cancel()
+			}
+			m.stopped = true
+			return m, tea.Quit
+		}
 	case progressStopMsg:
 		m.stopped = true
 		return m, tea.Quit
