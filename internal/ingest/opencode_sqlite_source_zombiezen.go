@@ -96,7 +96,7 @@ type zombiezenOpenCodeSQLiteSource struct {
 	activeCancel context.CancelFunc
 	denied       string
 
-	// Cache the selected metadata authority and column support for this source's
+	// Cache the preferred metadata table and column support for this source's
 	// lifetime. An upstream schema change fails its read without switching tables.
 	sessionColumnsChecked bool
 	sessionColumns        openCodeSessionColumnSupport
@@ -493,9 +493,9 @@ func validateLegacySessionPartPageRequest(request OpenCodeLegacySessionPartPageR
 	return nil
 }
 
-// SessionRecords pages one schema-selected metadata authority. Supported v2
-// always wins, including an empty table. An unavailable or structurally unusable
-// v2 table permits legacy selection; a failed selected-table read never does.
+// SessionRecords pages one supported metadata table. By default V2 wins,
+// including an empty table; an explicit legacy request lets discovery retain
+// live V1-only identities without changing shared IDs' V2 metadata preference.
 func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
 	var cursor *string
 	if request.After != nil {
@@ -510,6 +510,13 @@ func (s *zombiezenOpenCodeSQLiteSource) SessionRecords(ctx context.Context, requ
 	}
 	defer lease.release()
 	support, err := s.sessionColumnSupportLocked(lease.ctx)
+	if request.Selection == OpenCodeSessionRecordsLegacy {
+		var columns []OpenCodeColumnEvidence
+		columns, err = s.columnsLocked(lease.ctx, string(OpenCodeSessionTableLegacy))
+		support = openCodeSessionColumns(OpenCodeSessionTableLegacy, columns)
+	} else if request.Selection != OpenCodeSessionRecordsPreferred {
+		return OpenCodeSessionRecordPage{}, fmt.Errorf("read bounded session records: unsupported selection %d; no records read; use preferred or legacy session records", request.Selection)
+	}
 	if err != nil || lease.ctx.Err() != nil {
 		return OpenCodeSessionRecordPage{}, s.sourceReadError(lease.ctx, "read bounded session record page", err, "pragma_table_info(session_v2/session)", "supported OpenCode session metadata")
 	}

@@ -25,22 +25,34 @@ type sessionAuthorityFixture struct {
 }
 
 type sessionAuthorityCase struct {
-	RequiredColumns    []string `yaml:"required_columns"`
-	CatalogColumns     int      `yaml:"catalog_columns"`
-	CatalogOverflow    bool     `yaml:"catalog_overflow"`
-	V2Layout           string   `yaml:"v2_layout"`
-	DiagnosticContains string   `yaml:"diagnostic_contains"`
-	FailRead           bool     `yaml:"fail_read"`
-	Name               string   `yaml:"name"`
-	Fixture            string   `yaml:"fixture"`
-	Setup              string   `yaml:"setup"`
-	AfterRead          string   `yaml:"after_read"`
-	Table              string   `yaml:"table"`
-	RecordIDs          []string `yaml:"record_ids"`
-	PresentIDs         []string `yaml:"present_ids"`
-	DiscoveredIDs      []string `yaml:"discovered_ids"`
-	Title              string   `yaml:"title"`
-	Skipped            bool     `yaml:"skipped"`
+	Sessions           map[string]sessionAuthorityExpected `yaml:"sessions"`
+	FailLegacy         bool                                `yaml:"fail_legacy"`
+	RequiredColumns    []string                            `yaml:"required_columns"`
+	CatalogColumns     int                                 `yaml:"catalog_columns"`
+	CatalogOverflow    bool                                `yaml:"catalog_overflow"`
+	V2Layout           string                              `yaml:"v2_layout"`
+	DiagnosticContains string                              `yaml:"diagnostic_contains"`
+	FailRead           bool                                `yaml:"fail_read"`
+	Name               string                              `yaml:"name"`
+	Fixture            string                              `yaml:"fixture"`
+	Setup              string                              `yaml:"setup"`
+	AfterRead          string                              `yaml:"after_read"`
+	Table              string                              `yaml:"table"`
+	RecordIDs          []string                            `yaml:"record_ids"`
+	PresentIDs         []string                            `yaml:"present_ids"`
+	DiscoveredIDs      []string                            `yaml:"discovered_ids"`
+	Title              string                              `yaml:"title"`
+	Skipped            bool                                `yaml:"skipped"`
+}
+
+type sessionAuthorityExpected struct {
+	Transcript string `yaml:"transcript"`
+	Title      string `yaml:"title"`
+	CWD        string `yaml:"cwd"`
+	Parent     string `yaml:"parent"`
+	Created    int64  `yaml:"created"`
+	Updated    int64  `yaml:"updated"`
+	Origin     string `yaml:"origin"`
 }
 
 func loadSessionAuthorityFixtures(t *testing.T) []sessionAuthorityCase {
@@ -148,7 +160,7 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 			}
 			testfixture.AssertUnchanged(t, materialized, before)
 
-			// Discovery uses the same authority for metadata and deletion.
+			// Discovery combines live identities while preferring V2 metadata.
 			root, err := NewResolvedPath(filepath.Dir(materialized.Path))
 			if err != nil {
 				t.Fatal(err)
@@ -156,12 +168,12 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 			filesystem := &OSFileSystem{}
 			opener := func(ctx context.Context, path OpenCodeSQLiteSourcePath, options OpenCodeSQLiteSourceOptions) (OpenCodeSQLiteSource, error) {
 				opened, openErr := OpenOpenCodeSQLiteSource(ctx, path, options)
-				if openErr != nil || !c.FailRead {
+				if openErr != nil {
 					return opened, openErr
 				}
-				return metadataReadFailingSource{OpenCodeSQLiteSource: opened}, nil
+				return metadataReadFailingSource{OpenCodeSQLiteSource: opened, fail: c.FailRead, failLegacy: c.FailLegacy}, nil
 			}
-			adapter, err := NewOpenCodeAdapterWithCandidateProbe(filesystem, nil, salt.Salt{}, "latest", canonicalTieEnvironment{}, filesystem, opener, DefaultOpenCodeSQLiteSourceOptions())
+			adapter, err := NewOpenCodeAdapterWithCandidateProbe(filesystem, semanticNoGit{}, salt.Salt{}, "latest", canonicalTieEnvironment{}, filesystem, opener, DefaultOpenCodeSQLiteSourceOptions())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,6 +184,27 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 			discoveredIDs := map[string]bool{}
 			for _, session := range discovered {
 				discoveredIDs[string(session.SessionID)] = true
+				if expected, ok := c.Sessions[string(session.SessionID)]; ok {
+					parent := ""
+					if session.ParentUUID != nil {
+						parent = string(*session.ParentUUID)
+					}
+					origin := "legacy"
+					if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
+						origin = "current"
+					}
+					if session.Title != expected.Title || session.CWD != expected.CWD || parent != expected.Parent || session.CreatedAt.UnixMilli() != expected.Created || origin != expected.Origin {
+						t.Fatalf("discovered metadata = %+v parent=%q, want %+v", session, parent, expected)
+					}
+					if session.ModTime.UnixMilli() != expected.Updated {
+						t.Fatalf("freshness = %v, want %d", session.ModTime, expected.Updated)
+					}
+					metadata, transcript, err := adapter.MaterializeTranscript(t.Context(), session)
+					if err != nil || metadata == nil || !strings.Contains(string(transcript), expected.Transcript) {
+						t.Fatalf("materialize selected transcript: metadata present=%t bytes=%d err=%v", metadata != nil, len(transcript), err)
+					}
+					continue
+				}
 				if session.Title != c.Title {
 					t.Fatalf("title = %q, want authoritative title %q", session.Title, c.Title)
 				}
@@ -192,14 +225,24 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 	}
 }
 
-type metadataReadFailingSource struct{ OpenCodeSQLiteSource }
+type metadataReadFailingSource struct {
+	OpenCodeSQLiteSource
+	fail       bool
+	failLegacy bool
+}
+
+var _ OpenCodeSQLiteSource = metadataReadFailingSource{}
 
 func (s metadataReadFailingSource) SessionRecords(ctx context.Context, request OpenCodeSessionRecordPageRequest) (OpenCodeSessionRecordPage, error) {
+	request.PageSize, _ = NewOpenCodeCurrentPageSize(1)
 	page, err := s.OpenCodeSQLiteSource.SessionRecords(ctx, request)
 	if err != nil {
 		return page, err
 	}
-	return OpenCodeSessionRecordPage{Table: page.Table}, errors.New("synthetic authoritative metadata read failed")
+	if s.fail || (s.failLegacy && request.Selection == OpenCodeSessionRecordsLegacy && request.After != nil) {
+		return OpenCodeSessionRecordPage{Table: page.Table}, errors.New("synthetic metadata read failed")
+	}
+	return page, nil
 }
 
 func assertSessionAuthorityEvidence(t *testing.T, adapter *OpenCodeAdapter, path string, c sessionAuthorityCase) {
@@ -229,6 +272,9 @@ func assertSessionAuthorityEvidence(t *testing.T, adapter *OpenCodeAdapter, path
 		}
 		found := c.DiagnosticContains == ""
 		for _, diagnostic := range result.Diagnostics {
+			if strings.Contains(diagnostic.What+diagnostic.Meaning+diagnostic.Remediation, "were deleted from OpenCode") || strings.Contains(diagnostic.Remediation, "sessions were deleted") {
+				t.Fatalf("diagnostic asserts unproven deletion: %+v", diagnostic)
+			}
 			if strings.Contains(diagnostic.What, c.DiagnosticContains) {
 				found = true
 			}

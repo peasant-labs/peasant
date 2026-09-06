@@ -318,12 +318,21 @@ type OpenCodeLegacySessionPartPageRequest struct {
 	After     *OpenCodeLegacyPartCursor
 }
 
-// OpenCodeSessionRecordPageRequest requests bounded session records from the
-// upstream session table. Parent links and the per-session update clock are
-// shared by every representation.
+// OpenCodeSessionRecordSelection selects metadata without accepting SQL or a
+// table name. Preferred uses V2 when supported; Legacy reads only legacy records.
+type OpenCodeSessionRecordSelection uint8
+
+const (
+	OpenCodeSessionRecordsPreferred OpenCodeSessionRecordSelection = iota
+	OpenCodeSessionRecordsLegacy
+)
+
+// OpenCodeSessionRecordPageRequest requests bounded session metadata. Its zero
+// selection prefers V2; discovery also pages legacy records in a mixed store.
 type OpenCodeSessionRecordPageRequest struct {
-	PageSize OpenCodeCurrentPageSize
-	After    *OpenCodeSessionRecordCursor
+	Selection OpenCodeSessionRecordSelection
+	PageSize  OpenCodeCurrentPageSize
+	After     *OpenCodeSessionRecordCursor
 }
 
 // OpenCodeSessionLinkID is a validated identifier from the shared session
@@ -383,7 +392,7 @@ type OpenCodeSessionRecordSkip struct {
 	Reason string
 }
 
-// OpenCodeSessionTable names the closed set of metadata authorities. Its zero
+// OpenCodeSessionTable names the closed set of metadata tables. Its zero
 // value means no supported table was selected.
 type OpenCodeSessionTable string
 
@@ -393,8 +402,8 @@ const (
 )
 
 // OpenCodeSessionRecordPage is a bounded page from the selected metadata table.
-// Supported is false without a usable identity column. Table is selected once
-// per source from schema evidence, preferring session_v2 with id as its sole
+// Supported is false without a usable identity column. The default table is selected
+// from schema evidence, preferring session_v2 with id as its sole
 // primary key. Missing optional columns degrade metadata; an id-only v2 table
 // still enumerates existence. Legacy clockless layouts retain their previous
 // compatibility behavior. Skipped rows with valid IDs still prove presence.
@@ -406,9 +415,8 @@ type OpenCodeSessionRecordPage struct {
 	Records   []OpenCodeSessionRecord
 	// PresentSessionIDs names every row on this page whose identifier decoded,
 	// including a row whose parent link or clock was dropped. A session that
-	// still has a row here exists in OpenCode; a discovered session missing from
-	// every page was deleted from the session table and its historical message
-	// or session_message rows are stale.
+	// still has a row here exists in OpenCode. Absence from this table alone does
+	// not prove absence from another supported table or establish deletion history.
 	PresentSessionIDs []OpenCodeSessionLinkID
 	Skipped           []OpenCodeSessionRecordSkip
 	Next              *OpenCodeSessionRecordCursor
