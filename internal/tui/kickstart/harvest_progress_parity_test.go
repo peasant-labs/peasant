@@ -2,6 +2,7 @@ package kickstart_test
 
 import (
 	"context"
+	_ "embed"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,7 +20,8 @@ import (
 // stalls, concurrent stages, errors and completed clocks. Both production
 // parents receive the same sequence; parity must hold beyond a static mount.
 func TestHarvestAndKickstartProgressParity(t *testing.T) {
-	for _, row := range loadProgressCompletionDocument(t).Progress {
+	cases := append(loadProgressCompletionDocument(t).Progress, loadHarvestTimingFixtures(t)...)
+	for _, row := range cases {
 		t.Run(row.Name, func(t *testing.T) {
 			clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
 			progress := &fixtureProgressSource{}
@@ -39,12 +41,76 @@ func TestHarvestAndKickstartProgressParity(t *testing.T) {
 				if len(want) == 0 || !reflect.DeepEqual(got, want) {
 					t.Fatalf("mounted progress differs at %s\nharvest: %v\nkickstart: %v", clock.Now(), got, want)
 				}
+				assertHarvestTiming(t, "kickstart", want, observation)
+				assertHarvestTiming(t, "harvest", got, observation)
 				first := inline.View().Content
 				if inline.View().Content != first {
 					t.Fatal("rendering alone changed the progress clock or estimate")
 				}
 			}
 		})
+	}
+}
+
+//go:embed testdata/guided/harvest_timing.yaml
+var harvestTimingYAML []byte
+
+func loadHarvestTimingFixtures(t *testing.T) []progressFixture {
+	t.Helper()
+	var doc struct {
+		Required []string          `yaml:"required_cases"`
+		Cases    []progressFixture `yaml:"cases"`
+	}
+	decodeSingleKnownFieldsDocument(t, "harvest timing", harvestTimingYAML, &doc)
+	seen := map[string]bool{}
+	for _, c := range doc.Cases {
+		if c.Name == "" || seen[c.Name] || len(c.Observations) == 0 {
+			t.Fatalf("invalid timing fixture %q", c.Name)
+		}
+		seen[c.Name] = true
+		for _, observation := range c.Observations {
+			if len(observation.WantContains) == 0 || len(observation.WantElapsed) == 0 {
+				t.Fatalf("timing fixture %q lacks independent expectations", c.Name)
+			}
+		}
+	}
+	if len(doc.Required) == 0 {
+		t.Fatal("timing fixtures need required names")
+	}
+	for _, name := range doc.Required {
+		if !seen[name] {
+			t.Fatalf("missing timing fixture %q", name)
+		}
+	}
+	return doc.Cases
+}
+
+func assertHarvestTiming(t *testing.T, surface string, lines []string, observation progressObservationFixture) {
+	t.Helper()
+	text := strings.Join(lines, "\n")
+	for _, want := range observation.WantContains {
+		if !strings.Contains(text, want) {
+			t.Errorf("%s missing %q:\n%s", surface, want, text)
+		}
+	}
+	for _, missing := range observation.WantMissing {
+		if strings.Contains(text, missing) {
+			t.Errorf("%s unexpectedly contains %q:\n%s", surface, missing, text)
+		}
+	}
+	for stage, elapsed := range observation.WantElapsed {
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, strings.ToLower(stage.String())) {
+				found = true
+				if !strings.HasSuffix(line, "  "+elapsed) {
+					t.Errorf("%s %s elapsed should be %s: %s", surface, stage, elapsed, line)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s missing timed stage %s", surface, stage)
+		}
 	}
 }
 

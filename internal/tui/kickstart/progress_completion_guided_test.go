@@ -60,8 +60,11 @@ type progressStageFixture struct {
 }
 
 type progressObservationFixture struct {
-	AdvanceSeconds int                    `yaml:"advanceSeconds"`
-	Stages         []progressStageFixture `yaml:"stages"`
+	AdvanceSeconds int                     `yaml:"advanceSeconds"`
+	Stages         []progressStageFixture  `yaml:"stages"`
+	WantContains   []string                `yaml:"wantContains"`
+	WantMissing    []string                `yaml:"wantMissing"`
+	WantElapsed    map[ingest.Stage]string `yaml:"wantElapsed"`
 }
 
 type progressFixture struct {
