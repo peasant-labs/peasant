@@ -94,7 +94,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		<-r.stop
 		return
 	}
-	model := ingestprogress.NewModel(r.state, r.anim, r.theme, time.Now(), r.cancel)
+	model := r.newModel(ctx, time.Now())
 	program := tea.NewProgram(
 		model,
 		tea.WithOutput(r.w),
@@ -132,6 +132,10 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		}
 		fmt.Fprintf(r.w, "warning: harvest progress renderer failed: %v\n", err)
 	}
+}
+
+func (r *progressRenderer) newModel(ctx context.Context, startedAt time.Time) ingestprogress.Model {
+	return ingestprogress.NewModel(r.state, r.anim, r.theme, startedAt, r.cancel, ctx.Err)
 }
 
 // Stop acknowledges operation completion. Cancellation alone must not unmount

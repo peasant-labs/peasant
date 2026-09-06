@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -64,20 +65,23 @@ type ingestProgressFixtures struct {
 	Estimate struct {
 		Required []string `yaml:"required_cases"`
 		Cases    []struct {
-			Name        string `yaml:"name"`
-			Key         bool   `yaml:"key"`
-			External    bool   `yaml:"external"`
-			Unavailable bool   `yaml:"unavailable"`
-			Expired     bool   `yaml:"expired"`
-			Want        string `yaml:"want"`
+			Name          string `yaml:"name"`
+			Key           bool   `yaml:"key"`
+			External      bool   `yaml:"external"`
+			Unavailable   bool   `yaml:"unavailable"`
+			Expired       bool   `yaml:"expired"`
+			DelayedCancel bool   `yaml:"delayed_cancel"`
+			StopFallback  bool   `yaml:"stop_fallback"`
+			Want          string `yaml:"want"`
 		} `yaml:"cases"`
 	} `yaml:"estimate"`
 	Lifecycle struct {
 		Required []string `yaml:"required_cases"`
 		Cases    []struct {
-			Name     string `yaml:"name"`
-			Key      bool   `yaml:"key"`
-			External bool   `yaml:"external"`
+			Name                string `yaml:"name"`
+			Key                 bool   `yaml:"key"`
+			External            bool   `yaml:"external"`
+			DelayedNotification bool   `yaml:"delayed_notification"`
 		} `yaml:"cases"`
 	} `yaml:"lifecycle"`
 	Interrupt struct {
@@ -122,7 +126,7 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 	})
 	validateNamedFixtures(t, "lifecycle", doc.Lifecycle.Required, len(doc.Lifecycle.Cases), func(i int) (string, bool) {
 		c := doc.Lifecycle.Cases[i]
-		return c.Name, !(c.Key && c.External)
+		return c.Name, !(c.Key && c.External) && (!c.DelayedNotification || c.External)
 	})
 	return doc
 }
@@ -138,7 +142,10 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 			started := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			state := ingest.NewProgressState()
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
-			var model tea.Model = ingestprogress.NewModel(state, nil, theme.New(theme.ModeDark), started, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			renderer := newProgressRenderer(io.Discard, state, nil, cancel)
+			var model tea.Model = renderer.newModel(ctx, started)
 			if !c.Unavailable || c.Expired {
 				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
 			}
@@ -164,9 +171,19 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 				}
 			}
 			assertView(initialClock)
+			if c.DelayedCancel || c.StopFallback {
+				cancel()
+			}
 			// The operation can publish its failure before the renderer receives
 			// any cancellation message. Capture the displayed estimate, not this snapshot.
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 2, Total: 4, Err: context.Canceled})
+			if c.DelayedCancel {
+				// The tick is already queued while the context watcher has not
+				// delivered its CancelMsg. Use the renderer's real model wiring.
+				model, _ = model.Update(ingestprogress.TickMsg(started.Add(9 * time.Second)))
+				assertView("canceling harvest", "✗ discover", "2/4", "total elapsed: 9s")
+				initialClock = "total elapsed: 9s"
+			}
 			if c.Key {
 				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 			} else if c.External {
@@ -181,7 +198,7 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 				assertView("canceling harvest", "2/4")
 			}
-			model, _ = model.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(12 * time.Second)})
+			model, _ = model.Update(ingestprogress.StopMsg{Canceled: !c.StopFallback, At: started.Add(12 * time.Second)})
 			assertView("harvest canceled", "✗ discover", "2/4", "total elapsed: 12s")
 			wantStageClock := "12s"
 			if c.Key || c.External {
@@ -206,6 +223,19 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 
 // The operation deliberately withholds completion after acknowledging cancel.
 // Raw terminal input and inherited cancellation must keep the same renderer alive.
+type delayedNotificationContext struct {
+	context.Context
+	release <-chan struct{}
+}
+
+// Delay only the watcher's subscription; Err still reads the real operation.
+func (c delayedNotificationContext) Done() <-chan struct{} {
+	<-c.release
+	return c.Context.Done()
+}
+
+var _ context.Context = delayedNotificationContext{}
+
 func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 	for _, c := range loadIngestProgressFixtures(t).Lifecycle.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -228,10 +258,16 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			copied := make(chan struct{})
 			go func() { _, _ = io.Copy(out, master); close(copied) }()
 			defer func() { _ = terminal.Close(); _ = master.Close(); <-copied }()
-			go r.Run(ctx)
+			notification := make(chan struct{})
+			releaseNotification := sync.OnceFunc(func() { close(notification) })
+			var operation context.Context = ctx
+			if c.DelayedNotification {
+				operation = delayedNotificationContext{Context: ctx, release: notification}
+			}
+			go r.Run(operation)
 			done := make(chan struct{})
 			go func() { r.Wait(); close(done) }()
-			defer func() { r.Stop(ctx.Err() != nil); <-done }()
+			defer func() { releaseNotification(); r.Stop(ctx.Err() != nil); <-done }()
 			waitFor := func(text string) {
 				t.Helper()
 				deadline := time.NewTimer(5 * time.Second)
@@ -254,10 +290,16 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			}
 			if c.External {
 				cancel()
+				if c.DelayedNotification {
+					state.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiff, Done: 4, Total: 10, Err: context.Canceled})
+				}
 			}
 			if c.Key || c.External {
 				// The diff renderer reuses the initial 'c' from the old hint.
 				waitFor("waiting for current work to stop")
+				// The mounted renderer must recognize cancellation from ticks
+				// before its separate notification watcher is allowed to proceed.
+				releaseNotification()
 				if ctx.Err() != context.Canceled {
 					t.Fatal("key did not cancel operation")
 				}
