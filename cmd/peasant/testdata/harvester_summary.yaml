@@ -1,4 +1,24 @@
 requiredNames: [logs_dry_run, all_dry_run, logs_write, all_write]
+expectedSummaryKeys:
+  - Active
+  - Computed
+  - Errors
+  - HarvesterVersions
+  - Indexed
+  - MetadataVersion
+  - New
+  - OriginResolve
+  - OriginResolveError
+  - ReminedEvidenceRecords
+  - StoreError
+  - Unchanged
+  - Updated
+expectedHarvesterKeys: [AdapterVersion, IndexerVersion, IndexVersion]
+requiredMutationNames: [summary_wrong_case, adapter_wrong_case, index_wrong_case]
+mutations:
+  - {name: summary_wrong_case, object: summary, from: HarvesterVersions, to: harvesterVersions}
+  - {name: adapter_wrong_case, object: harvester, from: AdapterVersion, to: adapterVersion}
+  - {name: index_wrong_case, object: harvester, from: IndexVersion, to: indexVersion}
 sessionID: 77777777-7777-4777-8777-777777777777
 transcript: |
   {"sessionId":"77777777-7777-4777-8777-777777777777","type":"user","message":{"role":"user","content":"version summary fixture"},"timestamp":"2024-02-19T00:00:00Z","cwd":"/fixture/project"}
