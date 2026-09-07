@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -82,6 +83,27 @@ func WithClaudeFullContent(enabled bool) ClaudeIndexerOption {
 }
 
 var _ TranscriptIndexer = (*ClaudeIndexer)(nil)
+var _ VersionedTranscriptIndexer = (*ClaudeIndexer)(nil)
+
+// IndexTranscriptResult verifies completion before authorizing persistent replacement.
+func (idx *ClaudeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	data, err := idx.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return nil, completion.failure(err)
+	}
+	return idx.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
+func (idx *ClaudeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	entries, err := idx.parseJSONLWithCompletion(session.SessionID, data, completion)
+	return completion.result(entries, err)
+}
 
 // SourceKind reports that Claude's entries come from a single JSONL file; every entry is in its bytes.
 func (idx *ClaudeIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
@@ -118,6 +140,10 @@ func (idx *ClaudeIndexer) IndexTranscriptBytes(_ context.Context, session Discov
 // parseJSONL is the shared JSONL parsing kernel used by both IndexTranscript and
 // IndexTranscriptBytes. Malformed lines are skipped (not fatal).
 func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema.SessionEntry, error) {
+	return idx.parseJSONLWithCompletion(sessionID, data, nil)
+}
+
+func (idx *ClaudeIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	buf := make([]byte, defaults.ScannerInitBuf)
 	scanner.Buffer(buf, defaults.ScannerMaxLine)
@@ -130,13 +156,37 @@ func (idx *ClaudeIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 	askUserCallIDs := make(map[string]bool)
 
 	for scanner.Scan() {
+		if completion != nil {
+			completion.line++
+		}
 		raw := scanner.Bytes()
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			continue
 		}
 
-		entry, ok := parseClaudeLine(sessionID, entryIndex, trimmed, idx.fullContent)
+		var line claudeIndexLine
+		decodeErr := json.Unmarshal(trimmed, &line)
+		if completion != nil {
+			if err := completion.record(trimmed); err != nil {
+				return nil, err
+			}
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if line.Type == "" && line.Message.Role == "" {
+				return nil, fmt.Errorf("record has neither a transcript type nor a message role")
+			}
+			content := line.Message.Content
+			if len(content) == 0 {
+				content = line.Content
+			}
+			if err := validateIndexContent(content); err != nil {
+				return nil, err
+			}
+			completion.recognized++
+		}
+		entry, ok := claudeLineEntry(sessionID, entryIndex, trimmed, idx.fullContent, line, decodeErr)
 		if !ok {
 			// Malformed line — skip silently.
 			entryIndex++
@@ -255,13 +305,12 @@ type claudeContentBlock struct {
 	IsError  bool   `json:"is_error"`
 }
 
-// parseClaudeLine parses a single JSONL line into a SessionEntry.
+// claudeLineEntry projects a decoded JSONL line into a SessionEntry.
 // Returns (entry, true) on success, (zero, false) on parse failure.
 // When fullContent is true, ContentPreview is set to the full content string
 // without truncation; otherwise it is capped at defaults.ContentPreviewLimit.
-func parseClaudeLine(sessionID SessionID, index int, raw []byte, fullContent bool) (schema.SessionEntry, bool) {
-	var line claudeIndexLine
-	if err := json.Unmarshal(raw, &line); err != nil {
+func claudeLineEntry(sessionID SessionID, index int, raw []byte, fullContent bool, line claudeIndexLine, decodeErr error) (schema.SessionEntry, bool) {
+	if decodeErr != nil {
 		return schema.SessionEntry{}, false
 	}
 

@@ -318,7 +318,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 					if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &seed, Session: session}}); err != nil {
 						t.Fatal(err)
 					}
-					producer := 15
+					producer := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].IndexerVersion
 					if fixture.Stale {
 						producer--
 					}

@@ -4,6 +4,10 @@ requiredNames:
   - completed-empty-v1
   - legacy-empty-preserves-last-good
   - malformed-claude-preserves-last-good
+  - completed-empty-claude
+  - completed-empty-codex
+  - mixed-malformed-claude-preserves-last-good
+  - mixed-malformed-codex-preserves-last-good
   - missing-opencode-tree-preserves-last-good
   - parse-error-preserves-last-good
   - absent-versioned-result-refused
@@ -18,7 +22,27 @@ cases:
   - {name: versioned-v1-result, declaredFormat: 1, versioned: true, payload: v1, wantIndexed: true}
   - {name: completed-empty-v1, declaredFormat: 1, versioned: true, payload: empty, wantIndexed: true}
   - {name: legacy-empty-preserves-last-good, declaredFormat: 1, payload: empty, wantDiagnostic: true}
-  - {name: malformed-claude-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, transcript: "malformed json", wantDiagnostic: true}
+  - {name: malformed-claude-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, transcript: "malformed json", wantLogError: could not verify complete input}
+  - {name: completed-empty-claude, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, emptyTranscript: true, wantIndexed: true}
+  - {name: completed-empty-codex, declaredFormat: 1, payload: empty, realIndexer: true, harness: codex, emptyTranscript: true, wantIndexed: true}
+  - name: mixed-malformed-claude-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: claude-code
+    transcript: |
+      {"type":"user","message":{"role":"user","content":"new content that must not replace old data"}}
+      malformed
+    wantLogError: could not verify complete input
+  - name: mixed-malformed-codex-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: codex
+    transcript: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new content that must not replace old data"}]}}
+      malformed
+    wantLogError: could not verify complete input
   - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantDiagnostic: true}
   - {name: parse-error-preserves-last-good, declaredFormat: 1, payload: parse-error, wantLogError: synthetic parser failure}
   - {name: absent-versioned-result-refused, declaredFormat: 1, versioned: true, payload: absent, wantLogError: no concrete result}

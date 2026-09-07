@@ -18,12 +18,13 @@ import (
 var harvesterVersionsYAML []byte
 
 type harvesterVersionFixture struct {
-	Name      string    `yaml:"name"`
-	Harnesses []Harness `yaml:"harnesses"`
-	Adapter   int       `yaml:"adapter"`
-	Indexer   int       `yaml:"indexer"`
-	Index     int       `yaml:"index"`
-	Error     string    `yaml:"error"`
+	Name             string          `yaml:"name"`
+	Harnesses        []Harness       `yaml:"harnesses"`
+	Adapter          int             `yaml:"adapter"`
+	Indexer          int             `yaml:"indexer"`
+	IndexerOverrides map[Harness]int `yaml:"indexerOverrides"`
+	Index            int             `yaml:"index"`
+	Error            string          `yaml:"error"`
 }
 
 type nonAtomicHarvesterStore struct {
@@ -102,6 +103,14 @@ func TestHarvesterVersionRegistry(t *testing.T) {
 			targets := make(map[Harness]HarvesterVersions)
 			for _, harness := range fixture.Harnesses {
 				targets[harness] = HarvesterVersions{AdapterVersion: fixture.Adapter, IndexerVersion: fixture.Indexer, IndexVersion: fixture.Index}
+			}
+			for harness, version := range fixture.IndexerOverrides {
+				versions, ok := targets[harness]
+				if !ok {
+					t.Fatalf("indexer override names undeclared harness %q", harness)
+				}
+				versions.IndexerVersion = version
+				targets[harness] = versions
 			}
 			adapters := map[Harness]AdapterFactory{HarnessClaudeCode: DefaultAdapterRegistry[HarnessClaudeCode]}
 			if fixture.Name == "canonical_registry" {

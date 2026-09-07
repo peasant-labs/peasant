@@ -50,6 +50,7 @@ type indexFormatOutputCase struct {
 	RealIndexer          bool                `yaml:"realIndexer"`
 	Harness              ingest.Harness      `yaml:"harness"`
 	Transcript           string              `yaml:"transcript"`
+	EmptyTranscript      bool                `yaml:"emptyTranscript"`
 	SourceRoot           ingest.ResolvedPath `yaml:"sourceRoot"`
 }
 
@@ -160,7 +161,7 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			}
 			meta.Project.Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			metadataPath, transcriptPath := setupPeasantSyncSession(t, fs, testOutputDir, testutil.TestHostSlug, string(sid), meta)
-			if row.Transcript != "" {
+			if row.Transcript != "" || row.EmptyTranscript {
 				if err := fs.WriteFile(transcriptPath, []byte(row.Transcript), 0600); err != nil {
 					t.Fatal(err)
 				}

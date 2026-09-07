@@ -1,0 +1,74 @@
+requiredNames:
+  - claude-empty-readable
+  - claude-whitespace
+  - claude-malformed-only
+  - claude-malformed-after-valid
+  - claude-null
+  - claude-unrecognized-object
+  - claude-wrong-content
+  - claude-control
+  - claude-structured-tool-result
+  - claude-missing-source
+  - claude-long-content-parity
+  - codex-empty-readable
+  - codex-control-only
+  - codex-malformed-after-valid
+  - codex-null
+  - codex-unrecognized-object
+  - codex-wrong-response
+  - codex-unknown-only
+  - codex-mixed-future
+  - codex-mixed-future-opaque-fields
+  - codex-missing-source
+  - codex-long-content-parity
+cases:
+  - {name: claude-empty-readable, harness: claude-code, input: '', entries: 0}
+  - {name: claude-whitespace, harness: claude-code, input: " \n\t\n", entries: 0}
+  - {name: claude-malformed-only, harness: claude-code, input: 'not json', error: true, legacyEntries: 0}
+  - name: claude-malformed-after-valid
+    harness: claude-code
+    input: |
+      {"type":"user","message":{"role":"user","content":"hello"}}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: claude-null, harness: claude-code, input: 'null', error: true, legacyEntries: 1}
+  - {name: claude-unrecognized-object, harness: claude-code, input: '{}', error: true, legacyEntries: 1}
+  - {name: claude-wrong-content, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":42}}', error: true, legacyEntries: 1}
+  - {name: claude-control, harness: claude-code, input: '{"type":"progress"}', entries: 1}
+  - {name: claude-structured-tool-result, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":[{"type":"text","text":"done"}]}]}}', entries: 2}
+  - {name: claude-missing-source, harness: claude-code, missing: true, error: true}
+  - {name: claude-long-content-parity, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":"LONG_CONTENT"}}', longContent: true, entries: 1}
+  - {name: codex-empty-readable, harness: codex, input: '', entries: 0}
+  - name: codex-control-only
+    harness: codex
+    input: |
+      {"type":"session_meta","payload":{"id":"synthetic"}}
+      {"type":"turn_context","payload":{}}
+      {"type":"event_msg","payload":{"type":"task_started"}}
+    entries: 0
+  - name: codex-malformed-after-valid
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: codex-null, harness: codex, input: 'null', error: true, legacyEntries: 0}
+  - {name: codex-unrecognized-object, harness: codex, input: '{}', error: true, legacyEntries: 0}
+  - {name: codex-wrong-response, harness: codex, input: '{"type":"response_item","payload":{"type":"message","content":42}}', error: true, legacyEntries: 0}
+  - {name: codex-unknown-only, harness: codex, input: '{"type":"response_item","payload":{"type":"future-response"}}', error: true, legacyEntries: 0}
+  - name: codex-mixed-future
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"future-response"}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+    entries: 1
+  - {name: codex-missing-source, harness: codex, missing: true, error: true}
+  - name: codex-mixed-future-opaque-fields
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+    entries: 1
+  - {name: codex-long-content-parity, harness: codex, input: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"LONG_CONTENT"}]}}', longContent: true, entries: 1}
