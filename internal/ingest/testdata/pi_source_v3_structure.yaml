@@ -23,7 +23,32 @@ requiredNames:
   - display-true-context
   - separate-native-namespace
   - native-metadata-string-over-limit
+  - opaque-tool-result-details-recorded-size-boundary
+  - ordinary-content-outside-selected-metadata-budget
 cases:
+  - name: opaque-tool-result-details-recorded-size-boundary
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"synthetic_tool","arguments":{}}]}}
+      {"type":"message","id":"r","parentId":"a","message":{"role":"toolResult","toolCallId":"call","toolName":"synthetic_tool","content":[{"type":"text","text":"ordinary tool output"}],"isError":false,"details":{"extension":{"payload":"native-boundary-string"},"padding":"native-boundary-padding"}}}
+    metadataStringBytes: 51175
+    paddingStringBytes: 1404
+    selectedMetadataBytes: 52620
+    reject: true
+    rejectContains: metadata string exceeds 16 KiB
+  - name: ordinary-content-outside-selected-metadata-budget
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":[{"type":"image","data":"native-boundary-string","mimeType":"image/png"}]}}
+      {"type":"message","id":"a","parentId":"u","message":{"role":"assistant","content":[{"type":"thinking","thinking":"native-boundary-string"},{"type":"toolCall","id":"call","name":"synthetic_tool","arguments":{"payload":"native-boundary-string"}},{"type":"image","data":"native-boundary-string","mimeType":"image/png"}]}}
+      {"type":"message","id":"r","parentId":"a","message":{"role":"toolResult","toolCallId":"call","toolName":"synthetic_tool","content":[{"type":"text","text":"native-boundary-string"},{"type":"image","data":"native-boundary-string","mimeType":"image/png"}],"isError":false,"details":{"extension":{"payload":"safe"}}}}
+      {"type":"custom_message","id":"c","parentId":"r","customType":"context","display":false,"content":[{"type":"image","data":"native-boundary-string","mimeType":"image/png"},{"type":"text","text":"ordinary context"}]}
+    metadataStringBytes: 51175
+    assertOrdinaryLongContent: true
+    turns: 3
+    owners: 2
+    metadata: 1
+    contains: [ordinary context, '[image omitted]']
   - name: native-metadata-string-over-limit
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}

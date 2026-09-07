@@ -54,20 +54,72 @@ func TestPiSanitizedNativeRecording(t *testing.T) {
 }
 
 type piSourceCase struct {
-	Name                string   `yaml:"name"`
-	Source              string   `yaml:"source"`
-	Reject              bool     `yaml:"reject"`
-	ProjectionReject    bool     `yaml:"projectionReject"`
-	MetadataStringBytes int      `yaml:"metadataStringBytes"`
-	RejectContains      string   `yaml:"rejectContains"`
-	Title               string   `yaml:"title"`
-	MetadataModel       string   `yaml:"metadataModel"`
-	Turns               int      `yaml:"turns"`
-	Owners              int      `yaml:"owners"`
-	Metadata            int      `yaml:"metadata"`
-	Warnings            int      `yaml:"warnings"`
-	Contains            []string `yaml:"contains"`
-	Excludes            []string `yaml:"excludes"`
+	Name                      string   `yaml:"name"`
+	Source                    string   `yaml:"source"`
+	Reject                    bool     `yaml:"reject"`
+	ProjectionReject          bool     `yaml:"projectionReject"`
+	MetadataStringBytes       int      `yaml:"metadataStringBytes"`
+	PaddingStringBytes        int      `yaml:"paddingStringBytes"`
+	SelectedMetadataBytes     int      `yaml:"selectedMetadataBytes"`
+	AssertOrdinaryLongContent bool     `yaml:"assertOrdinaryLongContent"`
+	RejectContains            string   `yaml:"rejectContains"`
+	Title                     string   `yaml:"title"`
+	MetadataModel             string   `yaml:"metadataModel"`
+	Turns                     int      `yaml:"turns"`
+	Owners                    int      `yaml:"owners"`
+	Metadata                  int      `yaml:"metadata"`
+	Warnings                  int      `yaml:"warnings"`
+	Contains                  []string `yaml:"contains"`
+	Excludes                  []string `yaml:"excludes"`
+}
+
+func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, body, wantReason string) {
+	t.Helper()
+	ctx := context.Background()
+	sid, err := ingest.NewSessionID(testutil.TestSessionUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := &ingest.OSFileSystem{}
+	indexers := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})
+	_, err = indexers[schema.HarnessPi].IndexTranscriptBytes(ctx, ingest.DiscoveredSession{SessionID: sid}, []byte(body))
+	if err == nil || !strings.Contains(err.Error(), wantReason) {
+		t.Fatal("native index operation did not enforce the selected-metadata bound")
+	}
+	db, err := store.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	output, err := ingest.NewResolvedPath(filepath.Join(t.TempDir(), "managed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline, err := ingest.NewPipeline(fs, testutil.NoGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{
+		Sources: map[ingest.Harness]ingest.SourceConfig{schema.HarnessPi: {Enabled: true, Paths: []ingest.ResolvedPath{source}}}, OutputDir: output, IncludeActive: true, Parallelism: 1,
+	}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(indexers))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := pipeline.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.DiscoveryDiagnostics) != 1 || !strings.Contains(result.DiscoveryDiagnostics[0].Detail, wantReason) {
+		t.Fatal("pipeline did not report the selected-metadata rejection")
+	}
+	stored, err := db.SessionSourceInfo(ctx, sid.String())
+	if err != nil || stored != nil {
+		t.Fatal("rejected metadata source created a session")
+	}
+	entries, err := db.ListEntries(ctx, sid)
+	if err != nil || len(entries) != 0 {
+		t.Fatal("rejected metadata source created indexed entries")
+	}
+	artifacts, err := filepath.Glob(filepath.Join(output.String(), "*", "*", "*"))
+	if err != nil || len(artifacts) != 0 {
+		t.Fatal("rejected metadata source created managed transcript artifacts")
+	}
 }
 
 func TestPiNativeRegistryProjection(t *testing.T) {
@@ -85,6 +137,9 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 		tc.Source = strings.ReplaceAll(tc.Source, "pi-native-fixture", testutil.TestSessionUUID)
 		if tc.MetadataStringBytes > 0 {
 			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-string", strings.Repeat("x", tc.MetadataStringBytes))
+		}
+		if tc.PaddingStringBytes > 0 {
+			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-padding", strings.Repeat("p", tc.PaddingStringBytes))
 		}
 		if tc.Name == "" || seen[tc.Name] {
 			t.Fatal("duplicate or empty fixture name")
@@ -107,6 +162,20 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.Reject {
+				if tc.SelectedMetadataBytes > 0 {
+					var result struct {
+						Message struct {
+							Details json.RawMessage `json:"details"`
+						} `json:"message"`
+					}
+					lines := strings.Split(strings.TrimSpace(tc.Source), "\n")
+					if err := json.Unmarshal([]byte(lines[len(lines)-1]), &result); err != nil {
+						t.Fatal(err)
+					}
+					if len(result.Message.Details) != tc.SelectedMetadataBytes {
+						t.Fatalf("synthetic selected subtree has %d bytes, want %d", len(result.Message.Details), tc.SelectedMetadataBytes)
+					}
+				}
 				if len(sessions) != 0 {
 					t.Fatal("invalid source accepted")
 				}
@@ -115,6 +184,9 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				}
 				if tc.RejectContains != "" && !strings.Contains(adapter.(ingest.DiscoveryDiagnosticReporter).DiscoveryDiagnostics()[0].Detail, tc.RejectContains) {
 					t.Fatal("source rejected for the wrong reason")
+				}
+				if tc.RejectContains != "" {
+					assertPiSourceRejectionPipeline(t, resolved, tc.Source, tc.RejectContains)
 				}
 				return
 			}
@@ -139,6 +211,27 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			entries, err := indexer.IndexTranscript(ctx, session)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if tc.AssertOrdinaryLongContent {
+				payload := strings.Repeat("x", tc.MetadataStringBytes)
+				thinking, arguments, output, placeholders := false, false, false, 0
+				for _, entry := range entries {
+					if entry.ContentPreview != nil {
+						placeholders += strings.Count(*entry.ContentPreview, "[image omitted]")
+						if entry.Role == schema.RoleAssistant && entry.Depth == 0 && strings.Contains(*entry.ContentPreview, payload) && entry.HasThinking {
+							thinking = true
+						}
+					}
+					if entry.ToolInput != nil && strings.Contains(*entry.ToolInput, payload) {
+						arguments = true
+					}
+					if entry.ToolOutput != nil && strings.Contains(*entry.ToolOutput, payload) {
+						output = true
+					}
+				}
+				if !thinking || !arguments || !output || placeholders != 4 {
+					t.Fatal("ordinary long content was constrained by a selected-metadata budget or an image location lost its placeholder")
+				}
 			}
 			dbPath := filepath.Join(t.TempDir(), "index.db")
 			db, err := store.Open(dbPath)
