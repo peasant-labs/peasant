@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -223,4 +224,36 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommitsWithMetadata(ctx context.Context,
 	}
 
 	return commits, nil
+}
+
+// IsAncestor answers `git merge-base --is-ancestor <commit> <ref>` under the
+// same per-call timeout as the log queries. Exit status 1 is git's "no". Every
+// other failure, including the timeout, is returned as an error so the caller
+// can tell "not reachable" from "could not check".
+func (g *ExecGitDiffAnalyzer) IsAncestor(ctx context.Context, repoPath, commit, ref string) (bool, error) {
+	logTimeout := g.logTimeout()
+	ctx, cancel := context.WithTimeout(ctx, logTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "merge-base", "--is-ancestor", commit, ref)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return false, fmt.Errorf(
+			"git merge-base --is-ancestor in %s: operation timed out after %v: %w",
+			repoPath, logTimeout, ctx.Err(),
+		)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf(
+		"git merge-base --is-ancestor %s %s in %s: %w: %s",
+		commit, ref, repoPath, err, strings.TrimSpace(stderr.String()),
+	)
 }
