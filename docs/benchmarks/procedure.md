@@ -11,10 +11,16 @@ profile evidence when push profiling is enabled. The harness is only a safe
 runner. It does not choose the profile command for you, and it does not compare
 runs by a hard maximum duration.
 
+The harness needs Bash, GNU coreutils (`realpath`, `stat`, and `rm`), and Linux
+`/proc` directory handles.
+
 ### Goals
 
 - Keep profile outputs under `/tmp/opencode`.
 - Keep the work directory under `/tmp/opencode/peasant-push-profile-*`.
+- Use fresh work and output paths with existing parents. The harness rejects
+  existing files and directories, traversal, symlinks, and output overlap. This
+  also prevents an existing hardlink from redirecting an output write.
 - Record whether JSON and JSONL files were created.
 - Compare structural metrics: keys, stage names, counter names, outcomes, safe
   subject identifiers, and forbidden-string absence.
@@ -22,7 +28,8 @@ runs by a hard maximum duration.
 
 ### Dry Run
 
-The dry run validates paths and writes a safe summary without running a push:
+The dry run validates paths and creates a new summary without running a push.
+It never creates or cleans a workspace, including with `--clean`:
 
 ```bash
 scripts/profile-push-copy.sh \
@@ -41,6 +48,20 @@ profile summary: /tmp/opencode/push-profile.summary.log
 ```
 
 ### Real Run Shape
+
+The harness exclusively creates the workspace with mode `0700` and prepares
+`data-home`, `config-home`, and `state-home` beneath it. Choose a new name for
+each run. It retains the workspace by default, including when the command fails.
+With `--clean`, it clears contents through an open handle to the directory it
+created. It refuses cleanup if the workspace or an ancestor has been replaced.
+The empty workspace root is retained: Bash cannot safely combine an identity
+check with unlinking that pathname. Inspect it before removing it manually.
+Cleanup does not change the child command's exit status.
+
+This is a wrapper for a trusted local command, not a filesystem sandbox. The
+command must use the exported destinations and finish its writers before it
+exits; do not mutate the workspace concurrently from other processes. Summary
+writes use an open descriptor so replacing its pathname does not redirect them.
 
 When the CLI profiling flags are available, pass the exact command to the
 harness after `--`. The harness exports these variables for the command:
