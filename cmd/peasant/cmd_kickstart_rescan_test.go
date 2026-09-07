@@ -83,7 +83,7 @@ func (r rescanRecord) seeded() bool {
 }
 
 // rescanSchemaAge is the metadata schema version a row's record was written
-// under: the version this build writes, or one behind it.
+// under: the version this build writes, or a version requiring a refresh.
 type rescanSchemaAge string
 
 const (
@@ -100,7 +100,9 @@ func (a rescanSchemaAge) version(t *testing.T, caseName string) int {
 	case rescanSchemaCurrent:
 		return ingest.CurrentSchemaVersion
 	case rescanSchemaBehind:
-		return ingest.CurrentSchemaVersion - 1
+		// v9 remains compatible with v10's optional adapter provenance. This
+		// fixture needs genuinely stale metadata, not merely a lower number.
+		return 8
 	default:
 		t.Fatalf("kickstart re-scan fixture case %q declares unknown recorded_schema_version %q; use %q or %q",
 			caseName, string(a), rescanSchemaCurrent, rescanSchemaBehind)
