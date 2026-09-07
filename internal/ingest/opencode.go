@@ -343,8 +343,8 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		// canonical selection keep one projection per session. Current outranks
 		// legacy, so a session in both is a current winner while a session only
 		// in the legacy tables is a legacy winner. A session the current
-		// projection dropped but the legacy tables still hold is handled by the
-		// session-table deletion rule below, not by hiding the legacy tables.
+		// projection dropped but the legacy tables still hold is kept when either
+		// supported session table still has its live record.
 		current, currentErr := a.discoverCurrentSQLite(ctx, source, result.Candidate)
 		legacy, legacyErr := a.discoverLegacySQLite(ctx, source, result.Candidate)
 		if currentErr != nil && legacyErr != nil {
@@ -372,29 +372,33 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 		discoveredIDs[candidates[index].session.SessionID] = struct{}{}
 	}
 	records, err := a.discoverSQLiteSessionRecords(ctx, source, result.Candidate, discoveredIDs)
+	a.recordSessionTable(result.Candidate.Path, records.table)
 	if err != nil {
-		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session records could not be read; sessions stay discoverable as roots with file-based freshness", err)
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeMetadataUnavailable, "session metadata could not be read completely from supported session tables; sessions stay discoverable as roots and absence could not be verified", err)
 		return candidates, source
 	}
-	// A session table that carries neither the parent link nor the changed clock
-	// supplies nothing, so name it. A table that has only the parent link, or
+	if result.V2Layout == OpenCodeSessionV2Unsupported && records.table == OpenCodeSessionTableLegacy {
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeMetadataFallback, "session_v2 lacks id as its sole primary key; session supplies metadata and existence evidence", errors.New("session_v2 is structurally unusable for bounded identity enumeration"))
+	}
+	if !records.present {
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeMetadataUnavailable, "neither session_v2 nor session supplies usable session identity; sessions stay discoverable as roots and deletion could not be verified", errors.New("no supported metadata table was selected"))
+	}
+	// A metadata table without parent links and a changed clock degrades those
+	// fields, even if v2 still supplies identity. A table with only the parent link or
 	// only the clock, is used for whichever it has and is not a failure.
 	if records.present && !records.hasParent && !records.hasClock {
-		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, "session table carries neither parent_id nor time_updated, so parent links and the changed clock are unavailable; sessions stay discoverable as roots with file-based freshness", errors.New("session table lacks both parent_id and time_updated"))
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeMetadataDegraded, fmt.Sprintf("%s carries neither parent_id nor time_updated, so its records cannot supply parent links or the changed clock; available identity evidence is retained", records.table), errors.New("selected metadata table lacks both parent_id and time_updated"))
 	}
 	if len(records.skipped) > 0 {
 		// One diagnostic names every dropped row, so the good rows keep their
 		// parent link and clock while the bad ones are visible.
-		a.recordCandidateFailure(result.Candidate.Path, OpenCodeProbeDiscover, fmt.Sprintf("%d session row(s) were dropped while keeping the others: %s", len(records.skipped), strings.Join(records.skipped, "; ")), errors.New("one or more session rows were undecodable"))
+		a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeMetadataDegraded, fmt.Sprintf("%d session metadata row(s) were dropped while retaining valid identity evidence: %s", len(records.skipped), strings.Join(records.skipped, "; ")), errors.New("one or more metadata rows were undecodable"))
 	}
-	// OpenCode keeps its authoritative session list in the session table; the
-	// message and session_message rows are historical. When the session table
-	// carries the changed clock, which is the real OpenCode shape, a discovered
-	// session with no row there was deleted from OpenCode, so it is skipped
-	// rather than resurrected from stale rows. A session table without the clock
-	// column is a degraded or synthetic shape, so the rule fails safe and keeps
-	// every discovered session as a root rather than risk skipping a live one.
-	if records.present && records.hasClock {
+	// Only complete successful enumeration of the supported tables can prove
+	// absence; message tables may retain orphan history. V2 can prove
+	// identity without optional metadata. Preserve legacy clockless compatibility,
+	// where old or partial layouts did not supply an authoritative live list.
+	if records.canVerifyAbsence {
 		surviving := candidates[:0]
 		survivingIDs := make(map[SessionID]struct{}, len(candidates))
 		var deleted []string
@@ -405,7 +409,7 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 				survivingIDs[sessionID] = struct{}{}
 				continue
 			}
-			deleted = append(deleted, fmt.Sprintf("session %q has no row in the session table", sessionID))
+			deleted = append(deleted, fmt.Sprintf("session %q has no live record", sessionID))
 		}
 		candidates = surviving
 		// A parent the deletion rule removed can no longer satisfy the parent
@@ -423,7 +427,7 @@ func (a *OpenCodeAdapter) discoverSQLiteCandidate(ctx context.Context, result Op
 			}
 		}
 		if len(deleted) > 0 {
-			a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeDeleted, fmt.Sprintf("%d session(s) were skipped because they were deleted from OpenCode and have no row in the session table: %s", len(deleted), strings.Join(deleted, "; ")), errors.New("one or more sessions were deleted from the session table"))
+			a.recordCandidateOutcome(result.Candidate.Path, OpenCodeProbeDiscover, openCodeOutcomeDeleted, fmt.Sprintf("%d session(s) were skipped because they have no live record in the supported session tables (session_v2/session): %s", len(deleted), strings.Join(deleted, "; ")), errors.New("complete supported metadata enumeration verified missing session records, not deletion history"))
 		}
 	}
 	if len(records.danglingParents) > 0 {
@@ -589,15 +593,16 @@ type openCodeSessionClock struct {
 // which of the parent link and changed clock columns the session table carries,
 // so parent links are read whether or not the clock column exists.
 type openCodeSessionRecords struct {
-	present   bool
-	hasParent bool
-	hasClock  bool
-	bySession map[SessionID]openCodeSessionClock
+	canVerifyAbsence bool
+	table            OpenCodeSessionTable
+	present          bool
+	hasParent        bool
+	hasClock         bool
+	bySession        map[SessionID]openCodeSessionClock
 	// rowIDs names every session that still has a row in the session table,
 	// including a row whose parent link or clock could not be decoded. A
 	// discovered session missing from rowIDs while the table is present and
-	// enumerable was deleted from OpenCode, so it is skipped rather than
-	// resurrected from its historical message or session_message rows.
+	// enumerable has no live record, so its historical message rows are skipped.
 	rowIDs map[SessionID]struct{}
 	// skipped names the rows the read could not use, so one bad row is dropped
 	// with a diagnostic while the others keep their parent link and clock.
@@ -613,6 +618,34 @@ type openCodeSessionRecords struct {
 // read whether or not the clock column exists. A database without a session
 // table yields an empty result with present false.
 func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, discoveredIDs map[SessionID]struct{}) (openCodeSessionRecords, error) {
+	records, err := a.readSQLiteSessionRecords(ctx, source, candidate, discoveredIDs, OpenCodeSessionRecordsPreferred, nil)
+	if err != nil || records.table != OpenCodeSessionTableV2 {
+		return records, err
+	}
+	legacy, err := a.readSQLiteSessionRecords(ctx, source, candidate, discoveredIDs, OpenCodeSessionRecordsLegacy, records.rowIDs)
+	if err != nil {
+		return records, err
+	}
+	// A successful V2 read does not prove absence from a supported legacy
+	// store. Keep its live identities too, but never replace shared V2 metadata,
+	// even when the V2 row's optional fields could not be decoded.
+	if legacy.present && !legacy.canVerifyAbsence {
+		records.canVerifyAbsence = false
+	}
+	for id := range legacy.rowIDs {
+		if _, shared := records.rowIDs[id]; !shared {
+			if row, ok := legacy.bySession[id]; ok {
+				records.bySession[id] = row
+			}
+		}
+		records.rowIDs[id] = struct{}{}
+	}
+	records.skipped = append(records.skipped, legacy.skipped...)
+	records.danglingParents = append(records.danglingParents, legacy.danglingParents...)
+	return records, nil
+}
+
+func (a *OpenCodeAdapter) readSQLiteSessionRecords(ctx context.Context, source OpenCodeSQLiteSource, candidate OpenCodeCandidate, discoveredIDs map[SessionID]struct{}, selection OpenCodeSessionRecordSelection, preferredIDs map[SessionID]struct{}) (openCodeSessionRecords, error) {
 	records := openCodeSessionRecords{bySession: make(map[SessionID]openCodeSessionClock, len(discoveredIDs)), rowIDs: make(map[SessionID]struct{}, len(discoveredIDs))}
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
@@ -620,15 +653,21 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 	}
 	var cursor *OpenCodeSessionRecordCursor
 	for {
-		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{PageSize: pageSize, After: cursor})
+		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{Selection: selection, PageSize: pageSize, After: cursor})
+		if page.Table != "" {
+			records.table = page.Table
+		}
 		if readErr != nil {
 			return records, fmt.Errorf("read OpenCode session records from %q failed while enumerating a bounded session page: %w; sessions remain discoverable as roots; verify the session table and retry", candidate.Path, readErr)
+		}
+		if cursor != nil && !page.Supported {
+			return records, fmt.Errorf("read OpenCode session records from %q lost supported metadata during pagination; absence cannot be verified; retry after OpenCode finishes changing its schema", candidate.Path)
 		}
 		records.present = page.Supported
 		records.hasParent = page.HasParent
 		records.hasClock = page.HasClock
 		for _, skip := range page.Skipped {
-			records.skipped = append(records.skipped, skip.Reason)
+			records.skipped = append(records.skipped, fmt.Sprintf("%s: %s", page.Table, skip.Reason))
 		}
 		for _, rowID := range page.PresentSessionIDs {
 			// A row whose stored identifier is valid marks the session present.
@@ -648,6 +687,9 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 			}
 			// Retain only the rows for sessions this database actually discovered,
 			// so freshness and parent links are read for the discovered ids only.
+			if _, preferred := preferredIDs[sessionID]; preferred {
+				continue
+			}
 			if _, discovered := discoveredIDs[sessionID]; !discovered {
 				continue
 			}
@@ -682,6 +724,7 @@ func (a *OpenCodeAdapter) discoverSQLiteSessionRecords(ctx context.Context, sour
 		}
 		cursor = page.Next
 	}
+	records.canVerifyAbsence = records.present && (records.hasClock || records.table == OpenCodeSessionTableV2)
 	return records, nil
 }
 
@@ -716,9 +759,11 @@ const (
 	// openCodeOutcomeFloorFallback names sessions whose freshness fell back to
 	// the database and write-ahead-log file time. Nothing was skipped.
 	openCodeOutcomeFloorFallback
-	// openCodeOutcomeDeleted names sessions removed from OpenCode and skipped so
-	// a deleted session does not reappear from its historical rows.
+	// openCodeOutcomeDeleted names historical rows without a live session record.
 	openCodeOutcomeDeleted
+	openCodeOutcomeMetadataUnavailable
+	openCodeOutcomeMetadataDegraded
+	openCodeOutcomeMetadataFallback
 )
 
 // meaningAndRemediation returns the Meaning and Remediation text for the
@@ -727,6 +772,15 @@ const (
 // only fell back for freshness.
 func (o openCodeDiagnosticOutcome) meaningAndRemediation() (string, string) {
 	switch o {
+	case openCodeOutcomeMetadataUnavailable:
+		return "transcript candidates remain discoverable as roots with file-based freshness; incomplete metadata enumeration cannot prove deletion and no candidate was removed by this metadata failure",
+			"retry after the source is readable; if the failure persists, report its schema and error without transcript content; do not modify the OpenCode database through Peasant"
+	case openCodeOutcomeMetadataDegraded:
+		return "available metadata and valid session identities are retained; missing or malformed metadata does not itself mean a session was deleted",
+			"inspect the selected table's supported column shape and retry; report persistent metadata incompatibility without transcript content"
+	case openCodeOutcomeMetadataFallback:
+		return "the legacy session table is the metadata authority because session_v2 is structurally unusable; transcript representation selection remains independent",
+			"report the unsupported session_v2 column shape so compatibility can be extended; do not migrate or repair the source through Peasant"
 	case openCodeOutcomeIngestedAsRoots:
 		return "the named sessions were ingested as roots because this run did not discover their parent; no session was skipped and every other session was still discovered",
 			"discover the parent to restore the link, for example by widening the selection or ingesting the parent's source; if the parent no longer exists in OpenCode, the root attachment is correct and no action is needed"
@@ -734,8 +788,8 @@ func (o openCodeDiagnosticOutcome) meaningAndRemediation() (string, string) {
 		return "the named sessions used the database and write-ahead-log file time as a freshness floor; no session was skipped and every session was still discovered",
 			"no action is needed; the file time still moves a session when its rows change"
 	case openCodeOutcomeDeleted:
-		return "the named sessions were deleted from OpenCode and were skipped so a removed session does not reappear from its historical rows; every session OpenCode still keeps was discovered",
-			"no action is needed; the sessions were deleted in OpenCode"
+		return "the named sessions have historical message rows but no live record in the supported session tables; those candidates were skipped, but their deletion history is unknown",
+			"if a named session should be live, verify its session record in OpenCode and retry; Peasant does not modify the source database"
 	default:
 		return "sessions from this candidate were skipped for this run; sessions from other candidates and the legacy JSON layout were still discovered",
 			"retry after OpenCode finishes writing; if the failure persists, verify the database with OpenCode and do not modify it through Peasant"
@@ -745,12 +799,16 @@ func (o openCodeDiagnosticOutcome) meaningAndRemediation() (string, string) {
 // logSummary is the one-line slog message for the outcome.
 func (o openCodeDiagnosticOutcome) logSummary() string {
 	switch o {
+	case openCodeOutcomeMetadataUnavailable, openCodeOutcomeMetadataDegraded:
+		return "opencode discovery: session metadata degraded"
+	case openCodeOutcomeMetadataFallback:
+		return "opencode discovery: legacy session metadata selected"
 	case openCodeOutcomeIngestedAsRoots:
 		return "opencode discovery: sessions ingested as roots"
 	case openCodeOutcomeFloorFallback:
 		return "opencode discovery: freshness used the file-time floor"
 	case openCodeOutcomeDeleted:
-		return "opencode discovery: deleted sessions skipped"
+		return "opencode discovery: sessions without live records skipped"
 	default:
 		return "opencode discovery: candidate skipped"
 	}
@@ -760,6 +818,18 @@ func (o openCodeDiagnosticOutcome) logSummary() string {
 // evidence and logs it. Discovery continues for other candidates.
 func (a *OpenCodeAdapter) recordCandidateFailure(path string, stage OpenCodeProbeStage, what string, cause error) {
 	a.recordCandidateOutcomeAt(a.resolveCandidateEvidenceIndex(path), path, stage, openCodeOutcomeSkipped, what, cause)
+}
+
+func (a *OpenCodeAdapter) recordSessionTable(path string, table OpenCodeSessionTable) {
+	index := a.resolveCandidateEvidenceIndex(path)
+	if index < 0 {
+		return
+	}
+	a.candidateMu.Lock()
+	defer a.candidateMu.Unlock()
+	if index < len(a.candidateEvidence) {
+		a.candidateEvidence[index].SessionTable = table
+	}
 }
 
 // recordCandidateOutcome attaches a diagnostic whose meaning matches the given
@@ -1209,6 +1279,8 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 		cloned[index] = result
 		cloned[index].Diagnostics = append([]OpenCodeProbeDiagnostic(nil), result.Diagnostics...)
 		cloned[index].Evidence.Tables = append([]string(nil), result.Evidence.Tables...)
+		cloned[index].Evidence.SessionColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.SessionColumns...)
+		cloned[index].Evidence.SessionV2Columns = append([]OpenCodeColumnEvidence(nil), result.Evidence.SessionV2Columns...)
 		cloned[index].Evidence.LegacyMessageColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.LegacyMessageColumns...)
 		cloned[index].Evidence.LegacyPartColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.LegacyPartColumns...)
 		cloned[index].Evidence.CurrentMessageColumns = append([]OpenCodeColumnEvidence(nil), result.Evidence.CurrentMessageColumns...)

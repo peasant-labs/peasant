@@ -84,7 +84,7 @@ func loadCurrentControlRowsDocument(data []byte) (currentControlRowsDocument, er
 // and named by one diagnostic per type.
 //
 // Mutation proof: restoring the upstream-id requirement for control rows
-// (calling validateIdentity, or requiring the "id" field) makes
+// (requiring the "id" field) makes
 // MaterializeTranscript fail with "upstream message id is required", so this
 // case can no longer materialize and it goes red.
 func TestOpenCodeCurrentControlRowsTolerated(t *testing.T) {

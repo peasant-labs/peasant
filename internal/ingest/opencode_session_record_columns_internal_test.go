@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,7 @@ type openCodeSessionRecordColumnsFixture struct {
 }
 
 type openCodeSessionRecordColumnCase struct {
+	Table    string                           `yaml:"table"`
 	Name     string                           `yaml:"name"`
 	Extended bool                             `yaml:"extended"`
 	Rows     []openCodeSessionRecordColumnRow `yaml:"rows"`
@@ -125,6 +127,13 @@ func materializeExtendedSessionDatabase(t *testing.T, testCase openCodeSessionRe
 			t.Fatalf("insert base session row %q: %v", row.ID, err)
 		}
 	}
+	if testCase.Table == "session_v2" {
+		if err := sqlitex.ExecuteScript(conn, "ALTER TABLE session RENAME TO session_v2", nil); err != nil {
+			t.Fatal(err)
+		}
+	} else if strings.TrimSpace(testCase.Table) != "" && testCase.Table != "session" {
+		t.Fatalf("unknown fixture table %q", testCase.Table)
+	}
 	return dbPath
 }
 
@@ -187,6 +196,9 @@ func TestSessionRecordsReadExtendedColumns(t *testing.T) {
 				record, ok := records[row.ID]
 				if !ok {
 					t.Fatalf("session %q missing from records %v", row.ID, records)
+				}
+				if record.ParentID.String() != row.ParentID || record.TimeUpdated != row.TimeUpdated {
+					t.Fatalf("session %q parent/clock = %q/%d, want %q/%d", row.ID, record.ParentID.String(), record.TimeUpdated, row.ParentID, row.TimeUpdated)
 				}
 				// The base attribution resolves in both layouts.
 				if record.Directory != row.Directory || record.Title != row.Title || record.TimeCreated != row.TimeCreated {

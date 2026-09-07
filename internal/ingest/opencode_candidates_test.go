@@ -2577,7 +2577,7 @@ func openCodeSessionSelectColumns(statement string) (columns []string, targetsSe
 	if !recognized {
 		return nil, false, false
 	}
-	if table != "session" {
+	if table != "session" && table != "session_v2" {
 		return nil, false, true
 	}
 	return columns, true, true
