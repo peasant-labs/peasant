@@ -23,7 +23,7 @@ func BuildPlayIngestCommand() *cobra.Command {
 			defer cancel()
 
 			progState := ingest.NewProgressState()
-			renderer := newProgressRenderer(os.Stderr, progState, animation.IngestAnimation())
+			renderer := newProgressProgram(os.Stderr, progState, animation.IngestAnimation())
 			go renderer.Run(ctx)
 
 			simulateIngestProgress(progState)

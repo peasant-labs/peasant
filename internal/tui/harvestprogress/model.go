@@ -1,4 +1,5 @@
-package ingestprogress
+// Package harvestprogress owns the inline harvest Bubble Tea root model.
+package harvestprogress
 
 import (
 	"context"
@@ -7,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/keymap"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
@@ -29,12 +31,12 @@ type StopMsg struct {
 }
 
 // ProgressSource supplies a non-blocking pipeline snapshot to the inline model.
-type ProgressSource interface {
+type ProgressReader interface {
 	Snapshot() map[ingest.Stage]ingest.StageProgress
 }
 
 type Model struct {
-	state            ProgressSource
+	state            ProgressReader
 	anim             *animation.Animation
 	cancel           context.CancelFunc
 	operationErr     func() error
@@ -45,18 +47,24 @@ type Model struct {
 	canceling        bool
 	canceledEstimate string
 	width, height    int
-	presentation     Presentation
+	presentation     ingestprogress.Presentation
 	theme            theme.Theme
 }
 
 // operationErr optionally probes the owning operation's context independently
 // of asynchronous CancelMsg delivery. Inline harvest supplies its context.Err.
-func NewModel(state ProgressSource, anim *animation.Animation, th theme.Theme, startedAt time.Time, cancel context.CancelFunc, operationErr ...func() error) Model {
-	m := Model{state: state, anim: anim, cancel: cancel, now: startedAt, theme: th, presentation: New(startedAt, false)}
-	if len(operationErr) > 0 {
-		m.operationErr = operationErr[0]
-	}
-	m.observe(startedAt)
+type Options struct {
+	Progress   ProgressReader
+	Theme      theme.Theme
+	Animation  *animation.Animation
+	StartedAt  time.Time
+	Cancel     context.CancelFunc
+	ContextErr func() error
+}
+
+func New(options Options) Model {
+	m := Model{state: options.Progress, anim: options.Animation, cancel: options.Cancel, operationErr: options.ContextErr, now: options.StartedAt, theme: options.Theme, presentation: ingestprogress.New(options.StartedAt, false)}
+	m.observe(options.StartedAt)
 	return m
 }
 
@@ -117,7 +125,7 @@ func (m *Model) beginCancel() {
 	if !m.canceling {
 		// Keep only the displayed estimate. Continue observing final counts,
 		// errors and clocks while the operation acknowledges cancellation.
-		m.canceledEstimate = m.presentation.estimateText()
+		m.canceledEstimate = m.presentation.EstimateText()
 		m.canceling = true
 	}
 }
@@ -157,7 +165,7 @@ func (m Model) Render() string {
 	if m.height > 0 {
 		available = max(m.height-len(lines)-len(footer), 0)
 	}
-	lines = append(lines, m.presentation.lines(styles, m.now, available, m.canceledEstimate)...)
+	lines = append(lines, m.presentation.LinesWithRetainedEstimate(styles, m.now, available, m.canceledEstimate)...)
 	if m.height > 0 && len(lines)+len(footer) > m.height {
 		lines = lines[:max(m.height-len(footer), 0)]
 	}
@@ -177,4 +185,4 @@ func (m Model) Render() string {
 
 var _ tea.Model = Model{}
 var _ keymap.Availability = Model{}
-var _ ProgressSource = (*ingest.ProgressState)(nil)
+var _ ProgressReader = (*ingest.ProgressState)(nil)

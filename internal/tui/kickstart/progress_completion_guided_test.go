@@ -20,7 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
-	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -568,13 +568,13 @@ func TestHarvestAndKickstartProgressParity(t *testing.T) {
 			wizard, _, _ := newProgressProgram(t, progress, clock, func(context.Context) (*ftue.IngestResult, error) {
 				return &ftue.IngestResult{New: 1}, nil
 			}, nil, &tick)
-			inline := ingestprogress.NewModel(progress, animation.IngestAnimation(), theme.New(theme.ModeDark), clock.Now(), nil)
+			inline := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: theme.New(theme.ModeDark), StartedAt: clock.Now()})
 			for _, observation := range row.Observations {
 				clock.Advance(observation.AdvanceSeconds)
 				progress.Set(observation.Stages)
 				wizard, _ = wizard.Update(tick(clock.Now()))
-				updated, _ := inline.Update(ingestprogress.TickMsg(clock.Now()))
-				inline = updated.(ingestprogress.Model)
+				updated, _ := inline.Update(harvestprogress.TickMsg(clock.Now()))
+				inline = updated.(harvestprogress.Model)
 				want := progressMatrixLines(wizard.View())
 				got := progressMatrixLines(inline.View().Content)
 				if len(want) == 0 || !reflect.DeepEqual(got, want) {

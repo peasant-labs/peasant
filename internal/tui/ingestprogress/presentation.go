@@ -130,6 +130,16 @@ func (p Presentation) estimateText() string {
 	return "  estimate unavailable"
 }
 
+// EstimateText exposes the currently displayed estimate to the transitional
+// harvest root. It will be removed when Presentation becomes the shared child.
+func (p Presentation) EstimateText() string { return p.estimateText() }
+
+// LinesWithRetainedEstimate renders the matrix while preserving a canceled
+// harvest estimate. It is a narrow migration bridge for the extracted root.
+func (p Presentation) LinesWithRetainedEstimate(styles theme.Styles, now time.Time, height int, retainedEstimate string) []string {
+	return p.lines(styles, now, height, retainedEstimate)
+}
+
 // retainedEstimate is used only by the canceled inline surface; other consumers
 // continue to render the live estimate, including its normal stall expiration.
 func (p Presentation) lines(styles theme.Styles, now time.Time, height int, retainedEstimate string) []string {

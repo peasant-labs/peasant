@@ -23,7 +23,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
-	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"golang.org/x/sys/unix"
@@ -144,18 +144,18 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			renderer := newProgressRenderer(io.Discard, state, nil, cancel)
+			renderer := newProgressProgram(io.Discard, state, nil, cancel)
 			var model tea.Model = renderer.newModel(ctx, started)
 			if !c.Unavailable || c.Expired {
 				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
 			}
-			model, _ = model.Update(ingestprogress.TickMsg(started.Add(2 * time.Second)))
+			model, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 			initialClock := "total elapsed: 2s"
 			if c.Expired {
 				if !strings.Contains(ansi.Strip(model.View().Content), "estimate: 6s") {
 					t.Fatal("fixture did not establish a live estimate before the stall")
 				}
-				model, _ = model.Update(ingestprogress.TickMsg(started.Add(8 * time.Second)))
+				model, _ = model.Update(harvestprogress.TickMsg(started.Add(8 * time.Second)))
 				initialClock = "total elapsed: 8s"
 			}
 			assertView := func(markers ...string) {
@@ -180,25 +180,25 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 			if c.DelayedCancel {
 				// The tick is already queued while the context watcher has not
 				// delivered its CancelMsg. Use the renderer's real model wiring.
-				model, _ = model.Update(ingestprogress.TickMsg(started.Add(9 * time.Second)))
+				model, _ = model.Update(harvestprogress.TickMsg(started.Add(9 * time.Second)))
 				assertView("canceling harvest", "✗ discover", "2/4", "total elapsed: 9s")
 				initialClock = "total elapsed: 9s"
 			}
 			if c.Key {
 				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 			} else if c.External {
-				model, _ = model.Update(ingestprogress.CancelMsg{})
+				model, _ = model.Update(harvestprogress.CancelMsg{})
 			}
 			if c.Key || c.External {
 				assertView("canceling harvest", initialClock)
-				model, _ = model.Update(ingestprogress.TickMsg(started.Add(9 * time.Second)))
+				model, _ = model.Update(harvestprogress.TickMsg(started.Add(9 * time.Second)))
 				assertView("canceling harvest", "✗ discover", "2/4", "total elapsed: 9s")
 				// Repeated notification must not capture the now failed/expired ETA.
-				model, _ = model.Update(ingestprogress.CancelMsg{})
+				model, _ = model.Update(harvestprogress.CancelMsg{})
 				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 				assertView("canceling harvest", "2/4")
 			}
-			model, _ = model.Update(ingestprogress.StopMsg{Canceled: !c.StopFallback, At: started.Add(12 * time.Second)})
+			model, _ = model.Update(harvestprogress.StopMsg{Canceled: !c.StopFallback, At: started.Add(12 * time.Second)})
 			assertView("harvest canceled", "✗ discover", "2/4", "total elapsed: 12s")
 			wantStageClock := "12s"
 			if c.Key || c.External {
@@ -213,7 +213,7 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 				}
 			}
 			final := model.View().Content
-			model, _ = model.Update(ingestprogress.TickMsg(started.Add(time.Hour)))
+			model, _ = model.Update(harvestprogress.TickMsg(started.Add(time.Hour)))
 			if model.View().Content != final {
 				t.Fatal("final snapshot changed after stop")
 			}
@@ -245,7 +245,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
 			out := newSignalWriter("ctrl+c to cancel")
-			r := newProgressRenderer(out, state, nil, cancel)
+			r := newProgressProgram(out, state, nil, cancel)
 			r.isTTY = true
 			master, terminal := openTestTerminal(t)
 			if err := unix.IoctlSetWinsize(int(terminal.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
@@ -330,8 +330,8 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 }
 
 func TestProgressModelSuccessClears(t *testing.T) {
-	m := ingestprogress.NewModel(ingest.NewProgressState(), nil, theme.New(theme.ModeDark), time.Now(), nil)
-	updated, cmd := m.Update(ingestprogress.StopMsg{})
+	m := harvestprogress.New(harvestprogress.Options{Progress: ingest.NewProgressState(), Theme: theme.New(theme.ModeDark), StartedAt: time.Now()})
+	updated, cmd := m.Update(harvestprogress.StopMsg{})
 	if cmd == nil || updated.View().Content != "" {
 		t.Fatal("success must clear the live view")
 	}
@@ -341,10 +341,10 @@ func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
 	started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	state := ingest.NewProgressState()
 	state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
-	m := ingestprogress.NewModel(state, nil, theme.New(theme.ModeDark), started, nil)
-	updated, _ := m.Update(ingestprogress.CancelMsg{})
+	m := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: started})
+	updated, _ := m.Update(harvestprogress.CancelMsg{})
 	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
-	updated, cmd := updated.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(8 * time.Second)})
+	updated, cmd := updated.Update(harvestprogress.StopMsg{Canceled: true, At: started.Add(8 * time.Second)})
 	if cmd == nil {
 		t.Fatal("acknowledged cancellation did not quit")
 	}
@@ -353,7 +353,7 @@ func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
 		t.Fatalf("final snapshot omitted last operation progress or clock: %s", view)
 	}
 	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 9, Total: 10})
-	updated, _ = updated.Update(ingestprogress.TickMsg(started.Add(time.Minute)))
+	updated, _ = updated.Update(harvestprogress.TickMsg(started.Add(time.Minute)))
 	if updated.View().Content != view {
 		t.Fatal("completed cancellation snapshot changed after termination")
 	}
@@ -368,7 +368,7 @@ func TestProgressRendererFailureCancelsOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	r := newProgressRenderer(&output, ingest.NewProgressState(), nil, cancel)
+	r := newProgressProgram(&output, ingest.NewProgressState(), nil, cancel)
 	r.isTTY = true
 	r.input = terminal
 	go r.Run(ctx)
@@ -417,12 +417,12 @@ func validateNamedFixtures(t *testing.T, family string, required []string, count
 func TestProgressRenderer_Run_NonTTY(t *testing.T) {
 	state := ingest.NewProgressState()
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, state, nil)
+	r := newProgressProgram(&buf, state, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Run() is launched in a goroutine (per the usage contract documented in
-	// the progressRenderer struct comment). newProgressRenderer pre-increments
+	// the progressProgram struct comment). newProgressProgram pre-increments
 	// the WaitGroup so Wait() is safe immediately after go r.Run(ctx).
 	go r.Run(ctx)
 
@@ -443,7 +443,7 @@ func TestProgressRenderer_Run_NonTTY(t *testing.T) {
 func TestProgressRenderer_IsTTY_NonFileWriter(t *testing.T) {
 	state := ingest.NewProgressState()
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, state, nil)
+	r := newProgressProgram(&buf, state, nil)
 	if r.IsTTY() {
 		t.Error("IsTTY() = true for bytes.Buffer writer, want false")
 	}
@@ -464,7 +464,7 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 		Total: 5,
 	})
 
-	model := ingestprogress.NewModel(state, nil, theme.New(theme.ModeDark), time.Now(), nil)
+	model := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: time.Now()})
 	out := model.Render()
 	if out == "" {
 		t.Fatal("render() wrote nothing, want non-empty output")
@@ -476,8 +476,8 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 }
 
 func TestProgressRendererUsesGentleFrameRate(t *testing.T) {
-	if progressRendererFPS != 24 {
-		t.Fatalf("progressRendererFPS = %d, want 24", progressRendererFPS)
+	if progressProgramFPS != 24 {
+		t.Fatalf("progressProgramFPS = %d, want 24", progressProgramFPS)
 	}
 }
 
@@ -503,7 +503,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, state, nil)
+	r := newProgressProgram(&buf, state, nil)
 	// Force TTY mode to exercise the tick path.
 	r.isTTY = true
 
@@ -524,7 +524,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 
 func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := ingestprogress.NewModel(ingest.NewProgressState(), nil, theme.New(theme.ModeDark), time.Now(), cancel)
+	m := harvestprogress.New(harvestprogress.Options{Progress: ingest.NewProgressState(), Theme: theme.New(theme.ModeDark), StartedAt: time.Now(), Cancel: cancel})
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd != nil {
@@ -536,7 +536,7 @@ func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 	if !strings.Contains(updated.View().Content, "canceling harvest") {
 		t.Fatal("ctrl+c must retain progress while cancellation unwinds")
 	}
-	updated, cmd = updated.Update(ingestprogress.StopMsg{})
+	updated, cmd = updated.Update(harvestprogress.StopMsg{})
 	if cmd == nil || !strings.Contains(updated.View().Content, "harvest canceled") {
 		t.Fatal("completion racing with a cancellation request must retain canceled progress")
 	}
@@ -553,14 +553,14 @@ func TestInlineProgressLayout(t *testing.T) {
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageIndex, Total: 10})
 			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageIndex, Done: 4, Total: 10})
 			started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
-			model := ingestprogress.NewModel(state, animation.IngestAnimation(), theme.New(mode), started, nil)
+			model := harvestprogress.New(harvestprogress.Options{Progress: state, Animation: animation.IngestAnimation(), Theme: theme.New(mode), StartedAt: started})
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: c.Width, Height: c.Height})
-			updated, _ = updated.Update(ingestprogress.TickMsg(started.Add(8 * time.Second)))
+			updated, _ = updated.Update(harvestprogress.TickMsg(started.Add(8 * time.Second)))
 			if c.Cancel {
-				updated, _ = updated.Update(ingestprogress.CancelMsg{})
+				updated, _ = updated.Update(harvestprogress.CancelMsg{})
 			}
 			if c.Stop {
-				updated, _ = updated.Update(ingestprogress.StopMsg{Canceled: c.Cancel, At: started.Add(8 * time.Second)})
+				updated, _ = updated.Update(harvestprogress.StopMsg{Canceled: c.Cancel, At: started.Add(8 * time.Second)})
 			}
 			view := updated.View()
 			if view.AltScreen {
