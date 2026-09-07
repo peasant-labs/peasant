@@ -102,6 +102,9 @@ type UnsupportedIndexFormatError struct {
 }
 
 func (e *UnsupportedIndexFormatError) Error() string {
+	if e.Version == 0 {
+		return fmt.Sprintf("store: session %s has stored entries but no recorded index format; this build cannot verify their representation, so reads and replacement were refused and the index was preserved; restore valid format evidence or use a compatible Peasant build", e.SessionID)
+	}
 	return fmt.Sprintf("store: session %s has unsupported index format %d; before reading or replacing its transcript projection, this build refused the operation and preserved its index; use a Peasant build that supports this format", e.SessionID, e.Version)
 }
 
@@ -156,6 +159,15 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	}
 	if state == nil {
 		return nil, nil, fmt.Errorf("store: cannot index session %s before its metadata is stored; import the session and retry", write.SessionID)
+	}
+	if state.IndexVersion == nil {
+		hasEntries := false
+		if err := sqlitex.ExecuteTransient(conn, sqlSessionEntriesExist, &sqlitex.ExecOptions{Args: []any{string(write.SessionID)}, ResultFunc: func(*sqlite.Stmt) error { hasEntries = true; return nil }}); err != nil {
+			return nil, nil, fmt.Errorf("store: verify absent index format for %s before replacement: %w; existing entries were preserved; restore database access and retry", write.SessionID, err)
+		}
+		if hasEntries {
+			return nil, nil, &UnsupportedIndexFormatError{SessionID: write.SessionID}
+		}
 	}
 	if state.IndexVersion != nil {
 		if !s.SupportsIndexFormat(*state.IndexVersion) {

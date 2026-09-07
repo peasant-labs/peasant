@@ -83,6 +83,7 @@ ORDER BY entry_index`
 )
 
 type sessionEntryWriteOutcome struct {
+	entriesCount       int
 	skipped            bool
 	sessionEntriesHash string
 	stats              ingest.SessionEntryWriteStats
@@ -144,6 +145,7 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		}
 		outcome, err, fatal := s.indexSessionEntryWriteSavepoint(ctx, conn, writes[i], stmts)
 		results[i].Stats = outcome.stats
+		results[i].EntriesCount = outcome.entriesCount
 		if err != nil {
 			results[i].Err = err
 			if fatal {
@@ -204,6 +206,7 @@ func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlit
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal
 	}
 	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, entries, stmts)
+	outcome.entriesCount = len(entries)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return outcome, rollbackErr, fatal

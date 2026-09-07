@@ -7,6 +7,8 @@ requiredNames:
   - batch-refuses-newer-producer
   - entry-only-refuses-newer-format
   - batch-refuses-newer-format
+  - entry-only-refuses-missing-format
+  - batch-refuses-missing-format
   - declaration-must-match-result
   - concrete-type-must-match-format
   - absent-result-refused
@@ -21,6 +23,8 @@ cases:
   - {name: batch-refuses-newer-producer, storedProducer: 99, producer: 15, declaredFormat: 1, wantError: "newer than this writer"}
   - {name: entry-only-refuses-newer-format, storedProducer: 14, storedFormat: 99, direct: true, declaredFormat: 1, wantError: "unsupported index format 99"}
   - {name: batch-refuses-newer-format, storedProducer: 14, storedFormat: 99, producer: 15, declaredFormat: 1, wantError: "unsupported index format 99"}
+  - {name: entry-only-refuses-missing-format, storedProducer: 14, missingFormat: true, direct: true, declaredFormat: 1, wantError: "no recorded index format"}
+  - {name: batch-refuses-missing-format, storedProducer: 14, missingFormat: true, producer: 15, declaredFormat: 1, wantError: "no recorded index format"}
   - {name: declaration-must-match-result, storedProducer: 14, producer: 15, declaredFormat: 2, wantError: "does not match declared format"}
   - {name: concrete-type-must-match-format, storedProducer: 14, producer: 15, declaredFormat: 1, payload: fake-v1, wantError: "requires an indexformat.V1 result"}
   - {name: absent-result-refused, storedProducer: 14, producer: 15, declaredFormat: 1, payload: absent, wantError: "does not match declared format"}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -43,8 +44,9 @@ func TestPipelineRefusesNonAtomicIndexerWrites(t *testing.T) {
 	pipeline := &Pipeline{metricsStore: store}
 	sid := SessionID("77777777-7777-4777-8777-777777777777")
 	result := indexParseResult{
-		im:      indexedMeta{session: DiscoveredSession{SessionID: sid, Harness: HarnessClaudeCode}},
-		entries: []schema.SessionEntry{{SessionID: sid, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser}},
+		im:         indexedMeta{session: DiscoveredSession{SessionID: sid, Harness: HarnessClaudeCode}},
+		output:     indexformat.V1{Entries: []schema.SessionEntry{{SessionID: sid, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser}}},
+		entryCount: 1,
 	}
 	flush := pipeline.flushIndexParseResults(t.Context(), []indexParseResult{result}, IndexOutcomeIndexed, "pipeline", nil)
 	if store.wrote || len(flush.indexed) != 1 || flush.indexed[0].indexed || flush.writeTxs != 0 || len(flush.logEntries) != 1 || flush.logEntries[0].Outcome != IndexOutcomeError {
@@ -84,7 +86,7 @@ func loadHarvesterVersionFixtures(t *testing.T) []harvesterVersionFixture {
 		}
 		names[fixture.Name] = true
 	}
-	for _, required := range []string{"canonical_registry", "injected_subset_without_indexers", "missing_adapter_target", "nonpositive_adapter", "nonpositive_indexer", "nonpositive_index", "unsupported_output_format", "unimplemented_harness"} {
+	for _, required := range []string{"canonical_registry", "injected_subset_without_indexers", "missing_adapter_target", "nonpositive_adapter", "nonpositive_indexer", "nonpositive_index", "unused_output_format_without_indexers", "unimplemented_harness"} {
 		if !names[required] {
 			t.Errorf("missing required harvester fixture %q", required)
 		}

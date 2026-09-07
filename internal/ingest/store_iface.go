@@ -141,11 +141,12 @@ type SessionEntryWrite struct {
 
 // SessionEntryWriteResult reports the outcome for one SessionEntryWrite.
 type SessionEntryWriteResult struct {
-	SessionID SessionID
-	Written   bool // true when the write request completed, including an unchanged-row skip
-	Skipped   bool // true when existing entry projections already matched and no entry rows were replaced
-	Stats     SessionEntryWriteStats
-	Err       error
+	SessionID    SessionID
+	EntriesCount int  // canonical projection rows committed by the format handler
+	Written      bool // true when the write request completed, including an unchanged-row skip
+	Skipped      bool // true when existing entry projections already matched and no entry rows were replaced
+	Stats        SessionEntryWriteStats
+	Err          error
 }
 
 // SessionEntryBatchStore is required to persist pipeline index results. Metrics
@@ -154,6 +155,12 @@ type SessionEntryWriteResult struct {
 // preserving per-session rollback with savepoints, including single-item batches.
 type SessionEntryBatchStore interface {
 	IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult
+}
+
+// IndexFormatSupport describes the formats the actual writer can persist and
+// read. A declaration in HarvesterVersionRegistry alone does not supply support.
+type IndexFormatSupport interface {
+	SupportsIndexFormat(version int) bool
 }
 
 // AnnotationRunState records the exact inputs used by the last completed
@@ -282,6 +289,15 @@ type TranscriptIndexer interface {
 	// it something to discard - which is what used to happen, and which hid the
 	// fact that its root had been lost.
 	IndexTranscriptBytes(ctx context.Context, session DiscoveredSession, data []byte) ([]schema.SessionEntry, error)
+}
+
+// VersionedTranscriptIndexer supplies a concrete representation when a harness
+// adopts a format other than V1. Existing slice-returning indexers remain V1;
+// callers never relabel those slices as a different representation.
+type VersionedTranscriptIndexer interface {
+	TranscriptIndexer
+	IndexTranscriptResult(context.Context, DiscoveredSession) (indexformat.Result, error)
+	IndexTranscriptBytesResult(context.Context, DiscoveredSession, []byte) (indexformat.Result, error)
 }
 
 // SessionTranscriptSourceResolver lets an indexer select its typed source per

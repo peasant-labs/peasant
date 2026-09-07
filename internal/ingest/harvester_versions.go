@@ -47,9 +47,6 @@ func (p *Pipeline) validateHarvesterVersions() error {
 		if versions.AdapterVersion < 1 || versions.IndexerVersion < 1 || versions.IndexVersion < 1 {
 			return fmt.Errorf("pipeline version registry: harness %q has nonpositive versions %+v; declare positive adapter, indexer and index format versions before harvesting", harness, versions)
 		}
-		if versions.IndexVersion != 1 {
-			return fmt.Errorf("pipeline version registry: harness %q declares unsupported output format %d; register a compatible format writer before harvesting", harness, versions.IndexVersion)
-		}
 	}
 	for harness := range p.adapters {
 		if _, ok := p.harvesterVersions[harness]; !ok {
@@ -59,6 +56,21 @@ func (p *Pipeline) validateHarvesterVersions() error {
 	for harness := range p.indexers {
 		if _, ok := p.harvesterVersions[harness]; !ok {
 			return fmt.Errorf("pipeline version registry: indexer %q has no version declaration; add its harvester targets before harvesting", harness)
+		}
+	}
+	// Logs-only ingestion never uses a Store or an indexer. An unused index
+	// declaration must not introduce a database dependency into that path.
+	if p.metricsStore == nil || len(p.indexers) == 0 {
+		return nil
+	}
+	for harness, versions := range p.indexerTargets() {
+		indexer := p.indexers[harness]
+		if _, versioned := indexer.(VersionedTranscriptIndexer); versions.IndexVersion != 1 && !versioned {
+			return fmt.Errorf("pipeline version registry: harness %q has a slice-returning indexer, which only produces format 1, but declares format %d; use a concrete versioned result before indexing", harness, versions.IndexVersion)
+		}
+		support, ok := p.metricsStore.(IndexFormatSupport)
+		if !ok || !support.SupportsIndexFormat(versions.IndexVersion) {
+			return fmt.Errorf("pipeline version registry: harness %q declares unsupported output format %d for its writer; register a compatible format writer before harvesting", harness, versions.IndexVersion)
 		}
 	}
 	return nil

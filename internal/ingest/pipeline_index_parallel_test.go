@@ -750,12 +750,13 @@ func (store *serialIndexStore) IndexSessionEntries(_ context.Context, sessionID 
 }
 
 func (*serialIndexStore) UpdateIndexState(context.Context, SessionID, int, int64) error { return nil }
+func (*serialIndexStore) SupportsIndexFormat(version int) bool                          { return version == 1 }
 
 func (store *serialIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	results := make([]SessionEntryWriteResult, len(writes))
 	for i, write := range writes {
 		err := store.IndexSessionEntries(ctx, write.SessionID, write.Result.(indexformat.V1).Entries)
-		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: err == nil, Err: err}
+		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, EntriesCount: len(write.Result.(indexformat.V1).Entries), Written: err == nil, Err: err}
 	}
 	return results
 }
@@ -767,6 +768,8 @@ type batchIndexStore struct {
 	batchSizes   []int
 	singleWrites atomic.Int64
 }
+
+func (*batchIndexStore) SupportsIndexFormat(version int) bool { return version == 1 }
 
 func (store *batchIndexStore) IndexSessionEntries(_ context.Context, sessionID SessionID, entries []schema.SessionEntry) error {
 	store.singleWrites.Add(1)
@@ -784,8 +787,9 @@ func (store *batchIndexStore) IndexSessionEntryBatch(_ context.Context, writes [
 	for i, write := range writes {
 		store.entries[write.SessionID] = append([]schema.SessionEntry(nil), write.Result.(indexformat.V1).Entries...)
 		results[i] = SessionEntryWriteResult{
-			SessionID: write.SessionID,
-			Written:   true,
+			SessionID:    write.SessionID,
+			EntriesCount: len(write.Result.(indexformat.V1).Entries),
+			Written:      true,
 			Stats: SessionEntryWriteStats{
 				HashMatches:              1,
 				AnnotationTargetsCarried: 2,
@@ -965,6 +969,8 @@ func (idx *cpuIndexBenchmarkIndexer) IndexTranscriptBytes(ctx context.Context, s
 
 type benchmarkIndexStore struct{ MetricsStore }
 
+func (*benchmarkIndexStore) SupportsIndexFormat(version int) bool { return version == 1 }
+
 func (*benchmarkIndexStore) IndexSessionEntries(context.Context, SessionID, []schema.SessionEntry) error {
 	return nil
 }
@@ -976,7 +982,7 @@ func (*benchmarkIndexStore) UpdateIndexState(context.Context, SessionID, int, in
 func (*benchmarkIndexStore) IndexSessionEntryBatch(_ context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	results := make([]SessionEntryWriteResult, len(writes))
 	for i, write := range writes {
-		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: true}
+		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, EntriesCount: len(write.Result.(indexformat.V1).Entries), Written: true}
 	}
 	return results
 }

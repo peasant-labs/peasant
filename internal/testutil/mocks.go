@@ -723,6 +723,9 @@ type StubMetricsStore struct {
 
 var _ ingest.MetricsStore = (*StubMetricsStore)(nil)
 var _ ingest.SessionEntryBatchStore = (*StubMetricsStore)(nil)
+var _ ingest.IndexFormatSupport = (*StubMetricsStore)(nil)
+
+func (*StubMetricsStore) SupportsIndexFormat(version int) bool { return version == 1 }
 
 // NewStubMetricsStore creates a ready-to-use StubMetricsStore.
 func NewStubMetricsStore() *StubMetricsStore {
@@ -768,6 +771,7 @@ func (s *StubMetricsStore) IndexSessionEntryBatch(_ context.Context, writes []in
 			continue
 		}
 		s.IndexedEntries[write.SessionID] = result.Entries
+		results[i].EntriesCount = len(result.Entries)
 		if write.IndexerVersion > 0 {
 			s.IndexStates[write.SessionID] = write.IndexerVersion
 		}

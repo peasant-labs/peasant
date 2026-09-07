@@ -34,6 +34,7 @@ type indexFormatWriterCase struct {
 	Name            string             `yaml:"name"`
 	StoredProducer  int                `yaml:"storedProducer"`
 	StoredFormat    int                `yaml:"storedFormat"`
+	MissingFormat   bool               `yaml:"missingFormat"`
 	Producer        int                `yaml:"producer"`
 	DeclaredFormat  int                `yaml:"declaredFormat"`
 	Direct          bool               `yaml:"direct"`
@@ -135,7 +136,11 @@ func TestIndexFormatWriterPreservesActualProvenance(t *testing.T) {
 				storedFormat = 1
 			}
 			conn := takeConn(t, db.Pool())
-			if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_version = ?, index_format_version = ?, indexed_at = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{row.StoredProducer, storedFormat, int64(1700000000100), string(sid)}}); err != nil {
+			var formatArg any = storedFormat
+			if row.MissingFormat {
+				formatArg = nil
+			}
+			if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_version = ?, index_format_version = ?, indexed_at = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{row.StoredProducer, formatArg, int64(1700000000100), string(sid)}}); err != nil {
 				t.Fatal(err)
 			}
 			if row.FailFormatStamp {

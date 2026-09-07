@@ -14,8 +14,8 @@ var _ ingest.IndexLogger = (*Store)(nil)
 const sqlInsertIndexLog = `INSERT INTO index_log (
     session_id, provider, outcome, index_version,
     entries_count, source_path, original_root, reason,
-    started_at, finished_at, error_message
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    started_at, finished_at, error_message, index_format_version
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // LogIndexEntry inserts a single index_log row.
 // Best-effort: callers should not fail the pipeline on error.
@@ -39,6 +39,7 @@ func (s *Store) LogIndexEntry(ctx context.Context, entry ingest.IndexLogEntry) e
 			entry.StartedAt,
 			derefInt64(entry.FinishedAt),
 			derefString(entry.ErrorMessage),
+			derefInt(entry.IndexVersion),
 		},
 	}); err != nil {
 		return fmt.Errorf("store: insert index_log: %w", err)

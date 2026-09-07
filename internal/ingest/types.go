@@ -211,7 +211,8 @@ type IndexLogEntry struct {
 	SessionID      SessionID
 	Harness        Harness
 	Outcome        IndexOutcome
-	IndexerVersion int `json:"IndexVersion"` // legacy JSON key; SQL index_version stores the producing parser revision
+	IndexerVersion int  `json:"IndexVersion"` // legacy JSON key; SQL index_version stores the producing parser revision
+	IndexVersion   *int `json:"-"`            // attempted concrete output format; stored in index_log only
 	EntriesCount   int
 	SourcePath     *string
 	OriginalRoot   *string

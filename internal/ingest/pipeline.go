@@ -1287,7 +1287,8 @@ func (p *Pipeline) indexLoop(
 
 type indexParseResult struct {
 	im            indexedMeta
-	entries       []schema.SessionEntry
+	output        indexformat.Result
+	entryCount    int
 	startedAt     int64
 	logEntry      IndexLogEntry
 	parseDuration time.Duration
@@ -1377,21 +1378,33 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	active := activeParses.Add(1)
 	recordIndexProfileMax(maxActiveParses, active)
 	parseStart := time.Now()
-	entries, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
+	output, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
+	if err == nil {
+		var version int
+		version, err = indexformat.VersionOf(output)
+		if err == nil && version != p.versionTargets()[im.session.Harness].IndexVersion {
+			err = fmt.Errorf("indexer result format %d does not match declared format %d for harness %s; no entries were replaced; correct the indexer declaration or concrete output", version, p.versionTargets()[im.session.Harness].IndexVersion, im.session.Harness)
+		}
+	}
 	if err != nil {
+		var empty *unverifiedEmptyIndexError
+		if errors.As(err, &empty) {
+			p.reportDiagnostic(DiagnosticEntry{ErrorType: "index_empty_unverified", Location: string(im.session.SessionID), Message: empty.Error(), Remediation: "Restore readable source records, or use an indexer that verifies completed-empty input, and retry harvest."})
+			reason := empty.Error()
+			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+			return result
+		}
 		slog.Warn(logPrefix+": index transcript", "session_id", im.session.SessionID, "error", err)
 		errMsg := err.Error()
 		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
 		return result
 	}
-	if len(entries) == 0 {
-		reason := "no entries returned"
-		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
-		return result
+	result.output = output
+	if v1, ok := output.(indexformat.V1); ok {
+		result.entryCount = len(v1.Entries)
 	}
-	result.entries = entries
 	return result
 }
 
@@ -1440,7 +1453,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 	writePositions := make([]int, 0, len(results))
 	nowMs := time.Now().UnixMilli()
 	for i, result := range results {
-		if len(result.entries) == 0 || p.metricsStore == nil {
+		if result.output == nil || p.metricsStore == nil {
 			flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
 			flush.logEntries[i] = result.logEntry
 			flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, 0)
@@ -1448,8 +1461,8 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		writes = append(writes, SessionEntryWrite{
 			SessionID:      result.im.session.SessionID,
-			Result:         indexformat.V1{Entries: result.entries},
-			IndexVersion:   1,
+			Result:         result.output,
+			IndexVersion:   p.versionTargets()[result.im.session.Harness].IndexVersion,
 			IndexerVersion: p.versionTargets()[result.im.session.Harness].IndexerVersion,
 			IndexedAtMs:    nowMs,
 		})
@@ -1483,7 +1496,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 	}
 	for i, result := range results {
-		if len(result.entries) == 0 || p.metricsStore == nil {
+		if result.output == nil || p.metricsStore == nil {
 			continue
 		}
 		flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
@@ -1504,13 +1517,14 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		if writeErr != nil {
 			slog.Warn(logPrefix+": store session entries", "session_id", result.im.session.SessionID, "error", writeErr)
 			errMsg := writeErr.Error()
-			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, len(result.entries), result.startedAt, nil, &errMsg)
+			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, result.entryCount, result.startedAt, nil, &errMsg)
 			flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
 			flush.logEntries[position] = logEntry
 			flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
 			continue
 		}
-		logEntry := p.makeIndexLogEntry(result.im, outcome, len(result.entries), result.startedAt, nil, nil)
+		result.entryCount = writeResult.EntriesCount
+		logEntry := p.makeIndexLogEntry(result.im, outcome, result.entryCount, result.startedAt, nil, nil)
 		flush.indexed[position] = indexedMeta{session: result.im.session, startMs: result.im.startMs, indexed: true}
 		flush.logEntries[position] = logEntry
 		flush.profileSessions[position] = p.makeIndexProfileSession(result, logEntry, perSessionWriteDuration)
@@ -1524,7 +1538,7 @@ func (p *Pipeline) makeIndexProfileSession(result indexParseResult, logEntry Ind
 		Harness:       result.im.session.Harness,
 		SourcePath:    p.indexProfileSourcePath(result.im),
 		Outcome:       logEntry.Outcome,
-		Entries:       len(result.entries),
+		Entries:       result.entryCount,
 		Bytes:         result.bytes,
 		ParseDuration: result.parseDuration,
 		WriteDuration: writeDuration,
@@ -1536,8 +1550,8 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 	ok := false
 	logEntry := result.logEntry
 	writeDuration := time.Duration(0)
-	entriesCount := len(result.entries)
-	if entriesCount > 0 && p.metricsStore != nil {
+	entriesCount := result.entryCount
+	if result.output != nil && p.metricsStore != nil {
 		// A split entries/stamp fallback could overwrite last-good output and
 		// report success after the producer stamp failed. Refuse before any write.
 		errMsg := "index persistence requires atomic entry and indexer-state writes; configure a SessionEntryBatchStore and retry; existing entries were preserved"
@@ -2318,7 +2332,33 @@ func indexWithSourceKind(
 	indexer TranscriptIndexer,
 	session DiscoveredSession,
 	transcriptData []byte,
-) ([]schema.SessionEntry, error) {
+) (indexformat.Result, error) {
+	readFile := func() (indexformat.Result, error) {
+		if versioned, ok := indexer.(VersionedTranscriptIndexer); ok {
+			return versioned.IndexTranscriptResult(ctx, session)
+		}
+		entries, err := indexer.IndexTranscript(ctx, session)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			return nil, &unverifiedEmptyIndexError{session: session}
+		}
+		return indexformat.V1{Entries: entries}, nil
+	}
+	readBytes := func() (indexformat.Result, error) {
+		if versioned, ok := indexer.(VersionedTranscriptIndexer); ok {
+			return versioned.IndexTranscriptBytesResult(ctx, session, transcriptData)
+		}
+		entries, err := indexer.IndexTranscriptBytes(ctx, session, transcriptData)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			return nil, &unverifiedEmptyIndexError{session: session}
+		}
+		return indexformat.V1{Entries: entries}, nil
+	}
 	sourceKind := indexer.SourceKind()
 	if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
 		sourceKind = resolver.TranscriptSourceKindFor(session)
@@ -2337,12 +2377,12 @@ func indexWithSourceKind(
 					"Fix: enable %s in your configuration (sources.%s.enabled: true) and re-run, so discovery resolves its storage root. If you are pointing at sessions with --source-harness and --source-path, name %s and give the path to its storage directory rather than to a single file.",
 				session.SessionID, session.Harness, session.Harness, session.Harness, session.Harness, session.Harness)
 		}
-		return indexer.IndexTranscript(ctx, session)
+		return readFile()
 	case TranscriptSourceFile:
 		if len(transcriptData) > 0 {
-			return indexer.IndexTranscriptBytes(ctx, session, transcriptData)
+			return readBytes()
 		}
-		return indexer.IndexTranscript(ctx, session)
+		return readFile()
 	case TranscriptSourceKindUnknown:
 		return nil, fmt.Errorf(
 			"ingest: cannot index session %q: its indexer did not declare where its entries come from.\n"+
@@ -2974,11 +3014,16 @@ func (p *Pipeline) makeIndexLogEntry(im indexedMeta, outcome IndexOutcome, entri
 	if or := string(im.session.OriginalRoot); or != "" {
 		originalRoot = &or
 	}
+	var indexVersion *int
+	if declared := p.versionTargets()[im.session.Harness].IndexVersion; declared > 0 {
+		indexVersion = &declared
+	}
 	return IndexLogEntry{
 		SessionID:      im.session.SessionID,
 		Harness:        im.session.Harness,
 		Outcome:        outcome,
 		IndexerVersion: p.versionTargets()[im.session.Harness].IndexerVersion,
+		IndexVersion:   indexVersion,
 		EntriesCount:   entriesCount,
 		SourcePath:     sourcePath,
 		OriginalRoot:   originalRoot,

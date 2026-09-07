@@ -30,12 +30,11 @@ cases:
     indexer: 15
     index: 0
     error: nonpositive versions
-  - name: unsupported_output_format
+  - name: unused_output_format_without_indexers
     harnesses: [claude-code]
     adapter: 1
     indexer: 15
     index: 2
-    error: unsupported output format
   - name: unimplemented_harness
     harnesses: [gemini]
     adapter: 1

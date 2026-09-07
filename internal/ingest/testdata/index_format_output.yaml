@@ -1,0 +1,28 @@
+requiredNames:
+  - legacy-v1-result
+  - versioned-v1-result
+  - completed-empty-v1
+  - legacy-empty-preserves-last-good
+  - malformed-claude-preserves-last-good
+  - missing-opencode-tree-preserves-last-good
+  - parse-error-preserves-last-good
+  - absent-versioned-result-refused
+  - typed-nil-versioned-result-refused
+  - mismatched-versioned-result-refused
+  - legacy-indexer-cannot-declare-v2
+  - writer-must-support-declaration
+  - logs-ignore-unwritten-index-format
+cases:
+  - {name: legacy-v1-result, declaredFormat: 1, payload: v1, wantIndexed: true}
+  - {name: versioned-v1-result, declaredFormat: 1, versioned: true, payload: v1, wantIndexed: true}
+  - {name: completed-empty-v1, declaredFormat: 1, versioned: true, payload: empty, wantIndexed: true}
+  - {name: legacy-empty-preserves-last-good, declaredFormat: 1, payload: empty, wantDiagnostic: true}
+  - {name: malformed-claude-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: claude-code, transcript: "malformed json", wantDiagnostic: true}
+  - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantDiagnostic: true}
+  - {name: parse-error-preserves-last-good, declaredFormat: 1, payload: parse-error, wantLogError: synthetic parser failure}
+  - {name: absent-versioned-result-refused, declaredFormat: 1, versioned: true, payload: absent, wantLogError: no concrete result}
+  - {name: typed-nil-versioned-result-refused, declaredFormat: 1, versioned: true, payload: nil-v1, wantLogError: no concrete result}
+  - {name: mismatched-versioned-result-refused, declaredFormat: 1, versioned: true, payload: v2, wantLogError: declared format 1}
+  - {name: legacy-indexer-cannot-declare-v2, declaredFormat: 2, payload: v1, wantConstructorError: slice-returning indexer}
+  - {name: writer-must-support-declaration, declaredFormat: 2, versioned: true, payload: v2, wantConstructorError: unsupported output format 2}
+  - {name: logs-ignore-unwritten-index-format, declaredFormat: 2, payload: v1, logsOnly: true}
