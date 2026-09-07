@@ -3,6 +3,9 @@ package kit
 import (
 	"fmt"
 	"strings"
+
+	"charm.land/bubbles/v2/progress"
+	"charm.land/lipgloss/v2"
 )
 
 // Progress bar rows shared by every surface that reports staged work with
@@ -87,21 +90,15 @@ func renderProgressBar(label string, done, total int, ended, hasErr bool, elapse
 		icon = "●"
 	}
 
-	// Fill fraction.
-	var filled int
-	if total > 0 {
-		filled = done * progressBarWidth / total
-		if done > 0 && filled == 0 {
-			filled = 1
-		}
-		if filled > progressBarWidth {
-			filled = progressBarWidth
-		}
-	} else if ended {
-		filled = progressBarWidth
-	}
-	barStr := strings.Repeat(string(progressBarFill), filled) +
-		strings.Repeat(string(progressBarEmpty), progressBarWidth-filled)
+	filled := currentProgressFilledCells(done, total, ended)
+	bar := progress.New(
+		progress.WithWidth(progressBarWidth),
+		progress.WithoutPercentage(),
+		progress.WithFillCharacters(progressBarFill, progressBarEmpty),
+		progress.WithColors(lipgloss.NoColor{}),
+	)
+	bar.EmptyColor = lipgloss.NoColor{}
+	barStr := bar.ViewAs(float64(filled) / float64(progressBarWidth))
 
 	count := progressCount(done, total, ended)
 
@@ -118,4 +115,24 @@ func renderProgressBar(label string, done, total int, ended, hasErr bool, elapse
 		row += strings.Repeat(" ", countWidth-len(count))
 	}
 	return row, elapsed
+}
+
+func currentProgressFilledCells(done, total int, ended bool) int {
+	if total <= 0 {
+		if ended {
+			return progressBarWidth
+		}
+		return 0
+	}
+	filled := done * progressBarWidth / total
+	if done > 0 && filled == 0 {
+		filled = 1
+	}
+	if filled < 0 {
+		return 0
+	}
+	if filled > progressBarWidth {
+		return progressBarWidth
+	}
+	return filled
 }
