@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/peasant-labs/schema"
 )
@@ -43,6 +44,22 @@ func PiPublicRef(sessionID, domain, nativeID string) string {
 
 // EncodePiExtra validates and serializes evidence for SessionEntry.Extra.
 func EncodePiExtra(value PiExtra) (*string, error) {
+	if !utf8.ValidString(value.Namespace) || !utf8.ValidString(string(value.ModelID)) {
+		return nil, piEvidenceError(fmt.Errorf("typed Pi evidence contains invalid UTF-8"))
+	}
+	total := 0
+	for _, record := range value.Metadata {
+		if !utf8.ValidString(record.CustomType) || len(record.CustomType) > 128 {
+			return nil, piEvidenceError(fmt.Errorf("customType must be valid UTF-8 within 128 bytes"))
+		}
+		if _, err := schema.DecodeNativeMetadataDataRaw(record.Data); err != nil {
+			return nil, piEvidenceError(err)
+		}
+		total += len(record.Data)
+	}
+	if total > 1<<20 {
+		return nil, piEvidenceError(fmt.Errorf("aggregate metadata data exceeds 1 MiB before encoding"))
+	}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err

@@ -175,7 +175,19 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 
 	// Content-layer entries: include when the caller provides mapped entries.
 	if len(opts.Entries) > 0 {
-		req.Entries = opts.Entries
+		for _, entry := range opts.Entries {
+			if ingest.IsPiCarrier(entry) {
+				continue
+			}
+			if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil {
+				return nil, err
+			} else if pi {
+				entry.Extra = nil
+				entry.EntryID = nil
+				entry.ParentEntryID = nil
+			}
+			req.Entries = append(req.Entries, entry)
+		}
 	}
 
 	// License: the contributor's per-transcript content license (sessions.license_id,
@@ -186,6 +198,9 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 	result, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal publish request: %w", err)
+	}
+	if err := schema.ScanRawJSONDocument(result, schema.RawJSONPathPolicy{MaxDocumentBytes: 4 << 20, MaxDocumentDepth: 64}); err != nil {
+		return nil, err
 	}
 	if opts.Redactor == nil {
 		return result, nil
@@ -214,7 +229,14 @@ func MapMetadata(opts MapOptions) ([]byte, error) {
 			redactedRequest.Entries[index].Extra = restored
 		}
 	}
-	return json.Marshal(redactedRequest)
+	final, err := json.Marshal(redactedRequest)
+	if err != nil {
+		return nil, err
+	}
+	if err := schema.ScanRawJSONDocument(final, schema.RawJSONPathPolicy{MaxDocumentBytes: 4 << 20, MaxDocumentDepth: 64}); err != nil {
+		return nil, err
+	}
+	return final, nil
 }
 
 // projectContextWire builds the wire-safe Project field: the hash is always

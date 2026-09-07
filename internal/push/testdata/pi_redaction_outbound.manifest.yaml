@@ -1,0 +1,18 @@
+requiredNames:
+  - raw_metadata_bytes_checked_before_json_compaction
+  - redaction_expansion_rechecks_metadata_string_budget
+  - recognized_tool_result_reference_is_not_public_metadata
+  - benign_extension_keys_preserved
+  - recognized_text_thinking_image_tool_envelopes
+  - recognized_assistant_replay_handle_removed
+  - metadata_key_collision_fails_whole_upload
+  - raw_escaped_duplicate_rejected_before_decode
+  - raw_unsafe_metadata_integer_rejected
+  - raw_metadata_underflow_rejected
+  - all_capabilities_preserved_in_both_parts
+  - absent_capabilities_refuse_upload
+  - missing_usage_refuses_upload
+  - missing_metadata_refuses_upload
+  - missing_model_refuses_upload
+  - unknown_advertisement_is_ignored
+  - dry_run_no_negotiation_or_upload

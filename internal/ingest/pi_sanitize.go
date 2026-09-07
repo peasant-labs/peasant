@@ -79,6 +79,10 @@ func sanitizePiValue(value any, rewrite func(string) (string, error)) (any, erro
 		}
 		_, content := v["content"].([]any)
 		_, timestamp := v["timestamp"].(json.Number)
+		_, isError := v["isError"].(bool)
+		if v["role"] == "toolResult" && piString(v, "toolCallId") && piString(v, "toolName") && content && timestamp && isError {
+			skip["toolCallId"] = true
+		}
 		_, usage := v["usage"].(map[string]any)
 		assistant := v["role"] == "assistant" && content && timestamp && usage && piString(v, "api") && piString(v, "provider") && piString(v, "model") && piString(v, "stopReason")
 		if assistant {

@@ -43,6 +43,14 @@ import (
 // folded in here. Callers must treat a nil map as "keep existing preview
 // content", not as a failure.
 func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) (map[int]string, error) {
+	entries, err := fullContentEntries(ctx, fs, harness, sourcePath, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return contentOverlayFromEntries(entries), nil
+}
+
+func fullContentEntries(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) ([]schema.SessionEntry, error) {
 	indexer, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[ingest.Harness(harness)]
 	if !ok {
 		return nil, nil
@@ -77,7 +85,49 @@ func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defa
 		)
 	}
 
-	return contentOverlayFromEntries(sourceEntries), nil
+	return sourceEntries, nil
+}
+
+// RecoverFullEntries is the common full-content path. Overlay before folding so
+// thinking and tool input/output recover alongside text. Stored evidence and
+// indices remain authoritative; changing source attribution is never an overlay.
+func RecoverFullEntries(ctx context.Context, fs ingest.FileSystem, harness schema.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID, entries []schema.SessionEntry) ([]schema.SessionEntry, error) {
+	if !AnyContentTruncated(entries) {
+		return entries, nil
+	}
+	full, err := fullContentEntries(ctx, fs, harness, sourcePath, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	byIndex := make(map[int]schema.SessionEntry, len(full))
+	for _, entry := range full {
+		byIndex[entry.EntryIndex] = entry
+	}
+	copy := append([]schema.SessionEntry(nil), entries...)
+	for i := range copy {
+		e := &copy[i]
+		source, ok := byIndex[e.EntryIndex]
+		if !ok {
+			continue
+		}
+		old, pi, err := ingest.DecodePiExtra(e.Extra)
+		if err != nil {
+			return nil, err
+		}
+		if pi {
+			fresh, isPi, err := ingest.DecodePiExtra(source.Extra)
+			if err != nil {
+				return nil, err
+			}
+			if !isPi || old.SourceRef != fresh.SourceRef || e.EntryType != source.EntryType {
+				return nil, projectionError("source changed since indexing; full-content overlay cannot reattribute rows")
+			}
+		}
+		e.ContentPreview = source.ContentPreview
+		e.ToolInput = source.ToolInput
+		e.ToolOutput = source.ToolOutput
+	}
+	return copy, nil
 }
 
 // contentOverlayFromEntries maps entry_index to the full content preview of
@@ -128,8 +178,10 @@ func contentOverlayFromEntries(sourceEntries []schema.SessionEntry) map[int]stri
 // the common all-short-turns case this gate exists to skip.
 func AnyContentTruncated(entries []schema.SessionEntry) bool {
 	for i := range entries {
-		if p := entries[i].ContentPreview; p != nil && len(*p) >= defaults.ContentPreviewLimit {
-			return true
+		for _, p := range []*string{entries[i].ContentPreview, entries[i].ToolInput, entries[i].ToolOutput} {
+			if p != nil && len(*p) >= defaults.ContentPreviewLimit {
+				return true
+			}
 		}
 	}
 	return false

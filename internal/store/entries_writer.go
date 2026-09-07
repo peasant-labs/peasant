@@ -224,6 +224,17 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 }
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
+	for _, entry := range entries {
+		if _, _, err := ingest.DecodePiExtra(entry.Extra); err != nil {
+			return sessionEntryWriteOutcome{}, err
+		}
+		if !ingest.IsPiCarrier(entry) {
+			continue
+		}
+		if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil || !pi || entry.Role != schema.RoleSystem || entry.EntryType != schema.EntryTypeSystem || entry.ContentPreview != nil || entry.ToolInput != nil || entry.ToolOutput != nil || entry.TokensIn != nil || entry.TokensOut != nil {
+			return sessionEntryWriteOutcome{}, fmt.Errorf("store carrier validation failed during index replacement: private Pi rows must have system role/type and no searchable content or token counts (decode: %v); existing entries were not replaced; repair the Pi indexer and re-index", err)
+		}
+	}
 	outcome := sessionEntryWriteOutcome{}
 	sessionEntriesHash, err := computeSessionEntriesHash(entries)
 	if err != nil {

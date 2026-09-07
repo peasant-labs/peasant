@@ -1,0 +1,100 @@
+cases:
+  - name: separate_namespace_refuses_lossy_public_conversion
+    entries:
+      - {id: a, role: assistant, content: response}
+      - {id: a, role: assistant, type: tool_use, parent: 0, tool: call, name: search, namespace: extension, arguments: '{}'}
+    want_turns: 1
+    want_scopes: [assistant]
+    want_completeness: [unknown]
+    want_costs: ['']
+    error: tool namespace preservation is unavailable
+  - name: trailing_usage_carrier_resolves_visible_owner
+    entries:
+      - {id: a, role: assistant, content: response, no_owner: true}
+      - {id: a, role: assistant, carrier: true, usage: '{"input":0}'}
+    want_turns: 1
+    want_scopes: [assistant]
+    want_completeness: [partial]
+    want_costs: ['']
+  - name: thinking_sibling_survives_once_beside_tool
+    entries:
+      - {id: a, role: assistant, content: response}
+      - {id: a, role: assistant, type: thinking, parent: 0, content: considered, no_owner: true}
+      - {id: a, role: assistant, type: tool_use, parent: 0, tool: call, name: arbitrary, arguments: '{}'}
+    want_turns: 1
+    want_scopes: [assistant]
+    want_completeness: [unknown]
+    want_costs: ['']
+    want_content: "response\nconsidered"
+  - name: distinct_assistant_owners_complete_and_cost_spelling
+    entries:
+      - {id: a, role: assistant, content: same, usage: '{"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}}'}
+      - {id: b, role: assistant, content: same, usage: '{"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}}'}
+    want_turns: 2
+    want_scopes: [assistant, assistant]
+    want_completeness: [complete, complete]
+    want_costs: [1e-7, 1e-7]
+  - name: partial_absent_cost_only_and_subset_only
+    entries:
+      - {id: a, role: assistant, content: partial, usage: '{"input":0}'}
+      - {id: b, role: assistant, content: absent}
+      - {id: c, role: assistant, content: cost, usage: '{"cost":{"total":0.30000000000000004}}'}
+      - {id: d, role: assistant, content: subset, usage: '{"reasoning":2}'}
+    want_turns: 4
+    want_scopes: [assistant, assistant, assistant, assistant]
+    want_completeness: [partial, unknown, unknown, unknown]
+    want_costs: ['', '', '0.30000000000000004', '']
+  - name: tool_result_details_follow_surviving_tool
+    entries:
+      - {id: a, role: assistant, content: working}
+      - {id: a, role: assistant, type: tool_use, tool: call, parent: 0, name: extension.tool, arguments: '{"nested":{"value":true}}'}
+      - {id: r, role: tool, type: tool_result, tool: call, parent: 0, content: result, metadata: '{"safe":true}', kind: pi.toolresult.details, source: pi.message, usage: '{"output":0}'}
+    want_turns: 1
+    want_scopes: [assistant, tool]
+    want_completeness: [unknown, partial]
+    want_costs: ['', '']
+    want_metadata: 1
+  - name: pending_tool_has_no_result_owner
+    entries:
+      - {id: a, role: assistant, content: working}
+      - {id: a, role: assistant, type: tool_use, tool: call, parent: 0, name: arbitrary, arguments: '{}'}
+    want_turns: 1
+    want_scopes: [assistant]
+    want_completeness: [unknown]
+    want_costs: ['']
+  - name: visible_context_summary_and_unattached_custom
+    entries:
+      - {id: u, role: user, content: precompaction history}
+      - {id: c, role: system, content: context, metadata: '{"display":false}', kind: pi.custommessage.details, source: pi.custom_message, custom: context}
+      - {id: s, role: system, content: compaction, summary: true, metadata: '{"summary":true}', kind: pi.compaction.details, source: pi.compaction}
+      - {id: b, role: system, content: branch summary, summary: true, metadata: '{"summary":true}', kind: pi.branchsummary.details, source: pi.branch_summary}
+      - {id: m, role: system, carrier: true, metadata: '{"state":true}', kind: pi.custom.data, source: pi.custom, custom: state}
+    want_turns: 4
+    want_scopes: [summary, summary]
+    want_completeness: [unknown, unknown]
+    want_costs: ['', '']
+    want_metadata: 4
+  - name: metadata_only_replacement_clears_history
+    entries:
+      - {id: m, role: system, carrier: true, metadata: '{"state":true}', kind: pi.custom.data, source: pi.custom, custom: state}
+    want_turns: 0
+    want_scopes: []
+    want_completeness: []
+    want_costs: []
+    want_metadata: 1
+  - name: header_only_replacement_clears_history
+    entries:
+      - {id: header, role: system, carrier: true}
+    want_turns: 0
+    want_scopes: []
+    want_completeness: []
+    want_costs: []
+invalid_extras:
+  - name: duplicate_carrier_marker_rejected_before_store_maps
+    extra: '{"kind":"pi.usage","k\u0069nd":"pi.state","harness":"pi"}'
+  - name: null_usage_rejected_before_store_maps
+    extra: '{"kind":"pi.usage","harness":"pi","usage":null}'
+  - name: wrong_carrier_harness_rejected_before_store_maps
+    extra: '{"kind":"pi.carrier","harness":"claude-code"}'
+  - name: duplicate_nested_metadata_rejected_before_store_maps
+    extra: '{"kind":"pi.native_metadata","harness":"pi","metadata":[{"data":{"x":1,"\u0078":2}}]}'

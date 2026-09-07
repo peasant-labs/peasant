@@ -68,21 +68,10 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		)
 	}
 
-	// Step 3: Build contentMap by re-indexing the source transcript with full
-	// content, dispatched by the session's ACTUAL harness (not source format —
-	// see transcript.BuildContentOverlay's doc comment: Codex and Claude Code
-	// both write "jsonl", so a format-only dispatch silently mis-indexes one
-	// of them). contentMap maps entry_index → full content string; used ONLY
-	// for content overlay below, never for structure or indices.
-	//
-	// GATED on transcript.AnyContentTruncated: BuildContentOverlay re-parses
-	// the ENTIRE source transcript from disk, which is real cost this
-	// function would otherwise pay on every export regardless of session
-	// size. The common case — nothing in this session hit the preview limit
-	// — has nothing to recover, so it skips the re-parse entirely.
-	var contentMap map[int]string
+	// Recover all content fields before folding using the same registry and
+	// truncation gate as the local viewer, share review and publication.
 	if transcript.AnyContentTruncated(dbEntries) {
-		contentMap, err = transcript.BuildContentOverlay(ctx, fs, defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), sid)
+		dbEntries, err = transcript.RecoverFullEntries(ctx, fs, defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), sid, dbEntries)
 		if err != nil {
 			return nil, fmt.Errorf("export.ExportSession: %w", err)
 		}
@@ -123,28 +112,17 @@ func ExportSession(ctx context.Context, db *store.Store, fs ingest.FileSystem, s
 		}
 		fullSession.PushedAt = detail.PushedAt
 	}
-	fullSession.Turns, err = transcript.EntriesToTurnsValidated(dbEntries)
+	projection, err := transcript.EntriesToProjectionValidated(dbEntries, transcript.ProjectionOptions{Harness: fullSession.Harness})
 	if err != nil {
 		return nil, fmt.Errorf("export.ExportSession: validate indexed observed model evidence after storage read and before export: %w", err)
 	}
 
 	// Convert to the standardized detail payload — same as the session viewer.
-	payload, err := transcript.SessionToDetailValidated(fullSession)
+	payload, err := transcript.SessionToDetailValidatedWithProjection(fullSession, projection)
 	if err != nil {
 		return nil, fmt.Errorf("export.ExportSession: validate observed model evidence before export: %w", err)
 	}
 	payload.TurnCount = len(payload.Turns)
-
-	// Overlay full content from source re-index where available.
-	// The DB stores truncated ContentPreview; the source has full text.
-	for i := range payload.Turns {
-		if content, ok := contentMap[payload.Turns[i].Index]; ok {
-			payload.Turns[i].Content = content
-		}
-		// Turns not in contentMap keep their existing content (from DB ContentPreview
-		// via EntriesToTurns). Turns with no content at all (e.g. tool_use entries)
-		// are expected — they have no text body.
-	}
 
 	return payload, nil
 }

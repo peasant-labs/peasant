@@ -26,6 +26,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/title"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/schema"
 )
 
@@ -831,6 +832,7 @@ func (p *Pipeline) pushSession(
 	// p.redactor is guaranteed non-nil: NewPipeline refuses to construct a
 	// Pipeline without one.
 	redactStart := time.Now()
+	originalSourcePath := meta.Source.FilePath
 	redacted := p.redactor.RedactMetadata(&meta)
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
@@ -851,6 +853,10 @@ func (p *Pipeline) pushSession(
 	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
 	if entriesErr != nil {
 		return entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
+	}
+	entries, entriesErr = transcript.RecoverFullEntries(ctx, p.fs, meta.ModelHarness, ingest.ResolvedPath(originalSourcePath), sessionID, entries)
+	if entriesErr != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: entriesErr}
 	}
 	// 3b. Redact them ONCE, here, before anything can attach them to a request.
 	//
@@ -955,14 +961,6 @@ func (p *Pipeline) pushSession(
 	// (Single current contract version; the multi-version compatibility matrix is
 	// contract.) This is part of the shared pre-flight both real-push and --dry-run
 	// run, so a dry-run surfaces the same rejection.
-	if err := schema.ValidatePublishRequest(publishJSON); err != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("session %s: %w: %w", sess.SessionID, ErrInvalidPublishBody, err),
-		}
-	}
 
 	// Build human-readable title for this session (needed by both the dry-run
 	// forecast and the real result).
@@ -975,9 +973,17 @@ func (p *Pipeline) pushSession(
 	// sessions row this run selected rather than from the metadata sidecar.
 	content, err := BuildTranscriptContentValidated(&meta, entries, emit, p.cfg.Push.Fields, sessionorigin.Origin(sess.SessionOrigin))
 	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w: %w", ErrInvalidPublishBody, err)}
 	}
 	requiredCapabilities := schema.RequiredContentCapabilities(*content.SessionDetail)
+	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("build structured content: %w", err)}
+	}
+	request, err := buildAuthoritativeRequest(publishJSON, transcriptBytes)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Status: PushStatusError, Error: fmt.Errorf("session %s: %w: %w", sess.SessionID, ErrInvalidPublishBody, err)}
+	}
 
 	// 5. DRY-RUN DIVERGENCE. Everything above — read metadata, the metadata/model
 	// guards, redaction, mapping, and the client-side schema validation — is the
@@ -1004,8 +1010,8 @@ func (p *Pipeline) pushSession(
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
 			Error: fmt.Errorf(
-				"enriched transcript push refused\n  what: session %s carries observedModel source evidence\n  why: the target Village did not advertise the exact %q capability token\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would misattribute assistant output\n  fix: use a Village target that advertises the exact capability after its preservation proof passes, or push a legacy session with no observed model evidence, then retry",
-				sess.SessionID, schema.ContentCapabilityObservedModelV1,
+				"enriched transcript push refused\n  what: session %s carries capability-bearing source evidence\n  why: the target Village did not advertise the exact %q capability tokens\n  where: push.Pipeline.pushSession\n  when: after local canonical content construction and validation, and before serialization or upload\n  meaning: no transcript bytes or metadata were sent, because silently removing the evidence would lose recorded attribution\n  fix: use a Village target that advertises these capabilities after its preservation proof passes, then retry",
+				sess.SessionID, missingCapabilities,
 			),
 		}
 	}
@@ -1043,15 +1049,6 @@ func (p *Pipeline) pushSession(
 	// remain, and are no longer the only things protecting a publish.
 	// Raw project, path, branch, and remote fields are consent-gated before this
 	// document is assembled; redaction is defense in depth, not a consent gate.
-	transcriptBytes, err := marshalBuiltTranscriptContent(content, p.redactor)
-	if err != nil {
-		return SessionPushResult{
-			SessionID: sess.SessionID,
-			HostSlug:  sess.HostSlug,
-			Status:    PushStatusError,
-			Error:     fmt.Errorf("build structured content: %w", err),
-		}
-	}
 
 	// 7. Upload via Publisher interface. The uploaded body is the structured
 	// TranscriptContent envelope (JSON), named "--content.json" to distinguish
@@ -1069,25 +1066,6 @@ func (p *Pipeline) pushSession(
 	transcriptFilename := sess.SessionID + "--content.json"
 	client := p.transport
 	ledger := p.store
-	var request schema.AuthoritativePublishRequest
-	var requestDocument map[string]json.RawMessage
-	if err := json.Unmarshal(publishJSON, &requestDocument); err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("build authoritative publication request from mapped metadata: %w", err)}
-	}
-	contentHash := schema.ComputeTranscriptContentHash(transcriptBytes)
-	if err := promoteAuthoritativePublishFields(requestDocument); err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("promote mapped metadata to the authoritative publication contract: %w", err)}
-	}
-	requestDocument["contentHash"], _ = json.Marshal(contentHash)
-	requestDocument["visibilityIntent"], _ = json.Marshal(schema.VisibilityIntentPrivate)
-	authoritativeJSON, err := json.Marshal(requestDocument)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("encode authoritative publication request: %w", err)}
-	}
-	request, err = schema.DecodeAuthoritativePublishRequest(authoritativeJSON)
-	if err != nil {
-		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("validate authoritative publication request: %w", err)}
-	}
 	operation, err := schema.CanonicalizePublishRequest(request)
 	if err != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("canonicalize authoritative publication operation: %w", err)}

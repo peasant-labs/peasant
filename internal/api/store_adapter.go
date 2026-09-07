@@ -356,43 +356,26 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 
 	entries, err := p.store.ListEntries(ctx, sid)
 	if err != nil {
+		if s.Harness == schema.HarnessPi {
+			return nil, fmt.Errorf("store adapter: Pi indexed evidence could not be read before session-detail emission: %w; no partial detail was emitted; repair or re-index the session and retry", err)
+		}
 		// Non-fatal: return session without turns rather than failing entirely.
 		return &s, nil
 	}
-	turns, validationErr := transcript.EntriesToTurnsValidated(entries)
-	if validationErr != nil {
-		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
-	}
-	s.Turns = turns
-
-	// Overlay full turn content from the source transcript, re-indexed with
-	// truncation disabled (see transcript.BuildContentOverlay) — otherwise
-	// every turn's Content stops at the DB's bounded content_preview
-	// (defaults.ContentPreviewLimit), which is what the session_detail WS
-	// channel was silently doing before: main turn bodies
-	// cut off mid-word around 2000 chars).
-	//
-	// GATED on transcript.AnyContentTruncated: BuildContentOverlay does a
-	// full re-parse of the source transcript from disk, which is real cost
-	// this fix would otherwise pay on EVERY session view regardless of size.
-	// The common case — nothing in this session hit the preview limit — has
-	// nothing to recover, so it skips the re-parse entirely.
-	//
-	// Best-effort even when gated in: if source info can't be looked up, the
-	// file is missing, or the harness has no full-content indexer wired (see
-	// BuildContentOverlay's doc comment), turns simply keep their existing
-	// (possibly truncated) content rather than failing the whole session view.
 	if transcript.AnyContentTruncated(entries) {
 		if info, infoErr := p.store.SessionSourceInfo(ctx, id); infoErr == nil && info != nil {
-			if overlay, overlayErr := transcript.BuildContentOverlay(ctx, p.fs, defaults.Harness(info.Harness), ingest.ResolvedPath(info.SourcePath), schema.SessionID(id)); overlayErr == nil {
-				for i := range s.Turns {
-					if content, ok := overlay[s.Turns[i].Index]; ok {
-						s.Turns[i].Content = content
-					}
-				}
+			if recovered, recoverErr := transcript.RecoverFullEntries(ctx, p.fs, s.Harness, ingest.ResolvedPath(info.SourcePath), sid, entries); recoverErr == nil {
+				entries = recovered
 			}
 		}
 	}
+	projection, validationErr := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: s.Harness})
+	if validationErr != nil {
+		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
+	}
+	s.Turns = projection.Turns
+	s.NativeMetadata = projection.NativeMetadata
+
 	return &s, nil
 }
 

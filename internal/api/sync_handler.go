@@ -20,7 +20,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
 	"github.com/peasant-labs/peasant/internal/push"
+	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/village"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -261,11 +263,6 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Read transcript content.
-	content, err := h.readTranscriptContent(r.Context(), sessionID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusNotFound)
-		return
-	}
 
 	// Create redactor at the requested level.
 	xdg := redact.XDGPaths{
@@ -276,6 +273,11 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	redactor, err := redact.NewRedactor(redactLevel, userPatterns, xdg)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "create redactor: "+err.Error())
+		return
+	}
+	content, err := h.readReviewContent(r.Context(), sessionID, redactor)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -448,9 +450,49 @@ func truncateLine(s string) string {
 
 // readTranscriptContent reads the transcript file for a session.
 func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr string) (string, error) {
+	return h.readReviewContent(ctx, sessionIDStr, nil)
+}
+
+func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
 	sid, sidErr := ingest.NewSessionID(sessionIDStr)
 	if sidErr != nil {
 		return "", fmt.Errorf("invalid session ID")
+	}
+	info, err := h.store.SessionSourceInfo(ctx, sessionIDStr)
+	if err != nil {
+		return "", err
+	}
+	if info != nil && info.Harness == string(schema.HarnessPi) {
+		entries, err := h.store.ListEntries(ctx, sid)
+		if err != nil {
+			return "", err
+		}
+		entries, err = transcript.RecoverFullEntries(ctx, &ingest.OSFileSystem{}, schema.HarnessPi, ingest.ResolvedPath(info.SourcePath), sid, entries)
+		if err != nil {
+			return "", err
+		}
+		meta := &ingest.UnifiedMetadata{SessionID: sid, ModelHarness: schema.HarnessPi}
+		// Validate the exact redaction path before returning matches. A key
+		// collision is a failed scan, not a successful empty review.
+		redacted, err := push.RedactEntries(redactor, entries)
+		if err != nil {
+			return "", err
+		}
+		if _, err := push.BuildTranscriptContentValidated(meta, redacted, defaults.PublishSchemaVersion, config.PushFieldVisibility{}, sessionorigin.Unknown); err != nil {
+			return "", err
+		}
+		content, err := push.BuildTranscriptContentValidated(meta, entries, defaults.PublishSchemaVersion, config.PushFieldVisibility{}, sessionorigin.Unknown)
+		if err != nil {
+			return "", err
+		}
+		raw, err := json.Marshal(content)
+		if err != nil {
+			return "", err
+		}
+		if _, err := schema.DecodeTranscriptContentRaw(raw); err != nil {
+			return "", err
+		}
+		return string(raw), nil
 	}
 
 	hostSlug, parentID, err := h.store.LookupSessionLocation(ctx, sid)

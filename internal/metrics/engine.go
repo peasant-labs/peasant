@@ -160,6 +160,7 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 		}
 
 		// Run all MetricFuncs and merge results.
+		entries = ingest.ConversationalEntries(entries)
 		merged := &ingest.SessionMetrics{
 			SessionID: sid,
 		}

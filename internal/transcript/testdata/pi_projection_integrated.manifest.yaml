@@ -1,0 +1,15 @@
+requiredNames:
+  - separate_namespace_refuses_lossy_public_conversion
+  - duplicate_carrier_marker_rejected_before_store_maps
+  - null_usage_rejected_before_store_maps
+  - wrong_carrier_harness_rejected_before_store_maps
+  - duplicate_nested_metadata_rejected_before_store_maps
+  - trailing_usage_carrier_resolves_visible_owner
+  - thinking_sibling_survives_once_beside_tool
+  - distinct_assistant_owners_complete_and_cost_spelling
+  - partial_absent_cost_only_and_subset_only
+  - tool_result_details_follow_surviving_tool
+  - pending_tool_has_no_result_owner
+  - visible_context_summary_and_unattached_custom
+  - metadata_only_replacement_clears_history
+  - header_only_replacement_clears_history

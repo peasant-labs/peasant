@@ -15,6 +15,7 @@ package transcript
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -140,6 +141,11 @@ func validCommandWrapperBody(kind commandWrapperKind, body string) bool {
 //     text/thinking siblings of tool turns).
 //   - Pass 3: Emit turns with folded ToolCalls attached to depth=0 parents.
 func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
+	projection, _ := entriesToProjection(entries, ProjectionOptions{}, false)
+	return projection.Turns
+}
+
+func foldEntries(entries []schema.SessionEntry, evidence map[int]ingest.PiExtra) []ingest.Turn {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -283,7 +289,8 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 	turns := make([]ingest.Turn, 0, len(entries))
 	turnObservations := make(map[int]entryModelObservation)
 	for _, e := range entries {
-		if suppress[e.EntryIndex] {
+		_, pi := evidence[e.EntryIndex]
+		if suppress[e.EntryIndex] || ingest.IsPiCarrier(e) || (pi && e.Depth > 0 && e.ParentIndex != nil && (e.EntryType == schema.EntryTypeThinking || e.EntryType == schema.EntryTypeText)) {
 			continue
 		}
 
@@ -298,18 +305,20 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		}
 
 		t := ingest.Turn{
-			Index:       e.EntryIndex,
-			Role:        injectedCommandRole(e, content),
-			Content:     content,
-			Timestamp:   ts,
-			Depth:       e.Depth,
-			ParentIndex: e.ParentIndex,
-			EntryType:   e.EntryType,
-			HasThinking: e.HasThinking,
-			StopReason:  e.StopReason,
-			TokensIn:    e.TokensIn,
-			TokensOut:   e.TokensOut,
-			PartType:    e.PartType,
+			SourceEntryRef: evidence[e.EntryIndex].SourceRef,
+			Usage:          evidence[e.EntryIndex].Usage,
+			Index:          e.EntryIndex,
+			Role:           injectedCommandRole(e, content),
+			Content:        content,
+			Timestamp:      ts,
+			Depth:          e.Depth,
+			ParentIndex:    e.ParentIndex,
+			EntryType:      e.EntryType,
+			HasThinking:    e.HasThinking,
+			StopReason:     e.StopReason,
+			TokensIn:       e.TokensIn,
+			TokensOut:      e.TokensOut,
+			PartType:       e.PartType,
 		}
 		observation := modelObservation(e)
 		projectedObservation := projectModelObservation(observation)
@@ -382,7 +391,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		hasContent := strings.TrimSpace(t.Content) != ""
 		hasTools := len(t.ToolCalls) > 0
 		hasObservation := turnObservations[t.Index].present
-		if suppressEmptyTurn(hasContent, hasTools, hasObservation) {
+		if t.SourceEntryRef == "" && suppressEmptyTurn(hasContent, hasTools, hasObservation) {
 			continue
 		}
 		filtered = append(filtered, t)
@@ -398,7 +407,7 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 		prevObservation := turnObservations[prev.Index]
 		currObservation := turnObservations[curr.Index]
 		observationsEqual := modelObservationsEquivalent(prevObservation, currObservation)
-		if prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
+		if prev.SourceEntryRef == "" && curr.SourceEntryRef == "" && prev.Role == curr.Role && prev.Content == curr.Content && strings.TrimSpace(curr.Content) != "" && observationsEqual {
 			prevHasTools := len(prev.ToolCalls) > 0
 			currHasTools := len(curr.ToolCalls) > 0
 			if currHasTools && !prevHasTools {
@@ -485,16 +494,41 @@ func qualityMetricsToScorecard(q *schema.QualityMetrics) *schema.SessionScorecar
 // Exported for use by the export package to ensure the exported transcript
 // matches exactly what the session viewer shows.
 func SessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
+	if s.Harness == schema.HarnessPi {
+		detail, _ := SessionToDetailValidated(s)
+		return detail
+	}
 	return sessionToDetail(s)
 }
 
 // SessionToDetailValidated is the canonical producer trust boundary. Callers
 // that can surface failures use it so invalid attribution never reaches a wire.
 func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, error) {
+	for _, turn := range s.Turns {
+		for _, tool := range turn.ToolCalls {
+			if tool.Namespace != "" {
+				return nil, fmt.Errorf("tool namespace preservation is unavailable: the recorded tool on turn %d has a separate namespace but the pinned schema has no namespace field; transcript.SessionToDetailValidated stopped before detail/export/publication so no evidence was silently dropped; upgrade the shared schema and Peasant together to a release supporting tool namespaces, then retry (the original recording is unchanged)", turn.Index)
+			}
+		}
+	}
 	if err := validateSessionObservedModelEvidence(s); err != nil {
 		return nil, err
 	}
-	return sessionToDetail(s), nil
+	detail := sessionToDetail(s)
+	if s.Harness == schema.HarnessPi {
+		if err := piLegacyMirrors(detail); err != nil {
+			return nil, err
+		}
+	}
+	if err := schema.ValidateSessionDetailPayload(*detail); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return nil, err
+	}
+	validated, err := schema.DecodeSessionDetailPayloadRaw(raw)
+	return &validated, err
 }
 
 // sessionToDetail converts a full Session to a SessionDetailPayload.
@@ -504,31 +538,36 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 		toolCalls := make([]schema.ToolCallDetail, len(t.ToolCalls))
 		for j, tc := range t.ToolCalls {
 			toolCalls[j] = schema.ToolCallDetail{
-				ID:         tc.ID,
-				Name:       tc.Name,
-				Arguments:  tc.Arguments,
-				Result:     tc.Result,
-				DurationMs: tc.DurationMs,
-				ExitCode:   tc.ExitCode,
-				FilePath:   tc.FilePath,
-				IsError:    tc.IsError,
-				ToolKind:   tc.ToolKind,
+				CallEntryRef:   tc.CallEntryRef,
+				ResultEntryRef: tc.ResultEntryRef,
+				Usage:          tc.Usage,
+				ID:             tc.ID,
+				Name:           tc.Name,
+				Arguments:      tc.Arguments,
+				Result:         tc.Result,
+				DurationMs:     tc.DurationMs,
+				ExitCode:       tc.ExitCode,
+				FilePath:       tc.FilePath,
+				IsError:        tc.IsError,
+				ToolKind:       tc.ToolKind,
 			}
 		}
 		turns[i] = schema.TurnDetail{
-			Index:         t.Index,
-			Role:          t.Role,
-			Content:       t.Content,
-			ToolCalls:     toolCalls,
-			Timestamp:     t.Timestamp,
-			Depth:         t.Depth,
-			ParentIndex:   t.ParentIndex,
-			EntryType:     t.EntryType,
-			HasThinking:   t.HasThinking,
-			StopReason:    t.StopReason,
-			TokensIn:      t.TokensIn,
-			TokensOut:     t.TokensOut,
-			ObservedModel: t.ObservedModel,
+			SourceEntryRef: t.SourceEntryRef,
+			Usage:          t.Usage,
+			Index:          t.Index,
+			Role:           t.Role,
+			Content:        t.Content,
+			ToolCalls:      toolCalls,
+			Timestamp:      t.Timestamp,
+			Depth:          t.Depth,
+			ParentIndex:    t.ParentIndex,
+			EntryType:      t.EntryType,
+			HasThinking:    t.HasThinking,
+			StopReason:     t.StopReason,
+			TokensIn:       t.TokensIn,
+			TokensOut:      t.TokensOut,
+			ObservedModel:  t.ObservedModel,
 		}
 	}
 
@@ -552,6 +591,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 	scorecard := qualityMetricsToScorecard(s.Metadata.Quality)
 
 	return &schema.SessionDetailPayload{
+		NativeMetadata:   s.NativeMetadata,
 		ID:               string(s.ID),
 		Harness:          s.Harness,
 		StartTime:        s.StartTime,
