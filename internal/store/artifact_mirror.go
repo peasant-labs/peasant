@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -41,9 +42,23 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 		return results
 	}
 	defer s.pool.Put(conn)
-	end := sqlitex.Transaction(conn)
+	if err = sqlitex.ExecuteTransient(conn, "BEGIN DEFERRED", nil); err != nil {
+		failAll(fmt.Errorf("begin managed artifact mirror transaction: %w; no session was reconciled; restore database access and retry harvest", err))
+		return results
+	}
 	defer func() {
-		end(&err)
+		if err == nil && conn.AutocommitEnabled() {
+			err = fmt.Errorf("managed artifact mirror transaction ended before batch commit")
+		}
+		if err == nil {
+			err = sqlitex.ExecuteTransient(conn, "COMMIT", nil)
+		}
+		if err != nil && !conn.AutocommitEnabled() {
+			// Cancellation must not prevent cleanup of a still-open transaction.
+			interrupted := conn.SetInterrupt(nil)
+			err = errors.Join(err, sqlitex.ExecuteTransient(conn, "ROLLBACK", nil))
+			conn.SetInterrupt(interrupted)
+		}
 		if err != nil {
 			failAll(fmt.Errorf("commit managed artifact mirror transaction: %w; no session in this batch was reconciled; keep committed files and retry harvest", err))
 		}
@@ -76,7 +91,12 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 					continue
 				}
 			}
-			results[index].Err = s.mirrorArtifactOnConn(conn, request)
+			var fatal bool
+			results[index].Err, fatal = s.mirrorArtifactSavepoint(conn, request)
+			if fatal {
+				err = results[index].Err
+				return results
+			}
 			results[index].Mirrored = results[index].Err == nil
 			delete(pending, sid)
 			advanced = true
@@ -91,9 +111,35 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 	return results
 }
 
+func (s *Store) mirrorArtifactSavepoint(conn *sqlite.Conn, request ingest.ArtifactMirrorRequest) (error, bool) {
+	const savepoint = "artifact_mirror_item"
+	if conn.AutocommitEnabled() {
+		return fmt.Errorf("mirror session %s: outer transaction was lost; remaining sessions were refused; retry the batch after restoring database access", request.Artifact.Metadata.SessionID), true
+	}
+	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepoint, nil); err != nil {
+		return err, true
+	}
+	itemErr := s.mirrorArtifactOnConn(conn, request)
+	if conn.AutocommitEnabled() {
+		return fmt.Errorf("mirror session %s: outer transaction rolled back during reconciliation: %w; earlier tentative successes and remaining work were refused", request.Artifact.Metadata.SessionID, itemErr), true
+	}
+	if itemErr == nil {
+		if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepoint, nil); err != nil {
+			return err, true
+		}
+		return nil, false
+	}
+	interrupted := conn.SetInterrupt(nil)
+	rollbackErr := sqlitex.ExecuteTransient(conn, "ROLLBACK TO SAVEPOINT "+savepoint, nil)
+	releaseErr := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepoint, nil)
+	conn.SetInterrupt(interrupted)
+	if rollbackErr != nil || releaseErr != nil || conn.AutocommitEnabled() {
+		return errors.Join(itemErr, rollbackErr, releaseErr), true
+	}
+	return itemErr, false
+}
+
 func (s *Store) mirrorArtifactOnConn(conn *sqlite.Conn, request ingest.ArtifactMirrorRequest) (err error) {
-	end := sqlitex.Save(conn)
-	defer end(&err)
 	meta := request.Artifact.Metadata
 	origin := sessionorigin.Unknown
 	if err := sqlitex.ExecuteTransient(conn, "SELECT schema_version, adapter_version, session_origin FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{

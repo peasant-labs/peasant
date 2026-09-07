@@ -118,7 +118,19 @@ func artifactSemanticJSON(data []byte, contentHash string) ([]byte, error) {
 		delete(redaction, "redacted_at_ms")
 		fields["redaction"], _ = json.Marshal(redaction)
 	}
-	return json.Marshal(fields)
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	// RawMessage preserves nested source key order. Normalize every object,
+	// while keeping integer precision and array order, before computing identity.
+	var normalized any
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	if err := decoder.Decode(&normalized); err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalized)
 }
 
 // ArtifactMirrorRequest carries only native evidence actually acquired for this

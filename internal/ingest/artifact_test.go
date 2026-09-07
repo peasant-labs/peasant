@@ -38,7 +38,7 @@ func TestManagedArtifactCapturePreservesValidatedInput(t *testing.T) {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		t.Fatal("artifact capture fixture must have exactly one YAML document")
 	}
-	required := []string{"valid-legacy-hashes-absent", "derived-cache-time-not-input", "ingested-time-not-input", "redaction-time-not-input", "adapter-version-is-input", "future-adapter-remains-readable", "future-schema-refused", "invalid-content-hash-refused", "unknown-field-preserved-in-input", "invalid-adapter-refused"}
+	required := []string{"valid-legacy-hashes-absent", "derived-cache-time-not-input", "ingested-time-not-input", "redaction-time-not-input", "nested-key-order-is-not-input", "adapter-version-is-input", "future-adapter-remains-readable", "future-schema-refused", "invalid-content-hash-refused", "unknown-field-preserved-in-input", "invalid-adapter-refused"}
 	if !reflect.DeepEqual(required, fixture.RequiredNames) {
 		t.Fatal("artifact capture required-name manifest changed")
 	}
