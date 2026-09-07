@@ -636,7 +636,7 @@ func (s *Store) BulkLookupSessionLocations(ctx context.Context, sessionIDs []ing
 		placeholders[i] = "?"
 		args[i] = string(id)
 	}
-	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version
+	q := `SELECT s.session_id, h.host_slug, COALESCE(s.parent_id,''), s.ingested_ms, s.schema_version, s.adapter_version
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 WHERE s.session_id IN (` +
@@ -649,11 +649,17 @@ WHERE s.session_id IN (` +
 			id := schema.SessionID(stmt.ColumnText(0))
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
+			var adapterVersion *int
+			if stmt.ColumnType(5) != sqlite.TypeNull {
+				value := stmt.ColumnInt(5)
+				adapterVersion = &value
+			}
 			result[id] = ingest.SessionLocation{
-				HostSlug:      stmt.ColumnText(1),
-				ParentID:      stmt.ColumnText(2),
-				IngestedMs:    &ingestedMs,
-				SchemaVersion: schemaVersion,
+				HostSlug:       stmt.ColumnText(1),
+				ParentID:       stmt.ColumnText(2),
+				IngestedMs:     &ingestedMs,
+				SchemaVersion:  schemaVersion,
+				AdapterVersion: adapterVersion,
 			}
 			return nil
 		},

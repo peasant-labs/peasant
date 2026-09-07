@@ -1,4 +1,8 @@
 requiredNames:
+  - future-stored-adapter-failed-prefetch
+  - future-stored-adapter-missing-sidecar
+  - future-stored-adapter-changed-source
+  - future-stored-adapter-retained-index
   - db v9 remains unchanged
   - file v9 remains unchanged without a database
   - db v8 requires native refresh
@@ -61,6 +65,41 @@ sessionID: 11111111-1111-1111-1111-111111111111
 transcript: |
   {"type":"user","message":{"role":"user","content":"retained input"},"timestamp":"2024-01-01T00:00:00Z"}
 cases:
+  - name: future-stored-adapter-failed-prefetch
+    schemaVersion: 10
+    storedAdapterVersion: 999
+    database: true
+    force: true
+    lookupFailures: 1
+    wantDiagnostic: 'recorded adapter revision 999'
+    wantExtract: 0
+    wantIndexed: 0
+  - name: future-stored-adapter-missing-sidecar
+    schemaVersion: 10
+    storedAdapterVersion: 999
+    database: true
+    metadataAbsent: true
+    force: true
+    wantDiagnostic: 'recorded adapter revision 999'
+    wantExtract: 0
+    wantIndexed: 0
+  - name: future-stored-adapter-changed-source
+    schemaVersion: 10
+    storedAdapterVersion: 999
+    database: true
+    sourceChanged: true
+    wantDiagnostic: 'recorded adapter revision 999'
+    wantExtract: 0
+    wantIndexed: 0
+  - name: future-stored-adapter-retained-index
+    schemaVersion: 10
+    storedAdapterVersion: 999
+    adapterVersion: 999
+    database: true
+    reindex: true
+    stale: true
+    wantExtract: 0
+    wantIndexed: 1
   - name: persistent lookup failure recovers on the next run
     schemaVersion: 9
     database: true

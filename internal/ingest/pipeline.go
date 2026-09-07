@@ -1963,7 +1963,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	// Prefetch is only a discovery optimization. A missing or stale cache must
 	// never authorize overwriting a newer stored schema, even under --force.
-	if err := p.checkStoredMetadataVersion(ctx, session.SessionID); err != nil {
+	if err := p.checkStoredRewriteVersion(ctx, session.SessionID, session.Harness); err != nil {
 		p.reportMetadataRefusal(string(session.SessionID), err)
 		result.Status = DiffUnchanged
 		return workerResult{result: result}

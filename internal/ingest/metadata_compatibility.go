@@ -26,6 +26,15 @@ func managedInputIOError(path string, err error) error {
 // work. Discovery's cache may be incomplete after a failed prefetch, and retained
 // maintenance also processes sessions absent from native discovery.
 func (p *Pipeline) checkStoredMetadataVersion(ctx context.Context, sid SessionID) error {
+	return p.checkStoredMetadataCompatibility(ctx, sid, nil)
+}
+
+func (p *Pipeline) checkStoredRewriteVersion(ctx context.Context, sid SessionID, harness Harness) error {
+	target := p.versionTargets()[harness].AdapterVersion
+	return p.checkStoredMetadataCompatibility(ctx, sid, &target)
+}
+
+func (p *Pipeline) checkStoredMetadataCompatibility(ctx context.Context, sid SessionID, adapterTarget *int) error {
 	backing := p.store
 	if backing == nil {
 		backing, _ = p.metricsStore.(SessionStore)
@@ -39,6 +48,9 @@ func (p *Pipeline) checkStoredMetadataVersion(ctx context.Context, sid SessionID
 	}
 	if location, ok := locations[sid]; ok && location.SchemaVersion > CurrentSchemaVersion {
 		return &UnsupportedMetadataVersionError{Path: string(sid) + " (stored metadata)", Version: location.SchemaVersion}
+	}
+	if location, ok := locations[sid]; ok && adapterTarget != nil && location.AdapterVersion != nil && *location.AdapterVersion > *adapterTarget {
+		return &AdapterVersionError{Path: string(sid) + " (stored metadata)", Version: *location.AdapterVersion, Target: *adapterTarget}
 	}
 	return nil
 }
@@ -158,6 +170,12 @@ func decodeManagedMetadataBody(data []byte) (*UnifiedMetadata, error) {
 func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetadata, error) {
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.SchemaVersion > CurrentSchemaVersion {
 		return nil, &UnsupportedMetadataVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: loc.SchemaVersion}
+	}
+	if loc, ok := p.locationCache[session.SessionID]; ok && loc.AdapterVersion != nil {
+		target := p.versionTargets()[session.Harness].AdapterVersion
+		if *loc.AdapterVersion > target {
+			return nil, &AdapterVersionError{Path: string(session.SessionID) + " (stored metadata)", Version: *loc.AdapterVersion, Target: target}
+		}
 	}
 	path, err := p.findMetadataPath(session)
 	if err != nil {

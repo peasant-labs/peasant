@@ -164,14 +164,24 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 			SessionID: sid,
 		}
 
-		// Preserve retained v1 fields from existing metrics.
-		if existing != nil {
-			merged.TurnCount = existing.TurnCount
-			merged.SubagentCount = existing.SubagentCount
-			merged.InputTokens = existing.InputTokens
-			merged.OutputTokens = existing.OutputTokens
-			merged.ToolCalls = existing.ToolCalls
-			merged.DurationMinutes = existing.DurationMinutes
+		// Retained adapter statistics are inputs, not prior computed output.
+		// Missing historical seeds stay unknown; current metrics functions can
+		// still derive their supported fields from indexed entries.
+		if seeds, ok := e.store.(ingest.MetricSeedStore); ok {
+			seed, seedErr := seeds.GetMetricSeed(ctx, sid)
+			if seedErr != nil {
+				slog.Warn("metrics: read retained seed; prior metrics preserved", "session_id", sid, "error", seedErr)
+				continue
+			}
+			if seed != nil {
+				merged.TurnCount = &seed.TurnCount
+				merged.SubagentCount = &seed.SubagentCount
+				merged.InputTokens = &seed.TokensIn
+				merged.OutputTokens = &seed.TokensOut
+				merged.ToolCalls = &seed.ToolCallCount
+				duration := float64(seed.DurationMs) / 60000
+				merged.DurationMinutes = &duration
+			}
 		}
 
 		for _, nf := range e.funcs {

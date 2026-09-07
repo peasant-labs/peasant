@@ -56,6 +56,10 @@ func (s *Store) UpsertOpenCodeSeqCursor(ctx context.Context, sessionID ingest.Se
 		return fmt.Errorf("store.UpsertOpenCodeSeqCursor: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return upsertOpenCodeSeqCursorOnConn(conn, sessionID, seq)
+}
+
+func upsertOpenCodeSeqCursorOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, seq int64) error {
 	if err := sqlitex.ExecuteTransient(conn, sqlUpsertOpenCodeSeqCursor, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), seq},
 	}); err != nil {

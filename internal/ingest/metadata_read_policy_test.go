@@ -37,6 +37,7 @@ type metadataReadPolicyFixtures struct {
 		Name                  string              `yaml:"name"`
 		SchemaVersion         int                 `yaml:"schemaVersion"`
 		StoredSchemaVersion   *int                `yaml:"storedSchemaVersion"`
+		StoredAdapterVersion  *int                `yaml:"storedAdapterVersion"`
 		WarmStoredSchema      *int                `yaml:"warmStoredSchema"`
 		StoredAbsent          bool                `yaml:"storedAbsent"`
 		LookupFailures        int                 `yaml:"lookupFailures"`
@@ -303,6 +304,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				// This reproduces stale mirror state and exercises file refusal before
 				// the DB's native source-info fallback can parse or stamp the session.
 				seed := *meta
+				seed.AdapterVersion = fixture.StoredAdapterVersion
 				if seed.SchemaVersion > 10 {
 					seed.SchemaVersion = 9
 				}

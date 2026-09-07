@@ -20,10 +20,17 @@ type CurrentCommitAssociation struct {
 // for a session already in the database. Populated by BulkLookupSessionLocations
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
-	HostSlug      string
-	ParentID      string // empty string if the session has no parent
-	IngestedMs    *int64 // nil if unknown; populated from DB ingested_ms column
-	SchemaVersion int    // 0 if unknown; populated from DB schema_version column
+	HostSlug       string
+	ParentID       string // empty string if the session has no parent
+	IngestedMs     *int64 // nil if unknown; populated from DB ingested_ms column
+	SchemaVersion  int    // 0 if unknown; populated from DB schema_version column
+	AdapterVersion *int   // nil means the producing adapter revision is unknown.
+}
+
+// MetricSeedStore reads retained adapter statistics independently of computed
+// results. A nil seed means no retained input has been reconciled yet.
+type MetricSeedStore interface {
+	GetMetricSeed(ctx context.Context, sessionID SessionID) (*StatsInfo, error)
 }
 
 // SessionLocationLookup is satisfied by anything that can answer where a
