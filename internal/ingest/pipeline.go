@@ -2562,7 +2562,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 			var n int
 			var err error
 			p.runStoreWrite(writeLane, func() {
-				n, err = p.analyzer.ComputeMetrics(ctx, ids)
+				n, err = p.computeIndexedMetrics(ctx, ids)
 			})
 			computeDuration += time.Since(computeStarted)
 			if err != nil {
@@ -2573,9 +2573,8 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 					"why", "the metrics engine or metrics store returned an error for this session batch",
 					"user_impact", "these sessions can be indexed but may not show fresh metrics or quality annotations until ingest is run again",
 					"how_to_fix", "re-run peasant harvest index --all; if the error repeats, inspect the named session and database")
-			} else {
-				result.Computed += n
 			}
+			result.Computed += n
 		}
 		result.ComputeDone += len(batch)
 		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageCompute, Done: result.ComputeDone, Total: total})
@@ -2790,7 +2789,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 			computeTargets = remainingSuccessfullyIndexed
 		}
 		if len(computeTargets) > 0 {
-			n, err := p.analyzer.ComputeMetrics(ctx, computeTargets)
+			n, err := p.computeIndexedMetrics(ctx, computeTargets)
 			if err != nil {
 				slog.Warn(logPrefix+": compute metrics", "error", err)
 			}

@@ -305,6 +305,12 @@ type MetricsComputer interface {
 	ComputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error)
 }
 
+// MetricsRecomputer refreshes metrics after a successful index operation in
+// this invocation. Last-good values remain stored until the new save succeeds.
+type MetricsRecomputer interface {
+	RecomputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error)
+}
+
 // InsightsComputer recomputes daily_summary aggregations for the given days.
 type InsightsComputer interface {
 	ComputeInsights(ctx context.Context, days []string) error
