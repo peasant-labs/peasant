@@ -1,0 +1,36 @@
+requiredNames: [warning-details, long-warning-controls, no-warning-control]
+viewports:
+  - {width: 80, height: 24}
+  - {width: 120, height: 40}
+cases:
+  - name: warning-details
+    diagnostics:
+      - location: future-session
+        message: metadata schema version 999 cannot be read by this Peasant
+        remediation: upgrade Peasant and retry
+    wantText: [future-session, metadata schema version 999, upgrade Peasant and retry]
+  - name: long-warning-controls
+    diagnostics:
+      - location: "recorded-session\u001b[2J\u0007"
+        message: |
+          retained metadata was not readable; stored data remains unchanged
+          every other compatible session can still be processed
+          a refused session does not mean setup failed
+          source histories were not modified
+          diagnostic evidence must stay readable throughout completion
+          warning details must not disappear below the terminal height
+          the final remediation remains available by scrolling
+          restore managed directory access before retrying this session
+          this warning concerns the local retained copy only
+          no transcript was published as part of this synthetic setup
+          the user can finish setup without resolving this warning now
+          warning evidence is not an additional error count
+          later attempts may resolve a previously recorded warning
+          the last line remains reachable in the smallest supported terminal
+        remediation: "restore access\u001b]0;unsafe-title\u0007 and retry peasant harvest"
+    wantText: [recorded-session, source histories were not modified, the last line remains reachable, restore access and retry peasant harvest]
+    wantAbsent: [unsafe-title]
+  - name: no-warning-control
+    diagnostics: []
+    wantText: []
+    wantAbsent: [warnings]

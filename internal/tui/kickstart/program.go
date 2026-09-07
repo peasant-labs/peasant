@@ -235,6 +235,7 @@ type Program struct {
 	flowBuilt bool
 
 	ingestRes          *ftue.IngestResult
+	completionOffset   int
 	ingestErr          error
 	retentionErr       error
 	retentionAttempted bool
@@ -867,6 +868,7 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		p = p.clearIngestAttempt()
 		p = p.observeProgress(p.deps.Clock.Now())
 		p.ingestRes = m.result
+		p.completionOffset = 0
 		p.ingestErr = m.err
 		p.phase = PhaseDone
 		if m.err == nil {
@@ -1035,6 +1037,12 @@ func (p Program) observeProgress(at time.Time) Program {
 // available only after failure and starts local ingest again without touching
 // the already-committed Draft or retention effect.
 func (p Program) updateDone(msg tea.Msg) (Program, tea.Cmd) {
+	if p.hasIngestDiagnostics() {
+		if offset, handled := p.ingestCompletion().Scroll(msg, p.completionOffset); handled {
+			p.completionOffset = offset
+			return p, nil
+		}
+	}
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return p, nil
@@ -1425,6 +1433,31 @@ func (p Program) progressFocusStage() (ingest.Stage, bool) {
 }
 
 func (p Program) viewDone() string {
+	if p.hasIngestDiagnostics() {
+		return p.ingestCompletion().View(p.completionOffset)
+	}
+	content := p.doneContent()
+	panel := kit.NewPanel(p.deps.Theme)
+	// Fill unused terminal space without truncating an existing longer result.
+	panel.SetSize(max(p.width, lipgloss.Width(content)), max(p.height, lipgloss.Height(content)))
+	panel.Rendered(content)
+	return panel.View()
+}
+
+func (p Program) hasIngestDiagnostics() bool {
+	return p.ingestRes != nil && len(p.ingestRes.Diagnostics) > 0
+}
+
+func (p Program) ingestCompletion() ftue.IngestCompletion {
+	actions := programActionAvailability{keymap.ActionPageUp, keymap.ActionPageDown, keymap.ActionQuit}
+	if p.ingestErr != nil {
+		actions = append(actions, keymap.ActionConfirm)
+	}
+	footer := keymap.FooterView(p.deps.Theme, keymap.Default(), actions)
+	return ftue.NewIngestCompletion(p.deps.Theme, fmt.Sprintf("kickstart · %d warnings", len(p.ingestRes.Diagnostics)), p.doneContent(), footer, p.width, p.height)
+}
+
+func (p Program) doneContent() string {
 	styles := p.deps.Theme.Styles()
 	if p.Exited() && !p.Committed() {
 		return strings.Join([]string{
@@ -1448,6 +1481,10 @@ func (p Program) viewDone() string {
 			styles.Muted.Render("estimate unavailable"),
 			styles.Base.Render("retry local import only with enter"),
 			styles.Base.Render("kickstart published nothing"))
+		if p.hasIngestDiagnostics() {
+			lines = append(lines, "", styles.Base.Render(ftue.IngestDiagnosticsText(p.ingestRes.Diagnostics)))
+			return strings.Join(lines, "\n")
+		}
 		lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
 			programActionAvailability{keymap.ActionConfirm, keymap.ActionBack, keymap.ActionQuit}))
 		return strings.Join(lines, "\n")
@@ -1468,7 +1505,11 @@ func (p Program) viewDone() string {
 	} else {
 		lines = append(lines, styles.Muted.Render("local import was not run"))
 	}
-	lines = append(lines, styles.Base.Render("kickstart published nothing"), "", styles.Header.Render("next steps"))
+	lines = append(lines, styles.Base.Render("kickstart published nothing"))
+	if p.hasIngestDiagnostics() {
+		lines = append(lines, "", styles.Base.Render(ftue.IngestDiagnosticsText(p.ingestRes.Diagnostics)))
+	}
+	lines = append(lines, "", styles.Header.Render("next steps"))
 	if p.nextStepsErr != nil {
 		for _, line := range strings.Split(p.nextStepsErr.Error(), "\n") {
 			lines = append(lines, styles.Danger.Render(line))
@@ -1497,8 +1538,10 @@ func (p Program) viewDone() string {
 				styles.Muted.Render(step.detail))
 		}
 	}
-	lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
-		programActionAvailability{keymap.ActionBack, keymap.ActionQuit}))
+	if !p.hasIngestDiagnostics() {
+		lines = append(lines, "", keymap.FooterView(p.deps.Theme, keymap.Default(),
+			programActionAvailability{keymap.ActionBack, keymap.ActionQuit}))
+	}
 	return strings.Join(lines, "\n")
 }
 

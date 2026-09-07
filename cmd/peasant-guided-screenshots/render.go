@@ -134,6 +134,8 @@ func renderSheets(document captureDocument) ([]renderedSheet, error) {
 			content, rows, err = composePushSheet(sheet, document.PushStates, document.PushCaptures, pushCaptures)
 		case sheetKindIngest:
 			content, rows, err = composeIngestProgressSheet(sheet, document.IngestProgressStates, document.IngestProgressCaptures, ingestProgressCaptures)
+		case sheetKindCompletion:
+			content, rows, err = renderCompletionSheet(workingDirectory, sheet, document.Completion)
 		default:
 			err = fmt.Errorf("compose unknown screenshot sheet kind %q", sheet.Kind)
 		}

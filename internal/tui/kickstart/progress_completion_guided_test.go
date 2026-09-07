@@ -782,7 +782,9 @@ func validateRenderedCompletionPreamble(view string) error {
 
 func exactRenderedLineIndex(lines []string, want string) int {
 	for index, line := range lines {
-		if line == want {
+		// The kit fills the mounted terminal with background-bearing cells.
+		// Ignore only those trailing spaces; the complete text remains exact.
+		if strings.TrimRight(line, " ") == want {
 			return index
 		}
 	}
