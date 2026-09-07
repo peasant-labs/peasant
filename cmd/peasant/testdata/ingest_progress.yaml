@@ -22,15 +22,25 @@ lifecycle:
     - {name: external-tick-before-watcher-notification, external: true, delayed_notification: true}
     - {name: successful-completion}
 execution:
-  required_cases: [startup-cancel-before-pipeline-run, setup-cancel-before-runner-launch, completion-committed-before-late-cancel, failure-committed-before-late-cancel, cancel-ack-before-nil-pipeline-return, success-commit-cancel-tick-before-final-delivery, failed-commit-cancel-tick-before-final-delivery]
+  required_cases: [startup-cancel-before-pipeline-run, completion-committed-before-late-cancel, failure-committed-before-late-cancel, cancel-ack-before-nil-pipeline-return, success-commit-cancel-tick-before-final-delivery, failed-commit-cancel-tick-before-final-delivery, cancellation-over-pipeline-error, ui-error-over-success, ui-error-over-failure, ui-error-over-cancellation, session-failure-summary, json-session-failure-payload]
   cases:
-    - {name: startup-cancel-before-pipeline-run, cancel_before: true, want: canceled}
-    - {name: setup-cancel-before-runner-launch, cancel_before: true, want: canceled}
-    - {name: completion-committed-before-late-cancel, late_cancel: true, want: succeeded}
-    - {name: failure-committed-before-late-cancel, run_error: true, late_cancel: true, want: failed}
-    - {name: cancel-ack-before-nil-pipeline-return, cancel_during: true, want: canceled}
-    - {name: success-commit-cancel-tick-before-final-delivery, late_cancel: true, want: succeeded}
-    - {name: failed-commit-cancel-tick-before-final-delivery, run_error: true, late_cancel: true, want: failed}
+    - {name: startup-cancel-before-pipeline-run, cancel_at: startup, want: canceled, want_error: context, json: true}
+    - {name: completion-committed-before-late-cancel, cancel_at: wait, want: succeeded, contains: ["peasant harvest: 7 sessions", "duration: 2.3s"]}
+    - {name: failure-committed-before-late-cancel, run_error: true, cancel_at: wait, want: failed, want_error: pipeline}
+    - {name: cancel-ack-before-nil-pipeline-return, cancel_at: pipeline, nil_result: true, want: canceled, want_error: context}
+    - {name: success-commit-cancel-tick-before-final-delivery, cancel_at: before-final, want: succeeded, json: true, contains: ['"New": 7', '"duration": "2.3s"']}
+    - {name: failed-commit-cancel-tick-before-final-delivery, run_error: true, cancel_at: before-final, want: failed, want_error: pipeline, json: true}
+    - {name: cancellation-over-pipeline-error, cancel_at: pipeline, run_error: true, want: canceled, want_error: context, json: true}
+    - {name: ui-error-over-success, cancel_at: wait, ui_error: true, want: succeeded, want_error: ui}
+    - {name: ui-error-over-failure, cancel_at: before-final, run_error: true, ui_error: true, want: failed, want_error: ui, json: true}
+    - {name: ui-error-over-cancellation, cancel_at: pipeline, run_error: true, ui_error: true, want: canceled, want_error: ui}
+    - {name: session-failure-summary, cancel_at: none, session_errors: 2, want: succeeded, want_error: sessions, contains: ["peasant harvest: 9 sessions", "duration: 2.3s"]}
+    - {name: json-session-failure-payload, cancel_at: none, session_errors: 2, want: succeeded, json: true, contains: ['"New": 7', '"Errors": 2', '"duration": "2.3s"']}
+command_startup:
+  required_cases: [command-pre-canceled-before-setup, command-pre-canceled-json-before-setup]
+  cases:
+    - {name: command-pre-canceled-before-setup}
+    - {name: command-pre-canceled-json-before-setup, json: true}
 final_override:
   required_cases: [success-overrides-pending-cancel, failure-overrides-pending-cancel]
   cases:
