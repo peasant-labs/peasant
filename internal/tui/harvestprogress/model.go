@@ -122,9 +122,9 @@ func (m Model) View() tea.View {
 	if m.stopped && !m.canceling {
 		return tea.NewView("")
 	}
-	return tea.NewView(m.Render())
+	return tea.NewView(m.render())
 }
-func (m Model) Render() string {
+func (m Model) render() string {
 	styles := m.theme.Styles()
 	lines := []string{}
 	// In a short terminal, reclaim decoration before sacrificing the active

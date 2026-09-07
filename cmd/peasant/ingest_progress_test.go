@@ -595,7 +595,7 @@ func TestProgressModelRenderWritesOutput(t *testing.T) {
 	})
 
 	model := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: time.Now()})
-	out := model.Render()
+	out := model.View().Content
 	if out == "" {
 		t.Fatal("render() wrote nothing, want non-empty output")
 	}

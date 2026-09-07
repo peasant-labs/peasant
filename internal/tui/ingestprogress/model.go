@@ -95,10 +95,28 @@ func (m Model) Update(message tea.Msg) (Model, tea.Cmd) {
 			m.retaining = false
 			m.retainedEstimate = estimate{}
 		}
-		m.observe(msg.At, msg.Snapshot)
+		m.applyFinal(msg.At, msg.Snapshot)
 		m.final = true
 	}
 	return m, nil
+}
+
+func (m *Model) applyFinal(at time.Time, snapshot map[ingest.Stage]ingest.StageProgress) {
+	previous := m.observations
+	m.observations = map[ingest.Stage]observation{}
+	m.now, m.latestAt = at, at
+	for _, stage := range ingest.StageOrder {
+		sp := snapshot[stage]
+		if !sp.Started {
+			continue
+		}
+		startedAt := at
+		if old, ok := previous[stage]; ok {
+			startedAt = old.startedAt
+		}
+		m.observations[stage] = observation{startedAt: startedAt, lastAt: at, lastDone: sp.Done,
+			lastTotal: sp.Total, progress: sp, estimator: kit.NewEstimator(estimateWindow)}
+	}
 }
 
 func (m *Model) retainEstimate() {
@@ -198,7 +216,7 @@ func (m Model) View() string {
 			if sp.Ended && o.lastAt.Before(end) {
 				end = o.lastAt
 			}
-			row.Elapsed = DisplayDuration(end.Sub(o.startedAt))
+			row.Elapsed = displayDuration(end.Sub(o.startedAt))
 		}
 		row.Done, row.Total, row.Ended, row.HasErr = sp.Done, sp.Total, sp.Ended, sp.HasErr
 		if hasFocus && stage == focus {
@@ -220,9 +238,9 @@ func (m Model) View() string {
 	}
 	estimateText := "  estimate unavailable"
 	if estimate.ok {
-		estimateText = "  estimate: " + DisplayDuration(estimate.value)
+		estimateText = "  estimate: " + displayDuration(estimate.value)
 	}
-	detail := []string{styles.Muted.Render("  total elapsed: " + DisplayDuration(now.Sub(m.startedAt))), styles.Muted.Render(estimateText)}
+	detail := []string{styles.Muted.Render("  total elapsed: " + displayDuration(now.Sub(m.startedAt))), styles.Muted.Render(estimateText)}
 	lines = append(lines, detail...)
 	if m.height < 0 || len(lines) <= m.height {
 		return strings.Join(lines, "\n")
@@ -255,9 +273,11 @@ func (m Model) View() string {
 	return strings.Join(window, "\n")
 }
 
-func DisplayDuration(d time.Duration) string {
+func displayDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
 	return d.Round(time.Second).String()
 }
+
+var _ kit.Sizeable = (*Model)(nil)
