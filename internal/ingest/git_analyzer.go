@@ -31,8 +31,8 @@ const (
 // Streaming configuration:
 //   - BatchSize controls scanner memory: O(BatchSize) per call, not O(TotalCommits).
 //   - MaxCommits caps results per session; cap hit is silent (non-fatal).
-//   - LogTimeout guards against pathologically slow git in monorepos.
-//     Timeout returns partial results and a diagnostic error.
+//   - LogTimeout bounds every git call: log queries return partial results and a
+//     diagnostic error on timeout; merge-base queries return an error.
 type ExecGitDiffAnalyzer struct {
 	// BatchSize is the scanner batch size (number of commits buffered at a time).
 	// Defaults to DefaultCommitBatchSize when zero.
@@ -41,7 +41,7 @@ type ExecGitDiffAnalyzer struct {
 	// MaxCommits is the per-session commit cap. Defaults to DefaultMaxCommitsPerSession when zero.
 	MaxCommits int
 
-	// LogTimeout is the per-call timeout for git log. Defaults to DefaultGitLogTimeout when zero.
+	// LogTimeout is the per-call timeout for git log and merge-base queries. Defaults to DefaultGitLogTimeout when zero.
 	LogTimeout time.Duration
 }
 

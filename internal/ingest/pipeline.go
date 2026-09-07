@@ -2209,10 +2209,10 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		}
 
 		if repoPath != "" && meta.Timestamp.End != 0 {
-			// If user email is not configured (empty string), all commits will be
-			// filtered out since no commit will match an empty author email.
-			// A diagnostic warning is emitted by CommitDetector.LayeredDetection
-			// if the git operation itself fails.
+			// When no user email is configured, the detector returns the window
+			// unfiltered by author and records a missing_user_email diagnostic;
+			// the branch filter below still applies. Git failures become
+			// diagnostics inside CommitDetector.LayeredDetection.
 			// UserEmail with a short timeout: git config reads ~/.gitconfig and
 			// should complete in milliseconds. A 2-second cap guards against
 			// hangs caused by locked config files or slow/network filesystems.
