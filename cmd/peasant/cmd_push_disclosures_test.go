@@ -5,9 +5,12 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -594,41 +597,57 @@ func presence(present bool) string {
 	return "absent"
 }
 
-// runPushForDisclosures runs the production push command against a village that
-// accepts a connection and never answers, under a short budget.
+// runPushForDisclosures runs the production push command through its disclosures
+// and into a promptly responding local Village preflight.
 //
 // A publishable session has to be present: the record describes what is being
-// published, and there is nothing to record when nothing is. The hanging village
-// keeps the run off the network without stubbing the pipeline, and everything
-// asserted here is written before the first request is made.
+// published, and there is nothing to record when nothing is. The store-only seed
+// reaches preflight but lacks the on-disk metadata needed to upload a transcript.
+// Everything asserted here is written before that first request. Upload success
+// is covered separately; this corpus must not depend on a deadline expiring to
+// terminate, or a busy race run can lose its budget before printing the record.
 func runPushForDisclosures(t *testing.T, testCase pushDisclosureCase) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { listener.Close() })
-	go func() {
-		for {
-			conn, acceptErr := listener.Accept()
-			if acceptErr != nil {
-				return
-			}
-			t.Cleanup(func() { conn.Close() })
+	var preflightReached atomic.Bool
+	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/schema/version":
+			preflightReached.Store(true)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/annotations/manifest":
+			// The annotation stage can check its empty manifest after preflight.
+		default:
+			t.Errorf("unexpected Village request %s %s: the store-only disclosure seed must not publish", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
 		}
-	}()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(village.Close)
 
 	dir := t.TempDir()
-	writeTestCredentialsFor(t, dir, "http://"+listener.Addr().String())
+	writeTestCredentialsFor(t, dir, village.URL)
 	seedPushableSession(t, dir)
 	cfgPath := writeCfg(t, dir, "disclosures.yaml", fmt.Sprintf(
-		"version: 1\npush:\n  method: all\n  visibility: %s\nredaction:\n  level: %s\n",
-		testCase.Visibility, testCase.ConfiguredLevel))
+		"version: 1\noutput:\n  basePath: %s\npush:\n  method: all\n  visibility: %s\nredaction:\n  level: %s\n",
+		filepath.Join(dir, "transcripts"), testCase.Visibility, testCase.ConfiguredLevel))
 
-	args := []string{"--config", cfgPath, "--non-interactive", "--timeout", (300 * time.Millisecond).String()}
+	// A safety ceiling for local setup and HTTP, not the trigger that ends the
+	// scenario. Keep the intentional 300ms/1ms expiry tests in hook ergonomics
+	// separate: these cases need the report query to complete under package-wide
+	// race-test contention. The server answers immediately, so this cap does not
+	// add a wait to a passing test.
+	const budget = 30 * time.Second
+	args := []string{"--config", cfgPath, "--non-interactive", "--timeout", budget.String(), "--state-dir", dir}
 	if testCase.Quiet {
 		args = append(args, "--quiet")
 	}
-	_, stderr, _ := executePushCmdSeparate(t, dir, args)
+	stdout, stderr, err := executePushCmdSeparate(t, dir, args)
+	if err != nil {
+		t.Fatalf("disclosure command failed before completing its preflight scenario: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !preflightReached.Load() {
+		t.Fatalf("the Village preflight was never reached; an early return cannot prove disclosure behavior, especially for quiet cases\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
 	return stderr
 }

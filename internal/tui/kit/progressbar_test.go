@@ -1,28 +1,80 @@
 package kit_test
 
 import (
+	_ "embed"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/tui/kit"
+	"gopkg.in/yaml.v3"
 )
+
+type progressBarCase struct {
+	Name     string `yaml:"name"`
+	Label    string `yaml:"label"`
+	Done     int    `yaml:"done"`
+	Total    int    `yaml:"total"`
+	Ended    bool   `yaml:"ended"`
+	HasError bool   `yaml:"hasError"`
+	Filled   int    `yaml:"filled"`
+	Empty    int    `yaml:"empty"`
+	Icon     string `yaml:"icon"`
+	Count    string `yaml:"count"`
+}
+
+type progressBarDocument struct {
+	RequiredNames []string          `yaml:"requiredNames"`
+	Cases         []progressBarCase `yaml:"cases"`
+}
+
+//go:embed testdata/progressbar.yaml
+var progressBarFixtureData []byte
+
+func loadProgressBarCases(t *testing.T) []progressBarCase {
+	t.Helper()
+	var document progressBarDocument
+	if err := yaml.Unmarshal(progressBarFixtureData, &document); err != nil {
+		t.Fatalf("decode testdata/progressbar.yaml: %v", err)
+	}
+	byName := make(map[string]bool, len(document.Cases))
+	for _, row := range document.Cases {
+		if row.Name == "" || byName[row.Name] {
+			t.Fatalf("progress-bar fixture name %q is empty or duplicated", row.Name)
+		}
+		byName[row.Name] = true
+	}
+	for _, name := range document.RequiredNames {
+		if !byName[name] {
+			t.Fatalf("progress-bar fixture is missing required case %q", name)
+		}
+	}
+	return document.Cases
+}
 
 // TestProgressBarMatchesHarvestFormat pins the single-row rendering: status
 // icon, name padded to 13, 24-cell bar, raw count, no duration column.
 func TestProgressBarMatchesHarvestFormat(t *testing.T) {
 	t.Parallel()
-	line := kit.ProgressBar("DISCOVER", 1, 4, false, false)
-	filled, empty := strings.Count(line, "█"), strings.Count(line, "░")
-	if filled != 6 || empty != 18 {
-		t.Errorf("bar cells filled/empty=%d/%d, want 6/18 in %q", filled, empty, line)
-	}
-	for _, want := range []string{"●", "DISCOVER", "1/4"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("bar row omits %q in %q", want, line)
-		}
-	}
-	if strings.HasSuffix(line, " ") {
-		t.Errorf("bar row without duration must not pad trailing cells in %q", line)
+	for _, testCase := range loadProgressBarCases(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
+			t.Parallel()
+			line := kit.ProgressBar(testCase.Label, testCase.Done, testCase.Total, testCase.Ended, testCase.HasError)
+			filled, empty := strings.Count(line, "█"), strings.Count(line, "░")
+			if filled != testCase.Filled || empty != testCase.Empty {
+				t.Errorf("bar cells filled/empty=%d/%d, want %d/%d in %q", filled, empty, testCase.Filled, testCase.Empty, line)
+			}
+			for _, want := range []string{testCase.Icon, testCase.Label, testCase.Count} {
+				if !strings.Contains(line, want) {
+					t.Errorf("bar row omits %q in %q", want, line)
+				}
+			}
+			if strings.Contains(line, "\x1b[") {
+				t.Errorf("raw progress bar contains ANSI styling: %q", line)
+			}
+			if strings.HasSuffix(line, " ") {
+				t.Errorf("bar row without duration must not pad trailing cells in %q", line)
+			}
+		})
 	}
 }
 

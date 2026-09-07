@@ -1,0 +1,23 @@
+required_cases:
+  - native_current_round_trip
+  - native_v2_only_round_trip
+  - native_v2_authority_round_trip
+cases:
+  - &native
+    name: native_current_round_trip
+    source_fixture: native-current-rows
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+    user_text: native user question
+    assistant_text: native assistant answer
+    updated_user_text: native user question updated
+    version: native-fixture
+    model: synthetic-model
+    input_tokens: 120
+    output_tokens: 80
+    mutation: native-user-update
+  - <<: *native
+    name: native_v2_only_round_trip
+    source_fixture: native-v2-only
+  - <<: *native
+    name: native_v2_authority_round_trip
+    source_fixture: native-v2-preferred

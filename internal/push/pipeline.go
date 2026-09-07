@@ -6,6 +6,7 @@ package push
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,6 +56,37 @@ const localPersistenceBudget = 10 * time.Second
 // subsequent commit, forever.
 func persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), localPersistenceBudget)
+}
+
+// recorder resolves the profile recorder for this run: the injected
+// PipelineConfig.Recorder when set, otherwise the recorder threaded through
+// the run context (Nop when profiling is off, so instrumentation calls stay
+// cheap and the disabled path is byte-identical). It never returns nil.
+func (p *Pipeline) recorder(ctx context.Context) perf.Recorder {
+	if p.runCfg.Recorder != nil {
+		return p.runCfg.Recorder
+	}
+	return perf.RecorderFromContext(ctx)
+}
+
+// safeSubjectID never carries raw caller-controlled identifiers into a profile.
+// Hashing preserves stable grouping without exposing path-like session IDs.
+func safeSubjectID(sessionID string) string {
+	return fmt.Sprintf("session:%x", sha256.Sum256([]byte(sessionID)))
+}
+
+// outcomeForStatus maps a per-session push status to the profile outcome
+// vocabulary: new/updated uploads are ok, explicit skips are skipped, and
+// errors are failed. Profiling never changes the status itself.
+func outcomeForStatus(s PushStatus) perf.Outcome {
+	switch s {
+	case PushStatusNew, PushStatusUpdated:
+		return perf.OutcomeOK
+	case PushStatusSkipped, PushStatusHeld:
+		return perf.OutcomeSkipped
+	default:
+		return perf.OutcomeFailed
+	}
 }
 
 // Pipeline orchestrates pushing local sessions to the Peasant village.
@@ -114,6 +146,11 @@ type PipelineStore interface {
 // single production constructor, so refusing a nil redactor here — rather
 // than letting the pipeline silently skip re-redaction — is the one place
 // that can guarantee every caller gets it.
+//
+// When profiling, cfg.Redaction.CustomPatterns must describe the injected
+// engine's configured custom patterns. Production callers construct the engine
+// from this same config. Aggregate reports combine rules with the same ID;
+// profiling withholds counts when their configured categories conflict.
 func NewPipeline(
 	store PipelineStore,
 	transport Transport,
@@ -163,8 +200,28 @@ func NewPipeline(
 //   - 3 consecutive connection errors abort the pipeline.
 //   - Receipt persistence failures become per-session errors; InsertPushLog
 //     failures are logged to stderr rather than returned.
-func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
+func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	startedAt := time.Now().UnixMilli()
+
+	// Profile recorder for this run: the injected PipelineConfig.Recorder when
+	// set, otherwise the context recorder (Nop when profiling is off). The
+	// resolved recorder is threaded back into ctx so every downstream helper
+	// (candidate query, negotiate, per-session work, annotations when driven
+	// through the same context) records against one collector without
+	// signature changes. Recording against Nop is cheap and changes no
+	// behavior, so the disabled path stays byte-identical.
+	rec := p.recorder(ctx)
+	ctx = perf.ContextWithRecorder(ctx, rec)
+	p, finishRedactionProfile := profileRedactionRun(ctx, p)
+	defer finishRedactionProfile()
+	// The CLI owns push.run around both transcript and annotation stages.
+	// Pipeline instrumentation must not add a second run duration.
+	var tracker ConcurrencyTracker
+	var selected int
+	defer func() {
+		p.countRunTotals(rec, result, selected)
+		rec.Count(perf.CounterPushConcurrencyHighWater, int64(tracker.HighWater()), perf.UnitCount, nil)
+	}()
 
 	// 1. Resolve effective visibility + content license (both uniform for the run).
 	visibility := p.resolveVisibility()
@@ -172,6 +229,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 
 	// 2. Guard: individual mode is not yet implemented.
 	if p.cfg.Push.Method == config.PushMethodIndividual && p.runCfg.SourceProvider == "" {
+		rec.Error(perf.StagePushRun, fmt.Errorf("individual push method needs a session picker"), nil)
 		return nil, fmt.Errorf(
 			"push.method is set to %q in your config, which requires an interactive session "+
 				"picker (not yet implemented). To push now, either run 'peasant kickstart' to "+
@@ -180,10 +238,13 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	}
 
 	// 3. Query sessions from store.
-	sessions, baseCount, err := p.getTargetSessions(ctx)
+	sessions, baseCount, err := p.getTargetSessions(ctx, perf.ParentSpanFromContext(ctx))
 	if err != nil {
+		rec.Error(perf.StagePushDiscovery, fmt.Errorf("candidate database query failed; check local storage before retrying"), nil)
 		return nil, fmt.Errorf("get target sessions: %w", err)
 	}
+	rec.Count(perf.CounterPushSessionsSelected, int64(len(sessions)), perf.UnitCount, nil)
+	selected = len(sessions)
 
 	// 4. Warn about held-back sessions (missing metrics), for this push's scope
 	// only. A hook fires on every commit in ONE repository; listing another
@@ -195,7 +256,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 		return &PushResult{BaseCandidateCount: baseCount, EmptyReason: p.emptyReason(ctx, baseCount)}, nil
 	}
 
-	result := &PushResult{BaseCandidateCount: baseCount}
+	result = &PushResult{BaseCandidateCount: baseCount}
 
 	// 6. Dry-run: sequential scan exercising the SAME pushSession pre-flight as the
 	// real path (read → guards → map → client-side validate), diverging only at the
@@ -204,7 +265,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// contract version; no audit log.
 	if stopBeforeRemoteNegotiation(p.runCfg.DryRun) {
 		for _, sess := range sessions {
-			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil)
+			sr := p.pushSession(ctx, sess, visibility, license, defaults.PublishSchemaVersion, nil, perf.ParentSpanFromContext(ctx))
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 		}
@@ -215,12 +276,22 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	// fail closed rather than publishing stale preflight bytes.
 	for _, sess := range sessions {
 		sessionID, _ := ingest.NewSessionID(sess.SessionID)
+		var attrs perf.Attributes
+		if rec.Enabled() {
+			attrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
+		}
+		load := rec.StartChildSpan(perf.StagePushSessionLoad, perf.ParentSpanFromContext(ctx), attrs)
 		if _, readErr := p.store.ListEntries(ctx, sessionID); readErr != nil {
+			load.End(perf.OutcomeFailed, nil)
+			rec.Error(perf.StagePushSessionLoad, fmt.Errorf("transcript entry preflight read failed; repair the local store before retrying"), attrs)
+			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 			sr := entryReadFailure(sess, readErr, entryReadPreflight)
 			result.Sessions = append(result.Sessions, sr)
 			result.countStatus(sr.Status)
 			return result, nil
 		}
+		load.End(perf.OutcomeOK, nil)
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	}
 
 	// 6b. Version-negotiation preflight: query the village's accepted
@@ -259,7 +330,13 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 			}
 			mu.Unlock()
 
-			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities)
+			if rec.Enabled() {
+				tracker.Enter()
+			}
+			sr := p.pushSession(gctx, sess, visibility, license, emit, capabilities, perf.ParentSpanFromContext(gctx))
+			if rec.Enabled() {
+				tracker.Exit()
+			}
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -284,6 +361,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	_ = g.Wait()
 
 	if abortErr != nil {
+		rec.Error(perf.StagePushRun, fmt.Errorf("push stopped after repeated connection failures; check network access before retrying"), nil)
 		return result, abortErr
 	}
 
@@ -310,6 +388,27 @@ func (p *Pipeline) Run(ctx context.Context) (*PushResult, error) {
 	}
 
 	return result, nil
+}
+
+// countRunTotals records the run-level session outcome counters once per run
+// from the aggregate PushResult: published (new + updated), failed, and
+// skipped. Per-session outcomes already ride on their push.session spans; the
+// counters give the reduced profile its deterministic totals. Counts run
+// against the (possibly Nop) recorder, so the disabled path is unchanged.
+func (p *Pipeline) countRunTotals(rec perf.Recorder, result *PushResult, selected int) {
+	if result == nil {
+		return
+	}
+	published := result.New + result.Updated
+	if p.runCfg.DryRun {
+		published = 0 // Forecasts are not remote publications.
+	}
+	rec.Count(perf.CounterPushSessionsPublished, int64(published), perf.UnitCount, nil)
+	rec.Count(perf.CounterPushSessionsFailed, int64(result.Errors), perf.UnitCount, nil)
+	// Selected sessions not reached after a fail-closed preflight or connection
+	// abort were skipped, not published. Do not alter the historical PushResult.
+	skipped := result.Skipped + max(0, selected-len(result.Sessions))
+	rec.Count(perf.CounterPushSessionsSkipped, int64(skipped), perf.UnitCount, nil)
 }
 
 // resolveVisibility returns the visibility this run will actually publish at.
@@ -344,7 +443,9 @@ func (p *Pipeline) resolveLicense() schema.License {
 // The returned baseCount is the number of candidates from QueryPushCandidates
 // BEFORE any selection filtering — surfaced so callers can tell "selection
 // excluded everything" from "nothing to push" without a second query.
-func (p *Pipeline) getTargetSessions(ctx context.Context) (kept []ingest.PushSessionRow, baseCount int, err error) {
+func (p *Pipeline) getTargetSessions(ctx context.Context, parentSpanID string) (kept []ingest.PushSessionRow, baseCount int, err error) {
+	rec := p.recorder(ctx)
+	discoverySpan := rec.StartChildSpan(perf.StagePushDiscovery, parentSpanID, nil)
 	base, err := QueryPushCandidates(ctx, p.store, PushCandidateQuery{
 		Force:          p.runCfg.Force,
 		SourceProvider: p.runCfg.SourceProvider,
@@ -352,10 +453,13 @@ func (p *Pipeline) getTargetSessions(ctx context.Context) (kept []ingest.PushSes
 		Sources:        p.cfg.Push.Sources,
 	})
 	if err != nil {
+		discoverySpan.End(perf.OutcomeFailed, nil)
 		return nil, 0, err
 	}
+	discoverySpan.End(perf.OutcomeOK, nil)
 	baseCount = len(base)
 
+	selectionSpan := rec.StartChildSpan(perf.StagePushSelection, parentSpanID, nil)
 	base = p.filterByWizardSelection(base)
 	kept, withheld := ApplySelection(base, p.runCfg.Selection)
 	kept = ApplyRepositoryScope(kept, p.runCfg.Repository)
@@ -363,6 +467,7 @@ func (p *Pipeline) getTargetSessions(ctx context.Context) (kept []ingest.PushSes
 	// hook firing in one repository must not report branch conflicts belonging
 	// to another one on every commit.
 	p.noticeWithheld(ApplyRepositoryScope(withheld, p.runCfg.Repository))
+	selectionSpan.End(perf.OutcomeOK, nil)
 	return kept, baseCount, nil
 }
 
@@ -469,6 +574,7 @@ func (p *Pipeline) emptyReason(ctx context.Context, baseCount int) string {
 // failure once rather than silently treating it as an empty store.
 func (p *Pipeline) allPushable(ctx context.Context) ([]ingest.PushSessionRow, error) {
 	all, err := p.store.AllPushableSessions(ctx)
+	p.recorder(ctx).Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if err != nil {
 		fmt.Fprintf(p.stderr, "warning: check total sessions: %v\n", err)
 	}
@@ -713,6 +819,7 @@ func priorCandidateNote(baseCount int) string {
 // was already moved behind the same narrowing.
 func (p *Pipeline) noticeHeld(ctx context.Context) {
 	held, heldErr := p.store.SessionsWithoutMetrics(ctx)
+	p.recorder(ctx).Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if heldErr != nil {
 		fmt.Fprintf(p.stderr, "warning: check held sessions: %v\n", heldErr)
 	}
@@ -780,7 +887,30 @@ func (p *Pipeline) pushSession(
 	license schema.License,
 	emit schema.PushContractVersion,
 	contentCapabilities []schema.ContentCapability,
-) SessionPushResult {
+	parentSpanID string,
+) (sr SessionPushResult) {
+	// Profile spans for this session. The session span is the parent for every
+	// per-session stage; its safe subject is the sanitized session token (never
+	// raw paths, remotes, or transcript text). The deferred End maps the
+	// returned status to the profile outcome vocabulary, so profiling can never
+	// mark a failed push successful: Error always ends failed.
+	rec := p.recorder(ctx)
+	var subjectAttrs perf.Attributes
+	if rec.Enabled() {
+		subjectAttrs = perf.Attributes{perf.AttrSafeSubjectID: safeSubjectID(sess.SessionID)}
+	}
+	sessionSpan := rec.StartChildSpan(perf.StagePushSession, parentSpanID, subjectAttrs)
+	if rec.Enabled() {
+		ctx = perf.ContextWithRecorder(ctx, sessionRecorder{Recorder: rec, subject: subjectAttrs[perf.AttrSafeSubjectID]})
+		ctx = perf.ContextWithParentSpan(ctx, sessionSpan.ID())
+		p = profileRedactionSession(ctx, p)
+	}
+	defer func() {
+		sessionSpan.End(outcomeForStatus(sr.Status), nil)
+	}()
+
+	stage := startProfileStage(rec, sessionSpan.ID(), subjectAttrs, perf.StagePushSessionLoad)
+	defer func() { stage.finish(sr.Error) }()
 	// 1. Read metadata.json via injected FileSystem. The path is resolved by the
 	// shared ingest helper so subagent sessions (which live under
 	// {parentID}/subagents/{id}) are read from the correct location rather than
@@ -804,11 +934,12 @@ func (p *Pipeline) pushSession(
 
 	var meta ingest.UnifiedMetadata
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		parseErr := fmt.Errorf("parse metadata: %w", err)
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
-			Error:     fmt.Errorf("parse metadata: %w", err),
+			Error:     parseErr,
 		}
 	}
 
@@ -816,30 +947,33 @@ func (p *Pipeline) pushSession(
 	// never sees a request that would 400. The root cause is in ingest; until
 	// then this is a clean client-side Error (not a Held type).
 	if meta.Model == "" {
+		modelErr := fmt.Errorf("session %s: %w", sess.SessionID, ErrNoModel)
 		return SessionPushResult{
 			SessionID: sess.SessionID,
 			HostSlug:  sess.HostSlug,
 			Status:    PushStatusError,
-			Error:     fmt.Errorf("session %s: %w", sess.SessionID, ErrNoModel),
+			Error:     modelErr,
 		}
 	}
-
-	// Per-session timing recorder (Nop unless --timing threaded one onto ctx).
-	rec := perf.RecorderFromContext(ctx)
 
 	// 1b. Safety-net redaction: re-redact metadata before upload.
 	// This catches sessions ingested before redaction was added or with minimal level.
 	// p.redactor is guaranteed non-nil: NewPipeline refuses to construct a
 	// Pipeline without one.
+	//
+	// Coarse redaction stages share the recorder with combined redaction metrics.
+	stage.next(perf.StagePushSessionRedact)
 	redactStart := time.Now()
 	originalSourcePath := meta.Source.FilePath
 	redacted := p.redactor.RedactMetadata(&meta)
 	rec.RecordPhase(perf.PhaseRedact, time.Since(redactStart))
 	meta = *redacted
+	stage.next(perf.StagePushSessionLoad)
 
 	// 2. Fetch quality metrics from the store (non-fatal on error).
 	sessionID, _ := ingest.NewSessionID(sess.SessionID)
 	metrics, metricsErr := p.store.GetQualityMetrics(ctx, sessionID)
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if metricsErr != nil {
 		slog.Warn("failed to get quality metrics, continuing without",
 			"session_id", sess.SessionID,
@@ -851,8 +985,10 @@ func (p *Pipeline) pushSession(
 	// 3. Fetch session entries from the store. Transcript bytes and schema-owned
 	// evidence are indivisible publication input, so an unreadable entry set fails closed.
 	entries, entriesErr := p.store.ListEntries(ctx, sessionID)
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if entriesErr != nil {
-		return entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
+		failure := entryReadFailure(sess, entriesErr, entryReadPostNegotiation)
+		return failure
 	}
 	entries, entriesErr = transcript.RecoverFullEntries(ctx, p.fs, meta.ModelHarness, ingest.ResolvedPath(originalSourcePath), sessionID, entries)
 	if entriesErr != nil {
@@ -896,6 +1032,7 @@ func (p *Pipeline) pushSession(
 	// where it now lives: suppressing this call fails
 	// TestPipeline_RedactionFailureStopsTheSessionInsteadOfPublishing, which
 	// re-runs on every change instead of aging in a comment.
+	stage.next(perf.StagePushSessionRedact)
 	entries, entriesErr = RedactEntries(p.redactor, entries)
 	if entriesErr != nil {
 		return SessionPushResult{
@@ -910,7 +1047,9 @@ func (p *Pipeline) pushSession(
 	// transcript entries this is not optional: omitting an authoritative current
 	// relationship would make a later association annotation unresolvable at the
 	// village and could silently sever rewrite history.
+	stage.next(perf.StagePushSessionLoad)
 	storedAssociations, associationErr := p.store.ListCurrentSessionCommitAssociations(ctx, sessionID)
+	rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
 	if associationErr != nil {
 		return SessionPushResult{
 			SessionID: sess.SessionID,
@@ -919,6 +1058,7 @@ func (p *Pipeline) pushSession(
 			Error:     fmt.Errorf("load durable commit associations: %w", associationErr),
 		}
 	}
+	stage.next(perf.StagePushPayloadBuild)
 	publishedAssociations := make([]schema.PublishedAssociation, 0, len(storedAssociations))
 	for _, association := range storedAssociations {
 		publishedAssociations = append(publishedAssociations, schema.PublishedAssociation{
@@ -1078,6 +1218,7 @@ func (p *Pipeline) pushSession(
 	if hashErr != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
 	}
+	stage.next(perf.StagePushPublish)
 	receipt, statusCode, err := client.PublishAuthoritative(uploadCtx, request, bytes.NewReader(transcriptBytes), transcriptFilename)
 	if trace != nil {
 		rec.RecordUpload(trace.Sample(sess.SessionID))
@@ -1102,6 +1243,7 @@ func (p *Pipeline) pushSession(
 			Error:     fmt.Errorf("upload: %w: %w", sentinel, err),
 		}
 	}
+	stage.next(perf.StagePushReceiptPersist)
 	if receipt.ContentHash != request.ContentHash || receipt.RequestOperationFingerprint != expectedFingerprint {
 		err = fmt.Errorf("authoritative receipt mismatch: Village returned content hash %s and operation fingerprint %s, expected %s and %s from the exact request; local applied state was not changed", receipt.ContentHash, receipt.RequestOperationFingerprint, request.ContentHash, expectedFingerprint)
 		diagnosticCtx, cancelDiagnostic := persistenceContext(ctx)
@@ -1112,6 +1254,7 @@ func (p *Pipeline) pushSession(
 	if visibility == schema.VisibilityPrivate || visibility == schema.VisibilityPublic {
 		desired := schema.TranscriptUpdateVisibility(visibility)
 		if schema.Visibility(receipt.Visibility) != visibility {
+			stage.next(perf.StagePushVisibilityUpdate)
 			updated, _, updateErr := client.UpdateOwner(uploadCtx, receipt.TranscriptID, schema.OwnerTranscriptUpdateRequest{Visibility: &desired})
 			if updateErr != nil {
 				primary := fmt.Errorf("publication content succeeded but visibility convergence failed; the remote resource remains at its authoritative access state and no local terminal receipt was advanced; retry this session to apply the current configuration: %w", updateErr)
@@ -1130,6 +1273,7 @@ func (p *Pipeline) pushSession(
 			receipt.Visibility = visibility
 			receipt.Applied.NormalizedValues.Visibility = visibility
 			receipt.UpdatedAt = updated.UpdatedAt
+			stage.next(perf.StagePushReceiptPersist)
 		}
 	}
 

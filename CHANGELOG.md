@@ -7,6 +7,12 @@ Release, which holds the signed artifacts and checksums.
 
 ## [Unreleased]
 
+### Changed
+- Commit detection keeps only the commits reachable from the branch a session
+  recorded. Sessions without a recorded branch keep the existing three-day
+  window, and a branch that can no longer be resolved falls back to that window
+  with a diagnostic (#324).
+
 ## [0.5.0] - 2026-09-01
 
 ### Added

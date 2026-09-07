@@ -76,7 +76,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 | C1 | Root-Owns-Subtree | One goroutine processes a root + its entire BFS subtree. Prevents directory races on `{hostSlug}/{parentID}/`. |
 | C2 | Parent-Before-Child DB | FK ordering via `StagingBuffer.Commit()`: children invisible to `Drain()` until parent committed. |
 | C3 | Atomic File Writes | Write to `.tmp-*` dir, then `os.Rename()`. CLEANUP removes orphans. |
-| C4 | Schema Version Re-Ingest | `SchemaVersion < Current` → `DiffUpdated` → re-ingest. All sessions auto-upgrade on bump. |
+| C4 | Schema Version Re-Ingest | `metadataNeedsRefresh(SchemaVersion)` → `DiffUpdated` → re-ingest. Versions behind Current refresh except v9 when Current is v10: optional adapter provenance does not invalidate existing harness recordings. |
 | C5 | Arena Concurrent Drain | `Add()` uses bounded exponential backoff (1ms→16ms) when arena full. drainLoop goroutine runs concurrently with workers; arena only recycles via `AckBatch`. |
 | C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. |
 

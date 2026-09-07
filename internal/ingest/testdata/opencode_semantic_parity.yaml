@@ -21,7 +21,7 @@ cases:
       - id: msg_04_skill
         data: '{"id":"msg_04_skill","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"assistant","modelID":"synthetic-model","path":{"cwd":"/synthetic/parity"},"time":{"created":1120,"completed":1125}}'
         parts:
-          - {id: skill_call, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[],"structured":{}},"time":{"created":1121,"completed":1122}}'}
+          - {id: skill_call, data: '{"id":"skill_call","messageID":"msg_04_skill","type":"tool","name":"skill","state":{"status":"completed","input":{"name":"fixture-skill"},"content":[{"type":"text","text":"fixture skill loaded"}],"structured":{},"result":"fixture skill loaded"},"time":{"created":1121,"completed":1122}}'}
       - id: msg_05_agent
         data: '{"id":"msg_05_agent","sessionID":"ses_3cd91f52effeXd3QAJ54jOyzv5","role":"system","path":{"cwd":"/synthetic/parity"},"time":{"created":1130,"completed":1130},"content":"reviewer"}'
         parts:
@@ -58,14 +58,15 @@ current_variants:
   - {id: msg_variant_compaction, row_type: compaction, data: '{"id":"msg_variant_compaction","reason":"manual","summary":"summary","recent":"recent","time":{"created":2060}}'}
   - {id: msg_variant_agent, row_type: agent-switched, data: '{"id":"msg_variant_agent","agent":"reviewer","time":{"created":2070}}'}
   - {id: msg_variant_model, row_type: model-switched, data: '{"id":"msg_variant_model","model":{"id":"next-model","providerID":"next-provider"},"time":{"created":2080}}'}
-expected_current_identities: [pending_tool, running_tool, completed_tool, error_tool, shell_call]
+expected_current_identities: [reason_variant, pending_tool, running_tool, completed_tool, error_tool, shell_call]
+expected_current_projection_identities: [text_variant]
 
 declared_negative_cases: 11
 negative_cases:
   - {name: reject-unknown-row-type, rows: [{id: msg_unknown, row_type: unknown, data: '{}'}], error_contains: outside the supported pinned SessionMessage closed set}
   - {name: reject-conflicting-pairing-spellings, rows: [{id: msg_pairing, row_type: user, data: '{"messageID":"msg_pairing","message_id":"msg_other","text":"request","time":{"created":3000}}'}], error_contains: messageID}
   - {name: reject-embedded-row-identity-mismatch, rows: [{id: msg_identity, row_type: user, data: '{"id":"msg_other","text":"request","files":[],"agents":[],"time":{"created":3000}}'}], error_contains: upstream message id}
-  - {name: reject-absent-upstream-row-identity, rows: [{id: msg_missing_identity, row_type: user, data: '{"text":"request","files":[],"agents":[],"time":{"created":3000}}'}], error_contains: upstream message id is required}
+  - {name: reject-empty-explicit-row-identity, rows: [{id: msg_missing_identity, row_type: user, data: '{"id":"","text":"request","files":[],"agents":[],"time":{"created":3000}}'}], error_contains: upstream message id}
   - {name: reject-duplicate-row-identity, rows: [{id: msg_duplicate, row_type: system, data: '{"id":"msg_duplicate","text":"one","time":{"created":3000}}'}, {id: msg_duplicate, row_type: system, data: '{"id":"msg_duplicate","text":"two","time":{"created":3001}}'}], error_contains: already registered}
   - {name: reject-duplicate-content-identity, rows: [{id: msg_duplicate_content, row_type: assistant, data: '{"id":"msg_duplicate_content","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","id":"same_part","text":"one"},{"type":"reasoning","id":"same_part","text":"two"}],"time":{"created":3000}}'}], error_contains: already registered}
   - {name: reject-row-content-cross-kind-collision, rows: [{id: msg_cross_kind, row_type: system, data: '{"id":"msg_cross_kind","text":"one","time":{"created":3000}}'}, {id: msg_cross_owner, row_type: assistant, data: '{"id":"msg_cross_owner","agent":"builder","model":{"id":"model","providerID":"provider"},"content":[{"type":"text","id":"msg_cross_kind","text":"collision"}],"time":{"created":3001}}'}], error_contains: cannot also identify nested message content}

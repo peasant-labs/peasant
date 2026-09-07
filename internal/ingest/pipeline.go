@@ -434,6 +434,9 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 //  9. AUDIT: Write ingest_log entry (best-effort)
 func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	start := time.Now()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("pipeline start: %w", err)
+	}
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
 	// instead of discovering from source providers.
@@ -447,6 +450,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	allSessions, err := p.discover(ctx)
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	if err != nil {
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
@@ -456,6 +462,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(allSessions), len(allSessions))
 	prepareProfileStart := time.Now()
 	if p.config.PrepareSessionFilter != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
+		}
 		if err := p.config.PrepareSessionFilter(ctx, allSessions); err != nil {
 			p.recordIndexProfileStage(StagePrepare, prepareProfileStart, 0, len(allSessions))
 			return nil, fmt.Errorf("pipeline prepare session filter after discovery: %w", err)
@@ -471,7 +480,13 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// cannot acquire a parent later. It rides the discovery that has just run,
 	// so the evidence cache it reads is already warm and no transcript is opened
 	// twice.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("pipeline prepare session filter: %w", err)
+	}
 	p.originResolve, p.originResolveErr = p.resolveStoredOrigins(ctx)
+	if err := pipelineCancellation(ctx, p.originResolveErr); err != nil {
+		return nil, fmt.Errorf("pipeline prepare stored origins: %w", err)
+	}
 
 	// Pre-DIFF: bulk-load session locations from DB to avoid per-session queries
 	// in findMetadataPath. A single SELECT ... WHERE session_id IN (...) replaces
@@ -479,9 +494,18 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	if p.store != nil {
 		ids := make([]SessionID, len(allSessions))
 		for i, s := range allSessions {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("pipeline prepare session locations: %w", err)
+			}
 			ids[i] = s.SessionID
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("pipeline prepare session locations: %w", err)
+		}
 		cache, err := p.store.BulkLookupSessionLocations(ctx, ids)
+		if err := pipelineCancellation(ctx, err); err != nil {
+			return nil, fmt.Errorf("pipeline prepare session locations: %w", err)
+		}
 		if err == nil {
 			p.locationCache = cache
 		}
@@ -492,7 +516,14 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 		// last ingested value even when no time column changed. A store without the
 		// cursor capability keeps the clock-only behaviour.
 		if cursorStore, ok := p.store.(OpenCodeSeqCursorStore); ok {
-			if cursors, cursorErr := cursorStore.BulkLookupOpenCodeSeqCursors(ctx, ids); cursorErr == nil {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("pipeline prepare session cursors: %w", err)
+			}
+			cursors, cursorErr := cursorStore.BulkLookupOpenCodeSeqCursors(ctx, ids)
+			if err := pipelineCancellation(ctx, cursorErr); err != nil {
+				return nil, fmt.Errorf("pipeline prepare session cursors: %w", err)
+			}
+			if cursorErr == nil {
 				p.seqCursorCache = cursors
 			}
 		}
@@ -502,9 +533,12 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	// Stage 2: DIFF
 	diffProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(allSessions)})
-	diffResult := p.diff(allSessions, prog)
-	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
-	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(diffResult.Sessions), len(diffResult.Sessions))
+	diffResult, err := p.diff(ctx, allSessions, prog)
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(diffResult.Sessions), Total: len(allSessions), Err: err})
+	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(diffResult.Sessions), len(allSessions))
+	if err != nil {
+		return nil, fmt.Errorf("pipeline diff: %w", err)
+	}
 
 	// Stage 3: FILTER + Stage 4a: EXTRACT + WRITE
 	filterProfileStart := time.Now()
@@ -1686,13 +1720,19 @@ func (p *Pipeline) originEvidenceMiners() map[Harness]OriginEvidenceMiner {
 }
 
 // diff categorizes each discovered session.
-func (p *Pipeline) diff(sessions []DiscoveredSession, prog *ProgressState) DiffResult {
+func (p *Pipeline) diff(ctx context.Context, sessions []DiscoveredSession, prog *ProgressState) (DiffResult, error) {
 	result := DiffResult{
 		Sessions: make([]DiffEntry, 0, len(sessions)),
 	}
 
 	for index, session := range sessions {
-		status := p.classifySession(session)
+		status, err := p.classifySession(ctx, session)
+		if err != nil {
+			return result, err
+		}
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		result.Sessions = append(result.Sessions, DiffEntry{
 			Session: session,
 			Status:  status,
@@ -1700,7 +1740,19 @@ func (p *Pipeline) diff(sessions []DiscoveredSession, prog *ProgressState) DiffR
 		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(sessions)})
 	}
 
-	return result
+	return result, ctx.Err()
+}
+
+// pipelineCancellation distinguishes cancellation from best-effort lookup errors.
+// Dependencies may return a cancellation error before the parent context observes it.
+func pipelineCancellation(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
 }
 
 // ClassifyAgainstStore returns the DiffStatus of a discovered session that the
@@ -1753,7 +1805,10 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 //  4. Schema version behind CurrentSchemaVersion: DiffUpdated
 //  5. Source within staleness threshold (still being written): DiffActive
 //  6. Otherwise: DiffUnchanged
-func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
+func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSession) (DiffStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return DiffNew, err
+	}
 	isActive := p.config.StalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold
 
 	// Force: re-ingest, but only if we're also including active sessions (or
@@ -1761,9 +1816,9 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	// active sessions are still skipped.
 	if p.config.Force {
 		if isActive {
-			return DiffActive
+			return DiffActive, nil
 		}
-		return DiffNew
+		return DiffNew, nil
 	}
 
 	// DB-first diff (v8+): if locationCache has a record with IngestedMs and SchemaVersion,
@@ -1779,32 +1834,41 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 		if status == DiffUnchanged {
 			if storedSeq, tracked := p.seqCursorCache[session.SessionID]; tracked && session.EventSeq > storedSeq {
 				if isActive {
-					return DiffActive
+					return DiffActive, nil
 				}
-				return DiffUpdated
+				return DiffUpdated, nil
 			}
 		}
-		return status
+		return status, nil
 	}
 
 	// File fallback: DB has no record for this session (pre-migration data or first run).
 	// Read metadata.json from disk for backward compat (preserves pre-v8 behavior).
-	metaPath := p.findMetadataPath(session)
+	metaPath, err := p.findMetadataPath(ctx, session)
+	if err != nil {
+		return DiffNew, err
+	}
 	if metaPath == "" {
 		// No metadata file found; new session.
 		// Still respect staleness for new sessions.
 		if isActive {
-			return DiffActive
+			return DiffActive, nil
 		}
-		return DiffNew
+		return DiffNew, nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return DiffNew, err
+	}
 	data, err := p.fs.ReadFile(metaPath)
+	if err := pipelineCancellation(ctx, err); err != nil {
+		return DiffNew, err
+	}
 	if err != nil {
 		if isActive {
-			return DiffActive
+			return DiffActive, nil
 		}
-		return DiffNew
+		return DiffNew, nil
 	}
 
 	// Parse existing metadata to compare.
@@ -1812,9 +1876,9 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	if err := json.Unmarshal(data, &existing); err != nil {
 		// Corrupt metadata: re-ingest.
 		if isActive {
-			return DiffActive
+			return DiffActive, nil
 		}
-		return DiffNew
+		return DiffNew, nil
 	}
 
 	// Source modified more recently than ingest time: re-ingest.
@@ -1824,9 +1888,9 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 			ingestedTime := time.UnixMilli(ingestedMs)
 			if session.ModTime.After(ingestedTime) {
 				if isActive {
-					return DiffActive
+					return DiffActive, nil
 				}
-				return DiffUpdated
+				return DiffUpdated, nil
 			}
 		}
 	}
@@ -1834,17 +1898,17 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	// Schema version behind current: re-ingest.
 	if metadataNeedsRefresh(existing.SchemaVersion) {
 		if isActive {
-			return DiffActive
+			return DiffActive, nil
 		}
-		return DiffUpdated
+		return DiffUpdated, nil
 	}
 
 	// Staleness check last: file may be being written but already ingested.
 	if isActive {
-		return DiffActive
+		return DiffActive, nil
 	}
 
-	return DiffUnchanged
+	return DiffUnchanged, nil
 }
 
 // findMetadataPath searches for an existing metadata file for a session.
@@ -1853,7 +1917,10 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 // Since the hostSlug is not known during the diff phase (it requires extraction),
 // we walk one level of the outputDir looking for a matching sessionId directory.
 // Returns empty string if no metadata file is found.
-func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
+func (p *Pipeline) findMetadataPath(ctx context.Context, session DiscoveredSession) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	outputDir := string(p.config.OutputDir)
 	metaFilename := fmt.Sprintf("%s%s", session.SessionID, defaults.MetadataSuffix)
 
@@ -1868,18 +1935,34 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
 		} else {
 			candidate = fmt.Sprintf("%s/%s/%s/%s", outputDir, loc.HostSlug, session.SessionID, metaFilename)
 		}
-		if _, err := p.fs.Stat(candidate); err == nil {
-			return candidate
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		_, err := p.fs.Stat(candidate)
+		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+			return "", cancelErr
+		}
+		if err == nil {
+			return candidate, nil
 		}
 		// File not at expected path (e.g. output moved) — fall through to walk.
 	}
 
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	entries, err := p.fs.ReadDir(outputDir)
+	if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+		return "", cancelErr
+	}
 	if err != nil {
-		return "" // outputDir doesn't exist yet
+		return "", nil // outputDir doesn't exist yet
 	}
 
 	for _, hostEntry := range entries {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		if !hostEntry.IsDir() {
 			continue
 		}
@@ -1887,27 +1970,50 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
 
 		// Check flat layout: {hostSlug}/{sessionID}/{metaFilename}
 		candidate := fmt.Sprintf("%s/%s/%s", hostDir, session.SessionID, metaFilename)
-		if _, err := p.fs.Stat(candidate); err == nil {
-			return candidate
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		_, err := p.fs.Stat(candidate)
+		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+			return "", cancelErr
+		}
+		if err == nil {
+			return candidate, nil
 		}
 
 		// Check nested subagent layout: {hostSlug}/{parentID}/subagents/{sessionID}/{metaFilename}
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		sessionEntries, err := p.fs.ReadDir(hostDir)
+		if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+			return "", cancelErr
+		}
 		if err != nil {
 			continue
 		}
 		for _, sessionEntry := range sessionEntries {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 			if !sessionEntry.IsDir() {
 				continue
 			}
 			nested := fmt.Sprintf("%s/%s/%s/%s/%s", hostDir, sessionEntry.Name(), defaults.DirSubagents.String(), session.SessionID, metaFilename)
-			if _, err := p.fs.Stat(nested); err == nil {
-				return nested
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			_, err := p.fs.Stat(nested)
+			if cancelErr := pipelineCancellation(ctx, err); cancelErr != nil {
+				return "", cancelErr
+			}
+			if err == nil {
+				return nested, nil
 			}
 		}
 	}
 
-	return "" // not found
+	return "", nil // not found
 }
 
 // processSession extracts metadata and atomically writes output for one session.
@@ -2103,17 +2209,23 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		}
 
 		if repoPath != "" && meta.Timestamp.End != 0 {
-			// If user email is not configured (empty string), all commits will be
-			// filtered out since no commit will match an empty author email.
-			// A diagnostic warning is emitted by CommitDetector.LayeredDetection
-			// if the git operation itself fails.
+			// When no user email is configured, the detector returns the window
+			// unfiltered by author and records a missing_user_email diagnostic;
+			// the branch filter below still applies. Git failures become
+			// diagnostics inside CommitDetector.LayeredDetection.
 			// UserEmail with a short timeout: git config reads ~/.gitconfig and
 			// should complete in milliseconds. A 2-second cap guards against
 			// hangs caused by locked config files or slow/network filesystems.
 			emailCtx, emailCancel := context.WithTimeout(ctx, 2*time.Second)
 			userEmail, _ := p.git.UserEmail(emailCtx)
 			emailCancel()
-			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader)
+			// The recorded branch narrows the window to commits reachable from
+			// it. A session without one keeps the full window.
+			sessionBranch := ""
+			if meta.Git.Branch != nil {
+				sessionBranch = *meta.Git.Branch
+			}
+			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader, WithSessionBranch(sessionBranch))
 			sessionStart := time.UnixMilli(meta.Timestamp.Start)
 			sessionEnd := time.UnixMilli(meta.Timestamp.End)
 			// File origins use the provider transcript. Current SQLite uses only
@@ -3191,6 +3303,10 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
 	scanned := p.scanPeasantSyncSessions()
+	if err := ctx.Err(); err != nil {
+		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
+		return nil, fmt.Errorf("pipeline reindex discovery: %w", err)
+	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(scanned), len(scanned))
 	prepareProfileStart := time.Now()
@@ -3199,11 +3315,24 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Stage 2: DIFF — filter to targeted sessions.
 	diffProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(scanned)})
+	diffDone := 0
+	cancelDiff := func(err error) (*PipelineResult, error) {
+		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: diffDone, Total: len(scanned), Err: err})
+		p.recordIndexProfileStage(StageDiff, diffProfileStart, diffDone, len(scanned))
+		return nil, fmt.Errorf("pipeline reindex diff: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return cancelDiff(err)
+	}
 	var targeted []reindexTarget
 	if p.config.Force {
 		// --force --reindex: target ALL sessions.
 		targeted = scanned
 		for index := range scanned {
+			if err := ctx.Err(); err != nil {
+				return cancelDiff(err)
+			}
+			diffDone = index + 1
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
 		}
 	} else {
@@ -3211,19 +3340,32 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		staleSet := make(map[SessionID]bool)
 		if p.metricsStore != nil {
 			staleIDs, err := p.metricsStore.ListStaleIndexSessions(ctx, CurrentIndexVersion)
+			if err := pipelineCancellation(ctx, err); err != nil {
+				return cancelDiff(err)
+			}
 			if err != nil {
 				slog.Warn("reindex: list stale index sessions", "error", err)
 			}
 			for _, sid := range staleIDs {
+				if err := ctx.Err(); err != nil {
+					return cancelDiff(err)
+				}
 				staleSet[sid] = true
 			}
 		}
 		for index, t := range scanned {
+			if err := ctx.Err(); err != nil {
+				return cancelDiff(err)
+			}
 			if staleSet[t.session.SessionID] {
 				targeted = append(targeted, t)
 			}
+			diffDone = index + 1
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return cancelDiff(err)
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(targeted), len(scanned))

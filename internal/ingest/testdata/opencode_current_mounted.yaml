@@ -17,7 +17,7 @@ cases:
 
 declared_negative_cases: 2
 negative_cases:
-  - {name: malformed-row-leaves-no-managed-state, kind: unknown_row_type, error_contains: outside the supported pinned SessionMessage closed set}
+  - {name: malformed-row-leaves-no-managed-state, kind: malformed_native_data, row_data: '{"text":42,"time":{"created":1000}}', error_contains: cannot unmarshal number}
   - {name: canceled-page-leaves-no-managed-state, kind: canceled_page, error_contains: context canceled}
 
 declared_loader_mutations: 5

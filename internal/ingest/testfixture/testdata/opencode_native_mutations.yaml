@@ -1,0 +1,7 @@
+mutations:
+  - name: native-user-update
+    session_id: ses_3cd91f52effeXd3QAJ54jOyzn1
+    message_id: msg_native_user
+    text: native user question updated
+    time_created: 1000
+    file_modified_ms: 3000

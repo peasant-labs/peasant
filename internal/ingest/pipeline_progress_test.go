@@ -2,15 +2,233 @@ package ingest
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/salt"
+	"gopkg.in/yaml.v3"
 )
+
+//go:embed testdata/pipeline_progress.yaml
+var pipelineProgressYAML []byte
+
+type pipelineProgressCase struct {
+	Name        string `yaml:"name"`
+	Boundary    string `yaml:"boundary"`
+	ReturnError bool   `yaml:"return_error"`
+}
+
+func loadPipelineProgressFixtures(t *testing.T) []pipelineProgressCase {
+	t.Helper()
+	var fixture struct {
+		RequiredCases []string               `yaml:"required_cases"`
+		Cases         []pipelineProgressCase `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(pipelineProgressYAML, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	present := make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		present[tc.Name] = true
+	}
+	if len(fixture.RequiredCases) == 0 {
+		t.Fatal("missing required cancellation cases")
+	}
+	for _, name := range fixture.RequiredCases {
+		if !present[name] {
+			t.Fatalf("missing required case %q", name)
+		}
+	}
+	return fixture.Cases
+}
+
+func TestPipelineCancellationBeforeDiff(t *testing.T) {
+	for _, tc := range loadPipelineProgressFixtures(t) {
+		t.Run(tc.Name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			progress := NewProgressState()
+			filesystem := &cancelNestedDiffFS{canceled: true}
+			adapter := progressAdapter{sessions: []DiscoveredSession{{SessionID: "session-one", Harness: HarnessClaudeCode}}}
+			pipeline := &Pipeline{
+				fs: filesystem,
+				adapters: map[Harness]AdapterFactory{
+					HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter { return adapter },
+				},
+				config: PipelineConfig{Sources: map[Harness]SourceConfig{HarnessClaudeCode: {Enabled: true}}, Progress: progress},
+			}
+			switch tc.Boundary {
+			case "entry":
+				cancel()
+			case "discovery":
+				adapter.discover = cancel
+			case "prepare":
+				pipeline.config.PrepareSessionFilter = func(context.Context, []DiscoveredSession) error { cancel(); return nil }
+			case "bulk":
+				pipeline.store = &cancelProgressStore{cancel: cancel, returnError: tc.ReturnError}
+			default:
+				t.Fatalf("unknown cancellation boundary %q", tc.Boundary)
+			}
+			_, err := pipeline.Run(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Run error = %v, want context.Canceled", err)
+			}
+			if filesystem.afterCancel != 0 {
+				t.Fatalf("unexpected filesystem calls = %d", filesystem.afterCancel)
+			}
+			for _, stage := range StageOrder[1:] {
+				if progress.Snapshot()[stage].Started {
+					t.Errorf("stage %s started after preparation cancellation", stage)
+				}
+			}
+		})
+	}
+}
+
+type cancelProgressStore struct {
+	SessionStore
+	cancel      context.CancelFunc
+	returnError bool
+}
+
+var _ SessionStore = (*cancelProgressStore)(nil)
+
+func (s *cancelProgressStore) BulkLookupSessionLocations(context.Context, []SessionID) (map[SessionID]SessionLocation, error) {
+	s.cancel()
+	if s.returnError {
+		return nil, context.Canceled
+	}
+	ingested := int64(1)
+	return map[SessionID]SessionLocation{"session-one": {IngestedMs: &ingested, SchemaVersion: CurrentSchemaVersion}}, nil
+}
+
+func TestPipelineReindexCancellationDuringDiffLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	progress := NewProgressState()
+	pipeline := &Pipeline{
+		fs:           emptyProgressFS{},
+		metricsStore: &cancelReindexProgressStore{cancel: cancel},
+		config:       PipelineConfig{Reindex: true, Progress: progress},
+	}
+	_, err := pipeline.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	snapshot := progress.Snapshot()
+	if got := snapshot[StageDiff]; !got.Ended || !got.HasErr || got.Done != 0 {
+		t.Fatalf("interrupted reindex DIFF = %+v, want error with no classified sessions", got)
+	}
+	for _, stage := range StageOrder[2:] {
+		if snapshot[stage].Started {
+			t.Errorf("stage %s started after cancellation", stage)
+		}
+	}
+}
+
+type cancelReindexProgressStore struct {
+	MetricsStore
+	cancel context.CancelFunc
+}
+
+var _ MetricsStore = (*cancelReindexProgressStore)(nil)
+
+func (s *cancelReindexProgressStore) ListStaleIndexSessions(context.Context, int) ([]SessionID, error) {
+	s.cancel()
+	return nil, context.Canceled
+}
+
+func TestPipelineCancellationInsideNestedDiffWalk(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	progress := NewProgressState()
+	filesystem := &cancelNestedDiffFS{cancel: cancel, progress: progress, t: t}
+	pipeline := &Pipeline{
+		fs: filesystem,
+		adapters: map[Harness]AdapterFactory{
+			HarnessClaudeCode: func(FileSystem, GitResolver, salt.Salt) SourceAdapter {
+				return progressAdapter{sessions: []DiscoveredSession{
+					{SessionID: "session-one", Harness: HarnessClaudeCode},
+					{SessionID: "session-two", Harness: HarnessClaudeCode},
+					{SessionID: "session-three", Harness: HarnessClaudeCode},
+				}}
+			},
+		},
+		config: PipelineConfig{
+			Sources:   map[Harness]SourceConfig{HarnessClaudeCode: {Enabled: true}},
+			OutputDir: ResolvedPath("/out"), Progress: progress,
+			SessionFilter: func(DiscoveredSession) bool { t.Error("FILTER ran after cancellation"); return false },
+		},
+	}
+	_, err := pipeline.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	if !filesystem.canceled || filesystem.afterCancel != 0 {
+		t.Fatalf("nested cancellation reached=%v, later filesystem calls=%d", filesystem.canceled, filesystem.afterCancel)
+	}
+	if filesystem.reads != 3 || filesystem.stats != 2 {
+		t.Fatalf("DIFF filesystem work: ReadDir=%d Stat=%d, want 3 and 2", filesystem.reads, filesystem.stats)
+	}
+	snapshot := progress.Snapshot()
+	if got := snapshot[StageDiff]; got.Done != 1 || got.Total != 3 || !got.Ended || !got.HasErr {
+		t.Fatalf("interrupted DIFF = %+v, want 1/3 ended with error", got)
+	}
+	for _, stage := range StageOrder[2:] {
+		if snapshot[stage].Started {
+			t.Errorf("stage %s started after DIFF cancellation", stage)
+		}
+	}
+}
+
+type cancelNestedDiffFS struct {
+	emptyProgressFS
+	cancel      context.CancelFunc
+	progress    *ProgressState
+	t           *testing.T
+	reads       int
+	stats       int
+	canceled    bool
+	afterCancel int
+}
+
+var _ FileSystem = (*cancelNestedDiffFS)(nil)
+
+func (f *cancelNestedDiffFS) ReadDir(path string) ([]os.DirEntry, error) {
+	if f.canceled {
+		f.afterCancel++
+	}
+	f.reads++
+	if f.reads == 1 {
+		return nil, os.ErrNotExist
+	}
+	return fs.ReadDir(fstest.MapFS{
+		"parent":  &fstest.MapFile{Mode: fs.ModeDir},
+		"sibling": &fstest.MapFile{Mode: fs.ModeDir},
+	}, ".")
+}
+
+func (f *cancelNestedDiffFS) Stat(path string) (os.FileInfo, error) {
+	f.stats++
+	if f.canceled {
+		f.afterCancel++
+	}
+	if !f.canceled && strings.Contains(path, "/subagents/") {
+		if got := f.progress.Snapshot()[StageDiff]; !got.Started || got.Done != 1 {
+			f.t.Errorf("cancel boundary progress = %+v", got)
+		}
+		f.canceled = true
+		f.cancel()
+	}
+	return nil, os.ErrNotExist
+}
 
 func TestPipelineDiffProgressAdvancesBeforeSlowSecondSession(t *testing.T) {
 	progress := NewProgressState()
@@ -141,11 +359,15 @@ func TestPipelineFilterProgressDoesNotEndBeforeSlowFilterReturns(t *testing.T) {
 
 type progressAdapter struct {
 	sessions []DiscoveredSession
+	discover func()
 }
 
 func (adapter progressAdapter) Harness() Harness { return HarnessClaudeCode }
 
 func (adapter progressAdapter) Discover(context.Context, SourceConfig) ([]DiscoveredSession, error) {
+	if adapter.discover != nil {
+		adapter.discover()
+	}
 	return adapter.sessions, nil
 }
 

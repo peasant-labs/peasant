@@ -529,6 +529,10 @@ func (p *partialOnTimeoutAnalyzer) GetSessionCommitsWithMetadata(_ context.Conte
 	return p.commits, p.err
 }
 
+func (p *partialOnTimeoutAnalyzer) IsAncestor(_ context.Context, _, _, _ string) (bool, error) {
+	return true, nil
+}
+
 // --- Integration test helpers (real git) ---
 
 // initCommitDetectorTestRepo creates a temporary git repository with an initial
