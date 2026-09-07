@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"gopkg.in/yaml.v3"
 )
@@ -102,10 +103,10 @@ func TestStore_HarvesterWriterPreservesFutureParser(t *testing.T) {
 			ctx := context.Background()
 			sid := ingest.SessionID("99999999-9999-4999-8999-999999999999")
 			seedSession(t, s, string(sid))
-			before := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: batchTestEntries(sid, "last-good", 1), IndexerVersion: fixture.Previous, IndexedAtMs: 1700000001000}})
+			before := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: batchTestEntries(sid, "last-good", 1)}, IndexVersion: 1, IndexerVersion: fixture.Previous, IndexedAtMs: 1700000001000}})
 			assertBatchResult(t, before, 0, sid, true)
 			hash := sessionEntriesHash(t, s, sid)
-			after := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: batchTestEntries(sid, "replacement", 1), IndexerVersion: fixture.Next, IndexedAtMs: 1700000002000}})
+			after := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: batchTestEntries(sid, "replacement", 1)}, IndexVersion: 1, IndexerVersion: fixture.Next, IndexedAtMs: 1700000002000}})
 			assertBatchResult(t, after, 0, sid, !fixture.Error)
 			if fixture.Error {
 				assertIndexState(t, s, sid, fixture.Previous, 1700000001000)

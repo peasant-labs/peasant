@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -1447,7 +1448,8 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 		}
 		writes = append(writes, SessionEntryWrite{
 			SessionID:      result.im.session.SessionID,
-			Entries:        result.entries,
+			Result:         indexformat.V1{Entries: result.entries},
+			IndexVersion:   1,
 			IndexerVersion: p.versionTargets()[result.im.session.Harness].IndexerVersion,
 			IndexedAtMs:    nowMs,
 		})

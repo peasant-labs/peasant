@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -81,7 +82,7 @@ func TestPipelineHarvesterTargets(t *testing.T) {
 				}
 				content := "last-good " + string(session.Harness)
 				entries := []schema.SessionEntry{{SessionID: session.ID, Harness: session.Harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &content}}
-				write := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: session.ID, Entries: entries, IndexerVersion: previous, IndexedAtMs: 1700000001000}})
+				write := db.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: session.ID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: previous, IndexedAtMs: 1700000001000}})
 				if len(write) != 1 || !write[0].Written {
 					t.Fatalf("seed index: %+v", write)
 				}

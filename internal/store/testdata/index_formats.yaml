@@ -1,0 +1,28 @@
+requiredNames:
+  - current-v1-write
+  - empty-v1-write
+  - entry-only-preserves-producer
+  - entry-only-preserves-unknown-producer
+  - entry-only-refuses-newer-producer
+  - batch-refuses-newer-producer
+  - entry-only-refuses-newer-format
+  - batch-refuses-newer-format
+  - declaration-must-match-result
+  - concrete-type-must-match-format
+  - absent-result-refused
+  - nil-concrete-result-refused
+  - failed-format-stamp-rolls-back-entries
+cases:
+  - {name: current-v1-write, storedProducer: 14, producer: 15, declaredFormat: 1}
+  - {name: empty-v1-write, storedProducer: 14, producer: 15, declaredFormat: 1, empty: true}
+  - {name: entry-only-preserves-producer, storedProducer: 14, direct: true, declaredFormat: 1}
+  - {name: entry-only-preserves-unknown-producer, storedProducer: 0, direct: true, declaredFormat: 1}
+  - {name: entry-only-refuses-newer-producer, storedProducer: 99, direct: true, declaredFormat: 1, wantError: "newer than this writer"}
+  - {name: batch-refuses-newer-producer, storedProducer: 99, producer: 15, declaredFormat: 1, wantError: "newer than this writer"}
+  - {name: entry-only-refuses-newer-format, storedProducer: 14, storedFormat: 99, direct: true, declaredFormat: 1, wantError: "unsupported index format 99"}
+  - {name: batch-refuses-newer-format, storedProducer: 14, storedFormat: 99, producer: 15, declaredFormat: 1, wantError: "unsupported index format 99"}
+  - {name: declaration-must-match-result, storedProducer: 14, producer: 15, declaredFormat: 2, wantError: "does not match declared format"}
+  - {name: concrete-type-must-match-format, storedProducer: 14, producer: 15, declaredFormat: 1, payload: fake-v1, wantError: "requires an indexformat.V1 result"}
+  - {name: absent-result-refused, storedProducer: 14, producer: 15, declaredFormat: 1, payload: absent, wantError: "does not match declared format"}
+  - {name: nil-concrete-result-refused, storedProducer: 14, producer: 15, declaredFormat: 1, payload: nil-v1, wantError: "does not match declared format"}
+  - {name: failed-format-stamp-rolls-back-entries, storedProducer: 14, producer: 15, declaredFormat: 1, failFormatStamp: true, wantError: "synthetic format stamp failure"}

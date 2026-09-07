@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -126,12 +127,14 @@ type MetricsStore interface {
 }
 
 // SessionEntryWrite is one session's replacement entry set for the INDEX stage.
-// IndexerVersion zero means entries are written without updating the session's
-// index state. Non-zero IndexerVersion updates sessions.index_version and
-// sessions.indexed_at inside the same per-session atomic write.
+// Result is the sole payload; IndexVersion must match its concrete format.
+// IndexerVersion zero preserves the producing parser and its timestamp while
+// still recording the representation actually written. A non-zero revision
+// commits the producer and timestamp in the same atomic write.
 type SessionEntryWrite struct {
 	SessionID      SessionID
-	Entries        []schema.SessionEntry
+	Result         indexformat.Result
+	IndexVersion   int
 	IndexerVersion int
 	IndexedAtMs    int64
 }

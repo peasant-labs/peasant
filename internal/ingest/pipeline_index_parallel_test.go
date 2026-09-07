@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -753,7 +754,7 @@ func (*serialIndexStore) UpdateIndexState(context.Context, SessionID, int, int64
 func (store *serialIndexStore) IndexSessionEntryBatch(ctx context.Context, writes []SessionEntryWrite) []SessionEntryWriteResult {
 	results := make([]SessionEntryWriteResult, len(writes))
 	for i, write := range writes {
-		err := store.IndexSessionEntries(ctx, write.SessionID, write.Entries)
+		err := store.IndexSessionEntries(ctx, write.SessionID, write.Result.(indexformat.V1).Entries)
 		results[i] = SessionEntryWriteResult{SessionID: write.SessionID, Written: err == nil, Err: err}
 	}
 	return results
@@ -781,7 +782,7 @@ func (store *batchIndexStore) IndexSessionEntryBatch(_ context.Context, writes [
 	store.batchSizes = append(store.batchSizes, len(writes))
 	results := make([]SessionEntryWriteResult, len(writes))
 	for i, write := range writes {
-		store.entries[write.SessionID] = append([]schema.SessionEntry(nil), write.Entries...)
+		store.entries[write.SessionID] = append([]schema.SessionEntry(nil), write.Result.(indexformat.V1).Entries...)
 		results[i] = SessionEntryWriteResult{
 			SessionID: write.SessionID,
 			Written:   true,

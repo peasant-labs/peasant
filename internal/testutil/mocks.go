@@ -17,6 +17,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/gitops"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/schema"
@@ -761,7 +762,12 @@ func (s *StubMetricsStore) IndexSessionEntryBatch(_ context.Context, writes []in
 			results[i].Err = fmt.Errorf("newer indexer revision already stored for %s", write.SessionID)
 			continue
 		}
-		s.IndexedEntries[write.SessionID] = write.Entries
+		result, ok := write.Result.(indexformat.V1)
+		if !ok || write.IndexVersion != 1 {
+			results[i].Err = fmt.Errorf("stub index writer requires concrete V1")
+			continue
+		}
+		s.IndexedEntries[write.SessionID] = result.Entries
 		if write.IndexerVersion > 0 {
 			s.IndexStates[write.SessionID] = write.IndexerVersion
 		}

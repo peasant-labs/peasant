@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -296,7 +297,7 @@ func seedHarvestIndexSession(t testing.TB, db *store.Store, output string, fixtu
 	}
 	content := "last-good " + fixture.Name
 	entries := []schema.SessionEntry{{SessionID: fixture.ID, Harness: fixture.Harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &content}}
-	results := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: fixture.ID, Entries: entries, IndexerVersion: ingest.HarvesterVersionRegistry[fixture.Harness].IndexerVersion + fixture.VersionDelta, IndexedAtMs: 1700000001000}})
+	results := db.IndexSessionEntryBatch(t.Context(), []ingest.SessionEntryWrite{{SessionID: fixture.ID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[fixture.Harness].IndexerVersion + fixture.VersionDelta, IndexedAtMs: 1700000001000}})
 	if len(results) != 1 || !results[0].Written {
 		t.Fatalf("seed index: %+v", results)
 	}

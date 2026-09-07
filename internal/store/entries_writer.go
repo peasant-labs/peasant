@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
 	"golang.org/x/crypto/sha3"
@@ -99,21 +100,10 @@ type sessionEntryWriteOutcome struct {
 // isolated and reported by push, but a re-index must not create new ones, so the
 // rows are read first and re-attached to the entries that still exist afterwards.
 func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry) (err error) {
-	conn, err := s.pool.Take(ctx)
-	if err != nil {
-		return fmt.Errorf("store: take connection: %w", err)
-	}
-	defer s.pool.Put(conn)
-
-	endFn := sqlitex.Transaction(conn)
-	defer endFn(&err)
-
-	stmts := newSessionEntryWriteStatements(conn)
-	defer func() {
-		err = errors.Join(err, stmts.Close())
-	}()
-	_, err = indexSessionEntriesOnConn(conn, sessionID, entries, stmts)
-	return err
+	results := s.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{
+		SessionID: sessionID, Result: indexformat.V1{Entries: entries}, IndexVersion: 1,
+	}})
+	return results[0].Err
 }
 
 // IndexSessionEntryBatch writes multiple session entry replacements in one
@@ -152,7 +142,7 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		if results[i].Err != nil {
 			continue
 		}
-		outcome, err, fatal := indexSessionEntryWriteSavepoint(conn, writes[i], stmts)
+		outcome, err, fatal := s.indexSessionEntryWriteSavepoint(ctx, conn, writes[i], stmts)
 		results[i].Stats = outcome.stats
 		if err != nil {
 			results[i].Err = err
@@ -184,20 +174,41 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 	return results
 }
 
-func indexSessionEntryWriteSavepoint(conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error, bool) {
+func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error, bool) {
 	const savepointName = "session_entry_batch_item"
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
-	if write.IndexerVersion > 0 {
-		if err := validateIndexerRevisionOnConn(conn, write.SessionID, write.IndexerVersion); err != nil {
+	format, state, err := s.validateIndexWriteOnConn(conn, write)
+	if err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	if state.IndexVersion != nil && *state.IndexVersion != write.IndexVersion {
+		if err := s.indexFormats[*state.IndexVersion].Delete(ctx, conn, write.SessionID); err != nil {
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 			return sessionEntryWriteOutcome{}, rollbackErr, fatal
 		}
 	}
-
-	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, write.Entries, stmts)
+	entries, err := format.Write(ctx, conn, write.SessionID, write.Result)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.SessionID != write.SessionID {
+				err = fmt.Errorf("store: format %d projected entry for session %s into replacement for %s; no replacement was committed; correct the format projection", write.IndexVersion, entry.SessionID, write.SessionID)
+				break
+			}
+		}
+	}
 	if err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
+	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, entries, stmts)
+	if err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return outcome, rollbackErr, fatal
+	}
+	if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET index_format_version = ? WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{write.IndexVersion, string(write.SessionID)}}); err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return outcome, rollbackErr, fatal
 	}

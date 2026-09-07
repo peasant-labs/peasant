@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/store"
@@ -320,7 +321,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 						producer--
 					}
 					preview := "last-good indexed content"
-					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: []schema.SessionEntry{{SessionID: sid, Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}, IndexerVersion: producer, IndexedAtMs: ingested}})
+					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: []schema.SessionEntry{{SessionID: sid, Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}}, IndexVersion: 1, IndexerVersion: producer, IndexedAtMs: ingested}})
 					if len(writes) != 1 || !writes[0].Written {
 						t.Fatalf("seed index: %+v", writes)
 					}

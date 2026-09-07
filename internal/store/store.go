@@ -258,6 +258,7 @@ var (
 // and manages the database lifecycle.
 type Store struct {
 	pool              *sqlitex.Pool
+	indexFormats      map[int]IndexFormat
 	salt              salt.Salt
 	annotationWriteMu sync.Mutex
 	closed            atomic.Bool
@@ -284,6 +285,7 @@ var pragmas = []string{
 type OpenOption func(*openOptions)
 
 type openOptions struct {
+	indexFormats     []IndexFormat
 	migrationConsent MigrationConsent
 	poolSize         int
 	skipMigrations   bool
@@ -320,6 +322,10 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 	o := openOptions{}
 	for _, opt := range opts {
 		opt(&o)
+	}
+	formats, err := newIndexFormats(o.indexFormats)
+	if err != nil {
+		return nil, err
 	}
 
 	// V33 is a breaking migration (renames harness identifiers in sessions).
@@ -371,7 +377,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	return &Store{pool: pool, salt: s}, nil
+	return &Store{pool: pool, salt: s, indexFormats: formats}, nil
 }
 
 // readUserVersion returns the PRAGMA user_version value from the pool.

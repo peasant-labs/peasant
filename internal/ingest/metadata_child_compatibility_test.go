@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
@@ -82,7 +83,7 @@ func TestMetadataChildCompatibility(t *testing.T) {
 			beforeState := make(map[ingest.SessionID]metadataPolicyIndexState)
 			for _, sid := range []ingest.SessionID{fixtures.ParentID, fixtures.ChildID} {
 				preview := "last-good indexed content"
-				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: []schema.SessionEntry{{SessionID: sid, Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}, IndexerVersion: fixture.StoredIndexer, IndexedAtMs: 1700000000000}})
+				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: []schema.SessionEntry{{SessionID: sid, Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}}, IndexVersion: 1, IndexerVersion: fixture.StoredIndexer, IndexedAtMs: 1700000000000}})
 				if len(writes) != 1 || !writes[0].Written {
 					t.Fatalf("seed index: %+v", writes)
 				}
