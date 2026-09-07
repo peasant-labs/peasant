@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -50,6 +51,28 @@ func (i *StrikeIndexer) IndexTranscriptBytes(_ context.Context, session Discover
 	return i.parse(session.SessionID, data), nil
 }
 
+var _ VersionedTranscriptIndexer = (*StrikeIndexer)(nil)
+
+// IndexTranscriptResult verifies completion before authorizing persistent replacement.
+func (i *StrikeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	data, err := i.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return nil, completion.failure(err)
+	}
+	return i.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// IndexTranscriptBytesResult verifies retained bytes, not native retention completeness.
+func (i *StrikeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	entries, err := i.parseWithCompletion(session.SessionID, data, completion)
+	return completion.result(entries, err)
+}
+
 type strikeContentKind uint8
 
 const (
@@ -88,6 +111,11 @@ type strikeAssembly struct {
 }
 
 func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.SessionEntry {
+	entries, _ := i.parseWithCompletion(sessionID, data, nil)
+	return entries
+}
+
+func (i *StrikeIndexer) parseWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
 	a := &strikeAssembly{
 		sessionID:      sessionID,
 		fullContent:    i.fullContent,
@@ -98,8 +126,18 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 		processCalls:   make(map[string]string),
 	}
 
-	forEachStrikeRecord(data, func(_ int, raw []byte) {
+	var parseErr error
+	forEachStrikeRecord(data, func(line int, raw []byte) {
+		if parseErr != nil {
+			return
+		}
+		if completion != nil {
+			completion.line = line
+		}
 		if strikeRecordTooLarge(raw) {
+			if completion != nil {
+				parseErr = fmt.Errorf("record exceeds the %d-byte supported processing limit; it was not silently omitted", defaults.ScannerMaxLine)
+			}
 			return
 		}
 		trimmed := bytes.TrimSpace(raw)
@@ -107,15 +145,40 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 			return
 		}
 		var envelope strikeEnvelope
-		if json.Unmarshal(trimmed, &envelope) != nil {
+		if completion != nil {
+			if err := completion.record(trimmed); err != nil {
+				parseErr = err
+				return
+			}
+		}
+		if err := json.Unmarshal(trimmed, &envelope); err != nil {
+			if completion != nil {
+				parseErr = err
+			}
+			return
+		}
+		if completion != nil && envelope.Type == "" {
+			parseErr = fmt.Errorf("record lacks its event type")
 			return
 		}
 		if !isKnownStrikeEvent(envelope.Type) {
 			return
 		}
+		if completion != nil {
+			if err := requireJSONObject(envelope.Data); err != nil {
+				parseErr = fmt.Errorf("event data: %w", err)
+				return
+			}
+		}
 		event, err := decodeStrikeEventData(envelope.Data)
 		if err != nil {
+			if completion != nil {
+				parseErr = err
+			}
 			return
+		}
+		if completion != nil {
+			completion.recognized++
 		}
 		timestamp := parseIndexTimestamp(envelope.Time)
 
@@ -196,7 +259,7 @@ func (i *StrikeIndexer) parse(sessionID SessionID, data []byte) []schema.Session
 		}
 	})
 
-	return a.entries
+	return a.entries, parseErr
 }
 
 func (a *strikeAssembly) beginTurn(turnID string) {

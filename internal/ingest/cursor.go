@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/schema"
 )
@@ -515,6 +516,27 @@ type CursorIndexer struct {
 }
 
 var _ TranscriptIndexer = (*CursorIndexer)(nil)
+var _ VersionedTranscriptIndexer = (*CursorIndexer)(nil)
+
+// IndexTranscriptResult verifies completion before authorizing persistent replacement.
+func (idx *CursorIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	data, err := idx.fs.ReadFile(session.SourcePath.String())
+	if err != nil {
+		return nil, completion.failure(err)
+	}
+	return idx.IndexTranscriptBytesResult(ctx, session, data)
+}
+
+// IndexTranscriptBytesResult consumes precisely the supplied transcript snapshot.
+func (idx *CursorIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	entries, err := idx.parseJSONLWithCompletion(session.SessionID, data, completion)
+	return completion.result(entries, err)
+}
 
 // SourceKind reports that Cursor's entries come from a single JSONL file; every entry is in its bytes.
 func (idx *CursorIndexer) SourceKind() TranscriptSourceKind { return TranscriptSourceFile }
@@ -551,6 +573,10 @@ func (idx *CursorIndexer) IndexTranscriptBytes(_ context.Context, session Discov
 }
 
 func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema.SessionEntry, error) {
+	return idx.parseJSONLWithCompletion(sessionID, data, nil)
+}
+
+func (idx *CursorIndexer) parseJSONLWithCompletion(sessionID SessionID, data []byte, completion *indexCompletion) ([]schema.SessionEntry, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	buf := make([]byte, defaults.ScannerInitBuf)
 	scanner.Buffer(buf, defaults.ScannerMaxLine)
@@ -558,11 +584,31 @@ func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 	var entries []schema.SessionEntry
 	entryIndex := 0
 	for scanner.Scan() {
+		if completion != nil {
+			completion.line++
+		}
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
 			continue
 		}
-		entry, ok := parseCursorLine(sessionID, entryIndex, raw)
+		var line cursorJSONLLine
+		decodeErr := json.Unmarshal(raw, &line)
+		if completion != nil {
+			if err := completion.record(raw); err != nil {
+				return nil, err
+			}
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if line.Role == "" && line.Message.Role == "" {
+				return nil, fmt.Errorf("record has no transcript role")
+			}
+			if err := validateIndexContent(line.content()); err != nil {
+				return nil, err
+			}
+			completion.recognized++
+		}
+		entry, ok := cursorLineEntry(sessionID, entryIndex, raw, line, decodeErr)
 		if !ok {
 			entryIndex++
 			continue
@@ -587,9 +633,8 @@ func (idx *CursorIndexer) parseJSONL(sessionID SessionID, data []byte) ([]schema
 	return entries, nil
 }
 
-func parseCursorLine(sessionID SessionID, index int, raw []byte) (schema.SessionEntry, bool) {
-	var line cursorJSONLLine
-	if err := json.Unmarshal(raw, &line); err != nil {
+func cursorLineEntry(sessionID SessionID, index int, raw []byte, line cursorJSONLLine, decodeErr error) (schema.SessionEntry, bool) {
+	if decodeErr != nil {
 		return schema.SessionEntry{}, false
 	}
 	role := cursorLineRole(line)

@@ -1,3 +1,4 @@
+requiredNames: [below-limit, at-limit, above-limit]
 cases:
   - name: below-limit
     sizeDelta: -1

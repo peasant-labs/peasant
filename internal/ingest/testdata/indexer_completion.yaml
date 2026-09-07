@@ -1,4 +1,23 @@
 requiredNames:
+  - cursor-empty-readable
+  - cursor-malformed-only
+  - cursor-malformed-after-valid
+  - cursor-null
+  - cursor-unrecognized-object
+  - cursor-wrong-content
+  - cursor-missing-source
+  - strike-empty-readable
+  - strike-control-only
+  - strike-malformed-only
+  - strike-malformed-after-valid
+  - strike-null
+  - strike-unrecognized-object
+  - strike-wrong-event-data
+  - strike-unknown-only
+  - strike-mixed-future
+  - strike-missing-source
+  - strike-long-content-parity
+  - strike-oversized-after-valid
   - claude-empty-readable
   - claude-whitespace
   - claude-malformed-only
@@ -22,6 +41,54 @@ requiredNames:
   - codex-missing-source
   - codex-long-content-parity
 cases:
+  - {name: cursor-empty-readable, harness: cursor, input: '', entries: 0}
+  - {name: cursor-malformed-only, harness: cursor, input: 'not json', error: true, legacyEntries: 0}
+  - name: cursor-malformed-after-valid
+    harness: cursor
+    input: |
+      {"role":"user","content":"hello"}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: cursor-null, harness: cursor, input: 'null', error: true, legacyEntries: 1}
+  - {name: cursor-unrecognized-object, harness: cursor, input: '{}', error: true, legacyEntries: 1}
+  - {name: cursor-wrong-content, harness: cursor, input: '{"role":"user","content":42}', error: true, legacyEntries: 1}
+  - {name: cursor-missing-source, harness: cursor, missing: true, error: true}
+  - {name: strike-empty-readable, harness: strike, input: '', entries: 0}
+  - name: strike-control-only
+    harness: strike
+    input: |
+      {"type":"session.started","data":{"sessionId":"synthetic"}}
+      {"type":"model.selected","data":{"model":"synthetic"}}
+      {"type":"turn.started","data":{"turnId":"synthetic"}}
+    entries: 0
+  - {name: strike-malformed-only, harness: strike, input: 'not json', error: true, legacyEntries: 0}
+  - name: strike-malformed-after-valid
+    harness: strike
+    input: |
+      {"type":"user.message","data":{"text":"hello"}}
+      broken
+    error: true
+    legacyEntries: 1
+  - {name: strike-null, harness: strike, input: 'null', error: true, legacyEntries: 0}
+  - {name: strike-unrecognized-object, harness: strike, input: '{}', error: true, legacyEntries: 0}
+  - {name: strike-wrong-event-data, harness: strike, input: '{"type":"usage.reported","data":{"inputTokens":"wrong"}}', error: true, legacyEntries: 0}
+  - {name: strike-unknown-only, harness: strike, input: '{"type":"future-event","data":{}}', error: true, legacyEntries: 0}
+  - name: strike-mixed-future
+    harness: strike
+    input: |
+      {"type":"future-event","data":"opaque"}
+      {"type":"user.message","data":{"text":"hello"}}
+    entries: 1
+  - {name: strike-missing-source, harness: strike, missing: true, error: true}
+  - {name: strike-long-content-parity, harness: strike, input: '{"type":"user.message","data":{"text":"LONG_CONTENT"}}', longContent: true, entries: 1}
+  - name: strike-oversized-after-valid
+    harness: strike
+    input: |
+      {"type":"user.message","data":{"text":"hello"}}
+    oversized: true
+    error: true
+    legacyEntries: 1
   - {name: claude-empty-readable, harness: claude-code, input: '', entries: 0}
   - {name: claude-whitespace, harness: claude-code, input: " \n\t\n", entries: 0}
   - {name: claude-malformed-only, harness: claude-code, input: 'not json', error: true, legacyEntries: 0}

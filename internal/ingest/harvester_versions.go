@@ -20,8 +20,8 @@ var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 	HarnessClaudeCode: {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 	HarnessOpenCode:   {AdapterVersion: 1, IndexerVersion: 15, IndexVersion: 1},
 	HarnessCodex:      {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
-	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 15, IndexVersion: 1},
-	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 15, IndexVersion: 1},
+	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
+	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 }
 
 // WithHarvesterVersions injects targets for a pipeline without changing global

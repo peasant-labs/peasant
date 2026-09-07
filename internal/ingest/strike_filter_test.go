@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,7 +17,8 @@ var strikeRecordSizeFixtureData []byte
 const strikeRecordSizeFixturePath = "internal/ingest/testdata/strike_record_sizes.yaml"
 
 type strikeRecordSizeFixtures struct {
-	Cases []strikeRecordSizeFixture `yaml:"cases"`
+	RequiredNames []string                  `yaml:"requiredNames"`
+	Cases         []strikeRecordSizeFixture `yaml:"cases"`
 }
 
 type strikeRecordSizeFixture struct {
@@ -36,8 +38,17 @@ func TestFilterStrikeOversizedRecordsBoundary(t *testing.T) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		t.Fatalf("committed fixture %s must contain exactly one YAML document, trailing decode: %v", strikeRecordSizeFixturePath, err)
 	}
-	if len(fixtures.Cases) != 3 {
-		t.Fatalf("committed fixture %s must define three boundary cases, got %d", strikeRecordSizeFixturePath, len(fixtures.Cases))
+	names := make(map[string]bool)
+	for _, fixture := range fixtures.Cases {
+		if fixture.Name == "" || names[fixture.Name] {
+			t.Fatalf("missing/duplicate boundary fixture name %q", fixture.Name)
+		}
+		names[fixture.Name] = true
+	}
+	for _, name := range fixtures.RequiredNames {
+		if !names[name] {
+			t.Fatalf("required boundary fixture %q missing", name)
+		}
 	}
 
 	laterRecord := []byte("{\"type\":\"session.titled\",\"data\":{\"title\":\"retained\"}}\n")
@@ -52,6 +63,28 @@ func TestFilterStrikeOversizedRecordsBoundary(t *testing.T) {
 			}
 			if !bytes.Equal(filtered, laterRecord) {
 				t.Errorf("%s filtered bytes did not retain the later record", fixture.Name)
+			}
+			// Completion certifies the retained artifact, not the omitted native
+			// event. Both its known control-only and wholly filtered forms are valid.
+			indexer := NewStrikeIndexer(nil)
+			session := DiscoveredSession{Harness: HarnessStrike}
+			result, err := indexer.IndexTranscriptBytesResult(t.Context(), session, filtered)
+			if err != nil {
+				t.Fatalf("filtered known control refused: %v", err)
+			}
+			if len(result.(indexformat.V1).Entries) != 0 {
+				t.Fatal("control unexpectedly emitted entries")
+			}
+			empty, emptyDiagnostics := filterStrikeOversizedRecords(input[:recordSize+1], fixture.Name+".jsonl")
+			if len(empty) != 0 || len(emptyDiagnostics) != 1 {
+				t.Fatal("fixture did not produce a filtered empty artifact")
+			}
+			result, err = indexer.IndexTranscriptBytesResult(t.Context(), session, empty)
+			if err != nil {
+				t.Fatalf("filtered empty artifact refused: %v", err)
+			}
+			if len(result.(indexformat.V1).Entries) != 0 {
+				t.Fatal("filtered empty artifact emitted entries")
 			}
 		} else {
 			if len(diagnostics) != 0 {

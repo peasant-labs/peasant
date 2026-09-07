@@ -28,6 +28,7 @@ type indexerCompletionFixture struct {
 	Entries       int            `yaml:"entries"`
 	LegacyEntries *int           `yaml:"legacyEntries"`
 	LongContent   bool           `yaml:"longContent"`
+	Oversized     bool           `yaml:"oversized"`
 }
 
 func loadIndexerCompletionFixtures(t *testing.T) []indexerCompletionFixture {
@@ -64,6 +65,9 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 			data := []byte(fixture.Input)
 			if fixture.LongContent {
 				data = []byte(strings.ReplaceAll(fixture.Input, "LONG_CONTENT", strings.Repeat("x", defaults.ContentPreviewLimit+50)))
+			}
+			if fixture.Oversized {
+				data = append(data, []byte(strings.Repeat("x", defaults.ScannerMaxLine)+"\n")...)
 			}
 			if !fixture.Missing {
 				if err := fs.WriteFile(session.SourcePath.String(), data, 0600); err != nil {
