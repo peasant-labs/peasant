@@ -249,6 +249,9 @@ func (cd *CommitDetector) restrictToSessionBranch(ctx context.Context, repoPath 
 	for _, c := range candidates {
 		reachable, err := cd.analyzer.IsAncestor(ctx, repoPath, c.Hash, ref)
 		if err != nil {
+			if ctx.Err() != nil {
+				err = fmt.Errorf("%w (the %v reachability budget for this session was exhausted)", err, branchReachabilityBudget)
+			}
 			return candidates, []DiagnosticEntry{cd.branchDiagnostic(err, repoPath, ref)}
 		}
 		if reachable {

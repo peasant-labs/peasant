@@ -371,3 +371,22 @@ func TestIsAncestor_TimeoutIsAnError(t *testing.T) {
 		t.Error("reachable must be false on timeout")
 	}
 }
+
+// TestIsAncestor_CallerDeadlineIsReportedAsSuch verifies that a deadline the
+// caller already imposed is not misreported as the per-call timeout.
+func TestIsAncestor_CallerDeadlineIsReportedAsSuch(t *testing.T) {
+	dir, topicCommit, _ := initTwoBranchRepo(t)
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := defaultAnalyzer().IsAncestor(ctx, dir, topicCommit, "refs/heads/topic")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected an error wrapping context.DeadlineExceeded, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "caller's deadline") {
+		t.Errorf("a caller-imposed deadline must be named as such: %v", err)
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		t.Errorf("a caller-imposed deadline must not be reported as the per-call timeout: %v", err)
+	}
+}

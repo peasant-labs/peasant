@@ -232,6 +232,7 @@ func (g *ExecGitDiffAnalyzer) GetSessionCommitsWithMetadata(ctx context.Context,
 // can tell "not reachable" from "could not check".
 func (g *ExecGitDiffAnalyzer) IsAncestor(ctx context.Context, repoPath, commit, ref string) (bool, error) {
 	logTimeout := g.logTimeout()
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, logTimeout)
 	defer cancel()
 
@@ -243,9 +244,15 @@ func (g *ExecGitDiffAnalyzer) IsAncestor(ctx context.Context, repoPath, commit, 
 		return true, nil
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if parent.Err() != nil {
+			return false, fmt.Errorf(
+				"git merge-base --is-ancestor %s %s in %s: stopped by the caller's deadline: %w",
+				commit, ref, repoPath, ctx.Err(),
+			)
+		}
 		return false, fmt.Errorf(
-			"git merge-base --is-ancestor in %s: operation timed out after %v: %w",
-			repoPath, logTimeout, ctx.Err(),
+			"git merge-base --is-ancestor %s %s in %s: operation timed out after %v: %w",
+			commit, ref, repoPath, logTimeout, ctx.Err(),
 		)
 	}
 	var exitErr *exec.ExitError
