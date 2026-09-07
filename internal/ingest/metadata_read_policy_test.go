@@ -32,25 +32,26 @@ type metadataReadPolicyFixtures struct {
 	SessionID     ingest.SessionID `yaml:"sessionID"`
 	Transcript    string           `yaml:"transcript"`
 	Cases         []struct {
-		Name                string              `yaml:"name"`
-		SchemaVersion       int                 `yaml:"schemaVersion"`
-		StoredSchemaVersion *int                `yaml:"storedSchemaVersion"`
-		OutsideDiscovery    bool                `yaml:"outsideDiscovery"`
-		RetryCompatible     bool                `yaml:"retryCompatible"`
-		AdapterVersion      *int                `yaml:"adapterVersion"`
-		RawAdapterVersion   string              `yaml:"rawAdapterVersion"`
-		FaultOperation      metadataPolicyFault `yaml:"faultOperation"`
-		TransientIO         bool                `yaml:"transientIO"`
-		MetadataAbsent      bool                `yaml:"metadataAbsent"`
-		RawMetadata         string              `yaml:"rawMetadata"`
-		Nested              bool                `yaml:"nested"`
-		Database            bool                `yaml:"database"`
-		SourceChanged       bool                `yaml:"sourceChanged"`
-		Reindex             bool                `yaml:"reindex"`
-		Force               bool                `yaml:"force"`
-		Stale               bool                `yaml:"stale"`
-		WantExtract         int                 `yaml:"wantExtract"`
-		WantIndexed         int                 `yaml:"wantIndexed"`
+		Name                  string              `yaml:"name"`
+		SchemaVersion         int                 `yaml:"schemaVersion"`
+		StoredSchemaVersion   *int                `yaml:"storedSchemaVersion"`
+		OutsideDiscovery      bool                `yaml:"outsideDiscovery"`
+		RetryCompatible       bool                `yaml:"retryCompatible"`
+		AdapterVersion        *int                `yaml:"adapterVersion"`
+		RawAdapterVersion     string              `yaml:"rawAdapterVersion"`
+		FaultOperation        metadataPolicyFault `yaml:"faultOperation"`
+		TransientIO           bool                `yaml:"transientIO"`
+		MetadataAbsent        bool                `yaml:"metadataAbsent"`
+		RawMetadata           string              `yaml:"rawMetadata"`
+		Nested                bool                `yaml:"nested"`
+		Database              bool                `yaml:"database"`
+		SourceChanged         bool                `yaml:"sourceChanged"`
+		Reindex               bool                `yaml:"reindex"`
+		Force                 bool                `yaml:"force"`
+		Stale                 bool                `yaml:"stale"`
+		WantExtract           int                 `yaml:"wantExtract"`
+		WantIndexed           int                 `yaml:"wantIndexed"`
+		ExpectedMetadataReads *int                `yaml:"expectedMetadataReads"`
 	} `yaml:"cases"`
 }
 
@@ -86,6 +87,8 @@ type metadataPolicyFS struct {
 	faultPath      string
 	faults         atomic.Int64
 	transientIO    bool
+	metadataPath   string
+	metadataReads  atomic.Int64
 }
 
 type metadataPolicyFault string
@@ -109,6 +112,9 @@ func (f *metadataPolicyFS) fault(path string) error {
 var _ ingest.FileSystem = (*metadataPolicyFS)(nil)
 
 func (f *metadataPolicyFS) ReadFile(path string) ([]byte, error) {
+	if path == f.metadataPath {
+		f.metadataReads.Add(1)
+	}
 	if f.faultOperation == metadataPolicyReadFault && path == f.faultPath {
 		return nil, f.fault(path)
 	}
@@ -301,6 +307,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex, cfg.Force = fixture.Reindex, fixture.Force
+			filesystem.metadataPath = metaPath
 			filesystem.faultOperation = fixture.FaultOperation
 			filesystem.transientIO = fixture.TransientIO
 			switch fixture.FaultOperation {
@@ -334,6 +341,9 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			}
 			if result.Summary.Indexed != fixture.WantIndexed {
 				t.Errorf("indexed sessions = %d, want %d", result.Summary.Indexed, fixture.WantIndexed)
+			}
+			if fixture.ExpectedMetadataReads != nil && filesystem.metadataReads.Load() != int64(*fixture.ExpectedMetadataReads) {
+				t.Errorf("metadata reads = %d, want %d", filesystem.metadataReads.Load(), *fixture.ExpectedMetadataReads)
 			}
 			if fixture.FaultOperation != "" && filesystem.faults.Load() == 0 {
 				t.Fatalf("configured metadata I/O fault %q was not reached", fixture.FaultOperation)

@@ -37,10 +37,56 @@ requiredNames:
   - undiscovered stored future schema blocks older file indexing
   - undiscovered stored future schema blocks missing metadata fallback
   - compatible repeated run does not replay refused diagnostics
+  - future adapter malformed body blocks normal refresh
+  - future adapter malformed body blocks forced refresh
+  - older schema future adapter malformed body blocks normal refresh
+  - older schema future adapter malformed body blocks forced logs
+  - future adapter survives malformed schema header on force
+  - future adapter survives overflowing schema header on force
 sessionID: 11111111-1111-1111-1111-111111111111
 transcript: |
   {"type":"user","message":{"role":"user","content":"retained input"},"timestamp":"2024-01-01T00:00:00Z"}
 cases:
+  - name: future adapter survives overflowing schema header on force
+    schemaVersion: 10
+    adapterVersion: 999
+    rawMetadata: '{"schemaVersion":18446744073709551616,"adapterVersion":999,"timestamp":"invalid object"}'
+    database: true
+    force: true
+    expectedMetadataReads: 1
+  - name: future adapter survives malformed schema header on force
+    schemaVersion: 10
+    adapterVersion: 999
+    rawMetadata: '{"schemaVersion":"invalid version","adapterVersion":999,"timestamp":"invalid object"}'
+    database: true
+    force: true
+    expectedMetadataReads: 1
+  - name: future adapter malformed body blocks normal refresh
+    schemaVersion: 10
+    adapterVersion: 999
+    rawMetadata: '{"schemaVersion":10,"adapterVersion":999,"timestamp":"invalid object"}'
+    database: true
+    sourceChanged: true
+    expectedMetadataReads: 1
+  - name: future adapter malformed body blocks forced refresh
+    schemaVersion: 10
+    adapterVersion: 999
+    rawMetadata: '{"schemaVersion":10,"adapterVersion":999,"timestamp":"invalid object"}'
+    database: true
+    force: true
+    expectedMetadataReads: 1
+  - name: older schema future adapter malformed body blocks normal refresh
+    schemaVersion: 8
+    adapterVersion: 999
+    rawMetadata: '{"schemaVersion":8,"adapterVersion":999,"timestamp":"invalid object"}'
+    database: true
+    expectedMetadataReads: 1
+  - name: older schema future adapter malformed body blocks forced logs
+    schemaVersion: 8
+    adapterVersion: 999
+    rawMetadata: '{"schemaVersion":8,"adapterVersion":999,"timestamp":"invalid object"}'
+    force: true
+    expectedMetadataReads: 1
   - name: compatible repeated run does not replay refused diagnostics
     schemaVersion: 999
     retryCompatible: true

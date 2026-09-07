@@ -45,7 +45,19 @@ func (p *Pipeline) checkStoredMetadataVersion(ctx context.Context, sid SessionID
 func isMetadataCompatibilityError(err error) bool {
 	var schemaErr *UnsupportedMetadataVersionError
 	var adapterErr *AdapterVersionError
-	return errors.As(err, &schemaErr) || errors.As(err, &adapterErr)
+	var headerErr *MetadataHeaderError
+	return errors.As(err, &schemaErr) || errors.As(err, &adapterErr) || errors.As(err, &headerErr)
+}
+
+// MetadataHeaderError distinguishes an unreadable compatibility field from
+// historic body corruption. Invalid version evidence never authorizes recovery.
+type MetadataHeaderError struct {
+	Path  string
+	Cause error
+}
+
+func (e *MetadataHeaderError) Error() string {
+	return fmt.Sprintf("read managed metadata %s: compatibility header is invalid (%v); its schema cannot be verified, so artifacts and index were preserved; restore valid version metadata or use a compatible Peasant build before retrying", e.Path, e.Cause)
 }
 
 // UnsupportedMetadataVersionError distinguishes a newer artifact from a missing
@@ -79,17 +91,29 @@ func (e *AdapterVersionError) Error() string {
 	return fmt.Sprintf("refresh managed metadata %s: recorded adapter revision %d is newer than this harness's adapter revision %d; native extraction and artifact replacement were refused to preserve producer evidence; upgrade Peasant before refreshing this session", e.Path, e.Version, e.Target)
 }
 
-func decodeManagedMetadata(data []byte, path string) (*UnifiedMetadata, error) {
-	// Read the version before decoding fields that a future schema may change.
+type managedMetadataHeader struct {
+	SchemaVersion  int
+	AdapterVersion *int
+}
+
+// decodeManagedMetadataHeader validates producer evidence without depending on
+// the metadata body's readability. An unrelated malformed field cannot discard
+// a known schema or adapter revision before a caller decides whether to rewrite.
+func decodeManagedMetadataHeader(data []byte, path string) (*managedMetadataHeader, error) {
 	var header struct {
-		SchemaVersion  int             `json:"schemaVersion"`
+		SchemaVersion  json.RawMessage `json:"schemaVersion"`
 		AdapterVersion json.RawMessage `json:"adapterVersion"`
 	}
 	if err := json.Unmarshal(data, &header); err != nil {
 		return nil, err
 	}
-	if header.SchemaVersion > CurrentSchemaVersion {
-		return nil, &UnsupportedMetadataVersionError{Path: path, Version: header.SchemaVersion}
+	decoded := &managedMetadataHeader{}
+	var schemaErr error
+	if len(header.SchemaVersion) > 0 {
+		schemaErr = json.Unmarshal(header.SchemaVersion, &decoded.SchemaVersion)
+	}
+	if schemaErr == nil && decoded.SchemaVersion > CurrentSchemaVersion {
+		return nil, &UnsupportedMetadataVersionError{Path: path, Version: decoded.SchemaVersion}
 	}
 	if len(header.AdapterVersion) > 0 {
 		if bytes.Equal(bytes.TrimSpace(header.AdapterVersion), []byte("null")) {
@@ -102,7 +126,24 @@ func decodeManagedMetadata(data []byte, path string) (*UnifiedMetadata, error) {
 		if adapterVersion <= 0 {
 			return nil, &AdapterVersionError{Path: path, Version: adapterVersion}
 		}
+		decoded.AdapterVersion = &adapterVersion
 	}
+	// Keep a valid producer revision even when the other header field is
+	// malformed; callers must evaluate that evidence before corruption recovery.
+	if schemaErr != nil {
+		return decoded, &MetadataHeaderError{Path: path, Cause: schemaErr}
+	}
+	return decoded, nil
+}
+
+func decodeManagedMetadata(data []byte, path string) (*UnifiedMetadata, error) {
+	if _, err := decodeManagedMetadataHeader(data, path); err != nil {
+		return nil, err
+	}
+	return decodeManagedMetadataBody(data)
+}
+
+func decodeManagedMetadataBody(data []byte) (*UnifiedMetadata, error) {
 	var meta UnifiedMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, err
@@ -131,18 +172,24 @@ func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetada
 		}
 		return nil, managedInputIOError(path, err)
 	}
-	meta, err := decodeManagedMetadata(data, path)
+	header, err := decodeManagedMetadataHeader(data, path)
+	if header != nil && header.AdapterVersion != nil {
+		target := p.versionTargets()[session.Harness].AdapterVersion
+		if *header.AdapterVersion > target {
+			return nil, &AdapterVersionError{Path: path, Version: *header.AdapterVersion, Target: target}
+		}
+	}
 	if err != nil {
 		if isMetadataCompatibilityError(err) {
 			return nil, err
 		}
 		return nil, nil
 	}
-	if meta.AdapterVersion != nil {
-		target := p.versionTargets()[session.Harness].AdapterVersion
-		if *meta.AdapterVersion > target {
-			return nil, &AdapterVersionError{Path: path, Version: *meta.AdapterVersion, Target: target}
-		}
+	meta, err := decodeManagedMetadataBody(data)
+	if err != nil {
+		// Historic corruption remains recoverable only after the independently
+		// decoded header has ruled out an incompatible producer.
+		return nil, nil
 	}
 	return meta, nil
 }
