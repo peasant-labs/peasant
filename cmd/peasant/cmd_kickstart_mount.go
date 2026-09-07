@@ -138,11 +138,12 @@ func runKickstartFlow(
 	}
 
 	programDeps := kickstart.ProgramDeps{
-		Theme:                 th,
-		Draft:                 draft,
-		Source:                source,
-		CommitGate:            settings.NewCommitGateEvaluator(commitGateCandidates),
-		Preview:               kickstartPreview(cmd, db, th, sessions, source),
+		Theme:      th,
+		Draft:      draft,
+		Source:     source,
+		CommitGate: settings.NewCommitGateEvaluator(commitGateCandidates),
+		Preview: kickstartPreview(cmd, db, th, sessions,
+			kickstart.WithListingPreviewContextSource(source), kickstart.WithDiscoveryInventory(inventory)),
 		ClaudeSessionsPresent: claudeSessionsPresent(inventory),
 		Login:                 kickstartLoginFunc(cmd, configPath),
 		Ingest:                ingestRun,
@@ -354,7 +355,7 @@ func kickstartPreview(
 	db *store.Store,
 	th theme.Theme,
 	sessions []ftue.SessionListing,
-	contexts ...kickstart.ListingPreviewContextSource,
+	options ...kickstart.ListingPreviewOption,
 ) kit.BodySource {
 	ctx := cmd.Context()
 	// storedTurns reports the turns AND whether the store holds the session at
@@ -436,9 +437,7 @@ func kickstartPreview(
 	if db != nil {
 		opts = append(opts, kickstart.WithEmptySessionBody(kickstartImportedEmptySessionBody(ctx, db)))
 	}
-	if len(contexts) > 0 && contexts[0] != nil {
-		opts = append(opts, kickstart.WithListingPreviewContextSource(contexts[0]))
-	}
+	opts = append(opts, options...)
 	return kickstart.NewListingPreview(th, sessions, turns, opts...)
 }
 

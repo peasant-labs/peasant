@@ -18,7 +18,7 @@ sheets:
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 7950}
+    viewport: {width: 1800, height: 9050}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
@@ -45,6 +45,12 @@ guidedSections:
     wantContains: [how long claude code keeps its transcripts, 30 days]
 
 selectionStates:
+  - key: discovery-notes
+    query: pi fixture
+    discoveryInventory:
+      pi:
+        detail: "1 source(s) could not be fully read: /fixtures/corrupt.jsonl (Pi source skipped during discovery)"
+    wantContains: [discovery notes, corrupt.jsonl, repair]
   - key: pi-preview
     query: pi fixture
     wantContains: ["harness: pi", "pi-context-body", "Pi keeps full"]
@@ -230,6 +236,10 @@ guidedCaptures:
   - {name: retention-light-120x40, section: retention, theme: light, width: 120, height: 40}
 
 selectionCaptures:
+  - {name: selection-discovery-notes-dark-80x24, state: discovery-notes, theme: dark, width: 80, height: 24}
+  - {name: selection-discovery-notes-dark-120x40, state: discovery-notes, theme: dark, width: 120, height: 40}
+  - {name: selection-discovery-notes-light-80x24, state: discovery-notes, theme: light, width: 80, height: 24}
+  - {name: selection-discovery-notes-light-120x40, state: discovery-notes, theme: light, width: 120, height: 40}
   - {name: selection-pi-preview-dark-80x24, state: pi-preview, theme: dark, width: 80, height: 24}
   - {name: selection-pi-preview-dark-120x40, state: pi-preview, theme: dark, width: 120, height: 40}
   - {name: selection-pi-preview-light-80x24, state: pi-preview, theme: light, width: 80, height: 24}

@@ -253,6 +253,7 @@ func renderSelectionCapture(
 			// row previews from its own source file.
 			storedThenHarnessTurns(selection.Transcripts, kickstart.NewSourceTurns(&ingest.OSFileSystem{}, listings)),
 			kickstart.WithListingPreviewContextSource(source),
+			kickstart.WithDiscoveryInventory(state.DiscoveryInventory),
 		),
 	})
 	program.SetSize(capture.Width, capture.Height)

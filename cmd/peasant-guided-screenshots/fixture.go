@@ -83,8 +83,9 @@ const (
 	selectionStateSessionPreview selectionState = "session-preview"
 	// selectionStateSourcePreview is a session the local store does not hold,
 	// previewed from the transcript its harness wrote.
-	selectionStateSourcePreview selectionState = "harness-source-preview"
-	selectionStatePiPreview     selectionState = "pi-preview"
+	selectionStateSourcePreview  selectionState = "harness-source-preview"
+	selectionStatePiPreview      selectionState = "pi-preview"
+	selectionStateDiscoveryNotes selectionState = "discovery-notes"
 	// selectionStateOriginHidden is the mounted list with an agent-driven root
 	// hidden, its user-origin control visible, and a visible parent's child
 	// badge reading correctly.
@@ -95,7 +96,7 @@ func (s selectionState) valid() bool {
 	switch s {
 	case selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
-		selectionStateOriginHidden, selectionStatePiPreview:
+		selectionStateOriginHidden, selectionStatePiPreview, selectionStateDiscoveryNotes:
 		return true
 	default:
 		return false
@@ -105,7 +106,7 @@ func (s selectionState) valid() bool {
 func (s selectionState) requiresBothThemes() bool {
 	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
 		s == selectionStateSessionPreview || s == selectionStateSourcePreview ||
-		s == selectionStateOriginHidden || s == selectionStatePiPreview
+		s == selectionStateOriginHidden || s == selectionStatePiPreview || s == selectionStateDiscoveryNotes
 }
 
 // pushState is the closed set of push-wizard screens the harness captures: the
@@ -218,9 +219,10 @@ type guidedSectionFixture struct {
 }
 
 type selectionStateFixture struct {
-	Key          selectionState `yaml:"key"`
-	Query        string         `yaml:"query"`
-	WantContains []string       `yaml:"wantContains"`
+	DiscoveryInventory ftue.ProviderInventory `yaml:"discoveryInventory"`
+	Key                selectionState         `yaml:"key"`
+	Query              string                 `yaml:"query"`
+	WantContains       []string               `yaml:"wantContains"`
 	// WantAbsent names markers that must NOT appear in the rendered view. It
 	// is optional; only the origin-hiding state uses it today, to prove a
 	// row is actually gone rather than merely not asserted present.
@@ -498,7 +500,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 7950},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 9050},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 1200},
 	}
@@ -576,7 +578,7 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
 		selectionStateOriginHidden,
-		selectionStatePiPreview,
+		selectionStatePiPreview, selectionStateDiscoveryNotes,
 	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
@@ -584,6 +586,9 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 	}
 	if len(stateRows[selectionStateOriginHidden].WantAbsent) == 0 {
 		return fmt.Errorf("screenshot fixture selection state %q declares no wantAbsent marker, so a broken origin filter would pass unnoticed", selectionStateOriginHidden)
+	}
+	if stateRows[selectionStateDiscoveryNotes].DiscoveryInventory[ingest.HarnessPi].Detail == "" {
+		return fmt.Errorf("screenshot fixture discovery-notes must contain the skipped Pi source diagnostic")
 	}
 
 	seenNames := make(map[string]bool, len(captures))

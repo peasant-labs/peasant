@@ -1,0 +1,18 @@
+requiredNames: [discovered-pi-selection-preview-import-with-skipped-source]
+cases:
+  - name: discovered-pi-selection-preview-import-with-skipped-source
+    sessionID: 11111111-2222-4333-8444-555555555555
+    title: Pi local setup
+    project: project
+    preview: native pipeline body
+    diagnostic: Pi source skipped
+    completion: "local import completed: 1 new"
+    gitCommands:
+      - [init, -b, main]
+      - [-c, user.name=Fixture, -c, user.email=fixture@example.test, -c, commit.gpgsign=false, commit, --allow-empty, --message=fixture]
+    source: |
+      {"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/fixture/project","timestamp":"2025-01-01T00:00:00Z"}
+      {"type":"message","id":"u","parentId":null,"timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"native pipeline body"}}
+      {"type":"message","id":"a","parentId":"u","timestamp":"2025-01-01T00:00:02Z","message":{"role":"assistant","model":"gpt-5","content":[{"type":"text","text":"Pi answer preserved"}],"usage":{"input":1,"output":2,"cacheRead":0,"cacheWrite":0,"totalTokens":3}}}
+      {"type":"session_info","id":"n","parentId":"a","timestamp":"2025-01-01T00:00:03Z","name":"Pi local setup"}
+    corruptSource: "{}\n"
