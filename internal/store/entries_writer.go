@@ -110,8 +110,8 @@ func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.Sessio
 // IndexSessionEntryBatch writes multiple session entry replacements in one
 // outer transaction. Each session runs under a savepoint, so one bad session can
 // roll back without discarding later successful sessions in the same batch.
-func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
-	results := make([]ingest.SessionEntryWriteResult, len(writes))
+func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) (results []ingest.SessionEntryWriteResult) {
+	results = make([]ingest.SessionEntryWriteResult, len(writes))
 	for i := range writes {
 		results[i].SessionID = writes[i].SessionID
 	}
@@ -129,21 +129,34 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 	defer s.pool.Put(conn)
 
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
-	txnOpen := true
-	stmts := newSessionEntryWriteStatements(conn)
+	// This cleanup runs after transaction finalization, so a failed COMMIT can
+	// never leave a successful completion result for rolled-back entries.
 	defer func() {
-		if txnOpen {
-			txnErr = errors.Join(txnErr, stmts.Close())
-			endFn(&txnErr)
+		if txnErr != nil {
+			commitErr := fmt.Errorf("store: commit session entry batch: %w", txnErr)
+			for i := range results {
+				if results[i].Written {
+					results[i].Written = false
+					results[i].Err = commitErr
+				}
+				if results[i].Err == nil {
+					results[i].Err = commitErr
+				}
+			}
 		}
 	}()
+	endFn := sqlitex.Transaction(conn)
+	// Keep this a direct defer: sqlitex must recover an active handler panic
+	// here, roll back the entire outer transaction, then propagate the panic.
+	defer endFn(&txnErr)
+	stmts := newSessionEntryWriteStatements(conn)
+	defer func() { txnErr = errors.Join(txnErr, stmts.Close()) }()
 
 	for i := range writes {
 		if results[i].Err != nil {
 			continue
 		}
-		outcome, err, fatal := s.indexSessionEntryWriteSavepoint(ctx, conn, writes[i], stmts)
+		outcome, err, fatal := s.indexSessionEntryWriteSavepoint(ctx, conn, writes[i], stmts, nil)
 		results[i].Stats = outcome.stats
 		results[i].EntriesCount = outcome.entriesCount
 		if err != nil {
@@ -158,30 +171,15 @@ func (s *Store) IndexSessionEntryBatch(ctx context.Context, writes []ingest.Sess
 		results[i].Skipped = outcome.skipped
 	}
 
-	txnErr = errors.Join(txnErr, stmts.Close())
-	endFn(&txnErr)
-	txnOpen = false
-	if txnErr != nil {
-		commitErr := fmt.Errorf("store: commit session entry batch: %w", txnErr)
-		for i := range results {
-			if results[i].Written {
-				results[i].Written = false
-				results[i].Err = commitErr
-			}
-			if results[i].Err == nil {
-				results[i].Err = commitErr
-			}
-		}
-	}
 	return results
 }
 
-func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error, bool) {
+func (s *Store) indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlite.Conn, write ingest.SessionEntryWrite, stmts *sessionEntryWriteStatements, conversion *IndexFormatConversion) (sessionEntryWriteOutcome, error, bool) {
 	const savepointName = "session_entry_batch_item"
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
-	format, state, err := s.validateIndexWriteOnConn(conn, write)
+	format, state, err := s.validateIndexWriteOnConn(conn, write, conversion)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
 		return sessionEntryWriteOutcome{}, rollbackErr, fatal

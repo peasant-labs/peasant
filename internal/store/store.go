@@ -259,6 +259,7 @@ var (
 type Store struct {
 	pool              *sqlitex.Pool
 	indexFormats      map[int]IndexFormat
+	indexConversions  map[indexConversionKey]IndexFormatConversion
 	salt              salt.Salt
 	annotationWriteMu sync.Mutex
 	closed            atomic.Bool
@@ -286,6 +287,7 @@ type OpenOption func(*openOptions)
 
 type openOptions struct {
 	indexFormats     []IndexFormat
+	indexConversions []IndexFormatConversion
 	migrationConsent MigrationConsent
 	poolSize         int
 	skipMigrations   bool
@@ -324,6 +326,10 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		opt(&o)
 	}
 	formats, err := newIndexFormats(o.indexFormats)
+	if err != nil {
+		return nil, err
+	}
+	conversions, err := newIndexFormatConversions(o.indexConversions, formats)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +383,7 @@ func Open(dbPath string, opts ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("store: load installation salt: %w", err)
 	}
 
-	return &Store{pool: pool, salt: s, indexFormats: formats}, nil
+	return &Store{pool: pool, salt: s, indexFormats: formats, indexConversions: conversions}, nil
 }
 
 // readUserVersion returns the PRAGMA user_version value from the pool.

@@ -142,7 +142,7 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*store
 	return state, nil
 }
 
-func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite) (IndexFormat, *storedIndexState, error) {
+func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite, conversion *IndexFormatConversion) (IndexFormat, *storedIndexState, error) {
 	if nilIndexValue(write.Result) || write.IndexVersion < 1 || write.Result.IndexVersion() != write.IndexVersion {
 		return nil, nil, fmt.Errorf("store: index result for session %s does not match declared format %d; refused before replacement; provide one concrete result matching the indexer's declared output", write.SessionID, write.IndexVersion)
 	}
@@ -178,6 +178,14 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 		}
 	}
 	producer := write.IndexerVersion
+	if conversion != nil {
+		if state.IndexVersion == nil || *state.IndexVersion != conversion.FromVersion || write.IndexVersion != conversion.ToVersion || producer != 0 {
+			return nil, nil, fmt.Errorf("store: conversion source/target or producer history changed for session %s; replacement was refused; retry the registered upgrade against current stored state", write.SessionID)
+		}
+		// Only the private registered conversion path can bypass the parser
+		// ceiling: no parser ran, and the stored revision/time remain untouched.
+		return format, state, nil
+	}
 	if producer == 0 {
 		// Legacy entry-only callers do not claim a parser run. The current
 		// harness target is only a safety ceiling, never a provenance stamp.
