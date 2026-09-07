@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -9,9 +10,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/peasant-labs/peasant/internal/api"
+	"github.com/peasant-labs/peasant/internal/auth"
+	"github.com/peasant-labs/peasant/internal/config"
+	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/export"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/metrics"
+	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
@@ -33,7 +41,7 @@ func TestPiSanitizedNativeRecording(t *testing.T) {
 		Name   string `yaml:"name"`
 		Source string `yaml:"source"`
 	}
-	if err := yaml.Unmarshal(piSanitizedRecording, &fixture); err != nil {
+	if err := testutil.DecodeFixtureYAML(piSanitizedRecording, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.Name != "sanitized-native-recording" {
@@ -78,6 +86,9 @@ type piSourceCase struct {
 	Source                      string            `yaml:"source"`
 	Reject                      bool              `yaml:"reject"`
 	ProjectionReject            bool              `yaml:"projectionReject"`
+	ExpectedNamespace           *string           `yaml:"expectedNamespace"`
+	ExpectedAssistantContent    *string           `yaml:"expectedAssistantContent"`
+	OutboundDryRunModes         []bool            `yaml:"outboundDryRunModes"`
 	MetadataStringBytes         int               `yaml:"metadataStringBytes"`
 	PaddingStringBytes          int               `yaml:"paddingStringBytes"`
 	SelectedMetadataBytes       int               `yaml:"selectedMetadataBytes"`
@@ -101,9 +112,7 @@ func TestPiFixtureModelExpectationValidation(t *testing.T) {
 			Document string `yaml:"document"`
 		} `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(strings.NewReader(string(piModelExpectationBoundaries)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(piModelExpectationBoundaries, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)
@@ -112,9 +121,7 @@ func TestPiFixtureModelExpectationValidation(t *testing.T) {
 		var target struct {
 			ExpectedModel *piFixtureModelID `yaml:"expectedModel"`
 		}
-		decoder := yaml.NewDecoder(strings.NewReader(tc.Document))
-		decoder.KnownFields(true)
-		if err := decoder.Decode(&target); err == nil {
+		if err := testutil.DecodeFixtureYAML([]byte(tc.Document), &target); err == nil {
 			t.Fatalf("%s: invalid model expectation accepted", tc.Name)
 		}
 	}
@@ -179,9 +186,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 		RequiredNames []string       `yaml:"requiredNames"`
 		Cases         []piSourceCase `yaml:"cases"`
 	}
-	decoder := yaml.NewDecoder(strings.NewReader(string(piSourceFixtures)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(piSourceFixtures, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)
@@ -330,6 +335,9 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				}
 			}
 			projection, err := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: schema.HarnessPi})
+			if len(tc.OutboundDryRunModes) > 0 {
+				assertPiNativeOutward(t, db, fs, session.SessionID, output, tc)
+			}
 			if tc.ProjectionReject {
 				if err != nil {
 					t.Fatal(err)
@@ -344,7 +352,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 					if decodeErr != nil {
 						t.Fatal(decodeErr)
 					}
-					if extra.Namespace == "native.extension" && entry.ToolNamesCSV != nil && *entry.ToolNamesCSV == "original_name" {
+					if extra.Namespace != nil && tc.ExpectedNamespace != nil && *extra.Namespace == *tc.ExpectedNamespace && entry.ToolNamesCSV != nil && *entry.ToolNamesCSV == "original_name" {
 						found = true
 					}
 				}
@@ -359,13 +367,32 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if len(projection.Turns) != tc.ExpectedTurnCount || len(projection.UsageOwners) != tc.ExpectedUsageOwnerCount || len(projection.NativeMetadata) != tc.ExpectedNativeMetadataCount {
 				t.Fatalf("projection: %d turns, %d owners, %d metadata", len(projection.Turns), len(projection.UsageOwners), len(projection.NativeMetadata))
 			}
-			detail, err := transcript.SessionToDetailValidatedWithProjection(&ingest.Session{Harness: schema.HarnessPi}, projection)
+			detail, err := transcript.SessionToDetailValidatedWithProjection(&ingest.Session{ID: session.SessionID, Harness: schema.HarnessPi}, projection)
 			if err != nil {
 				t.Fatal(err)
 			}
 			raw, err := json.Marshal(detail)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, err := schema.DecodeSessionDetailPayloadRaw(raw); err != nil {
+				t.Fatalf("actual native producer failed published Schema: %v", err)
+			}
+			if tc.ExpectedAssistantContent != nil {
+				found := false
+				for _, turn := range detail.Turns {
+					if turn.Role != schema.RoleAssistant {
+						continue
+					}
+					found = true
+					if turn.EntryType != schema.EntryTypeText || !turn.HasThinking || turn.Content != *tc.ExpectedAssistantContent {
+						t.Fatalf("canonical mixed thinking must keep only thinking in the leading disclosure: %+v", turn)
+					}
+					break
+				}
+				if !found {
+					t.Fatal("thinking owner missing")
+				}
 			}
 			for _, text := range tc.Contains {
 				if !strings.Contains(string(raw), text) {
@@ -416,6 +443,54 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 	for _, name := range fixture.RequiredNames {
 		if !seen[name] {
 			t.Errorf("missing required fixture %q", name)
+		}
+	}
+}
+
+func assertPiNativeOutward(t *testing.T, db *store.Store, fs ingest.FileSystem, sid schema.SessionID, output ingest.ResolvedPath, tc piSourceCase) {
+	t.Helper()
+	ctx := t.Context()
+	provider := api.NewStoreDataProvider(db, sessionvisibility.All())
+	local, err := provider.SessionByID(ctx, sid.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = transcript.SessionToDetailValidated(local)
+	if (err != nil) != tc.ProjectionReject || (err != nil && !strings.Contains(err.Error(), "namespace")) {
+		t.Fatalf("API detail namespace outcome: %v", err)
+	}
+	_, err = export.ExportSession(ctx, db, fs, sid.String())
+	if (err != nil) != tc.ProjectionReject || (err != nil && !strings.Contains(err.Error(), "namespace")) {
+		t.Fatalf("export namespace outcome: %v", err)
+	}
+	for _, dryRun := range tc.OutboundDryRunModes {
+		publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilityDetailedUsageV1, schema.ContentCapabilityNativeMetadataV1}}}
+		var stderr bytes.Buffer
+		cfg := &config.Config{Output: config.OutputConfig{BasePath: output.String()}, Push: config.PushConfig{Method: config.PushMethodAll, Visibility: config.VisibilityPrivate}}
+		creds := &auth.Credentials{APIKey: "synthetic-key", KeyID: "synthetic-key-id", UserID: "synthetic-user", Username: "fixture", VillageURL: "https://village.example.com"}
+		pipeline, err := push.NewPipeline(db, publisher, creds, cfg, fs, push.PipelineConfig{Concurrency: 1, DryRun: dryRun}, &testutil.NoopRedactor{}, &stderr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := pipeline.Run(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (result.Errors != 0) != tc.ProjectionReject {
+			t.Fatalf("push dryRun=%t result=%+v stderr=%s", dryRun, result, stderr.String())
+		}
+		if tc.ProjectionReject && (len(result.Sessions) != 1 || result.Sessions[0].Error == nil || !strings.Contains(result.Sessions[0].Error.Error(), "namespace")) {
+			t.Fatalf("push refused for the wrong reason: %+v", result)
+		}
+		if dryRun || tc.ProjectionReject {
+			if len(publisher.Calls) != 0 || len(publisher.AuthoritativeCalls) != 0 {
+				t.Fatal("unsupported namespace uploaded")
+			}
+		} else if len(publisher.Calls) != 1 {
+			t.Fatalf("omitted namespace did not upload: %+v", result)
+		}
+		if dryRun && publisher.SchemaVersionCalls != 0 {
+			t.Fatal("dry-run negotiated remotely")
 		}
 	}
 }

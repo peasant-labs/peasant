@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/schema"
@@ -61,6 +62,9 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 				return p, err
 			}
 		}
+		if extra.Namespace != nil && (entry.EntryType != schema.EntryTypeToolUse || entry.ToolCallID == nil || entry.ParentIndex == nil || entry.Depth != 1 || ingest.IsPiCarrier(entry)) {
+			return p, projectionError("namespace evidence requires a surviving tool-call row with its ID and parent; re-index the source before retrying")
+		}
 		if indexes[entry.EntryIndex] {
 			return p, projectionError("duplicate indexed row")
 		}
@@ -94,6 +98,7 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 		}
 	}
 	seenResults := make(map[string]bool)
+	thinkingByParent := make(map[int][]string)
 	callIndexes := make(map[string]int)
 	for _, entry := range entries {
 		if entry.EntryType == schema.EntryTypeToolUse && entry.ToolCallID != nil {
@@ -106,15 +111,8 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 			continue
 		}
 		if entry.EntryType == schema.EntryTypeThinking && entry.ParentIndex != nil {
-			for i := range p.Turns {
-				t := &p.Turns[i]
-				if t.Index == *entry.ParentIndex && entry.ContentPreview != nil {
-					if t.Content != "" {
-						t.Content += "\n"
-					}
-					t.Content += *entry.ContentPreview
-					t.HasThinking = true
-				}
+			if entry.ContentPreview != nil {
+				thinkingByParent[*entry.ParentIndex] = append(thinkingByParent[*entry.ParentIndex], *entry.ContentPreview)
 			}
 		}
 		if entry.ToolCallID == nil {
@@ -150,6 +148,13 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 				return p, projectionError("duplicate result source")
 			}
 			p.SourceMap[extra.SourceRef] = ProjectedTarget{TurnIndex: toolTargets[tc.ID], ToolCallID: tc.ID}
+		}
+	}
+	for i := range p.Turns {
+		t := &p.Turns[i]
+		if thinking := thinkingByParent[t.Index]; len(thinking) > 0 {
+			t.Content = "<thinking>" + strings.Join(thinking, "\n") + "</thinking>\n" + t.Content
+			t.HasThinking = true
 		}
 	}
 	metadataBytes := 0

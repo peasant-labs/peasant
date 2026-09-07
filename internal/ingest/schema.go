@@ -56,7 +56,7 @@ type Turn struct {
 
 // ToolCall represents a tool invocation within a turn.
 type ToolCall struct {
-	Namespace      string
+	Namespace      *string
 	CallEntryRef   string
 	ResultEntryRef string
 	Usage          *schema.UsageDetail

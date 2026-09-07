@@ -33,7 +33,7 @@ type PiExtra struct {
 	Usage       *schema.UsageDetail           `json:"usage,omitempty"`
 	Metadata    []schema.NativeMetadataRecord `json:"metadata,omitempty"`
 	ModelID     schema.ObservedModelID        `json:"model_id,omitempty"`
-	Namespace   string                        `json:"namespace,omitempty"`
+	Namespace   *string                       `json:"namespace,omitempty"`
 	SessionName *string                       `json:"sessionName,omitempty"`
 }
 
@@ -45,7 +45,7 @@ func PiPublicRef(sessionID, domain, nativeID string) string {
 
 // EncodePiExtra validates and serializes evidence for SessionEntry.Extra.
 func EncodePiExtra(value PiExtra) (*string, error) {
-	if !utf8.ValidString(value.Namespace) || !utf8.ValidString(string(value.ModelID)) {
+	if (value.Namespace != nil && !utf8.ValidString(*value.Namespace)) || !utf8.ValidString(string(value.ModelID)) {
 		return nil, piEvidenceError(fmt.Errorf("typed Pi evidence contains invalid UTF-8"))
 	}
 	total := 0

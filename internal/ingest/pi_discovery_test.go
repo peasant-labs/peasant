@@ -12,7 +12,6 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pi_discovery.yaml
@@ -27,9 +26,7 @@ func TestPiDiscoveryLocationsAndCandidates(t *testing.T) {
 			Reject string `yaml:"reject"`
 		} `yaml:"cases"`
 	}
-	d := yaml.NewDecoder(strings.NewReader(string(piDiscoveryYAML)))
-	d.KnownFields(true)
-	if err := d.Decode(&fixture); err != nil {
+	if err := testutil.DecodeNamedFixtureYAML(piDiscoveryYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool)

@@ -15,10 +15,10 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/schema"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed testdata/pi_common_modes.yaml
@@ -27,12 +27,7 @@ var piModesYAML []byte
 func TestPiKickstartDefaultDiscoveryAndSourcePreview(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	var fixture struct {
-		Source string `yaml:"source"`
-	}
-	if err := yaml.Unmarshal(piModesYAML, &fixture); err != nil {
-		t.Fatal(err)
-	}
+	fixture := loadPiCommonModesFixture(t)
 	directory := filepath.Join(home, ".pi", "agent", "sessions", "project")
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		t.Fatal(err)
@@ -60,28 +55,34 @@ func TestPiKickstartDefaultDiscoveryAndSourcePreview(t *testing.T) {
 	}
 }
 
-func TestPiHarvestCommonModes(t *testing.T) {
-	var fixture struct {
-		RequiredNames []string `yaml:"requiredNames"`
-		Source        string   `yaml:"source"`
-		Cases         []struct {
-			Name          string   `yaml:"name"`
-			First         []string `yaml:"first"`
-			Second        []string `yaml:"second"`
-			Stored        bool     `yaml:"stored"`
-			Managed       bool     `yaml:"managed"`
-			RemoveSource  bool     `yaml:"removeSource"`
-			HeaderOnly    bool     `yaml:"headerOnly"`
-			Redact        bool     `yaml:"redact"`
-			LongText      int      `yaml:"longText"`
-			InvalidUpdate bool     `yaml:"invalidUpdate"`
-		} `yaml:"cases"`
-	}
-	decoder := yaml.NewDecoder(strings.NewReader(string(piModesYAML)))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&fixture); err != nil {
+type piCommonModesFixture struct {
+	RequiredNames []string `yaml:"requiredNames"`
+	Source        string   `yaml:"source"`
+	Cases         []struct {
+		Name          string   `yaml:"name"`
+		First         []string `yaml:"first"`
+		Second        []string `yaml:"second"`
+		Stored        bool     `yaml:"stored"`
+		Managed       bool     `yaml:"managed"`
+		RemoveSource  bool     `yaml:"removeSource"`
+		HeaderOnly    bool     `yaml:"headerOnly"`
+		Redact        bool     `yaml:"redact"`
+		LongText      int      `yaml:"longText"`
+		InvalidUpdate bool     `yaml:"invalidUpdate"`
+	} `yaml:"cases"`
+}
+
+func loadPiCommonModesFixture(t *testing.T) piCommonModesFixture {
+	t.Helper()
+	var fixture piCommonModesFixture
+	if err := testutil.DecodeNamedFixtureYAML(piModesYAML, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	return fixture
+}
+
+func TestPiHarvestCommonModes(t *testing.T) {
+	fixture := loadPiCommonModesFixture(t)
 	seen := make(map[string]bool)
 	for _, tc := range fixture.Cases {
 		if seen[tc.Name] || tc.Name == "" {

@@ -36,23 +36,23 @@ var piProjectionYAML []byte
 var piProjectionManifest []byte
 
 type piProjectionEntry struct {
-	ID        string `yaml:"id"`
-	Role      string `yaml:"role"`
-	Type      string `yaml:"type"`
-	Content   string `yaml:"content"`
-	Usage     string `yaml:"usage"`
-	Tool      string `yaml:"tool"`
-	Parent    *int   `yaml:"parent"`
-	Name      string `yaml:"name"`
-	Namespace string `yaml:"namespace"`
-	Arguments string `yaml:"arguments"`
-	Metadata  string `yaml:"metadata"`
-	Kind      string `yaml:"kind"`
-	Source    string `yaml:"source"`
-	Custom    string `yaml:"custom"`
-	Summary   bool   `yaml:"summary"`
-	Carrier   bool   `yaml:"carrier"`
-	NoOwner   bool   `yaml:"no_owner"`
+	ID        string  `yaml:"id"`
+	Role      string  `yaml:"role"`
+	Type      string  `yaml:"type"`
+	Content   string  `yaml:"content"`
+	Usage     string  `yaml:"usage"`
+	Tool      string  `yaml:"tool"`
+	Parent    *int    `yaml:"parent"`
+	Name      string  `yaml:"name"`
+	Namespace *string `yaml:"namespace"`
+	Arguments string  `yaml:"arguments"`
+	Metadata  string  `yaml:"metadata"`
+	Kind      string  `yaml:"kind"`
+	Source    string  `yaml:"source"`
+	Custom    string  `yaml:"custom"`
+	Summary   bool    `yaml:"summary"`
+	Carrier   bool    `yaml:"carrier"`
+	NoOwner   bool    `yaml:"no_owner"`
 }
 type piProjectionCase struct {
 	Name             string              `yaml:"name"`
@@ -64,6 +64,7 @@ type piProjectionCase struct {
 	WantCosts        []string            `yaml:"want_costs"`
 	WantContent      string              `yaml:"want_content"`
 	Error            string              `yaml:"error"`
+	ProjectionError  string              `yaml:"projection_error"`
 }
 
 func TestPiProjectionSQLiteOutbound(t *testing.T) {
@@ -144,7 +145,7 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			if matches != 0 {
 				t.Fatal("stale conversation or private carrier data remains searchable")
 			}
-			if c.WantTurns == 0 {
+			if c.WantTurns == 0 && c.ProjectionError == "" {
 				engine := metrics.NewEngine(db)
 				engine.SetForce(true)
 				if _, err := engine.ComputeMetrics(ctx, []ingest.SessionID{sid}); err != nil {
@@ -156,6 +157,12 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 				}
 			}
 			p, err := transcript.EntriesToProjectionValidated(stored, transcript.ProjectionOptions{Harness: schema.HarnessPi})
+			if c.ProjectionError != "" {
+				if err == nil || !strings.Contains(err.Error(), c.ProjectionError) {
+					t.Fatalf("unsafe private evidence was not refused: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

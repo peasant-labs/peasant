@@ -1,4 +1,11 @@
 requiredNames:
+  - null_private_namespace_rejected_before_store_maps
+  - number_private_namespace_rejected_before_store_maps
+  - empty_namespace_refuses_lossy_public_conversion
+  - namespace_without_tool_id_rejected
+  - namespace_without_tool_type_rejected
+  - namespace_on_carrier_rejected
+  - multiple_thinking_siblings_share_one_disclosure
   - missing_pi_evidence_cannot_downgrade_usage
   - separate_namespace_refuses_lossy_public_conversion
   - duplicate_carrier_marker_rejected_before_store_maps

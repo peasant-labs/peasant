@@ -1,5 +1,7 @@
 requiredNames:
   - active-history
+  - mixed-thinking-without-tools
+  - thinking-only-owner
   - final-leaf-and-global-name
   - whitespace-clears-name
   - incomplete-tail
@@ -22,10 +24,32 @@ requiredNames:
   - invalid-usage
   - display-true-context
   - separate-native-namespace
+  - empty-native-namespace
+  - omitted-native-namespace
+  - null-native-namespace
+  - number-native-namespace
+  - response-model-omitted
+  - response-model-valid
+  - response-model-empty
+  - response-model-null
   - native-metadata-string-over-limit
   - opaque-tool-result-details-recorded-size-boundary
   - ordinary-content-outside-selected-metadata-budget
 cases:
+  - name: mixed-thinking-without-tools
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"first thought"},{"type":"text","text":"visible answer"},{"type":"thinking","thinking":"second thought"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}]}}
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
+    expectedAssistantContent: "<thinking>first thought\nsecond thought</thinking>\nvisible answer\n[image omitted]"
+  - name: thinking-only-owner
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"only thought"}]}}
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
+    expectedAssistantContent: "<thinking>only thought</thinking>\n"
   - name: opaque-tool-result-details-recorded-size-boundary
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
@@ -57,10 +81,68 @@ cases:
     reject: true
     rejectContains: metadata string exceeds 16 KiB
   - name: separate-native-namespace
+    expectedModel: observed-model
+    outboundDryRunModes: [true, false]
+    expectedNamespace: native.extension
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
-      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"native.extension","arguments":{}}]}}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"observed-model","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"native.extension","arguments":{}}]}}
     projectionReject: true
+  - name: empty-native-namespace
+    expectedModel: observed-model
+    outboundDryRunModes: [true, false]
+    expectedNamespace: ""
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"observed-model","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"","arguments":{}}]}}
+    projectionReject: true
+  - name: omitted-native-namespace
+    expectedModel: observed-model
+    outboundDryRunModes: [true, false]
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"observed-model","content":[{"type":"toolCall","id":"tool","name":"original_name","arguments":{}}]}}
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
+    contains: [original_name]
+  - name: null-native-namespace
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":null,"arguments":{}}]}}
+    reject: true
+    rejectContains: namespace must be a string
+  - name: number-native-namespace
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":3,"arguments":{}}]}}
+    reject: true
+    rejectContains: namespace
+  - name: response-model-omitted
+    expectedModel: fallback-model
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"fallback-model","content":[]}}
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
+  - name: response-model-valid
+    expectedModel: observed-model
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"fallback-model","responseModel":"observed-model","content":[]}}
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
+  - name: response-model-empty
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"fallback-model","responseModel":"","content":[]}}
+    reject: true
+    rejectContains: response model
+  - name: response-model-null
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"fallback-model","responseModel":null,"content":[]}}
+    reject: true
+    rejectContains: response model
   - name: bash-execution
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
@@ -109,6 +191,7 @@ cases:
     expectedTurnCount: 1
     contains: [displayed context]
   - name: active-history
+    expectedAssistantContent: "<thinking>think once</thinking>\nanswer\n[image omitted]"
     expectedModel: observed-model
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","timestamp":"2026-01-01T00:00:00Z"}

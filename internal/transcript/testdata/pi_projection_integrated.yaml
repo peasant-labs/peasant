@@ -1,4 +1,26 @@
 cases:
+  - name: empty_namespace_refuses_lossy_public_conversion
+    entries:
+      - {id: a, role: assistant, content: response}
+      - {id: a, role: assistant, type: tool_use, parent: 0, tool: call, name: search, namespace: '', arguments: '{}'}
+    want_turns: 1
+    want_scopes: [assistant]
+    want_completeness: [unknown]
+    want_costs: ['']
+    error: tool namespace preservation is unavailable
+  - name: namespace_without_tool_id_rejected
+    entries:
+      - {id: a, role: assistant, content: response}
+      - {id: a, role: assistant, type: tool_use, parent: 0, name: search, namespace: '', arguments: '{}', no_owner: true}
+    projection_error: namespace evidence requires a surviving tool-call row
+  - name: namespace_without_tool_type_rejected
+    entries:
+      - {id: a, role: assistant, content: response, namespace: ''}
+    projection_error: namespace evidence requires a surviving tool-call row
+  - name: namespace_on_carrier_rejected
+    entries:
+      - {id: a, role: system, carrier: true, namespace: ''}
+    projection_error: namespace evidence requires a surviving tool-call row
   - name: separate_namespace_refuses_lossy_public_conversion
     entries:
       - {id: a, role: assistant, content: response}
@@ -25,7 +47,17 @@ cases:
     want_scopes: [assistant]
     want_completeness: [unknown]
     want_costs: ['']
-    want_content: "response\nconsidered"
+    want_content: "<thinking>considered</thinking>\nresponse"
+  - name: multiple_thinking_siblings_share_one_disclosure
+    entries:
+      - {id: a, role: assistant, content: 'answer [image omitted]'}
+      - {id: a, role: assistant, type: thinking, parent: 0, content: first, no_owner: true}
+      - {id: a, role: assistant, type: thinking, parent: 0, content: second, no_owner: true}
+    want_turns: 1
+    want_scopes: [assistant]
+    want_completeness: [unknown]
+    want_costs: ['']
+    want_content: "<thinking>first\nsecond</thinking>\nanswer [image omitted]"
   - name: distinct_assistant_owners_complete_and_cost_spelling
     entries:
       - {id: a, role: assistant, content: same, usage: '{"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}}'}
@@ -90,6 +122,10 @@ cases:
     want_completeness: []
     want_costs: []
 invalid_extras:
+  - name: null_private_namespace_rejected_before_store_maps
+    extra: '{"kind":"pi.state","harness":"pi","namespace":null}'
+  - name: number_private_namespace_rejected_before_store_maps
+    extra: '{"kind":"pi.state","harness":"pi","namespace":3}'
   - name: missing_pi_evidence_cannot_downgrade_usage
     extra: '{}'
   - name: duplicate_carrier_marker_rejected_before_store_maps

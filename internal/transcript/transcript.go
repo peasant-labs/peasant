@@ -506,7 +506,7 @@ func SessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, error) {
 	for _, turn := range s.Turns {
 		for _, tool := range turn.ToolCalls {
-			if tool.Namespace != "" {
+			if tool.Namespace != nil {
 				return nil, fmt.Errorf("tool namespace preservation is unavailable: the recorded tool on turn %d has a separate namespace but the pinned schema has no namespace field; transcript.SessionToDetailValidated stopped before detail/export/publication so no evidence was silently dropped; upgrade the shared schema and Peasant together to a release supporting tool namespaces, then retry (the original recording is unchanged)", turn.Index)
 			}
 		}

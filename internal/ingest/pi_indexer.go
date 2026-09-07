@@ -112,7 +112,7 @@ type piMessagePayload struct {
 	Role          piMessageRole   `json:"role"`
 	Content       json.RawMessage `json:"content"`
 	Model         string          `json:"model"`
-	ResponseModel string          `json:"responseModel"`
+	ResponseModel json.RawMessage `json:"responseModel"`
 	Usage         json.RawMessage `json:"usage"`
 	ToolCallID    string          `json:"toolCallId"`
 	ToolName      string          `json:"toolName"`
@@ -131,13 +131,29 @@ type piContentBlock struct {
 	MimeType  *string         `json:"mimeType"`
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
-	Namespace string          `json:"namespace"`
+	Namespace *string         `json:"namespace"`
 	Arguments json.RawMessage `json:"arguments"`
 }
 type piToolOwner struct {
 	parent   int
 	name     string
 	finished bool
+}
+
+var _ json.Unmarshaler = (*piContentBlock)(nil)
+
+// UnmarshalJSON retains optional empty namespace evidence, rejecting explicit
+// null before a pointer decode could make it indistinguishable from omission.
+func (b *piContentBlock) UnmarshalJSON(raw []byte) error {
+	type block piContentBlock
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	if namespace, present := fields["namespace"]; present && bytes.Equal(bytes.TrimSpace(namespace), []byte("null")) {
+		return fmt.Errorf("namespace must be a string when present, not null")
+	}
+	return json.Unmarshal(raw, (*block)(b))
 }
 
 func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, error) {
@@ -157,6 +173,7 @@ func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, e
 		return "", nil, err
 	}
 	var text []string
+	var thinking []string
 	var tools []piContentBlock
 	for _, block := range blocks {
 		switch block.Type {
@@ -169,7 +186,7 @@ func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, e
 			if !assistant || block.Thinking == nil {
 				return "", nil, fmt.Errorf("thinking requires an assistant and string thinking text")
 			}
-			text = append(text, *block.Thinking)
+			thinking = append(thinking, *block.Thinking)
 		case piBlockImage:
 			if block.ImageData == nil || block.MimeType == nil {
 				return "", nil, fmt.Errorf("image block requires string data and mimeType")
@@ -184,7 +201,13 @@ func piContent(raw json.RawMessage, assistant bool) (string, []piContentBlock, e
 			return "", nil, fmt.Errorf("unknown content block type")
 		}
 	}
-	return strings.Join(text, "\n"), tools, nil
+	content := strings.Join(text, "\n")
+	if len(thinking) > 0 {
+		// Canonical mixed-thinking representation: the adapter extracts only
+		// this leading disclosure and leaves the answer/images visible.
+		content = "<thinking>" + strings.Join(thinking, "\n") + "</thinking>\n" + content
+	}
+	return content, tools, nil
 }
 
 func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.SessionEntry, error) {
@@ -272,20 +295,24 @@ func (i *PiIndexer) project(doc piDocument, sessionID SessionID) ([]schema.Sessi
 				if json.Unmarshal(message.Content, &blocks) == nil {
 					for _, block := range blocks {
 						if block.Type == piBlockThinking {
-							row.EntryType = EntryTypeThinking
 							row.HasThinking = true
 						}
 					}
 				}
 				scope, rawUsage = schema.UsageScopeAssistant, message.Usage
 				model := message.Model
-				if message.ResponseModel != "" {
-					model = message.ResponseModel
+				if len(message.ResponseModel) > 0 {
+					if bytes.Equal(bytes.TrimSpace(message.ResponseModel), []byte("null")) {
+						return nil, piSourceError("response model", 0, fmt.Errorf("responseModel must be a valid observed model string when present, not null"))
+					}
+					if err := json.Unmarshal(message.ResponseModel, &model); err != nil {
+						return nil, piSourceError("response model", 0, err)
+					}
 				}
-				if model != "" {
+				if model != "" || len(message.ResponseModel) > 0 {
 					observed, modelErr := schema.NewObservedModelID(model)
 					if modelErr != nil {
-						return nil, modelErr
+						return nil, piSourceError("response model", 0, modelErr)
 					}
 					extra.ModelID = observed
 				}
