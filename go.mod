@@ -12,12 +12,12 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/coder/websocket v1.8.14
-	github.com/dayvidpham/bestiary v0.2.9
+	github.com/dayvidpham/bestiary v0.2.11
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.2.0
 	github.com/peasant-labs/redact v0.1.5
-	github.com/peasant-labs/schema v0.1.3
+	github.com/peasant-labs/schema v0.16.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

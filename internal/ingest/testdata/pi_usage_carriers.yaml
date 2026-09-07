@@ -1,0 +1,19 @@
+cases:
+  - {name: absent_usage_retains_owner, usage: '', completeness: unknown}
+  - {name: complete_zero_without_cost, usage: '{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0}', completeness: complete}
+  - {name: partial_base, usage: '{"input":12}', completeness: partial}
+  - {name: subset_without_base, usage: '{"reasoning":5,"cacheWrite1h":2}', completeness: unknown}
+  - {name: cost_only_exponent, usage: '{"cost":{"total":1e-7}}', completeness: unknown, cost: 1e-7}
+  - {name: recorded_floating_artifact, usage: '{"cost":{"input":0.1,"output":0.2,"total":0.30000000000000004}}', completeness: unknown, cost: '0.30000000000000004'}
+  - {name: inconsistent_cost_components_preserved, usage: '{"cost":{"input":1,"total":2}}', completeness: unknown, cost: '2'}
+  - {name: native_cost_string_rejected, usage: '{"cost":{"total":"1e-7"}}', error: true}
+  - {name: native_cost_overflow_rejected, usage: '{"cost":{"total":1e999}}', error: true}
+  - {name: native_cost_negative_rejected, usage: '{"cost":{"total":-1}}', error: true}
+  - {name: token_null_rejected_before_decode, usage: '{"input":null}', error: true}
+  - {name: usage_null_rejected_before_decode, usage: 'null', error: true}
+  - {name: token_overflow_rejected, usage: '{"input":9007199254740992}', error: true}
+  - {name: token_fraction_rejected, usage: '{"input":0.5}', error: true}
+  - {name: token_negative_rejected, usage: '{"input":-1}', error: true}
+  - {name: token_total_mismatch_rejected, usage: '{"input":1,"output":1,"cacheRead":1,"cacheWrite":1,"totalTokens":3}', error: true}
+  - {name: subset_exceeds_base_rejected, usage: '{"reasoning":2,"output":1}', error: true}
+  - {name: duplicate_usage_key_rejected, usage: '{"input":1,"in\u0070ut":2}', error: true}
