@@ -20,6 +20,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -203,7 +204,7 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 		updated, _ = updated.Update(harvestprogress.TickMsg(started.Add(9 * time.Second)))
 	}
 	if capture.State == ingestProgressStateHarvestCanceled {
-		updated, _ = updated.Update(harvestprogress.StopMsg{Canceled: true, At: started.Add(12 * time.Second)})
+		updated, _ = updated.Update(ingestprogress.FinalMsg{At: started.Add(12 * time.Second), Snapshot: progress.Snapshot(), Outcome: ingestprogress.FinalCanceled})
 	}
 	view := updated.(harvestprogress.Model).View().Content
 	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {

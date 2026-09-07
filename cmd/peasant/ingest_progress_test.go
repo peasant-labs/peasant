@@ -85,6 +85,17 @@ type ingestProgressFixtures struct {
 			DelayedNotification bool   `yaml:"delayed_notification"`
 		} `yaml:"cases"`
 	} `yaml:"lifecycle"`
+	Execution struct {
+		Required []string `yaml:"required_cases"`
+		Cases    []struct {
+			Name         string `yaml:"name"`
+			CancelBefore bool   `yaml:"cancel_before"`
+			CancelDuring bool   `yaml:"cancel_during"`
+			LateCancel   bool   `yaml:"late_cancel"`
+			RunError     bool   `yaml:"run_error"`
+			Want         string `yaml:"want"`
+		} `yaml:"cases"`
+	} `yaml:"execution"`
 	Interrupt struct {
 		Required []string               `yaml:"required_cases"`
 		Cases    []harvestInterruptCase `yaml:"cases"`
@@ -129,7 +140,22 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 		c := doc.Lifecycle.Cases[i]
 		return c.Name, !(c.Key && c.External) && (!c.DelayedNotification || c.External)
 	})
+	validateNamedFixtures(t, "execution", doc.Execution.Required, len(doc.Execution.Cases), func(i int) (string, bool) {
+		c := doc.Execution.Cases[i]
+		return c.Name, c.Want != ""
+	})
 	return doc
+}
+
+func finalOutcome(canceled bool) ingestprogress.FinalOutcome {
+	if canceled {
+		return ingestprogress.FinalCanceled
+	}
+	return ingestprogress.FinalSucceeded
+}
+
+func finalMessage(at time.Time, state *ingest.ProgressState, err error) ingestprogress.FinalMsg {
+	return ingestprogress.FinalMsg{At: at, Snapshot: state.Snapshot(), Outcome: finalOutcome(err != nil)}
 }
 
 func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
@@ -199,7 +225,7 @@ func TestProgressModelCancellationRetainsEstimate(t *testing.T) {
 				model, _ = model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 				assertView("canceling harvest", "2/4")
 			}
-			model, _ = model.Update(harvestprogress.StopMsg{Canceled: !c.StopFallback, At: started.Add(12 * time.Second)})
+			model, _ = model.Update(ingestprogress.FinalMsg{At: started.Add(12 * time.Second), Snapshot: state.Snapshot(), Outcome: ingestprogress.FinalCanceled})
 			assertView("harvest canceled", "✗ discover", "2/4", "total elapsed: 12s")
 			wantStageClock := "12s"
 			if c.Key || c.External {
@@ -268,7 +294,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			go r.Run(operation)
 			done := make(chan struct{})
 			go func() { r.Wait(); close(done) }()
-			defer func() { releaseNotification(); r.Stop(ctx.Err() != nil); <-done }()
+			defer func() { releaseNotification(); r.Finish(finalMessage(time.Now(), state, ctx.Err())); <-done }()
 			waitFor := func(text string) {
 				t.Helper()
 				deadline := time.NewTimer(5 * time.Second)
@@ -310,7 +336,7 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 				default:
 				}
 			}
-			r.Stop(ctx.Err() != nil)
+			r.Finish(finalMessage(time.Now(), state, ctx.Err()))
 			select {
 			case <-done:
 			case <-time.After(5 * time.Second):
@@ -330,9 +356,92 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 	}
 }
 
+type controlledHarvestPipeline struct {
+	cancel context.CancelFunc
+	err    error
+	runs   int
+}
+
+func (p *controlledHarvestPipeline) Run(context.Context) (*ingest.PipelineResult, error) {
+	p.runs++
+	if p.cancel != nil {
+		p.cancel()
+	}
+	return nil, p.err
+}
+
+type controlledHarvestProgram struct {
+	finishEntered chan ingestprogress.FinalMsg
+	releaseFinish chan struct{}
+	done          chan struct{}
+	err           error
+}
+
+func newControlledHarvestProgram() *controlledHarvestProgram {
+	return &controlledHarvestProgram{finishEntered: make(chan ingestprogress.FinalMsg, 1), releaseFinish: make(chan struct{}), done: make(chan struct{})}
+}
+
+func (p *controlledHarvestProgram) Run(context.Context) { <-p.done }
+func (p *controlledHarvestProgram) Finish(msg ingestprogress.FinalMsg) {
+	p.finishEntered <- msg
+	<-p.releaseFinish
+	close(p.done)
+}
+func (p *controlledHarvestProgram) Wait()      { <-p.done }
+func (p *controlledHarvestProgram) Err() error { return p.err }
+
+var _ harvestPipeline = (*controlledHarvestPipeline)(nil)
+var _ harvestProgressProgram = (*controlledHarvestProgram)(nil)
+
+func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
+	for _, c := range loadIngestProgressFixtures(t).Execution.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pipeline := &controlledHarvestPipeline{}
+			if c.RunError {
+				pipeline.err = errors.New("pipeline failed")
+			}
+			if c.CancelDuring {
+				pipeline.cancel = cancel
+			}
+			if c.CancelBefore {
+				cancel()
+			}
+			program := newControlledHarvestProgram()
+			result := make(chan harvestExecution, 1)
+			go func() { result <- executeHarvest(ctx, pipeline, ingest.NewProgressState(), program) }()
+			if c.CancelBefore {
+				execution := <-result
+				if pipeline.runs != 0 || execution.kind != harvestCompletionCanceled {
+					t.Fatalf("startup cancellation ran pipeline or lost outcome: runs=%d kind=%v", pipeline.runs, execution.kind)
+				}
+				return
+			}
+			final := <-program.finishEntered
+			if c.LateCancel {
+				cancel()
+			}
+			close(program.releaseFinish)
+			execution := <-result
+			wantKind := harvestCompletionSucceeded
+			wantFinal := ingestprogress.FinalSucceeded
+			switch c.Want {
+			case "canceled":
+				wantKind, wantFinal = harvestCompletionCanceled, ingestprogress.FinalCanceled
+			case "failed":
+				wantKind, wantFinal = harvestCompletionFailed, ingestprogress.FinalFailed
+			}
+			if execution.kind != wantKind || final.Outcome != wantFinal {
+				t.Fatalf("execution/final = %v/%v, want %v/%v", execution.kind, final.Outcome, wantKind, wantFinal)
+			}
+		})
+	}
+}
+
 func TestProgressModelSuccessClears(t *testing.T) {
 	m := harvestprogress.New(harvestprogress.Options{Progress: ingest.NewProgressState(), Theme: theme.New(theme.ModeDark), StartedAt: time.Now()})
-	updated, cmd := m.Update(harvestprogress.StopMsg{})
+	updated, cmd := m.Update(ingestprogress.FinalMsg{At: time.Now(), Snapshot: ingest.NewProgressState().Snapshot(), Outcome: ingestprogress.FinalSucceeded})
 	if cmd == nil || updated.View().Content != "" {
 		t.Fatal("success must clear the live view")
 	}
@@ -364,7 +473,7 @@ func TestProgressModelCancellationFreezesFinalSnapshot(t *testing.T) {
 	m := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: started})
 	updated, _ := m.Update(harvestprogress.CancelMsg{})
 	state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
-	updated, cmd := updated.Update(harvestprogress.StopMsg{Canceled: true, At: started.Add(8 * time.Second)})
+	updated, cmd := updated.Update(ingestprogress.FinalMsg{At: started.Add(8 * time.Second), Snapshot: state.Snapshot(), Outcome: ingestprogress.FinalCanceled})
 	if cmd == nil {
 		t.Fatal("acknowledged cancellation did not quit")
 	}
@@ -388,7 +497,8 @@ func TestProgressRendererFailureCancelsOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	r := newProgressProgram(&output, ingest.NewProgressState(), nil, cancel)
+	state := ingest.NewProgressState()
+	r := newProgressProgram(&output, state, nil, cancel)
 	r.isTTY = true
 	r.input = terminal
 	go r.Run(ctx)
@@ -397,7 +507,7 @@ func TestProgressRendererFailureCancelsOperation(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		r.Stop(true)
+		r.Finish(finalMessage(time.Now(), state, context.Canceled))
 		<-done
 		t.Fatal("renderer setup failure did not terminate")
 	}
@@ -448,7 +558,7 @@ func TestProgressRenderer_Run_NonTTY(t *testing.T) {
 
 	// Acknowledge completion immediately, even if cancellation preceded startup.
 	cancel()
-	r.Stop(true)
+	r.Finish(finalMessage(time.Now(), state, context.Canceled))
 	r.Wait()
 
 	// In non-TTY mode no bytes are written to the buffer.
@@ -533,7 +643,7 @@ func TestProgressRenderer_Run_TTY_StartStop(t *testing.T) {
 	// Allow a couple of ticks (100 ms each) so the ticker fires at least once.
 	time.Sleep(250 * time.Millisecond)
 	cancel()
-	r.Stop(true)
+	r.Finish(finalMessage(time.Now(), state, context.Canceled))
 	r.Wait()
 
 	// At least one Bubble Tea render should have occurred before shutdown.
@@ -556,7 +666,7 @@ func TestProgressModelControlCCancelsPipeline(t *testing.T) {
 	if !strings.Contains(updated.View().Content, "canceling harvest") {
 		t.Fatal("ctrl+c must retain progress while cancellation unwinds")
 	}
-	updated, cmd = updated.Update(harvestprogress.StopMsg{})
+	updated, cmd = updated.Update(ingestprogress.FinalMsg{At: time.Now(), Snapshot: ingest.NewProgressState().Snapshot(), Outcome: ingestprogress.FinalCanceled})
 	if cmd == nil || !strings.Contains(updated.View().Content, "harvest canceled") {
 		t.Fatal("completion racing with a cancellation request must retain canceled progress")
 	}
@@ -580,7 +690,7 @@ func TestInlineProgressLayout(t *testing.T) {
 				updated, _ = updated.Update(harvestprogress.CancelMsg{})
 			}
 			if c.Stop {
-				updated, _ = updated.Update(harvestprogress.StopMsg{Canceled: c.Cancel, At: started.Add(8 * time.Second)})
+				updated, _ = updated.Update(ingestprogress.FinalMsg{At: started.Add(8 * time.Second), Snapshot: state.Snapshot(), Outcome: finalOutcome(c.Cancel)})
 			}
 			view := updated.View()
 			if view.AltScreen {

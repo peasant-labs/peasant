@@ -21,6 +21,16 @@ lifecycle:
     - {name: external-context-awaits-acknowledgment, external: true}
     - {name: external-tick-before-watcher-notification, external: true, delayed_notification: true}
     - {name: successful-completion}
+execution:
+  required_cases: [startup-cancel-before-pipeline-run, setup-cancel-before-runner-launch, completion-committed-before-late-cancel, failure-committed-before-late-cancel, cancel-ack-before-nil-pipeline-return, success-commit-cancel-tick-before-final-delivery, failed-commit-cancel-tick-before-final-delivery]
+  cases:
+    - {name: startup-cancel-before-pipeline-run, cancel_before: true, want: canceled}
+    - {name: setup-cancel-before-runner-launch, cancel_before: true, want: canceled}
+    - {name: completion-committed-before-late-cancel, late_cancel: true, want: succeeded}
+    - {name: failure-committed-before-late-cancel, run_error: true, late_cancel: true, want: failed}
+    - {name: cancel-ack-before-nil-pipeline-return, cancel_during: true, want: canceled}
+    - {name: success-commit-cancel-tick-before-final-delivery, late_cancel: true, want: succeeded}
+    - {name: failed-commit-cancel-tick-before-final-delivery, run_error: true, late_cancel: true, want: failed}
 interrupt:
   required_cases:
     - raw-control-c
