@@ -1,0 +1,12 @@
+requiredNames:
+  - nested-inclusive-stages-use-root-duration
+  - concurrent-inclusive-share-exceeds-one
+  - root-only-has-no-bottlenecks
+  - absent-root-uses-run-duration
+  - absent-root-uses-run-timestamps
+  - absent-run-duration-retains-stages-without-hints
+  - zero-measured-root-does-not-fabricate-share
+  - zero-stage-with-positive-run-has-zero-share
+  - multiple-roots-use-metadata-not-summed-durations
+  - nested-run-is-not-the-root-denominator
+  - tied-stages-sort-by-stage

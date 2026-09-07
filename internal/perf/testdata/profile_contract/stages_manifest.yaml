@@ -1,0 +1,17 @@
+requiredNames:
+  - push.run
+  - push.discovery
+  - push.selection
+  - push.session
+  - push.session.load
+  - push.session.redact
+  - push.payload.build
+  - push.negotiate
+  - push.publish
+  - push.visibility.update
+  - push.receipt.persist
+  - push.annotations.publish
+  - push.retry
+  - redaction.scan
+  - redaction.rule.evaluate
+  - redaction.apply

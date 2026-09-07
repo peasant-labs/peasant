@@ -8,6 +8,7 @@ import (
 
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/peasant/internal/perf"
 	"github.com/peasant-labs/peasant/internal/sessionorigin"
 	"github.com/peasant-labs/peasant/internal/transcript"
 	"github.com/peasant-labs/redact"
@@ -101,10 +102,14 @@ func BuildTranscriptContentValidated(meta *ingest.UnifiedMetadata, entries []sch
 //
 // A nil redactor leaves the entries as recorded, the same explicit-choice
 // convention marshalTranscriptContent uses; every production push builds one.
-func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) ([]schema.SessionEntry, error) {
+func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) (_ []schema.SessionEntry, err error) {
 	if redactor == nil || len(entries) == 0 {
 		return entries, nil
 	}
+	if profiled, ok := redactor.(*profiledRedactor); ok {
+		profiled.rec.Count(perf.CounterRedactionEntriesScanned, int64(len(entries)), perf.UnitCount, nil)
+	}
+	defer observeRedactionDocument(redactor, &err, redactionEntriesValidation)
 	raw, err := json.Marshal(entries)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -264,7 +269,7 @@ func marshalTranscriptContent(
 	return marshalBuiltTranscriptContent(content, redactor)
 }
 
-func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) ([]byte, error) {
+func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor redact.JSONRedactor) (_ []byte, err error) {
 	b, err := json.Marshal(content)
 	if err != nil {
 		return nil, fmt.Errorf("marshal transcript content: %w", err)
@@ -272,6 +277,7 @@ func marshalBuiltTranscriptContent(content schema.TranscriptContent, redactor re
 	if redactor == nil {
 		return b, nil
 	}
+	defer observeRedactionDocument(redactor, &err, redactionTranscriptValidation)
 	// Through the SAME fail-closed round trip as the other two seams. This one
 	// called redact.RedactJSONDocBytes directly and returned its value, so a
 	// re-marshal failure published the assembled document exactly as built, with

@@ -1,0 +1,73 @@
+# Preflight transcript reads happen before sessions begin and belong to the run.
+# Detailed engine calls belong to the session, not to a mutable run-wide scope.
+parents:
+  push.discovery: [push.run]
+  push.selection: [push.run]
+  push.negotiate: [push.run]
+  push.annotations.publish: [push.run]
+  push.session: [push.run]
+  push.session.load: [push.run, push.session]
+  push.session.redact: [push.session]
+  push.payload.build: [push.session]
+  push.publish: [push.session]
+  push.receipt.persist: [push.session]
+  push.visibility.update: [push.session]
+  push.retry: [push.session, push.negotiate, push.annotations.publish]
+  redaction.apply: [push.session]
+cases:
+  - name: single_root
+    spans:
+      - &root {id: span-1, stage: push.run}
+  - name: nested_sessions
+    spans:
+      - *root
+      - &session {id: span-2, parent: span-1, stage: push.session, subject: 'session:a'}
+      - &child {id: span-3, parent: span-2, stage: redaction.apply, subject: 'session:a'}
+      - {id: span-4, parent: span-1, stage: push.session, subject: 'session:b'}
+      - {id: span-5, parent: span-4, stage: redaction.apply, subject: 'session:b'}
+  - name: disconnected_stage
+    error: disconnected ancestry
+    spans:
+      - *root
+      - {id: span-2, stage: push.discovery}
+  - name: dangling_parent
+    error: disconnected ancestry
+    spans:
+      - *root
+      - {id: span-2, parent: span-9, stage: push.discovery}
+  - name: cyclic_parents
+    error: cyclic ancestry
+    spans:
+      - *root
+      - {id: span-2, parent: span-3, stage: push.discovery}
+      - {id: span-3, parent: span-2, stage: push.selection}
+  - name: missing_root
+    error: missing push.run
+    spans:
+      - *session
+      - *child
+  - name: duplicate_root
+    error: single unparented root
+    spans:
+      - *root
+      - {id: span-2, stage: push.run}
+  - name: parented_root
+    error: single unparented root
+    spans:
+      - {id: span-1, parent: span-2, stage: push.run}
+  - name: duplicate_id
+    error: duplicate span ID
+    spans:
+      - *root
+      - {id: span-1, stage: push.discovery}
+  - name: missing_id
+    error: has no ID
+    spans:
+      - *root
+      - {stage: push.discovery}
+  - name: cross_session_attribution
+    error: different session
+    spans:
+      - *root
+      - *session
+      - {id: span-3, parent: span-2, stage: redaction.apply, subject: 'session:b'}
