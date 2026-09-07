@@ -3638,19 +3638,18 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 			}
 
 			smr, metadataErr := p.readSessionMetadata(hostDir, sid, "reindex")
-			if metadataErr != nil || smr == nil {
-				continue
+			if metadataErr == nil && smr != nil {
+				targets = append(targets, reindexTarget{
+					session:            smr.session,
+					startMs:            smr.startMs,
+					transcriptPath:     smr.transcriptPath,
+					originalSourcePath: smr.originalSourcePath,
+					refreshMetadata:    smr.refreshMetadata,
+				})
 			}
 
-			targets = append(targets, reindexTarget{
-				session:            smr.session,
-				startMs:            smr.startMs,
-				transcriptPath:     smr.transcriptPath,
-				originalSourcePath: smr.originalSourcePath,
-				refreshMetadata:    smr.refreshMetadata,
-			})
-
-			// Also scan for nested subagent sessions under {sessionDir}/subagents/.
+			// Child metadata has its own compatibility boundary. A refused or
+			// missing parent artifact does not prevent indexing a supported child.
 			subagentsDir := fmt.Sprintf("%s/%s/%s", hostDir, sessionEntry.Name(), defaults.DirSubagents.String())
 			subEntries, subErr := p.fs.ReadDir(subagentsDir)
 			if subErr != nil {
