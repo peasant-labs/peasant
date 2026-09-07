@@ -1,4 +1,6 @@
 requiredNames:
+  - completed-empty-opencode-directory
+  - mixed-malformed-opencode-preserves-last-good
   - completed-empty-cursor
   - completed-empty-strike
   - mixed-malformed-cursor-preserves-last-good
@@ -22,6 +24,24 @@ requiredNames:
   - future-format-write-refusal-is-visible
   - logs-ignore-unwritten-index-format
 cases:
+  - name: completed-empty-opencode-directory
+    declaredFormat: 1
+    payload: empty
+    realIndexer: true
+    harness: opencode
+    sourceRoot: /synthetic/opencode
+    sourceDirectories: [storage/message/SESSION_ID]
+    wantIndexed: true
+  - name: mixed-malformed-opencode-preserves-last-good
+    declaredFormat: 1
+    payload: v1
+    realIndexer: true
+    harness: opencode
+    sourceRoot: /synthetic/opencode
+    sourceFiles:
+      storage/message/SESSION_ID/msg_1.json: '{"role":"user","content":"new content that must not replace old data"}'
+      storage/message/SESSION_ID/msg_2.json: malformed
+    wantLogError: could not verify complete input
   - {name: completed-empty-cursor, declaredFormat: 1, payload: empty, realIndexer: true, harness: cursor, emptyTranscript: true, wantIndexed: true}
   - {name: completed-empty-strike, declaredFormat: 1, payload: empty, realIndexer: true, harness: strike, emptyTranscript: true, wantIndexed: true}
   - name: mixed-malformed-cursor-preserves-last-good
@@ -67,7 +87,7 @@ cases:
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new content that must not replace old data"}]}}
       malformed
     wantLogError: could not verify complete input
-  - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantDiagnostic: true}
+  - {name: missing-opencode-tree-preserves-last-good, declaredFormat: 1, payload: empty, realIndexer: true, harness: opencode, transcript: "{}", sourceRoot: /synthetic/missing-opencode, wantLogError: could not verify complete input}
   - {name: parse-error-preserves-last-good, declaredFormat: 1, payload: parse-error, wantLogError: synthetic parser failure}
   - {name: absent-versioned-result-refused, declaredFormat: 1, versioned: true, payload: absent, wantLogError: no concrete result}
   - {name: typed-nil-versioned-result-refused, declaredFormat: 1, versioned: true, payload: nil-v1, wantLogError: no concrete result}

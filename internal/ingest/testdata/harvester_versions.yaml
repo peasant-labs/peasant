@@ -3,7 +3,7 @@ cases:
     harnesses: [claude-code, opencode, codex, cursor, strike]
     adapter: 1
     indexer: 15
-    indexerOverrides: {claude-code: 16, codex: 16, cursor: 16, strike: 16}
+    indexerOverrides: {claude-code: 16, codex: 16, cursor: 16, strike: 16, opencode: 16}
     index: 1
   - name: injected_subset_without_indexers
     harnesses: [claude-code]

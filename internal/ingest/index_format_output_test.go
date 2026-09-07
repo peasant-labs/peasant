@@ -52,6 +52,8 @@ type indexFormatOutputCase struct {
 	Transcript           string              `yaml:"transcript"`
 	EmptyTranscript      bool                `yaml:"emptyTranscript"`
 	SourceRoot           ingest.ResolvedPath `yaml:"sourceRoot"`
+	SourceFiles          map[string]string   `yaml:"sourceFiles"`
+	SourceDirectories    []string            `yaml:"sourceDirectories"`
 }
 
 func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {
@@ -150,6 +152,20 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			ctx := t.Context()
 			fs := testutil.NewMemFS()
 			sid := schema.SessionID(testutil.TestSessionUUID)
+			sourceBytes := make(map[string][]byte)
+			for name, content := range row.SourceFiles {
+				path := filepath.Join(row.SourceRoot.String(), strings.ReplaceAll(name, "SESSION_ID", string(sid)))
+				data := []byte(content)
+				if err := fs.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				sourceBytes[path] = data
+			}
+			for _, directory := range row.SourceDirectories {
+				if err := fs.MkdirAll(filepath.Join(row.SourceRoot.String(), strings.ReplaceAll(directory, "SESSION_ID", string(sid))), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
 			harness := row.Harness
 			if harness == "" {
 				harness = ingest.HarnessClaudeCode
@@ -241,6 +257,12 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				t.Fatal(err)
 			}
 			afterMetadata, err := fs.ReadFile(metadataPath)
+			for path, before := range sourceBytes {
+				after, readErr := fs.ReadFile(path)
+				if readErr != nil || !bytes.Equal(before, after) {
+					t.Fatalf("native fixture changed %s: %v", path, readErr)
+				}
+			}
 			if err != nil || !bytes.Equal(beforeMetadata, afterMetadata) {
 				t.Fatalf("indexing changed managed metadata: %v", err)
 			}

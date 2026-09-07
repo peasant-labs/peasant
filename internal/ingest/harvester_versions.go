@@ -18,7 +18,7 @@ type HarvesterVersions struct {
 // 1 is the relational representation, not that parser revision.
 var HarvesterVersionRegistry = map[Harness]HarvesterVersions{
 	HarnessClaudeCode: {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
-	HarnessOpenCode:   {AdapterVersion: 1, IndexerVersion: 15, IndexVersion: 1},
+	HarnessOpenCode:   {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 	HarnessCodex:      {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 	HarnessCursor:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},
 	HarnessStrike:     {AdapterVersion: 1, IndexerVersion: 16, IndexVersion: 1},

@@ -1,16 +1,19 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/indexformat"
 	"github.com/peasant-labs/schema"
 )
 
@@ -40,7 +43,44 @@ func WithOpenCodeFullContent(enabled bool) OpenCodeIndexerOption {
 }
 
 var _ TranscriptIndexer = (*OpenCodeIndexer)(nil)
+var _ VersionedTranscriptIndexer = (*OpenCodeIndexer)(nil)
 var _ SessionTranscriptSourceResolver = (*OpenCodeIndexer)(nil)
+
+// IndexTranscriptResult refuses incomplete native trees and validates managed
+// projections through their existing bounded, strict decoder.
+func (idx *OpenCodeIndexer) IndexTranscriptResult(ctx context.Context, session DiscoveredSession) (indexformat.Result, error) {
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	switch session.TranscriptOrigin {
+	case TranscriptOriginFile:
+		messages, err := loadOpenCodeJSONSemanticMessagesWithCompletion(idx.fs, session, completion)
+		if err != nil {
+			return completion.result(nil, err)
+		}
+		return completion.result(idx.indexSemanticMessages(session.SessionID, messages), nil)
+	case TranscriptOriginOpenCodeLegacySQLite, TranscriptOriginOpenCodeCurrentSQLite:
+		entries, err := idx.IndexTranscript(ctx, session)
+		return completion.result(entries, err)
+	default:
+		return completion.result(nil, fmt.Errorf("unsupported transcript origin %d", session.TranscriptOrigin))
+	}
+}
+
+// IndexTranscriptBytesResult verifies managed projection bytes; directory
+// origins still require their actual message/part tree, never a session JSON substitute.
+func (idx *OpenCodeIndexer) IndexTranscriptBytesResult(ctx context.Context, session DiscoveredSession, data []byte) (indexformat.Result, error) {
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		return idx.IndexTranscriptResult(ctx, session)
+	}
+	completion := &indexCompletion{ctx: ctx, session: session}
+	if err := ctx.Err(); err != nil {
+		return nil, completion.failure(err)
+	}
+	entries, err := idx.indexManagedProjection(session, data)
+	return completion.result(entries, err)
+}
 
 // SourceKind reports the default legacy JSON representation. TranscriptSourceKindFor
 // selects managed projection files for SQLite-backed sessions.
@@ -194,12 +234,21 @@ func (idx *OpenCodeIndexer) IndexTranscript(_ context.Context, session Discovere
 }
 
 func loadOpenCodeJSONSemanticMessages(filesystem FileSystem, session DiscoveredSession) []openCodeSemanticMessage {
+	// Adapter metadata and legacy preview APIs retain their tolerant policy.
+	messages, _ := loadOpenCodeJSONSemanticMessagesWithCompletion(filesystem, session, nil)
+	return messages
+}
+
+func loadOpenCodeJSONSemanticMessagesWithCompletion(filesystem FileSystem, session DiscoveredSession, completion *indexCompletion) ([]openCodeSemanticMessage, error) {
 	storageRoot := resolveStorageRoot(session)
 	msgDir := filepath.Join(storageRoot, defaults.OpenCodeDirMessage.String(), string(session.SessionID))
 
 	dirEntries, err := filesystem.ReadDir(msgDir)
 	if err != nil {
-		return nil
+		if completion != nil {
+			return nil, fmt.Errorf("read message directory %s: %w", msgDir, err)
+		}
+		return nil, nil
 	}
 
 	// Collect and sort message file names for deterministic ordering.
@@ -215,31 +264,78 @@ func loadOpenCodeJSONSemanticMessages(filesystem FileSystem, session DiscoveredS
 
 	messages := make([]openCodeSemanticMessage, 0, len(msgFiles))
 	for _, name := range msgFiles {
+		if completion != nil {
+			completion.line++
+		}
 		data, err := filesystem.ReadFile(filepath.Join(msgDir, name))
 		if err != nil {
+			if completion != nil {
+				return nil, fmt.Errorf("read message %s: %w", filepath.Join(msgDir, name), err)
+			}
 			continue
+		}
+		if completion != nil {
+			if err := completion.record(data); err != nil {
+				return nil, fmt.Errorf("message %s: %w", name, err)
+			}
 		}
 		messageID := strings.TrimSuffix(name, defaults.ExtJSON.String())
 		semantic, err := parseOpenCodeSemanticMessage(messageID, 0, data)
 		if err != nil {
+			if completion != nil {
+				return nil, fmt.Errorf("decode message %s: %w", name, err)
+			}
 			continue
 		}
+		if completion != nil {
+			if !Role(semantic.Data.Role).IsValid() {
+				return nil, fmt.Errorf("message %s has unsupported role %q", name, semantic.Data.Role)
+			}
+			if err := validateIndexContent(semantic.Data.Content); err != nil {
+				return nil, fmt.Errorf("message %s inline content: %w", name, err)
+			}
+			completion.recognized++
+		}
 		partDir := filepath.Join(storageRoot, defaults.OpenCodeDirPart.String(), messageID)
-		for _, partName := range listPartFilenames(filesystem, storageRoot, messageID) {
+		partNames, partDirErr := listPartFilenamesWithError(filesystem, storageRoot, messageID)
+		if completion != nil && partDirErr != nil {
+			// Some supported older messages carry their complete content inline.
+			// That explicit string/array permits an absent part directory, not an
+			// unreadable directory and not a message lacking inline evidence.
+			inline := bytes.TrimSpace(semantic.Data.Content)
+			if !errors.Is(partDirErr, fs.ErrNotExist) || len(inline) == 0 || bytes.Equal(inline, []byte("null")) {
+				return nil, fmt.Errorf("read required part directory %s: %w; only an absent directory with explicit inline content is supported", partDir, partDirErr)
+			}
+		}
+		for _, partName := range partNames {
 			partData, readErr := filesystem.ReadFile(filepath.Join(partDir, partName))
 			if readErr != nil {
+				if completion != nil {
+					return nil, fmt.Errorf("read part %s: %w", filepath.Join(partDir, partName), readErr)
+				}
 				continue
+			}
+			if completion != nil {
+				if err := completion.record(partData); err != nil {
+					return nil, fmt.Errorf("part %s: %w", partName, err)
+				}
 			}
 			partID := strings.TrimSuffix(partName, defaults.ExtJSON.String())
 			part, parseErr := parseOpenCodeSemanticPart(partID, 0, partData)
 			if parseErr != nil {
+				if completion != nil {
+					return nil, fmt.Errorf("decode part %s: %w", partName, parseErr)
+				}
 				continue
+			}
+			if completion != nil && part.Data.Type == "" {
+				return nil, fmt.Errorf("part %s lacks its type", partName)
 			}
 			semantic.Parts = append(semantic.Parts, part)
 		}
 		messages = append(messages, semantic)
 	}
-	return messages
+	return messages, nil
 }
 
 type openCodeSemanticSummary struct {
@@ -522,8 +618,14 @@ func (idx *OpenCodeIndexer) indexSemanticMessages(sessionID SessionID, messages 
 		if !idx.fullDepth {
 			continue
 		}
+		// Deduplication is structural: truncating a preview must never change
+		// whether a part exists, or every later entry coordinate can shift.
+		parentContent := extractOpenCodePreview(message.Data.Content)
+		if parentContent == "" {
+			parentContent = firstOpenCodeSemanticText(message.Parts)
+		}
 		for _, part := range message.Parts {
-			partEntry, include := idx.openCodePartEntry(sessionID, part, parentIndex, entryIndex, entry.Role, entry.ContentPreview)
+			partEntry, include := idx.openCodePartEntry(sessionID, part, parentIndex, entryIndex, entry.Role, &parentContent)
 			if !include {
 				continue
 			}
@@ -1134,10 +1236,15 @@ func extractOpenCodePreview(raw json.RawMessage) string {
 // This is the package-level variant of (*OpenCodeIndexer).listPartFiles for use
 // by types that do not embed OpenCodeIndexer.
 func listPartFilenames(fs FileSystem, storageRoot, msgID string) []string {
+	files, _ := listPartFilenamesWithError(fs, storageRoot, msgID)
+	return files
+}
+
+func listPartFilenamesWithError(fs FileSystem, storageRoot, msgID string) ([]string, error) {
 	partDir := filepath.Join(storageRoot, defaults.OpenCodeDirPart.String(), msgID)
 	dirEntries, err := fs.ReadDir(partDir)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var partFiles []string
 	for _, de := range dirEntries {
@@ -1148,7 +1255,7 @@ func listPartFilenames(fs FileSystem, storageRoot, msgID string) []string {
 		partFiles = append(partFiles, name)
 	}
 	sort.Strings(partFiles)
-	return partFiles
+	return partFiles, nil
 }
 
 // listPartFiles returns sorted JSON filenames under {storageRoot}/part/{msgID}/.
