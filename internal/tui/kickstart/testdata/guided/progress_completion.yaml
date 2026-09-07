@@ -228,12 +228,239 @@ timing:
         wantElapsed: {DISCOVER: 2s}
 
 expectedCompletionCount: 3
+requiredChildMessageNames:
+  - older-observation-ignored
+  - equal-observation-accepted
+  - authoritative-earlier-final
+  - already-ended-clock-survives-final
+  - final-before-speculative-start
+  - final-replaces-absent-and-unstarted-stages
+  - final-absorbs-late-messages
+  - cancel-retains-qualified-estimate
+  - observation-cancel-retains-before-error
+  - final-cancel-retains-before-error
+  - pending-cancel-overridden-by-success
+  - pending-cancel-overridden-by-failure
 childMessages:
-  - {name: older-observation-ignored}
-  - {name: equal-observation-accepted}
-  - {name: authoritative-earlier-final}
-  - {name: final-absorbs-late-messages}
-  - {name: cancel-retains-qualified-estimate}
+  - name: older-observation-ignored
+    events:
+      - &childInitial
+        action: observe
+        atSeconds: 0
+        stages: [{stage: INDEX, started: true, done: 0, total: 100}]
+        want:
+          total: 0s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '●', count: 0/100, elapsed: 0s}]
+      - &childQualified
+        action: observe
+        atSeconds: 2
+        stages: [{stage: INDEX, started: true, done: 20, total: 100}]
+        want: &qualifiedView
+          total: 2s
+          estimate: 'estimate: 8s'
+          rows: [{stage: INDEX, icon: '●', count: 20/100, elapsed: 2s}]
+      - action: observe
+        atSeconds: 1
+        stages: [{stage: INDEX, started: true, done: 5, total: 100, hasErr: true}]
+        want: *qualifiedView
+  - name: equal-observation-accepted
+    events:
+      - *childInitial
+      - *childQualified
+      - action: observe
+        atSeconds: 2
+        stages: [{stage: INDEX, started: true, done: 30, total: 100}]
+        want:
+          total: 2s
+          estimate: 'estimate: 5s'
+          rows: [{stage: INDEX, icon: '●', count: 30/100, elapsed: 2s}]
+  - name: authoritative-earlier-final
+    events:
+      - *childInitial
+      - *childQualified
+      - action: observe
+        atSeconds: 8
+        stages: [{stage: INDEX, started: true, done: 80, total: 100, ended: true}]
+        want:
+          total: 8s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✓', count: 80/100, elapsed: 8s}]
+      - action: final
+        atSeconds: 5
+        outcome: failed
+        stages: [{stage: INDEX, started: true, done: 40, total: 90, ended: true, hasErr: true}]
+        want:
+          total: 5s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✗', count: 40/90, elapsed: 5s}]
+  - name: already-ended-clock-survives-final
+    events:
+      - *childInitial
+      - *childQualified
+      - action: observe
+        atSeconds: 9
+        stages: [{stage: INDEX, started: true, done: 90, total: 100, ended: true}]
+        want:
+          total: 9s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✓', count: 90/100, elapsed: 9s}]
+      - action: final
+        atSeconds: 12
+        outcome: canceled
+        stages: [{stage: INDEX, started: true, done: 70, total: 80, ended: true, hasErr: true}]
+        want:
+          total: 12s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✗', count: 70/80, elapsed: 9s}]
+  - name: final-before-speculative-start
+    events:
+      - action: observe
+        atSeconds: 8
+        stages: [{stage: INDEX, started: true, done: 80, total: 100, ended: true}]
+        want:
+          total: 8s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✓', count: 80/100, elapsed: 0s}]
+      - action: final
+        atSeconds: 5
+        outcome: failed
+        stages: [{stage: INDEX, started: true, done: 40, total: 100, ended: true, hasErr: true}]
+        want:
+          total: 5s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✗', count: 40/100, elapsed: 0s}]
+  - name: final-replaces-absent-and-unstarted-stages
+    events:
+      - action: observe
+        atSeconds: 0
+        stages:
+          - {stage: DISCOVER, started: true, done: 4, total: 10, ended: true, hasErr: true}
+          - {stage: DIFF, started: true, done: 3, total: 10, ended: true}
+          - {stage: INDEX, started: true, done: 2, total: 100, hasErr: true}
+        want:
+          total: 0s
+          estimate: estimate unavailable
+          rows:
+            - {stage: DISCOVER, icon: '✗', count: 4/10, elapsed: 0s}
+            - {stage: DIFF, icon: '✓', count: 3/10, elapsed: 0s}
+            - {stage: INDEX, icon: '✗', count: 2/100, elapsed: 0s}
+      - action: final
+        atSeconds: 5
+        outcome: succeeded
+        stages:
+          - {stage: DIFF, started: false}
+          - {stage: INDEX, started: true, done: 100, total: 100, ended: true}
+        want:
+          total: 5s
+          estimate: estimate unavailable
+          rows:
+            - {stage: DISCOVER, icon: '○', count: '', elapsed: ''}
+            - {stage: DIFF, icon: '○', count: '', elapsed: ''}
+            - {stage: INDEX, icon: '✓', count: 100/100, elapsed: 5s}
+  - name: final-absorbs-late-messages
+    events:
+      - *childInitial
+      - *childQualified
+      - &childCancel
+        action: cancel
+        atSeconds: 2
+        want: *qualifiedView
+      - action: final
+        atSeconds: 3
+        outcome: canceled
+        stages: [{stage: INDEX, started: true, done: 30, total: 100, ended: true, hasErr: true}]
+        want: &canceledView
+          total: 3s
+          estimate: 'estimate: 8s'
+          rows: [{stage: INDEX, icon: '✗', count: 30/100, elapsed: 3s}]
+      - action: observe
+        atSeconds: 9
+        stages: [{stage: INDEX, started: true, done: 90, total: 100}]
+        want: *canceledView
+      - action: cancel
+        atSeconds: 9
+        want: *canceledView
+      - action: final
+        atSeconds: 10
+        outcome: succeeded
+        stages: [{stage: INDEX, started: true, done: 100, total: 100, ended: true}]
+        want: *canceledView
+      - action: final
+        atSeconds: 11
+        outcome: failed
+        stages: []
+        want: *canceledView
+  - name: cancel-retains-qualified-estimate
+    events:
+      - *childInitial
+      - *childQualified
+      - *childCancel
+      - &childError
+        action: observe
+        atSeconds: 9
+        stages: [{stage: INDEX, started: true, done: 40, total: 100, hasErr: true}]
+        want: &pendingErrorView
+          total: 9s
+          estimate: 'estimate: 8s'
+          rows: [{stage: INDEX, icon: '✗', count: 40/100, elapsed: 9s}]
+      - action: cancel
+        atSeconds: 10
+        want: *pendingErrorView
+      - action: final
+        atSeconds: 12
+        outcome: canceled
+        stages: [{stage: INDEX, started: true, done: 50, total: 100, ended: true, hasErr: true}]
+        want:
+          total: 12s
+          estimate: 'estimate: 8s'
+          rows: [{stage: INDEX, icon: '✗', count: 50/100, elapsed: 12s}]
+  - name: observation-cancel-retains-before-error
+    events:
+      - *childInitial
+      - *childQualified
+      - <<: *childError
+        cancelRequested: true
+      - action: cancel
+        atSeconds: 10
+        want: *pendingErrorView
+  - name: final-cancel-retains-before-error
+    events:
+      - *childInitial
+      - *childQualified
+      - action: final
+        atSeconds: 3
+        outcome: canceled
+        stages: [{stage: INDEX, started: true, done: 30, total: 100, ended: true, hasErr: true}]
+        want: *canceledView
+  - name: pending-cancel-overridden-by-success
+    events:
+      - *childInitial
+      - *childQualified
+      - *childCancel
+      - *childError
+      - action: final
+        atSeconds: 12
+        outcome: succeeded
+        stages: [{stage: INDEX, started: true, done: 100, total: 100, ended: true}]
+        want:
+          total: 12s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✓', count: 100/100, elapsed: 12s}]
+  - name: pending-cancel-overridden-by-failure
+    events:
+      - *childInitial
+      - *childQualified
+      - *childCancel
+      - *childError
+      - action: final
+        atSeconds: 12
+        outcome: failed
+        stages: [{stage: INDEX, started: true, done: 50, total: 100, ended: true, hasErr: true}]
+        want:
+          total: 12s
+          estimate: estimate unavailable
+          rows: [{stage: INDEX, icon: '✗', count: 50/100, elapsed: 12s}]
 completion:
   - name: successful-local-import
     terminalWidth: 80
