@@ -22,8 +22,9 @@ func managedInputIOError(path string, err error) error {
 	return fmt.Errorf("inspect managed input %q before refresh or indexing: %w; its compatibility could not be checked, so this session's artifact replacement and native fallback were refused; restore read access or retry after the I/O failure is resolved", path, err)
 }
 
-// checkStoredMetadataVersion reads actual stored state, not discovery's cache:
-// retained maintenance also processes sessions absent from native discovery.
+// checkStoredMetadataVersion reads actual stored state before refresh or index
+// work. Discovery's cache may be incomplete after a failed prefetch, and retained
+// maintenance also processes sessions absent from native discovery.
 func (p *Pipeline) checkStoredMetadataVersion(ctx context.Context, sid SessionID) error {
 	backing := p.store
 	if backing == nil {
@@ -34,7 +35,7 @@ func (p *Pipeline) checkStoredMetadataVersion(ctx context.Context, sid SessionID
 	}
 	locations, err := backing.BulkLookupSessionLocations(ctx, []SessionID{sid})
 	if err != nil {
-		return fmt.Errorf("read stored metadata compatibility for session %s before indexing: %w; no retained or native fallback index was written; restore database access and retry", sid, err)
+		return fmt.Errorf("read stored metadata compatibility for session %s before refresh or indexing: %w; compatibility could not be verified, so this operation was refused without changing session artifacts or index; restore database access and retry", sid, err)
 	}
 	if location, ok := locations[sid]; ok && location.SchemaVersion > CurrentSchemaVersion {
 		return &UnsupportedMetadataVersionError{Path: string(sid) + " (stored metadata)", Version: location.SchemaVersion}

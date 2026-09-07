@@ -43,10 +43,128 @@ requiredNames:
   - older schema future adapter malformed body blocks forced logs
   - future adapter survives malformed schema header on force
   - future adapter survives overflowing schema header on force
+  - failed prefetch future stored schema blocks force with older file
+  - failed prefetch future stored schema blocks force with missing metadata
+  - failed prefetch future stored schema blocks native update with older file
+  - failed prefetch future stored schema blocks native update with missing metadata
+  - persistent lookup failure preserves future stored schema and older file
+  - persistent lookup failure preserves future stored schema and missing metadata
+  - persistent lookup failure preserves compatible stored data
+  - persistent lookup failure does not create a new stored session
+  - failed prefetch compatible forced refresh succeeds
+  - failed prefetch compatible native update succeeds
+  - failed prefetch new session succeeds
+  - failed prefetch does not trust a reused compatible cache
+  - failed prefetch discards a reused future cache
+  - persistent lookup failure recovers on the next run
 sessionID: 11111111-1111-1111-1111-111111111111
 transcript: |
   {"type":"user","message":{"role":"user","content":"retained input"},"timestamp":"2024-01-01T00:00:00Z"}
 cases:
+  - name: persistent lookup failure recovers on the next run
+    schemaVersion: 9
+    database: true
+    sourceChanged: true
+    lookupFailures: -1
+    retryLookup: true
+    wantDiagnostic: restore database access and retry
+  - name: failed prefetch future stored schema blocks force with older file
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    database: true
+    force: true
+    lookupFailures: 1
+    wantDiagnostic: schema version 999
+  - name: failed prefetch future stored schema blocks force with missing metadata
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    metadataAbsent: true
+    database: true
+    force: true
+    lookupFailures: 1
+    wantDiagnostic: schema version 999
+  - name: failed prefetch future stored schema blocks native update with older file
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    database: true
+    sourceChanged: true
+    lookupFailures: 1
+    wantDiagnostic: schema version 999
+  - name: failed prefetch future stored schema blocks native update with missing metadata
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    metadataAbsent: true
+    database: true
+    sourceChanged: true
+    lookupFailures: 1
+    wantDiagnostic: schema version 999
+  - name: persistent lookup failure preserves future stored schema and older file
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    database: true
+    force: true
+    lookupFailures: -1
+    wantDiagnostic: restore database access and retry
+  - name: persistent lookup failure preserves future stored schema and missing metadata
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    metadataAbsent: true
+    database: true
+    sourceChanged: true
+    lookupFailures: -1
+    wantDiagnostic: restore database access and retry
+  - name: persistent lookup failure preserves compatible stored data
+    schemaVersion: 9
+    database: true
+    sourceChanged: true
+    lookupFailures: -1
+    wantDiagnostic: restore database access and retry
+  - name: persistent lookup failure does not create a new stored session
+    schemaVersion: 9
+    database: true
+    storedAbsent: true
+    metadataAbsent: true
+    lookupFailures: -1
+    wantDiagnostic: restore database access and retry
+  - name: failed prefetch compatible forced refresh succeeds
+    schemaVersion: 9
+    database: true
+    force: true
+    lookupFailures: 1
+    wantExtract: 1
+    wantIndexed: 1
+  - name: failed prefetch compatible native update succeeds
+    schemaVersion: 9
+    database: true
+    sourceChanged: true
+    lookupFailures: 1
+    wantExtract: 1
+    wantIndexed: 1
+  - name: failed prefetch new session succeeds
+    schemaVersion: 9
+    database: true
+    storedAbsent: true
+    metadataAbsent: true
+    lookupFailures: 1
+    wantExtract: 1
+    wantIndexed: 1
+  - name: failed prefetch does not trust a reused compatible cache
+    schemaVersion: 9
+    warmStoredSchema: 9
+    storedSchemaVersion: 999
+    database: true
+    sourceChanged: true
+    lookupFailures: 1
+    wantDiagnostic: schema version 999
+  - name: failed prefetch discards a reused future cache
+    schemaVersion: 9
+    warmStoredSchema: 999
+    storedSchemaVersion: 9
+    database: true
+    sourceChanged: true
+    lookupFailures: 1
+    wantExtract: 1
+    wantIndexed: 1
   - name: future adapter survives overflowing schema header on force
     schemaVersion: 10
     adapterVersion: 999

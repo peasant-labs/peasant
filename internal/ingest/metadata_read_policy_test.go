@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -35,6 +36,11 @@ type metadataReadPolicyFixtures struct {
 		Name                  string              `yaml:"name"`
 		SchemaVersion         int                 `yaml:"schemaVersion"`
 		StoredSchemaVersion   *int                `yaml:"storedSchemaVersion"`
+		WarmStoredSchema      *int                `yaml:"warmStoredSchema"`
+		StoredAbsent          bool                `yaml:"storedAbsent"`
+		LookupFailures        int                 `yaml:"lookupFailures"`
+		RetryLookup           bool                `yaml:"retryLookup"`
+		WantDiagnostic        string              `yaml:"wantDiagnostic"`
 		OutsideDiscovery      bool                `yaml:"outsideDiscovery"`
 		RetryCompatible       bool                `yaml:"retryCompatible"`
 		AdapterVersion        *int                `yaml:"adapterVersion"`
@@ -153,6 +159,29 @@ func (a *metadataPolicyAdapter) ExtractMetadata(ctx context.Context, session ing
 	return a.StubAdapter.ExtractMetadata(ctx, session)
 }
 
+// metadataPolicyStore faults only the lookup dependency. All writes and later
+// state assertions use the real SQLite store.
+type metadataPolicyStore struct {
+	*store.Store
+	remainingFailures atomic.Int64
+	faults            atomic.Int64
+}
+
+var _ ingest.SessionStore = (*metadataPolicyStore)(nil)
+
+func (s *metadataPolicyStore) BulkLookupSessionLocations(ctx context.Context, ids []ingest.SessionID) (map[ingest.SessionID]ingest.SessionLocation, error) {
+	for {
+		remaining := s.remainingFailures.Load()
+		if remaining == 0 {
+			return s.Store.BulkLookupSessionLocations(ctx, ids)
+		}
+		if remaining < 0 || s.remainingFailures.CompareAndSwap(remaining, remaining-1) {
+			s.faults.Add(1)
+			return nil, errors.New("synthetic stored-location lookup I/O failure")
+		}
+	}
+}
+
 type metadataPolicyIndexState struct {
 	IndexerVersion int
 	IndexedAt      int64
@@ -258,6 +287,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			}
 			options := []ingest.PipelineOption{}
 			var database *store.Store
+			var lookupStore *metadataPolicyStore
 			var beforeEntries []schema.SessionEntry
 			var beforeLocations map[ingest.SessionID]ingest.SessionLocation
 			var beforeIndexState metadataPolicyIndexState
@@ -278,32 +308,25 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				if fixture.StoredSchemaVersion != nil {
 					seed.SchemaVersion = *fixture.StoredSchemaVersion
 				}
-				if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &seed, Session: session}}); err != nil {
-					t.Fatal(err)
+				if fixture.WarmStoredSchema != nil {
+					seed.SchemaVersion = *fixture.WarmStoredSchema
 				}
-				producer := 15
-				if fixture.Stale {
-					producer--
+				if !fixture.StoredAbsent {
+					if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &seed, Session: session}}); err != nil {
+						t.Fatal(err)
+					}
+					producer := 15
+					if fixture.Stale {
+						producer--
+					}
+					preview := "last-good indexed content"
+					writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: []schema.SessionEntry{{SessionID: sid, Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}, IndexerVersion: producer, IndexedAtMs: ingested}})
+					if len(writes) != 1 || !writes[0].Written {
+						t.Fatalf("seed index: %+v", writes)
+					}
 				}
-				preview := "last-good indexed content"
-				writes := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Entries: []schema.SessionEntry{{SessionID: sid, Harness: ingest.HarnessClaudeCode, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &preview}}, IndexerVersion: producer, IndexedAtMs: ingested}})
-				if len(writes) != 1 || !writes[0].Written {
-					t.Fatalf("seed index: %+v", writes)
-				}
-				beforeEntries, err = database.ListEntries(ctx, sid)
-				if err != nil {
-					t.Fatal(err)
-				}
-				beforeLocations, err = database.BulkLookupSessionLocations(ctx, []ingest.SessionID{sid})
-				if err != nil {
-					t.Fatal(err)
-				}
-				beforeIndexState = readMetadataPolicyIndexState(t, database, sid)
-				beforeMetrics, err = database.GetMetrics(ctx, sid)
-				if err != nil {
-					t.Fatal(err)
-				}
-				options = append(options, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
+				lookupStore = &metadataPolicyStore{Store: database}
+				options = append(options, ingest.WithStore(lookupStore), ingest.WithMetricsStore(database), ingest.WithIndexLogger(database), ingest.WithIndexers(ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})))
 			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Reindex, cfg.Force = fixture.Reindex, fixture.Force
@@ -332,6 +355,44 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if fixture.WarmStoredSchema != nil {
+				if fixture.Force || fixture.StoredSchemaVersion == nil || database == nil {
+					t.Fatal("warm-cache fixture requires an unforced stored session with a final schema")
+				}
+				adapter.Sessions[0].ModTime = time.UnixMilli(ingested).Add(-time.Hour)
+				if _, err := pipeline.Run(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if adapter.extracts.Load() != 0 {
+					t.Fatal("cache warmup unexpectedly extracted native data")
+				}
+				adapter.Sessions[0] = session
+				conn, err := database.Pool().Take(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.ExecuteTransient(conn, "UPDATE sessions SET schema_version = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{*fixture.StoredSchemaVersion, string(sid)}})
+				database.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if database != nil {
+				beforeEntries, err = database.ListEntries(ctx, sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				beforeLocations, err = database.BulkLookupSessionLocations(ctx, []ingest.SessionID{sid})
+				if err != nil {
+					t.Fatal(err)
+				}
+				beforeIndexState = readMetadataPolicyIndexState(t, database, sid)
+				beforeMetrics, err = database.GetMetrics(ctx, sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lookupStore.remainingFailures.Store(int64(fixture.LookupFailures))
+			}
 			result, err := pipeline.Run(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -342,6 +403,25 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			if result.Summary.Indexed != fixture.WantIndexed {
 				t.Errorf("indexed sessions = %d, want %d", result.Summary.Indexed, fixture.WantIndexed)
 			}
+			if fixture.LookupFailures != 0 && lookupStore.faults.Load() == 0 {
+				t.Fatal("configured stored-location lookup failure was not reached")
+			}
+			if fixture.LookupFailures != 0 && result.Summary.Errors != 0 {
+				t.Errorf("lookup refusal became a fatal session error: %+v", result.Summary)
+			}
+			if fixture.WantDiagnostic != "" {
+				found := false
+				for _, diagnostic := range result.Diagnostics {
+					if strings.Contains(diagnostic.Message, fixture.WantDiagnostic) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("missing diagnostic %q: %+v", fixture.WantDiagnostic, result.Diagnostics)
+				}
+			} else if fixture.LookupFailures != 0 && len(result.Diagnostics) != 0 {
+				t.Errorf("compatible lookup recovery reported refusal: %+v", result.Diagnostics)
+			}
 			if fixture.ExpectedMetadataReads != nil && filesystem.metadataReads.Load() != int64(*fixture.ExpectedMetadataReads) {
 				t.Errorf("metadata reads = %d, want %d", filesystem.metadataReads.Load(), *fixture.ExpectedMetadataReads)
 			}
@@ -349,6 +429,9 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				t.Fatalf("configured metadata I/O fault %q was not reached", fixture.FaultOperation)
 			}
 			afterMetadata, err := filesystem.MemFS.ReadFile(metaPath)
+			if fixture.MetadataAbsent && fixture.WantExtract == 0 && !errors.Is(err, fs.ErrNotExist) {
+				t.Error("refused session created previously missing metadata")
+			}
 			if err != nil && !(fixture.MetadataAbsent && fixture.WantExtract == 0 && errors.Is(err, fs.ErrNotExist)) {
 				t.Fatal(err)
 			}
@@ -391,6 +474,20 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				}
 				if afterState != beforeIndexState {
 					t.Fatalf("actual index producer/state changed: got %+v, want %+v", afterState, beforeIndexState)
+				}
+			}
+			if fixture.RetryLookup {
+				if len(result.Diagnostics) == 0 || fixture.WantExtract != 0 || lookupStore == nil {
+					t.Fatal("lookup retry fixture must first refuse a stored-lookup failure")
+				}
+				firstDiagnostics := append([]ingest.DiagnosticEntry(nil), result.Diagnostics...)
+				lookupStore.remainingFailures.Store(0)
+				retried, err := pipeline.Run(ctx)
+				if err != nil || retried.Summary.Indexed != 1 || len(retried.Diagnostics) != 0 || adapter.extracts.Load() != 1 {
+					t.Fatalf("lookup recovery did not refresh cleanly: result=%+v extracts=%d err=%v", retried, adapter.extracts.Load(), err)
+				}
+				if !reflect.DeepEqual(firstDiagnostics, result.Diagnostics) {
+					t.Fatal("lookup recovery mutated prior diagnostic snapshot")
 				}
 			}
 			if fixture.RetryCompatible {

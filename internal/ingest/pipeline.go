@@ -448,6 +448,8 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 //  9. AUDIT: Write ingest_log entry (best-effort)
 func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) {
 	p.resetDiagnostics()
+	p.locationCache = nil
+	p.seqCursorCache = nil
 	defer func() {
 		if result != nil {
 			result.Diagnostics = p.snapshotDiagnostics()
@@ -508,7 +510,8 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		if err == nil {
 			p.locationCache = cache
 		}
-		// On error, locationCache stays nil and findMetadataPath falls back to walk.
+		// On error, paths fall back to a walk. Before any rewrite, processSession
+		// still checks the authoritative stored schema with a bounded lookup.
 
 		// Load the OpenCode change cursor when the store records it, so the DIFF
 		// stage can re-ingest a session whose newest event sequence moved past the
@@ -1954,6 +1957,13 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	fail := func(err error) workerResult {
 		result.Error = err
+		return workerResult{result: result}
+	}
+	// Prefetch is only a discovery optimization. A missing or stale cache must
+	// never authorize overwriting a newer stored schema, even under --force.
+	if err := p.checkStoredMetadataVersion(ctx, session.SessionID); err != nil {
+		p.reportMetadataRefusal(string(session.SessionID), err)
+		result.Status = DiffUnchanged
 		return workerResult{result: result}
 	}
 	if _, err := p.metadataForRewrite(session); err != nil {
