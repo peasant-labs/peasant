@@ -31,6 +31,11 @@ execution:
     - {name: cancel-ack-before-nil-pipeline-return, cancel_during: true, want: canceled}
     - {name: success-commit-cancel-tick-before-final-delivery, late_cancel: true, want: succeeded}
     - {name: failed-commit-cancel-tick-before-final-delivery, run_error: true, late_cancel: true, want: failed}
+final_override:
+  required_cases: [success-overrides-pending-cancel, failure-overrides-pending-cancel]
+  cases:
+    - {name: success-overrides-pending-cancel, outcome: succeeded}
+    - {name: failure-overrides-pending-cancel, outcome: failed}
 interrupt:
   required_cases:
     - raw-control-c
