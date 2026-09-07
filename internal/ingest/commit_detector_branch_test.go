@@ -26,15 +26,16 @@ type commitDetectorBranchFixture struct {
 }
 
 type commitDetectorBranchCase struct {
-	Name                string          `yaml:"name"`
-	SessionBranch       string          `yaml:"session_branch"`
-	UserEmailMissing    bool            `yaml:"user_email_missing"`
-	Candidates          []string        `yaml:"candidates"`
-	Ancestry            map[string]bool `yaml:"ancestry"`
-	AncestryError       string          `yaml:"ancestry_error"`
-	WantHashes          []string        `yaml:"want_hashes"`
-	WantErrorTypes      []string        `yaml:"want_error_types"`
-	WantAncestryQueries int             `yaml:"want_ancestry_queries"`
+	Name                 string          `yaml:"name"`
+	SessionBranch        string          `yaml:"session_branch"`
+	UserEmailMissing     bool            `yaml:"user_email_missing"`
+	Candidates           []string        `yaml:"candidates"`
+	Ancestry             map[string]bool `yaml:"ancestry"`
+	AncestryError        string          `yaml:"ancestry_error"`
+	AncestryErrorOnQuery int             `yaml:"ancestry_error_on_query"`
+	WantHashes           []string        `yaml:"want_hashes"`
+	WantErrorTypes       []string        `yaml:"want_error_types"`
+	WantAncestryQueries  int             `yaml:"want_ancestry_queries"`
 }
 
 // decodeStrictYAML decodes exactly one YAML document into out, rejecting
@@ -85,6 +86,7 @@ func branchFixtureAnalyzer(t *testing.T, tc commitDetectorBranchCase) *testutil.
 		ancestry[hash+"@refs/heads/"+tc.SessionBranch] = reachable
 	}
 	stub := &testutil.StubGitDiffAnalyzer{CommitInfos: infos, Ancestry: ancestry}
+	stub.IsAncestorErrOnQuery = tc.AncestryErrorOnQuery
 	switch tc.AncestryError {
 	case "":
 	case "timeout":

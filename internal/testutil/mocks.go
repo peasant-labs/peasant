@@ -1397,6 +1397,7 @@ func (s *StubPublisher) UpdateOwner(_ context.Context, id schema.TranscriptID, r
 // Configure FileContents to return specific file contents for (file, commit) pairs.
 // Configure Commits to return commits for GetSessionCommits.
 // Configure CommitInfos to return full metadata for GetSessionCommitsWithMetadata.
+// Configure Ancestry to answer IsAncestor for "commit@ref" keys, and IsAncestorErr to make it fail.
 type StubGitDiffAnalyzer struct {
 	// FileContents maps "file@commit" to file contents.
 	FileContents map[string][]byte
@@ -1412,6 +1413,9 @@ type StubGitDiffAnalyzer struct {
 	GetCommitsWithMetaErr error
 	// IsAncestorErr, when set, is returned by every IsAncestor call.
 	IsAncestorErr error
+	// IsAncestorErrOnQuery makes IsAncestorErr fire only on the Nth call
+	// (1-based). Zero, the default, fires it on every call.
+	IsAncestorErrOnQuery int
 
 	mu              sync.Mutex
 	ancestorQueries int
@@ -1453,8 +1457,9 @@ func (s *StubGitDiffAnalyzer) GetSessionCommitsWithMetadata(_ context.Context, _
 func (s *StubGitDiffAnalyzer) IsAncestor(_ context.Context, _ string, commit, ref string) (bool, error) {
 	s.mu.Lock()
 	s.ancestorQueries++
+	query := s.ancestorQueries
 	s.mu.Unlock()
-	if s.IsAncestorErr != nil {
+	if s.IsAncestorErr != nil && (s.IsAncestorErrOnQuery == 0 || s.IsAncestorErrOnQuery == query) {
 		return false, s.IsAncestorErr
 	}
 	return s.Ancestry[commit+"@"+ref], nil

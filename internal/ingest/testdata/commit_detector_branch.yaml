@@ -5,6 +5,8 @@
 # "is <hash> reachable from refs/heads/<session_branch>?"; a hash missing from
 # the map answers false. `ancestry_error` makes every reachability check fail
 # with the named cause (`timeout` or `unknown_ref`) instead of answering.
+# `ancestry_error_on_query` limits that failure to the Nth reachability question
+# (1-based); zero or absent fails every question.
 #
 # `want_hashes` is compared as an ordered slice: a hash absent from it must be
 # absent from the detector's output, and the input order must survive.
@@ -21,6 +23,7 @@ required_case_names:
   - detached_head_is_treated_as_branchless
   - unresolvable_branch_falls_back_to_the_window
   - reachability_timeout_falls_back_to_the_window
+  - reachability_error_after_earlier_answers_keeps_every_candidate
   - unknown_user_email_still_narrows_by_branch
   - no_candidates_asks_nothing
 cases:
@@ -77,6 +80,18 @@ cases:
     want_hashes: [f1a1f1a1, ab12ab12]
     want_error_types: [branch_reachability_unavailable]
     want_ancestry_queries: 1
+
+  - name: reachability_error_after_earlier_answers_keeps_every_candidate
+    session_branch: feature
+    candidates: [ab12ab12, f1a1f1a1, f2b2f2b2]
+    ancestry:
+      ab12ab12: false
+      f1a1f1a1: true
+    ancestry_error: unknown_ref
+    ancestry_error_on_query: 3
+    want_hashes: [ab12ab12, f1a1f1a1, f2b2f2b2]
+    want_error_types: [branch_reachability_unavailable]
+    want_ancestry_queries: 3
 
   - name: unknown_user_email_still_narrows_by_branch
     session_branch: feature
