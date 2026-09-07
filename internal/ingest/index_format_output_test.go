@@ -54,6 +54,8 @@ type indexFormatOutputCase struct {
 	SourceRoot           ingest.ResolvedPath `yaml:"sourceRoot"`
 	SourceFiles          map[string]string   `yaml:"sourceFiles"`
 	SourceDirectories    []string            `yaml:"sourceDirectories"`
+	HealthyTranscript    string              `yaml:"healthyTranscript"`
+	HealthySourceFiles   map[string]string   `yaml:"healthySourceFiles"`
 }
 
 func loadIndexFormatOutputFixtures(t *testing.T) []indexFormatOutputCase {

@@ -38,6 +38,9 @@ cases:
     realIndexer: true
     harness: opencode
     sourceRoot: /synthetic/opencode
+    healthyTranscript: '{}'
+    healthySourceFiles:
+      storage/message/SESSION_ID/msg_healthy.json: '{"role":"user","content":"healthy session"}'
     sourceFiles:
       storage/message/SESSION_ID/msg_1.json: '{"role":"user","content":"new content that must not replace old data"}'
       storage/message/SESSION_ID/msg_2.json: malformed
@@ -49,6 +52,7 @@ cases:
     payload: v1
     realIndexer: true
     harness: cursor
+    healthyTranscript: '{"role":"user","content":"healthy session"}'
     transcript: |
       {"role":"user","content":"new content that must not replace old data"}
       malformed
@@ -58,6 +62,7 @@ cases:
     payload: v1
     realIndexer: true
     harness: strike
+    healthyTranscript: '{"type":"user.message","data":{"text":"healthy session"}}'
     transcript: |
       {"type":"user.message","data":{"text":"new content that must not replace old data"}}
       {"type":"usage.reported","data":{"inputTokens":"wrong"}}
@@ -74,6 +79,7 @@ cases:
     payload: v1
     realIndexer: true
     harness: claude-code
+    healthyTranscript: '{"type":"user","message":{"role":"user","content":"healthy session"}}'
     transcript: |
       {"type":"user","message":{"role":"user","content":"new content that must not replace old data"}}
       malformed
@@ -83,6 +89,7 @@ cases:
     payload: v1
     realIndexer: true
     harness: codex
+    healthyTranscript: '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"healthy session"}]}}'
     transcript: |
       {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"new content that must not replace old data"}]}}
       malformed

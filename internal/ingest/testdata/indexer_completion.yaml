@@ -1,4 +1,15 @@
 requiredNames:
+  - claude-scan-failure-after-valid
+  - codex-scan-failure-after-valid
+  - cursor-scan-failure-after-valid
+  - claude-partial-read
+  - codex-partial-read
+  - cursor-partial-read
+  - strike-partial-read
+  - codex-malformed-only
+  - codex-whitespace
+  - cursor-whitespace
+  - strike-whitespace
   - cursor-empty-readable
   - cursor-malformed-only
   - cursor-malformed-after-valid
@@ -41,6 +52,32 @@ requiredNames:
   - codex-missing-source
   - codex-long-content-parity
 cases:
+  - name: claude-scan-failure-after-valid
+    harness: claude-code
+    input: |
+      {"type":"user","message":{"role":"user","content":"valid"}}
+    oversized: true
+    error: true
+  - name: codex-scan-failure-after-valid
+    harness: codex
+    input: |
+      {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"valid"}]}}
+    oversized: true
+    error: true
+  - name: cursor-scan-failure-after-valid
+    harness: cursor
+    input: |
+      {"role":"user","content":"valid"}
+    oversized: true
+    error: true
+  - {name: claude-partial-read, harness: claude-code, input: '{"type":"user","message":{"role":"user","content":"valid"}}', partialRead: true, error: true}
+  - {name: codex-partial-read, harness: codex, input: '{"type":"response_item","payload":{"type":"message","role":"user","content":[]}}', partialRead: true, error: true}
+  - {name: cursor-partial-read, harness: cursor, input: '{"role":"user","content":"valid"}', partialRead: true, error: true}
+  - {name: strike-partial-read, harness: strike, input: '{"type":"user.message","data":{"text":"valid"}}', partialRead: true, error: true}
+  - {name: codex-malformed-only, harness: codex, input: 'not json', error: true, legacyEntries: 0}
+  - {name: codex-whitespace, harness: codex, input: " \n\t\n", entries: 0}
+  - {name: cursor-whitespace, harness: cursor, input: " \n\t\n", entries: 0}
+  - {name: strike-whitespace, harness: strike, input: " \n\t\n", entries: 0}
   - {name: cursor-empty-readable, harness: cursor, input: '', entries: 0}
   - {name: cursor-malformed-only, harness: cursor, input: 'not json', error: true, legacyEntries: 0}
   - name: cursor-malformed-after-valid

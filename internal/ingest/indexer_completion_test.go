@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,7 +31,20 @@ type indexerCompletionFixture struct {
 	LegacyEntries *int           `yaml:"legacyEntries"`
 	LongContent   bool           `yaml:"longContent"`
 	Oversized     bool           `yaml:"oversized"`
+	PartialRead   bool           `yaml:"partialRead"`
 }
+
+type completionPartialReadFS struct{ ingest.FileSystem }
+
+func (filesystem completionPartialReadFS) ReadFile(path string) ([]byte, error) {
+	data, err := filesystem.FileSystem.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return data, errors.New("synthetic partial source read")
+}
+
+var _ ingest.FileSystem = completionPartialReadFS{}
 
 func loadIndexerCompletionFixtures(t *testing.T) []indexerCompletionFixture {
 	t.Helper()
@@ -41,6 +56,10 @@ func loadIndexerCompletionFixtures(t *testing.T) []indexerCompletionFixture {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("completion fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
@@ -74,7 +93,11 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			indexer := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{})[fixture.Harness]
+			var inputFS ingest.FileSystem = fs
+			if fixture.PartialRead {
+				inputFS = completionPartialReadFS{FileSystem: fs}
+			}
+			indexer := ingest.NewIndexerRegistry(inputFS, ingest.IndexerRegistryOptions{})[fixture.Harness]
 			strict, ok := indexer.(ingest.VersionedTranscriptIndexer)
 			if !ok {
 				t.Fatal("production indexer cannot verify completion")
@@ -90,7 +113,7 @@ func TestConcreteIndexerCompletion(t *testing.T) {
 			} else {
 				assertCompletionEntries(t, result, err, fixture.Entries)
 			}
-			if !fixture.Missing {
+			if !fixture.Missing && !fixture.PartialRead {
 				fromBytes, bytesErr := strict.IndexTranscriptBytesResult(context.Background(), session, data)
 				if (bytesErr != nil) != fixture.Error || !reflect.DeepEqual(result, fromBytes) {
 					t.Fatalf("file/bytes outcomes differ: %#v %v / %#v %v", result, err, fromBytes, bytesErr)

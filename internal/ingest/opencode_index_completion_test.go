@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	_ "embed"
+	"io"
 	"io/fs"
 	"path/filepath"
 	"reflect"
@@ -64,6 +65,10 @@ func loadOpenCodeCompletionFixtures(t *testing.T) []openCodeCompletionFixture {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&fixtures); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("OpenCode completion fixture must contain exactly one YAML document: %v", err)
 	}
 	names := make(map[string]bool)
 	for _, fixture := range fixtures.Cases {
