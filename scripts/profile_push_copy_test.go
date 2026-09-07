@@ -69,6 +69,9 @@ func loadProfileScriptFixtures(t *testing.T) []profileScriptCase {
 }
 
 func TestProfilePushCopy(t *testing.T) {
+	if err := prepareProfileScriptBase("/tmp/opencode"); err != nil {
+		t.Fatal(err)
+	}
 	script, err := filepath.Abs("profile-push-copy.sh")
 	if err != nil {
 		t.Fatal(err)
