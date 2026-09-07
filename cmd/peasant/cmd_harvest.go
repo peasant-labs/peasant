@@ -250,6 +250,10 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	defer stopSignals()
 	ctx, cancelOperation := context.WithCancel(signalCtx)
 	defer cancelOperation()
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
 	// resolveConfigPath, not the raw flag: reading --config directly returns its
 	// default when unset, so --config-dir was ignored and this command read a
 	// DIFFERENT configuration than the one the user pointed at - including its
@@ -272,6 +276,10 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if levelErr := checkIngestRedactionLevel(cfg, configPath, "peasant "+cmd.Name()); levelErr != nil {
 		cmd.SilenceUsage = true
 		return levelErr
+	}
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
 	}
 
 	// Notify the user when no config file exists.
@@ -468,6 +476,10 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 
 	// 9. Create and run pipeline.
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
 	pipeline, err := ingest.NewPipeline(fs, git, adapters, pipelineCfg, pipelineOpts...)
 	if err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
@@ -478,7 +490,6 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		renderer.isTTY = false
 		renderer.input = nil
 	}
-	go renderer.Run(ctx)
 	var restoreLogger func()
 	if renderer.IsTTY() {
 		orig := slog.Default().Handler()
@@ -486,29 +497,30 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		restoreLogger = func() { slog.SetDefault(slog.New(orig)) }
 	}
 	stopProgress := func() {
-		renderer.Stop(ctx.Err() != nil)
-		renderer.Wait()
 		renderer.Clear()
 		if restoreLogger != nil {
 			restoreLogger()
 			restoreLogger = nil
 		}
 	}
-	defer stopProgress()
-
-	result, err := pipeline.Run(ctx)
+	if err := ctx.Err(); err != nil {
+		cmd.SilenceUsage = true
+		return harvestCancellationError(err)
+	}
+	execution := executeHarvest(ctx, pipeline, progState, renderer)
 	stopProgress()
-	if rendererErr := renderer.Err(); rendererErr != nil {
+	if execution.uiErr != nil {
 		cmd.SilenceUsage = true
-		return fmt.Errorf("harvest progress failed: %w; rerun 'peasant harvest' to continue", rendererErr)
+		return fmt.Errorf("harvest progress failed: %w; rerun 'peasant harvest' to continue", execution.uiErr)
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
+	if execution.kind == harvestCompletionCanceled {
 		cmd.SilenceUsage = true
-		return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", ctxErr)
+		return harvestCancellationError(execution.ctxErr)
 	}
-	if err != nil {
-		return fmt.Errorf("pipeline failed: %w", err)
+	if execution.kind == harvestCompletionFailed {
+		return fmt.Errorf("pipeline failed: %w", execution.runErr)
 	}
+	result := execution.result
 	if selectionConflicts != nil {
 		selectionConflicts.notice(cmd.ErrOrStderr(), configPath)
 	}
@@ -533,6 +545,10 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		return fmt.Errorf("%d session(s) failed", result.Summary.Errors)
 	}
 	return nil
+}
+
+func harvestCancellationError(err error) error {
+	return fmt.Errorf("harvest canceled while the ingest pipeline was running: %w; rerun 'peasant harvest' to continue", err)
 }
 
 func printIndexProfile(w io.Writer, profile ingest.IndexProfileSnapshot) {

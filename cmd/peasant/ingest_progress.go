@@ -12,6 +12,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"golang.org/x/term"
 )
@@ -28,7 +29,7 @@ import (
 //	r := newProgressProgram(os.Stderr, progState, nil, cancel)
 //	go r.Run(ctx)       // cancellation stays mounted until operation returns
 //	pipeline.Run(ctx)
-//	r.Stop(ctx.Err() != nil)
+//	r.Finish(ingestprogress.FinalMsg{Outcome: ingestprogress.FinalSucceeded})
 //	r.Wait()            // blocks until renderer goroutine exits
 //	r.Clear()           // erase progress lines before printing final summary
 type progressProgram struct {
@@ -42,8 +43,60 @@ type progressProgram struct {
 	cancel   context.CancelFunc
 	errMu    sync.Mutex
 	err      error
-	stop     chan bool
+	finish   chan ingestprogress.FinalMsg
 	stopOnce sync.Once
+}
+
+type harvestPipeline interface {
+	Run(context.Context) (*ingest.PipelineResult, error)
+}
+
+type harvestProgressProgram interface {
+	Run(context.Context)
+	Finish(ingestprogress.FinalMsg)
+	Wait()
+	Err() error
+}
+
+type harvestCompletionKind uint8
+
+const (
+	harvestCompletionSucceeded harvestCompletionKind = iota + 1
+	harvestCompletionCanceled
+	harvestCompletionFailed
+)
+
+type harvestExecution struct {
+	kind     harvestCompletionKind
+	result   *ingest.PipelineResult
+	runErr   error
+	ctxErr   error
+	uiErr    error
+	at       time.Time
+	snapshot map[ingest.Stage]ingest.StageProgress
+}
+
+func executeHarvest(ctx context.Context, pipeline harvestPipeline, progress *ingest.ProgressState, program harvestProgressProgram) harvestExecution {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return harvestExecution{kind: harvestCompletionCanceled, ctxErr: ctxErr, at: time.Now(), snapshot: progress.Snapshot()}
+	}
+	go program.Run(ctx)
+	result, runErr := pipeline.Run(ctx)
+	completedAt := time.Now()
+	ctxErr := ctx.Err()
+	snapshot := progress.Snapshot()
+	kind := harvestCompletionSucceeded
+	finalOutcome := ingestprogress.FinalSucceeded
+	if ctxErr != nil {
+		kind = harvestCompletionCanceled
+		finalOutcome = ingestprogress.FinalCanceled
+	} else if runErr != nil {
+		kind = harvestCompletionFailed
+		finalOutcome = ingestprogress.FinalFailed
+	}
+	program.Finish(ingestprogress.FinalMsg{At: completedAt, Snapshot: snapshot, Outcome: finalOutcome})
+	program.Wait()
+	return harvestExecution{kind: kind, result: result, runErr: runErr, ctxErr: ctxErr, uiErr: program.Err(), at: completedAt, snapshot: snapshot}
 }
 
 const progressProgramFPS = 24
@@ -64,13 +117,13 @@ func newProgressProgram(w io.Writer, state *ingest.ProgressState, anim *animatio
 		input = os.Stdin
 	}
 	r := &progressProgram{
-		w:     w,
-		input: input,
-		state: state,
-		anim:  anim,
-		isTTY: isTTY,
-		theme: theme.New(theme.ModeDark),
-		stop:  make(chan bool, 1),
+		w:      w,
+		input:  input,
+		state:  state,
+		anim:   anim,
+		isTTY:  isTTY,
+		theme:  theme.New(theme.ModeDark),
+		finish: make(chan ingestprogress.FinalMsg, 1),
 	}
 	if len(cancel) > 0 {
 		r.cancel = cancel[0]
@@ -91,7 +144,7 @@ func (r *progressProgram) Run(ctx context.Context) {
 	}
 	if !r.isTTY {
 		// Operation cancellation is not renderer completion, even without a TTY.
-		<-r.stop
+		<-r.finish
 		return
 	}
 	model := r.newModel(ctx, time.Now())
@@ -112,8 +165,8 @@ func (r *progressProgram) Run(ctx context.Context) {
 			case <-operationDone:
 				program.Send(harvestprogress.CancelMsg{})
 				operationDone = nil
-			case canceled := <-r.stop:
-				program.Send(harvestprogress.StopMsg{Canceled: canceled || ctx.Err() != nil, At: time.Now()})
+			case final := <-r.finish:
+				program.Send(final)
 				return
 			case <-finished:
 				return
@@ -138,10 +191,10 @@ func (r *progressProgram) newModel(ctx context.Context, startedAt time.Time) har
 	return harvestprogress.New(harvestprogress.Options{Progress: r.state, Theme: r.theme, Animation: r.anim, StartedAt: startedAt, Cancel: r.cancel, ContextErr: ctx.Err})
 }
 
-// Stop acknowledges operation completion. Cancellation alone must not unmount
-// progress while the pipeline is still unwinding.
-func (r *progressProgram) Stop(canceled bool) {
-	r.stopOnce.Do(func() { r.stop <- canceled })
+// Finish publishes the command-owned final outcome. Cancellation alone must not
+// unmount progress while the pipeline is still unwinding.
+func (r *progressProgram) Finish(final ingestprogress.FinalMsg) {
+	r.stopOnce.Do(func() { r.finish <- final })
 }
 
 // Wait blocks until Run has returned.
@@ -161,3 +214,6 @@ func (r *progressProgram) IsTTY() bool { return r.isTTY }
 // when the model returns a blank view during shutdown, so no extra ANSI erase is
 // necessary here.
 func (r *progressProgram) Clear() {}
+
+var _ harvestPipeline = (*ingest.Pipeline)(nil)
+var _ harvestProgressProgram = (*progressProgram)(nil)

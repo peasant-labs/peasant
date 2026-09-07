@@ -25,12 +25,6 @@ type TickMsg time.Time
 // CancelMsg reports operation cancellation without ending presentation lifetime.
 type CancelMsg struct{}
 
-// StopMsg is retained until command completion sends typed final messages.
-type StopMsg struct {
-	Canceled bool
-	At       time.Time
-}
-
 // ProgressSource supplies a non-blocking pipeline snapshot to the inline model.
 type ProgressReader interface {
 	Snapshot() map[ingest.Stage]ingest.StageProgress
@@ -93,17 +87,6 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.stopped = true
 		m.canceling = msg.Outcome == ingestprogress.FinalCanceled
 		return m, tea.Quit
-	case StopMsg:
-		at := msg.At
-		if at.IsZero() {
-			at = m.now
-		}
-		outcome := ingestprogress.FinalSucceeded
-		if msg.Canceled || m.canceling || (m.operationErr != nil && m.operationErr() != nil) {
-			outcome = ingestprogress.FinalCanceled
-		}
-		snapshot := m.state.Snapshot()
-		return m.Update(ingestprogress.FinalMsg{At: at, Snapshot: snapshot, Outcome: outcome})
 	case CancelMsg:
 		m.beginCancel()
 	case TickMsg:
