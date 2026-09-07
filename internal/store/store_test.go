@@ -524,7 +524,7 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 		t.Fatalf("first InsertSessions: %v", err)
 	}
 
-	// Modify tokens and re-insert (INSERT OR REPLACE should upsert, not duplicate).
+	// Modify retained token seeds and re-insert without duplicating session rows.
 	entry.Metadata.Stats.TokensIn = 2000
 	entry.Metadata.Stats.TokensOut = 900
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
@@ -555,12 +555,12 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 		t.Errorf("host_slugs: expected 1 row after double insert, got %d", hostCount)
 	}
 
-	// Verify upsert updated field values to the second insert's values.
-	tokIn := queryInt(t, conn, `SELECT input_tokens FROM session_metrics WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
+	// Updated adapter inputs are separate from the prior metrics result.
+	tokIn := queryInt(t, conn, `SELECT json_extract(metric_seed_json, '$.tokensIn') FROM sessions WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
 	if tokIn != 2000 {
 		t.Errorf("input_tokens after upsert: expected 2000, got %d", tokIn)
 	}
-	tokOut := queryInt(t, conn, `SELECT output_tokens FROM session_metrics WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
+	tokOut := queryInt(t, conn, `SELECT json_extract(metric_seed_json, '$.tokensOut') FROM sessions WHERE session_id = ?`, "44444444-4444-4444-4444-444444444444")
 	if tokOut != 900 {
 		t.Errorf("output_tokens after upsert: expected 900, got %d", tokOut)
 	}
@@ -621,7 +621,7 @@ func TestStore_InsertSessions_PreservesSessionEntriesHashOnUpsert(t *testing.T) 
 		t.Errorf("source_path after metadata upsert: expected %q, got %q", entry.Metadata.Source.FilePath, gotSourcePath)
 	}
 
-	tokIn := queryInt(t, conn, `SELECT input_tokens FROM session_metrics WHERE session_id = ?`, sid)
+	tokIn := queryInt(t, conn, `SELECT json_extract(metric_seed_json, '$.tokensIn') FROM sessions WHERE session_id = ?`, sid)
 	if tokIn != 2000 {
 		t.Errorf("input_tokens after upsert: expected 2000, got %d", tokIn)
 	}
@@ -765,7 +765,7 @@ func TestStore_UpdateDailySummary_MultiDay(t *testing.T) {
 	}
 }
 
-func TestStore_UpdateDailySummary_RecomputeOnReinsert(t *testing.T) {
+func TestStore_UpdateDailySummary_RecomputeAfterMetricSave(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -797,11 +797,16 @@ func TestStore_UpdateDailySummary_RecomputeOnReinsert(t *testing.T) {
 		}
 	}()
 
-	// Re-insert with different metrics (INSERT OR REPLACE updates).
+	// Re-insert with different retained seeds, then save the completed metrics.
 	entry.Metadata.Stats.TokensIn = 9999
 	entry.Metadata.Stats.TokensOut = 8888
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("second InsertSessions: %v", err)
+	}
+	if err := s.SaveMetrics(ctx, &ingest.SessionMetrics{SessionID: entry.Metadata.SessionID, QualityMetrics: schema.QualityMetrics{
+		InputTokens: &entry.Metadata.Stats.TokensIn, OutputTokens: &entry.Metadata.Stats.TokensOut,
+	}}); err != nil {
+		t.Fatalf("save updated metrics: %v", err)
 	}
 	if err := s.UpdateDailySummary(ctx, []string{"2024-01-15"}); err != nil {
 		t.Fatalf("second UpdateDailySummary: %v", err)

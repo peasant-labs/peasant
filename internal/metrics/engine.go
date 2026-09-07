@@ -5,6 +5,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -27,6 +28,7 @@ type MetricFunc func(ctx context.Context, sessionID ingest.SessionID, entries []
 
 // Compile-time guard: Engine must implement SessionAnalyzer.
 var _ ingest.SessionAnalyzer = (*Engine)(nil)
+var _ ingest.MetricsRecomputer = (*Engine)(nil)
 
 // Engine orchestrates metric computation for sessions.
 type Engine struct {
@@ -124,6 +126,31 @@ func (e *Engine) SetForce(force bool) {
 // Sessions that already have compute_version >= CurrentComputeVersion
 // are skipped unless Force is true.
 func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.SessionID) (int, error) {
+	return e.computeMetrics(ctx, sessionIDs, false)
+}
+
+// RecomputeMetrics refreshes only the successful index targets supplied by the
+// current pipeline invocation. A value copy avoids changing shared force state.
+// This is not a durable freshness proof; last-good values survive failed saves.
+func (e *Engine) RecomputeMetrics(ctx context.Context, sessionIDs []ingest.SessionID) (int, error) {
+	forced := *e
+	forced.force = true
+	computed := 0
+	var failures []error
+	for _, sid := range sessionIDs {
+		n, err := forced.computeMetrics(ctx, []ingest.SessionID{sid}, true)
+		computed += n
+		if err != nil {
+			failures = append(failures, err)
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return computed, errors.Join(failures...)
+}
+
+func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.SessionID, reportFailures bool) (int, error) {
 	computed := 0
 
 	for _, sid := range sessionIDs {
@@ -146,6 +173,9 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 		// Load session entries.
 		entries, err := e.store.ListEntries(ctx, sid)
 		if err != nil {
+			if reportFailures {
+				return computed, fmt.Errorf("read indexed entries before recomputing metrics for session %s: %w; prior metrics were preserved; restore database access and retry", sid, err)
+			}
 			slog.Warn("metrics: list entries", "session_id", sid, "error", err)
 			continue
 		}
@@ -156,7 +186,19 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 		// Load existing metrics (may be nil for first computation).
 		existing, err := e.store.GetMetrics(ctx, sid)
 		if err != nil {
+			if reportFailures {
+				return computed, fmt.Errorf("read metric producer before recomputing session %s: %w; prior metrics were preserved; restore database access and retry", sid, err)
+			}
 			slog.Warn("metrics: get existing", "session_id", sid, "error", err)
+			continue
+		}
+		if existing != nil && existing.ComputeVersion != nil && *existing.ComputeVersion > CurrentComputeVersion {
+			refusal := fmt.Errorf("recompute metrics for session %s: stored compute version %d is newer than this build's version %d; prior metrics and producer stamps were preserved; upgrade Peasant before retrying", sid, *existing.ComputeVersion, CurrentComputeVersion)
+			if reportFailures {
+				return computed, refusal
+			}
+			slog.Warn("metrics: newer producer refused", "session_id", sid, "error", refusal)
+			continue
 		}
 
 		// Run all MetricFuncs and merge results.
@@ -164,14 +206,27 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 			SessionID: sid,
 		}
 
-		// Preserve retained v1 fields from existing metrics.
-		if existing != nil {
-			merged.TurnCount = existing.TurnCount
-			merged.SubagentCount = existing.SubagentCount
-			merged.InputTokens = existing.InputTokens
-			merged.OutputTokens = existing.OutputTokens
-			merged.ToolCalls = existing.ToolCalls
-			merged.DurationMinutes = existing.DurationMinutes
+		// Retained adapter statistics are inputs, not prior computed output.
+		// Missing historical seeds stay unknown; current metrics functions can
+		// still derive their supported fields from indexed entries.
+		if seeds, ok := e.store.(ingest.MetricSeedStore); ok {
+			seed, seedErr := seeds.GetMetricSeed(ctx, sid)
+			if seedErr != nil {
+				if reportFailures {
+					return computed, fmt.Errorf("read retained adapter inputs before recomputing metrics for session %s: %w; prior metrics were preserved; reconcile valid managed metadata and retry", sid, seedErr)
+				}
+				slog.Warn("metrics: read retained seed; prior metrics preserved", "session_id", sid, "error", seedErr)
+				continue
+			}
+			if seed != nil {
+				merged.TurnCount = &seed.TurnCount
+				merged.SubagentCount = &seed.SubagentCount
+				merged.InputTokens = &seed.TokensIn
+				merged.OutputTokens = &seed.TokensOut
+				merged.ToolCalls = &seed.ToolCallCount
+				duration := float64(seed.DurationMs) / 60000
+				merged.DurationMinutes = &duration
+			}
 		}
 
 		for _, nf := range e.funcs {

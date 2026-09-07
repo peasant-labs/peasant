@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
@@ -29,7 +30,10 @@ func (s *Store) UpsertSessionCommits(ctx context.Context, sessionID ingest.Sessi
 
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	return upsertSessionCommitsOnConn(conn, sessionID, commits)
+}
 
+func upsertSessionCommitsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, commits []ingest.CommitInfo) (err error) {
 	// Allocate or replay every durable association before replacing the current
 	// session_commits projection. The association ledger is intentionally
 	// append-only: a later re-ingest may remove a current binding, but it must

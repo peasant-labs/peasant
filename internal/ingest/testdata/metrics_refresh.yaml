@@ -1,0 +1,6 @@
+requiredNames: [current-index-refreshes-metrics, failed-save-is-visible, future-producer-refusal-is-visible]
+priorTurns: 99
+cases:
+  - {name: current-index-refreshes-metrics, wantComputed: 1}
+  - {name: failed-save-is-visible, failSave: true, wantDiagnostic: synthetic metric save failure}
+  - {name: future-producer-refusal-is-visible, versionDelta: 1, wantDiagnostic: upgrade Peasant}

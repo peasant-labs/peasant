@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -74,8 +75,9 @@ VALUES (?, ?, ?, ?)`
 	sqlInsertSession = `INSERT INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
-    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
+    adapter_version, metric_seed_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = excluded.parent_id,
     model_harness = excluded.model_harness,
@@ -92,11 +94,15 @@ ON CONFLICT(session_id) DO UPDATE SET
     git_worktree = excluded.git_worktree,
     git_tracking = excluded.git_tracking,
     tool_version = excluded.tool_version,
-    session_origin = excluded.session_origin`
+    session_origin = excluded.session_origin,
+    adapter_version = excluded.adapter_version,
+    metric_seed_json = excluded.metric_seed_json`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 
-	sqlInsertSessionMetrics = `INSERT OR REPLACE INTO session_metrics (
+	// A seed-only first row is not a successful computation. Metadata refresh
+	// never replaces an existing metrics result, including its success stamps.
+	sqlInsertSessionMetrics = `INSERT OR IGNORE INTO session_metrics (
     session_id, turn_count, subagent_count,
     input_tokens, output_tokens, tool_calls, duration_minutes
 ) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -187,7 +193,7 @@ GROUP BY date_utc, s.project_hash`
 //  3. INSERT OR IGNORE INTO host_slugs with opaque_id PK
 //  4. INSERT INTO sessions with opaque_host_id FK; on conflict, update metadata
 //     fields while preserving index-owned columns
-//  5. INSERT OR REPLACE INTO session_metrics (upsert)
+//  5. INSERT OR IGNORE INTO session_metrics (initial uncomputed placeholder)
 //  6. COMMIT
 //
 // Entries with nil Metadata are silently skipped — this occurs when extraction
@@ -205,7 +211,10 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	return s.insertSessionsOnConn(conn, entries, true)
+}
 
+func (s *Store) insertSessionsOnConn(conn *sqlite.Conn, entries []ingest.StoreEntry, retainStats bool) (err error) {
 	// Topological sort: parents before children to satisfy the FK constraint
 	// sessions.parent_id REFERENCES sessions(session_id). When processing
 	// thousands of sessions in one transaction, a child may appear before its
@@ -236,6 +245,18 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 		m := sorted[i].Metadata
 		if m == nil {
 			continue
+		}
+		var seedJSON any
+		if retainStats {
+			encoded, seedErr := json.Marshal(m.Stats)
+			if seedErr != nil {
+				return fmt.Errorf("store: encode retained metric seeds for session %s before metadata insertion: %w; prior metadata and computed metrics are unchanged", m.SessionID, seedErr)
+			}
+			seedJSON = string(encoded)
+		}
+		var adapterVersion any
+		if m.AdapterVersion != nil {
+			adapterVersion = *m.AdapterVersion
 		}
 
 		// 1. Insert project dimension.
@@ -327,22 +348,27 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 				derefString(m.Git.Tracking),
 				m.Version,
 				sessionOrigin.String(),
+				adapterVersion,
+				seedJSON,
 			},
 		}); err != nil {
 			return fmt.Errorf("store: insert session %s: %w", m.SessionID, err)
 		}
 
 		// 5. Insert session metrics.
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertSessionMetrics, &sqlitex.ExecOptions{
-			Args: []any{
-				string(m.SessionID),
+		metricArgs := []any{string(m.SessionID), nil, nil, nil, nil, nil, nil}
+		if retainStats {
+			metricArgs = []any{string(m.SessionID),
 				m.Stats.TurnCount,
 				m.Stats.SubagentCount,
 				m.Stats.TokensIn,
 				m.Stats.TokensOut,
 				m.Stats.ToolCallCount,
 				float64(m.Stats.DurationMs) / 60000.0,
-			},
+			}
+		}
+		if err = sqlitex.ExecuteTransient(conn, sqlInsertSessionMetrics, &sqlitex.ExecOptions{
+			Args: metricArgs,
 		}); err != nil {
 			return fmt.Errorf("store: insert session_metrics %s: %w", m.SessionID, err)
 		}
