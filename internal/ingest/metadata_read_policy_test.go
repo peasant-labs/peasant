@@ -36,6 +36,7 @@ type metadataReadPolicyFixtures struct {
 		SchemaVersion       int                 `yaml:"schemaVersion"`
 		StoredSchemaVersion *int                `yaml:"storedSchemaVersion"`
 		OutsideDiscovery    bool                `yaml:"outsideDiscovery"`
+		RetryCompatible     bool                `yaml:"retryCompatible"`
 		AdapterVersion      *int                `yaml:"adapterVersion"`
 		RawAdapterVersion   string              `yaml:"rawAdapterVersion"`
 		FaultOperation      metadataPolicyFault `yaml:"faultOperation"`
@@ -380,6 +381,38 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				}
 				if afterState != beforeIndexState {
 					t.Fatalf("actual index producer/state changed: got %+v, want %+v", afterState, beforeIndexState)
+				}
+			}
+			if fixture.RetryCompatible {
+				if len(result.Diagnostics) == 0 {
+					t.Fatal("first refused run lost its diagnostics")
+				}
+				firstDiagnostics := append([]ingest.DiagnosticEntry(nil), result.Diagnostics...)
+				meta.SchemaVersion = 9
+				compatible, err := json.Marshal(meta)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := filesystem.MemFS.WriteFile(metaPath, compatible, 0600); err != nil {
+					t.Fatal(err)
+				}
+				retried, err := pipeline.Run(ctx)
+				if err != nil || len(retried.Diagnostics) != 0 {
+					t.Fatalf("compatible repeat replayed old warnings: %+v %v", retried, err)
+				}
+				if !reflect.DeepEqual(firstDiagnostics, result.Diagnostics) {
+					t.Fatal("later run mutated prior diagnostic snapshot")
+				}
+				encoded, err := json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var envelope map[string]json.RawMessage
+				if err := json.Unmarshal(encoded, &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if _, exists := envelope["Diagnostics"]; exists {
+					t.Fatal("internal diagnostic field entered raw result JSON")
 				}
 			}
 		})

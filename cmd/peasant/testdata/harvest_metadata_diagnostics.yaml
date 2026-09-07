@@ -1,0 +1,32 @@
+requiredNames:
+  - normal refusal survives interactive log suppression
+  - forced refusal survives interactive log suppression
+  - index refusal survives interactive log suppression
+  - stored schema refusal survives interactive log suppression
+  - compatible metadata has no false warning
+sessionID: 11111111-1111-1111-1111-111111111111
+transcript: |
+  {"type":"user","sessionId":"11111111-1111-1111-1111-111111111111","message":{"role":"user","content":"synthetic retained session"},"timestamp":"2024-01-01T00:00:00Z"}
+expectedRootKeys: [duration, sessions, summary]
+cases:
+  - name: normal refusal survives interactive log suppression
+    schemaVersion: 999
+    wantWarning: true
+  - name: forced refusal survives interactive log suppression
+    schemaVersion: 999
+    force: true
+    wantWarning: true
+  - name: index refusal survives interactive log suppression
+    schemaVersion: 999
+    reindex: true
+    force: true
+    wantWarning: true
+  - name: stored schema refusal survives interactive log suppression
+    schemaVersion: 9
+    storedSchemaVersion: 999
+    reindex: true
+    force: true
+    wantWarning: true
+  - name: compatible metadata has no false warning
+    schemaVersion: 9
+    wantWarning: false

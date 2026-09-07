@@ -76,6 +76,9 @@ type PipelineResult struct {
 	// enumerate. Discovery stayed non-fatal per location, so the run continued;
 	// these records make each skipped location visible to the caller.
 	DiscoveryDiagnostics []DiscoveryDiagnostic
+	// Diagnostics carries local nonfatal maintenance warnings to post-render
+	// reporting. It is not a new HTTP/WS or command JSON contract field.
+	Diagnostics []DiagnosticEntry `json:"-"`
 }
 
 // PipelineSummary holds aggregate counts for a pipeline run.
@@ -252,6 +255,9 @@ type Pipeline struct {
 	// by adapters during discover(), copied into every PipelineResult so a
 	// skipped database is visible even though discovery stayed non-fatal.
 	discoveryDiagnostics []DiscoveryDiagnostic
+	diagnosticsMu        sync.Mutex
+	diagnostics          []DiagnosticEntry
+	diagnosticSet        map[DiagnosticEntry]struct{}
 
 	// v2 analytics stages (all optional; nil = skip stage).
 	redactor               TextRedactor                  // REDACT stage: applied before writing metadata to disk
@@ -440,7 +446,13 @@ func NewPipeline(fs FileSystem, git GitResolver, adapters map[Harness]AdapterFac
 //  7. CLEANUP: Remove orphan .tmp-* directories
 //  8. REPORT: Return PipelineResult
 //  9. AUDIT: Write ingest_log entry (best-effort)
-func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
+func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) {
+	p.resetDiagnostics()
+	defer func() {
+		if result != nil {
+			result.Diagnostics = p.snapshotDiagnostics()
+		}
+	}()
 	if err := p.validateHarvesterVersions(); err != nil {
 		return nil, err
 	}
@@ -901,6 +913,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			// Reconstruct DiscoveredSession from peasant-sync metadata.
 			reconstructed, startMs, transcriptPath, metadataErr := p.reconstructFromMetadata(ctx, sid)
 			if metadataErr != nil {
+				p.reportMetadataRefusal(string(sid), metadataErr)
 				slog.Warn("pipeline: retained metadata refused", "session_id", sid, "error", metadataErr)
 				continue // Unsupported is not missing: never bypass through DB source info.
 			}
@@ -1344,6 +1357,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 		return result
 	}
 	if err := p.checkStoredMetadataVersion(ctx, im.session.SessionID); err != nil {
+		p.reportMetadataRefusal(string(im.session.SessionID), err)
 		slog.Warn(logPrefix+": stored metadata refused", "session_id", im.session.SessionID, "error", err)
 		errMsg := err.Error()
 		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
@@ -1769,6 +1783,7 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	existing, err := p.metadataForRewrite(session)
 	if err != nil {
+		p.reportMetadataRefusal(string(session.SessionID), err)
 		slog.Warn("pipeline: metadata refresh refused", "session_id", session.SessionID, "error", err)
 		return DiffUnchanged
 	}
@@ -1942,7 +1957,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		return workerResult{result: result}
 	}
 	if _, err := p.metadataForRewrite(session); err != nil {
-		return fail(err)
+		p.reportMetadataRefusal(string(session.SessionID), err)
+		result.Status = DiffUnchanged
+		return workerResult{result: result}
 	}
 
 	// Find the adapter for this provider.
@@ -2971,8 +2988,8 @@ type sessionMetadataResult struct {
 
 // readSessionMetadata reads and parses a metadata JSON file for a session in
 // the given host directory, reconstructing a DiscoveredSession. Missing metadata
-// or transcript returns nil. Undecodable/incompatible metadata returns an error,
-// preventing callers from bypassing refusal via native source reconstruction.
+// or transcript returns nil. Incompatible versions and non-missing I/O failures
+// return errors; corrupt historic content can use validated retained recovery.
 //
 // The logPrefix parameter is used for structured log messages on parse errors.
 func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix string) (*sessionMetadataResult, error) {
@@ -2984,6 +3001,7 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 			return nil, nil
 		}
 		readErr := managedInputIOError(metaPath, err)
+		p.reportMetadataRefusal(string(sid), readErr)
 		slog.Warn(logPrefix+": managed metadata unreadable", "session_id", sid, "error", readErr)
 		return nil, readErr
 	}
@@ -2991,6 +3009,7 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 	meta, err := decodeManagedMetadata(data, metaPath)
 	if err != nil {
 		if isMetadataCompatibilityError(err) {
+			p.reportMetadataRefusal(string(sid), err)
 			slog.Warn(logPrefix+": incompatible metadata", "session_id", sid, "error", err)
 			return nil, err
 		}
@@ -3016,6 +3035,7 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 			return nil, nil
 		}
 		readErr := managedInputIOError(transcriptPath, err)
+		p.reportMetadataRefusal(string(sid), readErr)
 		slog.Warn(logPrefix+": managed transcript unreadable", "session_id", sid, "error", readErr)
 		return nil, readErr
 	}
@@ -3040,11 +3060,13 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 				return nil, nil
 			}
 			readErr = managedInputIOError(transcriptPath, readErr)
+			p.reportMetadataRefusal(string(sid), readErr)
 			slog.Warn(logPrefix+": managed transcript unreadable", "session_id", sid, "error", readErr)
 			return nil, readErr
 		}
 		origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
 		if recognitionErr != nil {
+			p.reportMetadataRefusal(string(sid), recognitionErr)
 			slog.Warn(logPrefix+": managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", transcriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
 			return nil, recognitionErr
 		}
@@ -3058,6 +3080,7 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 	if refreshMetadata && meta.AdapterVersion != nil {
 		target := p.versionTargets()[meta.ModelHarness].AdapterVersion
 		if *meta.AdapterVersion > target {
+			p.reportMetadataRefusal(string(sid), &AdapterVersionError{Path: metaPath, Version: *meta.AdapterVersion, Target: target})
 			slog.Warn(logPrefix+": retaining newer adapter output", "session_id", sid,
 				"error", &AdapterVersionError{Path: metaPath, Version: *meta.AdapterVersion, Target: target})
 			refreshMetadata = false
@@ -3183,6 +3206,7 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 	}
 	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
 		slog.Warn("reconstructFromSourceInfo: stored metadata refused", "session_id", sid, "error", err)
+		p.reportMetadataRefusal(string(sid), err)
 		return nil, 0, ""
 	}
 	sourcePath, sourceFormat, providerStr, err := p.metricsStore.LookupSourceInfo(ctx, sid)
@@ -3226,12 +3250,14 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 			origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
 			if recognitionErr != nil {
 				slog.Warn("reconstructFromSourceInfo: managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", outputTranscriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
+				p.reportMetadataRefusal(string(sid), recognitionErr)
 				return nil, 0, ""
 			}
 			transcriptOrigin = origin
 		} else if !errors.Is(readErr, fs.ErrNotExist) {
 			slog.Warn("reconstructFromSourceInfo: managed transcript unreadable", "session_id", sid,
 				"error", managedInputIOError(outputTranscriptPath, readErr))
+			p.reportMetadataRefusal(string(sid), managedInputIOError(outputTranscriptPath, readErr))
 			return nil, 0, ""
 		}
 	}
@@ -3325,6 +3351,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		}
 		if allowed {
 			if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
+				p.reportMetadataRefusal(string(target.session.SessionID), err)
 				slog.Warn("reindex: stored metadata refused", "session_id", target.session.SessionID, "error", err)
 				allowed = false
 			}
@@ -3610,6 +3637,7 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			slog.Warn("reindex: managed output lookup failed", "error", managedInputIOError(outputDir, err))
+			p.reportMetadataRefusal(outputDir, managedInputIOError(outputDir, err))
 		}
 		return nil // Nothing can be enumerated safely.
 	}
@@ -3624,6 +3652,7 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
 				slog.Warn("reindex: managed host lookup failed", "error", managedInputIOError(hostDir, err))
+				p.reportMetadataRefusal(hostDir, managedInputIOError(hostDir, err))
 			}
 			continue
 		}
@@ -3655,6 +3684,7 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 			if subErr != nil {
 				if !errors.Is(subErr, fs.ErrNotExist) {
 					slog.Warn("reindex: managed subagent lookup failed", "error", managedInputIOError(subagentsDir, subErr))
+					p.reportMetadataRefusal(subagentsDir, managedInputIOError(subagentsDir, subErr))
 				}
 				continue
 			}

@@ -36,10 +36,14 @@ requiredNames:
   - stored future schema blocks stale retained indexing
   - undiscovered stored future schema blocks older file indexing
   - undiscovered stored future schema blocks missing metadata fallback
+  - compatible repeated run does not replay refused diagnostics
 sessionID: 11111111-1111-1111-1111-111111111111
 transcript: |
   {"type":"user","message":{"role":"user","content":"retained input"},"timestamp":"2024-01-01T00:00:00Z"}
 cases:
+  - name: compatible repeated run does not replay refused diagnostics
+    schemaVersion: 999
+    retryCompatible: true
   - name: stored future schema blocks normal stale indexing
     schemaVersion: 9
     storedSchemaVersion: 999

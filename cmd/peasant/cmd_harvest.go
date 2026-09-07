@@ -489,6 +489,9 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 
 	// 10. Output results.
+	for _, diagnostic := range result.Diagnostics {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", diagnostic.Location, diagnostic.Message)
+	}
 	if result.Summary.StoreError != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", result.Summary.StoreError)
 	}
