@@ -110,11 +110,19 @@ func (m *Model) applyFinal(at time.Time, snapshot map[ingest.Stage]ingest.StageP
 		if !sp.Started {
 			continue
 		}
-		startedAt := at
+		startedAt, lastAt := at, at
 		if old, ok := previous[stage]; ok {
-			startedAt = old.startedAt
+			if old.startedAt.Before(at) {
+				startedAt = old.startedAt
+			}
+			// Final data replaces speculative counts and errors, but a stage
+			// already ended before completion must not acquire the remaining
+			// operation time. Cap later speculative end times at completion.
+			if old.progress.Ended && sp.Ended && old.lastAt.Before(at) {
+				lastAt = old.lastAt
+			}
 		}
-		m.observations[stage] = observation{startedAt: startedAt, lastAt: at, lastDone: sp.Done,
+		m.observations[stage] = observation{startedAt: startedAt, lastAt: lastAt, lastDone: sp.Done,
 			lastTotal: sp.Total, progress: sp, estimator: kit.NewEstimator(estimateWindow)}
 	}
 }

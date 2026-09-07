@@ -118,6 +118,7 @@ type progressCompletionDocument struct {
 	RequiredTimingNames               []string                            `yaml:"requiredTimingNames"`
 	Timing                            []progressFixture                   `yaml:"timing"`
 	ChildMessages                     []childMessageFixture               `yaml:"childMessages"`
+	RequiredChildMessageNames         []string                            `yaml:"requiredChildMessageNames"`
 	ExpectedCompletionCount           int                                 `yaml:"expectedCompletionCount"`
 	Completion                        []completionFixture                 `yaml:"completion"`
 	ExpectedPreambleMutationCount     int                                 `yaml:"expectedPreambleMutationCount"`
@@ -125,7 +126,46 @@ type progressCompletionDocument struct {
 }
 
 type childMessageFixture struct {
-	Name string `yaml:"name"`
+	Name   string              `yaml:"name"`
+	Events []childEventFixture `yaml:"events"`
+}
+
+type childAction string
+
+const (
+	childObserve childAction = "observe"
+	childCancel  childAction = "cancel"
+	childFinal   childAction = "final"
+)
+
+type childOutcome string
+
+const (
+	childSucceeded childOutcome = "succeeded"
+	childCanceled  childOutcome = "canceled"
+	childFailed    childOutcome = "failed"
+)
+
+type childRowExpectation struct {
+	Stage   ingest.Stage `yaml:"stage"`
+	Elapsed string       `yaml:"elapsed"`
+	Count   string       `yaml:"count"`
+	Icon    string       `yaml:"icon"`
+}
+
+type childViewExpectation struct {
+	Total    string                `yaml:"total"`
+	Estimate string                `yaml:"estimate"`
+	Rows     []childRowExpectation `yaml:"rows"`
+}
+
+type childEventFixture struct {
+	Action          childAction            `yaml:"action"`
+	AtSeconds       int                    `yaml:"atSeconds"`
+	Stages          []progressStageFixture `yaml:"stages"`
+	CancelRequested bool                   `yaml:"cancelRequested"`
+	Outcome         childOutcome           `yaml:"outcome"`
+	Want            childViewExpectation   `yaml:"want"`
 }
 
 //go:embed testdata/guided/progress_completion.yaml
@@ -233,6 +273,63 @@ func loadProgressCompletionDocument(t *testing.T) progressCompletionDocument {
 	for name := range timingNames {
 		if !requiredTimingNames[name] {
 			t.Fatalf("timing fixture %q is absent from requiredTimingNames", name)
+		}
+	}
+	childNames := map[string]bool{}
+	for _, row := range document.ChildMessages {
+		if strings.TrimSpace(row.Name) == "" || childNames[row.Name] || len(row.Events) == 0 {
+			t.Fatalf("child message fixture is empty or duplicated: %#v", row)
+		}
+		childNames[row.Name] = true
+		for index, event := range row.Events {
+			if event.AtSeconds < 0 || event.Want.Total == "" || event.Want.Estimate == "" || len(event.Want.Rows) == 0 {
+				t.Fatalf("child fixture %q event %d lacks time or independent view expectations", row.Name, index)
+			}
+			switch event.Action {
+			case childObserve:
+				if event.Outcome != "" {
+					t.Fatalf("child observation in %q has a final outcome", row.Name)
+				}
+			case childCancel:
+				if event.Outcome != "" || event.CancelRequested || len(event.Stages) != 0 {
+					t.Fatalf("child cancel in %q carries unsupported snapshot/outcome fields", row.Name)
+				}
+			case childFinal:
+				if event.CancelRequested || (event.Outcome != childSucceeded && event.Outcome != childCanceled && event.Outcome != childFailed) {
+					t.Fatalf("child final in %q has unsupported outcome/cancellation fields: %#v", row.Name, event)
+				}
+			default:
+				t.Fatalf("child fixture %q has unsupported action %q", row.Name, event.Action)
+			}
+			seen := map[ingest.Stage]bool{}
+			for _, stage := range event.Stages {
+				if !validStages[stage.Stage] || seen[stage.Stage] || stage.Done < 0 || stage.Total < 0 {
+					t.Fatalf("child fixture %q has invalid/duplicate stage: %#v", row.Name, stage)
+				}
+				seen[stage.Stage] = true
+			}
+			seen = map[ingest.Stage]bool{}
+			for _, expected := range event.Want.Rows {
+				if !validStages[expected.Stage] || seen[expected.Stage] || (expected.Icon != "○" && expected.Icon != "●" && expected.Icon != "✓" && expected.Icon != "✗") {
+					t.Fatalf("child fixture %q has invalid/duplicate row expectation: %#v", row.Name, expected)
+				}
+				seen[expected.Stage] = true
+			}
+		}
+	}
+	if len(document.RequiredChildMessageNames) == 0 {
+		t.Fatal("child message fixtures need required names")
+	}
+	requiredChildNames := map[string]bool{}
+	for _, name := range document.RequiredChildMessageNames {
+		if strings.TrimSpace(name) == "" || requiredChildNames[name] || !childNames[name] {
+			t.Fatalf("child message required name is empty, duplicated, or missing: %q", name)
+		}
+		requiredChildNames[name] = true
+	}
+	for name := range childNames {
+		if !requiredChildNames[name] {
+			t.Fatalf("child message fixture %q is absent from requiredChildMessageNames", name)
 		}
 	}
 	completionNames := map[string]bool{}
@@ -378,13 +475,15 @@ func seenProgressStage(stages []progressStageFixture, want ingest.Stage) bool {
 }
 
 type fixtureClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu    sync.Mutex
+	now   time.Time
+	reads int
 }
 
 func (c *fixtureClock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.reads++
 	return c.now
 }
 
@@ -398,6 +497,7 @@ type fixtureProgressSource struct {
 	mu       sync.Mutex
 	snapshot map[ingest.Stage]ingest.StageProgress
 	resets   int
+	reads    int
 }
 
 type realProgressSource struct {
@@ -431,6 +531,7 @@ type resetCountingProgress interface {
 func (s *fixtureProgressSource) Snapshot() map[ingest.Stage]ingest.StageProgress {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reads++
 	copyOfSnapshot := make(map[ingest.Stage]ingest.StageProgress, len(s.snapshot))
 	for stage, progress := range s.snapshot {
 		copyOfSnapshot[stage] = progress
@@ -599,57 +700,80 @@ func TestHarvestAndKickstartProgressParity(t *testing.T) {
 
 func TestIngestProgressChildMessageContract(t *testing.T) {
 	document := loadProgressCompletionDocument(t)
-	seen := map[string]bool{}
 	for _, row := range document.ChildMessages {
-		if row.Name == "" || seen[row.Name] {
-			t.Fatalf("invalid child message fixture %q", row.Name)
-		}
-		seen[row.Name] = true
 		t.Run(row.Name, func(t *testing.T) {
 			start := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
 			model := ingestprogress.New(ingestprogress.Options{Theme: theme.New(theme.ModeDark), StartedAt: start})
 			model.SetSize(120, -1)
-			snapshot := func(done int, ended, hasErr bool) map[ingest.Stage]ingest.StageProgress {
-				return map[ingest.Stage]ingest.StageProgress{ingest.StageIndex: {Started: true, Done: done, Total: 100, Ended: ended, HasErr: hasErr}}
-			}
-			model, _ = model.Update(ingestprogress.ObserveMsg{At: start, Snapshot: snapshot(0, false, false)})
-			model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(2 * time.Second), Snapshot: snapshot(20, false, false)})
-			switch row.Name {
-			case "older-observation-ignored":
-				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(time.Second), Snapshot: snapshot(5, false, false)})
-				assertContainsAll(t, model.View(), "20/100", "total elapsed: 2s", "estimate: 8s")
-			case "equal-observation-accepted":
-				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(2 * time.Second), Snapshot: snapshot(30, false, false)})
-				assertContainsAll(t, model.View(), "30/100", "total elapsed: 2s")
-			case "authoritative-earlier-final":
-				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(8 * time.Second), Snapshot: snapshot(80, true, false)})
-				model, _ = model.Update(ingestprogress.FinalMsg{At: start.Add(5 * time.Second), Snapshot: snapshot(40, true, true), Outcome: ingestprogress.FinalFailed})
-				assertContainsAll(t, model.View(), "40/100", "total elapsed: 5s", "5s")
-			case "final-absorbs-late-messages":
-				model, _ = model.Update(ingestprogress.CancelRequestedMsg{At: start.Add(2 * time.Second)})
-				model, _ = model.Update(ingestprogress.FinalMsg{At: start.Add(3 * time.Second), Snapshot: snapshot(30, true, false), Outcome: ingestprogress.FinalCanceled})
-				want := model.View()
-				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(9 * time.Second), Snapshot: snapshot(90, false, true)})
-				model, _ = model.Update(ingestprogress.CancelRequestedMsg{At: start.Add(9 * time.Second)})
-				model, _ = model.Update(ingestprogress.FinalMsg{At: start.Add(10 * time.Second), Snapshot: snapshot(100, true, true), Outcome: ingestprogress.FinalFailed})
-				if model.View() != want {
-					t.Fatalf("final child view changed:\n%s", model.View())
+			for index, event := range row.Events {
+				snapshot := make(map[ingest.Stage]ingest.StageProgress, len(event.Stages))
+				for _, stage := range event.Stages {
+					snapshot[stage.Stage] = ingest.StageProgress{Started: stage.Started, Done: stage.Done,
+						Total: stage.Total, Ended: stage.Ended, HasErr: stage.HasErr}
 				}
-			case "cancel-retains-qualified-estimate":
-				model, _ = model.Update(ingestprogress.CancelRequestedMsg{At: start.Add(2 * time.Second)})
-				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(3 * time.Second), Snapshot: snapshot(20, false, true), CancelRequested: true})
-				assertContainsAll(t, model.View(), "estimate: 8s", "20/100")
+				at := start.Add(time.Duration(event.AtSeconds) * time.Second)
+				var message tea.Msg
+				switch event.Action {
+				case childObserve:
+					message = ingestprogress.ObserveMsg{At: at, Snapshot: snapshot, CancelRequested: event.CancelRequested}
+				case childCancel:
+					message = ingestprogress.CancelRequestedMsg{At: at}
+				case childFinal:
+					var outcome ingestprogress.FinalOutcome
+					switch event.Outcome {
+					case childSucceeded:
+						outcome = ingestprogress.FinalSucceeded
+					case childCanceled:
+						outcome = ingestprogress.FinalCanceled
+					case childFailed:
+						outcome = ingestprogress.FinalFailed
+					default:
+						t.Fatalf("unsupported final outcome %q", event.Outcome)
+					}
+					message = ingestprogress.FinalMsg{At: at, Snapshot: snapshot, Outcome: outcome}
+				default:
+					t.Fatalf("unsupported child action %q", event.Action)
+				}
+				var command tea.Cmd
+				model, command = model.Update(message)
+				if command != nil {
+					t.Fatalf("event %d scheduled a command from the data-only child", index)
+				}
+				lines := progressMatrixLines(model.View())
+				elapsed := map[ingest.Stage]string{}
+				for _, expected := range event.Want.Rows {
+					if expected.Elapsed != "" {
+						elapsed[expected.Stage] = expected.Elapsed
+					}
+					found := false
+					for _, line := range lines {
+						if !strings.Contains(line, strings.ToLower(expected.Stage.String())) {
+							continue
+						}
+						found = true
+						// Compare only the row's fields after its bar, so total elapsed
+						// cannot accidentally satisfy a stage-clock or count assertion.
+						barEnd := strings.LastIndexAny(line, "█░")
+						if barEnd < 0 {
+							t.Fatalf("event %d %s row has no progress bar: %q", index, expected.Stage, line)
+						}
+						barEnd += len("█")
+						got := strings.Fields(line[barEnd:])
+						want := strings.Fields(expected.Count + " " + expected.Elapsed)
+						if !reflect.DeepEqual(got, want) || !strings.HasPrefix(line, expected.Icon+" ") {
+							t.Errorf("event %d %s: row %q, want icon=%q count=%q elapsed=%q", index, expected.Stage, line, expected.Icon, expected.Count, expected.Elapsed)
+						}
+					}
+					if !found {
+						t.Errorf("event %d missing expected stage %s", index, expected.Stage)
+					}
+				}
+				assertHarvestTiming(t, fmt.Sprintf("child event %d", index), lines, progressObservationFixture{WantElapsed: elapsed})
+				if exactRenderedLineIndex(lines, "total elapsed: "+event.Want.Total) < 0 || exactRenderedLineIndex(lines, event.Want.Estimate) < 0 {
+					t.Errorf("event %d wants total=%q estimate=%q:\n%s", index, event.Want.Total, event.Want.Estimate, model.View())
+				}
 			}
 		})
-	}
-}
-
-func assertContainsAll(t *testing.T, view string, values ...string) {
-	t.Helper()
-	for _, value := range values {
-		if !strings.Contains(view, value) {
-			t.Fatalf("missing %q:\n%s", value, view)
-		}
 	}
 }
 
@@ -995,13 +1119,14 @@ func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
 	clock := &fixtureClock{now: time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)}
 	var callbacks []func(time.Time) tea.Msg
 	ingestCalls := 0
+	progress := &fixtureProgressSource{}
 	program := kickstart.NewProgram(kickstart.ProgramDeps{
 		Theme:            theme.New(theme.ModeDark),
 		Draft:            draft,
 		Source:           scannerfix.NewFixtureTreeSource("standard"),
 		AlreadyConnected: true,
 		Clock:            clock,
-		Progress:         ingest.NewProgressState(),
+		Progress:         progress,
 		Tick: func(_ time.Duration, callback func(time.Time) tea.Msg) tea.Cmd {
 			callbacks = append(callbacks, callback)
 			return func() tea.Msg { return callback(clock.Now()) }
@@ -1023,7 +1148,8 @@ func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
 	}
 	oldProgressMessage := callbacks[0](clock.Now())
 	oldSpinnerMessage := firstChildren[2]()
-	program, _ = program.Update(firstChildren[0]())
+	oldCompletionMessage := firstChildren[0]()
+	program, _ = program.Update(oldCompletionMessage)
 	if program.Phase() != kickstart.PhaseDone || program.IngestErr() == nil {
 		t.Fatalf("first attempt phase/error=%s/%v, want failed completion", program.Phase(), program.IngestErr())
 	}
@@ -1033,6 +1159,16 @@ func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
 	if program.Phase() != kickstart.PhaseIngest || len(retryChildren) != 3 || len(callbacks) != 2 {
 		t.Fatalf("retry phase/children/callbacks=%s/%d/%d, want ingest/3/2",
 			program.Phase(), len(retryChildren), len(callbacks))
+	}
+	retryView := program.View()
+	clockReads, snapshotReads := clock.reads, progress.reads
+	program, staleCompletionCommand := program.Update(oldCompletionMessage)
+	if program.Phase() != kickstart.PhaseIngest || program.IngestErr() != nil || program.View() != retryView {
+		t.Fatalf("prior completion finished or reverted the new attempt: phase=%s error=%v\n%s", program.Phase(), program.IngestErr(), program.View())
+	}
+	if staleCompletionCommand != nil || len(callbacks) != 2 || ingestCalls != 1 || clock.reads != clockReads || progress.reads != snapshotReads {
+		t.Fatalf("prior completion caused effects: command=%t callbacks=%d ingest=%d clock reads=%d->%d snapshot reads=%d->%d",
+			staleCompletionCommand != nil, len(callbacks), ingestCalls, clockReads, clock.reads, snapshotReads, progress.reads)
 	}
 
 	var staleCommand tea.Cmd
@@ -1053,5 +1189,12 @@ func TestProgramRetryIgnoresPriorAttemptTimerChains(t *testing.T) {
 	_, currentSpinnerCommand := program.Update(retryChildren[2]())
 	if currentSpinnerCommand == nil {
 		t.Fatal("current retry spinner tick did not continue its animation chain")
+	}
+	program, completionCommand := program.Update(retryChildren[0]())
+	if program.Phase() != kickstart.PhaseDone || program.IngestErr() != nil || completionCommand != nil || ingestCalls != 2 {
+		t.Fatalf("current completion rejected: phase=%s error=%v command=%t ingest=%d", program.Phase(), program.IngestErr(), completionCommand != nil, ingestCalls)
+	}
+	if !strings.Contains(stripRender(program.View()), "local import completed") {
+		t.Fatalf("current completion did not render success:\n%s", program.View())
 	}
 }
