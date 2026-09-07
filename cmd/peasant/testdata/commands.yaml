@@ -57,6 +57,7 @@ commands:
           - { name: output, type: string, default: "" }
           - { name: detect-commits, type: bool, default: "false" }
           - { name: profile-index, type: bool, default: "false" }
+          - { name: source-harness, type: string, default: "" }
       - use: verify
         flags:
           - { name: verbose, type: bool, default: "false" }

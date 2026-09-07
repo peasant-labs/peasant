@@ -121,7 +121,9 @@ func BuildHarvestCommand() *cobra.Command {
 	indexCmd := &cobra.Command{
 		Use:   "index",
 		Short: "Populate database from existing peasant-sync/ files",
-		Long:  "Read transcripts already in peasant-sync/ and populate the SQLite analytics database (indexing, metrics, annotations).",
+		Long: "Read transcripts already in peasant-sync/ and populate the SQLite analytics database (indexing, metrics, annotations).\n" +
+			"By default, select sessions with stale indexer revisions. Use --source-harness, --session, and --since to narrow the selection, or --force to re-process matching current sessions.\n" +
+			"--all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHarvest(cmd, harvestIndexOnly, &flags)
 		},
@@ -159,8 +161,10 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	cmd.Flags().StringVar(&flags.since, "since", "", "Filter to sessions from the last N period (e.g. 2w, 3m, 7d)")
 	cmd.Flags().StringVar(&flags.outputPath, "output", "", "Override output base path")
 
-	// Source flags are relevant for logs and all modes.
-	if mode != harvestIndexOnly {
+	if mode == harvestIndexOnly {
+		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike; cleared by --all)")
+	} else {
+		// Native source overrides are relevant only for logs and all modes.
 		cmd.Flags().StringVar(&flags.sourceHarness, "source-harness", "", "Override source harness (claude-code, opencode, codex, cursor, strike)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the harness (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", false, "Also process sessions still being written")
@@ -273,8 +277,20 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		fmt.Fprintf(os.Stderr, "notice: no config found at %s — using defaults. Run 'peasant kickstart' to configure.\n", configPath)
 	}
 
-	// 3. Apply CLI flag overrides (source flags only for logs/all modes).
-	if mode != harvestIndexOnly {
+	// 3. An index selector does not override or discover native source paths.
+	// Validate even when --all clears the selector, so misspelled harnesses fail.
+	var indexHarness *ingest.Harness
+	if mode == harvestIndexOnly {
+		if flags.sourceHarness != "" {
+			harness, err := resolveHarnessFlag(flags.sourceHarness)
+			if err != nil {
+				return err
+			}
+			if !flags.all {
+				indexHarness = &harness
+			}
+		}
+	} else {
 		if flags.sourceHarness != "" || flags.sourcePath != "" {
 			if flags.sourceHarness == "" {
 				return fmt.Errorf("--source-path requires --source-harness")
@@ -358,6 +374,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		StalenessThreshold: staleness,
 		DryRun:             flags.dryRun,
 		Reindex:            reindex,
+		Harness:            indexHarness,
 		Parallelism:        0, // 0 = auto (runtime.NumCPU())
 		IndexProfiler:      indexProfiler,
 		Progress:           progState,
@@ -385,9 +402,9 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		pipelineCfg.Since = &cutoff
 	}
 
-	// 6d. Wire selection index into SessionFilter (unless --all clears filters).
+	// 6d. Saved selection scopes native discovery, not stored maintenance.
 	var selectionConflicts *selectionConflictRecorder
-	if !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
+	if mode != harvestIndexOnly && !flags.all && len(flags.sessionIDs) == 0 && cfg.Selection.Mode == config.SelectionModeSelected {
 		selectionFilter, recorder := buildSelectionFilterWithRecorder(cfg, git)
 		pipelineCfg.PrepareSessionFilter = selectionFilter.Prepare
 		pipelineCfg.SessionFilter = selectionFilter.Match
@@ -994,12 +1011,11 @@ func resolveHarnessFlag(raw string) (defaults.Harness, error) {
 			raw, strings.Join(names, ", "),
 		)
 	}
-	// Cursor and antigravity are recognized by bestiary but peasant has no
-	// ingester adapter for them yet.
-	switch h {
-	case defaults.HarnessCursor, defaults.HarnessAntigravity:
+	// Bestiary also recognizes harnesses this build cannot harvest. Keep the
+	// CLI inventory aligned with the actual registered implementation.
+	if _, ok := ingest.DefaultAdapterRegistry[h]; !ok {
 		return "", fmt.Errorf(
-			"harness %q is recognized by bestiary but peasant has no ingester for it yet (planned for a future release)",
+			"harness %q is recognized by bestiary but this Peasant build has no registered harvester; select a harness listed in --help or upgrade to a build that supports it",
 			raw,
 		)
 	}

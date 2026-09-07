@@ -5,6 +5,8 @@ Populate database from existing peasant-sync/ files
 ### Synopsis
 
 Read transcripts already in peasant-sync/ and populate the SQLite analytics database (indexing, metrics, annotations).
+By default, select sessions with stale indexer revisions. Use --source-harness, --session, and --since to narrow the selection, or --force to re-process matching current sessions.
+--all clears these filters and implies --force. Saved discovery selection does not restrict stored-session maintenance. No --source-path is required.
 
 ```
 peasant harvest index [flags]
@@ -13,17 +15,18 @@ peasant harvest index [flags]
 ### Options
 
 ```
-      --all               Process ALL sessions (clears filters, implies --force)
-      --detect-commits    Detect and store git commits linked to each session
-      --dry-run           Show what would be processed without writing
-      --force             Force re-process sessions that match current filters
-  -h, --help              help for index
-      --json              Output as JSON instead of human-readable
-      --output string     Override output base path
-      --profile-index     Print INDEX parse/write timing diagnostics
-      --session strings   Filter to specific session IDs (repeatable, comma-separated)
-      --since string      Filter to sessions from the last N period (e.g. 2w, 3m, 7d)
-      --verbose           Show file-level detail
+      --all                     Process ALL sessions (clears filters, implies --force)
+      --detect-commits          Detect and store git commits linked to each session
+      --dry-run                 Show what would be processed without writing
+      --force                   Force re-process sessions that match current filters
+  -h, --help                    help for index
+      --json                    Output as JSON instead of human-readable
+      --output string           Override output base path
+      --profile-index           Print INDEX parse/write timing diagnostics
+      --session strings         Filter to specific session IDs (repeatable, comma-separated)
+      --since string            Filter to sessions from the last N period (e.g. 2w, 3m, 7d)
+      --source-harness string   Filter stored sessions by harness (claude-code, opencode, codex, cursor, strike; cleared by --all)
+      --verbose                 Show file-level detail
 ```
 
 ### Options inherited from parent commands

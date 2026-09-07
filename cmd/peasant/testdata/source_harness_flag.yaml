@@ -8,6 +8,11 @@ required_names:
   - push-help-uses-harness
   - harvest-ingests-named-harness
   - logs-extracts-named-harness
+  - index-help-uses-harness
+  - harvest-all-preserves-source-isolation
+  - logs-all-preserves-source-isolation
+  - harvest-still-requires-source-path
+  - logs-still-requires-source-path
 cases:
   - name: harvest-rejects-old-flag
     args: [harvest, --source-provider=strike]
@@ -33,6 +38,10 @@ cases:
     args: [village, push, --help]
     output_contains: [--source-harness]
     output_excludes: [--source-provider]
+  - name: index-help-uses-harness
+    args: [harvest, index, --help]
+    output_contains: [--source-harness, "--all clears these filters", "No --source-path is required"]
+    output_excludes: [--source-provider]
   - name: harvest-ingests-named-harness
     args: [harvest, --source-harness=strike, "--source-path={source}", "--output={output}", --include-active, --json]
     output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA, BBBBBBBBBBBBBBBBBBBBBBBBBB]
@@ -40,3 +49,23 @@ cases:
   - name: logs-extracts-named-harness
     args: [harvest, logs, --source-harness=strike, "--source-path={source}", "--output={output}", --include-active, --json]
     output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA, BBBBBBBBBBBBBBBBBBBBBBBBBB]
+  - name: harvest-all-preserves-source-isolation
+    args: [harvest, --all, --source-harness=strike, "--source-path={source}", "--output={output}", --session=invalid/session, --since=invalid, --json]
+    output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA]
+    output_excludes: [&other_id 77777777-7777-4777-8777-777777777777]
+    stored_session: 20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA
+    other_session: *other_id
+    other_transcript: &other_transcript |
+      {"type":"user","sessionId":"77777777-7777-4777-8777-777777777777","timestamp":"2024-02-19T00:00:00Z","message":{"role":"user","content":"unselected native fixture"}}
+  - name: logs-all-preserves-source-isolation
+    args: [harvest, logs, --all, --source-harness=strike, "--source-path={source}", "--output={output}", --session=invalid/session, --since=invalid, --json]
+    output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA]
+    output_excludes: [*other_id]
+    other_session: *other_id
+    other_transcript: *other_transcript
+  - name: harvest-still-requires-source-path
+    args: [harvest, --source-harness=strike]
+    error_contains: --source-harness requires --source-path
+  - name: logs-still-requires-source-path
+    args: [harvest, logs, --source-harness=strike]
+    error_contains: --source-harness requires --source-path

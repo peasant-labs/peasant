@@ -1,91 +1,66 @@
 package main
 
 import (
+	_ "embed"
 	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/defaults"
+	"github.com/peasant-labs/peasant/internal/testutil"
+	"gopkg.in/yaml.v3"
 )
 
-// TestResolveHarnessFlag guards the user-facing flag contract: legacy harness
-// names get a tailored "renamed to X" error; cursor and antigravity are recognized
-// but unsupported without a version commitment; and unknown and valid values stay
-// distinct.
+//go:embed testdata/harvest_harness_resolution.yaml
+var harvestHarnessResolutionYAML []byte
+
+type harvestHarnessResolutionFixture struct {
+	Name          string           `yaml:"name"`
+	Raw           string           `yaml:"raw"`
+	Want          defaults.Harness `yaml:"want"`
+	ErrorContains []string         `yaml:"error_contains"`
+}
+
+func LoadHarvestHarnessResolutionFixtures(t testing.TB) []harvestHarnessResolutionFixture {
+	t.Helper()
+	var document struct {
+		RequiredNames []string                          `yaml:"required_names"`
+		Cases         []harvestHarnessResolutionFixture `yaml:"cases"`
+	}
+	if err := yaml.Unmarshal(harvestHarnessResolutionYAML, &document); err != nil {
+		t.Fatal(err)
+	}
+	names := make(map[string]bool)
+	for _, fixture := range document.Cases {
+		if fixture.Name == "" || names[fixture.Name] {
+			t.Fatalf("empty or duplicate harness resolution fixture name %q", fixture.Name)
+		}
+		names[fixture.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("harvest harness resolution", "case", document.RequiredNames, names); err != nil {
+		t.Fatal(err)
+	}
+	return document.Cases
+}
+
 func TestResolveHarnessFlag(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name        string
-		raw         string
-		want        defaults.Harness
-		wantErr     bool
-		errContains []string
-	}{
-		{
-			name: "valid claude-code",
-			raw:  string(defaults.HarnessClaudeCode),
-			want: defaults.HarnessClaudeCode,
-		},
-		{
-			name: "valid opencode",
-			raw:  string(defaults.HarnessOpenCode),
-			want: defaults.HarnessOpenCode,
-		},
-		{
-			name: "valid codex",
-			raw:  string(defaults.HarnessCodex),
-			want: defaults.HarnessCodex,
-		},
-		{
-			name:        "legacy claude gets rename hint (C2)",
-			raw:         string(defaults.LegacyHarnessClaude),
-			wantErr:     true,
-			errContains: []string{"deprecated", "renamed", string(defaults.HarnessClaudeCode)},
-		},
-		{
-			name:        "legacy gemini gets rename hint (C2)",
-			raw:         string(defaults.LegacyHarnessGemini),
-			wantErr:     true,
-			errContains: []string{"deprecated", "renamed", string(defaults.HarnessGeminiCLI)},
-		},
-		{
-			name:        "cursor recognized but unsupported (C7)",
-			raw:         string(defaults.HarnessCursor),
-			wantErr:     true,
-			errContains: []string{"planned for a future release"},
-		},
-		{
-			name:        "antigravity recognized but unsupported (C7)",
-			raw:         string(defaults.HarnessAntigravity),
-			wantErr:     true,
-			errContains: []string{"planned for a future release"},
-		},
-		{
-			name:        "unknown value",
-			raw:         "bogus-harness",
-			wantErr:     true,
-			errContains: []string{"unknown harness", "bogus-harness"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, fixture := range LoadHarvestHarnessResolutionFixtures(t) {
+		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
-			got, err := resolveHarnessFlag(tc.raw)
-			if tc.wantErr {
+			got, err := resolveHarnessFlag(fixture.Raw)
+			if len(fixture.ErrorContains) > 0 {
 				if err == nil {
-					t.Fatalf("resolveHarnessFlag(%q): expected error, got nil (result %q)", tc.raw, got)
+					t.Fatalf("resolveHarnessFlag(%q): expected error, got %q", fixture.Raw, got)
 				}
-				for _, sub := range tc.errContains {
-					if !strings.Contains(err.Error(), sub) {
-						t.Errorf("error %q should contain %q", err.Error(), sub)
+				for _, want := range fixture.ErrorContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q should contain %q", err.Error(), want)
 					}
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("resolveHarnessFlag(%q): unexpected error: %v", tc.raw, err)
-			}
-			if got != tc.want {
-				t.Errorf("resolveHarnessFlag(%q) = %q, want %q", tc.raw, got, tc.want)
+			if err != nil || got != fixture.Want {
+				t.Fatalf("resolveHarnessFlag(%q) = %q, %v; want %q", fixture.Raw, got, err, fixture.Want)
 			}
 		})
 	}

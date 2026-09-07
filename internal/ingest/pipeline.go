@@ -3175,7 +3175,7 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 //  1. Scan peasant-sync output to enumerate all existing sessions (by reading metadata JSONs)
 //  2. Filter to targeted sessions:
 //     - Default: sessions below their harness indexer target (via DB query)
-//     - With --force: ALL sessions
+//     - With --force: all sessions matching the explicit harness/session/since filters
 //  3. For each targeted session:
 //     a. Try EXTRACT+WRITE from original source (if source file exists)
 //     b. If original source missing: log structured warning, record fallback outcome,
@@ -3230,14 +3230,28 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiff, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageDiff, diffProfileStart, len(targeted), len(scanned))
 
-	// Stage 3: FILTER — scan progress; targeted counts stay in the profile data.
+	// Stage 3: FILTER — explicit session and age constraints apply to both stale
+	// and forced work. Saved discovery selection is not an access boundary over
+	// already-stored sessions and is deliberately not applied here.
 	filterProfileStart := time.Now()
-	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: len(scanned)})
-	for index := range scanned {
-		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageFilter, Done: index + 1, Total: len(scanned)})
+	filterTotal := len(targeted)
+	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: filterTotal})
+	filtered := targeted[:0]
+	for index, target := range targeted {
+		allowed := p.config.AllowedSessionIDs == nil || p.config.AllowedSessionIDs[target.session.SessionID]
+		// Retained metadata records the native session start. The managed file's
+		// mtime is publication time, so it cannot establish a session's age.
+		if allowed && p.config.Since != nil {
+			allowed = !time.UnixMilli(target.startMs).Before(*p.config.Since)
+		}
+		if allowed {
+			filtered = append(filtered, target)
+		}
+		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageFilter, Done: index + 1, Total: filterTotal})
 	}
-	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(scanned), Total: len(scanned)})
-	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(targeted), len(scanned))
+	targeted = filtered
+	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: filterTotal, Total: filterTotal})
+	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(targeted), filterTotal)
 
 	if p.config.DryRun {
 		result := &PipelineResult{
