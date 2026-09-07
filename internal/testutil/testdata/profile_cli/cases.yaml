@@ -1,0 +1,55 @@
+cases:
+  - name: profile_json_only
+    description: writes only the JSON v1 profile file
+    subject: cli
+    expectedStages:
+      - push.run
+    expectedCounters:
+      - push.sessions.selected
+    expectedOutputKeys:
+      - profilePath
+    evidenceRules:
+      - assert the file path is user-selected and not written when profiling is disabled
+      - assert output text points to the profile without copying raw JSON
+    forbiddenInputs:
+      - RAW_PATH_SENTINEL
+  - name: profile_json_plus_trace
+    description: writes JSON profile and optional JSONL trace
+    subject: cli
+    expectedStages:
+      - push.run
+    expectedCounters:
+      - push.http.requests
+    expectedOutputKeys:
+      - traceFile
+    evidenceRules:
+      - assert trace lines are structural JSON objects
+      - assert trace order is deterministic for an injected clock
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+  - name: profile_invalid_output_path
+    description: returns an actionable error for unsafe or invalid output path use
+    subject: cli
+    expectedStages: []
+    expectedCounters: []
+    expectedOutputKeys:
+      - safeMessage
+    evidenceRules:
+      - assert the error says what path check failed and how to fix it
+      - assert no profile file is partially written
+    forbiddenInputs:
+      - RAW_PATH_SENTINEL
+  - name: profile_summary_output
+    description: prints a short human summary after profile JSON is written
+    subject: cli
+    expectedStages:
+      - push.publish
+    expectedCounters:
+      - push.payload.bytes
+    expectedOutputKeys:
+      - topBottlenecks
+    evidenceRules:
+      - assert summary names structural bottlenecks, not transcript data
+      - assert tests do not require a maximum elapsed duration
+    forbiddenInputs:
+      - PRIVATE_PROJECT_HISTORY_SENTINEL

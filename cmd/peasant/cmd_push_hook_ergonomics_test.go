@@ -207,7 +207,7 @@ func seedPushableSession(t *testing.T, dir string) {
 //
 // It returns the session id and a config whose output base path is this test's
 // own directory, so parallel tests never share transcripts.
-func seedUploadableSession(t *testing.T, dir, sessionID string) string {
+func seedUploadableSession(t *testing.T, dir, sessionID string, projectPaths ...string) string {
 	t.Helper()
 	const hostSlug = "github.com-user-repo"
 	dbPath := string(defaults.ResolveDBFilePathWith(dir))
@@ -219,7 +219,7 @@ func seedUploadableSession(t *testing.T, dir, sessionID string) string {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000)
+	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000, projectPaths...)
 	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,66 @@
+cases:
+  - name: json_v1_top_level_shape
+    description: verifies the local JSON v1 profile document sections
+    subject: contract
+    expectedStages:
+      - push.run
+      - push.session
+    expectedCounters:
+      - push.sessions.selected
+    expectedOutputKeys:
+      - formatVersion
+      - producer
+      - run
+      - summaries
+      - spans
+      - counters
+      - resources
+      - redaction
+      - errors
+    evidenceRules:
+      - assert stable keys and structural types only
+      - do not assert hard wall-clock thresholds
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+      - MATCHED_SECRET_SENTINEL
+  - name: summary_distribution_keys
+    description: verifies per-stage distributions without clock thresholds
+    subject: contract
+    expectedStages:
+      - push.publish
+    expectedCounters:
+      - push.http.requests
+    expectedOutputKeys:
+      - count
+      - totalMs
+      - minMs
+      - maxMs
+      - p50Ms
+      - p95Ms
+      - p99Ms
+      - errors
+      - outcomes
+    evidenceRules:
+      - assert deterministic ordering by stage and safe subject
+      - compare synthetic duration values from an injected clock
+    forbiddenInputs:
+      - RAW_PATH_SENTINEL
+      - RAW_REMOTE_SENTINEL
+  - name: privacy_safe_error_shape
+    description: verifies profile errors stay actionable and safe
+    subject: contract
+    expectedStages:
+      - push.publish
+    expectedCounters:
+      - push.sessions.failed
+    expectedOutputKeys:
+      - stage
+      - code
+      - safeMessage
+      - retryable
+    evidenceRules:
+      - assert safeMessage describes the failed operation and safe recovery
+      - assert raw error text is replaced before JSON output
+    forbiddenInputs:
+      - PRIVATE_TRANSCRIPT_SENTINEL
+      - RAW_REMOTE_SENTINEL

@@ -1,0 +1,411 @@
+cases:
+  - name: custom-multiple-categories-concurrent-history
+    input: 'CUSTOMPII CUSTOMSECRET CUSTOMPATH CUSTOMPROJECT contact zzmail@example.test /data/zzxdg/main.go'
+    xdgDataHome: /data/zzxdg/share
+    customPatterns:
+      - {id: private.pii-rule, category: pii, pattern: 'CUSTOMPI[I]', replacement: '<REPLACEDPII>'}
+      - {id: secret_token, category: secrets, pattern: 'CUSTOMSECRE[T]', replacement: '<REPLACEDSECRET>'}
+      - {id: custom_paths, category: paths, pattern: 'CUSTOMPAT[H]', replacement: '<REPLACEDPATH>'}
+      - {id: custom_project, category: project, pattern: 'CUSTOMPROJEC[T]', replacement: '<REPLACEDPROJECT>'}
+    forbidden: [CUSTOMPII, CUSTOMSECRET, CUSTOMPATH, CUSTOMPROJECT, zzmail@example.test, /data/zzxdg]
+    sessionIDs:
+      - 'aaaaaaaa-0000-4000-8000-000000000001'
+      - 'aaaaaaaa-0000-4000-8000-000000000002'
+      - 'aaaaaaaa-0000-4000-8000-000000000003'
+    rules: {private.pii-rule: 3, secret_token: 3, custom_paths: 3, custom_project: 3, email: 3, xdg_data_home: 3}
+    categories: {PII: 6, CREDENTIAL: 3, PATH: 6, INTERNAL: 3}
+  - name: custom-static-collision-actual-overlap
+    input: 'contact zzmail@example.test'
+    customPatterns:
+      - {id: email, category: pii, pattern: 'zzmail@example[.]test', replacement: '<CUSTOMPII>'}
+    rules: {email: 2}
+    categories: {PII: 2}
+  - name: custom-duplicate-same-category
+    input: 'CUSTOMONE CUSTOMTWO'
+    customPatterns:
+      - {id: custom_duplicate, category: secrets, pattern: 'CUSTOMON[E]', replacement: '<FIRST>'}
+      - {id: custom_duplicate, category: secrets, pattern: 'CUSTOMTW[O]', replacement: '<SECOND>'}
+    forbidden: [CUSTOMONE, CUSTOMTWO]
+    rules: {custom_duplicate: 2}
+    categories: {CREDENTIAL: 2}
+  - name: custom-duplicate-conflicting-categories
+    input: 'CUSTOMONE CUSTOMTWO'
+    customPatterns:
+      - {id: custom_duplicate, category: secrets, pattern: 'CUSTOMON[E]', replacement: '<FIRST>'}
+      - {id: custom_duplicate, category: pii, pattern: 'CUSTOMTW[O]', replacement: '<SECOND>'}
+      - {id: custom_duplicate, category: secrets, pattern: 'UNMATCHE[D]', replacement: '<THIRD>'}
+    forbidden: [CUSTOMONE, CUSTOMTWO, custom_duplicate]
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_custom_collision
+    diagnosticContains: [conflicting categories, counts withheld, publication unchanged, Rename]
+  - name: custom-static-conflicting-categories
+    input: 'contact zzmail@example.test'
+    customPatterns:
+      - {id: email, category: secrets, pattern: 'zzmail@example[.]test', replacement: '<CUSTOMSECRET>'}
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_custom_collision
+  - name: custom-unknown-unconfigured
+    input: custom-sensitive-input-sentinel
+    customRuleID: unconfigured_rule
+    declaredPatterns: []
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_unknown_rule
+  - name: custom-unsafe-path-id
+    input: custom-sensitive-input-sentinel
+    customRuleID: /home/zzprofile/private-rule
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_unsafe_rule
+  - name: custom-unsafe-remote-id
+    input: custom-sensitive-input-sentinel
+    customRuleID: https://private.example.test/rule.git
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_unsafe_rule
+  - name: custom-malformed-whitespace-id
+    input: custom-sensitive-input-sentinel
+    customRuleID: ' custom_rule '
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_unsafe_rule
+  - name: custom-malformed-control-id
+    input: custom-sensitive-input-sentinel
+    customRuleID: "custom_rule\nprivate"
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_unsafe_rule
+  - name: custom-malformed-uppercase-id
+    input: custom-sensitive-input-sentinel
+    customRuleID: CUSTOM_RULE
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_unsafe_rule
+  - name: custom-invalid-config-category
+    input: contact zzmail@example.test
+    declaredPatterns:
+      - {id: custom_rule, category: unknown, pattern: '[PRIVATE]', replacement: '<PRIVATE>'}
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_config
+  - name: custom-invalid-config-regex
+    input: contact zzmail@example.test
+    declaredPatterns:
+      - {id: custom_rule, category: pii, pattern: '[PRIVATE', replacement: '<PRIVATE>'}
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_config
+  - name: custom-invalid-config-empty-id
+    input: contact zzmail@example.test
+    declaredPatterns:
+      - {id: '', category: pii, pattern: 'PRIVATE', replacement: '<PRIVATE>'}
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_config
+  - name: custom-report-category-mismatch
+    input: custom-sensitive-input-sentinel
+    customRuleID: custom_rule
+    inconsistentCategory: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_category
+  - name: custom-disabled
+    input: custom-sensitive-input-sentinel
+    customRuleID: custom_rule
+    disabled: true
+    rules: {}
+    categories: {}
+  - name: xdg-data
+    xdgDataHome: /data/zzxdg/share
+    input: 'open /data/zzxdg/main.go'
+    forbidden: [/data/zzxdg, zzxdg]
+    rules: {xdg_data_home: 1}
+    categories: {PATH: 1}
+  - name: xdg-config
+    xdgConfigHome: /config/zzxdg/config
+    input: 'open /config/zzxdg/main.go'
+    forbidden: [/config/zzxdg, zzxdg]
+    rules: {xdg_config_home: 1}
+    categories: {PATH: 1}
+  - name: xdg-state
+    xdgStateHome: /state/zzxdg/state
+    input: 'open /state/zzxdg/main.go'
+    forbidden: [/state/zzxdg, zzxdg]
+    rules: {xdg_state_home: 1}
+    categories: {PATH: 1}
+  - name: xdg-overlap
+    xdgDataHome: /data/zzxdg/share
+    xdgConfigHome: /data/zzxdg/config
+    xdgStateHome: /data/zzxdg/state
+    input: 'open /data/zzxdg/main.go contact zzmail@example.test sk-ant-api03-zzprobe00000000000000123456'
+    forbidden: [/data/zzxdg, zzxdg, zzmail@example.test]
+    # Each detector counts its overlapping match; baseline history is subtracted.
+    rules: {xdg_data_home: 1, xdg_config_home: 1, xdg_state_home: 1, email: 1, anthropic_key: 1}
+    categories: {PATH: 3, PII: 1, CREDENTIAL: 1}
+  - name: xdg-distinct-prefixes
+    xdgDataHome: /data/zzxdg/share
+    xdgConfigHome: /config/zzxdg/config
+    xdgStateHome: /state/zzxdg/state
+    input: 'open /data/zzxdg/main.go /config/zzxdg/config /state/zzxdg/state'
+    forbidden: [zzxdg]
+    rules: {xdg_data_home: 1, xdg_config_home: 1, xdg_state_home: 1}
+    categories: {PATH: 3}
+  - name: xdg-concurrent-sessions
+    xdgDataHome: /data/zzxdg/share
+    input: 'open /data/zzxdg/main.go'
+    sessionIDs:
+      - 'aaaaaaaa-0000-4000-8000-000000000001'
+      - 'aaaaaaaa-0000-4000-8000-000000000002'
+      - 'aaaaaaaa-0000-4000-8000-000000000003'
+    rules: {xdg_data_home: 3}
+    categories: {PATH: 3}
+  - name: xdg-conventional-home
+    xdgDataHome: /home/zzxdg/.local/share
+    input: 'open /home/zzxdg/main.go'
+    rules: {unix_home_path: 3}
+    categories: {PATH: 3}
+  - name: xdg-disabled
+    xdgDataHome: /data/zzxdg/share
+    input: 'open /data/zzxdg/main.go'
+    disabled: true
+    rules: {}
+    categories: {}
+  - name: custom-xdg-prefix-reportable
+    input: custom-sensitive-input-sentinel
+    customRuleID: xdg_private_custom_rule_sentinel
+    rules: {xdg_private_custom_rule_sentinel: 1}
+    categories: {PII: 1}
+  - name: custom-xdg-collision-same-category
+    input: custom-sensitive-input-sentinel
+    customRuleID: xdg_data_home
+    customCategory: paths
+    rules: {xdg_data_home: 1}
+    categories: {PATH: 1}
+  - name: custom-xdg-collision-other-category
+    input: custom-sensitive-input-sentinel
+    customRuleID: xdg_config_home
+    customCategory: pii
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_custom_collision
+  - name: custom-static-collision
+    input: custom-sensitive-input-sentinel
+    customRuleID: email
+    customCategory: pii
+    rules: {email: 1}
+    categories: {PII: 1}
+  - name: report-duplicate-category
+    input: contact zzmail@example.test
+    duplicateCategory: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_category
+  - name: report-zero-count
+    input: contact zzmail@example.test
+    zeroCount: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_count
+  - name: report-overflow-count
+    input: contact zzmail@example.test
+    # A valid positive rule count plus MaxInt64 must fail before adding wraps.
+    reportCounts: {email: 9223372036854775807, anthropic_key: 1}
+    reportCategories: [pii, secrets]
+    reportTotal: 9223372036854775807
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+    expectedCode: redaction_report_count
+  - name: config-recorder
+    configRecorder: true
+    input: 'contact zz-redact-probe-01@example.com for access'
+    forbidden: ['zz-redact-probe-01@example.com']
+    rules: {email: 1}
+    categories: {PII: 1}
+  - name: secrets
+    input: 'deploy key sk-ant-api03-zzprobe00000000000000123456 in config'
+    forbidden: ['sk-ant-api03-zzprobe00000000000000123456']
+    rules: {anthropic_key: 1}
+    categories: {CREDENTIAL: 1}
+  - name: pii-email
+    input: 'contact zz-redact-probe-01@example.com for access'
+    forbidden: ['zz-redact-probe-01@example.com']
+    rules: {email: 1}
+    categories: {PII: 1}
+  - name: paths
+    input: 'open /home/zzprobeuser/projects/billing/main.go now'
+    forbidden: ['/home/zzprobeuser/projects/billing/main.go', zzprobeuser]
+    # The placeholder still matches the path rule in both assembled documents.
+    # These are match counts across passes, not three distinct replacements.
+    rules: {unix_home_path: 3}
+    categories: {PATH: 3}
+  - name: remote-https-not-active
+    input: 'clone https://github.com/zzprobeorg/zzproberepo.git today'
+    forbidden: ['https://github.com/zzprobeorg/zzproberepo.git', zzprobeorg]
+    rules: {}
+    categories: {}
+  - name: remote-ssh-not-active
+    input: 'origin git@github.com:zzprobeorg/zzproberepo.git pushed'
+    forbidden: ['git@github.com:zzprobeorg/zzproberepo.git', zzprobeorg]
+    rules: {}
+    categories: {}
+  - name: project-image
+    input: 'pull ghcr.io/zzprobeorg/zzprobeimg:latest now'
+    forbidden: ['ghcr.io/zzprobeorg/zzprobeimg:latest', zzprobeorg]
+    rules: {ghcr_image_ref: 1}
+    categories: {INTERNAL: 1}
+  - name: pii-phone
+    input: 'call +1-415-555-0132 after lunch today please'
+    forbidden: ['+1-415-555-0132']
+    rules: {phone_us: 1}
+    categories: {PII: 1}
+  - name: transcript-no-findings
+    input: 'Here is the fix for the deploy pipeline we discussed.'
+    rules: {}
+    categories: {}
+  - name: project-import
+    input: 'import "github.com/zzprobeorg/zzprobepkg/v2" here'
+    forbidden: ['github.com/zzprobeorg/zzprobepkg/v2', zzprobeorg]
+    rules: {go_import_path: 1}
+    categories: {INTERNAL: 1}
+  - name: private-history
+    input: 'branch zz-private-history-sentinel commit abc1234567890'
+    forbidden: [zz-private-history-sentinel]
+    rules: {}
+    categories: {}
+  - name: invalid-category
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidCategory: private_category_sentinel
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: invalid-rule-path
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidRule: '/home/zz-rule-sentinel/private'
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: invalid-rule-token-shaped
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidRule: private_rule_sentinel
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: disabled
+    input: 'contact zz-redact-probe-01@example.com for access'
+    disabled: true
+    rules: {}
+    categories: {}
+  - name: concurrent-sessions
+    input: 'contact zz-redact-probe-01@example.com for access'
+    sessionIDs:
+      - 'aaaaaaaa-0000-4000-8000-000000000001'
+      - 'aaaaaaaa-0000-4000-8000-000000000002'
+      - 'aaaaaaaa-0000-4000-8000-000000000003'
+    rules: {email: 3}
+    categories: {PII: 3}
+  - name: report-unavailable
+    expectedCode: redaction_report_unavailable
+    input: 'contact zz-redact-probe-01@example.com for access'
+    reportUnavailable: true
+    rules: {}
+    categories: {}
+  - name: report-invalid-total
+    expectedCode: redaction_report_total
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidTotal: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: report-inconsistent-category
+    expectedCode: redaction_report_category
+    input: 'contact zz-redact-probe-01@example.com for access'
+    inconsistentCategory: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: report-negative-count
+    expectedCode: redaction_report_count
+    input: 'contact zz-redact-probe-01@example.com for access'
+    negativeCount: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: report-decreasing-count
+    expectedCode: redaction_report_decreasing
+    input: 'contact zz-redact-probe-01@example.com for access'
+    decreasingReport: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: custom-rule-id-reportable
+    input: 'custom-sensitive-input-sentinel'
+    customRuleID: private_custom_rule_sentinel
+    rules: {private_custom_rule_sentinel: 1}
+    categories: {PII: 1}
+  - name: disabled-invalid-report
+    input: 'contact zz-redact-probe-01@example.com for access'
+    invalidCategory: private_category_sentinel
+    disabled: true
+    rules: {}
+    categories: {}
+  - name: entries-encoding-failure
+    expectedCode: redaction_entries_validation
+    diagnosticContains: [Push document validation failed, publication was refused, Correct]
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: entries
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: metadata-encoding-failure
+    expectedCode: redaction_metadata_validation
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: metadata
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
+  - name: transcript-encoding-failure
+    expectedCode: redaction_transcript_validation
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: transcript
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
+  - name: entries-shape-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: entries
+    failureShape: true
+    rules: {}
+    categories: {}
+    expectedFailures: 1
+  - name: metadata-shape-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: metadata
+    failureShape: true
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
+  - name: transcript-shape-failure
+    input: 'contact zz-redact-probe-01@example.com for access'
+    failureSeam: transcript
+    failureShape: true
+    rules: {email: 1}
+    categories: {PII: 1}
+    expectedFailures: 1
