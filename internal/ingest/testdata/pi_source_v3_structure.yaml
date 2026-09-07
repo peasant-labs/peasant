@@ -45,9 +45,9 @@ cases:
       {"type":"custom_message","id":"c","parentId":"r","customType":"context","display":false,"content":[{"type":"image","data":"native-boundary-string","mimeType":"image/png"},{"type":"text","text":"ordinary context"}]}
     metadataStringBytes: 51175
     assertOrdinaryLongContent: true
-    turns: 3
-    owners: 2
-    metadata: 1
+    expectedTurnCount: 3
+    expectedUsageOwnerCount: 2
+    expectedNativeMetadataCount: 1
     contains: [ordinary context, '[image omitted]']
   - name: native-metadata-string-over-limit
     source: |
@@ -65,15 +65,15 @@ cases:
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"message","id":"b","parentId":null,"message":{"role":"bashExecution","command":"echo synthetic","output":"synthetic output","exitCode":0}}
-    turns: 1
-    owners: 1
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
     contains: [bash, synthetic output]
   - name: pending-tool
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"pending","name":"pending_tool","arguments":{}}]}}
-    turns: 1
-    owners: 1
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
     contains: [pending_tool, unknown]
   - name: absent-usage-and-state
     source: |
@@ -81,8 +81,8 @@ cases:
       {"type":"model_change","id":"m","parentId":null,"modelId":"not-observed"}
       {"type":"thinking_level_change","id":"t","parentId":"m","thinkingLevel":"high"}
       {"type":"message","id":"a","parentId":"t","message":{"role":"assistant","content":[]}}
-    turns: 1
-    owners: 1
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
     contains: [unknown]
     excludes: [not-observed]
   - name: mismatched-result
@@ -106,7 +106,7 @@ cases:
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"custom_message","id":"c","parentId":null,"display":true,"customType":"context","content":"displayed context"}
-    turns: 1
+    expectedTurnCount: 1
     contains: [displayed context]
   - name: active-history
     expectedModel: observed-model
@@ -119,9 +119,9 @@ cases:
       {"type":"compaction","id":"s","parentId":"c","summary":"visible summary","details":{"count":1}}
       {"type":"branch_summary","id":"b","parentId":"s","summary":"visible branch summary"}
       {"type":"custom","id":"m","parentId":"b","customType":"state","data":{"opaque":"not searchable"}}
-    turns: 5
-    owners: 4
-    metadata: 4
+    expectedTurnCount: 5
+    expectedUsageOwnerCount: 4
+    expectedNativeMetadataCount: 4
     contains: [full history, think once, answer, visible context, visible summary, visible branch summary, '[image omitted]']
   - name: final-leaf-and-global-name
     source: |
@@ -130,7 +130,7 @@ cases:
       {"type":"session_info","id":"name","parentId":"old","name":"latest name"}
       {"type":"message","id":"leaf","parentId":null,"message":{"role":"user","content":"active text"}}
     title: latest name
-    turns: 1
+    expectedTurnCount: 1
     contains: [active text]
     excludes: [inactive text]
   - name: whitespace-clears-name
@@ -138,13 +138,13 @@ cases:
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"session_info","id":"name","parentId":null,"name":"old name"}
       {"type":"session_info","id":"clear","parentId":"name","name":"  "}
-    turns: 0
+    expectedTurnCount: 0
   - name: incomplete-tail
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"message",
-    warnings: 1
-    turns: 0
+    expectedWarningCount: 1
+    expectedTurnCount: 0
   - name: interior-incomplete
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
@@ -177,8 +177,8 @@ cases:
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"label","id":"a","parentId":"missing"}
       {"type":"message","id":"b","parentId":null,"message":{"role":"user","content":"valid active"}}
-    turns: 1
-    warnings: 1
+    expectedTurnCount: 1
+    expectedWarningCount: 1
     contains: [valid active]
   - name: cycle
     source: |
@@ -198,10 +198,10 @@ cases:
   - name: header-only
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","parentSession":"/synthetic/private-fork.jsonl"}
-    turns: 0
+    expectedTurnCount: 0
   - name: custom-only
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"custom","id":"a","parentId":null,"customType":"state","data":{"opaque":"metadata only"}}
-    turns: 0
-    metadata: 1
+    expectedTurnCount: 0
+    expectedNativeMetadataCount: 1

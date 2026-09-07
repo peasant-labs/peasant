@@ -74,23 +74,23 @@ func (m *piFixtureModelID) UnmarshalYAML(node *yaml.Node) error {
 }
 
 type piSourceCase struct {
-	Name                      string            `yaml:"name"`
-	Source                    string            `yaml:"source"`
-	Reject                    bool              `yaml:"reject"`
-	ProjectionReject          bool              `yaml:"projectionReject"`
-	MetadataStringBytes       int               `yaml:"metadataStringBytes"`
-	PaddingStringBytes        int               `yaml:"paddingStringBytes"`
-	SelectedMetadataBytes     int               `yaml:"selectedMetadataBytes"`
-	AssertOrdinaryLongContent bool              `yaml:"assertOrdinaryLongContent"`
-	RejectContains            string            `yaml:"rejectContains"`
-	Title                     string            `yaml:"title"`
-	ExpectedModel             *piFixtureModelID `yaml:"expectedModel"`
-	Turns                     int               `yaml:"turns"`
-	Owners                    int               `yaml:"owners"`
-	Metadata                  int               `yaml:"metadata"`
-	Warnings                  int               `yaml:"warnings"`
-	Contains                  []string          `yaml:"contains"`
-	Excludes                  []string          `yaml:"excludes"`
+	Name                        string            `yaml:"name"`
+	Source                      string            `yaml:"source"`
+	Reject                      bool              `yaml:"reject"`
+	ProjectionReject            bool              `yaml:"projectionReject"`
+	MetadataStringBytes         int               `yaml:"metadataStringBytes"`
+	PaddingStringBytes          int               `yaml:"paddingStringBytes"`
+	SelectedMetadataBytes       int               `yaml:"selectedMetadataBytes"`
+	AssertOrdinaryLongContent   bool              `yaml:"assertOrdinaryLongContent"`
+	RejectContains              string            `yaml:"rejectContains"`
+	Title                       string            `yaml:"title"`
+	ExpectedModel               *piFixtureModelID `yaml:"expectedModel"`
+	ExpectedTurnCount           int               `yaml:"expectedTurnCount"`
+	ExpectedUsageOwnerCount     int               `yaml:"expectedUsageOwnerCount"`
+	ExpectedNativeMetadataCount int               `yaml:"expectedNativeMetadataCount"`
+	ExpectedWarningCount        int               `yaml:"expectedWarningCount"`
+	Contains                    []string          `yaml:"contains"`
+	Excludes                    []string          `yaml:"excludes"`
 }
 
 func TestPiFixtureModelExpectationValidation(t *testing.T) {
@@ -249,7 +249,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if session.Title != tc.Title || session.CWD != "/synthetic/project" || session.ParentUUID != nil {
 				t.Fatalf("wrong native identity: %+v", session)
 			}
-			if len(session.DiscoveryWarnings) != tc.Warnings {
+			if len(session.DiscoveryWarnings) != tc.ExpectedWarningCount {
 				t.Fatalf("warnings: %+v", session.DiscoveryWarnings)
 			}
 			meta, err := adapter.ExtractMetadata(ctx, session)
@@ -356,7 +356,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(projection.Turns) != tc.Turns || len(projection.UsageOwners) != tc.Owners || len(projection.NativeMetadata) != tc.Metadata {
+			if len(projection.Turns) != tc.ExpectedTurnCount || len(projection.UsageOwners) != tc.ExpectedUsageOwnerCount || len(projection.NativeMetadata) != tc.ExpectedNativeMetadataCount {
 				t.Fatalf("projection: %d turns, %d owners, %d metadata", len(projection.Turns), len(projection.UsageOwners), len(projection.NativeMetadata))
 			}
 			detail, err := transcript.SessionToDetailValidatedWithProjection(&ingest.Session{Harness: schema.HarnessPi}, projection)
