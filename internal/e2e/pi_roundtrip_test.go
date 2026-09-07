@@ -38,8 +38,8 @@ type piRoundTripCase struct {
 		Result    string `yaml:"result"`
 		IsError   bool   `yaml:"isError"`
 	} `yaml:"tool"`
-	AssistantCost      string           `yaml:"assistantCost"`
-	AssistantTokens    map[string]int64 `yaml:"assistantTokens"`
+	AssistantCost      *schema.RecordedCostAmount `yaml:"assistantCost"`
+	AssistantTokens    map[string]int64           `yaml:"assistantTokens"`
 	SourceReplacements []struct {
 		From string `yaml:"from"`
 		To   string `yaml:"to"`
@@ -73,7 +73,14 @@ func loadPiRoundTripCases(t *testing.T) []piRoundTripCase {
 	names := make([]string, 0, len(fixture.Cases))
 	for _, c := range fixture.Cases {
 		names = append(names, c.Name)
-		piCheck(t, c.NativeCase != "" && c.SessionID != "" && c.AssistantCost != "" && c.MetadataOnly != "", "fixture string expectations must be populated")
+		piCheck(t, c.NativeCase != "" && c.SessionID != "" && c.MetadataOnly != "", "fixture string expectations must be populated")
+		if c.AssistantCost != nil {
+			piNoError(t, schema.ValidateUsageDetail(schema.UsageDetail{
+				OwnerID: "fixture-cost", SourceEntryRef: "fixture-cost", Scope: schema.UsageScopeAssistant,
+				Completeness: schema.UsageUnknown,
+				Cost:         &schema.RecordedCostDetail{Source: schema.RecordedCostSourceHarnessEstimate, Total: c.AssistantCost},
+			}))
+		}
 		piCheck(t, len(c.Capabilities) > 0 && len(c.Contents) > 0 && len(c.Forbidden) > 0 && len(c.Owners) > 0, "fixture evidence expectations must be populated")
 		piCheck(t, c.Placeholders > 0 && c.Metadata > 0, "fixture must require placeholders and metadata")
 		piCheck(t, len(c.MetadataSources) == c.Metadata && c.Tool.NativeID != "" && c.Tool.Name != "" && c.Tool.Arguments != "" && c.Tool.Result != "", "fixture must name exact metadata sources and paired tool evidence")

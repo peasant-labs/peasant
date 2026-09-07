@@ -1,4 +1,5 @@
 requiredNames:
+  - native-complete-base-no-cost-roundtrip
   - native-active-history-encrypted-roundtrip
   - duplicate-escaped-envelope-key
   - metadata-string-over-bound

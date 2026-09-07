@@ -122,6 +122,7 @@ push:
 			stored := readLegacyStorageSnapshot(t, stack, remote.ID)
 			assertPiCiphertext(t, stack, stored, content)
 			served := piReadVillageDetail(t, proxy.URL, apiKey, remote.ID)
+			assertPiRoundTripDetail(t, fixture, served)
 			piEqual(t, outbound.SessionDetail.Turns, served.Turns)
 			piEqual(t, outbound.SessionDetail.NativeMetadata, served.NativeMetadata)
 
@@ -140,6 +141,7 @@ push:
 			stored = readLegacyStorageSnapshot(t, stack, remote.ID)
 			assertPiCiphertext(t, stack, stored, bare)
 			rewritten := piReadVillageDetail(t, proxy.URL, apiKey, remote.ID)
+			assertPiRoundTripDetail(t, fixture, rewritten)
 			piEqual(t, served.Turns, rewritten.Turns)
 			piEqual(t, served.NativeMetadata, rewritten.NativeMetadata)
 			after := readLegacyStorageSnapshot(t, stack, remote.ID)
@@ -156,6 +158,7 @@ push:
 			pulledContent, err := schema.DecodeTranscriptContentRaw(pulledRaw)
 			piNoError(t, err)
 			piCheck(t, pulledContent.SessionDetail != nil, "pull must retain detail envelope")
+			assertPiRoundTripDetail(t, fixture, pulledContent.SessionDetail)
 			piEqual(t, rewritten.Turns, pulledContent.SessionDetail.Turns)
 			piEqual(t, rewritten.NativeMetadata, pulledContent.SessionDetail.NativeMetadata)
 			for _, invalid := range fixture.InvalidContent {
@@ -231,8 +234,12 @@ func assertPiRoundTripDetail(t *testing.T, fixture piRoundTripCase, detail *sche
 		if turn.Usage != nil {
 			owners[turn.Usage.SourceEntryRef] = *turn.Usage
 			if turn.Usage.Scope == schema.UsageScopeAssistant {
-				piCheck(t, turn.Usage.Cost != nil && turn.Usage.Cost.Total != nil, "recorded cost required")
-				piEqual(t, fixture.AssistantCost, string(*turn.Usage.Cost.Total))
+				if fixture.AssistantCost == nil {
+					piCheck(t, turn.Usage.Cost == nil, "unrecorded cost must remain absent, not a fabricated zero estimate")
+				} else {
+					piCheck(t, turn.Usage.Cost != nil && turn.Usage.Cost.Total != nil, "recorded cost required")
+					piEqual(t, *fixture.AssistantCost, *turn.Usage.Cost.Total)
+				}
 				raw, err := json.Marshal(turn.Usage.Tokens)
 				piNoError(t, err)
 				var tokens map[string]int64

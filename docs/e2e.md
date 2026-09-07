@@ -130,8 +130,9 @@ and XDG directories, against independently provisioned Village/Postgres/MinIO se
 A pass checks:
 
 - Native harvest, SQLite reopen, and matching local API/export projections.
-- Complete, partial-with-zero, and cost-only assistant accounting, plus distinct absent
-  tool and summary owners; exact source/owner refs and recorded cost strings.
+- Complete accounting with and without recorded cost, partial-with-zero, and cost-only
+  assistant accounting, plus distinct absent tool and summary owners; exact source/owner
+  refs and recorded cost strings.
 - Thinking once, visible context and summaries, four image placeholders, and extension
   state preserved as metadata rather than conversation text.
 - Zero HTTP requests during push dry-run, including negotiation and upload; real

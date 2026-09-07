@@ -35,6 +35,14 @@ cases:
         repeat: 16385
         status: 409
   - <<: *active
+    name: native-complete-base-no-cost-roundtrip
+    sessionID: 44444444-2222-4333-8444-555555555555
+    assistantCost: null
+    sourceReplacements:
+      - from: '"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}'
+        to: '"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10'
+    invalidContent: []
+  - <<: *active
     name: native-zero-partial-floating-cost-roundtrip
     sessionID: 22222222-2222-4333-8444-555555555555
     sourceReplacements:
