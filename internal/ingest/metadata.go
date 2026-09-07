@@ -5,6 +5,16 @@ import "github.com/peasant-labs/schema"
 // CurrentSchemaVersion is the schema version written by this build of the ingest tool.
 const CurrentSchemaVersion = schema.MetadataSchemaVersion
 
+// The optional adapter provenance added in metadata v10 does not invalidate v9
+// recordings. Keep the existing required refreshes, but do not re-harvest every
+// other harness merely because the shared contract gained an optional field.
+func metadataNeedsRefresh(version int) bool {
+	if version == 9 && CurrentSchemaVersion == 10 {
+		return false
+	}
+	return version < CurrentSchemaVersion
+}
+
 // UnifiedMetadata is the on-disk JSON stored alongside each raw transcript.
 type UnifiedMetadata = schema.UnifiedMetadata
 

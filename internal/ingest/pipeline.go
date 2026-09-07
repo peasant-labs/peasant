@@ -1726,7 +1726,7 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 		}
 	}
 	// Schema version behind current (DB value): re-ingest.
-	if loc.SchemaVersion < CurrentSchemaVersion {
+	if metadataNeedsRefresh(loc.SchemaVersion) {
 		if isActive {
 			return DiffActive
 		}
@@ -1832,7 +1832,7 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 	}
 
 	// Schema version behind current: re-ingest.
-	if existing.SchemaVersion < CurrentSchemaVersion {
+	if metadataNeedsRefresh(existing.SchemaVersion) {
 		if isActive {
 			return DiffActive
 		}
