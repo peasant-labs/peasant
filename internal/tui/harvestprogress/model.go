@@ -3,6 +3,7 @@ package harvestprogress
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -24,7 +25,7 @@ type TickMsg time.Time
 // CancelMsg reports operation cancellation without ending presentation lifetime.
 type CancelMsg struct{}
 
-// StopMsg is sent only after the operation returns. At freezes the final clock.
+// StopMsg is retained until command completion sends typed final messages.
 type StopMsg struct {
 	Canceled bool
 	At       time.Time
@@ -36,19 +37,18 @@ type ProgressReader interface {
 }
 
 type Model struct {
-	state            ProgressReader
-	anim             *animation.Animation
-	cancel           context.CancelFunc
-	operationErr     func() error
-	frame            int
-	lastAnimation    time.Time
-	now              time.Time
-	stopped          bool
-	canceling        bool
-	canceledEstimate string
-	width, height    int
-	presentation     ingestprogress.Presentation
-	theme            theme.Theme
+	state         ProgressReader
+	anim          *animation.Animation
+	cancel        context.CancelFunc
+	operationErr  func() error
+	frame         int
+	lastAnimation time.Time
+	now           time.Time
+	stopped       bool
+	canceling     bool
+	width, height int
+	progress      ingestprogress.Model
+	theme         theme.Theme
 }
 
 // operationErr optionally probes the owning operation's context independently
@@ -63,7 +63,7 @@ type Options struct {
 }
 
 func New(options Options) Model {
-	m := Model{state: options.Progress, anim: options.Animation, cancel: options.Cancel, operationErr: options.ContextErr, now: options.StartedAt, theme: options.Theme, presentation: ingestprogress.New(options.StartedAt, false)}
+	m := Model{state: options.Progress, anim: options.Animation, cancel: options.Cancel, operationErr: options.ContextErr, now: options.StartedAt, theme: options.Theme, progress: ingestprogress.New(ingestprogress.Options{Theme: options.Theme, StartedAt: options.StartedAt})}
 	m.observe(options.StartedAt)
 	return m
 }
@@ -86,17 +86,24 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-	case StopMsg:
-		if msg.Canceled {
-			m.beginCancel()
-		}
-		if !msg.At.IsZero() {
-			m.observe(msg.At)
-		} else {
-			m.observe(m.now)
-		}
+		m.progress.SetSize(msg.Width, -1)
+	case ingestprogress.FinalMsg:
+		m.progress, _ = m.progress.Update(msg)
+		m.now = msg.At
 		m.stopped = true
+		m.canceling = msg.Outcome == ingestprogress.FinalCanceled
 		return m, tea.Quit
+	case StopMsg:
+		at := msg.At
+		if at.IsZero() {
+			at = m.now
+		}
+		outcome := ingestprogress.FinalSucceeded
+		if msg.Canceled || m.canceling || (m.operationErr != nil && m.operationErr() != nil) {
+			outcome = ingestprogress.FinalCanceled
+		}
+		snapshot := m.state.Snapshot()
+		return m.Update(ingestprogress.FinalMsg{At: at, Snapshot: snapshot, Outcome: outcome})
 	case CancelMsg:
 		m.beginCancel()
 	case TickMsg:
@@ -118,15 +125,13 @@ func (m *Model) observe(at time.Time) {
 		m.beginCancel()
 	}
 	m.now = at
-	m.presentation.Observe(at, snapshot)
+	m.progress, _ = m.progress.Update(ingestprogress.ObserveMsg{At: at, Snapshot: snapshot, CancelRequested: m.canceling})
 }
 
 func (m *Model) beginCancel() {
 	if !m.canceling {
-		// Keep only the displayed estimate. Continue observing final counts,
-		// errors and clocks while the operation acknowledges cancellation.
-		m.canceledEstimate = m.presentation.EstimateText()
 		m.canceling = true
+		m.progress, _ = m.progress.Update(ingestprogress.CancelRequestedMsg{At: m.now})
 	}
 }
 
@@ -165,7 +170,10 @@ func (m Model) Render() string {
 	if m.height > 0 {
 		available = max(m.height-len(lines)-len(footer), 0)
 	}
-	lines = append(lines, m.presentation.LinesWithRetainedEstimate(styles, m.now, available, m.canceledEstimate)...)
+	m.progress.SetSize(m.width, available)
+	if child := m.progress.View(); child != "" {
+		lines = append(lines, strings.Split(child, "\n")...)
+	}
 	if m.height > 0 && len(lines)+len(footer) > m.height {
 		lines = lines[:max(m.height-len(footer), 0)]
 	}

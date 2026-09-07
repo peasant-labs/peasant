@@ -24,6 +24,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/ingest/testfixture"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"golang.org/x/sys/unix"
@@ -334,6 +335,25 @@ func TestProgressModelSuccessClears(t *testing.T) {
 	updated, cmd := m.Update(harvestprogress.StopMsg{})
 	if cmd == nil || updated.View().Content != "" {
 		t.Fatal("success must clear the live view")
+	}
+}
+
+func TestProgressModelAuthoritativeFinalOverridesPendingCancellation(t *testing.T) {
+	for _, outcome := range []ingestprogress.FinalOutcome{ingestprogress.FinalSucceeded, ingestprogress.FinalFailed} {
+		started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+		state := ingest.NewProgressState()
+		state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
+		model := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: started})
+		updated, _ := model.Update(harvestprogress.CancelMsg{})
+		finalSnapshot := state.Snapshot()
+		updated, cmd := updated.Update(ingestprogress.FinalMsg{At: started.Add(3 * time.Second), Snapshot: finalSnapshot, Outcome: outcome})
+		if cmd == nil || updated.View().Content != "" {
+			t.Fatalf("outcome %v did not clear pending cancellation", outcome)
+		}
+		late, lateCmd := updated.Update(harvestprogress.CancelMsg{})
+		if lateCmd != nil || late.View().Content != "" {
+			t.Fatalf("outcome %v changed after final", outcome)
+		}
 	}
 }
 

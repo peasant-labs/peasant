@@ -245,7 +245,7 @@ type Program struct {
 	ingestCtx          context.Context
 	ingestCancel       context.CancelFunc
 	attemptStarted     time.Time
-	progressView       ingestprogress.Presentation
+	progressView       ingestprogress.Model
 	progressAnimFrame  int
 	lastProgressAnimAt time.Time
 	nextSteps          []NextStepKind
@@ -278,7 +278,7 @@ func NewProgram(deps ProgramDeps) Program {
 		overlay:      kit.NewOverlay(deps.Theme),
 		spinner:      kit.NewSpinner(deps.Theme, "working"),
 		connection:   &villageConnectionState{connected: deps.AlreadyConnected},
-		progressView: ingestprogress.New(time.Time{}, false),
+		progressView: ingestprogress.New(ingestprogress.Options{Theme: deps.Theme}),
 	}
 	p = p.buildFlow()
 	if deps.AlreadyConnected {
@@ -347,6 +347,7 @@ func (p *Program) SetSize(width, height int) {
 	p.visibility.SetSize(wrapPromptWidth(width), kit.ConfirmMinSize.Height)
 	p.overlay.SetSize(width, height)
 	p.spinner.SetSize(width, height)
+	p.progressView.SetSize(width, height)
 	if p.flowBuilt {
 		p.flow.SetSize(width, height)
 	}
@@ -801,7 +802,8 @@ func (p Program) startIngest(retry bool) (Program, tea.Cmd) {
 	p.ingestErr = nil
 	p.retryAttempt = retry
 	p.attemptStarted = p.deps.Clock.Now()
-	p.progressView.Reset(p.attemptStarted, retry)
+	p.progressView = ingestprogress.New(ingestprogress.Options{Theme: p.deps.Theme, StartedAt: p.attemptStarted, Retry: retry})
+	p.progressView.SetSize(p.width, p.height)
 	// Each attempt owns a cancellable context, mirroring beginLogin, so an
 	// interrupt key can stop an ingest the runner would otherwise block on.
 	ctx, cancel := context.WithCancel(p.deps.Context)
@@ -865,8 +867,17 @@ func (p Program) updateIngest(msg tea.Msg) (Program, tea.Cmd) {
 		if m.generation != p.ingestGeneration {
 			return p, nil
 		}
+		at := p.deps.Clock.Now()
+		var snapshot map[ingest.Stage]ingest.StageProgress
+		if p.deps.Progress != nil {
+			snapshot = p.deps.Progress.Snapshot()
+		}
+		outcome := ingestprogress.FinalSucceeded
+		if m.err != nil {
+			outcome = ingestprogress.FinalFailed
+		}
+		p.progressView, _ = p.progressView.Update(ingestprogress.FinalMsg{At: at, Snapshot: snapshot, Outcome: outcome})
 		p = p.clearIngestAttempt()
-		p = p.observeProgress(p.deps.Clock.Now())
 		p.ingestRes = m.result
 		p.ingestErr = m.err
 		p.phase = PhaseDone
@@ -969,7 +980,7 @@ func (p Program) observeProgress(at time.Time) Program {
 	if p.deps.Progress == nil {
 		return p
 	}
-	p.progressView.Observe(at, p.deps.Progress.Snapshot())
+	p.progressView, _ = p.progressView.Update(ingestprogress.ObserveMsg{At: at, Snapshot: p.deps.Progress.Snapshot()})
 	return p
 }
 
@@ -1240,12 +1251,16 @@ func (p Program) viewIngest() string {
 	return panel.View()
 }
 
-func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines int) []string {
+func (p Program) progressLines(_ theme.Styles, _ time.Time, reservedLines int) []string {
 	available := p.height - reservedLines
 	if p.height <= 0 {
 		available = -1
 	}
-	return p.progressView.Lines(styles, now, available)
+	p.progressView.SetSize(p.width, available)
+	if view := p.progressView.View(); view != "" {
+		return strings.Split(view, "\n")
+	}
+	return nil
 }
 
 // progressFocusStage chooses the stage whose elapsed and estimate detail is
@@ -1253,7 +1268,7 @@ func (p Program) progressLines(styles theme.Styles, now time.Time, reservedLines
 // timing belongs to the latest failure, otherwise the latest active stage, and
 // finally the latest completed stage.
 func (p Program) progressFocusStage() (ingest.Stage, bool) {
-	return p.progressView.Focus()
+	return p.progressView.FocusedStage()
 }
 
 func (p Program) viewDone() string {
