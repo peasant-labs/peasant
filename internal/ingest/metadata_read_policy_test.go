@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"reflect"
@@ -31,22 +32,24 @@ type metadataReadPolicyFixtures struct {
 	SessionID     ingest.SessionID `yaml:"sessionID"`
 	Transcript    string           `yaml:"transcript"`
 	Cases         []struct {
-		Name              string              `yaml:"name"`
-		SchemaVersion     int                 `yaml:"schemaVersion"`
-		AdapterVersion    *int                `yaml:"adapterVersion"`
-		RawAdapterVersion string              `yaml:"rawAdapterVersion"`
-		FaultOperation    metadataPolicyFault `yaml:"faultOperation"`
-		TransientIO       bool                `yaml:"transientIO"`
-		MetadataAbsent    bool                `yaml:"metadataAbsent"`
-		RawMetadata       string              `yaml:"rawMetadata"`
-		Nested            bool                `yaml:"nested"`
-		Database          bool                `yaml:"database"`
-		SourceChanged     bool                `yaml:"sourceChanged"`
-		Reindex           bool                `yaml:"reindex"`
-		Force             bool                `yaml:"force"`
-		Stale             bool                `yaml:"stale"`
-		WantExtract       int                 `yaml:"wantExtract"`
-		WantIndexed       int                 `yaml:"wantIndexed"`
+		Name                string              `yaml:"name"`
+		SchemaVersion       int                 `yaml:"schemaVersion"`
+		StoredSchemaVersion *int                `yaml:"storedSchemaVersion"`
+		OutsideDiscovery    bool                `yaml:"outsideDiscovery"`
+		AdapterVersion      *int                `yaml:"adapterVersion"`
+		RawAdapterVersion   string              `yaml:"rawAdapterVersion"`
+		FaultOperation      metadataPolicyFault `yaml:"faultOperation"`
+		TransientIO         bool                `yaml:"transientIO"`
+		MetadataAbsent      bool                `yaml:"metadataAbsent"`
+		RawMetadata         string              `yaml:"rawMetadata"`
+		Nested              bool                `yaml:"nested"`
+		Database            bool                `yaml:"database"`
+		SourceChanged       bool                `yaml:"sourceChanged"`
+		Reindex             bool                `yaml:"reindex"`
+		Force               bool                `yaml:"force"`
+		Stale               bool                `yaml:"stale"`
+		WantExtract         int                 `yaml:"wantExtract"`
+		WantIndexed         int                 `yaml:"wantIndexed"`
 	} `yaml:"cases"`
 }
 
@@ -243,6 +246,9 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				Sessions:      []ingest.DiscoveredSession{session},
 				Metadata:      map[ingest.SessionID]*ingest.UnifiedMetadata{sid: freshMeta},
 			}}
+			if fixture.OutsideDiscovery {
+				adapter.Sessions = nil
+			}
 			options := []ingest.PipelineOption{}
 			var database *store.Store
 			var beforeEntries []schema.SessionEntry
@@ -261,6 +267,9 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				seed := *meta
 				if seed.SchemaVersion > 10 {
 					seed.SchemaVersion = 9
+				}
+				if fixture.StoredSchemaVersion != nil {
+					seed.SchemaVersion = *fixture.StoredSchemaVersion
 				}
 				if err := database.InsertSessions(ctx, []ingest.StoreEntry{{Metadata: &seed, Session: session}}); err != nil {
 					t.Fatal(err)
@@ -329,11 +338,11 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				t.Fatalf("configured metadata I/O fault %q was not reached", fixture.FaultOperation)
 			}
 			afterMetadata, err := filesystem.MemFS.ReadFile(metaPath)
-			if err != nil {
+			if err != nil && !(fixture.MetadataAbsent && fixture.WantExtract == 0 && errors.Is(err, fs.ErrNotExist)) {
 				t.Fatal(err)
 			}
 			if fixture.WantExtract == 0 {
-				if !bytes.Equal(afterMetadata, beforeMetadata) {
+				if !fixture.MetadataAbsent && !bytes.Equal(afterMetadata, beforeMetadata) {
 					t.Error("read-only metadata adoption changed bytes or producer evidence")
 				}
 				if filesystem.nativeRead.Load() != 0 || filesystem.nativeStat.Load() != 0 {

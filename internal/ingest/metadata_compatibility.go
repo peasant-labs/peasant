@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,32 @@ func metadataNeedsNativeRefresh(version int) bool {
 
 func managedInputIOError(path string, err error) error {
 	return fmt.Errorf("inspect managed input %q before refresh or indexing: %w; its compatibility could not be checked, so this session's artifact replacement and native fallback were refused; restore read access or retry after the I/O failure is resolved", path, err)
+}
+
+// checkStoredMetadataVersion reads actual stored state, not discovery's cache:
+// retained maintenance also processes sessions absent from native discovery.
+func (p *Pipeline) checkStoredMetadataVersion(ctx context.Context, sid SessionID) error {
+	backing := p.store
+	if backing == nil {
+		backing, _ = p.metricsStore.(SessionStore)
+	}
+	if backing == nil {
+		return nil // File-only mode has no stored metadata version.
+	}
+	locations, err := backing.BulkLookupSessionLocations(ctx, []SessionID{sid})
+	if err != nil {
+		return fmt.Errorf("read stored metadata compatibility for session %s before indexing: %w; no retained or native fallback index was written; restore database access and retry", sid, err)
+	}
+	if location, ok := locations[sid]; ok && location.SchemaVersion > CurrentSchemaVersion {
+		return &UnsupportedMetadataVersionError{Path: string(sid) + " (stored metadata)", Version: location.SchemaVersion}
+	}
+	return nil
+}
+
+func isMetadataCompatibilityError(err error) bool {
+	var schemaErr *UnsupportedMetadataVersionError
+	var adapterErr *AdapterVersionError
+	return errors.As(err, &schemaErr) || errors.As(err, &adapterErr)
 }
 
 // UnsupportedMetadataVersionError distinguishes a newer artifact from a missing
@@ -106,9 +133,7 @@ func (p *Pipeline) metadataForRewrite(session DiscoveredSession) (*UnifiedMetada
 	}
 	meta, err := decodeManagedMetadata(data, path)
 	if err != nil {
-		var schemaErr *UnsupportedMetadataVersionError
-		var adapterErr *AdapterVersionError
-		if errors.As(err, &schemaErr) || errors.As(err, &adapterErr) {
+		if isMetadataCompatibilityError(err) {
 			return nil, err
 		}
 		return nil, nil

@@ -1343,6 +1343,12 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	if p.indexers == nil || p.metricsStore == nil {
 		return result
 	}
+	if err := p.checkStoredMetadataVersion(ctx, im.session.SessionID); err != nil {
+		slog.Warn(logPrefix+": stored metadata refused", "session_id", im.session.SessionID, "error", err)
+		errMsg := err.Error()
+		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
+		return result
+	}
 	indexer, ok := p.indexers[im.session.Harness]
 	if !ok {
 		reason := "no indexer for provider"
@@ -2984,8 +2990,14 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 
 	meta, err := decodeManagedMetadata(data, metaPath)
 	if err != nil {
-		slog.Warn(logPrefix+": metadata parse error", "session_id", sid, "error", err)
-		return nil, err
+		if isMetadataCompatibilityError(err) {
+			slog.Warn(logPrefix+": incompatible metadata", "session_id", sid, "error", err)
+			return nil, err
+		}
+		// Historic corrupt content can recover through the validated managed
+		// envelope and compatible DB state. It is not a compatibility refusal.
+		slog.Warn(logPrefix+": corrupt metadata; attempting retained recovery", "session_id", sid, "error", err)
+		return nil, nil
 	}
 
 	// Determine SourceFormat from metadata.
@@ -3071,6 +3083,9 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 // directory. Falls back to full directory scan only when the session is not in
 // the DB (e.g. pre-DB ingestion data).
 func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string, error) {
+	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+		return nil, 0, "", err
+	}
 	outputDir := string(p.config.OutputDir)
 
 	// Fast path: query DB for the session's host_slug and parent_id.
@@ -3164,6 +3179,10 @@ func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (
 // via LookupSessionLocation. Returns (nil, 0, "") if any required field is missing.
 func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string) {
 	if p.metricsStore == nil {
+		return nil, 0, ""
+	}
+	if err := p.checkStoredMetadataVersion(ctx, sid); err != nil {
+		slog.Warn("reconstructFromSourceInfo: stored metadata refused", "session_id", sid, "error", err)
 		return nil, 0, ""
 	}
 	sourcePath, sourceFormat, providerStr, err := p.metricsStore.LookupSourceInfo(ctx, sid)
@@ -3303,6 +3322,12 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		// mtime is publication time, so it cannot establish a session's age.
 		if allowed && p.config.Since != nil {
 			allowed = !time.UnixMilli(target.startMs).Before(*p.config.Since)
+		}
+		if allowed {
+			if err := p.checkStoredMetadataVersion(ctx, target.session.SessionID); err != nil {
+				slog.Warn("reindex: stored metadata refused", "session_id", target.session.SessionID, "error", err)
+				allowed = false
+			}
 		}
 		if allowed {
 			filtered = append(filtered, target)
