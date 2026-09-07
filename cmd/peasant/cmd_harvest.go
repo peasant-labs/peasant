@@ -510,6 +510,26 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	}
 	execution := executeHarvest(ctx, pipeline, progState, renderer)
 	stopProgress()
+	return outputHarvest(cmd, execution, harvestOutputOptions{
+		flags: flags, outputDir: string(resolvedOutput), configPath: configPath,
+		sources: sources, customPatternCount: customPatternCount,
+		selectionConflicts: selectionConflicts, indexProfiler: indexProfiler,
+	})
+}
+
+type harvestOutputOptions struct {
+	flags              *harvestFlags
+	outputDir          string
+	configPath         string
+	sources            map[defaults.Harness]ingest.SourceConfig
+	customPatternCount int
+	selectionConflicts *selectionConflictRecorder
+	indexProfiler      *ingest.IndexProfiler
+}
+
+// outputHarvest consumes only the committed execution, after terminal and logger
+// cleanup. In particular, cancellation during that cleanup cannot change output.
+func outputHarvest(cmd *cobra.Command, execution harvestExecution, options harvestOutputOptions) error {
 	if execution.uiErr != nil {
 		cmd.SilenceUsage = true
 		return fmt.Errorf("harvest progress failed: %w; rerun 'peasant harvest' to continue", execution.uiErr)
@@ -522,8 +542,8 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		return fmt.Errorf("pipeline failed: %w", execution.runErr)
 	}
 	result := execution.result
-	if selectionConflicts != nil {
-		selectionConflicts.notice(cmd.ErrOrStderr(), configPath)
+	if options.selectionConflicts != nil {
+		options.selectionConflicts.notice(cmd.ErrOrStderr(), options.configPath)
 	}
 
 	// 10. Output results.
@@ -533,13 +553,13 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	for _, diagnostic := range result.DiscoveryDiagnostics {
 		fmt.Fprintf(os.Stderr, "warning: %s discovery skipped %s: %s\n", string(diagnostic.Provider), diagnostic.Location, diagnostic.Summary)
 	}
-	if indexProfiler != nil {
-		printIndexProfile(os.Stderr, indexProfiler.Snapshot())
+	if options.indexProfiler != nil {
+		printIndexProfile(os.Stderr, options.indexProfiler.Snapshot())
 	}
-	if flags.jsonOutput {
+	if options.flags.jsonOutput {
 		return printJSON(cmd.OutOrStdout(), result)
 	}
-	printSummary(cmd.OutOrStdout(), result, flags.verbose, flags.includeActive, string(resolvedOutput), configPath, sources, customPatternCount)
+	printSummary(cmd.OutOrStdout(), result, options.flags.verbose, options.flags.includeActive, options.outputDir, options.configPath, options.sources, options.customPatternCount)
 
 	// 11. Exit code: 1 if any errors occurred during ingestion.
 	if result.Summary.Errors > 0 {

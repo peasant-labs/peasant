@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,16 @@ type inlineFixture struct {
 	Absent   []string `yaml:"absent"`
 }
 
+type harvestCancelBoundary string
+
+const (
+	harvestCancelNone        harvestCancelBoundary = "none"
+	harvestCancelStartup     harvestCancelBoundary = "startup"
+	harvestCancelPipeline    harvestCancelBoundary = "pipeline"
+	harvestCancelBeforeFinal harvestCancelBoundary = "before-final"
+	harvestCancelWait        harvestCancelBoundary = "wait"
+)
+
 type ingestProgressFixtures struct {
 	Estimate struct {
 		Required []string `yaml:"required_cases"`
@@ -88,14 +99,25 @@ type ingestProgressFixtures struct {
 	Execution struct {
 		Required []string `yaml:"required_cases"`
 		Cases    []struct {
-			Name         string `yaml:"name"`
-			CancelBefore bool   `yaml:"cancel_before"`
-			CancelDuring bool   `yaml:"cancel_during"`
-			LateCancel   bool   `yaml:"late_cancel"`
-			RunError     bool   `yaml:"run_error"`
-			Want         string `yaml:"want"`
+			Name          string                `yaml:"name"`
+			CancelAt      harvestCancelBoundary `yaml:"cancel_at"`
+			RunError      bool                  `yaml:"run_error"`
+			UIError       bool                  `yaml:"ui_error"`
+			NilResult     bool                  `yaml:"nil_result"`
+			SessionErrors int                   `yaml:"session_errors"`
+			JSON          bool                  `yaml:"json"`
+			Want          string                `yaml:"want"`
+			WantError     string                `yaml:"want_error"`
+			Contains      []string              `yaml:"contains"`
 		} `yaml:"cases"`
 	} `yaml:"execution"`
+	CommandStartup struct {
+		Required []string `yaml:"required_cases"`
+		Cases    []struct {
+			Name string `yaml:"name"`
+			JSON bool   `yaml:"json"`
+		} `yaml:"cases"`
+	} `yaml:"command_startup"`
 	FinalOverride struct {
 		Required []string `yaml:"required_cases"`
 		Cases    []struct {
@@ -149,7 +171,15 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 	})
 	validateNamedFixtures(t, "execution", doc.Execution.Required, len(doc.Execution.Cases), func(i int) (string, bool) {
 		c := doc.Execution.Cases[i]
-		return c.Name, c.Want != ""
+		valid := false
+		switch c.CancelAt {
+		case harvestCancelNone, harvestCancelStartup, harvestCancelPipeline, harvestCancelBeforeFinal, harvestCancelWait:
+			valid = true
+		}
+		return c.Name, valid && (c.Want == "succeeded" || c.Want == "failed" || c.Want == "canceled")
+	})
+	validateNamedFixtures(t, "command_startup", doc.CommandStartup.Required, len(doc.CommandStartup.Cases), func(i int) (string, bool) {
+		return doc.CommandStartup.Cases[i].Name, true
 	})
 	validateNamedFixtures(t, "final_override", doc.FinalOverride.Required, len(doc.FinalOverride.Cases), func(i int) (string, bool) {
 		c := doc.FinalOverride.Cases[i]
@@ -368,38 +398,94 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 }
 
 type controlledHarvestPipeline struct {
-	cancel context.CancelFunc
-	err    error
-	runs   int
+	cancel     context.CancelFunc
+	err        error
+	runs       int
+	ready      <-chan struct{}
+	result     *ingest.PipelineResult
+	returnedAt time.Time
 }
 
 func (p *controlledHarvestPipeline) Run(context.Context) (*ingest.PipelineResult, error) {
 	p.runs++
+	<-p.ready
 	if p.cancel != nil {
 		p.cancel()
 	}
-	return nil, p.err
+	p.returnedAt = time.Now()
+	return p.result, p.err
+}
+
+type harvestModelUpdate struct {
+	msg      tea.Msg
+	response chan harvestModelResponse
+}
+
+type harvestModelResponse struct {
+	view string
+	cmd  tea.Cmd
 }
 
 type controlledHarvestProgram struct {
 	finishEntered chan ingestprogress.FinalMsg
 	releaseFinish chan struct{}
+	waitEntered   chan struct{}
+	releaseWait   chan struct{}
+	ready         chan struct{}
+	exited        chan struct{}
+	updates       chan harvestModelUpdate
 	done          chan struct{}
+	renderer      *progressProgram
 	err           error
 	runs          int
 }
 
-func newControlledHarvestProgram() *controlledHarvestProgram {
-	return &controlledHarvestProgram{finishEntered: make(chan ingestprogress.FinalMsg, 1), releaseFinish: make(chan struct{}), done: make(chan struct{})}
+func newControlledHarvestProgram(state *ingest.ProgressState, cancel context.CancelFunc) *controlledHarvestProgram {
+	return &controlledHarvestProgram{
+		finishEntered: make(chan ingestprogress.FinalMsg, 1), releaseFinish: make(chan struct{}),
+		waitEntered: make(chan struct{}), releaseWait: make(chan struct{}),
+		ready: make(chan struct{}), exited: make(chan struct{}),
+		updates: make(chan harvestModelUpdate), done: make(chan struct{}),
+		renderer: newProgressProgram(io.Discard, state, nil, cancel),
+	}
 }
 
-func (p *controlledHarvestProgram) Run(context.Context) { p.runs++; <-p.done }
+// Substitute only the runtime scheduling: mount the production model factory
+// with the same source/context as the runner, and serialize all root updates.
+func (p *controlledHarvestProgram) Run(ctx context.Context) {
+	p.runs++
+	var model tea.Model = p.renderer.newModel(ctx, time.Now().Add(-time.Second))
+	close(p.ready)
+	defer close(p.exited)
+	for {
+		select {
+		case update := <-p.updates:
+			var cmd tea.Cmd
+			model, cmd = model.Update(update.msg)
+			update.response <- harvestModelResponse{view: ansi.Strip(model.View().Content), cmd: cmd}
+		case <-p.done:
+			return
+		}
+	}
+}
+
+func (p *controlledHarvestProgram) update(msg tea.Msg) harvestModelResponse {
+	response := make(chan harvestModelResponse, 1)
+	p.updates <- harvestModelUpdate{msg: msg, response: response}
+	return <-response
+}
+
 func (p *controlledHarvestProgram) Finish(msg ingestprogress.FinalMsg) {
 	p.finishEntered <- msg
 	<-p.releaseFinish
-	close(p.done)
+	p.update(msg)
 }
-func (p *controlledHarvestProgram) Wait()      { <-p.done }
+func (p *controlledHarvestProgram) Wait() {
+	close(p.waitEntered)
+	<-p.releaseWait
+	close(p.done)
+	<-p.exited
+}
 func (p *controlledHarvestProgram) Err() error { return p.err }
 
 var _ harvestPipeline = (*controlledHarvestPipeline)(nil)
@@ -410,44 +496,79 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			pipeline := &controlledHarvestPipeline{}
+			state := ingest.NewProgressState()
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 4, Total: 10})
+			committedSnapshot := state.Snapshot()
+			payload := &ingest.PipelineResult{Duration: 2300 * time.Millisecond}
+			payload.Summary.New = 7
+			payload.Summary.Errors = c.SessionErrors
+			program := newControlledHarvestProgram(state, cancel)
+			pipeline := &controlledHarvestPipeline{ready: program.ready, result: payload}
+			if c.NilResult {
+				pipeline.result = nil
+			}
 			if c.RunError {
 				pipeline.err = errors.New("pipeline failed")
 			}
-			if c.CancelDuring {
+			if c.UIError {
+				program.err = errors.New("terminal write failed")
+			}
+			if c.CancelAt == harvestCancelPipeline {
 				pipeline.cancel = cancel
 			}
-			if c.CancelBefore {
+			if c.CancelAt == harvestCancelStartup {
 				cancel()
 			}
-			program := newControlledHarvestProgram()
 			result := make(chan harvestExecution, 1)
-			go func() { result <- executeHarvest(ctx, pipeline, ingest.NewProgressState(), program) }()
-			if c.CancelBefore {
-				execution := <-result
-				if pipeline.runs != 0 || program.runs != 0 || execution.kind != harvestCompletionCanceled {
-					t.Fatalf("startup cancellation launched work or lost outcome: pipeline=%d program=%d kind=%v", pipeline.runs, program.runs, execution.kind)
+			startedAt := time.Now()
+			go func() { result <- executeHarvest(ctx, pipeline, state, program) }()
+			var final ingestprogress.FinalMsg
+			var commitObservedAt time.Time
+			if c.CancelAt != harvestCancelStartup {
+				releaseFinish := sync.OnceFunc(func() { close(program.releaseFinish) })
+				releaseWait := sync.OnceFunc(func() { close(program.releaseWait) })
+				t.Cleanup(func() { releaseFinish(); releaseWait() })
+				final = awaitHarvestEvent(t, program.finishEntered)
+				commitObservedAt = time.Now()
+				if final.At.Before(pipeline.returnedAt) || final.At.After(commitObservedAt) || !reflect.DeepEqual(final.Snapshot, committedSnapshot) {
+					t.Fatalf("final did not capture completion time/progress: %+v", final)
 				}
-				return
+				// Change the shared source after the commit, while final delivery
+				// is held. Neither outcome snapshot may follow these later counts.
+				state.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiff, Done: 9, Total: 10})
+				if c.CancelAt == harvestCancelBeforeFinal {
+					program.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+					pending := program.update(harvestprogress.TickMsg(final.At.Add(time.Second)))
+					if ctx.Err() != context.Canceled || !strings.Contains(pending.view, "canceling harvest") || !strings.Contains(pending.view, "9/10") {
+						t.Fatalf("late key/tick did not reach mounted root/shared source: %s", pending.view)
+					}
+				}
+				releaseFinish()
+				awaitHarvestEvent(t, program.waitEntered)
+				if c.CancelAt == harvestCancelWait {
+					// This order is deliberately after final delivery, while Wait
+					// still holds the command. External cancellation reaches ctx too.
+					cancel()
+					late := program.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+					if late.cmd != nil || late.view != "" {
+						t.Fatalf("final root accepted late key: %+v", late)
+					}
+				}
+				frozen := program.update(harvestprogress.TickMsg(final.At.Add(time.Hour)))
+				if frozen.cmd != nil {
+					t.Fatal("final root scheduled another tick")
+				}
+				if c.Want == "canceled" {
+					if !strings.Contains(frozen.view, "harvest canceled") || !strings.Contains(frozen.view, "4/10") || strings.Contains(frozen.view, "9/10") {
+						t.Fatalf("canceled root lost committed snapshot: %s", frozen.view)
+					}
+				} else if frozen.view != "" {
+					t.Fatalf("committed success/failure did not clear root: %s", frozen.view)
+				}
+				releaseWait()
 			}
-			final := <-program.finishEntered
-			if c.LateCancel {
-				cancel()
-				state := ingest.NewProgressState()
-				state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
-				root := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: final.At.Add(-time.Second), Cancel: cancel, ContextErr: ctx.Err})
-				pending, _ := root.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-				pending, _ = pending.Update(harvestprogress.TickMsg(final.At.Add(time.Second)))
-				if !strings.Contains(pending.View().Content, "canceling harvest") {
-					t.Fatal("late cancellation did not reach actual root")
-				}
-				committed, _ := pending.Update(final)
-				if committed.View().Content != "" {
-					t.Fatalf("committed success/failure did not clear late cancellation: %s", committed.View().Content)
-				}
-			}
-			close(program.releaseFinish)
-			execution := <-result
+			execution := awaitHarvestEvent(t, result)
 			wantKind := harvestCompletionSucceeded
 			wantFinal := ingestprogress.FinalSucceeded
 			switch c.Want {
@@ -456,8 +577,116 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 			case "failed":
 				wantKind, wantFinal = harvestCompletionFailed, ingestprogress.FinalFailed
 			}
-			if execution.kind != wantKind || final.Outcome != wantFinal {
+			if execution.kind != wantKind {
+				t.Fatalf("execution kind = %v, want %v", execution.kind, wantKind)
+			}
+			if !reflect.DeepEqual(execution.snapshot, committedSnapshot) || execution.at.Before(startedAt) {
+				t.Fatalf("execution lost committed snapshot/time: %+v", execution)
+			}
+			if c.CancelAt == harvestCancelStartup {
+				if pipeline.runs != 0 || program.runs != 0 || execution.result != nil || execution.runErr != nil || execution.uiErr != nil {
+					t.Fatalf("startup cancellation launched work: pipeline=%d program=%d execution=%+v", pipeline.runs, program.runs, execution)
+				}
+			} else if final.Outcome != wantFinal {
 				t.Fatalf("execution/final = %v/%v, want %v/%v", execution.kind, final.Outcome, wantKind, wantFinal)
+			} else if pipeline.runs != 1 || program.runs != 1 || execution.result != pipeline.result || execution.runErr != pipeline.err || execution.uiErr != program.err || !execution.at.Equal(final.At) || execution.at.After(commitObservedAt) {
+				t.Fatalf("execution lost committed payload/errors/time: %+v", execution)
+			}
+			var wantContextError error
+			if c.Want == "canceled" {
+				wantContextError = context.Canceled
+			}
+			if execution.ctxErr != wantContextError {
+				t.Fatalf("sampled context error = %v, want %v", execution.ctxErr, wantContextError)
+			}
+			root := buildRootCommand()
+			cmd, _, err := root.Find([]string{"harvest"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd.SetContext(ctx)
+			var output bytes.Buffer
+			cmd.SetOut(&output)
+			err = outputHarvest(cmd, execution, harvestOutputOptions{flags: &harvestFlags{jsonOutput: c.JSON}})
+			var wantError error
+			switch c.WantError {
+			case "":
+			case "context":
+				wantError = context.Canceled
+			case "pipeline":
+				wantError = pipeline.err
+			case "ui":
+				wantError = program.err
+			case "sessions":
+				if err == nil || err.Error() != fmt.Sprintf("%d session(s) failed", c.SessionErrors) {
+					t.Fatalf("session failure = %v", err)
+				}
+				wantError = err
+			default:
+				t.Fatalf("unsupported output error %q", c.WantError)
+			}
+			if !errors.Is(err, wantError) {
+				t.Fatalf("output error = %v, want %v", err, wantError)
+			}
+			if cmd.SilenceUsage != (c.WantError == "context" || c.WantError == "ui") {
+				t.Fatalf("unexpected usage suppression for %v", err)
+			}
+			if len(c.Contains) == 0 && output.Len() != 0 {
+				t.Fatalf("unexpected summary/JSON: %s", output.String())
+			}
+			for _, marker := range c.Contains {
+				if !strings.Contains(output.String(), marker) {
+					t.Fatalf("missing %q in %s", marker, output.String())
+				}
+			}
+		})
+	}
+}
+
+func awaitHarvestEvent[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatal("harvest lifecycle did not reach expected dependency boundary")
+		var zero T
+		return zero
+	}
+}
+
+func TestHarvestCommandCanceledBeforeSetup(t *testing.T) {
+	for _, c := range loadIngestProgressFixtures(t).CommandStartup.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			root := buildRootCommand()
+			args := []string{"--config-dir", filepath.Join(dir, "config"), "--data-dir", filepath.Join(dir, "data"), "--state-dir", filepath.Join(dir, "state"), "harvest", "--output", filepath.Join(dir, "output")}
+			if c.JSON {
+				args = append(args, "--json")
+			}
+			root.SetArgs(args)
+			var output, diagnostic bytes.Buffer
+			root.SetOut(&output)
+			root.SetErr(&diagnostic)
+			originalHandler := slog.Default().Handler()
+			err := root.ExecuteContext(ctx)
+			if !errors.Is(err, context.Canceled) || output.Len() != 0 {
+				t.Fatalf("pre-canceled command = %v, output %q", err, output.String())
+			}
+			if strings.Contains(diagnostic.String(), "local import progress") || strings.Contains(diagnostic.String(), "ctrl+c to cancel") {
+				t.Fatalf("pre-canceled command mounted progress: %s", diagnostic.String())
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("pre-canceled command created setup files: %v", entries)
+			}
+			if slog.Default().Handler() != originalHandler {
+				t.Fatal("pre-canceled command changed logger")
 			}
 		})
 	}
