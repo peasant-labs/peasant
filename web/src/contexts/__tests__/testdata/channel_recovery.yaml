@@ -13,11 +13,25 @@ cases:
     initialData:
       id: abc
       harness: claude-code
+      durationMins: 0
+      startTime: '2026-01-01T00:00:00Z'
+      endTime: '2026-01-01T00:00:00Z'
+      tokensIn: 0
+      tokensOut: 0
+      totalTokens: 0
+      toolCallCount: 0
       turns: []
       turnCount: 3
     errorMessage: "Session abc could not be refreshed because the database is unavailable. Retry after restoring the database."
     recoveryData:
       id: abc
       harness: claude-code
+      durationMins: 0
+      startTime: '2026-01-01T00:00:00Z'
+      endTime: '2026-01-01T00:00:00Z'
+      tokensIn: 0
+      tokensOut: 0
+      totalTokens: 0
+      toolCallCount: 0
       turns: []
       turnCount: 4

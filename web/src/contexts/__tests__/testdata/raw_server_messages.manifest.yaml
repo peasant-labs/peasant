@@ -1,0 +1,17 @@
+requiredNames:
+  - pi usage and metadata survive mounted channel
+  - legacy detail accepts nullable turns and scorecard
+  - duplicate envelope type rejects before dispatch
+  - escaped duplicate payload member rejects before dispatch
+  - escaped duplicate metadata key rejects before dispatch
+  - metadata string at decoded bound survives
+  - metadata string over decoded bound rejects
+  - escaped metadata raw byte bound rejects with type last
+  - metadata array over bound rejects
+  - ordinary transcript text is not metadata bounded
+  - unrelated dashboard metadata is not detail validated
+  - unrelated sessions envelope stays compatible
+  - unrelated message duplicate keys still reject
+  - malformed JSON rejects before dispatch
+  - invalid usage domain rejects before dispatch
+  - legacy harness cannot carry Pi metadata
