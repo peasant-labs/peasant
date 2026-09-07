@@ -9,6 +9,13 @@ cases:
     metadataOnly: not searchable
     placeholders: 4
     metadata: 4
+    metadataSources: {pi.custom.data: m, pi.custommessage.details: c, pi.toolresult.details: r, pi.compaction.details: s}
+    tool:
+      nativeID: call
+      name: custom_tool
+      arguments: '{"nested":{"items":[1,true]}}'
+      result: "result\n[image omitted]"
+      isError: true
     assistantCost: '1e-7'
     sourceReplacements: []
     assistantTokens: {input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 10}

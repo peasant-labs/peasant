@@ -219,7 +219,14 @@ func assertPiRoundTripDetail(t *testing.T, fixture piRoundTripCase, detail *sche
 	metadata, err := json.Marshal(detail.NativeMetadata)
 	piNoError(t, err)
 	piCheck(t, bytes.Contains(metadata, []byte(fixture.MetadataOnly)), "opaque state must survive separately")
+	for _, record := range detail.NativeMetadata {
+		nativeID, ok := fixture.MetadataSources[record.Kind]
+		piCheck(t, ok, "unexpected metadata kind")
+		piEqual(t, ingest.PiPublicRef(fixture.SessionID, "entry", nativeID), record.Source.EntryRef)
+		piEqual(t, ingest.PiPublicRef(fixture.SessionID, "metadata", nativeID), record.ID)
+	}
 	owners := make(map[string]schema.UsageDetail)
+	toolCount := 0
 	for _, turn := range detail.Turns {
 		if turn.Usage != nil {
 			owners[turn.Usage.SourceEntryRef] = *turn.Usage
@@ -234,12 +241,22 @@ func assertPiRoundTripDetail(t *testing.T, fixture piRoundTripCase, detail *sche
 			}
 		}
 		for _, tool := range turn.ToolCalls {
+			toolCount++
+			piEqual(t, ingest.PiPublicRef(fixture.SessionID, "tool", fixture.Tool.NativeID), tool.ID)
+			piEqual(t, fixture.Tool.Name, tool.Name)
+			piEqual(t, fixture.Tool.Result, tool.Result)
+			piEqual(t, fixture.Tool.IsError, tool.IsError)
+			var gotArguments, wantArguments any
+			piNoError(t, json.Unmarshal([]byte(tool.Arguments), &gotArguments))
+			piNoError(t, json.Unmarshal([]byte(fixture.Tool.Arguments), &wantArguments))
+			piEqual(t, wantArguments, gotArguments)
 			if tool.Usage != nil {
 				owners[tool.Usage.SourceEntryRef] = *tool.Usage
 				piEqual(t, tool.ResultEntryRef, tool.Usage.SourceEntryRef)
 			}
 		}
 	}
+	piEqual(t, 1, toolCount, "the fixture has exactly one paired native tool")
 	piEqual(t, len(fixture.Owners), len(owners))
 	for _, expected := range fixture.Owners {
 		ref := ingest.PiPublicRef(fixture.SessionID, "entry", expected.NativeID)

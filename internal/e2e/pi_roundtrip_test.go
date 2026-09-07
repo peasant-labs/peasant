@@ -21,17 +21,25 @@ var piRoundTripYAML []byte
 var piRoundTripManifest []byte
 
 type piRoundTripCase struct {
-	Name               string                     `yaml:"name"`
-	NativeCase         string                     `yaml:"nativeCase"`
-	SessionID          string                     `yaml:"sessionID"`
-	Capabilities       []schema.ContentCapability `yaml:"capabilities"`
-	Contents           []string                   `yaml:"contents"`
-	Forbidden          []string                   `yaml:"forbidden"`
-	MetadataOnly       string                     `yaml:"metadataOnly"`
-	Placeholders       int                        `yaml:"placeholders"`
-	Metadata           int                        `yaml:"metadata"`
-	AssistantCost      string                     `yaml:"assistantCost"`
-	AssistantTokens    map[string]int64           `yaml:"assistantTokens"`
+	Name            string                               `yaml:"name"`
+	NativeCase      string                               `yaml:"nativeCase"`
+	SessionID       string                               `yaml:"sessionID"`
+	Capabilities    []schema.ContentCapability           `yaml:"capabilities"`
+	Contents        []string                             `yaml:"contents"`
+	Forbidden       []string                             `yaml:"forbidden"`
+	MetadataOnly    string                               `yaml:"metadataOnly"`
+	Placeholders    int                                  `yaml:"placeholders"`
+	Metadata        int                                  `yaml:"metadata"`
+	MetadataSources map[schema.NativeMetadataKind]string `yaml:"metadataSources"`
+	Tool            struct {
+		NativeID  string `yaml:"nativeID"`
+		Name      string `yaml:"name"`
+		Arguments string `yaml:"arguments"`
+		Result    string `yaml:"result"`
+		IsError   bool   `yaml:"isError"`
+	} `yaml:"tool"`
+	AssistantCost      string           `yaml:"assistantCost"`
+	AssistantTokens    map[string]int64 `yaml:"assistantTokens"`
 	SourceReplacements []struct {
 		From string `yaml:"from"`
 		To   string `yaml:"to"`
@@ -68,6 +76,7 @@ func loadPiRoundTripCases(t *testing.T) []piRoundTripCase {
 		piCheck(t, c.NativeCase != "" && c.SessionID != "" && c.AssistantCost != "" && c.MetadataOnly != "", "fixture string expectations must be populated")
 		piCheck(t, len(c.Capabilities) > 0 && len(c.Contents) > 0 && len(c.Forbidden) > 0 && len(c.Owners) > 0, "fixture evidence expectations must be populated")
 		piCheck(t, c.Placeholders > 0 && c.Metadata > 0, "fixture must require placeholders and metadata")
+		piCheck(t, len(c.MetadataSources) == c.Metadata && c.Tool.NativeID != "" && c.Tool.Name != "" && c.Tool.Arguments != "" && c.Tool.Result != "", "fixture must name exact metadata sources and paired tool evidence")
 		for _, replacement := range c.SourceReplacements {
 			piCheck(t, replacement.From != "" && replacement.To != "", "native fixture substitutions require nonempty source and replacement")
 		}
