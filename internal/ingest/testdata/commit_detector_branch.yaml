@@ -1,0 +1,113 @@
+# Branch-aware commit association through the detector.
+#
+# Every candidate is a commit the analyzer reports inside the timestamp window,
+# authored by the session user. `ancestry` is the analyzer's answer to
+# "is <hash> reachable from refs/heads/<session_branch>?"; a hash missing from
+# the map answers false. `ancestry_error` makes every reachability check fail
+# with the named cause (`timeout` or `unknown_ref`) instead of answering.
+# `ancestry_error_on_query` limits that failure to the Nth reachability question
+# (1-based); zero or absent fails every question.
+#
+# `want_hashes` is compared as an ordered slice: a hash absent from it must be
+# absent from the detector's output, and the input order must survive.
+# `want_error_types` is the exact ordered list of diagnostics the detector adds.
+# `want_ancestry_queries` is how many times the detector asked the analyzer;
+# it is zero whenever no branch anchors the question.
+# `user_email_missing` runs the session with no configured git user email, the
+# path that returns the window unfiltered by author; the branch filter is
+# independent of the author filter and still applies there.
+required_case_names:
+  - reachable_commit_on_recorded_branch_is_kept
+  - unreachable_commit_inside_window_is_dropped
+  - branchless_session_keeps_the_window_unchanged
+  - detached_head_is_treated_as_branchless
+  - unresolvable_branch_falls_back_to_the_window
+  - reachability_timeout_falls_back_to_the_window
+  - reachability_error_after_earlier_answers_keeps_every_candidate
+  - unknown_user_email_still_narrows_by_branch
+  - no_candidates_asks_nothing
+cases:
+  - name: reachable_commit_on_recorded_branch_is_kept
+    session_branch: feature
+    candidates: [f1a1f1a1]
+    ancestry:
+      f1a1f1a1: true
+    want_hashes: [f1a1f1a1]
+    want_error_types: []
+    want_ancestry_queries: 1
+
+  - name: unreachable_commit_inside_window_is_dropped
+    session_branch: feature
+    candidates: [f1a1f1a1, ab12ab12, f2b2f2b2]
+    ancestry:
+      f1a1f1a1: true
+      ab12ab12: false
+      f2b2f2b2: true
+    want_hashes: [f1a1f1a1, f2b2f2b2]
+    want_error_types: []
+    want_ancestry_queries: 3
+
+  - name: branchless_session_keeps_the_window_unchanged
+    session_branch: ""
+    candidates: [f1a1f1a1, ab12ab12]
+    ancestry: {}
+    want_hashes: [f1a1f1a1, ab12ab12]
+    want_error_types: []
+    want_ancestry_queries: 0
+
+  - name: detached_head_is_treated_as_branchless
+    session_branch: HEAD
+    candidates: [f1a1f1a1, ab12ab12]
+    ancestry: {}
+    want_hashes: [f1a1f1a1, ab12ab12]
+    want_error_types: []
+    want_ancestry_queries: 0
+
+  - name: unresolvable_branch_falls_back_to_the_window
+    session_branch: gone
+    candidates: [f1a1f1a1, ab12ab12]
+    ancestry: {}
+    ancestry_error: unknown_ref
+    want_hashes: [f1a1f1a1, ab12ab12]
+    want_error_types: [branch_reachability_unavailable]
+    want_ancestry_queries: 1
+
+  - name: reachability_timeout_falls_back_to_the_window
+    session_branch: feature
+    candidates: [f1a1f1a1, ab12ab12]
+    ancestry: {}
+    ancestry_error: timeout
+    want_hashes: [f1a1f1a1, ab12ab12]
+    want_error_types: [branch_reachability_unavailable]
+    want_ancestry_queries: 1
+
+  - name: reachability_error_after_earlier_answers_keeps_every_candidate
+    session_branch: feature
+    candidates: [ab12ab12, f1a1f1a1, f2b2f2b2]
+    ancestry:
+      ab12ab12: false
+      f1a1f1a1: true
+    ancestry_error: unknown_ref
+    ancestry_error_on_query: 3
+    want_hashes: [ab12ab12, f1a1f1a1, f2b2f2b2]
+    want_error_types: [branch_reachability_unavailable]
+    want_ancestry_queries: 3
+
+  - name: unknown_user_email_still_narrows_by_branch
+    session_branch: feature
+    user_email_missing: true
+    candidates: [f1a1f1a1, ab12ab12]
+    ancestry:
+      f1a1f1a1: true
+      ab12ab12: false
+    want_hashes: [f1a1f1a1]
+    want_error_types: [missing_user_email]
+    want_ancestry_queries: 2
+
+  - name: no_candidates_asks_nothing
+    session_branch: feature
+    candidates: []
+    ancestry: {}
+    want_hashes: []
+    want_error_types: []
+    want_ancestry_queries: 0

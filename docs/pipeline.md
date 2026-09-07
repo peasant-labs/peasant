@@ -228,6 +228,22 @@ chooses a safe publish boundary over a direct write into the final directory.
 The same pattern exists on the pull path, where docs explicitly call out the
 staging/publish boundary and the copy-plus-remove implementation.
 
+## Commit Candidate Selection
+
+Commit detection proposes candidates in steps, and each step only narrows the
+one before it. `git log` lists the commits from three days before the session
+started to three days after it ended. When a git user email is configured, the
+author email must match it; without one, every author is kept and a
+`missing_user_email` warning says so. When the session recorded a branch, each
+candidate must be reachable from `refs/heads/<branch>`, asked with `git merge-base
+--is-ancestor`; a session that recorded no branch, or ran on a detached `HEAD`,
+keeps the whole window. Last, for file-backed transcripts, the transcript must
+mention a git command at all. The branch step is all-or-nothing per session:
+when a reachability question cannot be answered, because the branch was deleted
+after it merged or git timed out, the unfiltered window is kept and a
+`branch_reachability_unavailable` warning records why. That fallback never
+drops a real association; it returns to the window behaviour and says so.
+
 ## Commit Association Ledger
 
 Commit detection is a source-fact producer. When it supplies observed commits for

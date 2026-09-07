@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -270,5 +271,122 @@ func TestGetFileAtCommit(t *testing.T) {
 	}
 	if string(got) != wantContent {
 		t.Errorf("GetFileAtCommit content = %q, want %q", string(got), wantContent)
+	}
+}
+
+// --- IsAncestor ---
+
+// initTwoBranchRepo builds two branches off the shared base commit so a commit
+// exists on each that the other cannot reach:
+//
+//	topic: base -> "topic: work"
+//	trunk: base -> "trunk: advance"
+//
+// Branch names are created explicitly so the test does not depend on the
+// machine's init.defaultBranch. HEAD is left on trunk.
+func initTwoBranchRepo(t *testing.T) (dir, topicCommit, trunkCommit string) {
+	t.Helper()
+	dir = initTestRepoWithModifiableFile(t)
+	mustGit(t, dir, "git", "checkout", "-q", "-b", "topic")
+	addModifyCommit(t, dir, "topic content\n", "topic: work")
+	topicCommit = revParse(t, dir, "HEAD")
+	mustGit(t, dir, "git", "checkout", "-q", "-b", "trunk", "HEAD~1")
+	addModifyCommit(t, dir, "trunk content\n", "trunk: advance")
+	trunkCommit = revParse(t, dir, "HEAD")
+	return dir, topicCommit, trunkCommit
+}
+
+// revParse returns the full hash for rev.
+func revParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", rev)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestIsAncestor_ReachableCommit verifies a branch's own commit is reachable
+// from its refs/heads/ name.
+func TestIsAncestor_ReachableCommit(t *testing.T) {
+	dir, topicCommit, _ := initTwoBranchRepo(t)
+
+	reachable, err := defaultAnalyzer().IsAncestor(context.Background(), dir, topicCommit, "refs/heads/topic")
+	if err != nil {
+		t.Fatalf("IsAncestor: unexpected error: %v", err)
+	}
+	if !reachable {
+		t.Error("topic's own commit must be reachable from refs/heads/topic")
+	}
+}
+
+// TestIsAncestor_UnreachableCommit verifies a commit that exists only on
+// another branch answers (false, nil), not an error.
+func TestIsAncestor_UnreachableCommit(t *testing.T) {
+	dir, _, trunkCommit := initTwoBranchRepo(t)
+
+	reachable, err := defaultAnalyzer().IsAncestor(context.Background(), dir, trunkCommit, "refs/heads/topic")
+	if err != nil {
+		t.Fatalf("IsAncestor: unexpected error for a plain \"no\": %v", err)
+	}
+	if reachable {
+		t.Error("a commit only on trunk must not be reachable from refs/heads/topic")
+	}
+}
+
+// TestIsAncestor_UnknownRefIsAnError verifies that a ref git cannot resolve is
+// reported as an error naming the ref, not as "not reachable" and not as a
+// timeout.
+func TestIsAncestor_UnknownRefIsAnError(t *testing.T) {
+	dir, topicCommit, _ := initTwoBranchRepo(t)
+
+	reachable, err := defaultAnalyzer().IsAncestor(context.Background(), dir, topicCommit, "refs/heads/gone")
+	if err == nil {
+		t.Fatal("expected an error for an unknown ref, got nil")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("an unknown ref must not be reported as a timeout: %v", err)
+	}
+	if !strings.Contains(err.Error(), "refs/heads/gone") {
+		t.Errorf("error must name the ref that failed: %v", err)
+	}
+	if reachable {
+		t.Error("reachable must be false when the check could not be answered")
+	}
+}
+
+// TestIsAncestor_TimeoutIsAnError verifies the per-call timeout surfaces as a
+// deadline error the detector can recognise.
+func TestIsAncestor_TimeoutIsAnError(t *testing.T) {
+	dir, topicCommit, _ := initTwoBranchRepo(t)
+
+	analyzer := &ExecGitDiffAnalyzer{LogTimeout: 1 * time.Nanosecond}
+	reachable, err := analyzer.IsAncestor(context.Background(), dir, topicCommit, "refs/heads/topic")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected an error wrapping context.DeadlineExceeded, got %v", err)
+	}
+	if reachable {
+		t.Error("reachable must be false on timeout")
+	}
+}
+
+// TestIsAncestor_CallerDeadlineIsReportedAsSuch verifies that a deadline the
+// caller already imposed is not misreported as the per-call timeout.
+func TestIsAncestor_CallerDeadlineIsReportedAsSuch(t *testing.T) {
+	dir, topicCommit, _ := initTwoBranchRepo(t)
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := defaultAnalyzer().IsAncestor(ctx, dir, topicCommit, "refs/heads/topic")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected an error wrapping context.DeadlineExceeded, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "caller's deadline") {
+		t.Errorf("a caller-imposed deadline must be named as such: %v", err)
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		t.Errorf("a caller-imposed deadline must not be reported as the per-call timeout: %v", err)
 	}
 }
