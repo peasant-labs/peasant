@@ -304,6 +304,23 @@ func (c delayedNotificationContext) Done() <-chan struct{} {
 
 var _ context.Context = delayedNotificationContext{}
 
+// Pause the PTY consumer after cancellation acknowledgment, so program shutdown
+// cannot accidentally stand in for capture completion just because reads are fast.
+type pausedProgressCapture struct {
+	*signalWriter
+	resume <-chan struct{}
+}
+
+func (w *pausedProgressCapture) Write(p []byte) (int, error) {
+	n, err := w.signalWriter.Write(p)
+	if strings.Contains(w.String(), "waiting for current work to stop") {
+		<-w.resume
+	}
+	return n, err
+}
+
+var _ io.Writer = (*pausedProgressCapture)(nil)
+
 func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 	for _, c := range loadIngestProgressFixtures(t).Lifecycle.Cases {
 		t.Run(c.Name, func(t *testing.T) {
@@ -319,13 +336,21 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			if err := unix.IoctlSetWinsize(int(terminal.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
 				t.Fatal(err)
 			}
+			before, err := term.GetState(int(terminal.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer master.Close()
 			defer terminal.Close()
 			r.input = terminal
 			r.w = terminal
+			resumeCapture := make(chan struct{})
+			releaseCapture := sync.OnceFunc(func() { close(resumeCapture) })
+			capture := &pausedProgressCapture{signalWriter: out, resume: resumeCapture}
 			copied := make(chan struct{})
-			go func() { _, _ = io.Copy(out, master); close(copied) }()
-			defer func() { _ = terminal.Close(); _ = master.Close(); <-copied }()
+			var copyErr error
+			go func() { _, copyErr = io.Copy(capture, master); close(copied) }()
+			defer func() { releaseCapture(); _ = terminal.Close(); _ = master.Close(); <-copied }()
 			notification := make(chan struct{})
 			releaseNotification := sync.OnceFunc(func() { close(notification) })
 			var operation context.Context = ctx
@@ -385,6 +410,29 @@ func TestProgressRendererCancellationAcknowledgment(t *testing.T) {
 			}
 			if err := r.Err(); err != nil {
 				t.Fatal(err)
+			}
+			after, err := term.GetState(int(terminal.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("progress program exited without restoring terminal state")
+			}
+			// Wait joins the program, not our independent PTY consumer. Close only
+			// the slave after terminal restoration, then drain through EOF/EIO before
+			// inspecting output. Closing the master here could discard queued bytes.
+			if err := terminal.Close(); err != nil {
+				t.Fatal(err)
+			}
+			releaseCapture()
+			select {
+			case <-copied:
+			case <-time.After(5 * time.Second):
+				t.Fatal("PTY capture did not drain after progress program shutdown and slave close")
+			}
+			// Linux reports EIO on a PTY master once its last slave closes.
+			if copyErr != nil && !errors.Is(copyErr, syscall.EIO) {
+				t.Fatalf("read progress program output through PTY shutdown: %v", copyErr)
 			}
 			if c.Key || c.External {
 				if !strings.Contains(out.String(), "harvest canceled") || !strings.Contains(out.String(), "4/10") {
