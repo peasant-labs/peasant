@@ -14,7 +14,7 @@ func (p *Pipeline) computeIndexedMetrics(ctx context.Context, sessionIDs []Sessi
 		computed, err = p.analyzer.ComputeMetrics(ctx, sessionIDs)
 	}
 	if err != nil {
-		p.appendDiagnostic(DiagnosticEntry{
+		p.reportDiagnostic(DiagnosticEntry{
 			ErrorType:   "metrics_incomplete",
 			Location:    "metrics after indexing",
 			Message:     err.Error(),

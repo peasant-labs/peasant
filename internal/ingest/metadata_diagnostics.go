@@ -16,10 +16,10 @@ func (p *Pipeline) reportMetadataRefusal(location string, err error) {
 		remedy = "Upgrade Peasant to a build compatible with the recorded producer/schema version."
 	}
 	diagnostic := DiagnosticEntry{ErrorType: "metadata_refused", Location: location, Message: err.Error(), Remediation: remedy}
-	p.appendDiagnostic(diagnostic)
+	p.reportDiagnostic(diagnostic)
 }
 
-func (p *Pipeline) appendDiagnostic(diagnostic DiagnosticEntry) {
+func (p *Pipeline) reportDiagnostic(diagnostic DiagnosticEntry) {
 	p.diagnosticsMu.Lock()
 	defer p.diagnosticsMu.Unlock()
 	if p.diagnosticSet == nil {
