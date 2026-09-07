@@ -11,6 +11,7 @@ requiredNames:
   - mismatched-versioned-result-refused
   - legacy-indexer-cannot-declare-v2
   - writer-must-support-declaration
+  - future-format-write-refusal-is-visible
   - logs-ignore-unwritten-index-format
 cases:
   - {name: legacy-v1-result, declaredFormat: 1, payload: v1, wantIndexed: true}
@@ -25,4 +26,5 @@ cases:
   - {name: mismatched-versioned-result-refused, declaredFormat: 1, versioned: true, payload: v2, wantLogError: declared format 1}
   - {name: legacy-indexer-cannot-declare-v2, declaredFormat: 2, payload: v1, wantConstructorError: slice-returning indexer}
   - {name: writer-must-support-declaration, declaredFormat: 2, versioned: true, payload: v2, wantConstructorError: unsupported output format 2}
+  - {name: future-format-write-refusal-is-visible, declaredFormat: 1, storedFormat: 99, payload: v1, wantLogError: unsupported index format 99}
   - {name: logs-ignore-unwritten-index-format, declaredFormat: 2, payload: v1, logsOnly: true}

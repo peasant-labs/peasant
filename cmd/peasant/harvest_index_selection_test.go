@@ -132,9 +132,9 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 				}
 			}
 			root := buildRootCommand()
-			var buf bytes.Buffer
+			var buf, diagnostics bytes.Buffer
 			root.SetOut(&buf)
-			root.SetErr(&buf)
+			root.SetErr(&diagnostics)
 			args := []string{"--config", configPath, "--data-dir", dir, "--config-dir", dir, "--state-dir", dir, "harvest", "index", "--output", output, "--json"}
 			root.SetArgs(append(args, fixture.Args...))
 			err = root.Execute()
@@ -157,6 +157,11 @@ func TestHarvestIndexSelectionMounted(t *testing.T) {
 				}
 				if result.Summary.Indexed != len(fixture.Indexed) {
 					t.Errorf("indexed = %d, want %d; output: %s", result.Summary.Indexed, len(fixture.Indexed), &buf)
+				}
+				for _, session := range sessions {
+					if slices.Contains(fixture.Refused, session.Name) && (!strings.Contains(diagnostics.String(), string(session.ID)) || !strings.Contains(diagnostics.String(), "preserved")) {
+						t.Fatalf("refused session %s lacks visible stderr warning: %s", session.Name, &diagnostics)
+					}
 				}
 				var got, want []ingest.SessionID
 				for _, selected := range result.Sessions {

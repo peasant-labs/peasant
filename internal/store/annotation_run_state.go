@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
+	"github.com/peasant-labs/schema"
 	"zombiezen.com/go/sqlite"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -35,12 +36,17 @@ ON CONFLICT(session_id) DO UPDATE SET
     annotated_at = excluded.annotated_at`
 )
 
-func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.SessionID) (*ingest.AnnotationRunInputs, error) {
+func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.SessionID) (_ *ingest.AnnotationRunInputs, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection for annotation run input lookup: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var inputs *ingest.AnnotationRunInputs
 	err = sqlitex.ExecuteTransient(conn, sqlGetAnnotationRunInputs, &sqlitex.ExecOptions{
@@ -75,12 +81,17 @@ func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.Ses
 	return inputs, nil
 }
 
-func (s *Store) GetCurrentSessionEntriesHash(ctx context.Context, sessionID ingest.SessionID) (string, bool, error) {
+func (s *Store) GetCurrentSessionEntriesHash(ctx context.Context, sessionID ingest.SessionID) (_ string, _ bool, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return "", false, fmt.Errorf("store: take connection for session_entries_hash lookup: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return "", false, err
+	}
 
 	var hash string
 	var ok bool
@@ -128,7 +139,7 @@ func (s *Store) GetAnnotationRunState(ctx context.Context, sessionID ingest.Sess
 	return state, nil
 }
 
-func (s *Store) SaveAnnotationRunState(ctx context.Context, state ingest.AnnotationRunState) error {
+func (s *Store) SaveAnnotationRunState(ctx context.Context, state ingest.AnnotationRunState) (retErr error) {
 	s.annotationWriteMu.Lock()
 	defer s.annotationWriteMu.Unlock()
 
@@ -137,6 +148,11 @@ func (s *Store) SaveAnnotationRunState(ctx context.Context, state ingest.Annotat
 		return fmt.Errorf("store: take connection for annotation_run_state save: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{state.SessionID}); err != nil {
+		return err
+	}
 
 	if err := saveAnnotationRunStateOnConn(conn, state); err != nil {
 		return fmt.Errorf("store: save annotation_run_state for %s: %w", state.SessionID, err)

@@ -166,12 +166,17 @@ func (s *Store) MetricsExist(ctx context.Context, sessionID ingest.SessionID, co
 
 // ListEntries returns all session_entries for a session ordered by entry_index.
 // Known ext keys are re-hydrated from session_entries_ext back into the Extra JSON string.
-func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
+func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) (_ []schema.SessionEntry, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var entries []schema.SessionEntry
 	err = sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
@@ -226,12 +231,17 @@ func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]
 // [fromIndex, toIndex] (inclusive), ordered by entry_index. ext values are
 // re-hydrated from session_entries_ext using the same logic as ListEntries.
 // Returns an empty slice (not an error) when no entries exist in the range.
-func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID, fromIndex, toIndex int) ([]schema.SessionEntry, error) {
+func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID, fromIndex, toIndex int) (_ []schema.SessionEntry, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var entries []schema.SessionEntry
 	err = sqlitex.ExecuteTransient(conn, sqlListEntriesRange, &sqlitex.ExecOptions{
@@ -282,12 +292,17 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 
 // MaxEntryIndex returns the maximum entry_index for a session, or -1 if the
 // session has no indexed entries (empty session or session not found in DB).
-func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (int, error) {
+func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (_ int, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return -1, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return -1, err
+	}
 
 	maxIdx := -1
 	err = sqlitex.ExecuteTransient(conn, sqlMaxEntryIndex, &sqlitex.ExecOptions{

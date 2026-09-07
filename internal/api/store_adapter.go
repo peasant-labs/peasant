@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -195,7 +196,7 @@ func (p *StoreDataProvider) summariesFromRows(ctx context.Context, rows []store.
 		sessionIDs[i] = rows[i].SessionID
 	}
 
-	// FirstUserMessageBulk issues one IN(...) query for all session IDs.
+	// FirstUserMessageBulk reads the requested IDs in bounded IN(...) batches.
 	// Sessions with no indexed user entry are omitted from the map (empty preview).
 	previews, err := p.store.FirstUserMessageBulk(ctx, sessionIDs)
 	if err != nil {
@@ -356,6 +357,10 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 
 	entries, err := p.store.ListEntries(ctx, sid)
 	if err != nil {
+		var unsupported *store.UnsupportedIndexFormatError
+		if errors.As(err, &unsupported) {
+			return nil, fmt.Errorf("store adapter: session %s index is not readable: %w", sid, err)
+		}
 		// Non-fatal: return session without turns rather than failing entirely.
 		return &s, nil
 	}

@@ -39,6 +39,7 @@ const (
 type indexFormatOutputCase struct {
 	Name                 string              `yaml:"name"`
 	DeclaredFormat       int                 `yaml:"declaredFormat"`
+	StoredFormat         int                 `yaml:"storedFormat"`
 	Versioned            bool                `yaml:"versioned"`
 	LogsOnly             bool                `yaml:"logsOnly"`
 	Payload              indexOutputPayload  `yaml:"payload"`
@@ -190,6 +191,17 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if row.StoredFormat > 0 {
+				conn, err := db.Pool().Take(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.ExecuteTransient(conn, "UPDATE sessions SET index_format_version = ? WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{row.StoredFormat, string(sid)}})
+				db.Pool().Put(conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			plainIndexer := &outputFixtureIndexer{payload: row.Payload}
 			var indexer ingest.TranscriptIndexer = plainIndexer
 			if row.Versioned {
@@ -253,6 +265,11 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			if row.WantLogError != "" && (attempt.ErrorMessage == nil || !strings.Contains(*attempt.ErrorMessage, row.WantLogError)) {
 				t.Fatalf("log lacks %q: %+v", row.WantLogError, attempt)
 			}
+			if row.WantLogError != "" {
+				if len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, row.WantLogError) || result.Diagnostics[0].Remediation == "" || result.Summary.Errors != 0 {
+					t.Fatalf("index refusal is not visible and nonfatal: diagnostics=%+v summary=%+v", result.Diagnostics, result.Summary)
+				}
+			}
 			data, err := json.Marshal(attempt)
 			if err != nil {
 				t.Fatal(err)
@@ -265,14 +282,19 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				t.Fatalf("legacy audit JSON changed: %s", data)
 			}
 			after, err := db.ListEntries(ctx, sid)
-			if err != nil {
+			if row.StoredFormat > 1 {
+				var unsupported *store.UnsupportedIndexFormatError
+				if !errors.As(err, &unsupported) {
+					t.Fatalf("unknown format unexpectedly became readable: %v", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			if row.WantIndexed {
 				if row.Payload == indexOutputEmpty && len(after) != 0 {
 					t.Fatalf("empty success retained stale entries: %+v", after)
 				}
-			} else if !reflect.DeepEqual(before, after) {
+			} else if row.StoredFormat <= 1 && !reflect.DeepEqual(before, after) {
 				t.Fatal("failed parse replaced last-good entries")
 			}
 			conn, err := db.Pool().Take(ctx)
@@ -282,10 +304,14 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 			defer db.Pool().Put(conn)
 			if err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version, indexed_at FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 				wantProducer := 14
+				wantFormat := 1
+				if row.StoredFormat > 0 {
+					wantFormat = row.StoredFormat
+				}
 				if row.WantIndexed {
 					wantProducer = 15
 				}
-				if stmt.ColumnInt(0) != wantProducer || stmt.ColumnInt(1) != 1 {
+				if stmt.ColumnInt(0) != wantProducer || stmt.ColumnInt(1) != wantFormat {
 					t.Errorf("incorrect actual producer/format=%d/%d", stmt.ColumnInt(0), stmt.ColumnInt(1))
 				}
 				if !row.WantIndexed && stmt.ColumnInt64(2) != 1700000000000 {
@@ -294,6 +320,16 @@ func TestPipelinePersistsDeclaredConcreteIndexOutput(t *testing.T) {
 				return nil
 			}}); err != nil {
 				t.Fatal(err)
+			}
+			if row.StoredFormat > 1 {
+				if err := sqlitex.ExecuteTransient(conn, "SELECT content_preview FROM session_entries WHERE session_id = ? ORDER BY entry_index", &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+					if stmt.ColumnText(0) != old {
+						t.Error("future-format refusal changed stored projection")
+					}
+					return nil
+				}}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version FROM index_log WHERE session_id = ?`, &sqlitex.ExecOptions{Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 				if stmt.ColumnInt(0) != 15 || stmt.ColumnType(1) == sqlite.TypeNull || stmt.ColumnInt(1) != row.DeclaredFormat {

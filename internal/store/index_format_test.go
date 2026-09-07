@@ -86,7 +86,7 @@ type indexStateSnapshot struct {
 	Format   *int
 	At       *int64
 	Hash     *string
-	Entries  []schema.SessionEntry
+	Entries  [][]string
 }
 
 func readIndexSnapshot(t *testing.T, db *store.Store, sid schema.SessionID) indexStateSnapshot {
@@ -111,13 +111,22 @@ func readIndexSnapshot(t *testing.T, db *store.Store, sid schema.SessionID) inde
 		db.Pool().Put(conn)
 		t.Fatal(err)
 	}
-	db.Pool().Put(conn)
-	// The public entry reader verifies the projection stored by the real writer.
-	var err error
-	snapshot.Entries, err = db.ListEntries(t.Context(), sid)
-	if err != nil {
+	// Raw rows prove preservation even when the public reader correctly refuses
+	// an unsupported format. Read behavior has a separate mounted fixture family.
+	if err := sqlitex.ExecuteTransient(conn, "SELECT * FROM session_entries WHERE session_id = ? ORDER BY entry_index", &sqlitex.ExecOptions{
+		Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
+			row := make([]string, stmt.ColumnCount())
+			for column := range row {
+				row[column] = stmt.ColumnType(column).String() + ":" + stmt.ColumnText(column)
+			}
+			snapshot.Entries = append(snapshot.Entries, row)
+			return nil
+		},
+	}); err != nil {
+		db.Pool().Put(conn)
 		t.Fatal(err)
 	}
+	db.Pool().Put(conn)
 	return snapshot
 }
 

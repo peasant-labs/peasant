@@ -654,6 +654,11 @@ func (s *Store) CreateAnnotation(ctx context.Context, params CreateAnnotationPar
 	// Transaction: parent + TPT child must succeed or fail together.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	if params.EntryTarget != nil {
+		if err := s.validateIndexFormatIDsOnConn(conn, []string{params.EntryTarget.SessionID}); err != nil {
+			return "", err
+		}
+	}
 
 	// Insert parent annotation row.
 	if err = sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
@@ -802,12 +807,17 @@ func (s *Store) GetSessionAnnotationsBulk(ctx context.Context) (map[string][]Ann
 // GetAnnotationsForSession (which returns only session-level annotations) so the
 // REST endpoint can surface per-turn labels — including ingest-generated rule
 // labels — to the viewer.
-func (s *Store) GetEntryAnnotationsForSession(ctx context.Context, sessionID string) ([]AnnotationRow, error) {
+func (s *Store) GetEntryAnnotationsForSession(ctx context.Context, sessionID string) (_ []AnnotationRow, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var rows []AnnotationRow
 	if err := sqlitex.ExecuteTransient(conn, sqlGetEntryAnnotationsForSession, &sqlitex.ExecOptions{
@@ -854,12 +864,17 @@ func (s *Store) GetAnnotationsForProject(ctx context.Context, projectHash string
 
 // GetAnnotationsForEntry returns all non-superseded annotations targeting the given
 // entry (sessionID + entryIndex), ordered by created_at DESC.
-func (s *Store) GetAnnotationsForEntry(ctx context.Context, sessionID string, entryIndex int) ([]AnnotationRow, error) {
+func (s *Store) GetAnnotationsForEntry(ctx context.Context, sessionID string, entryIndex int) (_ []AnnotationRow, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return nil, err
+	}
 
 	var rows []AnnotationRow
 	if err := sqlitex.ExecuteTransient(conn, sqlGetAnnotationsForEntry, &sqlitex.ExecOptions{
@@ -997,6 +1012,10 @@ func (s *Store) listAnnotationPushRows(ctx context.Context, query, label string)
 	}
 	defer s.pool.Put(conn)
 
+	return listAnnotationPushRowsOnConn(conn, query, label)
+}
+
+func listAnnotationPushRowsOnConn(conn *sqlite.Conn, query, label string) ([]ingest.AnnotationPushRow, error) {
 	var rows []ingest.AnnotationPushRow
 	if err := sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{
 		ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -1260,6 +1279,11 @@ func (s *Store) CreateAnnotationAndSupersede(ctx context.Context, p ingest.Creat
 	// so the transaction closes before the connection returns to the pool.
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	if p.EntryTarget != nil {
+		if err := s.validateIndexFormatIDsOnConn(conn, []string{p.EntryTarget.SessionID}); err != nil {
+			return "", err
+		}
+	}
 
 	// 1. Insert new annotation parent row (is_primary=0 for import-originated annotations).
 	if err = sqlitex.ExecuteTransient(conn, sqlInsertAnnotation, &sqlitex.ExecOptions{
@@ -1365,7 +1389,7 @@ func (s *Store) applyClassifierAnnotations(ctx context.Context, writes []ingest.
 	}()
 
 	var fatalErr error
-	results, fatalErr = applyClassifierAnnotationWritesOnConn(conn, writes, stats)
+	results, fatalErr = s.applyClassifierAnnotationWritesOnConn(conn, writes, stats)
 	if fatalErr != nil {
 		txnErr = fatalErr
 	}
@@ -1439,8 +1463,15 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	}
 
 	for i, batch := range batches {
+		if batch.RunState != nil {
+			if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{batch.SessionID}); err != nil {
+				results[i].Err = err
+				results[i].Results = classifierAnnotationFailedResults(len(batch.Writes), err)
+				continue
+			}
+		}
 		storeWrites := sessionAnnotationBatchStoreWrites(batch.Writes)
-		writeResults, fatalErr := applyClassifierAnnotationWritesOnConnWithCache(conn, storeWrites, stats, dedupCache)
+		writeResults, fatalErr := s.applyClassifierAnnotationWritesOnConnWithCache(conn, storeWrites, stats, dedupCache)
 		results[i].Results = writeResults
 		if fatalErr != nil {
 			results[i].Err = fatalErr
@@ -1482,14 +1513,14 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	return results
 }
 
-func applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) ([]ingest.ClassifierAnnotationWriteResult, error) {
-	return applyClassifierAnnotationWritesOnConnWithCache(conn, writes, stats, nil)
+func (s *Store) applyClassifierAnnotationWritesOnConn(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats) ([]ingest.ClassifierAnnotationWriteResult, error) {
+	return s.applyClassifierAnnotationWritesOnConnWithCache(conn, writes, stats, nil)
 }
 
-func applyClassifierAnnotationWritesOnConnWithCache(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) ([]ingest.ClassifierAnnotationWriteResult, error) {
+func (s *Store) applyClassifierAnnotationWritesOnConnWithCache(conn *sqlite.Conn, writes []ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) ([]ingest.ClassifierAnnotationWriteResult, error) {
 	results := make([]ingest.ClassifierAnnotationWriteResult, len(writes))
 	for i := range writes {
-		outcome, err, fatal := applyClassifierAnnotationSavepoint(conn, writes[i], stats, dedupCache)
+		outcome, err, fatal := s.applyClassifierAnnotationSavepoint(conn, writes[i], stats, dedupCache)
 		results[i] = outcome
 		if err != nil {
 			results[i].Err = err
@@ -1776,7 +1807,7 @@ func classifierAnnotationFailedResults(count int, err error) []ingest.Classifier
 	return results
 }
 
-func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) (ingest.ClassifierAnnotationWriteResult, error, bool) {
+func (s *Store) applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.ClassifierAnnotationWrite, stats *ingest.AnnotationProfileStats, dedupCache *classifierAnnotationDedupCache) (ingest.ClassifierAnnotationWriteResult, error, bool) {
 	const savepointName = "classifier_annotation_batch_item"
 	result := ingest.ClassifierAnnotationWriteResult{}
 	savepointStarted := annotationBatchProfileStart(stats)
@@ -1786,6 +1817,12 @@ func applyClassifierAnnotationSavepoint(conn *sqlite.Conn, write ingest.Classifi
 	}
 	recordBatchSavepointProfile(stats, &result.Profile, time.Since(savepointStarted))
 
+	if write.Create.EntryTarget != nil {
+		if err := s.validateIndexFormatIDsOnConn(conn, []string{write.Create.EntryTarget.SessionID}); err != nil {
+			rollbackErr, fatal := rollbackClassifierAnnotationSavepoint(conn, savepointName, err, stats, &result.Profile)
+			return result, rollbackErr, fatal
+		}
+	}
 	applied, err := applyClassifierAnnotationOnConn(conn, write, stats, dedupCache)
 	applied.Profile.Add(result.Profile)
 	result = applied
@@ -2887,6 +2924,11 @@ func (s *Store) BatchCreateAnnotations(ctx context.Context, params []CreateAnnot
 		if validationErr := validateCreateAnnotationTarget(p); validationErr != nil {
 			err = fmt.Errorf("store: BatchCreateAnnotations[%d]: %w", i, validationErr)
 			return nil, err
+		}
+		if p.EntryTarget != nil {
+			if err = s.validateIndexFormatIDsOnConn(conn, []string{p.EntryTarget.SessionID}); err != nil {
+				return nil, err
+			}
 		}
 		newID := uuid.New().String()
 		ids[i] = newID

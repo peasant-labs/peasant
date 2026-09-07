@@ -1,0 +1,12 @@
+requiredNames: [sample-before-turn-filter, sample-healthy-project, sample-empty-scope, summary-unknown-index, summary-healthy-session, coordinates-unknown-index, coordinates-healthy-session]
+sessions:
+  - {id: a3000000-0000-4000-8000-000000000001, project: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, name: healthy-project, entries: 3}
+  - {id: a3000000-0000-4000-8000-000000000002, project: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, name: unsupported-project, entries: 1, format: 99}
+cases:
+  - {name: sample-before-turn-filter, args: [annotate, sample, --count=1, --min-user-turns=2], refuse: true}
+  - {name: sample-healthy-project, args: [annotate, sample, --count=1, --min-user-turns=2, --project=healthy-project], wantContains: a3000000-0000-4000-8000-000000000001}
+  - {name: sample-empty-scope, args: [annotate, sample, --count=1, --min-user-turns=2, --project=absent-project]}
+  - {name: summary-unknown-index, args: [export, friction, --summary, --json, --session=a3000000-0000-4000-8000-000000000002], annotationTarget: session, refuse: true}
+  - {name: summary-healthy-session, args: [export, friction, --summary, --json, --session=a3000000-0000-4000-8000-000000000001], annotationTarget: session, wantContains: a3000000-0000-4000-8000-000000000001}
+  - {name: coordinates-unknown-index, args: [export, friction, --json, --session=a3000000-0000-4000-8000-000000000002], annotationTarget: entry, refuse: true}
+  - {name: coordinates-healthy-session, args: [export, friction, --json, --session=a3000000-0000-4000-8000-000000000001], annotationTarget: entry, wantContains: a3000000-0000-4000-8000-000000000001}

@@ -121,6 +121,10 @@ func (s *Store) ListUnresolvedAnnotationTargetAnchors(ctx context.Context, sessi
 	}
 	defer s.pool.Put(conn)
 
+	return listUnresolvedAnnotationTargetAnchorsOnConn(conn, sessionID)
+}
+
+func listUnresolvedAnnotationTargetAnchorsOnConn(conn *sqlite.Conn, sessionID string) ([]ingest.AnnotationTargetAnchorRow, error) {
 	var rows []ingest.AnnotationTargetAnchorRow
 	if err := sqlitex.ExecuteTransient(conn, sqlListUnresolvedAnnotationTargetAnchors, &sqlitex.ExecOptions{
 		Args: []any{sessionID, sessionID},

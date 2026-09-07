@@ -181,16 +181,14 @@ func seedAnnotationTypeIDForTest(t *testing.T, s *store.Store, typeID string) st
 
 func seedEntryForAnnotationBatchTest(t *testing.T, ctx context.Context, s *store.Store, sessionID string, entryIndex int) {
 	t.Helper()
-	conn, err := s.PoolForTest().Take(ctx)
+	sid := schema.SessionID(sessionID)
+	entries, err := s.ListEntries(ctx, sid)
 	if err != nil {
-		t.Fatalf("pool.Take: %v", err)
+		t.Fatal(err)
 	}
-	defer s.PoolForTest().Put(conn)
-	if err := sqlitex.ExecuteTransient(conn,
-		`INSERT INTO session_entries (session_id, entry_index, provider, entry_type, role)
-         VALUES (?, ?, 'claude', 'text', 'assistant')`,
-		&sqlitex.ExecOptions{Args: []any{sessionID, entryIndex}}); err != nil {
-		t.Fatalf("insert session_entry %s/%d: %v", sessionID, entryIndex, err)
+	entries = append(entries, schema.SessionEntry{SessionID: sid, EntryIndex: entryIndex, Harness: schema.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleAssistant})
+	if err := s.IndexSessionEntries(ctx, sid, entries); err != nil {
+		t.Fatalf("seed canonical session entry %s/%d: %v", sessionID, entryIndex, err)
 	}
 }
 
@@ -1005,19 +1003,7 @@ func TestGetAnnotationsForEntry_EntryLevel(t *testing.T) {
 	sessionID := "c1305555-0000-0000-0000-000000000005"
 	seedTestSessionV13(t, ctx, s, sessionID)
 
-	// Seed a session_entries row for the FK.
-	conn, err := s.PoolForTest().Take(ctx)
-	if err != nil {
-		t.Fatalf("pool.Take: %v", err)
-	}
-	if err := sqlitex.ExecuteTransient(conn,
-		`INSERT INTO session_entries (session_id, entry_index, provider, entry_type, role)
-         VALUES (?, 0, 'claude', 'text', 'assistant')`,
-		&sqlitex.ExecOptions{Args: []any{sessionID}}); err != nil {
-		s.PoolForTest().Put(conn)
-		t.Fatalf("insert session_entry: %v", err)
-	}
-	s.PoolForTest().Put(conn)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 0)
 
 	annotatorID := seedAnnotatorIDForTest(t, s)
 	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
@@ -1060,18 +1046,8 @@ func TestGetEntryAnnotationsForSession_ReturnsAllEntries(t *testing.T) {
 	sessionID := "c1305555-0000-0000-0000-000000000099"
 	seedTestSessionV13(t, ctx, s, sessionID)
 
-	conn, err := s.PoolForTest().Take(ctx)
-	if err != nil {
-		t.Fatalf("pool.Take: %v", err)
-	}
-	if err := sqlitex.ExecuteTransient(conn,
-		`INSERT INTO session_entries (session_id, entry_index, provider, entry_type, role)
-         VALUES (?1, 0, 'claude', 'text', 'assistant'), (?1, 1, 'claude', 'text', 'assistant')`,
-		&sqlitex.ExecOptions{Args: []any{sessionID}}); err != nil {
-		s.PoolForTest().Put(conn)
-		t.Fatalf("insert session_entries: %v", err)
-	}
-	s.PoolForTest().Put(conn)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 0)
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionID, 1)
 
 	annotatorID := seedAnnotatorIDForTest(t, s)
 	typeID := seedAnnotationTypeIDForTest(t, s, testutil.TestTypeIDSessionOutcome)
@@ -2184,16 +2160,10 @@ func TestGetSessionAnnotationsBulk(t *testing.T) {
 
 	// Session B also gets an ENTRY-level annotation — the bulk query is
 	// session-level only, so this must not appear in any group.
+	seedEntryForAnnotationBatchTest(t, ctx, s, sessionB, 0)
 	conn, err := s.PoolForTest().Take(ctx)
 	if err != nil {
 		t.Fatalf("pool.Take: %v", err)
-	}
-	if err := sqlitex.ExecuteTransient(conn,
-		`INSERT INTO session_entries (session_id, entry_index, provider, entry_type, role)
-         VALUES (?, 0, 'claude', 'text', 'assistant')`,
-		&sqlitex.ExecOptions{Args: []any{sessionB}}); err != nil {
-		s.PoolForTest().Put(conn)
-		t.Fatalf("insert session_entry: %v", err)
 	}
 	if err := sqlitex.ExecuteTransient(conn,
 		`UPDATE annotations SET superseded_by = ? WHERE id = ?`,

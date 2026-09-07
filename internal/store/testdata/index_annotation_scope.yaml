@@ -1,0 +1,8 @@
+requiredNames: [healthy-session-selected, unsupported-session-selected, healthy-label-selected, unsupported-label-selected, empty-session-selection, metadata-only-selected]
+cases:
+  - {name: healthy-session-selected, select: healthy-session, wantTotal: 1}
+  - {name: unsupported-session-selected, select: unsupported-session, refuse: true}
+  - {name: healthy-label-selected, select: healthy-label, wantTotal: 1}
+  - {name: unsupported-label-selected, select: unsupported-label, refuse: true}
+  - {name: empty-session-selection, select: none, wantTotal: 0}
+  - {name: metadata-only-selected, select: unsupported-session, metadataOnly: true, wantTotal: 1}

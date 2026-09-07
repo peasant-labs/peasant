@@ -821,12 +821,17 @@ func sortFieldToColumn(f defaults.SessionSortField) string {
 // FirstUserMessage returns the content_preview of the first user message (depth=0)
 // in a session, truncated to SessionPreviewMaxChars Unicode runes. Returns "" if
 // no user entries exist or the session does not exist.
-func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (string, error) {
+func (s *Store) FirstUserMessage(ctx context.Context, sessionID string) (_ string, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return "", fmt.Errorf("store: FirstUserMessage take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, []string{sessionID}); err != nil {
+		return "", err
+	}
 
 	const q = `SELECT content_preview FROM session_entries
 WHERE session_id = ? AND role = 'user' AND depth = 0
@@ -850,13 +855,13 @@ ORDER BY entry_index ASC LIMIT 1`
 }
 
 // FirstUserMessageBulk returns the content_preview of the first user message (depth=0)
-// for each session in sessionIDs, using a single IN(...) query. Sessions that have no
+// for each session in sessionIDs, using bounded IN(...) queries. Sessions that have no
 // user entry are OMITTED from the returned map (the caller should treat a missing key as
 // an empty preview — this matches the current behavior of FirstUserMessage returning "").
 //
 // All previews are truncated to SessionPreviewMaxChars runes for parity with
 // the single-row FirstUserMessage.
-func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (map[string]string, error) {
+func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (_ map[string]string, retErr error) {
 	if len(sessionIDs) == 0 {
 		return map[string]string{}, nil
 	}
@@ -866,16 +871,24 @@ func (s *Store) FirstUserMessageBulk(ctx context.Context, sessionIDs []string) (
 		return nil, fmt.Errorf("store: FirstUserMessageBulk take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
-
-	// Build a single IN(...) query so we pay one round-trip regardless of session count.
-	// The subquery per-session MIN(entry_index) picks the first user message per session.
-	placeholders := make([]string, len(sessionIDs))
-	args := make([]any, len(sessionIDs))
-	for i, id := range sessionIDs {
-		placeholders[i] = "?"
-		args[i] = id
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.validateIndexFormatIDsOnConn(conn, sessionIDs); err != nil {
+		return nil, err
 	}
-	q := `SELECT session_id, content_preview FROM session_entries
+
+	result := make(map[string]string, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += indexFormatReadBatchSize {
+		selectedIDs := sessionIDs[start:min(start+indexFormatReadBatchSize, len(sessionIDs))]
+		// Keep every projection query below SQLite's variable limit.
+		// The subquery per-session MIN(entry_index) picks the first user message per session.
+		placeholders := make([]string, len(selectedIDs))
+		args := make([]any, len(selectedIDs))
+		for i, id := range selectedIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		q := `SELECT session_id, content_preview FROM session_entries
 WHERE role = 'user' AND depth = 0
   AND (session_id, entry_index) IN (
     SELECT session_id, MIN(entry_index)
@@ -884,21 +897,21 @@ WHERE role = 'user' AND depth = 0
     GROUP BY session_id
   )`
 
-	result := make(map[string]string, len(sessionIDs))
-	err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
-		Args: args,
-		ResultFunc: func(stmt *sqlite.Stmt) error {
-			sid := stmt.ColumnText(0)
-			var preview string
-			if stmt.ColumnType(1) != sqlite.TypeNull {
-				preview = stmt.ColumnText(1)
-			}
-			result[sid] = TruncateToRunes(preview, defaults.SessionPreviewMaxChars)
-			return nil
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		err = sqlitex.ExecuteTransient(conn, q, &sqlitex.ExecOptions{
+			Args: args,
+			ResultFunc: func(stmt *sqlite.Stmt) error {
+				sid := stmt.ColumnText(0)
+				var preview string
+				if stmt.ColumnType(1) != sqlite.TypeNull {
+					preview = stmt.ColumnText(1)
+				}
+				result[sid] = TruncateToRunes(preview, defaults.SessionPreviewMaxChars)
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("store: FirstUserMessageBulk query: %w", err)
+		}
 	}
 	return result, nil
 }

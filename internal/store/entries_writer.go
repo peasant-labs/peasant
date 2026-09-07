@@ -1365,12 +1365,17 @@ func (anchor entryTargetAnchor) matchKeys() []string {
 }
 
 // SessionEntriesExist returns true if session_entries rows exist for the session.
-func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.SessionID) (bool, error) {
+func (s *Store) SessionEntriesExist(ctx context.Context, sessionID ingest.SessionID) (_ bool, retErr error) {
 	conn, err := s.pool.Take(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	endSnapshot := sqlitex.Save(conn)
+	defer endSnapshot(&retErr)
+	if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{sessionID}); err != nil {
+		return false, err
+	}
 
 	var exists bool
 	err = sqlitex.ExecuteTransient(conn, sqlSessionEntriesExist, &sqlitex.ExecOptions{

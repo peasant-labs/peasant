@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -30,6 +31,14 @@ func (p *Pipeline) reportDiagnostic(diagnostic DiagnosticEntry) {
 	}
 	p.diagnosticSet[diagnostic] = struct{}{}
 	p.diagnostics = append(p.diagnostics, diagnostic)
+}
+
+func (p *Pipeline) reportIndexRefusal(sessionID SessionID, err error) {
+	p.reportDiagnostic(DiagnosticEntry{
+		ErrorType: "index_refused", Location: string(sessionID),
+		Message:     fmt.Sprintf("index session %s: %v; this attempt preserved the last successful index", sessionID, err),
+		Remediation: "Use a compatible Peasant build or fix the reported parser/input/store problem, then retry harvest.",
+	})
 }
 
 func (p *Pipeline) resetDiagnostics() {

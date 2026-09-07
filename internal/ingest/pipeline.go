@@ -1397,6 +1397,7 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 			return result
 		}
 		slog.Warn(logPrefix+": index transcript", "session_id", im.session.SessionID, "error", err)
+		p.reportIndexRefusal(im.session.SessionID, err)
 		errMsg := err.Error()
 		result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, 0, result.startedAt, nil, &errMsg)
 		return result
@@ -1515,6 +1516,7 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			writeErr = fmt.Errorf("%s: store did not report session %s as written", logPrefix, result.im.session.SessionID)
 		}
 		if writeErr != nil {
+			p.reportIndexRefusal(result.im.session.SessionID, writeErr)
 			slog.Warn(logPrefix+": store session entries", "session_id", result.im.session.SessionID, "error", writeErr)
 			errMsg := writeErr.Error()
 			logEntry := p.makeIndexLogEntry(result.im, IndexOutcomeError, result.entryCount, result.startedAt, nil, &errMsg)
@@ -1555,6 +1557,7 @@ func (p *Pipeline) writeIndexParseResult(ctx context.Context, result indexParseR
 		// A split entries/stamp fallback could overwrite last-good output and
 		// report success after the producer stamp failed. Refuse before any write.
 		errMsg := "index persistence requires atomic entry and indexer-state writes; configure a SessionEntryBatchStore and retry; existing entries were preserved"
+		p.reportIndexRefusal(im.session.SessionID, errors.New(errMsg))
 		slog.Warn(logPrefix+": store session entries", "session_id", im.session.SessionID, "error", errMsg)
 		logEntry = p.makeIndexLogEntry(im, IndexOutcomeError, entriesCount, result.startedAt, nil, &errMsg)
 	}

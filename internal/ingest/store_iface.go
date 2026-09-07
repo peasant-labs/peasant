@@ -779,6 +779,10 @@ type PublishResult struct {
 // Defined in ingest (not store) to maintain the DI direction:
 // store implements this interface; the annotation push function depends on it.
 type AnnotationQueryStore interface {
+	// ReadAnnotationPushSnapshot selects active records and validates their
+	// entry-coordinate formats in one database snapshot. Historical diagnostics
+	// and hash-only retractions do not need the current index to be readable.
+	ReadAnnotationPushSnapshot(context.Context, AnnotationReadSelection, bool) (AnnotationPushSnapshot, error)
 	// ListSystemAnnotations returns all non-superseded annotations whose type has
 	// system origin (OriginSystem). Used by the push pipeline to collect annotations
 	// that the village can accept; push rejects unknown or user-defined type_ids.
@@ -795,6 +799,22 @@ type AnnotationQueryStore interface {
 	// durable target repair state is unresolved. An empty sessionID means all
 	// sessions. Push uses this trust-boundary check before building wire payloads.
 	ListUnresolvedAnnotationTargetAnchors(ctx context.Context, sessionID string) ([]AnnotationTargetAnchorRow, error)
+}
+
+// AnnotationReadSelection keeps the existing publication selection policy with
+// its caller. These predicates inspect only the supplied metadata, perform no
+// I/O, and must not attempt a second Store read while the snapshot is held.
+type AnnotationReadSelection interface {
+	IncludesAnnotation(AnnotationPushRow) bool
+	IncludesUnresolvedAnchor(AnnotationTargetAnchorRow) bool
+	IncludesRetraction(AnnotationPushRow) bool
+}
+
+// AnnotationPushSnapshot is local read state, not a public wire payload.
+type AnnotationPushSnapshot struct {
+	Annotations []AnnotationPushRow
+	Unresolved  []AnnotationTargetAnchorRow
+	Retractions []AnnotationPushRow
 }
 
 type AnnotationTargetAnchorRow struct {
