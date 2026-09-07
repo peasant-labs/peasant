@@ -96,6 +96,13 @@ type ingestProgressFixtures struct {
 			Want         string `yaml:"want"`
 		} `yaml:"cases"`
 	} `yaml:"execution"`
+	FinalOverride struct {
+		Required []string `yaml:"required_cases"`
+		Cases    []struct {
+			Name    string `yaml:"name"`
+			Outcome string `yaml:"outcome"`
+		} `yaml:"cases"`
+	} `yaml:"final_override"`
 	Interrupt struct {
 		Required []string               `yaml:"required_cases"`
 		Cases    []harvestInterruptCase `yaml:"cases"`
@@ -143,6 +150,10 @@ func loadIngestProgressFixtures(t *testing.T) ingestProgressFixtures {
 	validateNamedFixtures(t, "execution", doc.Execution.Required, len(doc.Execution.Cases), func(i int) (string, bool) {
 		c := doc.Execution.Cases[i]
 		return c.Name, c.Want != ""
+	})
+	validateNamedFixtures(t, "final_override", doc.FinalOverride.Required, len(doc.FinalOverride.Cases), func(i int) (string, bool) {
+		c := doc.FinalOverride.Cases[i]
+		return c.Name, c.Outcome == "succeeded" || c.Outcome == "failed"
 	})
 	return doc
 }
@@ -375,13 +386,14 @@ type controlledHarvestProgram struct {
 	releaseFinish chan struct{}
 	done          chan struct{}
 	err           error
+	runs          int
 }
 
 func newControlledHarvestProgram() *controlledHarvestProgram {
 	return &controlledHarvestProgram{finishEntered: make(chan ingestprogress.FinalMsg, 1), releaseFinish: make(chan struct{}), done: make(chan struct{})}
 }
 
-func (p *controlledHarvestProgram) Run(context.Context) { <-p.done }
+func (p *controlledHarvestProgram) Run(context.Context) { p.runs++; <-p.done }
 func (p *controlledHarvestProgram) Finish(msg ingestprogress.FinalMsg) {
 	p.finishEntered <- msg
 	<-p.releaseFinish
@@ -413,14 +425,26 @@ func TestExecuteHarvestCommitsOutcomeBeforeFinalDelivery(t *testing.T) {
 			go func() { result <- executeHarvest(ctx, pipeline, ingest.NewProgressState(), program) }()
 			if c.CancelBefore {
 				execution := <-result
-				if pipeline.runs != 0 || execution.kind != harvestCompletionCanceled {
-					t.Fatalf("startup cancellation ran pipeline or lost outcome: runs=%d kind=%v", pipeline.runs, execution.kind)
+				if pipeline.runs != 0 || program.runs != 0 || execution.kind != harvestCompletionCanceled {
+					t.Fatalf("startup cancellation launched work or lost outcome: pipeline=%d program=%d kind=%v", pipeline.runs, program.runs, execution.kind)
 				}
 				return
 			}
 			final := <-program.finishEntered
 			if c.LateCancel {
 				cancel()
+				state := ingest.NewProgressState()
+				state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
+				root := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: final.At.Add(-time.Second), Cancel: cancel, ContextErr: ctx.Err})
+				pending, _ := root.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+				pending, _ = pending.Update(harvestprogress.TickMsg(final.At.Add(time.Second)))
+				if !strings.Contains(pending.View().Content, "canceling harvest") {
+					t.Fatal("late cancellation did not reach actual root")
+				}
+				committed, _ := pending.Update(final)
+				if committed.View().Content != "" {
+					t.Fatalf("committed success/failure did not clear late cancellation: %s", committed.View().Content)
+				}
 			}
 			close(program.releaseFinish)
 			execution := <-result
@@ -448,21 +472,27 @@ func TestProgressModelSuccessClears(t *testing.T) {
 }
 
 func TestProgressModelAuthoritativeFinalOverridesPendingCancellation(t *testing.T) {
-	for _, outcome := range []ingestprogress.FinalOutcome{ingestprogress.FinalSucceeded, ingestprogress.FinalFailed} {
-		started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
-		state := ingest.NewProgressState()
-		state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
-		model := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: started})
-		updated, _ := model.Update(harvestprogress.CancelMsg{})
-		finalSnapshot := state.Snapshot()
-		updated, cmd := updated.Update(ingestprogress.FinalMsg{At: started.Add(3 * time.Second), Snapshot: finalSnapshot, Outcome: outcome})
-		if cmd == nil || updated.View().Content != "" {
-			t.Fatalf("outcome %v did not clear pending cancellation", outcome)
-		}
-		late, lateCmd := updated.Update(harvestprogress.CancelMsg{})
-		if lateCmd != nil || late.View().Content != "" {
-			t.Fatalf("outcome %v changed after final", outcome)
-		}
+	for _, c := range loadIngestProgressFixtures(t).FinalOverride.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			outcome := ingestprogress.FinalSucceeded
+			if c.Outcome == "failed" {
+				outcome = ingestprogress.FinalFailed
+			}
+			started := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+			state := ingest.NewProgressState()
+			state.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiff, Total: 10})
+			model := harvestprogress.New(harvestprogress.Options{Progress: state, Theme: theme.New(theme.ModeDark), StartedAt: started})
+			updated, _ := model.Update(harvestprogress.CancelMsg{})
+			finalSnapshot := state.Snapshot()
+			updated, cmd := updated.Update(ingestprogress.FinalMsg{At: started.Add(3 * time.Second), Snapshot: finalSnapshot, Outcome: outcome})
+			if cmd == nil || updated.View().Content != "" {
+				t.Fatalf("outcome %v did not clear pending cancellation", outcome)
+			}
+			late, lateCmd := updated.Update(harvestprogress.CancelMsg{})
+			if lateCmd != nil || late.View().Content != "" {
+				t.Fatalf("outcome %v changed after final", outcome)
+			}
+		})
 	}
 }
 

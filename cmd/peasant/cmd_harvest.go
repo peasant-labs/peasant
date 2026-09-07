@@ -503,6 +503,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 			restoreLogger = nil
 		}
 	}
+	defer stopProgress()
 	if err := ctx.Err(); err != nil {
 		cmd.SilenceUsage = true
 		return harvestCancellationError(err)
