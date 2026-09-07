@@ -6,6 +6,8 @@ import (
 	_ "embed"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -152,6 +154,107 @@ func TestTimestampDetection_SessionBranch(t *testing.T) {
 			}
 			if got := stub.AncestorQueries(); got != tc.WantAncestryQueries {
 				t.Errorf("IsAncestor was asked %d times, want %d", got, tc.WantAncestryQueries)
+			}
+		})
+	}
+}
+
+//go:embed testdata/commit_detector_branch_repo.yaml
+var commitDetectorBranchRepoFixtureYAML []byte
+
+type commitDetectorBranchRepoFixture struct {
+	RequiredCaseNames []string                       `yaml:"required_case_names"`
+	Cases             []commitDetectorBranchRepoCase `yaml:"cases"`
+}
+
+type commitDetectorBranchRepoCase struct {
+	Name           string   `yaml:"name"`
+	SessionBranch  string   `yaml:"session_branch"`
+	WantMessages   []string `yaml:"want_messages"`
+	WantErrorTypes []string `yaml:"want_error_types"`
+}
+
+func loadCommitDetectorBranchRepoFixture(t *testing.T) commitDetectorBranchRepoFixture {
+	t.Helper()
+	var fixture commitDetectorBranchRepoFixture
+	decodeStrictYAML(t, commitDetectorBranchRepoFixtureYAML, "branch-aware commit repository fixture", &fixture)
+	present := make(map[string]bool, len(fixture.Cases))
+	for _, tc := range fixture.Cases {
+		if present[tc.Name] {
+			t.Fatalf("branch-aware commit repository fixture repeats case %q", tc.Name)
+		}
+		present[tc.Name] = true
+	}
+	if err := testutil.RequireFixtureNames("branch-aware commit repository fixture", "case", fixture.RequiredCaseNames, present); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+// buildBranchTopologyRepo builds the topology the repository fixture documents
+// and returns its path. HEAD is left on integration so both modifying commits
+// are window candidates.
+func buildBranchTopologyRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	mustGitCmd(t, dir, "git", "init", "-q", "-b", "main")
+	mustGitCmd(t, dir, "git", "config", "user.email", testutil.TestEmail)
+	mustGitCmd(t, dir, "git", "config", "user.name", "Test User")
+	mustGitCmd(t, dir, "git", "config", "commit.gpgsign", "false")
+
+	writeRepoFile(t, dir, "main.txt", "base\n")
+	writeRepoFile(t, dir, "feature.txt", "base\n")
+	mustGitCmd(t, dir, "git", "add", "main.txt", "feature.txt")
+	mustGitCmd(t, dir, "git", "commit", "-q", "-m", "base: add files")
+
+	mustGitCmd(t, dir, "git", "checkout", "-q", "-b", "feature")
+	writeRepoFile(t, dir, "feature.txt", "work\n")
+	mustGitCmd(t, dir, "git", "commit", "-q", "-a", "-m", "feature: work")
+
+	mustGitCmd(t, dir, "git", "checkout", "-q", "main")
+	writeRepoFile(t, dir, "main.txt", "advance\n")
+	mustGitCmd(t, dir, "git", "commit", "-q", "-a", "-m", "main: advance")
+
+	mustGitCmd(t, dir, "git", "checkout", "-q", "-b", "integration")
+	mustGitCmd(t, dir, "git", "merge", "-q", "--no-ff", "-m", "integration: merge feature", "feature")
+	return dir
+}
+
+func writeRepoFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func TestCommitDetectorBranchRepoFixtureGuards(t *testing.T) {
+	loadCommitDetectorBranchRepoFixture(t)
+}
+
+// TestTimestampDetection_SessionBranch_RealGit proves the refs/heads/ anchoring
+// and the merge-base call against real git over the fixture's topology.
+func TestTimestampDetection_SessionBranch_RealGit(t *testing.T) {
+	fixture := loadCommitDetectorBranchRepoFixture(t)
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			dir := buildBranchTopologyRepo(t)
+			cd := ingest.NewCommitDetector(ingest.NewExecGitDiffAnalyzer(), testutil.TestEmail, ingest.WithSessionBranch(tc.SessionBranch))
+
+			now := time.Now()
+			commits, diags := cd.TimestampDetection(context.Background(), dir, now.Add(-time.Hour), now.Add(time.Hour))
+
+			got := make([]string, 0, len(commits))
+			for _, c := range commits {
+				got = append(got, c.Message)
+			}
+			slices.Sort(got)
+			want := slices.Clone(tc.WantMessages)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("commit subjects = %v, want exactly %v", got, want)
+			}
+			if gotTypes := errorTypesOf(diags); !slices.Equal(gotTypes, tc.WantErrorTypes) {
+				t.Errorf("diagnostic types = %v, want exactly %v (%+v)", gotTypes, tc.WantErrorTypes, diags)
 			}
 		})
 	}

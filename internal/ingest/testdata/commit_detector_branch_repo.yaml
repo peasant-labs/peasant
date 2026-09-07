@@ -1,0 +1,41 @@
+# Branch-aware commit association against a real repository.
+#
+# Each case runs the detector with ExecGitDiffAnalyzer over one fixed topology
+# that the test builds in a temporary directory:
+#
+#   base:        adds main.txt and feature.txt. An Add, so `git log
+#                --diff-filter=M` never lists it as a candidate.
+#   main:        base -> "main: advance"   (modifies main.txt)
+#   feature:     base -> "feature: work"   (modifies feature.txt)
+#   integration: a --no-ff merge of main and feature. HEAD is here, so the
+#                window lists both modifying commits as candidates.
+#
+# `want_messages` is the exact set of commit subjects the detector returns,
+# compared order-insensitively because two commits made in the same second
+# have no stable log order. `want_error_types` is the exact ordered list of
+# diagnostics it adds.
+required_case_names:
+  - feature_branch_keeps_only_its_own_commit
+  - main_branch_keeps_only_its_own_commit
+  - branchless_session_keeps_both_commits
+  - deleted_branch_falls_back_to_the_window
+cases:
+  - name: feature_branch_keeps_only_its_own_commit
+    session_branch: feature
+    want_messages: ["feature: work"]
+    want_error_types: []
+
+  - name: main_branch_keeps_only_its_own_commit
+    session_branch: main
+    want_messages: ["main: advance"]
+    want_error_types: []
+
+  - name: branchless_session_keeps_both_commits
+    session_branch: ""
+    want_messages: ["feature: work", "main: advance"]
+    want_error_types: []
+
+  - name: deleted_branch_falls_back_to_the_window
+    session_branch: gone
+    want_messages: ["feature: work", "main: advance"]
+    want_error_types: [branch_reachability_unavailable]
