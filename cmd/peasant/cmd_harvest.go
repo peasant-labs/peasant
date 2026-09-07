@@ -97,7 +97,7 @@ func BuildHarvestCommand() *cobra.Command {
 		Use:     "harvest",
 		Aliases: []string{"ingest"},
 		Short:   "Harvest AI coding agent transcripts",
-		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, and Strike.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
+		Long:    "Discover, normalize, and store AI coding agent transcripts from Claude Code, OpenCode, Codex, Cursor, Strike, and Pi.\nUse 'harvest logs' for file extraction only, or 'harvest index' for DB population only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHarvest(cmd, harvestAll, &flags)
 		},
@@ -161,7 +161,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 
 	// Source flags are relevant for logs and all modes.
 	if mode != harvestIndexOnly {
-		cmd.Flags().StringVar(&flags.sourceProvider, "source-provider", "", "Override source provider (claude-code, opencode, codex, cursor, strike)")
+		cmd.Flags().StringVar(&flags.sourceProvider, "source-provider", "", "Override source provider (claude-code, opencode, codex, cursor, strike, pi)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the provider (replaces config, not additive)")
 		cmd.Flags().BoolVar(&flags.includeActive, "include-active", false, "Also process sessions still being written")
 	}
@@ -328,6 +328,9 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 		},
 		defaults.HarnessStrike: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
 			return ingest.NewStrikeAdapter(f, g, s)
+		},
+		defaults.HarnessPi: func(f ingest.FileSystem, g ingest.GitResolver, s salt.Salt) ingest.SourceAdapter {
+			return ingest.NewPiAdapter(f, g, s)
 		},
 	}
 
@@ -1034,6 +1037,7 @@ func isolateSourceProvider(cfg *config.Config, provider defaults.Harness) {
 	cfg.Sources.Codex.Enabled = provider == defaults.HarnessCodex
 	cfg.Sources.Cursor.Enabled = provider == defaults.HarnessCursor
 	cfg.Sources.Strike.Enabled = provider == defaults.HarnessStrike
+	cfg.Sources.Pi.Enabled = provider == defaults.HarnessPi
 }
 
 // applySourceOverride replaces the config paths for a single provider.
@@ -1056,6 +1060,9 @@ func applySourceOverride(cfg *config.Config, provider defaults.Harness, path ing
 	case defaults.HarnessStrike:
 		cfg.Sources.Strike.Enabled = true
 		cfg.Sources.Strike.Paths = []string{string(path)}
+	case defaults.HarnessPi:
+		cfg.Sources.Pi.Enabled = true
+		cfg.Sources.Pi.Paths = []string{string(path)}
 	}
 }
 

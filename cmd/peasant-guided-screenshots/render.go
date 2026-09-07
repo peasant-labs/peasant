@@ -271,7 +271,7 @@ func renderSelectionCapture(
 	if state.Key == selectionStateBranchPreview {
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview {
+	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview || state.Key == selectionStatePiPreview {
 		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil

@@ -250,6 +250,7 @@ type DiscoveryDiagnosticReporter interface {
 
 // DefaultAdapterRegistry maps providers to their adapter factories.
 var DefaultAdapterRegistry = map[Harness]AdapterFactory{
+	HarnessPi: func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter { return NewPiAdapter(fs, git, s) },
 	HarnessClaudeCode: func(fs FileSystem, git GitResolver, s salt.Salt) SourceAdapter {
 		return NewClaudeAdapter(fs, git, s)
 	},

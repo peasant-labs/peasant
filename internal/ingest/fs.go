@@ -54,6 +54,12 @@ func (f *OSFileSystem) Lstat(path string) (os.FileInfo, error) {
 	return os.Lstat(path)
 }
 
+// EvalSymlinks supplies canonical candidate ordering to file-backed discovery.
+// In-memory filesystems may omit this optional capability when they have no links.
+func (f *OSFileSystem) EvalSymlinks(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
+}
+
 func (f *OSFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
 	return filepath.WalkDir(root, fn)
 }

@@ -1,0 +1,181 @@
+requiredNames:
+  - active-history
+  - final-leaf-and-global-name
+  - whitespace-clears-name
+  - incomplete-tail
+  - interior-incomplete
+  - complete-invalid-final
+  - duplicate-key
+  - duplicate-id
+  - active-dangling
+  - inactive-dangling
+  - cycle
+  - unsupported-version
+  - unknown-entry
+  - header-only
+  - custom-only
+  - bash-execution
+  - pending-tool
+  - absent-usage-and-state
+  - mismatched-result
+  - duplicate-result
+  - invalid-usage
+  - display-true-context
+  - separate-native-namespace
+  - native-metadata-string-over-limit
+cases:
+  - name: native-metadata-string-over-limit
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"custom","id":"m","parentId":null,"customType":"state","data":{"value":"native-boundary-string"}}
+    metadataStringBytes: 16385
+    reject: true
+    rejectContains: metadata string exceeds 16 KiB
+  - name: separate-native-namespace
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"native.extension","arguments":{}}]}}
+    projectionReject: true
+  - name: bash-execution
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"b","parentId":null,"message":{"role":"bashExecution","command":"echo synthetic","output":"synthetic output","exitCode":0}}
+    turns: 1
+    owners: 1
+    contains: [bash, synthetic output]
+  - name: pending-tool
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"pending","name":"pending_tool","arguments":{}}]}}
+    turns: 1
+    owners: 1
+    contains: [pending_tool, unknown]
+  - name: absent-usage-and-state
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"model_change","id":"m","parentId":null,"modelId":"not-observed"}
+      {"type":"thinking_level_change","id":"t","parentId":"m","thinkingLevel":"high"}
+      {"type":"message","id":"a","parentId":"t","message":{"role":"assistant","content":[]}}
+    turns: 1
+    owners: 1
+    contains: [unknown]
+    excludes: [not-observed]
+  - name: mismatched-result
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"r","parentId":null,"message":{"role":"toolResult","toolCallId":"missing","toolName":"unknown","content":[]}}
+    reject: true
+  - name: duplicate-result
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"tool","arguments":{}}]}}
+      {"type":"message","id":"r","parentId":"a","message":{"role":"toolResult","toolCallId":"call","toolName":"tool","content":[]}}
+      {"type":"message","id":"r2","parentId":"r","message":{"role":"toolResult","toolCallId":"call","toolName":"tool","content":[]}}
+    reject: true
+  - name: invalid-usage
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[],"usage":{"input":-1}}}
+    reject: true
+  - name: display-true-context
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"custom_message","id":"c","parentId":null,"display":true,"customType":"context","content":"displayed context"}
+    turns: 1
+    contains: [displayed context]
+  - name: active-history
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","timestamp":"2026-01-01T00:00:00Z"}
+      {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"full history"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}]}}
+      {"type":"message","id":"a","parentId":"u","message":{"role":"assistant","model":"fallback-model","responseModel":"observed-model","content":[{"type":"thinking","thinking":"think once"},{"type":"text","text":"answer"},{"type":"toolCall","id":"call","name":"custom_tool","arguments":{"nested":{"items":[1,true]}}},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"usage":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}}}}
+      {"type":"message","id":"r","parentId":"a","message":{"role":"toolResult","toolCallId":"call","toolName":"custom_tool","content":[{"type":"text","text":"result"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"isError":true,"details":{"extension":"safe"}}}
+      {"type":"custom_message","id":"c","parentId":"r","customType":"context","display":false,"content":[{"type":"text","text":"visible context"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"details":{"state":true}}
+      {"type":"compaction","id":"s","parentId":"c","summary":"visible summary","details":{"count":1}}
+      {"type":"branch_summary","id":"b","parentId":"s","summary":"visible branch summary"}
+      {"type":"custom","id":"m","parentId":"b","customType":"state","data":{"opaque":"not searchable"}}
+    turns: 5
+    owners: 4
+    metadata: 4
+    contains: [full history, think once, answer, visible context, visible summary, visible branch summary, '[image omitted]']
+  - name: final-leaf-and-global-name
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"old","parentId":null,"message":{"role":"user","content":"inactive text"}}
+      {"type":"session_info","id":"name","parentId":"old","name":"latest name"}
+      {"type":"message","id":"leaf","parentId":null,"message":{"role":"user","content":"active text"}}
+    title: latest name
+    turns: 1
+    contains: [active text]
+    excludes: [inactive text]
+  - name: whitespace-clears-name
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"session_info","id":"name","parentId":null,"name":"old name"}
+      {"type":"session_info","id":"clear","parentId":"name","name":"  "}
+    turns: 0
+  - name: incomplete-tail
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message",
+    warnings: 1
+    turns: 0
+  - name: interior-incomplete
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message",
+      {}
+    reject: true
+  - name: complete-invalid-final
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message",}
+    reject: true
+  - name: duplicate-key
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"custom","id":"a","parentId":null,"data":{"data":1,"d\u0061ta":2}}
+    reject: true
+  - name: duplicate-id
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"label","id":"a","parentId":null}
+      {"type":"label","id":"a","parentId":null}
+    reject: true
+  - name: active-dangling
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"label","id":"a","parentId":"missing"}
+    reject: true
+  - name: inactive-dangling
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"label","id":"a","parentId":"missing"}
+      {"type":"message","id":"b","parentId":null,"message":{"role":"user","content":"valid active"}}
+    turns: 1
+    warnings: 1
+    contains: [valid active]
+  - name: cycle
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"label","id":"a","parentId":"b"}
+      {"type":"label","id":"b","parentId":"a"}
+    reject: true
+  - name: unsupported-version
+    source: |
+      {"type":"session","version":2,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+    reject: true
+  - name: unknown-entry
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"future","id":"a","parentId":null}
+    reject: true
+  - name: header-only
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","parentSession":"/synthetic/private-fork.jsonl"}
+    turns: 0
+  - name: custom-only
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"custom","id":"a","parentId":null,"customType":"state","data":{"opaque":"metadata only"}}
+    turns: 0
+    metadata: 1

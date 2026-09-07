@@ -33,6 +33,7 @@ type IndexerRegistryOptions struct {
 // content needs its own indexer change, tracked as a separate follow-up.
 func NewIndexerRegistry(fs FileSystem, opts IndexerRegistryOptions) map[Harness]TranscriptIndexer {
 	return map[Harness]TranscriptIndexer{
+		HarnessPi:         NewPiIndexer(fs, WithPiFullContent(opts.FullContent)),
 		HarnessClaudeCode: NewClaudeIndexer(fs, WithClaudeFullDepth(true), WithClaudeFullContent(opts.FullContent)),
 		HarnessOpenCode:   NewOpenCodeIndexer(fs, WithOpenCodeFullDepth(true), WithOpenCodeFullContent(opts.FullContent)),
 		HarnessCodex:      NewCodexIndexer(fs, WithCodexFullContent(opts.FullContent)),

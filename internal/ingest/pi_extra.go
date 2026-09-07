@@ -27,13 +27,14 @@ const (
 // not a block. Only the owning row carries Usage or Metadata; siblings must not
 // repeat them. The shared projection resolves metadata attachments.
 type PiExtra struct {
-	Kind      PiExtraKind                   `json:"kind"`
-	Harness   schema.Harness                `json:"harness"`
-	SourceRef string                        `json:"sourceRef,omitempty"`
-	Usage     *schema.UsageDetail           `json:"usage,omitempty"`
-	Metadata  []schema.NativeMetadataRecord `json:"metadata,omitempty"`
-	ModelID   schema.ObservedModelID        `json:"model_id,omitempty"`
-	Namespace string                        `json:"namespace,omitempty"`
+	Kind        PiExtraKind                   `json:"kind"`
+	Harness     schema.Harness                `json:"harness"`
+	SourceRef   string                        `json:"sourceRef,omitempty"`
+	Usage       *schema.UsageDetail           `json:"usage,omitempty"`
+	Metadata    []schema.NativeMetadataRecord `json:"metadata,omitempty"`
+	ModelID     schema.ObservedModelID        `json:"model_id,omitempty"`
+	Namespace   string                        `json:"namespace,omitempty"`
+	SessionName *string                       `json:"sessionName,omitempty"`
 }
 
 // PiPublicRef domain-separates irreversible references. Never publish native IDs.

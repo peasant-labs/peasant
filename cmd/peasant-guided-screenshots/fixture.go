@@ -84,6 +84,7 @@ const (
 	// selectionStateSourcePreview is a session the local store does not hold,
 	// previewed from the transcript its harness wrote.
 	selectionStateSourcePreview selectionState = "harness-source-preview"
+	selectionStatePiPreview     selectionState = "pi-preview"
 	// selectionStateOriginHidden is the mounted list with an agent-driven root
 	// hidden, its user-origin control visible, and a visible parent's child
 	// badge reading correctly.
@@ -94,7 +95,7 @@ func (s selectionState) valid() bool {
 	switch s {
 	case selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
-		selectionStateOriginHidden:
+		selectionStateOriginHidden, selectionStatePiPreview:
 		return true
 	default:
 		return false
@@ -104,7 +105,7 @@ func (s selectionState) valid() bool {
 func (s selectionState) requiresBothThemes() bool {
 	return s == selectionStateProjectPreview || s == selectionStateBranchPreview ||
 		s == selectionStateSessionPreview || s == selectionStateSourcePreview ||
-		s == selectionStateOriginHidden
+		s == selectionStateOriginHidden || s == selectionStatePiPreview
 }
 
 // pushState is the closed set of push-wizard screens the harness captures: the
@@ -497,7 +498,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 7950},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 1200},
 	}
@@ -575,6 +576,7 @@ func validateSelectionMatrix(states []selectionStateFixture, captures []selectio
 		selectionStateDefault, selectionStateSearch, selectionStateProjectPreview,
 		selectionStateBranchPreview, selectionStateSessionPreview, selectionStateSourcePreview,
 		selectionStateOriginHidden,
+		selectionStatePiPreview,
 	} {
 		if stateRows[state].Key == "" {
 			return fmt.Errorf("screenshot fixture omits selection state %q", state)
