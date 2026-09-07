@@ -47,6 +47,10 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 		return results
 	}
 	defer func() {
+		panicValue := recover()
+		if panicValue != nil {
+			err = errors.Join(err, errors.New("panic interrupted managed artifact reconciliation before commit"))
+		}
 		if err == nil && conn.AutocommitEnabled() {
 			err = fmt.Errorf("managed artifact mirror transaction ended before batch commit")
 		}
@@ -61,6 +65,9 @@ func (s *Store) MirrorArtifacts(ctx context.Context, requests []ingest.ArtifactM
 		}
 		if err != nil {
 			failAll(fmt.Errorf("commit managed artifact mirror transaction: %w; no session in this batch was reconciled; keep committed files and retry harvest", err))
+		}
+		if panicValue != nil {
+			panic(panicValue)
 		}
 	}()
 	pending := make(map[ingest.SessionID]int)
