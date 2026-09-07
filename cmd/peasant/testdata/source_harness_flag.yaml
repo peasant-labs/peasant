@@ -49,6 +49,7 @@ cases:
   - name: logs-extracts-named-harness
     args: [harvest, logs, --source-harness=strike, "--source-path={source}", "--output={output}", --include-active, --json]
     output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA, BBBBBBBBBBBBBBBBBBBBBBBBBB]
+    database_absent: true
   - name: harvest-all-preserves-source-isolation
     args: [harvest, --all, --source-harness=strike, "--source-path={source}", "--output={output}", --session=invalid/session, --since=invalid, --json]
     output_contains: [20260728T123456.123456789Z-AAAAAAAAAAAAAAAAAAAAAAAAAA]
@@ -63,6 +64,7 @@ cases:
     output_excludes: [*other_id]
     other_session: *other_id
     other_transcript: *other_transcript
+    database_absent: true
   - name: harvest-still-requires-source-path
     args: [harvest, --source-harness=strike]
     error_contains: --source-harness requires --source-path

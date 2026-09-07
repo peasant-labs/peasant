@@ -899,7 +899,11 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			}
 
 			// Reconstruct DiscoveredSession from peasant-sync metadata.
-			reconstructed, startMs, transcriptPath := p.reconstructFromMetadata(ctx, sid)
+			reconstructed, startMs, transcriptPath, metadataErr := p.reconstructFromMetadata(ctx, sid)
+			if metadataErr != nil {
+				slog.Warn("pipeline: retained metadata refused", "session_id", sid, "error", metadataErr)
+				continue // Unsupported is not missing: never bypass through DB source info.
+			}
 			if reconstructed == nil {
 				// Fallback: reconstruct from DB source_path/source_format.
 				// This handles sessions (e.g. subagents) that were indexed from
@@ -1712,6 +1716,11 @@ func (p *Pipeline) diff(sessions []DiscoveredSession, prog *ProgressState) DiffR
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
 func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalenessThreshold time.Duration) DiffStatus {
+	// An older build cannot safely refresh a future metadata contract, including
+	// when the native clock changed. The pipeline's artifact guard reports why.
+	if loc.SchemaVersion > CurrentSchemaVersion {
+		return DiffUnchanged
+	}
 	isActive := stalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < stalenessThreshold
 
 	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
@@ -1723,8 +1732,8 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 			return DiffUpdated
 		}
 	}
-	// Schema version behind current (DB value): re-ingest.
-	if loc.SchemaVersion < CurrentSchemaVersion {
+	// Only metadata changes that need native evidence trigger re-extraction.
+	if metadataNeedsNativeRefresh(loc.SchemaVersion) {
 		if isActive {
 			return DiffActive
 		}
@@ -1743,15 +1752,20 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalen
 // (time.Since(ModTime) < threshold). A future debounce for actively written
 // sessions would need to poll ModTime twice with a bounded delay.
 //
-// Order of precedence (per spec):
+// Incompatible metadata is refused before this freshness order, including force:
 //  1. --force flag: always DiffNew (but DiffActive takes priority over force if
 //     IncludeActive is false, per "respect staleness unless --include-active")
 //  2. No existing metadata: DiffNew
 //  3. Source newer than last ingest: DiffUpdated
-//  4. Schema version behind CurrentSchemaVersion: DiffUpdated
+//  4. Metadata predates the native-refresh compatibility boundary: DiffUpdated
 //  5. Source within staleness threshold (still being written): DiffActive
 //  6. Otherwise: DiffUnchanged
 func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
+	existing, err := p.metadataForRewrite(session)
+	if err != nil {
+		slog.Warn("pipeline: metadata refresh refused", "session_id", session.SessionID, "error", err)
+		return DiffUnchanged
+	}
 	isActive := p.config.StalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold
 
 	// Force: re-ingest, but only if we're also including active sessions (or
@@ -1764,9 +1778,9 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 		return DiffNew
 	}
 
-	// DB-first diff (v8+): if locationCache has a record with IngestedMs and SchemaVersion,
-	// use DB state to classify the session without reading metadata.json from disk.
-	// This is the primary code path for sessions already in the DB.
+	// DB-first freshness (v8+): use recorded clocks/schema when available. The
+	// compatibility check above still inspects any existing metadata artifact so
+	// stale DB mirror state cannot authorize overwriting a future file version.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
 		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
 		// The change cursor is an additional trigger on top of the clock: a session
@@ -1785,30 +1799,9 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 		return status
 	}
 
-	// File fallback: DB has no record for this session (pre-migration data or first run).
-	// Read metadata.json from disk for backward compat (preserves pre-v8 behavior).
-	metaPath := p.findMetadataPath(session)
-	if metaPath == "" {
-		// No metadata file found; new session.
-		// Still respect staleness for new sessions.
-		if isActive {
-			return DiffActive
-		}
-		return DiffNew
-	}
-
-	data, err := p.fs.ReadFile(metaPath)
-	if err != nil {
-		if isActive {
-			return DiffActive
-		}
-		return DiffNew
-	}
-
-	// Parse existing metadata to compare.
-	var existing UnifiedMetadata
-	if err := json.Unmarshal(data, &existing); err != nil {
-		// Corrupt metadata: re-ingest.
+	// File fallback reuses the metadata already read for compatibility validation.
+	// Missing/corrupt historical metadata retains the existing new-session policy.
+	if existing == nil {
 		if isActive {
 			return DiffActive
 		}
@@ -1829,8 +1822,8 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 		}
 	}
 
-	// Schema version behind current: re-ingest.
-	if existing.SchemaVersion < CurrentSchemaVersion {
+	// Optional metadata fields do not make retained native evidence stale.
+	if metadataNeedsNativeRefresh(existing.SchemaVersion) {
 		if isActive {
 			return DiffActive
 		}
@@ -1850,8 +1843,9 @@ func (p *Pipeline) classifySession(session DiscoveredSession) DiffStatus {
 // Output structure is {outputDir}/{hostSlug}/{sessionId}/{sessionId}--metadata.json.
 // Since the hostSlug is not known during the diff phase (it requires extraction),
 // we walk one level of the outputDir looking for a matching sessionId directory.
-// Returns empty string if no metadata file is found.
-func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
+// Returns empty string only when no metadata file is found. Other lookup errors
+// prohibit replacement: unreadable directories/files do not prove absence.
+func (p *Pipeline) findMetadataPath(session DiscoveredSession) (string, error) {
 	outputDir := string(p.config.OutputDir)
 	metaFilename := fmt.Sprintf("%s%s", session.SessionID, defaults.MetadataSuffix)
 
@@ -1867,14 +1861,19 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
 			candidate = fmt.Sprintf("%s/%s/%s/%s", outputDir, loc.HostSlug, session.SessionID, metaFilename)
 		}
 		if _, err := p.fs.Stat(candidate); err == nil {
-			return candidate
+			return candidate, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", managedInputIOError(candidate, err)
 		}
 		// File not at expected path (e.g. output moved) — fall through to walk.
 	}
 
 	entries, err := p.fs.ReadDir(outputDir)
 	if err != nil {
-		return "" // outputDir doesn't exist yet
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil // outputDir doesn't exist yet
+		}
+		return "", managedInputIOError(outputDir, err)
 	}
 
 	for _, hostEntry := range entries {
@@ -1886,13 +1885,18 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
 		// Check flat layout: {hostSlug}/{sessionID}/{metaFilename}
 		candidate := fmt.Sprintf("%s/%s/%s", hostDir, session.SessionID, metaFilename)
 		if _, err := p.fs.Stat(candidate); err == nil {
-			return candidate
+			return candidate, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", managedInputIOError(candidate, err)
 		}
 
 		// Check nested subagent layout: {hostSlug}/{parentID}/subagents/{sessionID}/{metaFilename}
 		sessionEntries, err := p.fs.ReadDir(hostDir)
 		if err != nil {
-			continue
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return "", managedInputIOError(hostDir, err)
 		}
 		for _, sessionEntry := range sessionEntries {
 			if !sessionEntry.IsDir() {
@@ -1900,12 +1904,14 @@ func (p *Pipeline) findMetadataPath(session DiscoveredSession) string {
 			}
 			nested := fmt.Sprintf("%s/%s/%s/%s/%s", hostDir, sessionEntry.Name(), defaults.DirSubagents.String(), session.SessionID, metaFilename)
 			if _, err := p.fs.Stat(nested); err == nil {
-				return nested
+				return nested, nil
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				return "", managedInputIOError(nested, err)
 			}
 		}
 	}
 
-	return "" // not found
+	return "", nil // not found
 }
 
 // processSession extracts metadata and atomically writes output for one session.
@@ -1928,6 +1934,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	fail := func(err error) workerResult {
 		result.Error = err
 		return workerResult{result: result}
+	}
+	if _, err := p.metadataForRewrite(session); err != nil {
+		return fail(err)
 	}
 
 	// Find the adapter for this provider.
@@ -2951,32 +2960,38 @@ type sessionMetadataResult struct {
 	startMs            int64
 	transcriptPath     string
 	originalSourcePath string // Source.FilePath from metadata (may be empty)
+	refreshMetadata    bool   // Historical schema requires native evidence.
 }
 
 // readSessionMetadata reads and parses a metadata JSON file for a session in
-// the given host directory, reconstructing a DiscoveredSession. Returns nil
-// if the metadata is not found, cannot be parsed, or the transcript file does
-// not exist on disk.
+// the given host directory, reconstructing a DiscoveredSession. Missing metadata
+// or transcript returns nil. Undecodable/incompatible metadata returns an error,
+// preventing callers from bypassing refusal via native source reconstruction.
 //
 // The logPrefix parameter is used for structured log messages on parse errors.
-func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix string) *sessionMetadataResult {
+func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix string) (*sessionMetadataResult, error) {
 	metaFilename := fmt.Sprintf("%s%s", sid, defaults.MetadataSuffix)
 	metaPath := fmt.Sprintf("%s/%s/%s", hostDir, sid, metaFilename)
 	data, err := p.fs.ReadFile(metaPath)
 	if err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		readErr := managedInputIOError(metaPath, err)
+		slog.Warn(logPrefix+": managed metadata unreadable", "session_id", sid, "error", readErr)
+		return nil, readErr
 	}
 
-	var meta UnifiedMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
+	meta, err := decodeManagedMetadata(data, metaPath)
+	if err != nil {
 		slog.Warn(logPrefix+": metadata parse error", "session_id", sid, "error", err)
-		return nil
+		return nil, err
 	}
 
 	// Determine SourceFormat from metadata.
 	sourceFormat := meta.Source.Format
 	if sourceFormat == "" {
-		return nil
+		return nil, nil
 	}
 
 	// Build transcript path from output dir.
@@ -2985,7 +3000,12 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 
 	// Verify transcript exists.
 	if _, err := p.fs.Stat(transcriptPath); err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		readErr := managedInputIOError(transcriptPath, err)
+		slog.Warn(logPrefix+": managed transcript unreadable", "session_id", sid, "error", readErr)
+		return nil, readErr
 	}
 
 	// Look up OriginalRoot from config source paths for this provider.
@@ -3002,37 +3022,55 @@ func (p *Pipeline) readSessionMetadata(hostDir string, sid SessionID, logPrefix 
 		OriginalRoot: originalRoot,
 	}
 	if ds.Harness == HarnessOpenCode && sourceFormat == SourceFormatJSON {
-		if transcriptData, readErr := p.fs.ReadFile(transcriptPath); readErr == nil {
-			origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
-			if recognitionErr != nil {
-				slog.Warn(logPrefix+": managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", transcriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
-				return nil
+		transcriptData, readErr := p.fs.ReadFile(transcriptPath)
+		if readErr != nil {
+			if errors.Is(readErr, fs.ErrNotExist) {
+				return nil, nil
 			}
-			ds.TranscriptOrigin = origin
+			readErr = managedInputIOError(transcriptPath, readErr)
+			slog.Warn(logPrefix+": managed transcript unreadable", "session_id", sid, "error", readErr)
+			return nil, readErr
 		}
+		origin, recognitionErr := recognizeManagedOpenCodeProjection(transcriptData, sid)
+		if recognitionErr != nil {
+			slog.Warn(logPrefix+": managed OpenCode projection is corrupt", "session_id", sid, "transcript_path", transcriptPath, "error", recognitionErr, "impact", "recovery stopped before legacy fallback so existing index state is not replaced with an empty corpus", "fix", "re-run harvest to regenerate the managed transcript")
+			return nil, recognitionErr
+		}
+		ds.TranscriptOrigin = origin
 	}
 	if meta.ParentUUID != nil {
 		ds.ParentUUID = meta.ParentUUID
 	}
 
+	refreshMetadata := metadataNeedsNativeRefresh(meta.SchemaVersion)
+	if refreshMetadata && meta.AdapterVersion != nil {
+		target := p.versionTargets()[meta.ModelHarness].AdapterVersion
+		if *meta.AdapterVersion > target {
+			slog.Warn(logPrefix+": retaining newer adapter output", "session_id", sid,
+				"error", &AdapterVersionError{Path: metaPath, Version: *meta.AdapterVersion, Target: target})
+			refreshMetadata = false
+		}
+	}
 	return &sessionMetadataResult{
 		session:            ds,
 		startMs:            meta.Timestamp.Start,
 		transcriptPath:     transcriptPath,
 		originalSourcePath: meta.Source.FilePath,
-	}
+		refreshMetadata:    refreshMetadata,
+	}, nil
 }
 
 // reconstructFromMetadata attempts to reconstruct a DiscoveredSession from
 // peasant-sync metadata for a session that needs re-indexing (stale index_version).
 // Returns the reconstructed session, the start timestamp, and the transcript path.
-// Returns (nil, 0, "") if reconstruction fails.
+// Missing input returns (nil, 0, "", nil). Unreadable metadata returns an error
+// that prohibits fallback reconstruction from native source information.
 //
 // Optimization: queries the DB for host_slug and parent_id before scanning the
 // filesystem. If the DB has a location record, jumps directly to the session
 // directory. Falls back to full directory scan only when the session is not in
 // the DB (e.g. pre-DB ingestion data).
-func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string) {
+func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (*DiscoveredSession, int64, string, error) {
 	outputDir := string(p.config.OutputDir)
 
 	// Fast path: query DB for the session's host_slug and parent_id.
@@ -3045,16 +3083,22 @@ func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (
 			hostDir := fmt.Sprintf("%s/%s", outputDir, hostSlug)
 			if parentID == "" {
 				// Flat layout: {hostSlug}/{sid}/
-				result := p.readSessionMetadata(hostDir, sid, "pipeline")
+				result, err := p.readSessionMetadata(hostDir, sid, "pipeline")
+				if err != nil {
+					return nil, 0, "", err
+				}
 				if result != nil {
-					return &result.session, result.startMs, result.transcriptPath
+					return &result.session, result.startMs, result.transcriptPath, nil
 				}
 			} else {
 				// Nested subagent layout: {hostSlug}/{parentID}/subagents/{sid}/
 				subDir := fmt.Sprintf("%s/%s/%s", hostDir, parentID, defaults.DirSubagents.String())
-				result := p.readSessionMetadata(subDir, sid, "pipeline")
+				result, err := p.readSessionMetadata(subDir, sid, "pipeline")
+				if err != nil {
+					return nil, 0, "", err
+				}
 				if result != nil {
-					return &result.session, result.startMs, result.transcriptPath
+					return &result.session, result.startMs, result.transcriptPath, nil
 				}
 			}
 			// DB had a record but the file was missing — fall through to full scan.
@@ -3064,7 +3108,10 @@ func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (
 	// Slow path: scan all host directories (used when session is not in the DB).
 	entries, err := p.fs.ReadDir(outputDir)
 	if err != nil {
-		return nil, 0, ""
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, 0, "", nil
+		}
+		return nil, 0, "", managedInputIOError(outputDir, err)
 	}
 
 	for _, hostEntry := range entries {
@@ -3074,29 +3121,38 @@ func (p *Pipeline) reconstructFromMetadata(ctx context.Context, sid SessionID) (
 		hostDir := fmt.Sprintf("%s/%s", outputDir, hostEntry.Name())
 
 		// Check flat layout first: {hostSlug}/{sid}/{metaFilename}
-		result := p.readSessionMetadata(hostDir, sid, "pipeline")
+		result, err := p.readSessionMetadata(hostDir, sid, "pipeline")
+		if err != nil {
+			return nil, 0, "", err
+		}
 		if result != nil {
-			return &result.session, result.startMs, result.transcriptPath
+			return &result.session, result.startMs, result.transcriptPath, nil
 		}
 
 		// Check nested subagent layout: {hostSlug}/{parentID}/subagents/{sid}/{metaFilename}
 		sessionEntries, readErr := p.fs.ReadDir(hostDir)
 		if readErr != nil {
-			continue
+			if errors.Is(readErr, fs.ErrNotExist) {
+				continue
+			}
+			return nil, 0, "", managedInputIOError(hostDir, readErr)
 		}
 		for _, sessionEntry := range sessionEntries {
 			if !sessionEntry.IsDir() {
 				continue
 			}
 			subHostDir := fmt.Sprintf("%s/%s/%s", hostDir, sessionEntry.Name(), defaults.DirSubagents.String())
-			result := p.readSessionMetadata(subHostDir, sid, "pipeline")
+			result, err := p.readSessionMetadata(subHostDir, sid, "pipeline")
+			if err != nil {
+				return nil, 0, "", err
+			}
 			if result != nil {
-				return &result.session, result.startMs, result.transcriptPath
+				return &result.session, result.startMs, result.transcriptPath, nil
 			}
 		}
 	}
 
-	return nil, 0, ""
+	return nil, 0, "", nil
 }
 
 // reconstructFromSourceInfo builds a DiscoveredSession from the DB's source_path
@@ -3154,6 +3210,10 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 				return nil, 0, ""
 			}
 			transcriptOrigin = origin
+		} else if !errors.Is(readErr, fs.ErrNotExist) {
+			slog.Warn("reconstructFromSourceInfo: managed transcript unreadable", "session_id", sid,
+				"error", managedInputIOError(outputTranscriptPath, readErr))
+			return nil, 0, ""
 		}
 	}
 
@@ -3177,9 +3237,9 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 //     - Default: sessions below their harness indexer target (via DB query)
 //     - With --force: all sessions matching the explicit harness/session/since filters
 //  3. For each targeted session:
-//     a. Try EXTRACT+WRITE from original source (if source file exists)
-//     b. If original source missing: log structured warning, record fallback outcome,
-//     fall back to INDEX+COMPUTE from existing peasant-sync transcript
+//     a. Index readable v9/v10 metadata from retained input without adapter refresh
+//     b. For older metadata, try EXTRACT+WRITE from the original source; if missing,
+//     warn and fall back to INDEX+COMPUTE from the existing transcript
 //     c. Run INDEX+COMPUTE
 //  4. Write index_log entries, populate PipelineResult.IndexLog
 func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineResult, error) {
@@ -3269,8 +3329,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		return result, nil
 	}
 
-	// Stage 4: EXTRACT+WRITE — separate into extractable (source exists) vs fallback (source missing).
-	var fallbackTargets []reindexTarget // sessions where source is missing → INDEX+COMPUTE only
+	// Stage 4: compatible metadata needs only INDEX+COMPUTE. Older metadata keeps
+	// its native-refresh rule, with retained input as fallback when unavailable.
+	var fallbackTargets []reindexTarget
 
 	// Build maps for parent-before-child ordering (same pattern as normal pipeline).
 	entryByID := make(map[SessionID]DiffEntry, len(targeted))
@@ -3278,6 +3339,10 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	inBatch := make(map[SessionID]bool, len(targeted))
 
 	for _, t := range targeted {
+		if !t.refreshMetadata {
+			fallbackTargets = append(fallbackTargets, t)
+			continue
+		}
 		sourceExists := false
 		if t.originalSourcePath != "" {
 			if _, err := p.fs.Stat(t.originalSourcePath); err == nil {
@@ -3422,25 +3487,13 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			}
 		}
 
-		// Process fallback sessions (source missing — no EXTRACT+WRITE, straight to INDEX+COMPUTE).
+		// Retained sessions need no EXTRACT+WRITE. Warn only when required native
+		// refresh was unavailable, not for ordinary compatible metadata reuse.
 		fallbackExtractProfileStart := time.Now()
 		for _, t := range fallbackTargets {
-			slog.Warn("reindex: original source missing, falling back to INDEX+COMPUTE",
-				"session_id", t.session.SessionID,
-				"provider", t.session.Harness,
-				"expected_path", t.originalSourcePath,
-				"stage", "EXTRACT+WRITE",
-				"impact", "metadata not refreshed, indexing from existing peasant-sync transcript",
-				"fix", "ensure provider data exists at configured source path",
-			)
-
-			indexStartMs := time.Now().UnixMilli()
-			reason := "original source missing; falling back to existing peasant-sync transcript"
-			indexLogEntries = append(indexLogEntries, p.makeIndexLogEntry(indexedMeta{
-				session:              t.session,
-				startMs:              t.startMs,
-				outputTranscriptPath: t.transcriptPath,
-			}, IndexOutcomeFallback, 0, indexStartMs, &reason, nil))
+			if t.refreshMetadata {
+				indexLogEntries = append(indexLogEntries, p.reindexFallbackLog(t))
+			}
 
 			indexSessions = append(indexSessions, indexedMeta{
 				session:              t.session,
@@ -3466,22 +3519,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// No extractable sessions — all are fallback. Process fallback sessions directly.
 	extractProfileStart := time.Now()
 	for _, t := range fallbackTargets {
-		slog.Warn("reindex: original source missing, falling back to INDEX+COMPUTE",
-			"session_id", t.session.SessionID,
-			"provider", t.session.Harness,
-			"expected_path", t.originalSourcePath,
-			"stage", "EXTRACT+WRITE",
-			"impact", "metadata not refreshed, indexing from existing peasant-sync transcript",
-			"fix", "ensure provider data exists at configured source path",
-		)
-
-		indexStartMs := time.Now().UnixMilli()
-		reason := "original source missing; falling back to existing peasant-sync transcript"
-		indexLogEntries = append(indexLogEntries, p.makeIndexLogEntry(indexedMeta{
-			session:              t.session,
-			startMs:              t.startMs,
-			outputTranscriptPath: t.transcriptPath,
-		}, IndexOutcomeFallback, 0, indexStartMs, &reason, nil))
+		if t.refreshMetadata {
+			indexLogEntries = append(indexLogEntries, p.reindexFallbackLog(t))
+		}
 
 		indexSessions = append(indexSessions, indexedMeta{
 			session:              t.session,
@@ -3518,6 +3558,22 @@ type reindexTarget struct {
 	startMs            int64
 	transcriptPath     string // path to the peasant-sync transcript on disk
 	originalSourcePath string // path to the original source file (may not exist)
+	refreshMetadata    bool   // historical metadata requires native extraction
+}
+
+func (p *Pipeline) reindexFallbackLog(target reindexTarget) IndexLogEntry {
+	slog.Warn("reindex: original source missing, falling back to INDEX+COMPUTE",
+		"session_id", target.session.SessionID,
+		"harness", target.session.Harness,
+		"expected_path", target.originalSourcePath,
+		"stage", "EXTRACT+WRITE",
+		"impact", "metadata not refreshed, indexing from existing peasant-sync transcript",
+		"fix", "ensure harness data exists at configured source path",
+	)
+	reason := "original source missing; falling back to existing peasant-sync transcript"
+	return p.makeIndexLogEntry(indexedMeta{
+		session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath,
+	}, IndexOutcomeFallback, 0, time.Now().UnixMilli(), &reason, nil)
 }
 
 // scanPeasantSyncSessions walks the peasant-sync output directory and enumerates
@@ -3527,7 +3583,10 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 	outputDir := string(p.config.OutputDir)
 	entries, err := p.fs.ReadDir(outputDir)
 	if err != nil {
-		return nil // output dir doesn't exist yet
+		if !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("reindex: managed output lookup failed", "error", managedInputIOError(outputDir, err))
+		}
+		return nil // Nothing can be enumerated safely.
 	}
 
 	var targets []reindexTarget
@@ -3538,6 +3597,9 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 		hostDir := fmt.Sprintf("%s/%s", outputDir, hostEntry.Name())
 		sessionEntries, err := p.fs.ReadDir(hostDir)
 		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				slog.Warn("reindex: managed host lookup failed", "error", managedInputIOError(hostDir, err))
+			}
 			continue
 		}
 		for _, sessionEntry := range sessionEntries {
@@ -3550,8 +3612,8 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 				continue
 			}
 
-			smr := p.readSessionMetadata(hostDir, sid, "reindex")
-			if smr == nil {
+			smr, metadataErr := p.readSessionMetadata(hostDir, sid, "reindex")
+			if metadataErr != nil || smr == nil {
 				continue
 			}
 
@@ -3560,13 +3622,17 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 				startMs:            smr.startMs,
 				transcriptPath:     smr.transcriptPath,
 				originalSourcePath: smr.originalSourcePath,
+				refreshMetadata:    smr.refreshMetadata,
 			})
 
 			// Also scan for nested subagent sessions under {sessionDir}/subagents/.
 			subagentsDir := fmt.Sprintf("%s/%s/%s", hostDir, sessionEntry.Name(), defaults.DirSubagents.String())
 			subEntries, subErr := p.fs.ReadDir(subagentsDir)
 			if subErr != nil {
-				continue // no subagents/ dir or unreadable — fine
+				if !errors.Is(subErr, fs.ErrNotExist) {
+					slog.Warn("reindex: managed subagent lookup failed", "error", managedInputIOError(subagentsDir, subErr))
+				}
+				continue
 			}
 			for _, subEntry := range subEntries {
 				if !subEntry.IsDir() {
@@ -3580,8 +3646,8 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 				// so pass {hostDir}/{parentID}/subagents as the "hostDir"
 				// to produce the correct nested path.
 				subHostDir := subagentsDir
-				smr := p.readSessionMetadata(subHostDir, subSID, "reindex")
-				if smr == nil {
+				smr, metadataErr := p.readSessionMetadata(subHostDir, subSID, "reindex")
+				if metadataErr != nil || smr == nil {
 					continue
 				}
 				slog.Debug("reindex: discovered subagent session",
@@ -3594,6 +3660,7 @@ func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
 					startMs:            smr.startMs,
 					transcriptPath:     smr.transcriptPath,
 					originalSourcePath: smr.originalSourcePath,
+					refreshMetadata:    smr.refreshMetadata,
 				})
 			}
 		}

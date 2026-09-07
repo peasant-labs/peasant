@@ -1,0 +1,186 @@
+requiredNames:
+  - db v9 remains unchanged
+  - file v9 remains unchanged without a database
+  - db v8 requires native refresh
+  - file v8 requires native refresh
+  - db v9 native update still refreshes
+  - file v9 native update still refreshes
+  - v10 known producer remains unchanged
+  - retained v9 index does not reread native input
+  - forced retained v9 index does not reread native input
+  - stale retained v9 index does not reread native input
+  - future schema force preserves file and store
+  - future schema file force preserves files
+  - future schema index refuses
+  - future schema stale cannot fall back to source info
+  - future adapter force does not rewrite
+  - future adapter index preserves producer
+  - invalid adapter force preserves files
+  - invalid adapter index refuses
+  - old metadata with future adapter indexes retained input
+  - null adapter force preserves files
+  - malformed adapter force preserves files
+  - future schema changed producer type stays intact
+  - normal unreadable metadata preserves file and store
+  - forced unreadable metadata preserves file and store
+  - forced metadata stat failure preserves file and store
+  - forced output lookup failure preserves files
+  - forced nested host lookup failure preserves files
+  - stale unreadable metadata cannot fall back to source info
+  - stale unreadable transcript lookup cannot fall back to source info
+  - actually missing metadata remains recoverable
+  - older corrupt metadata remains recoverable
+  - transient metadata I/O failure preserves file and store
+sessionID: 11111111-1111-1111-1111-111111111111
+transcript: |
+  {"type":"user","message":{"role":"user","content":"retained input"},"timestamp":"2024-01-01T00:00:00Z"}
+cases:
+  - name: transient metadata I/O failure preserves file and store
+    schemaVersion: 999
+    database: true
+    force: true
+    faultOperation: metadata-read
+    transientIO: true
+  - name: normal unreadable metadata preserves file and store
+    schemaVersion: 999
+    database: true
+    sourceChanged: true
+    faultOperation: metadata-read
+  - name: forced unreadable metadata preserves file and store
+    schemaVersion: 999
+    database: true
+    force: true
+    faultOperation: metadata-read
+  - name: forced metadata stat failure preserves file and store
+    schemaVersion: 999
+    database: true
+    force: true
+    faultOperation: metadata-stat
+  - name: forced output lookup failure preserves files
+    schemaVersion: 999
+    force: true
+    faultOperation: output-list
+  - name: forced nested host lookup failure preserves files
+    schemaVersion: 999
+    force: true
+    nested: true
+    faultOperation: host-list
+  - name: stale unreadable metadata cannot fall back to source info
+    schemaVersion: 999
+    database: true
+    stale: true
+    faultOperation: metadata-read
+  - name: stale unreadable transcript lookup cannot fall back to source info
+    schemaVersion: 9
+    database: true
+    stale: true
+    faultOperation: transcript-stat
+  - name: actually missing metadata remains recoverable
+    schemaVersion: 9
+    metadataAbsent: true
+    wantExtract: 1
+  - name: older corrupt metadata remains recoverable
+    schemaVersion: 8
+    rawMetadata: '{"schemaVersion":8,"timestamp":"invalid historical object"}'
+    wantExtract: 1
+  - name: null adapter force preserves files
+    schemaVersion: 10
+    rawAdapterVersion: 'null'
+    force: true
+  - name: malformed adapter force preserves files
+    schemaVersion: 10
+    rawAdapterVersion: '"not-a-version"'
+    force: true
+  - name: future schema changed producer type stays intact
+    schemaVersion: 999
+    rawAdapterVersion: '{"producer":"future"}'
+    force: true
+  - name: invalid adapter force preserves files
+    schemaVersion: 10
+    adapterVersion: 0
+    force: true
+  - name: invalid adapter index refuses
+    schemaVersion: 10
+    adapterVersion: -1
+    database: true
+    reindex: true
+    force: true
+  - name: old metadata with future adapter indexes retained input
+    schemaVersion: 8
+    adapterVersion: 999
+    database: true
+    reindex: true
+    force: true
+    wantIndexed: 1
+  - name: db v9 remains unchanged
+    schemaVersion: 9
+    database: true
+  - name: file v9 remains unchanged without a database
+    schemaVersion: 9
+  - name: db v8 requires native refresh
+    schemaVersion: 8
+    database: true
+    wantExtract: 1
+    wantIndexed: 1
+  - name: file v8 requires native refresh
+    schemaVersion: 8
+    wantExtract: 1
+  - name: db v9 native update still refreshes
+    schemaVersion: 9
+    database: true
+    sourceChanged: true
+    wantExtract: 1
+    wantIndexed: 1
+  - name: file v9 native update still refreshes
+    schemaVersion: 9
+    sourceChanged: true
+    wantExtract: 1
+  - name: v10 known producer remains unchanged
+    schemaVersion: 10
+    adapterVersion: 1
+    database: true
+  - name: retained v9 index does not reread native input
+    schemaVersion: 9
+    database: true
+    reindex: true
+    stale: true
+    wantIndexed: 1
+  - name: forced retained v9 index does not reread native input
+    schemaVersion: 9
+    database: true
+    reindex: true
+    force: true
+    wantIndexed: 1
+  - name: stale retained v9 index does not reread native input
+    schemaVersion: 9
+    database: true
+    stale: true
+    wantIndexed: 1
+  - name: future schema force preserves file and store
+    schemaVersion: 999
+    database: true
+    force: true
+  - name: future schema file force preserves files
+    schemaVersion: 999
+    force: true
+  - name: future schema index refuses
+    schemaVersion: 999
+    database: true
+    reindex: true
+    force: true
+  - name: future schema stale cannot fall back to source info
+    schemaVersion: 999
+    database: true
+    stale: true
+  - name: future adapter force does not rewrite
+    schemaVersion: 10
+    adapterVersion: 999
+    database: true
+    force: true
+  - name: future adapter index preserves producer
+    schemaVersion: 10
+    adapterVersion: 999
+    database: true
+    reindex: true
+    force: true
+    wantIndexed: 1

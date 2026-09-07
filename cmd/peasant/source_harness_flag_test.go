@@ -27,6 +27,7 @@ type sourceHarnessFlagFixture struct {
 	StoredSession   string   `yaml:"stored_session"`
 	OtherSession    string   `yaml:"other_session"`
 	OtherTranscript string   `yaml:"other_transcript"`
+	DatabaseAbsent  bool     `yaml:"database_absent"`
 }
 
 func LoadSourceHarnessFlagFixtures(t testing.TB) []sourceHarnessFlagFixture {
@@ -105,6 +106,11 @@ func TestSourceHarnessFlagMounted(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("command failed: %v; output: %s", err, &buf)
+			}
+			if fixture.DatabaseAbsent {
+				if _, err := os.Stat(defaults.ResolveDBFilePathWith(dir).String()); !os.IsNotExist(err) {
+					t.Fatalf("file-only harvest unexpectedly created/opened an analytics database: %v", err)
+				}
 			}
 			for _, want := range fixture.OutputContains {
 				if !strings.Contains(buf.String(), want) {

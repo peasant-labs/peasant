@@ -83,12 +83,13 @@ func (r rescanRecord) seeded() bool {
 }
 
 // rescanSchemaAge is the metadata schema version a row's record was written
-// under: the version this build writes, or one behind it.
+// under: current, an older native-refresh version, or compatible version 9.
 type rescanSchemaAge string
 
 const (
-	rescanSchemaCurrent rescanSchemaAge = "current"
-	rescanSchemaBehind  rescanSchemaAge = "behind"
+	rescanSchemaCurrent    rescanSchemaAge = "current"
+	rescanSchemaBehind     rescanSchemaAge = "behind"
+	rescanSchemaCompatible rescanSchemaAge = "compatible-v9"
 )
 
 // version returns the metadata schema version the record carries, failing the
@@ -100,16 +101,18 @@ func (a rescanSchemaAge) version(t *testing.T, caseName string) int {
 	case rescanSchemaCurrent:
 		return ingest.CurrentSchemaVersion
 	case rescanSchemaBehind:
-		return ingest.CurrentSchemaVersion - 1
+		return 8 // Last schema before the native-refresh compatibility boundary.
+	case rescanSchemaCompatible:
+		return 9 // Optional producer provenance does not require git/native refresh.
 	default:
-		t.Fatalf("kickstart re-scan fixture case %q declares unknown recorded_schema_version %q; use %q or %q",
-			caseName, string(a), rescanSchemaCurrent, rescanSchemaBehind)
+		t.Fatalf("kickstart re-scan fixture case %q declares unknown recorded_schema_version %q; use %q, %q or %q",
+			caseName, string(a), rescanSchemaCurrent, rescanSchemaBehind, rescanSchemaCompatible)
 		return 0
 	}
 }
 
 type rescanFixtures struct {
-	DeclaredRows   int          `yaml:"declared_rows"`
+	RequiredNames  []string     `yaml:"required_names"`
 	ClaudeSlug     string       `yaml:"claude_slug"`
 	ResolvedRemote string       `yaml:"resolved_remote"`
 	ResolvedBranch string       `yaml:"resolved_branch"`
@@ -133,7 +136,7 @@ type rescanCase struct {
 }
 
 // loadRescanFixtures decodes the corpus and holds it to its own declared shape:
-// the row count is pinned, every field an assertion depends on is non-blank, and
+// required case names are pinned, every field an assertion depends on is non-blank, and
 // both closed sets are covered. A corpus that silently loses a row still reports
 // the coverage it no longer has.
 func loadRescanFixtures(t *testing.T) rescanFixtures {
@@ -144,10 +147,7 @@ func loadRescanFixtures(t *testing.T) rescanFixtures {
 	if err := decoder.Decode(&fixtures); err != nil {
 		t.Fatalf("decode kickstart re-scan fixtures: %v", err)
 	}
-	if fixtures.DeclaredRows != len(fixtures.Cases) {
-		t.Fatalf("kickstart re-scan fixture declares %d rows but carries %d; a dropped row silently narrows the corpus",
-			fixtures.DeclaredRows, len(fixtures.Cases))
-	}
+	names := make(map[string]bool)
 	testutil.RequireFixtureFields(t, "kickstart re-scan", "corpus", []testutil.FixtureField{
 		{Key: "claude_slug", Value: fixtures.ClaudeSlug},
 		{Key: "resolved_remote", Value: fixtures.ResolvedRemote},
@@ -157,6 +157,10 @@ func loadRescanFixtures(t *testing.T) rescanFixtures {
 	var resolutions []rescanResolution
 	var records []rescanRecord
 	for _, c := range fixtures.Cases {
+		if names[c.Name] {
+			t.Fatalf("duplicate kickstart re-scan fixture %q", c.Name)
+		}
+		names[c.Name] = true
 		testutil.RequireFixtureFields(t, "kickstart re-scan", c.Name, []testutil.FixtureField{
 			{Key: "name", Value: c.Name},
 			{Key: "session_id", Value: c.SessionID},
@@ -173,6 +177,11 @@ func loadRescanFixtures(t *testing.T) rescanFixtures {
 		ages = append(ages, c.SourceAge)
 		resolutions = append(resolutions, c.WantResolution)
 		records = append(records, c.Record)
+	}
+	for _, name := range fixtures.RequiredNames {
+		if !names[name] {
+			t.Fatalf("missing required kickstart re-scan fixture %q", name)
+		}
 	}
 	testutil.RequireClosedSetCoverage(t, "kickstart re-scan", "source_age", allRescanSourceAges, ages)
 	testutil.RequireClosedSetCoverage(t, "kickstart re-scan", "want_resolution", allRescanResolutions, resolutions)

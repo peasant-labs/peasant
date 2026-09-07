@@ -1525,7 +1525,7 @@ func TestPipeline_Force_IncludeActive_ActiveSession(t *testing.T) {
 }
 
 func TestPipeline_SchemaVersionUpgrade_DiffUpdated(t *testing.T) {
-	// When existing metadata has SchemaVersion < CurrentSchemaVersion,
+	// When existing metadata predates the native-refresh compatibility boundary,
 	// the session should be classified as DiffUpdated on re-run.
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -3823,8 +3823,8 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 	}
 }
 
-// TestPipeline_Reindex_ReExtractsWhenSourceExists verifies that when the original
-// source file exists, reindex re-extracts metadata from it (EXTRACT+WRITE path).
+// TestPipeline_Reindex_ReExtractsWhenSourceExists verifies that when historical
+// metadata requires native refresh and source exists, reindex re-extracts it.
 func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -3834,7 +3834,9 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 	setupSourceFile(t, mfs, originalSourcePath)
 
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
+	storedMeta := *meta
+	storedMeta.SchemaVersion = 8
+	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, &storedMeta)
 
 	sid, _ := ingest.NewSessionID(testSessionID)
 	metricsStore := testutil.NewStubMetricsStore()
@@ -3903,6 +3905,7 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 	// The original source path does NOT exist in MemFS.
 	originalSourcePath := "/nonexistent/source.jsonl"
 	meta := makeReindexMeta(t, testSessionID, originalSourcePath)
+	meta.SchemaVersion = 8 // Native refresh is required but the source is unavailable.
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta)
 
 	sid, _ := ingest.NewSessionID(testSessionID)
@@ -4063,6 +4066,7 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 
 	// Session 1: source missing → fallback + reindexed entries.
 	meta1 := makeReindexMeta(t, testSessionID, "/nonexistent/source.jsonl")
+	meta1.SchemaVersion = 8 // Required native refresh produces the fallback audit row.
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
 
 	sid1, _ := ingest.NewSessionID(testSessionID)
@@ -5516,8 +5520,10 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 
 	meta1 := makeReindexMeta(t, testSessionID, sourceFile1)
 	meta2 := makeReindexMeta(t, testSessionID2, sourceFile2)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, meta2)
+	storedMeta1, storedMeta2 := *meta1, *meta2
+	storedMeta1.SchemaVersion, storedMeta2.SchemaVersion = 8, 8
+	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, &storedMeta1)
+	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, &storedMeta2)
 
 	sid1, _ := ingest.NewSessionID(testSessionID)
 	sid2, _ := ingest.NewSessionID(testSessionID2)
