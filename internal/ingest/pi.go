@@ -206,6 +206,22 @@ func (a *PiAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSessi
 		if row.Role != RoleAssistant || row.Depth != 0 {
 			continue
 		}
+		// The publication preflight needs the session model as well as per-turn
+		// observations. Use the first actual assistant observation, never state
+		// changes or configuration, just as other file-backed harnesses do.
+		if meta.Model == "" {
+			extra, _, err := DecodePiEntryExtra(row)
+			if err != nil {
+				return nil, piSourceError("PiAdapter.ExtractMetadata model", 0, err)
+			}
+			if extra.ModelID != "" {
+				model, err := NewModelID(string(extra.ModelID))
+				if err != nil {
+					return nil, piSourceError("PiAdapter.ExtractMetadata model", 0, err)
+				}
+				meta.Model = model
+			}
+		}
 		const maxSafe = 9007199254740991
 		if row.TokensIn != nil {
 			if meta.Stats.TokensIn > maxSafe-*row.TokensIn {

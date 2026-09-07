@@ -979,6 +979,8 @@ sources:
       - %q
   opencode:
     enabled: false
+  pi:
+    enabled: false
   codex:
     enabled: true
     paths:

@@ -171,6 +171,10 @@ jobs:
             echo "::error::TestPublicationConvergenceE2E did not run and pass."
             exit 1
           fi
+          if grep -qE '^--- SKIP: TestPiRoundTripE2E' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPiRoundTripE2E' /tmp/e2e.log; then
+            echo "::error::TestPiRoundTripE2E did not run and pass; check the disposable Village stack and matching schema pins, then rerun native Pi preservation."
+            exit 1
+          fi
           if grep -qE '^--- SKIP: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' /tmp/e2e.log || ! grep -qE '^--- PASS: TestPostCommitHookPublishesConfiguredRepositoryToRealVillage' /tmp/e2e.log; then
             echo "::error::joined post-commit publication evidence did not run and pass."
             exit 1

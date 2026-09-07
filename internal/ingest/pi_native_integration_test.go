@@ -61,6 +61,7 @@ type piSourceCase struct {
 	MetadataStringBytes int      `yaml:"metadataStringBytes"`
 	RejectContains      string   `yaml:"rejectContains"`
 	Title               string   `yaml:"title"`
+	MetadataModel       string   `yaml:"metadataModel"`
 	Turns               int      `yaml:"turns"`
 	Owners              int      `yaml:"owners"`
 	Metadata            int      `yaml:"metadata"`
@@ -126,6 +127,13 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			}
 			if len(session.DiscoveryWarnings) != tc.Warnings {
 				t.Fatalf("warnings: %+v", session.DiscoveryWarnings)
+			}
+			meta, err := adapter.ExtractMetadata(ctx, session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(meta.Model) != tc.MetadataModel {
+				t.Fatalf("publication metadata model = %q, want first assistant observation %q", meta.Model, tc.MetadataModel)
 			}
 			indexer := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[schema.HarnessPi]
 			entries, err := indexer.IndexTranscript(ctx, session)

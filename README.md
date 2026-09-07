@@ -200,6 +200,7 @@ the selected projects, branches, and sessions. The `--session` flag overrides th
 | Claude Code | `claude-code` | JSONL |
 | OpenCode | `opencode` | JSON |
 | Codex | `codex` | JSONL (`rollout-*.jsonl`) |
+| Pi Coding Agent | `pi` | [JSONL v3; delivery status and limits](docs/pi.md) |
 
 Harness identity comes from [`peasant-labs/bestiary`](https://github.com/peasant-labs/bestiary)
 (`Harness` is a type alias re-exported via `internal/defaults`). Further harnesses

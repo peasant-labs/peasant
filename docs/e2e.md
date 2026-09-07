@@ -122,6 +122,36 @@ license and governance-event menus while clearing transcript rows and objects.
 An explicit table classification fails closed when a future migration adds an
 unclassified public table.
 
+## Native Pi preservation (`TestPiRoundTripE2E`)
+
+This backend test reuses the native `active-history` ingestion fixture, with named YAML
+usage variants and a required-name manifest. It runs the actual CLI in disposable HOME
+and XDG directories, against independently provisioned Village/Postgres/MinIO services.
+A pass checks:
+
+- Native harvest, SQLite reopen, and matching local API/export projections.
+- Complete, partial-with-zero, and cost-only assistant accounting, plus distinct absent
+  tool and summary owners; exact source/owner refs and recorded cost strings.
+- Thinking once, visible context and summaries, four image placeholders, and extension
+  state preserved as metadata rather than conversation text.
+- Zero HTTP requests during push dry-run, including negotiation and upload; real
+  capability negotiation before the actual CLI upload.
+- Both captured multipart surfaces validated by the published Schema contract, without
+  private carrier fields or image bytes.
+- Real encrypted objects and served/pulled content retaining turns and native metadata.
+- A second authenticated publication of the producer's detail in the supported bare
+  compatibility shape, with its content hash recomputed from those exact bytes. The first
+  read must install a new encrypted canonical object; subsequent reads must not rewrite
+  again. The test does not manufacture ciphertext or claim that changing a database
+  version marker exercises a shape-based migration.
+- Duplicate escaped keys and oversized metadata rejected with unchanged transcript rows,
+  encryption descriptors, governance audit counts, and object counts.
+
+The test is included in `make e2e`. It builds the real backend CLI through the existing
+E2E helper; it does **not** validate the embedded browser bundle or replace the required
+full `make build` and mounted browser review. Pi's current UI and namespace limitations
+are recorded in [Pi recordings](pi.md).
+
 The staged pull flow, the idempotency/304 fast-paths, and the
 compensation/cache doctrine this harness asserts are documented in
 [Village Pull Architecture](pull.md) (§2–§4, §6.3 storage invariants); the

@@ -84,6 +84,7 @@ cases:
     turns: 1
     contains: [displayed context]
   - name: active-history
+    metadataModel: observed-model
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","timestamp":"2026-01-01T00:00:00Z"}
       {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"full history"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}]}}

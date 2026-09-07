@@ -28,6 +28,7 @@ e2e:
     - -tags=e2e
     - -count=1
   asserted_tests:
+    - TestPiRoundTripE2E
     - TestSkipGateE2E
     - TestPullRoundTripE2E
     - TestHarnessRefreshE2E

@@ -1,0 +1,6 @@
+requiredNames:
+  - native-active-history-encrypted-roundtrip
+  - duplicate-escaped-envelope-key
+  - metadata-string-over-bound
+  - native-zero-partial-floating-cost-roundtrip
+  - native-cost-only-unknown-roundtrip

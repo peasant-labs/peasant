@@ -1,0 +1,56 @@
+cases:
+  - &active
+    name: native-active-history-encrypted-roundtrip
+    nativeCase: active-history
+    sessionID: 11111111-2222-4333-8444-555555555555
+    capabilities: [detailed_usage_v1, native_metadata_v1, observed_model_v1]
+    contents: [full history, think once, answer, visible context, visible summary, visible branch summary]
+    forbidden: [synthetic-image, pi.carrier, pi.usage, pi.native_metadata, '"extra"', '"parentId"']
+    metadataOnly: not searchable
+    placeholders: 4
+    metadata: 4
+    assistantCost: '1e-7'
+    sourceReplacements: []
+    assistantTokens: {input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 10}
+    owners:
+      - {nativeID: a, scope: assistant, completeness: complete}
+      - {nativeID: r, scope: tool, completeness: unknown}
+      - {nativeID: s, scope: summary, completeness: unknown}
+      - {nativeID: b, scope: summary, completeness: unknown}
+    invalidContent:
+      - name: duplicate-escaped-envelope-key
+        find: '"kind":'
+        replacement: '"k\u0069nd":"session_detail","kind":'
+        status: 409
+      - name: metadata-string-over-bound
+        find: 'not searchable'
+        replacement: '$REPEAT'
+        repeat: 16385
+        status: 409
+  - <<: *active
+    name: native-zero-partial-floating-cost-roundtrip
+    sessionID: 22222222-2222-4333-8444-555555555555
+    sourceReplacements:
+      - from: '"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}'
+        to: '"input":0,"cost":{"total":0.30000000000000004}'
+    assistantTokens: {input: 0}
+    assistantCost: '0.30000000000000004'
+    owners:
+      - {nativeID: a, scope: assistant, completeness: partial}
+      - {nativeID: r, scope: tool, completeness: unknown}
+      - {nativeID: s, scope: summary, completeness: unknown}
+      - {nativeID: b, scope: summary, completeness: unknown}
+    invalidContent: []
+  - <<: *active
+    name: native-cost-only-unknown-roundtrip
+    sessionID: 33333333-2222-4333-8444-555555555555
+    sourceReplacements:
+      - from: '"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}'
+        to: '"cost":{"total":1e-7}'
+    assistantTokens: {}
+    owners:
+      - {nativeID: a, scope: assistant, completeness: unknown}
+      - {nativeID: r, scope: tool, completeness: unknown}
+      - {nativeID: s, scope: summary, completeness: unknown}
+      - {nativeID: b, scope: summary, completeness: unknown}
+    invalidContent: []
