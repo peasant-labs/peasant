@@ -106,7 +106,7 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 	entries = append([]schema.SessionEntry(nil), entries...)
 	protected := make(map[int]*string)
 	for i := range entries {
-		extra, pi, err := ingest.DecodePiExtra(entries[i].Extra)
+		extra, pi, err := ingest.DecodePiEntryExtra(entries[i])
 		if err != nil {
 			return nil, err
 		}

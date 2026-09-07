@@ -90,6 +90,8 @@ cases:
     want_completeness: []
     want_costs: []
 invalid_extras:
+  - name: missing_pi_evidence_cannot_downgrade_usage
+    extra: '{}'
   - name: duplicate_carrier_marker_rejected_before_store_maps
     extra: '{"kind":"pi.usage","k\u0069nd":"pi.state","harness":"pi"}'
   - name: null_usage_rejected_before_store_maps

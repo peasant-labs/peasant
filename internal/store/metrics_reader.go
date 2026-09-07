@@ -178,7 +178,7 @@ func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := scanSessionEntry(stmt)
-			if _, _, err := ingest.DecodePiExtra(entry.Extra); err != nil {
+			if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
 				return err
 			}
 			entries = append(entries, entry)
@@ -244,7 +244,7 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 		Args: []any{string(sessionID), fromIndex, toIndex},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entry := scanSessionEntry(stmt)
-			if _, _, err := ingest.DecodePiExtra(entry.Extra); err != nil {
+			if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
 				return err
 			}
 			entries = append(entries, entry)

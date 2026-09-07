@@ -34,7 +34,7 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 	evidence := make(map[int]ingest.PiExtra)
 	indexes := make(map[int]bool)
 	for _, entry := range entries {
-		extra, pi, err := ingest.DecodePiExtra(entry.Extra)
+		extra, pi, err := ingest.DecodePiEntryExtra(entry)
 		if err != nil {
 			return p, err
 		}
@@ -42,6 +42,9 @@ func entriesToProjection(entries []schema.SessionEntry, opts ProjectionOptions, 
 			return p, projectionError("invalid carrier row")
 		}
 		if !pi {
+			if opts.Harness == schema.HarnessPi {
+				return p, projectionError("Pi session contains a row without typed source/usage evidence")
+			}
 			continue
 		}
 		if opts.Harness != "" && opts.Harness != schema.HarnessPi {

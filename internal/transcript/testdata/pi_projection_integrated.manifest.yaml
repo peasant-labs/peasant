@@ -1,4 +1,5 @@
 requiredNames:
+  - missing_pi_evidence_cannot_downgrade_usage
   - separate_namespace_refuses_lossy_public_conversion
   - duplicate_carrier_marker_rejected_before_store_maps
   - null_usage_rejected_before_store_maps

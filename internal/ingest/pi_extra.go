@@ -132,6 +132,22 @@ func DecodePiExtra(extra *string) (PiExtra, bool, error) {
 	return value, true, nil
 }
 
+// DecodePiEntryExtra also verifies the row's harness context. A Pi row without
+// its typed evidence must not be silently treated as a legacy usage-less row.
+func DecodePiEntryExtra(entry schema.SessionEntry) (PiExtra, bool, error) {
+	extra, pi, err := DecodePiExtra(entry.Extra)
+	if err != nil {
+		return extra, pi, err
+	}
+	if (entry.Harness == schema.HarnessPi || IsPiCarrier(entry)) && !pi {
+		return extra, pi, piEvidenceError(fmt.Errorf("Pi indexed row is missing its typed evidence marker"))
+	}
+	if pi && entry.Harness != "" && entry.Harness != schema.HarnessPi {
+		return extra, pi, piEvidenceError(fmt.Errorf("indexed harness disagrees with Pi evidence"))
+	}
+	return extra, pi, nil
+}
+
 func validPiRef(value string) bool {
 	if len(value) != 67 || value[:3] != "pi-" {
 		return false

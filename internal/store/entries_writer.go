@@ -225,7 +225,7 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
 	for _, entry := range entries {
-		if _, _, err := ingest.DecodePiExtra(entry.Extra); err != nil {
+		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
 			return sessionEntryWriteOutcome{}, err
 		}
 		if !ingest.IsPiCarrier(entry) {
