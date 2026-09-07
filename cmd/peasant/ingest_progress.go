@@ -11,12 +11,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/peasant-labs/peasant/internal/animation"
 	"github.com/peasant-labs/peasant/internal/ingest"
-	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/theme"
 	"golang.org/x/term"
 )
 
-// progressRenderer renders per-stage progress bars inline in a terminal.
+// progressProgram hosts the inline harvest Bubble Tea program.
 // It uses Bubble Tea's renderer instead of hand-rolled ANSI erase/redraw logic,
 // so redraws are diffed and capped. In non-TTY environments (CI, pipes) it is a
 // no-op; the existing printSummary output is unaffected.
@@ -25,13 +25,13 @@ import (
 //
 //	progState := ingest.NewProgressState()
 //	ctx, cancel := context.WithCancel(ctx)
-//	r := newProgressRenderer(os.Stderr, progState, nil, cancel)
+//	r := newProgressProgram(os.Stderr, progState, nil, cancel)
 //	go r.Run(ctx)       // cancellation stays mounted until operation returns
 //	pipeline.Run(ctx)
 //	r.Stop(ctx.Err() != nil)
 //	r.Wait()            // blocks until renderer goroutine exits
 //	r.Clear()           // erase progress lines before printing final summary
-type progressRenderer struct {
+type progressProgram struct {
 	w        io.Writer
 	input    io.Reader
 	state    *ingest.ProgressState
@@ -46,12 +46,12 @@ type progressRenderer struct {
 	stopOnce sync.Once
 }
 
-const progressRendererFPS = 24
+const progressProgramFPS = 24
 
-// newProgressRenderer creates a tick-based renderer that reads from state and writes to w.
+// newProgressProgram creates a tick-based program that reads from state and writes to w.
 // TTY detection is performed on w if it is an *os.File; otherwise rendering
 // is disabled (no-op mode for pipes/CI).
-func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animation.Animation, cancel ...context.CancelFunc) *progressRenderer {
+func newProgressProgram(w io.Writer, state *ingest.ProgressState, anim *animation.Animation, cancel ...context.CancelFunc) *progressProgram {
 	isTTY := false
 	var input io.Reader
 	if f, ok := w.(*os.File); ok {
@@ -63,7 +63,7 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 		// shell after harvest exits. Ctrl+C cancels the pipeline from raw mode.
 		input = os.Stdin
 	}
-	r := &progressRenderer{
+	r := &progressProgram{
 		w:     w,
 		input: input,
 		state: state,
@@ -82,9 +82,9 @@ func newProgressRenderer(w io.Writer, state *ingest.ProgressState, anim *animati
 
 // Run starts a small Bubble Tea program that reads a snapshot from state at a
 // capped frame rate. Call as a goroutine; wg.Add(1) is called by
-// newProgressRenderer so Wait() is safe to call immediately after go r.Run(ctx)
+// newProgressProgram so Wait() is safe to call immediately after go r.Run(ctx)
 // without a startup race.
-func (r *progressRenderer) Run(ctx context.Context) {
+func (r *progressProgram) Run(ctx context.Context) {
 	defer r.wg.Done()
 	if ctx == nil {
 		ctx = context.Background()
@@ -99,7 +99,7 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		model,
 		tea.WithOutput(r.w),
 		tea.WithInput(r.input),
-		tea.WithFPS(progressRendererFPS),
+		tea.WithFPS(progressProgramFPS),
 		tea.WithoutSignalHandler(),
 	)
 	finished := make(chan struct{})
@@ -110,10 +110,10 @@ func (r *progressRenderer) Run(ctx context.Context) {
 		for {
 			select {
 			case <-operationDone:
-				program.Send(ingestprogress.CancelMsg{})
+				program.Send(harvestprogress.CancelMsg{})
 				operationDone = nil
 			case canceled := <-r.stop:
-				program.Send(ingestprogress.StopMsg{Canceled: canceled || ctx.Err() != nil, At: time.Now()})
+				program.Send(harvestprogress.StopMsg{Canceled: canceled || ctx.Err() != nil, At: time.Now()})
 				return
 			case <-finished:
 				return
@@ -134,20 +134,20 @@ func (r *progressRenderer) Run(ctx context.Context) {
 	}
 }
 
-func (r *progressRenderer) newModel(ctx context.Context, startedAt time.Time) ingestprogress.Model {
-	return ingestprogress.NewModel(r.state, r.anim, r.theme, startedAt, r.cancel, ctx.Err)
+func (r *progressProgram) newModel(ctx context.Context, startedAt time.Time) harvestprogress.Model {
+	return harvestprogress.New(harvestprogress.Options{Progress: r.state, Theme: r.theme, Animation: r.anim, StartedAt: startedAt, Cancel: r.cancel, ContextErr: ctx.Err})
 }
 
 // Stop acknowledges operation completion. Cancellation alone must not unmount
 // progress while the pipeline is still unwinding.
-func (r *progressRenderer) Stop(canceled bool) {
+func (r *progressProgram) Stop(canceled bool) {
 	r.stopOnce.Do(func() { r.stop <- canceled })
 }
 
 // Wait blocks until Run has returned.
-func (r *progressRenderer) Wait() { r.wg.Wait() }
+func (r *progressProgram) Wait() { r.wg.Wait() }
 
-func (r *progressRenderer) Err() error {
+func (r *progressProgram) Err() error {
 	r.errMu.Lock()
 	defer r.errMu.Unlock()
 	return r.err
@@ -155,9 +155,9 @@ func (r *progressRenderer) Err() error {
 
 // IsTTY reports whether the renderer is writing to an interactive terminal.
 // When false, rendering is a no-op and log suppression is not needed.
-func (r *progressRenderer) IsTTY() bool { return r.isTTY }
+func (r *progressProgram) IsTTY() bool { return r.isTTY }
 
 // Clear is retained for the command path. Bubble Tea clears the rendered block
 // when the model returns a blank view during shutdown, so no extra ANSI erase is
 // necessary here.
-func (r *progressRenderer) Clear() {}
+func (r *progressProgram) Clear() {}

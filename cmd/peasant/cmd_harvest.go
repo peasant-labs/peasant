@@ -472,7 +472,7 @@ func runHarvest(cmd *cobra.Command, mode harvestMode, flags *harvestFlags) error
 	if err != nil {
 		return fmt.Errorf("create pipeline: %w", err)
 	}
-	renderer := newProgressRenderer(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
+	renderer := newProgressProgram(cmd.ErrOrStderr(), progState, animation.IngestAnimation(), cancelOperation)
 	renderer.theme = theme.New(themeModeFor(cfg))
 	if flags.jsonOutput {
 		renderer.isTTY = false

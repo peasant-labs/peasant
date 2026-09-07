@@ -19,7 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/push"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
-	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/kit"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
@@ -192,20 +192,20 @@ func renderHarvestInlineCapture(capture ingestProgressCaptureFixture) (string, e
 	started := timeDateForCapture()
 	progress := ingest.NewProgressState()
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindStart, Stage: ingest.StageDiscover, Total: 4})
-	model := ingestprogress.NewModel(progress, animation.IngestAnimation(), captureThemeValue(capture.Theme), started, nil)
+	model := harvestprogress.New(harvestprogress.Options{Progress: progress, Animation: animation.IngestAnimation(), Theme: captureThemeValue(capture.Theme), StartedAt: started})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: capture.Width, Height: capture.Height})
-	model = updated.(ingestprogress.Model)
+	model = updated.(harvestprogress.Model)
 	progress.Update(ingest.ProgressEvent{Kind: ingest.KindAdvance, Stage: ingest.StageDiscover, Done: 1, Total: 4})
-	updated, _ = model.Update(ingestprogress.TickMsg(started.Add(2 * time.Second)))
+	updated, _ = model.Update(harvestprogress.TickMsg(started.Add(2 * time.Second)))
 	if capture.State == ingestProgressStateHarvestCanceling || capture.State == ingestProgressStateHarvestCanceled {
 		updated, _ = updated.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		progress.Update(ingest.ProgressEvent{Kind: ingest.KindEnd, Stage: ingest.StageDiscover, Done: 2, Total: 4, Err: context.Canceled})
-		updated, _ = updated.Update(ingestprogress.TickMsg(started.Add(9 * time.Second)))
+		updated, _ = updated.Update(harvestprogress.TickMsg(started.Add(9 * time.Second)))
 	}
 	if capture.State == ingestProgressStateHarvestCanceled {
-		updated, _ = updated.Update(ingestprogress.StopMsg{Canceled: true, At: started.Add(12 * time.Second)})
+		updated, _ = updated.Update(harvestprogress.StopMsg{Canceled: true, At: started.Add(12 * time.Second)})
 	}
-	view := updated.(ingestprogress.Model).View().Content
+	view := updated.(harvestprogress.Model).View().Content
 	if lipgloss.Height(view) > capture.Height || lipgloss.Width(view) > capture.Width {
 		return "", fmt.Errorf("inline harvest overflows the capture terminal")
 	}
