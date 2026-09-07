@@ -1,0 +1,25 @@
+cases:
+  - name: preserve_current_sessions_relations_and_checks
+    seed:
+      - "INSERT INTO projects (project_hash, canonical_cwd) VALUES ('fixture-project', '/fixture/project')"
+      - "INSERT INTO host_slugs (opaque_id, host_slug) VALUES ('fixture-host', 'fixture-host')"
+      - "INSERT INTO sessions (session_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format,tags,license_id,index_version,indexed_at,session_origin,origin_version,session_entries_hash) VALUES ('fixture-session','strike','fixture-model','fixture-host','fixture-project',1,2,3,'/fixture/session.jsonl','jsonl','kept','CC-BY-4.0',21,4,'agent',7,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')"
+      - "INSERT INTO sessions (session_id,parent_id,model_harness,model_id,opaque_host_id,project_hash,start_ms,end_ms,ingested_ms,source_path,source_format) VALUES ('fixture-child','fixture-session','claude-code','fixture-model','fixture-host','fixture-project',1,2,3,'/fixture/child.jsonl','jsonl')"
+      - "INSERT INTO session_entries (session_id,entry_index,provider,entry_type,role,content_preview) VALUES ('fixture-session',0,'strike','text','user','preserved text')"
+      - "INSERT INTO session_commit_associations (association_id,session_id,observed_commit_hash,subject,author_time,created_at) VALUES ('fixture-association','fixture-session','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','preserved association',4,5)"
+      - "INSERT INTO daily_summary_harness (date_utc,model_harness,session_count,tokens_total) VALUES ('2026-01-01','strike',2,123)"
+    assertions:
+      - {query: "SELECT tags || ':' || license_id || ':' || index_version || ':' || indexed_at || ':' || session_origin || ':' || origin_version || ':' || session_entries_hash FROM sessions WHERE session_id='fixture-session'", want: 'kept:CC-BY-4.0:21:4:agent:7:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+      - {query: "SELECT parent_id FROM sessions WHERE session_id='fixture-child'", want: fixture-session}
+      - {query: "SELECT content_preview FROM session_entries WHERE session_id='fixture-session'", want: preserved text}
+      - {query: "SELECT session_id FROM session_commit_associations WHERE association_id='fixture-association'", want: fixture-session}
+      - {query: "SELECT session_count || ':' || tokens_total FROM daily_summary_harness WHERE model_harness='strike'", want: '2:123'}
+      - {query: 'SELECT COUNT(*) FROM pragma_foreign_key_check', want: '0'}
+      - {query: 'PRAGMA foreign_keys', want: '1'}
+    rejects:
+      - "UPDATE sessions SET model_harness='not-a-harness'"
+      - "UPDATE daily_summary_harness SET model_harness='not-a-harness'"
+      - "UPDATE sessions SET license_id='invalid-license'"
+      - "UPDATE sessions SET source_format='invalid-format'"
+      - "UPDATE sessions SET session_origin='invalid-origin'"
+      - "UPDATE sessions SET session_entries_hash='invalid-hash'"
