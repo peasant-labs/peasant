@@ -2219,7 +2219,13 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 			emailCtx, emailCancel := context.WithTimeout(ctx, 2*time.Second)
 			userEmail, _ := p.git.UserEmail(emailCtx)
 			emailCancel()
-			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader)
+			// The recorded branch narrows the window to commits reachable from
+			// it. A session without one keeps the full window.
+			sessionBranch := ""
+			if meta.Git.Branch != nil {
+				sessionBranch = *meta.Git.Branch
+			}
+			detector := newCommitDetectorWithReader(p.gitAnalyzer, userEmail, p.commitTranscriptReader, WithSessionBranch(sessionBranch))
 			sessionStart := time.UnixMilli(meta.Timestamp.Start)
 			sessionEnd := time.UnixMilli(meta.Timestamp.End)
 			// File origins use the provider transcript. Current SQLite uses only
