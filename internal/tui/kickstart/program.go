@@ -1235,7 +1235,7 @@ func (p Program) viewIngest() string {
 	// The footer hint owns two lines of the progress height budget, and is
 	// pinned after the height cut, so a short terminal never removes the
 	// only escape affordance.
-	lines = append(lines, p.progressLines(styles, p.deps.Clock.Now(), len(lines)+2)...)
+	lines = append(lines, p.progressLines(len(lines)+2)...)
 	footer := []string{"", styles.Muted.Render("ctrl+c to quit")}
 	if p.height == 1 {
 		// One row holds the hint, not its blank separator.
@@ -1251,7 +1251,7 @@ func (p Program) viewIngest() string {
 	return panel.View()
 }
 
-func (p Program) progressLines(_ theme.Styles, _ time.Time, reservedLines int) []string {
+func (p Program) progressLines(reservedLines int) []string {
 	available := p.height - reservedLines
 	if p.height <= 0 {
 		available = -1

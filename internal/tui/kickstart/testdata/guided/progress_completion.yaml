@@ -228,6 +228,12 @@ timing:
         wantElapsed: {DISCOVER: 2s}
 
 expectedCompletionCount: 3
+childMessages:
+  - {name: older-observation-ignored}
+  - {name: equal-observation-accepted}
+  - {name: authoritative-earlier-final}
+  - {name: final-absorbs-late-messages}
+  - {name: cancel-retains-qualified-estimate}
 completion:
   - name: successful-local-import
     terminalWidth: 80

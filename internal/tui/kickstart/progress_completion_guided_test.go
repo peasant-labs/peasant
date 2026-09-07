@@ -21,6 +21,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/tui/ftue"
 	"github.com/peasant-labs/peasant/internal/tui/harvestprogress"
+	"github.com/peasant-labs/peasant/internal/tui/ingestprogress"
 	"github.com/peasant-labs/peasant/internal/tui/kickstart"
 	"github.com/peasant-labs/peasant/internal/tui/settings"
 	"github.com/peasant-labs/peasant/internal/tui/settings/scannerfix"
@@ -116,10 +117,15 @@ type progressCompletionDocument struct {
 	Progress                          []progressFixture                   `yaml:"progress"`
 	RequiredTimingNames               []string                            `yaml:"requiredTimingNames"`
 	Timing                            []progressFixture                   `yaml:"timing"`
+	ChildMessages                     []childMessageFixture               `yaml:"childMessages"`
 	ExpectedCompletionCount           int                                 `yaml:"expectedCompletionCount"`
 	Completion                        []completionFixture                 `yaml:"completion"`
 	ExpectedPreambleMutationCount     int                                 `yaml:"expectedPreambleMutationCount"`
 	PreambleMutations                 []completionPreambleMutationFixture `yaml:"preambleMutations"`
+}
+
+type childMessageFixture struct {
+	Name string `yaml:"name"`
 }
 
 //go:embed testdata/guided/progress_completion.yaml
@@ -588,6 +594,62 @@ func TestHarvestAndKickstartProgressParity(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestIngestProgressChildMessageContract(t *testing.T) {
+	document := loadProgressCompletionDocument(t)
+	seen := map[string]bool{}
+	for _, row := range document.ChildMessages {
+		if row.Name == "" || seen[row.Name] {
+			t.Fatalf("invalid child message fixture %q", row.Name)
+		}
+		seen[row.Name] = true
+		t.Run(row.Name, func(t *testing.T) {
+			start := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+			model := ingestprogress.New(ingestprogress.Options{Theme: theme.New(theme.ModeDark), StartedAt: start})
+			model.SetSize(120, -1)
+			snapshot := func(done int, ended, hasErr bool) map[ingest.Stage]ingest.StageProgress {
+				return map[ingest.Stage]ingest.StageProgress{ingest.StageIndex: {Started: true, Done: done, Total: 100, Ended: ended, HasErr: hasErr}}
+			}
+			model, _ = model.Update(ingestprogress.ObserveMsg{At: start, Snapshot: snapshot(0, false, false)})
+			model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(2 * time.Second), Snapshot: snapshot(20, false, false)})
+			switch row.Name {
+			case "older-observation-ignored":
+				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(time.Second), Snapshot: snapshot(5, false, false)})
+				assertContainsAll(t, model.View(), "20/100", "total elapsed: 2s", "estimate: 8s")
+			case "equal-observation-accepted":
+				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(2 * time.Second), Snapshot: snapshot(30, false, false)})
+				assertContainsAll(t, model.View(), "30/100", "total elapsed: 2s")
+			case "authoritative-earlier-final":
+				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(8 * time.Second), Snapshot: snapshot(80, true, false)})
+				model, _ = model.Update(ingestprogress.FinalMsg{At: start.Add(5 * time.Second), Snapshot: snapshot(40, true, true), Outcome: ingestprogress.FinalFailed})
+				assertContainsAll(t, model.View(), "40/100", "total elapsed: 5s", "5s")
+			case "final-absorbs-late-messages":
+				model, _ = model.Update(ingestprogress.CancelRequestedMsg{At: start.Add(2 * time.Second)})
+				model, _ = model.Update(ingestprogress.FinalMsg{At: start.Add(3 * time.Second), Snapshot: snapshot(30, true, false), Outcome: ingestprogress.FinalCanceled})
+				want := model.View()
+				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(9 * time.Second), Snapshot: snapshot(90, false, true)})
+				model, _ = model.Update(ingestprogress.CancelRequestedMsg{At: start.Add(9 * time.Second)})
+				model, _ = model.Update(ingestprogress.FinalMsg{At: start.Add(10 * time.Second), Snapshot: snapshot(100, true, true), Outcome: ingestprogress.FinalFailed})
+				if model.View() != want {
+					t.Fatalf("final child view changed:\n%s", model.View())
+				}
+			case "cancel-retains-qualified-estimate":
+				model, _ = model.Update(ingestprogress.CancelRequestedMsg{At: start.Add(2 * time.Second)})
+				model, _ = model.Update(ingestprogress.ObserveMsg{At: start.Add(3 * time.Second), Snapshot: snapshot(20, false, true), CancelRequested: true})
+				assertContainsAll(t, model.View(), "estimate: 8s", "20/100")
+			}
+		})
+	}
+}
+
+func assertContainsAll(t *testing.T, view string, values ...string) {
+	t.Helper()
+	for _, value := range values {
+		if !strings.Contains(view, value) {
+			t.Fatalf("missing %q:\n%s", value, view)
+		}
 	}
 }
 
