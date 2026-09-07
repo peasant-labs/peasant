@@ -1,5 +1,7 @@
 # What a push tells the user about the visibility it will actually publish at, and
 # whether it keeps the published-content record.
+# These cases must reach a promptly answering local HTTP preflight, not expire a
+# short upload budget. Deadline enforcement has its own hook-ergonomics tests.
 #
 # Private and public are applied by authoritative publication and owner visibility
 # convergence without downgrade disclosure. Group is not a project/session
