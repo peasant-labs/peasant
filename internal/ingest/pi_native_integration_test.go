@@ -25,6 +25,9 @@ var piSourceFixtures []byte
 //go:embed testdata/pi_sanitized_recording.yaml
 var piSanitizedRecording []byte
 
+//go:embed testdata/pi_model_expectation_boundaries.yaml
+var piModelExpectationBoundaries []byte
+
 func TestPiSanitizedNativeRecording(t *testing.T) {
 	var fixture struct {
 		Name   string `yaml:"name"`
@@ -53,24 +56,73 @@ func TestPiSanitizedNativeRecording(t *testing.T) {
 	}
 }
 
+type piFixtureModelID struct {
+	schema.ModelID
+}
+
+func (m *piFixtureModelID) UnmarshalYAML(node *yaml.Node) error {
+	var raw string
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	model, err := schema.NewModelID(raw)
+	if err != nil {
+		return err
+	}
+	m.ModelID = model
+	return nil
+}
+
 type piSourceCase struct {
-	Name                      string   `yaml:"name"`
-	Source                    string   `yaml:"source"`
-	Reject                    bool     `yaml:"reject"`
-	ProjectionReject          bool     `yaml:"projectionReject"`
-	MetadataStringBytes       int      `yaml:"metadataStringBytes"`
-	PaddingStringBytes        int      `yaml:"paddingStringBytes"`
-	SelectedMetadataBytes     int      `yaml:"selectedMetadataBytes"`
-	AssertOrdinaryLongContent bool     `yaml:"assertOrdinaryLongContent"`
-	RejectContains            string   `yaml:"rejectContains"`
-	Title                     string   `yaml:"title"`
-	MetadataModel             string   `yaml:"metadataModel"`
-	Turns                     int      `yaml:"turns"`
-	Owners                    int      `yaml:"owners"`
-	Metadata                  int      `yaml:"metadata"`
-	Warnings                  int      `yaml:"warnings"`
-	Contains                  []string `yaml:"contains"`
-	Excludes                  []string `yaml:"excludes"`
+	Name                      string            `yaml:"name"`
+	Source                    string            `yaml:"source"`
+	Reject                    bool              `yaml:"reject"`
+	ProjectionReject          bool              `yaml:"projectionReject"`
+	MetadataStringBytes       int               `yaml:"metadataStringBytes"`
+	PaddingStringBytes        int               `yaml:"paddingStringBytes"`
+	SelectedMetadataBytes     int               `yaml:"selectedMetadataBytes"`
+	AssertOrdinaryLongContent bool              `yaml:"assertOrdinaryLongContent"`
+	RejectContains            string            `yaml:"rejectContains"`
+	Title                     string            `yaml:"title"`
+	ExpectedModel             *piFixtureModelID `yaml:"expectedModel"`
+	Turns                     int               `yaml:"turns"`
+	Owners                    int               `yaml:"owners"`
+	Metadata                  int               `yaml:"metadata"`
+	Warnings                  int               `yaml:"warnings"`
+	Contains                  []string          `yaml:"contains"`
+	Excludes                  []string          `yaml:"excludes"`
+}
+
+func TestPiFixtureModelExpectationValidation(t *testing.T) {
+	var fixture struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name     string `yaml:"name"`
+			Document string `yaml:"document"`
+		} `yaml:"cases"`
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(string(piModelExpectationBoundaries)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, tc := range fixture.Cases {
+		seen[tc.Name] = true
+		var target struct {
+			ExpectedModel *piFixtureModelID `yaml:"expectedModel"`
+		}
+		decoder := yaml.NewDecoder(strings.NewReader(tc.Document))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(&target); err == nil {
+			t.Fatalf("%s: invalid model expectation accepted", tc.Name)
+		}
+	}
+	for _, name := range fixture.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("required fixture %q missing", name)
+		}
+	}
 }
 
 func assertPiSourceRejectionPipeline(t *testing.T, source ingest.ResolvedPath, body, wantReason string) {
@@ -204,8 +256,12 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(meta.Model) != tc.MetadataModel {
-				t.Fatalf("publication metadata model = %q, want first assistant observation %q", meta.Model, tc.MetadataModel)
+			if tc.ExpectedModel == nil {
+				if meta.Model != "" {
+					t.Fatalf("publication metadata model = %q, want no model observation", meta.Model)
+				}
+			} else if meta.Model != tc.ExpectedModel.ModelID {
+				t.Fatalf("publication metadata model = %q, want first assistant observation %q", meta.Model, tc.ExpectedModel.ModelID)
 			}
 			indexer := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[schema.HarnessPi]
 			entries, err := indexer.IndexTranscript(ctx, session)

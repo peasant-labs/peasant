@@ -1,0 +1,6 @@
+requiredNames:
+  - empty-model-id
+cases:
+  - name: empty-model-id
+    document: |
+      expectedModel: ""
