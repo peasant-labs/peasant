@@ -72,6 +72,9 @@ VALUES (?, ?, ?, ?)`
 	// IndexSessionEntryBatch is the authority for that hash, and the legacy
 	// UpdateIndexState path still clears it when it cannot prove hash/index
 	// atomicity.
+	// An ordinary metadata upsert has no validated file manifest, so it clears
+	// artifact_hash. MirrorArtifacts restores the captured digest before its
+	// transaction commits. The last-good indexed input proof remains intact.
 	sqlInsertSession = `INSERT INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
@@ -96,7 +99,8 @@ ON CONFLICT(session_id) DO UPDATE SET
     tool_version = excluded.tool_version,
     session_origin = excluded.session_origin,
     adapter_version = excluded.adapter_version,
-    metric_seed_json = excluded.metric_seed_json`
+    metric_seed_json = excluded.metric_seed_json,
+    artifact_hash = NULL`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 

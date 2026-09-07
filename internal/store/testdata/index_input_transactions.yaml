@@ -1,0 +1,34 @@
+requiredNames:
+  - mixed-batch-commits-proofs
+  - stale-item-preserves-healthy-peers
+  - handler-failure-preserves-proof
+  - outer-commit-failure-preserves-all-proofs
+  - handler-panic-preserves-all-proofs
+  - conversion-preserves-known-input
+  - conversion-preserves-unknown-input
+  - conversion-preserves-future-producer
+  - conversion-preserves-unknown-producer
+  - conversion-artifact-mutation-refused
+  - conversion-input-mutation-refused
+  - conversion-entries-mutation-refused
+  - conversion-harness-mutation-refused
+  - conversion-error-keeps-input
+  - conversion-invalid-result-keeps-input
+  - completed-writer-invalidates-captured-parser
+cases:
+  - {name: mixed-batch-commits-proofs, operation: batch}
+  - {name: stale-item-preserves-healthy-peers, operation: batch, stale: true}
+  - {name: handler-failure-preserves-proof, operation: batch, fault: write-error}
+  - {name: outer-commit-failure-preserves-all-proofs, operation: batch, fault: commit-error}
+  - {name: handler-panic-preserves-all-proofs, operation: batch, fault: panic}
+  - {name: conversion-preserves-known-input, operation: convert}
+  - {name: conversion-preserves-unknown-input, operation: convert, unknownInput: true}
+  - {name: conversion-preserves-future-producer, operation: convert, producer: 99}
+  - {name: conversion-preserves-unknown-producer, operation: convert, producer: 0}
+  - {name: conversion-artifact-mutation-refused, operation: convert, mutationSQL: 'UPDATE sessions SET artifact_hash = NULL WHERE session_id = ?'}
+  - {name: conversion-input-mutation-refused, operation: convert, mutationSQL: 'UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?'}
+  - {name: conversion-entries-mutation-refused, operation: convert, mutationSQL: 'UPDATE sessions SET session_entries_hash = NULL WHERE session_id = ?'}
+  - {name: conversion-harness-mutation-refused, operation: convert, mutationSQL: "UPDATE sessions SET model_harness = 'strike' WHERE session_id = ?"}
+  - {name: conversion-error-keeps-input, operation: convert, fault: convert-error}
+  - {name: conversion-invalid-result-keeps-input, operation: convert, fault: wrong-result}
+  - {name: completed-writer-invalidates-captured-parser, operation: intervening}

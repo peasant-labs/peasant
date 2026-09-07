@@ -1,0 +1,127 @@
+artifactHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+projectHash: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+transcript: '{"type":"user","message":{"role":"user","content":"fixture input"}}'
+priorInputHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+newInputHash: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+requiredNames:
+  - captured-current-state
+  - captured-never-indexed-state
+  - completed-empty-state
+  - equal-output-records-current-input
+  - absent-expectation-refuses-proof
+  - absent-artifact-refuses-proof
+  - zero-producer-refuses-proof
+  - empty-proof-refused
+  - uppercase-proof-refused
+  - short-proof-refused
+  - expected-other-session-refused
+  - artifact-changed
+  - artifact-became-null
+  - producer-changed
+  - format-changed
+  - format-became-null
+  - parser-time-changed
+  - parser-time-became-null
+  - input-changed
+  - input-became-null
+  - entries-changed
+  - entries-became-null
+  - harness-changed
+  - session-disappeared
+  - null-artifact-is-not-empty
+  - null-format-became-known
+  - null-time-became-known
+  - null-input-became-known
+  - null-entries-became-known
+  - unproven-batch-clears-input
+  - expected-without-proof-clears-input
+  - direct-equal-write-clears-input
+  - stamp-clears-input
+  - hash-stamp-clears-input
+  - metadata-clears-artifact-only
+  - commits-clear-artifact-only
+  - empty-commits-clear-artifact-only
+  - format-stamp-failure-keeps-proof
+  - producer-stamp-failure-keeps-proof
+  - input-stamp-failure-keeps-proof
+  - metadata-failure-keeps-proof
+  - commits-failure-keeps-proof
+  - mirror-restores-actual-artifact-only
+  - mirror-failure-preserves-input
+  - metrics-preserve-proofs
+  - origin-classifier-preserves-proofs
+  - future-producer-stamp-refused
+  - future-producer-hash-stamp-refused
+  - stamp-failure-keeps-input-proof
+  - hash-stamp-failure-keeps-input-proof
+  - null-artifact-became-known
+  - null-artifact-unproven-write
+cases:
+  - {name: captured-current-state}
+  - {name: captured-never-indexed-state, noIndex: true}
+  - {name: completed-empty-state, empty: true}
+  - {name: equal-output-records-current-input, equal: true}
+  - {name: absent-expectation-refuses-proof, noExpected: true, wantError: true}
+  - {name: absent-artifact-refuses-proof, noArtifact: true, wantError: true}
+  - {name: zero-producer-refuses-proof, producerZero: true, wantError: true}
+  - {name: empty-proof-refused, invalidHash: '', wantError: true}
+  - {name: uppercase-proof-refused, invalidHash: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, wantError: true}
+  - {name: short-proof-refused, invalidHash: abc, wantError: true}
+  - {name: expected-other-session-refused, wrongSession: true, wantError: true}
+  - name: artifact-changed
+    mutationSQL: UPDATE sessions SET artifact_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - {name: artifact-became-null, mutationSQL: 'UPDATE sessions SET artifact_hash = NULL WHERE session_id = ?', stale: true}
+  - {name: producer-changed, mutationSQL: 'UPDATE sessions SET index_version = 16 WHERE session_id = ?', stale: true}
+  - {name: format-changed, mutationSQL: 'UPDATE sessions SET index_format_version = 99 WHERE session_id = ?', stale: true}
+  - {name: format-became-null, mutationSQL: 'UPDATE sessions SET index_format_version = NULL WHERE session_id = ?', stale: true}
+  - {name: parser-time-changed, mutationSQL: 'UPDATE sessions SET indexed_at = indexed_at + 1 WHERE session_id = ?', stale: true, equal: true}
+  - {name: parser-time-became-null, mutationSQL: 'UPDATE sessions SET indexed_at = NULL WHERE session_id = ?', stale: true}
+  - name: input-changed
+    mutationSQL: UPDATE sessions SET indexed_input_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - {name: input-became-null, mutationSQL: 'UPDATE sessions SET indexed_input_hash = NULL WHERE session_id = ?', stale: true}
+  - name: entries-changed
+    mutationSQL: UPDATE sessions SET session_entries_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - {name: entries-became-null, mutationSQL: 'UPDATE sessions SET session_entries_hash = NULL WHERE session_id = ?', stale: true}
+  - {name: harness-changed, mutationSQL: "UPDATE sessions SET model_harness = 'codex' WHERE session_id = ?", stale: true}
+  - {name: session-disappeared, beforeMutationSQL: 'DELETE FROM session_metrics WHERE session_id = ?', mutationSQL: 'DELETE FROM sessions WHERE session_id = ?', stale: true, noIndex: true}
+  - {name: null-artifact-is-not-empty, noArtifact: true, expectedEmptyArtifact: true, noProof: true, stale: true}
+  - {name: null-format-became-known, noIndex: true, mutationSQL: 'UPDATE sessions SET index_format_version = 1 WHERE session_id = ?', stale: true}
+  - {name: null-time-became-known, noIndex: true, mutationSQL: 'UPDATE sessions SET indexed_at = 1 WHERE session_id = ?', stale: true}
+  - name: null-input-became-known
+    noIndex: true
+    mutationSQL: UPDATE sessions SET indexed_input_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - name: null-entries-became-known
+    noIndex: true
+    mutationSQL: UPDATE sessions SET session_entries_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - {name: unproven-batch-clears-input, noExpected: true, noProof: true, equal: true}
+  - {name: expected-without-proof-clears-input, noProof: true}
+  - {name: direct-equal-write-clears-input, operation: direct, equal: true}
+  - {name: stamp-clears-input, operation: stamp}
+  - {name: hash-stamp-clears-input, operation: hash-stamp}
+  - {name: metadata-clears-artifact-only, operation: metadata}
+  - {name: commits-clear-artifact-only, operation: commits}
+  - {name: empty-commits-clear-artifact-only, operation: empty-commits}
+  - {name: format-stamp-failure-keeps-proof, failColumn: index_format_version, wantError: true}
+  - {name: producer-stamp-failure-keeps-proof, failColumn: index_version, wantError: true}
+  - {name: input-stamp-failure-keeps-proof, failColumn: indexed_input_hash, wantError: true}
+  - {name: metadata-failure-keeps-proof, operation: metadata, failColumn: artifact_hash, wantError: true}
+  - {name: commits-failure-keeps-proof, operation: commits, failColumn: artifact_hash, wantError: true}
+  - {name: mirror-restores-actual-artifact-only, operation: mirror}
+  - {name: mirror-failure-preserves-input, operation: mirror, failColumn: artifact_hash, wantError: true}
+  - {name: metrics-preserve-proofs, operation: metrics}
+  - {name: origin-classifier-preserves-proofs, operation: origin}
+  - {name: future-producer-stamp-refused, operation: stamp, storedProducer: 99, wantError: true}
+  - {name: future-producer-hash-stamp-refused, operation: hash-stamp, storedProducer: 99, wantError: true}
+  - {name: stamp-failure-keeps-input-proof, operation: stamp, failColumn: indexed_input_hash, wantError: true}
+  - {name: hash-stamp-failure-keeps-input-proof, operation: hash-stamp, failColumn: indexed_input_hash, wantError: true}
+  - name: null-artifact-became-known
+    noArtifact: true
+    noProof: true
+    mutationSQL: UPDATE sessions SET artifact_hash = printf('%064d', 1) WHERE session_id = ?
+    stale: true
+  - {name: null-artifact-unproven-write, noArtifact: true, noProof: true}

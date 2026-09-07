@@ -96,15 +96,11 @@ func (s *Store) ConvertIndexFormat(ctx context.Context, sessionID schema.Session
 	if err != nil {
 		return err
 	}
-	if current == nil || current.IndexVersion == nil || *current.IndexVersion != *before.IndexVersion || current.IndexerVersion != before.IndexerVersion || !sameIndexTimestamp(current.IndexedAt, before.IndexedAt) {
-		return fmt.Errorf("store: index conversion for session %s changed source format or parser history while preparing its result; the transaction was refused; correct the conversion to preserve producer revision and run time", sessionID)
+	if !sameIndexState(before, current) {
+		return fmt.Errorf("store: index conversion for session %s changed source format, input evidence or parser history while preparing its result; the transaction was refused; correct the conversion to preserve captured source state, producer revision and run time", sessionID)
 	}
 	stmts := newSessionEntryWriteStatements(conn)
 	defer func() { err = errors.Join(err, stmts.Close()) }()
-	_, err, _ = s.indexSessionEntryWriteSavepoint(ctx, conn, ingest.SessionEntryWrite{SessionID: sessionID, Result: output, IndexVersion: target}, stmts, &conversion)
+	_, err, _ = s.indexSessionEntryWriteSavepoint(ctx, conn, ingest.SessionEntryWrite{SessionID: sessionID, Result: output, IndexVersion: target, ExpectedState: before}, stmts, &conversion)
 	return err
-}
-
-func sameIndexTimestamp(a, b *int64) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }

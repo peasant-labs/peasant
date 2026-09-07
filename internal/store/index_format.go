@@ -108,23 +108,17 @@ func (e *UnsupportedIndexFormatError) Error() string {
 	return fmt.Sprintf("store: session %s has unsupported index format %d; before reading or replacing its transcript projection, this build refused the operation and preserved its index; use a Peasant build that supports this format", e.SessionID, e.Version)
 }
 
-type storedIndexState struct {
-	IndexerVersion int
-	IndexVersion   *int
-	IndexedAt      *int64
-	Harness        schema.Harness
-}
-
-func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*storedIndexState, error) {
-	var state *storedIndexState
-	err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version, indexed_at, model_harness FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
+func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*ingest.SessionIndexState, error) {
+	var state *ingest.SessionIndexState
+	err := sqlitex.ExecuteTransient(conn, `SELECT index_version, index_format_version, indexed_at, model_harness,
+artifact_hash, indexed_input_hash, session_entries_hash FROM sessions WHERE session_id = ?`, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			var harness schema.Harness
 			if err := harness.UnmarshalText([]byte(stmt.ColumnText(3))); err != nil || !harness.IsKnown() {
 				return fmt.Errorf("stored harness %q is not recognized; restore valid session metadata before indexing", stmt.ColumnText(3))
 			}
-			state = &storedIndexState{IndexerVersion: stmt.ColumnInt(0), Harness: harness}
+			state = &ingest.SessionIndexState{SessionID: sessionID, IndexerVersion: stmt.ColumnInt(0), Harness: harness}
 			if stmt.ColumnType(1) != sqlite.TypeNull {
 				version := stmt.ColumnInt(1)
 				state.IndexVersion = &version
@@ -132,6 +126,18 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*store
 			if stmt.ColumnType(2) != sqlite.TypeNull {
 				at := stmt.ColumnInt64(2)
 				state.IndexedAt = &at
+			}
+			if stmt.ColumnType(4) != sqlite.TypeNull {
+				hash := stmt.ColumnText(4)
+				state.ArtifactHash = &hash
+			}
+			if stmt.ColumnType(5) != sqlite.TypeNull {
+				hash := stmt.ColumnText(5)
+				state.IndexedInputHash = &hash
+			}
+			if stmt.ColumnType(6) != sqlite.TypeNull {
+				hash := stmt.ColumnText(6)
+				state.SessionEntriesHash = &hash
 			}
 			return nil
 		},
@@ -142,7 +148,10 @@ func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*store
 	return state, nil
 }
 
-func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite, conversion *IndexFormatConversion) (IndexFormat, *storedIndexState, error) {
+func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.SessionEntryWrite, conversion *IndexFormatConversion) (IndexFormat, *ingest.SessionIndexState, error) {
+	if err := validateIndexInputClaim(write); err != nil {
+		return nil, nil, err
+	}
 	if nilIndexValue(write.Result) || write.IndexVersion < 1 || write.Result.IndexVersion() != write.IndexVersion {
 		return nil, nil, fmt.Errorf("store: index result for session %s does not match declared format %d; refused before replacement; provide one concrete result matching the indexer's declared output", write.SessionID, write.IndexVersion)
 	}
@@ -156,6 +165,9 @@ func (s *Store) validateIndexWriteOnConn(conn *sqlite.Conn, write ingest.Session
 	state, err := readIndexStateOnConn(conn, write.SessionID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if write.ExpectedState != nil && !sameIndexState(write.ExpectedState, state) {
+		return nil, nil, &ingest.StaleIndexWorkError{SessionID: write.SessionID}
 	}
 	if state == nil {
 		return nil, nil, fmt.Errorf("store: cannot index session %s before its metadata is stored; import the session and retry", write.SessionID)
