@@ -68,28 +68,47 @@ func TestMigrationV51PiPreservesCurrentStore(t *testing.T) {
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			ctx := context.Background()
-			pool, err := sqlitex.NewPool(filepath.Join(t.TempDir(), "upgrade.db"), sqlitex.PoolOptions{PoolSize: 1, PrepareConn: preparePragmas})
+			dbPath := filepath.Join(t.TempDir(), "upgrade.db")
+			pool, err := sqlitex.NewPool(dbPath, sqlitex.PoolOptions{PoolSize: 1, PrepareConn: preparePragmas})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer pool.Close()
 			conn, err := pool.Take(ctx)
 			if err != nil {
+				pool.Close()
 				t.Fatal(err)
 			}
-			defer pool.Put(conn)
 			before := sqlitemigration.Schema{Migrations: dbSchema.Migrations[:50], MigrationOptions: dbSchema.MigrationOptions[:50]}
 			if err := sqlitemigration.Migrate(ctx, conn, before); err != nil {
+				pool.Put(conn)
+				pool.Close()
 				t.Fatal(err)
 			}
 			for _, query := range c.Seed {
 				if err := sqlitex.ExecuteTransient(conn, query, nil); err != nil {
+					pool.Put(conn)
+					pool.Close()
 					t.Fatalf("seed: %v", err)
 				}
 			}
 			if err := sqlitemigration.Migrate(ctx, conn, dbSchema); err != nil {
+				pool.Put(conn)
+				pool.Close()
 				t.Fatal(err)
 			}
+			pool.Put(conn)
+			pool.Close()
+
+			pool, err = sqlitex.NewPool(dbPath, sqlitex.PoolOptions{PoolSize: 1, PrepareConn: preparePragmas})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			conn, err = pool.Take(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Put(conn)
 			for _, a := range c.Assertions {
 				if got := scalarText(t, conn, a.Query); got != a.Want {
 					t.Fatalf("query %s = %q want %q", a.Query, got, a.Want)
