@@ -1347,7 +1347,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 		gitBranch = &b
 	}
 
-	remote, tracking := ResolveGitRemote(ctx, a.git, workDir, branch, "")
+	remote, tracking := ResolveGitRemote(ctx, a.git, workDir, session.Branch, "")
 	if remote != "" {
 		r := remote
 		gitRemote = &r
@@ -1379,7 +1379,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 		worktreeForHash = workDir
 	}
 
-	projectHash, hostSlug, err := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remoteForHash, worktreeForHash)
+	projectHash, hostSlug, err := DeriveProjectIdentifiers(a.salt, remoteForHash, worktreeForHash)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: derive project identifiers for session %s: %w", session.SessionID, err)
 	}

@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -1742,6 +1743,19 @@ func pipelineCancellation(ctx context.Context, err error) error {
 	return nil
 }
 
+// identityMatchesLocation compares the complete adapter-derived project
+// identity. An empty remote still carries a meaningful path-derived identity.
+func identityMatchesLocation(meta *UnifiedMetadata, loc SessionLocation) bool {
+	if meta == nil || string(meta.HostSlug) != loc.HostSlug || (loc.ProjectHash != "" && meta.Project.Hash.String() != loc.ProjectHash) {
+		return false
+	}
+	remote := ""
+	if meta.Git.Remote != nil {
+		remote = *meta.Git.Remote
+	}
+	return NormalizeRemoteForMatch(remote) == NormalizeRemoteForMatch(loc.GitRemote)
+}
+
 // ClassifyAgainstStore returns the DiffStatus of a discovered session that the
 // store already holds a record for: it compares the source file against the
 // recorded ingest timestamp and metadata schema version, honouring the same
@@ -1808,14 +1822,13 @@ func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSessio
 			}
 			return DiffUpdated, nil
 		}
-		if status == DiffUnchanged && p.git != nil {
-			identityPath := session.CWD
-			if session.ProjectWorktree != "" {
-				identityPath = session.ProjectWorktree
-			}
-			if identityPath != "" {
-				expectedRemote, _ := ResolveGitRemote(ctx, p.git, identityPath, session.Branch, "")
-				if expectedRemote != "" && NormalizeRemoteForMatch(expectedRemote) != NormalizeRemoteForMatch(loc.GitRemote) {
+		if status == DiffUnchanged && p.git != nil && loc.ProjectHash != "" {
+			if factory, ok := p.adapters[session.Harness]; ok {
+				meta, err := factory(p.fs, p.git, p.salt).ExtractMetadata(ctx, session)
+				if err != nil {
+					return DiffUnchanged, err
+				}
+				if !identityMatchesLocation(meta, loc) {
 					return DiffUpdated, nil
 				}
 			}
@@ -2308,14 +2321,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.HostSlug != "" && loc.HostSlug != string(hostSlug) {
 		oldDir := SessionDir(outputDir, loc.HostSlug, session.SessionID.String(), loc.ParentID)
 		if _, oldErr := p.fs.Stat(oldDir); oldErr == nil {
-			if _, destinationErr := p.fs.Stat(sessionDir); destinationErr == nil {
-				result.Error = errors.Join(
-					fmt.Errorf("repair session %s project artifacts: destination %s already contains data; remove the conflicting session directory and retry ingest", session.SessionID, sessionDir),
-					p.fs.RemoveAll(tmpDir),
-				)
-				return workerResult{result: result}
-			}
-			if err := p.renameDir(oldDir, sessionDir); err != nil {
+			if err := p.moveSessionFiles(oldDir, sessionDir, session.SessionID.String()); err != nil {
 				result.Error = errors.Join(
 					fmt.Errorf("repair session %s project artifacts from %s to %s: %w", session.SessionID, oldDir, sessionDir, err),
 					p.fs.RemoveAll(tmpDir),
@@ -2481,6 +2487,65 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 		OriginalRoot:     wr.originalRoot,
 		TranscriptOrigin: wr.transcriptOrigin,
 	}
+}
+
+// moveSessionFiles leaves children at their stored locations until they are
+// individually repaired. Only named session artifacts and its debug directory
+// belong to this session; unrelated destination members are never replaced.
+func (p *Pipeline) moveSessionFiles(src, dst, sessionID string) error {
+	if err := p.fs.MkdirAll(dst, defaults.PrivateDirPerm); err != nil {
+		return err
+	}
+	var paths []string
+	if err := p.fs.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == src {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if rel != defaults.DirDebug.String() && !strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(rel, sessionID+"--") || strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+			paths = append(paths, rel)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	// Check all collisions before moving any files.
+	for _, rel := range paths {
+		if _, err := p.fs.Stat(filepath.Join(dst, rel)); err == nil {
+			oldData, err := p.fs.ReadFile(filepath.Join(src, rel))
+			if err != nil {
+				return err
+			}
+			newData, err := p.fs.ReadFile(filepath.Join(dst, rel))
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(oldData, newData) {
+				return fmt.Errorf("repair artifacts: destination file %s conflicts with stored session %s; prior files retained; reconcile the duplicate file and retry ingest", filepath.Join(dst, rel), sessionID)
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	for _, rel := range paths {
+		target := filepath.Join(dst, rel)
+		if err := p.fs.MkdirAll(filepath.Dir(target), defaults.PrivateDirPerm); err != nil {
+			return err
+		}
+		if err := p.fs.Rename(filepath.Join(src, rel), target); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // renameDir moves a directory tree from src to dst using the FileSystem interface.

@@ -20,6 +20,7 @@ type CurrentCommitAssociation struct {
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
 	HostSlug                string
+	ProjectHash             string
 	GitRemote               string
 	ParentID                string // empty string if the session has no parent
 	IngestedMs              *int64 // nil if unknown; populated from DB ingested_ms column

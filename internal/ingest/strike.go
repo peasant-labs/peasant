@@ -674,7 +674,7 @@ func (a *StrikeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 		meta.Git.Tracking = &tracking
 	}
 
-	projectHash, hostSlug, identityErr := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remote, worktree)
+	projectHash, hostSlug, identityErr := DeriveProjectIdentifiers(a.salt, remote, worktree)
 	if identityErr != nil {
 		return nil, fmt.Errorf("strike metadata: derive project identity for session %s from worktree %q: %w", session.SessionID, worktree, identityErr)
 	}
