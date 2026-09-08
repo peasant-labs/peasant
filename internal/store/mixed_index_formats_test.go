@@ -453,7 +453,9 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 			db.Pool().Put(conn)
 			legacyMeta := seedMixedSession(t, db, document.LegacySession, schema.HarnessClaudeCode, document.Project)
 			targetMeta := seedMixedSession(t, db, document.TargetSession, schema.HarnessCodex, document.Project)
-			seedMixedIndex(t, db, document.LegacySession, schema.HarnessClaudeCode, document.Records, 15, 1)
+			// This session represents an unrelated current parser, not historical output.
+			legacyTarget := ingest.HarvesterVersionRegistry[schema.HarnessClaudeCode]
+			seedMixedIndex(t, db, document.LegacySession, schema.HarnessClaudeCode, document.Records, legacyTarget.IndexerVersion, 1)
 			seedMixedIndex(t, db, document.TargetSession, schema.HarnessCodex, document.Records, 14, 1)
 			legacyBefore := mixedSnapshot(t, db, document.LegacySession)
 			fs := testutil.NewMemFS()
