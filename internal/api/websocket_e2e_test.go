@@ -428,7 +428,7 @@ func TestProgressiveProvider_E2E_WebSocket_SessionDetail(t *testing.T) {
 				StartTime: time.Date(2026, 1, 2, 3, 4, 5, 0, offset),
 				EndTime:   time.Date(2026, 1, 2, 3, 5, 5, 0, offset),
 				Turns: []ingest.Turn{
-					{Index: 0, Role: "user", Content: "Hello"},
+					{Index: 0, Role: "user", Content: "Hello", Timestamp: time.Date(2026, 1, 2, 3, 4, 6, 0, offset)},
 				},
 			},
 		},
@@ -501,6 +501,9 @@ func TestProgressiveProvider_E2E_WebSocket_SessionDetail(t *testing.T) {
 	turns, ok := dataMap["turns"].([]any)
 	if !ok || len(turns) != 1 {
 		t.Errorf("turn count = %v, want 1", turns)
+	}
+	if len(turns) == 1 && turns[0].(map[string]any)["timestamp"] != "2026-01-02T11:04:06Z" {
+		t.Fatal("session_detail turn timestamp changed its instant or retained a local offset")
 	}
 }
 
