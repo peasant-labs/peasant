@@ -78,6 +78,13 @@ func (s *Store) SavePublication(ctx context.Context, record PublicationRecord) (
 	}
 	defer s.pool.Put(conn)
 	defer sqlitex.Transaction(conn)(&err)
+	// A project identity repair can move the local key while Village keeps the
+	// same transcript identity. Remove only that session's superseded key so the
+	// unique remote identity and its replacement receipt move atomically.
+	if err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_publications
+WHERE village_origin=? AND owner_user_id=? AND remote_transcript_id=? AND session_id=? AND project_hash<>?`, &sqlitex.ExecOptions{Args: []any{record.VillageOrigin, record.OwnerUserID, record.Receipt.TranscriptID.String(), record.SessionID, record.ProjectHash.String()}}); err != nil {
+		return fmt.Errorf("save publication receipt: relocate repaired project identity in the receipt transaction: %w", err)
+	}
 	err = sqlitex.ExecuteTransient(conn, `INSERT INTO session_publications
 (village_origin,owner_user_id,session_id,remote_transcript_id,transcript_url,project_hash,operation_fingerprint,content_hash,visibility,published_at,remote_updated_at,receipt_json)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(village_origin,owner_user_id,project_hash,session_id) DO UPDATE SET

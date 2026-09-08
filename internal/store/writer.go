@@ -67,15 +67,17 @@ VALUES (?, ?, ?, ?)`
 
 	// sqlInsertSession upserts a session row (V23+: opaque_host_id replaces host_slug FK).
 	// The conflict path updates only metadata fields owned by InsertSessions. It
-	// intentionally does not touch index fields such as session_entries_hash;
+	// marks the index stale when captured source evidence changes, but retains
+	// the prior session_entries_hash for the indexer's content comparison;
 	// IndexSessionEntryBatch is the authority for that hash, and the legacy
 	// UpdateIndexState path still clears it when it cannot prove hash/index
 	// atomicity.
 	sqlInsertSession = `INSERT INTO sessions (
     session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
     start_ms, end_ms, ingested_ms, source_path, source_format,
-    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin,
+    source_fingerprint
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = excluded.parent_id,
     model_harness = excluded.model_harness,
@@ -92,7 +94,27 @@ ON CONFLICT(session_id) DO UPDATE SET
     git_worktree = excluded.git_worktree,
     git_tracking = excluded.git_tracking,
     tool_version = excluded.tool_version,
-    session_origin = excluded.session_origin`
+    session_origin = excluded.session_origin,
+    index_version = CASE
+      WHEN excluded.source_fingerprint IS NOT NULL
+       AND sessions.source_fingerprint IS NOT excluded.source_fingerprint THEN 0
+      ELSE sessions.index_version END,
+    source_fingerprint = excluded.source_fingerprint`
+
+	sqlInsertSessionBeforeSourceFingerprint = `INSERT INTO sessions (
+    session_id, parent_id, model_harness, model_id, opaque_host_id, project_hash,
+    start_ms, end_ms, ingested_ms, source_path, source_format,
+    schema_version, git_branch, git_worktree, git_tracking, tool_version, session_origin
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+    parent_id=excluded.parent_id, model_harness=excluded.model_harness,
+    model_id=excluded.model_id, opaque_host_id=excluded.opaque_host_id,
+    project_hash=excluded.project_hash, start_ms=excluded.start_ms,
+    end_ms=excluded.end_ms, ingested_ms=excluded.ingested_ms,
+    source_path=excluded.source_path, source_format=excluded.source_format,
+    schema_version=excluded.schema_version, git_branch=excluded.git_branch,
+    git_worktree=excluded.git_worktree, git_tracking=excluded.git_tracking,
+    tool_version=excluded.tool_version, session_origin=excluded.session_origin`
 
 	sqlSessionExists = `SELECT 1 FROM sessions WHERE session_id = ?`
 
@@ -205,6 +227,10 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 
 	endFn := sqlitex.Transaction(conn)
 	defer endFn(&err)
+	hasSourceFingerprint := false
+	if err = sqlitex.ExecuteTransient(conn, `SELECT 1 FROM pragma_table_info('sessions') WHERE name='source_fingerprint'`, &sqlitex.ExecOptions{ResultFunc: func(*sqlite.Stmt) error { hasSourceFingerprint = true; return nil }}); err != nil {
+		return fmt.Errorf("store: inspect sessions source evidence column: %w", err)
+	}
 
 	// Topological sort: parents before children to satisfy the FK constraint
 	// sessions.parent_id REFERENCES sessions(session_id). When processing
@@ -308,26 +334,22 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 		}
 
 		// V23+: opaque_host_id replaces host_slug in sessions FK.
-		if err = sqlitex.ExecuteTransient(conn, sqlInsertSession, &sqlitex.ExecOptions{
-			Args: []any{
-				string(m.SessionID),
-				derefSessionID(m.ParentUUID),
-				m.ModelHarness.String(),
-				string(m.Model),
-				opaqueHostID, // opaque_host_id (FK → host_slugs.opaque_id)
-				string(m.Project.Hash),
-				m.Timestamp.Start,
-				m.Timestamp.End,
-				derefInt64(m.Timestamp.Ingested),
-				m.Source.FilePath,
-				string(m.Source.Format),
-				m.SchemaVersion,
-				derefString(m.Git.Branch),
-				derefString(m.Git.Worktree),
-				derefString(m.Git.Tracking),
-				m.Version,
-				sessionOrigin.String(),
-			},
+		sessionSQL := sqlInsertSession
+		sessionArgs := []any{
+			string(m.SessionID), derefSessionID(m.ParentUUID), m.ModelHarness.String(),
+			string(m.Model), opaqueHostID, string(m.Project.Hash), m.Timestamp.Start,
+			m.Timestamp.End, derefInt64(m.Timestamp.Ingested), m.Source.FilePath,
+			string(m.Source.Format), m.SchemaVersion, derefString(m.Git.Branch),
+			derefString(m.Git.Worktree), derefString(m.Git.Tracking), m.Version,
+			sessionOrigin.String(),
+		}
+		if hasSourceFingerprint {
+			sessionArgs = append(sessionArgs, sorted[i].SourceFingerprint)
+		} else {
+			sessionSQL = sqlInsertSessionBeforeSourceFingerprint
+		}
+		if err = sqlitex.ExecuteTransient(conn, sessionSQL, &sqlitex.ExecOptions{
+			Args: sessionArgs,
 		}); err != nil {
 			return fmt.Errorf("store: insert session %s: %w", m.SessionID, err)
 		}
@@ -345,6 +367,11 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 			},
 		}); err != nil {
 			return fmt.Errorf("store: insert session_metrics %s: %w", m.SessionID, err)
+		}
+		if sorted[i].Session.Harness == ingest.HarnessOpenCode {
+			if err = upsertOpenCodeSeqCursorConn(conn, m.SessionID, sorted[i].EventSeq); err != nil {
+				return err
+			}
 		}
 
 	}

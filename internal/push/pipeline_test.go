@@ -1127,6 +1127,11 @@ func TestPipeline_EmptyState_AllAlreadyPushed(t *testing.T) {
 
 	var stderr bytes.Buffer
 	p := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr)
+	seedMemFS(t, fs, testutil.TestHostSlug, testutil.TestSessionUUID, defaults.HarnessClaudeCode)
+	first, err := p.Run(ctx)
+	if err != nil || first.New != 1 {
+		t.Fatalf("seed authoritative publication: result=%+v err=%v", first, err)
+	}
 
 	result, err := p.Run(ctx)
 	if err != nil {
@@ -1288,7 +1293,15 @@ func runScopedEmptyState(t *testing.T, testCase scopedEmptyStateCase, quiet bool
 		AllSessions: all,
 	}
 	var stderr bytes.Buffer
-	p := newTestPipeline(store, &testutil.StubPublisher{}, testutil.NewMemFS(), baseTestConfig(), runCfg, &stderr)
+	fs := testutil.NewMemFS()
+	p := newTestPipeline(store, &testutil.StubPublisher{}, fs, baseTestConfig(), runCfg, &stderr)
+	if testCase.World == worldAllPublished {
+		seedMemFS(t, fs, inScope.HostSlug, inScope.SessionID, defaults.HarnessClaudeCode)
+		first, err := p.Run(context.Background())
+		if err != nil || first.New != 1 {
+			t.Fatalf("seed scoped authoritative publication: result=%+v err=%v", first, err)
+		}
+	}
 	return p.Run(context.Background())
 }
 
@@ -2192,6 +2205,16 @@ func TestPipeline_StatusCode_201New_200Updated(t *testing.T) {
 	})
 
 	t.Run("200 → updated", func(t *testing.T) {
+		pushedAt := int64(1)
+		updatedPreview := "locally updated"
+		store.Sessions[0].PushedAt = &pushedAt
+		sid, idErr := ingest.NewSessionID(sess1ID)
+		if idErr != nil {
+			t.Fatalf("session ID: %v", idErr)
+		}
+		store.Entries = map[ingest.SessionID][]schema.SessionEntry{
+			sid: {{SessionID: sid, EntryIndex: 0, Harness: defaults.HarnessClaudeCode, EntryType: schema.EntryTypeText, Role: schema.RoleUser, Depth: 0, ContentPreview: &updatedPreview}},
+		}
 		pub := &testutil.StubPublisher{StatusCode: 200}
 		var stderr bytes.Buffer
 		p := newTestPipeline(store, pub, fs, baseTestConfig(), push.PipelineConfig{}, &stderr)
@@ -2201,6 +2224,14 @@ func TestPipeline_StatusCode_201New_200Updated(t *testing.T) {
 		}
 		if result.Updated != 1 || result.New != 0 {
 			t.Errorf("200: new=%d updated=%d, want new=0 updated=1", result.New, result.Updated)
+		}
+		pub.AuthoritativeCalls = nil
+		result, err = p.Run(ctx)
+		if err != nil {
+			t.Fatalf("unchanged Run error: %v", err)
+		}
+		if result.Skipped != 1 || len(pub.AuthoritativeCalls) != 0 {
+			t.Errorf("unchanged repeat: skipped=%d uploads=%d, want skipped=1 uploads=0", result.Skipped, len(pub.AuthoritativeCalls))
 		}
 	})
 }

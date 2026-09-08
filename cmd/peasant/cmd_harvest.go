@@ -166,7 +166,7 @@ func registerHarvestFlags(cmd *cobra.Command, flags *harvestFlags, mode harvestM
 	if mode != harvestIndexOnly {
 		cmd.Flags().StringVar(&flags.sourceProvider, "source-provider", "", "Override source provider (claude-code, opencode, codex, cursor, strike)")
 		cmd.Flags().StringVar(&flags.sourcePath, "source-path", "", "Override source paths for the provider (replaces config, not additive)")
-		cmd.Flags().BoolVar(&flags.includeActive, "include-active", false, "Also process sessions still being written")
+		cmd.Flags().BoolVar(&flags.includeActive, "include-active", true, "Deprecated compatibility flag; active sessions are processed by default")
 	}
 
 	// Detect-commits flag (relevant for index and all modes).

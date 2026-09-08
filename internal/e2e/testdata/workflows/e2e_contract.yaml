@@ -24,9 +24,9 @@ e2e:
     key: VILLAGE_REPO
     value: '${{ github.workspace }}/_village'
   driver_contains:
-    - go test -race
-    - -tags=e2e
-    - -count=1
+    - E2E_MEMORY_MODE=external
+    - make e2e
+    - E2E_TEST_FLAGS=-v
   asserted_tests:
     - TestSkipGateE2E
     - TestPullRoundTripE2E

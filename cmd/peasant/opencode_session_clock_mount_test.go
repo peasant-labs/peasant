@@ -134,8 +134,12 @@ func TestOpenCodeSessionClockFixturesMountedHarvest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("second mounted harvest: %v\n%s", err, output)
 			}
-			if !harvestSummaryHasCount(output, 1, "updated") {
-				t.Fatalf("moved freshness did not re-ingest the session:\n%s", output)
+			status := "updated"
+			if testCase.Mutation == openCodeSessionClockMutationMTimeFloor {
+				status = "unchanged"
+			}
+			if !harvestSummaryHasCount(output, 1, status) {
+				t.Fatalf("captured source freshness did not report %s:\n%s", status, output)
 			}
 		})
 	}

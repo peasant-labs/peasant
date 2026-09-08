@@ -42,7 +42,8 @@ func TestOpenCodeOrphanPartDecodeTolerance(t *testing.T) {
 	if host == nil {
 		t.Fatalf("discovery = %+v, want the orphan host session", discovered)
 	}
-	metadata, data, err := adapter.MaterializeTranscript(t.Context(), *host)
+	captured, err := adapter.MaterializeTranscript(t.Context(), *host)
+	metadata, data := captured.Metadata, captured.Data
 	if err != nil {
 		t.Fatalf("orphan-bearing session failed to materialize: %v", err)
 	}

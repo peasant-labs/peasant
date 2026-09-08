@@ -1,8 +1,10 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -542,30 +544,13 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 
 	// Stage 3: FILTER + Stage 4a: EXTRACT + WRITE
 	filterProfileStart := time.Now()
-	//
-	// Pre-pass: identify active sessions that are required as parents by
-	// sessions that will be processed (New, Updated). These active parents
-	// must be ingested so the DB FK constraint on parent_id is satisfied.
-	requiredParents := make(map[SessionID]bool)
-	toProcess := 0
-	for _, entry := range diffResult.Sessions {
-		if entry.Status == DiffNew || entry.Status == DiffUpdated {
-			toProcess++
-			if entry.Session.ParentUUID != nil {
-				requiredParents[*entry.Session.ParentUUID] = true
-			}
-		} else if entry.Status == DiffActive {
-			toProcess++ // may be included as required parent
-		}
-	}
-
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageFilter, Total: len(diffResult.Sessions)})
 
 	// (indexedMeta defined at package level for use by helper methods)
 
 	// Separate sessions into two buckets:
-	//   skipped  — Unchanged or Active-but-not-required: recorded as-is, no processing.
-	//   toProcess — New, Updated, and Active-required: run through processSession.
+	//   skipped — unselected or unchanged captured sources: no processing.
+	//   toProcess — new or changed sources, including active sessions.
 	var sessionResults []SessionResult
 	var indexSessions []indexedMeta // sessions to index after write
 	var toProcessEntries []DiffEntry
@@ -666,6 +651,30 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			}
 		}
 
+		// Selected supported sources are decided inside the bounded root worker,
+		// never captured into the whole-batch discovery maps.
+		if supportsSessionCapture(entry.Session) && !p.config.DryRun {
+			toProcessEntries = append(toProcessEntries, entry)
+			advanceFilter()
+			continue
+		}
+		if supportsSessionCapture(entry.Session) && p.config.DryRun {
+			// Dry-run has no workers or staging. Compare one temporary capture
+			// at a time, retaining only the classification in its report.
+			captured, captureErr := p.captureSession(ctx, entry.Session)
+			if captureErr != nil {
+				entry.Status = DiffUpdated
+			} else {
+				if captured.Session != nil {
+					entry.Session = *captured.Session
+				}
+				status, err := p.classifyCapturedSession(ctx, entry.Session, captured)
+				if err != nil {
+					return nil, err
+				}
+				entry.Status = status
+			}
+		}
 		switch entry.Status {
 		case DiffUnchanged:
 			recordDryRun(entry, DiffUnchanged)
@@ -677,16 +686,8 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			})
 		case DiffActive:
 			recordDryRun(entry, DiffActive)
-			if !p.config.IncludeActive && !requiredParents[entry.Session.SessionID] {
-				sessionResults = append(sessionResults, SessionResult{
-					SessionID:  entry.Session.SessionID,
-					Harness:    entry.Session.Harness,
-					ParentUUID: entry.Session.ParentUUID,
-					Status:     DiffActive,
-				})
-			} else {
-				toProcessEntries = append(toProcessEntries, entry)
-			}
+			// Activity is diagnostic only; capture a finite source view by default.
+			toProcessEntries = append(toProcessEntries, entry)
 		default: // DiffNew, DiffUpdated
 			recordDryRun(entry, entry.Status)
 			toProcessEntries = append(toProcessEntries, entry)
@@ -695,6 +696,7 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageFilter, Done: len(diffResult.Sessions), Total: len(diffResult.Sessions)})
 	p.recordIndexProfileStage(StageFilter, filterProfileStart, len(toProcessEntries), len(diffResult.Sessions))
+	toProcess := len(toProcessEntries)
 
 	// Dry-run uses the same allowed-session, time, positive-selection, exact-
 	// denial, and parent-inheritance decisions as a real run. It stops only after
@@ -821,6 +823,9 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			done := int(extractDoneAtomic.Add(1))
 			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageExtract, Done: done, Total: toProcess})
 			staging.Add(wr)
+			// The root's heap payload must not outlive transfer to the arena,
+			// including while this worker walks a large descendant subtree.
+			wr.transcriptData = nil
 			// BFS over subtree: process all descendants inline (same goroutine →
 			// no directory races on the parent's {hostSlug}/{parentID}/ tree).
 			queue := childrenOf[entry.Session.SessionID]
@@ -1021,8 +1026,10 @@ func (p *Pipeline) drainLoop(
 					})
 					if p.store != nil {
 						storeBatch = append(storeBatch, StoreEntry{
-							Metadata: wr.meta,
-							Session:  sessionFromWorkerResult(wr),
+							Metadata:          wr.meta,
+							Session:           sessionFromWorkerResult(wr),
+							SourceFingerprint: wr.sourceFingerprint,
+							EventSeq:          wr.eventSeq,
 						})
 					}
 				}
@@ -1040,7 +1047,6 @@ func (p *Pipeline) drainLoop(
 						// succeeds so the FK constraint on session_commits(session_id) is satisfied.
 						// Called unconditionally (including empty slice) so that a --force re-ingest
 						// that finds 0 commits deletes stale DB rows, keeping JSON and DB in sync.
-						cursorStore, cursorStoreOK := p.store.(OpenCodeSeqCursorStore)
 						for _, entry := range storeBatch {
 							if err := p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits); err != nil {
 								slog.Warn("pipeline: upsert session_commits",
@@ -1050,13 +1056,6 @@ func (p *Pipeline) drainLoop(
 							// Record the OpenCode change cursor for a session just ingested,
 							// so a later in-place rewrite that bumps the sequence without
 							// moving a time column re-ingests it. Non-fatal.
-							if cursorStoreOK && entry.Session.Harness == HarnessOpenCode {
-								if err := cursorStore.UpsertOpenCodeSeqCursor(ctx, entry.Metadata.SessionID, entry.Session.EventSeq); err != nil {
-									slog.Warn("pipeline: upsert opencode_session_seq_cursor",
-										"session_id", entry.Metadata.SessionID,
-										"error", err)
-								}
-							}
 						}
 					}
 				})
@@ -1097,6 +1096,17 @@ func (p *Pipeline) drainLoop(
 						"session_id", wr.result.SessionID,
 						"path", metaPath,
 						"error", err)
+					continue
+				}
+				if p.store == nil && len(wr.fileCaptureEvidence) > 0 {
+					digest := sha256.Sum256(metaJSON)
+					evidence := append(wr.fileCaptureEvidence, digest[:]...)
+					path := fileCaptureEvidencePath(metaPath)
+					if err := p.fs.WriteFile(path+".tmp", evidence, defaults.PrivateFilePerm); err != nil {
+						slog.Warn("pipeline: save captured source evidence; retry harvest logs to refresh the managed snapshot", "session_id", wr.result.SessionID, "error", err)
+					} else if err := p.fs.Rename(path+".tmp", path); err != nil {
+						slog.Warn("pipeline: commit captured source evidence; retry harvest logs to refresh the managed snapshot", "session_id", wr.result.SessionID, "error", err)
+					}
 				}
 			}
 
@@ -1755,65 +1765,59 @@ func pipelineCancellation(ctx context.Context, err error) error {
 	return nil
 }
 
-// ClassifyAgainstStore returns the DiffStatus of a discovered session that the
-// store already holds a record for: it compares the source file against the
-// recorded ingest timestamp and metadata schema version, honouring the same
-// staleness threshold. It is the DB-first branch of classifySession, exported so
-// a caller that already knows what the store recorded (the kickstart re-scan)
-// asks the pipeline's own diff rule instead of writing a second one that can
-// drift from it.
+// identityMatchesLocation compares the complete adapter-derived project
+// identity. An empty remote still carries a meaningful path-derived identity.
+func identityMatchesLocation(meta *UnifiedMetadata, loc SessionLocation) bool {
+	if meta == nil || string(meta.HostSlug) != loc.HostSlug || (loc.ProjectHash != "" && meta.Project.Hash.String() != loc.ProjectHash) {
+		return false
+	}
+	remote := ""
+	if meta.Git.Remote != nil {
+		remote = *meta.Git.Remote
+	}
+	return NormalizeRemoteForMatch(remote) == NormalizeRemoteForMatch(loc.GitRemote)
+}
+
+// ClassifyAgainstStore provides a preliminary discovery hint from source time
+// and metadata schema version. The ingest pipeline supersedes this hint with
+// captured evidence before deciding a supported source is unchanged. Callers
+// such as Kickstart may use the hint to avoid redundant discovery work, but it
+// is not proof that the source bytes were consumed.
 //
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
-func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalenessThreshold time.Duration) DiffStatus {
-	isActive := stalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < stalenessThreshold
-
+func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, _ time.Duration) DiffStatus {
 	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
 		// Source modified more recently than DB ingested_ms: re-ingest.
 		if session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
-			if isActive {
-				return DiffActive
-			}
 			return DiffUpdated
 		}
 	}
 	// Schema version behind current (DB value): re-ingest.
 	if loc.SchemaVersion < CurrentSchemaVersion {
-		if isActive {
-			return DiffActive
-		}
 		return DiffUpdated
 	}
-	// Staleness check last.
-	if isActive {
-		return DiffActive
-	}
+	// Activity does not make an otherwise unchanged captured source fresh.
 	return DiffUnchanged
 }
 
-// classifySession determines the DiffStatus for a single session.
-//
-// The implementation uses a single staleness threshold check
-// (time.Since(ModTime) < threshold). A future debounce for actively written
-// sessions would need to poll ModTime twice with a bounded delay.
-//
-// Order of precedence (per spec):
-//  1. --force flag: always DiffNew (but DiffActive takes priority over force if
-//     IncludeActive is false, per "respect staleness unless --include-active")
-//  2. No existing metadata: DiffNew
-//  3. Source newer than last ingest: DiffUpdated
-//  4. Schema version behind CurrentSchemaVersion: DiffUpdated
-//  5. Source within staleness threshold (still being written): DiffActive
-//  6. Otherwise: DiffUnchanged
+// classifySession provides the discovery-time hint. Selected supported sources
+// are classified again with captured bytes before the authoritative no-op.
 func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSession) (DiffStatus, error) {
+	return p.classifyCapturedSession(ctx, session, nil)
+}
+
+func supportsSessionCapture(session DiscoveredSession) bool {
+	return session.TranscriptOrigin != TranscriptOriginFile || (session.SourceFormat == SourceFormatJSONL && session.Harness != HarnessStrike)
+}
+
+func (p *Pipeline) classifyCapturedSession(ctx context.Context, session DiscoveredSession, captured *MaterializedTranscript) (DiffStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return DiffNew, err
 	}
 	isActive := p.config.StalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < p.config.StalenessThreshold
 
-	// Force: re-ingest, but only if we're also including active sessions (or
-	// the session is not active). With --force and without --include-active,
-	// active sessions are still skipped.
+	// Force always processes a session; activity is diagnostic, not exclusion.
 	if p.config.Force {
 		if isActive {
 			return DiffActive, nil
@@ -1826,6 +1830,35 @@ func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSessio
 	// This is the primary code path for sessions already in the DB.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
 		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		if captured != nil && loc.SourceEvidenceSupported {
+			status = DiffUnchanged
+			if !bytes.Equal(loc.SourceFingerprint, captured.SourceFingerprint) || loc.SchemaVersion < CurrentSchemaVersion {
+				status = DiffUpdated
+			}
+		}
+		if loc.SourceEvidenceSupported && loc.SourceFingerprint == nil && status == DiffUnchanged {
+			if isActive {
+				return DiffActive, nil
+			}
+			return DiffUpdated, nil
+		}
+		if status == DiffUnchanged && loc.ProjectHash != "" {
+			if captured != nil {
+				if !identityMatchesLocation(captured.Metadata, loc) {
+					return DiffUpdated, nil
+				}
+			} else if factory, ok := p.adapters[session.Harness]; ok && p.git != nil && !supportsSessionCapture(session) {
+				// Supported sources defer identity to the root worker's capture;
+				// preliminary discovery must not read their payloads again.
+				meta, err := factory(p.fs, p.git, p.salt).ExtractMetadata(ctx, session)
+				if err != nil {
+					return DiffUnchanged, err
+				}
+				if !identityMatchesLocation(meta, loc) {
+					return DiffUpdated, nil
+				}
+			}
+		}
 		// The change cursor is an additional trigger on top of the clock: a session
 		// the clock reports unchanged is re-ingested when its newest event sequence
 		// moved past the last ingested value, catching an in-place rewrite that
@@ -1879,6 +1912,20 @@ func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSessio
 			return DiffActive, nil
 		}
 		return DiffNew, nil
+	}
+	if captured != nil {
+		// Private evidence is bound to the exact successful metadata file, whose
+		// content hash also verifies the managed transcript. Legacy/missing or
+		// interrupted evidence refreshes once; ingest audit time is not freshness.
+		evidence, readErr := p.fs.ReadFile(fileCaptureEvidencePath(metaPath))
+		digest := sha256.Sum256(data)
+		want := append(fileCaptureEvidence(captured), digest[:]...)
+		transcriptPath := filepath.Join(filepath.Dir(metaPath), fmt.Sprintf("%s--transcript.%s", session.SessionID, session.SourceFormat))
+		transcript, transcriptErr := p.fs.ReadFile(transcriptPath)
+		if readErr == nil && transcriptErr == nil && bytes.Equal(evidence, want) && existing.SchemaVersion >= CurrentSchemaVersion && existing.ContentHash == schema.ComputeTranscriptHash(transcript) {
+			return DiffUnchanged, nil
+		}
+		return DiffUpdated, nil
 	}
 
 	// Source modified more recently than ingest time: re-ingest.
@@ -2016,15 +2063,72 @@ func (p *Pipeline) findMetadataPath(ctx context.Context, session DiscoveredSessi
 	return "", nil // not found
 }
 
-// processSession extracts metadata and atomically writes output for one session.
-// Returns a workerResult carrying the SessionResult, metadata, redacted transcript
-// bytes (for JSONL/JSON providers — nil for directory-based providers), the output
-// transcript path, and the session start timestamp.
-//
-// The transcript bytes returned are the copy written to disk, which is the
-// transcript as recorded - no level a user can choose redacts content here.
-// Callers may store them in a StagingBuffer arena to avoid re-reading from disk
-// during the INDEX stage.
+// fileCaptureEvidence is private local evidence, not part of wire metadata.
+// Include pre-redaction identity so redacted logs also detect upstream repair.
+func fileCaptureEvidence(captured *MaterializedTranscript) []byte {
+	remote := ""
+	if captured.Metadata.Git.Remote != nil {
+		remote = NormalizeRemoteForMatch(*captured.Metadata.Git.Remote)
+	}
+	identity := sha256.Sum256([]byte(fmt.Sprintf("%q/%q/%q", captured.Metadata.HostSlug, captured.Metadata.Project.Hash, remote)))
+	return append(append([]byte(nil), captured.SourceFingerprint...), identity[:]...)
+}
+
+func fileCaptureEvidencePath(metaPath string) string {
+	return strings.TrimSuffix(metaPath, defaults.MetadataSuffix) + "--source-capture"
+}
+
+// captureSession detaches source bytes and metadata before any managed writes.
+// Legacy mutable multi-file formats retain their existing reader limitations.
+func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession) (*MaterializedTranscript, error) {
+	factory, ok := p.adapters[session.Harness]
+	if !ok {
+		return nil, fmt.Errorf("no adapter for provider %s", session.Harness)
+	}
+	if err := session.TranscriptOrigin.Validate(); err != nil {
+		return nil, err
+	}
+	adapterFS := p.fs
+	var data []byte
+	var err error
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		if reader, ok := p.fs.(sourcePrefixReader); ok && session.SourceFormat == SourceFormatJSONL {
+			data, err = reader.ReadSourcePrefix(session.SourcePath.String())
+		} else {
+			data, err = p.fs.ReadFile(session.SourcePath.String())
+		}
+		if err == nil && session.SourceFormat == SourceFormatJSONL && session.Harness != HarnessStrike {
+			data, err = completeJSONLPrefix(data)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("capture transcript source for %s: %w; prior stored state remains unchanged; restore source readability and retry", session.SessionID, err)
+		}
+		if session.Harness != HarnessOpenCode {
+			adapterFS = capturedSourceFileSystem{FileSystem: p.fs, path: session.SourcePath.String(), data: data}
+		}
+	}
+	adapter := factory(adapterFS, p.git, p.salt)
+	if session.TranscriptOrigin != TranscriptOriginFile {
+		materializer, ok := adapter.(TranscriptMaterializer)
+		if !ok {
+			return nil, fmt.Errorf("materialize session %s: adapter lacks managed source support; no state written; use the production OpenCode adapter", session.SessionID)
+		}
+		captured, err := materializer.MaterializeTranscript(ctx, session)
+		if err != nil {
+			return nil, err
+		}
+		return &captured, nil
+	}
+	meta, err := adapter.ExtractMetadata(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	captured := newMaterializedTranscript(meta, data, session.EventSeq)
+	return &captured, nil
+}
+
+// processSession atomically writes the accepted capture and carries its bytes
+// and evidence into the existing store and streamed indexing path.
 func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerResult {
 	session := entry.Session
 	result := SessionResult{
@@ -2037,32 +2141,31 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		result.Error = err
 		return workerResult{result: result}
 	}
-
-	// Find the adapter for this provider.
-	factory, ok := p.adapters[session.Harness]
-	if !ok {
-		return fail(fmt.Errorf("no adapter for provider %s", session.Harness))
-	}
-	adapter := factory(p.fs, p.git, p.salt)
-
-	if err := session.TranscriptOrigin.Validate(); err != nil {
-		return fail(fmt.Errorf("prepare transcript for session %s failed before source access: %w; the session was not written or stored; update the discovering adapter to return a supported typed origin", session.SessionID, err))
-	}
-	var rawData []byte
-	var meta *UnifiedMetadata
-	var err error
-	if session.TranscriptOrigin != TranscriptOriginFile {
-		materializer, ok := adapter.(TranscriptMaterializer)
-		if !ok {
-			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: typed transcript origin %d requires a managed materializer but adapter %T has none; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, session.TranscriptOrigin, adapter))
-		}
-		meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
-	} else {
-		meta, err = adapter.ExtractMetadata(ctx, session)
-	}
+	captured, err := p.captureSession(ctx, session)
 	if err != nil {
-		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
+		return fail(err)
 	}
+	if captured.Session != nil {
+		session = *captured.Session
+		result.ParentUUID = session.ParentUUID
+	}
+	if supportsSessionCapture(session) && !p.config.Reindex {
+		result.Status, err = p.classifyCapturedSession(ctx, session, captured)
+		if err != nil {
+			return fail(err)
+		}
+		if result.Status == DiffUnchanged {
+			// Drain commits the parent and acknowledges the empty arena slot,
+			// without inserting, rewriting metadata, or scheduling indexing.
+			return workerResult{result: result}
+		}
+	}
+	rawData, meta := captured.Data, captured.Metadata
+	var captureEvidence []byte
+	if p.store == nil && supportsSessionCapture(session) {
+		captureEvidence = fileCaptureEvidence(captured)
+	}
+	session.EventSeq = captured.EventSeq
 
 	// Set ingested timestamp.
 	ingested := time.Now().UnixMilli()
@@ -2117,16 +2220,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	tmpTranscriptPath := fmt.Sprintf("%s/%s", tmpDir, transcriptFilename)
 	var transcriptData []byte
 
-	if session.TranscriptOrigin == TranscriptOriginFile {
-		rawData, err = p.fs.ReadFile(string(session.SourcePath))
-		if err != nil {
-			result.Error = errors.Join(
-				fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
-				p.fs.RemoveAll(tmpDir),
-			)
-			return workerResult{result: result}
-		}
-	}
+	sourceFingerprint := captured.SourceFingerprint
 	if session.Harness == HarnessStrike && session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
 		rawData, diagnostics = filterStrikeOversizedRecords(rawData, session.SourcePath.String())
@@ -2305,23 +2399,25 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		)
 		return workerResult{result: result}
 	}
-
-	// KNOWN LIMITATION (M11): RemoveAll + renameDir is not atomic. There is a brief
-	// window where the session directory does not exist. For MVP this is acceptable
-	// since ingestion runs as a single sequential process. If concurrent readers are
-	// added, this should use a two-phase approach (rename old to .old, rename new to
-	// final, then remove .old).
-	if _, err := p.fs.Stat(sessionDir); err == nil {
-		if err := p.fs.RemoveAll(sessionDir); err != nil {
-			result.Error = errors.Join(
-				fmt.Errorf("remove old session dir for %s: %w", session.SessionID, err),
-				p.fs.RemoveAll(tmpDir),
-			)
-			return workerResult{result: result}
+	oldMetaPath, lookupErr := p.findMetadataPath(ctx, session)
+	if lookupErr != nil {
+		return fail(errors.Join(lookupErr, p.fs.RemoveAll(tmpDir)))
+	}
+	if oldMetaPath != "" && filepath.Dir(oldMetaPath) != sessionDir {
+		oldDir := filepath.Dir(oldMetaPath)
+		if _, oldErr := p.fs.Stat(oldDir); oldErr == nil {
+			if err := p.moveSessionFiles(oldDir, sessionDir, session.SessionID.String()); err != nil {
+				result.Error = errors.Join(
+					fmt.Errorf("repair session %s project artifacts from %s to %s: %w", session.SessionID, oldDir, sessionDir, err),
+					p.fs.RemoveAll(tmpDir),
+				)
+				return workerResult{result: result}
+			}
 		}
 	}
 
-	// Atomic rename: move temp dir to final location.
+	// Overlay only this session's newly staged files. Existing nested child
+	// artifacts remain in place when a parent is refreshed or re-attributed.
 	// FileSystem.Rename may not move directory contents recursively (MemFS),
 	// so we use a recursive move implementation.
 	if err := p.renameDir(tmpDir, sessionDir); err != nil {
@@ -2343,6 +2439,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	return workerResult{
 		result:               result,
 		meta:                 meta,
+		sourceFingerprint:    sourceFingerprint,
+		fileCaptureEvidence:  captureEvidence,
+		eventSeq:             session.EventSeq,
 		transcriptData:       transcriptData,
 		outputTranscriptPath: outputTranscriptPath,
 		// Carried from the DISCOVERED session, which is the only place it exists.
@@ -2476,11 +2575,72 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 	}
 }
 
+// moveSessionFiles leaves children at their stored locations until they are
+// individually repaired. Only named session artifacts and its debug directory
+// belong to this session; unrelated destination members are never replaced.
+func (p *Pipeline) moveSessionFiles(src, dst, sessionID string) error {
+	if err := p.fs.MkdirAll(dst, defaults.PrivateDirPerm); err != nil {
+		return err
+	}
+	var paths []string
+	if err := p.fs.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == src {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if rel != defaults.DirDebug.String() && !strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(rel, sessionID+"--") || strings.HasPrefix(rel, defaults.DirDebug.String()+"/") {
+			paths = append(paths, rel)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	// Check all collisions before moving any files.
+	for _, rel := range paths {
+		if _, err := p.fs.Stat(filepath.Join(dst, rel)); err == nil {
+			oldData, err := p.fs.ReadFile(filepath.Join(src, rel))
+			if err != nil {
+				return err
+			}
+			newData, err := p.fs.ReadFile(filepath.Join(dst, rel))
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(oldData, newData) {
+				return fmt.Errorf("repair artifacts: destination file %s conflicts with stored session %s; prior files retained; reconcile the duplicate file and retry ingest", filepath.Join(dst, rel), sessionID)
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	for _, rel := range paths {
+		target := filepath.Join(dst, rel)
+		if err := p.fs.MkdirAll(filepath.Dir(target), defaults.PrivateDirPerm); err != nil {
+			return err
+		}
+		if err := p.fs.Rename(filepath.Join(src, rel), target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // renameDir moves a directory tree from src to dst using the FileSystem interface.
 // This is necessary because MemFS.Rename only handles the directory node itself,
 // not its contents. For production (OSFileSystem), os.Rename handles everything.
 // We implement a portable recursive move: create dst dir, move files, remove src dir.
 func (p *Pipeline) renameDir(src, dst string) error {
+	_, destinationStatErr := p.fs.Stat(dst)
+	destinationExisted := destinationStatErr == nil
 	// First, ensure dst parent exists.
 	if err := p.fs.MkdirAll(dst, defaults.PrivateDirPerm); err != nil {
 		return fmt.Errorf("renameDir: mkdir %s: %w", dst, err)
@@ -2511,7 +2671,10 @@ func (p *Pipeline) renameDir(src, dst string) error {
 	})
 
 	if walkErr != nil {
-		return errors.Join(walkErr, p.fs.RemoveAll(dst))
+		if !destinationExisted {
+			return errors.Join(walkErr, p.fs.RemoveAll(dst))
+		}
+		return walkErr
 	}
 
 	// Remove src directory tree.
