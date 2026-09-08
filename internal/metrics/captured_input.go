@@ -52,24 +52,12 @@ func (e *Engine) computeCapturedSession(ctx context.Context, backing ingest.Metr
 	if err != nil {
 		return false, err
 	}
-	identity, err := json.Marshal(struct {
-		Database string
-		Version  int
-		Models   capturedModels
-		Git      capturedGitMetric
-	}{input.DatabaseHash, CurrentComputeVersion, models, git})
+	inputHash, err := metricInputHash(input.DatabaseHash, models, git)
 	if err != nil {
 		return false, err
 	}
-	inputHash := schema.ComputeTranscriptHash(identity)
-	if !e.force && existing != nil && existing.ComputeVersion != nil && *existing.ComputeVersion == CurrentComputeVersion && existing.InputHash != nil && *existing.InputHash == inputHash && existing.OutputHash != nil {
-		outputHash, err := ingest.MetricOutputHash(existing)
-		if err != nil {
-			return false, err
-		}
-		if outputHash == *existing.OutputHash {
-			return false, nil
-		}
+	if !e.force && metricsMatchInput(existing, inputHash) {
+		return false, nil
 	}
 	merged := &ingest.SessionMetrics{SessionID: sid}
 	if input.Seed != nil {

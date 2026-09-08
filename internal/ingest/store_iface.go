@@ -373,6 +373,23 @@ type MetricsRecomputer interface {
 	RecomputeMetrics(ctx context.Context, sessionIDs []SessionID) (int, error)
 }
 
+// SessionMetricsEnsurer proves current metrics for one session after either a
+// successful conditional save or reuse of matching captured inputs and output.
+type SessionMetricsEnsurer interface {
+	EnsureSessionMetrics(context.Context, SessionID) (computed, current bool, err error)
+}
+
+// MetricSession is the bounded metadata needed to scope downstream maintenance.
+type MetricSession struct {
+	SessionID SessionID
+	Harness   Harness
+	StartMS   int64
+}
+
+type MetricSessionReader interface {
+	ListMetricSessions(context.Context, SessionID, int) ([]MetricSession, error)
+}
+
 // InsightsComputer recomputes daily_summary aggregations for the given days.
 type InsightsComputer interface {
 	ComputeInsights(ctx context.Context, days []string) error
