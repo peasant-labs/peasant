@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -35,11 +36,6 @@ var (
 
 const indexDispatchFixturePath = "internal/ingest/testdata/index_dispatch.yaml"
 
-// indexDispatchFixtureFloor is the row count the committed corpus must not fall below.
-// It is a floor EQUAL to the current count rather than a hand-picked minimum:
-// any slack between the two is rows that can be deleted in silence.
-const indexDispatchFixtureFloor = 5
-
 // sourceKindName is the fixture's spelling of an ingest.TranscriptSourceKind.
 //
 // It is its own type with an explicit lookup rather than an integer the YAML
@@ -66,20 +62,20 @@ var fixtureSourceKinds = map[sourceKindName]ingest.TranscriptSourceKind{
 	sourceKindDirectory: ingest.TranscriptSourceDirectory,
 }
 
-// entryPointName is the index method the pipeline is expected to call.
+// entryPointName identifies the captured parser input used by the pipeline.
 type entryPointName string
 
 const (
 	// entryPointBytes is IndexTranscriptBytes: the in-memory path that exists to
 	// avoid a second disk read.
 	entryPointBytes entryPointName = "bytes"
-	// entryPointFile is IndexTranscript: the indexer resolves what it needs itself.
-	entryPointFile entryPointName = "file"
+	// entryPointTree is the canonical OpenCode parser over its captured tree.
+	entryPointTree entryPointName = "tree"
 	// entryPointNone is neither, which is only correct for a refusal.
 	entryPointNone entryPointName = "none"
 )
 
-var allEntryPoints = []entryPointName{entryPointBytes, entryPointFile, entryPointNone}
+var allEntryPoints = []entryPointName{entryPointBytes, entryPointTree, entryPointNone}
 
 // indexOutcomeName is what the run records for the session.
 type indexOutcomeName string
@@ -90,14 +86,17 @@ const (
 )
 
 type indexDispatchDocument struct {
-	ExpectedCaseCount int                 `yaml:"expectedCaseCount"`
-	Cases             []indexDispatchCase `yaml:"cases"`
+	RequiredNames    []string            `yaml:"requiredNames"`
+	DirectoryPreview string              `yaml:"directoryPreview"`
+	LastGoodPreview  string              `yaml:"lastGoodPreview"`
+	Cases            []indexDispatchCase `yaml:"cases"`
 }
 
 type indexDispatchCase struct {
 	Name          string           `yaml:"name"`
 	SourceKind    sourceKindName   `yaml:"sourceKind"`
 	OriginalRoot  presence         `yaml:"originalRoot"`
+	NativeLocator presence         `yaml:"nativeLocator"`
 	Bytes         presence         `yaml:"transcriptBytes"`
 	EntryPoint    entryPointName   `yaml:"entryPoint"`
 	IndexOutcome  indexOutcomeName `yaml:"indexOutcome"`
@@ -112,21 +111,15 @@ const (
 	absent  presence = "absent"
 )
 
-// dispatchExit names one decision indexWithSourceKind can reach.
-//
-// The corpus's coverage is anchored HERE rather than on the source kinds. There
-// are three kinds and six exits, and the two the kind-anchored corpus could not
-// reach were both deletable with the package green: the missing-root refusal, and
-// the file arm's read-from-disk path when no bytes are in hand. Both are edits a
-// maintainer makes while simplifying an arm they believe is redundant, and both
-// reinstate the failure this function exists to prevent.
+// dispatchExit distinguishes input availability before capture. Both file cases
+// reach the bytes parser, independently of whether extraction supplied bytes.
 type dispatchExit string
 
 const (
-	exitDirectoryMissingRoot dispatchExit = "directory refuses a lost provider root"
+	exitDirectoryMissingRoot dispatchExit = "directory refuses unavailable native context"
 	exitDirectoryIndexes     dispatchExit = "directory indexes from its provider tree"
 	exitFileFromBytes        dispatchExit = "file indexes from the bytes in hand"
-	exitFileFromDisk         dispatchExit = "file reads what was written"
+	exitFileFromDisk         dispatchExit = "file captures what was written before parsing bytes"
 	exitUndeclaredRefused    dispatchExit = "an undeclared kind is refused"
 	// exitUnhandledKind is the default arm. It is NOT in requiredDispatchExits and
 	// cannot be: fixtureSourceKinds is exhaustive over AllTranscriptSourceKinds by
@@ -148,7 +141,7 @@ func requiredDispatchExits() []dispatchExit {
 func dispatchExitOf(testCase indexDispatchCase) dispatchExit {
 	switch fixtureSourceKinds[testCase.SourceKind] {
 	case ingest.TranscriptSourceDirectory:
-		if testCase.OriginalRoot == absent {
+		if testCase.OriginalRoot == absent && testCase.NativeLocator == absent {
 			return exitDirectoryMissingRoot
 		}
 		return exitDirectoryIndexes
@@ -188,12 +181,11 @@ func loadIndexDispatchFixture(data []byte) (indexDispatchDocument, error) {
 			"loader=end-of-document check",
 			fmt.Sprintf("fix=remove the second document so the next decode returns EOF: %v", err))
 	}
-	if len(document.Cases) == 0 || document.ExpectedCaseCount != len(document.Cases) {
+	if len(document.Cases) == 0 {
 		return document, indexDispatchRuleError(
-			fmt.Sprintf("declared and actual case counts must match and be non-zero, got expectedCaseCount=%d cases=%d",
-				document.ExpectedCaseCount, len(document.Cases)),
-			"loader=case-count validation",
-			"fix=set expectedCaseCount to the number of cases present")
+			"the fixture has no cases",
+			"loader=case validation",
+			"fix=restore the named dispatch cases")
 	}
 	seen := map[string]bool{}
 	coveredExits := map[dispatchExit]bool{}
@@ -218,7 +210,7 @@ func loadIndexDispatchFixture(data []byte) (indexDispatchDocument, error) {
 			return document, indexDispatchRuleError(
 				fmt.Sprintf("case %q expects the entry point %q, which is not one the pipeline can call", testCase.Name, testCase.EntryPoint),
 				fmt.Sprintf("loader=case index %d", index),
-				fmt.Sprintf("fix=use one of %s, %s, %s", entryPointBytes, entryPointFile, entryPointNone))
+				fmt.Sprintf("fix=use one of %s, %s, %s", entryPointBytes, entryPointTree, entryPointNone))
 		}
 		switch testCase.IndexOutcome {
 		case outcomeError:
@@ -257,13 +249,26 @@ func loadIndexDispatchFixture(data []byte) (indexDispatchDocument, error) {
 				fmt.Sprintf("loader=case index %d", index),
 				fmt.Sprintf("fix=use %s or %s", outcomeIndexed, outcomeError))
 		}
-		for label, value := range map[string]presence{"originalRoot": testCase.OriginalRoot, "transcriptBytes": testCase.Bytes} {
+		for label, value := range map[string]presence{"originalRoot": testCase.OriginalRoot, "nativeLocator": testCase.NativeLocator, "transcriptBytes": testCase.Bytes} {
 			if value != present && value != absent {
 				return document, indexDispatchRuleError(
 					fmt.Sprintf("case %q gives %s the value %q", testCase.Name, label, value),
 					fmt.Sprintf("loader=case index %d", index),
 					"fix=use present or absent; a blank value would decode as neither and silently pick an exit")
 			}
+		}
+		expectedInput := entryPointBytes
+		switch dispatchExitOf(testCase) {
+		case exitDirectoryIndexes:
+			expectedInput = entryPointTree
+		case exitDirectoryMissingRoot, exitUndeclaredRefused:
+			expectedInput = entryPointNone
+		}
+		if testCase.EntryPoint != expectedInput {
+			return document, indexDispatchRuleError(
+				fmt.Sprintf("case %q expects %s but its available source requires %s", testCase.Name, testCase.EntryPoint, expectedInput),
+				"loader=captured-input contract",
+				"fix=expect captured bytes for files, a captured tree for available directory input, or no parser for refusal")
 		}
 		coveredKinds = append(coveredKinds, kind)
 		coveredExits[dispatchExitOf(testCase)] = true
@@ -291,6 +296,9 @@ func loadIndexDispatchFixture(data []byte) (indexDispatchDocument, error) {
 					"argument that cannot work and indexing nothing, quietly")
 		}
 	}
+	if err := testutil.RequireFixtureNames("index dispatch", "case", document.RequiredNames, seen); err != nil {
+		return document, err
+	}
 	return document, nil
 }
 
@@ -313,16 +321,11 @@ func TestLoadIndexDispatchFixture_RejectsACorpusThatSkipsASourceKind(t *testing.
 	}
 }
 
-// TestLoadIndexDispatchFixture_RejectsACorpusThatSkipsAnExit is the guard on the
-// axis this corpus was anchored to wrongly.
-//
-// Coverage used to be asserted per source KIND - three kinds, three rows - while
-// the dispatch makes more decisions than it has kinds. Two arms were therefore
-// unreachable by any row, and both were deletable with the package green.
+// Each input-availability case remains required alongside source-kind coverage.
 func TestLoadIndexDispatchFixture_RejectsACorpusThatSkipsAnExit(t *testing.T) {
 	t.Parallel()
 	_, err := loadIndexDispatchFixture(indexDispatchRejectUncoveredExitData)
-	if err == nil || !strings.Contains(err.Error(), "directory refuses a lost provider root") {
+	if err == nil || !strings.Contains(err.Error(), "directory refuses unavailable native context") {
 		t.Fatalf("error = %v, want rejection of a corpus that covers every source KIND while leaving an exit unreached; "+
 			"that is the shape this corpus had while two arms could be deleted with everything green", err)
 	}
@@ -339,195 +342,219 @@ func TestLoadIndexDispatchFixture_RejectsARefusalThatPinsNoneOfItsWording(t *tes
 
 func TestLoadIndexDispatchFixture_RejectsAnUnknownField(t *testing.T) {
 	t.Parallel()
-	_, err := loadIndexDispatchFixture([]byte("expectedCaseCount: 1\nsomethingElse: true\n"))
+	_, err := loadIndexDispatchFixture([]byte("somethingElse: true\n"))
 	if err == nil || !strings.Contains(err.Error(), "typed YAML fields must match") {
 		t.Fatalf("error = %v, want rejection of an unknown field", err)
 	}
 }
 
+func TestLoadIndexDispatchFixture_RejectsARenamedRequiredCase(t *testing.T) {
+	t.Parallel()
+	data := bytes.Replace(indexDispatchFixtureData,
+		[]byte("name: a-file-source-with-no-bytes-in-hand-reads-what-was-written-instead"),
+		[]byte("name: renamed-retained-input-case"), 1)
+	if _, err := loadIndexDispatchFixture(data); err == nil {
+		t.Fatal("renaming a required input case did not invalidate the corpus")
+	}
+}
+
 // --- the corpus -------------------------------------------------------------
 
-// TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind pins the dispatch
-// contract itself, for every kind an indexer can declare.
-//
-// A directory-source indexer must never be handed transcript bytes. Not because
-// passing them breaks anything today - it does not, the indexer just drops them -
-// but because "the caller passes bytes, the callee discards them" is what made the
-// lost provider root invisible for as long as it was. An argument that is always
-// ignored cannot signal that the thing it was meant to replace has gone missing.
-//
-// It also asserts the converse: a file-source indexer IS handed the bytes, so the
-// second disk read the in-memory path exists to avoid is genuinely avoided; and
-// the refusal: an indexer that declares NOTHING reaches neither method and the run
-// records why. That last arm used to be folded into the file case, where a
-// directory-source harness that writes one JSON session file - which is exactly
-// the shape that broke - would have been handed bytes and stored empty.
+// TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind verifies captured
+// file bytes, canonical native-tree parsing and actionable refusal through Store.
 func TestPipeline_IndexDispatchFollowsTheIndexersDeclaredSourceKind(t *testing.T) {
 	document, err := loadIndexDispatchFixture(indexDispatchFixtureData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The FLOOR, asserted here rather than in the loader because the rejection
-	// fixtures share that loader and are deliberately smaller. The declared count
-	// alone is satisfied by deleting a row and decrementing it in the same edit;
-	// the floor does not move with the corpus, so the count dropping is caught
-	// even when the pair stays self-consistent. Coverage catches a row swapped for
-	// a junk one, a floor catches the count dropping - different failures.
-	if len(document.Cases) < indexDispatchFixtureFloor {
-		t.Fatalf("the index dispatch corpus holds %d cases, below the floor of %d. Restore the case, or lower the floor "+
-			"deliberately and say in the fixture header which behaviour stopped being covered.",
-			len(document.Cases), indexDispatchFixtureFloor)
+	required := []string{
+		"an-undeclared-source-kind-is-refused-rather-than-assumed-to-be-a-file",
+		"a-file-source-is-handed-the-bytes-so-the-second-read-is-really-avoided",
+		"a-file-source-with-no-bytes-in-hand-reads-what-was-written-instead",
+		"a-directory-source-is-never-handed-bytes-it-would-have-to-discard",
+		"a-directory-source-that-lost-its-provider-root-is-refused-not-guessed-at",
+	}
+	if !slices.Equal(document.RequiredNames, required) {
+		t.Fatal("the dispatch required-name manifest changed")
 	}
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			mfs := testutil.NewMemFS()
 			git := testutil.DefaultGitResolver()
-
-			const projectHash = "dispatchprojecthash"
-			session := setupOpenCodeFixture(t, mfs, testutil.TestSessionUUID, projectHash)
+			session := setupOpenCodeFixture(t, mfs, testutil.TestSessionUUID, "dispatchprojecthash")
 			addOpenCodeMessage(t, mfs, testutil.TestSessionUUID, "msg_one", string(ingest.RoleUser), 10, 0)
 			addOpenCodePart(t, mfs, "msg_one", "prt_one")
-			session.ModTime = time.Now().Add(-1 * time.Hour)
-
+			session.ModTime = time.Now().Add(-time.Hour)
+			transcript, err := mfs.ReadFile(session.SourcePath.String())
+			if err != nil {
+				t.Fatal(err)
+			}
 			sid := session.SessionID
 			meta := makeMinimalMeta(t, string(sid))
 			meta.Source.FilePath = session.SourcePath.String()
-			meta.Source.Format = schema.SourceFormat(ingest.SourceFormatJSON)
-			meta.ModelHarness = schema.Harness(defaults.HarnessOpenCode)
-
-			// The row's inputs are DRIVEN, not described. Without this the two arms
-			// the kind-anchored corpus could not reach would still be unreached, and
-			// the new columns would be decoration.
-			providerRoot := session.OriginalRoot
+			meta.Source.Format = ingest.SourceFormatJSON
+			meta.ModelHarness = ingest.HarnessOpenCode
 			if testCase.OriginalRoot == absent {
-				// What the defect looked like: the provider root lost between
-				// discovery and indexing, which is what the directory arm refuses.
 				session.OriginalRoot = ""
 			}
-			indexer := &recordingIndexer{
-				kind:    fixtureSourceKinds[testCase.SourceKind],
-				entries: []schema.SessionEntry{{SessionID: sid, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText}},
+			if testCase.NativeLocator == absent {
+				meta.Source.FilePath = ""
 			}
-			metricsStore := testutil.NewStubMetricsStore()
+			observer := &dispatchRecordingIndexer{recordingIndexer: &recordingIndexer{
+				kind:    fixtureSourceKinds[testCase.SourceKind],
+				entries: []schema.SessionEntry{{SessionID: sid, Harness: session.Harness, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText}},
+			}}
+			var indexer ingest.TranscriptIndexer = observer
+			if testCase.SourceKind == sourceKindDirectory {
+				// The real implementation owns the private captured-tree methods.
+				// An arbitrary directory fake cannot satisfy that input contract.
+				indexer = ingest.NewOpenCodeIndexer(mfs)
+			}
+			fixtureStore := newPipelineFixtureStore(t, nil, nil)
+			var previousEntries []schema.SessionEntry
+			var previousState *ingest.SessionIndexState
+			if testCase.IndexOutcome == outcomeError {
+				if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+					t.Fatal(err)
+				}
+				previousEntries = []schema.SessionEntry{{SessionID: sid, Harness: session.Harness, EntryIndex: 0, Role: ingest.RoleUser, EntryType: ingest.EntryTypeText, ContentPreview: &document.LastGoodPreview}}
+				if err := fixtureStore.IndexSessionEntries(t.Context(), sid, previousEntries); err != nil {
+					t.Fatal(err)
+				}
+				previousEntries, err = fixtureStore.ListEntries(t.Context(), sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				previousState, err = fixtureStore.ReadIndexState(t.Context(), sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			cfg := makePipelineConfig(testOutputDir)
 			cfg.Sources = map[ingest.Harness]ingest.SourceConfig{
-				defaults.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{providerRoot}},
+				defaults.HarnessOpenCode: {Enabled: true},
+			}
+			if session.OriginalRoot != "" {
+				cfg.Sources[defaults.HarnessOpenCode] = ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{session.OriginalRoot}}
 			}
 			adapters := map[ingest.Harness]ingest.AdapterFactory{
-				defaults.HarnessOpenCode: makeStubAdapter(
-					[]ingest.DiscoveredSession{session},
-					map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta},
-				),
+				defaults.HarnessOpenCode: makeStubAdapter([]ingest.DiscoveredSession{session}, map[ingest.SessionID]*ingest.UnifiedMetadata{sid: meta}),
 			}
 			if testCase.Bytes == absent {
-				// Retained reindex naturally has no extraction bytes in hand.
-				// First publish a valid artifact through the real file-only path;
-				// an invalid blank source format is not an indexing fixture.
+				// Retained reindex starts without extraction bytes; capture must
+				// still deliver the committed file bytes directly to the parser.
 				seed, err := ingest.NewPipeline(mfs, git, adapters, cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
 				seeded, err := seed.Run(t.Context())
-				if err != nil || seeded.Summary.New != 1 || seeded.Summary.Errors != 0 {
+				if err != nil || seeded.Summary.Errors != 0 {
 					t.Fatalf("publish retained dispatch input: %+v %v", seeded, err)
 				}
 				cfg.Reindex, cfg.Force = true, true
 			}
-			pipeline, err := ingest.NewPipeline(mfs, git,
-				adapters,
-				cfg,
-				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
-					defaults.HarnessOpenCode: indexer,
-				}),
-				ingest.WithMetricsStore(metricsStore),
+			pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
+				ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{defaults.HarnessOpenCode: indexer}),
+				ingest.WithMetricsStore(fixtureStore),
 			)
 			if err != nil {
-				t.Fatalf("NewPipeline: %v", err)
+				t.Fatal(err)
 			}
-			result, err := pipeline.Run(context.Background())
+			result, err := pipeline.Run(t.Context())
 			if err != nil {
-				t.Fatalf("Run: %v", err)
+				t.Fatal(err)
 			}
-			if result.Summary.New+result.Summary.Updated == 0 {
-				t.Fatalf("nothing was imported or reindexed, so this case cannot say anything about the dispatch; summary=%+v", result.Summary)
-			}
-
-			assertDispatchEntryPoint(t, testCase, indexer)
-			assertDispatchOutcome(t, testCase, result, metricsStore, sid)
-
-			// Whichever path ran, the provider root has to have survived, and the
-			// source path has to be the written copy rather than the provider's.
-			for index, root := range indexer.seenRoots {
-				if root != session.OriginalRoot {
-					t.Errorf("call %d saw OriginalRoot %q, want %q; a directory source resolves its tree from this and a "+
-						"root derived from the source path points into the output tree",
-						index, root, session.OriginalRoot)
+			if testCase.SourceKind != sourceKindDirectory {
+				assertDispatchEntryPoint(t, testCase, observer, transcript)
+				for _, root := range observer.seenRoots {
+					if root != session.OriginalRoot {
+						t.Errorf("file parser lost recorded OriginalRoot: got %q, want %q", root, session.OriginalRoot)
+					}
+				}
+				for _, path := range observer.seenPaths {
+					if path == session.SourcePath {
+						t.Errorf("file parser received the native locator %q instead of the managed transcript locator", path)
+					}
 				}
 			}
-			for index, path := range indexer.seenPaths {
-				if path == session.SourcePath {
-					t.Errorf("call %d was pointed at the PROVIDER source path %q rather than the copy Peasant wrote; the "+
-						"indexer must read what was stored", index, path)
+			assertDispatchOutcome(t, testCase, result, fixtureStore, sid, previousEntries, previousState)
+			if testCase.EntryPoint == entryPointTree {
+				entries, err := fixtureStore.ListEntries(t.Context(), sid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := slices.ContainsFunc(entries, func(entry schema.SessionEntry) bool {
+					return entry.EntryID != nil && *entry.EntryID == "msg_one" && entry.Role == ingest.RoleUser &&
+						entry.ContentPreview != nil && *entry.ContentPreview == document.DirectoryPreview
+				})
+				if !found {
+					t.Fatalf("canonical directory parser did not persist its captured message: %+v", entries)
 				}
 			}
 		})
 	}
 }
 
-// assertDispatchEntryPoint holds the pipeline to calling exactly the method the
-// indexer's declared kind selects, and no other.
-func assertDispatchEntryPoint(t *testing.T, testCase indexDispatchCase, indexer *recordingIndexer) {
+type dispatchRecordingIndexer struct {
+	*recordingIndexer
+	captured [][]byte
+}
+
+var _ ingest.TranscriptIndexer = (*dispatchRecordingIndexer)(nil)
+
+func (indexer *dispatchRecordingIndexer) IndexTranscriptBytes(ctx context.Context, session ingest.DiscoveredSession, data []byte) ([]schema.SessionEntry, error) {
+	indexer.captured = append(indexer.captured, bytes.Clone(data))
+	return indexer.recordingIndexer.IndexTranscriptBytes(ctx, session, data)
+}
+
+func assertDispatchEntryPoint(t *testing.T, testCase indexDispatchCase, indexer *dispatchRecordingIndexer, transcript []byte) {
 	t.Helper()
-	wantBytes, wantFile := 0, 0
-	switch testCase.EntryPoint {
-	case entryPointBytes:
-		wantBytes = 1
-	case entryPointFile:
-		wantFile = 1
+	if indexer.fileCalls > 0 {
+		t.Fatal("file parser reopened a path instead of consuming captured input")
 	}
-	if indexer.bytesCalls != wantBytes {
-		t.Errorf("IndexTranscriptBytes called %d time(s), want %d. The pipeline chose its entry point from what it "+
-			"happened to have loaded rather than from the indexer's declared source kind (%s); an indexer handed an "+
-			"argument it must discard cannot report that what it actually needs has gone missing.",
-			indexer.bytesCalls, wantBytes, testCase.SourceKind)
+	if testCase.EntryPoint == entryPointNone {
+		if len(indexer.captured) != 0 {
+			t.Fatal("refused source kind reached the bytes parser")
+		}
+		return
 	}
-	if indexer.fileCalls != wantFile {
-		t.Errorf("IndexTranscript called %d time(s), want %d (source kind %s)", indexer.fileCalls, wantFile, testCase.SourceKind)
+	if len(indexer.captured) == 0 {
+		t.Fatal("file parser received no captured input")
 	}
-	if wantBytes > 0 && indexer.bytesNonNil != wantBytes {
-		t.Errorf("a file source was called via the bytes path %d time(s) but received EMPTY bytes %d time(s); the "+
-			"in-memory path exists to avoid a second read, so empty bytes make it pointless",
-			indexer.bytesCalls, indexer.bytesCalls-indexer.bytesNonNil)
+	for _, data := range indexer.captured {
+		if !bytes.Equal(data, transcript) {
+			t.Fatalf("file parser received different bytes from the retained transcript: got %q, want %q", data, transcript)
+		}
 	}
 }
 
-// assertDispatchOutcome holds the RUN's record of the session to the corpus.
-//
-// The entry-point counts above prove which method was called; they cannot prove
-// that a refusal was reported rather than swallowed. The refusal arm is the one
-// that matters most here, because its predecessor stored an empty session and
-// reported success, so this reads the index log the run actually produced.
 func assertDispatchOutcome(
 	t *testing.T,
 	testCase indexDispatchCase,
 	result *ingest.PipelineResult,
-	metricsStore *testutil.StubMetricsStore,
+	database *pipelineFixtureStore,
 	sid ingest.SessionID,
+	previousEntries []schema.SessionEntry,
+	previousState *ingest.SessionIndexState,
 ) {
 	t.Helper()
-	entries, listErr := metricsStore.ListEntries(context.Background(), sid)
-	if listErr != nil {
-		t.Fatalf("read the indexed entries back: %v", listErr)
+	entries, err := database.ListEntries(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := database.ReadIndexState(t.Context(), sid)
+	if err != nil || state == nil {
+		t.Fatalf("read actual index state: %+v %v", state, err)
 	}
 	var logged *ingest.IndexLogEntry
 	for i := range result.IndexLog {
-		if result.IndexLog[i].SessionID == sid {
-			logged = &result.IndexLog[i]
+		if result.IndexLog[i].SessionID != sid {
+			t.Fatalf("dispatch indexed an unrelated session: %+v", result.IndexLog[i])
 		}
+		logged = &result.IndexLog[i]
 	}
 	if logged == nil {
-		t.Fatalf("the run recorded no index-log entry for %q, so nothing says what happened to it; index log: %+v",
-			sid, result.IndexLog)
+		t.Fatalf("no index outcome was recorded for %q", sid)
 	}
 	switch testCase.IndexOutcome {
 	case outcomeIndexed:
@@ -535,27 +562,16 @@ func assertDispatchOutcome(
 		if testCase.Bytes == absent {
 			wantOutcome = ingest.IndexOutcomeReindexed
 		}
-		if logged.Outcome != wantOutcome {
-			t.Errorf("the run recorded the outcome %q, want %q; error=%v reason=%v",
-				logged.Outcome, wantOutcome, derefOrEmpty(logged.ErrorMessage), derefOrEmpty(logged.Reason))
-		}
-		if len(entries) == 0 {
-			t.Errorf("no entries were stored for a case the corpus says indexes successfully")
+		if logged.Outcome != wantOutcome || len(entries) == 0 || state.IndexedInputHash == nil {
+			t.Fatalf("captured input was not committed: outcome=%+v entries=%+v state=%+v", logged, entries, state)
 		}
 	case outcomeError:
-		if logged.Outcome != ingest.IndexOutcomeError {
-			t.Errorf("an indexer declaring no source kind produced the outcome %q, want %q. Anything else means the "+
-				"dispatch guessed a source instead of refusing, which is how a session gets stored with zero entries "+
-				"while the import reports success.", logged.Outcome, ingest.IndexOutcomeError)
+		if logged.Outcome != ingest.IndexOutcomeError || !strings.Contains(derefOrEmpty(logged.ErrorMessage), testCase.ErrorContains) {
+			t.Errorf("refusal lacks its actionable source explanation %q: %+v", testCase.ErrorContains, logged)
 		}
-		message := derefOrEmpty(logged.ErrorMessage)
-		if !strings.Contains(message, testCase.ErrorContains) {
-			t.Errorf("the recorded refusal does not say %q, so a reader cannot tell what was wrong or how to fix it; got: %s",
-				testCase.ErrorContains, message)
-		}
-		if len(entries) != 0 {
-			t.Errorf("a refused dispatch still stored %d entries; the refusal is meant to stop indexing, not to annotate it",
-				len(entries))
+		state.ArtifactHash = previousState.ArtifactHash // Publication can mirror metadata; refusal cannot replace the index.
+		if !reflect.DeepEqual(entries, previousEntries) || !reflect.DeepEqual(state, previousState) {
+			t.Fatalf("refused capture changed the last-good index: entries=%+v state=%+v", entries, state)
 		}
 	}
 }
