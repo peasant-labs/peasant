@@ -59,6 +59,7 @@ cases:
   - name: stale-single-harness-without-source-path
     args: [--source-harness=claude-code]
     indexed: [claude-recent, claude-old]
+    refused: [claude-future]
   - name: force-single-harness-preserves-future-producer
     args: [--source-harness=claude-code, --force]
     indexed: [claude-recent, claude-old, claude-current]
@@ -97,6 +98,7 @@ cases:
     args: [--source-harness=claude-code]
     selected_session: *codex_recent
     indexed: [claude-recent, claude-old]
+    refused: [claude-future]
   - name: index-rejects-unknown-harness
     args: [--source-harness=unknown-harness]
     error_contains: 'unknown harness "unknown-harness"'

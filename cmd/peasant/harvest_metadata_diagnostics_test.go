@@ -19,6 +19,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/testutil"
+	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 	"zombiezen.com/go/sqlite/sqlitex"
 )
@@ -75,12 +76,18 @@ func TestHarvestMetadataDiagnosticsTTY(t *testing.T) {
 				t.Fatal(err)
 			}
 			meta.SchemaVersion = fixture.SchemaVersion
+			meta.MetadataHash = schema.ComputeMetadataHash(&meta)
 			files[metaPath], err = json.Marshal(meta)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(metaPath, files[metaPath], 0600); err != nil {
 				t.Fatal(err)
+			}
+			if fixture.SchemaVersion <= ingest.CurrentSchemaVersion {
+				// Settle the compatible artifact change before recording the
+				// no-op baseline or injecting a future stored-schema refusal.
+				reconcileHarvestIndexMetadata(t, db, output, fixtures.SessionID, metaPath, files)
 			}
 			if fixture.StoredSchemaVersion > 0 {
 				conn, err := db.Pool().Take(t.Context())
