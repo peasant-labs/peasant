@@ -15,6 +15,7 @@ type IndexerRegistryOptions struct {
 // the store normalize previews independently from durable full content.
 func NewIndexerRegistry(fs FileSystem, opts IndexerRegistryOptions) map[Harness]TranscriptIndexer {
 	return map[Harness]TranscriptIndexer{
+		HarnessPi:         NewPiIndexer(fs, WithPiFullContent(opts.FullContent)),
 		HarnessClaudeCode: NewClaudeIndexer(fs, WithClaudeFullDepth(true), WithClaudeFullContent(opts.FullContent)),
 		HarnessOpenCode:   NewOpenCodeIndexer(fs, WithOpenCodeFullDepth(true), WithOpenCodeFullContent(opts.FullContent)),
 		HarnessCodex:      NewCodexIndexer(fs, WithCodexFullContent(opts.FullContent)),

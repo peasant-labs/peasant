@@ -183,7 +183,11 @@ func listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.
 	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			entries = append(entries, scanSessionEntry(stmt))
+			entry := scanSessionEntry(stmt)
+			if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+				return err
+			}
+			entries = append(entries, entry)
 			return nil
 		},
 	})
@@ -222,7 +226,9 @@ func listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.
 		if !ok || len(extKVs) == 0 {
 			continue
 		}
-		mergeExtIntoExtra(&entries[i], extKVs)
+		if err := mergeExtIntoExtra(&entries[i], extKVs); err != nil {
+			return nil, err
+		}
 	}
 
 	return entries, nil
@@ -243,7 +249,11 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 	err = sqlitex.ExecuteTransient(conn, sqlListEntriesRange, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID), fromIndex, toIndex},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
-			entries = append(entries, scanSessionEntry(stmt))
+			entry := scanSessionEntry(stmt)
+			if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+				return err
+			}
+			entries = append(entries, entry)
 			return nil
 		},
 	})
@@ -280,7 +290,9 @@ func (s *Store) ListEntriesRange(ctx context.Context, sessionID schema.SessionID
 		if !ok || len(extKVs) == 0 {
 			continue
 		}
-		mergeExtIntoExtra(&entries[i], extKVs)
+		if err := mergeExtIntoExtra(&entries[i], extKVs); err != nil {
+			return nil, err
+		}
 	}
 
 	return entries, nil
@@ -310,7 +322,19 @@ func (s *Store) MaxEntryIndex(ctx context.Context, sessionID schema.SessionID) (
 }
 
 // mergeExtIntoExtra merges ext key-value pairs into the entry's Extra JSON string.
-func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) {
+func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) error {
+	extra, pi, err := ingest.DecodePiExtra(e.Extra)
+	if err != nil {
+		return err
+	}
+	if pi {
+		for key, value := range extKVs {
+			if key != "model_id" || value != string(extra.ModelID) {
+				return fmt.Errorf("store Pi evidence rehydration failed before projection: extension columns disagree with typed Extra; no transcript was emitted; re-index this session to repair its evidence")
+			}
+		}
+		return nil
+	}
 	var existing map[string]any
 	if e.Extra != nil {
 		_ = json.Unmarshal([]byte(*e.Extra), &existing)
@@ -323,10 +347,11 @@ func mergeExtIntoExtra(e *schema.SessionEntry, extKVs map[string]any) {
 	}
 	b, err := json.Marshal(existing)
 	if err != nil {
-		return
+		return err
 	}
 	s := string(b)
 	e.Extra = &s
+	return nil
 }
 
 // scanSessionMetrics reads a SessionMetrics from the current statement.

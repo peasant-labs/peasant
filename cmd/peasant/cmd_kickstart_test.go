@@ -30,6 +30,7 @@ func TestKickstartDiscoveryMountsCurrentOnlyOpenCodeSession(t *testing.T) {
 	cfg.Sources.Codex.Paths = nil
 	cfg.Sources.Cursor.Paths = nil
 	cfg.Sources.Strike.Paths = nil
+	cfg.Sources.Pi.Paths = nil
 
 	inventory, sessions, _ := ftueDiscoverWith(t.Context(), cfg, &ingest.OSFileSystem{}, testutil.NoGitResolver(), nil, nil, nil)
 	discovery := inventory[defaults.HarnessOpenCode]

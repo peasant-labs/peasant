@@ -1,0 +1,66 @@
+cases:
+  - name: raw_metadata_bytes_checked_before_json_compaction
+    data: '{}'
+    padding: 65536
+    error: true
+  - name: redaction_expansion_rechecks_metadata_string_budget
+    data: '{"marker":"expand"}'
+    expand: 65537
+    error: true
+  - name: benign_extension_keys_preserved
+    data: '{"deferred":true,"responseId":"extension-local","thoughtSignature":"extension-local","toolCallId":"extension-local","secret-key":"secret-value"}'
+    want: '{"deferred":true,"responseId":"extension-local","thoughtSignature":"extension-local","toolCallId":"extension-local","safe-key":"safe-value"}'
+  - name: recognized_tool_result_reference_is_not_public_metadata
+    data: '{"role":"toolResult","toolCallId":"private-call","toolName":"custom","content":[{"type":"image","data":"private-image","mimeType":"image/png"}],"isError":false,"timestamp":1,"details":{"safe":true}}'
+    want: '{"role":"toolResult","toolName":"custom","content":[{"type":"image","mimeType":"image/png","bytesOmitted":true,"placeholder":"[image omitted]"}],"isError":false,"timestamp":1,"details":{"safe":true}}'
+  - name: recognized_text_thinking_image_tool_envelopes
+    data: '[{"type":"text","text":"secret","textSignature":"private-signature","safe":true},{"type":"thinking","thinking":"secret","thinkingSignature":"private-signature","redacted":false},{"type":"image","data":"private-image","mimeType":"image/png","extra":"secret"},{"type":"toolCall","id":"private-call","name":"custom","arguments":{"secret-key":"secret-value"},"thoughtSignature":"private-signature","namespace":"custom"}]'
+    want: '[{"type":"text","text":"safe","safe":true},{"type":"thinking","thinking":"safe","redacted":false},{"type":"image","mimeType":"image/png","bytesOmitted":true,"placeholder":"[image omitted]","extra":"safe"},{"type":"toolCall","name":"custom","arguments":{"safe-key":"safe-value"},"namespace":"custom"}]'
+  - name: recognized_assistant_replay_handle_removed
+    data: '{"role":"assistant","api":"test","provider":"test","model":"test","stopReason":"stop","timestamp":1,"usage":{},"content":[],"responseId":"private-response","deferred":{"provider":"test","modelId":"test","api":"test","id":"private-handle","data":{"private":"conversion-state"}},"diagnostics":{"secret":"secret"}}'
+    want: '{"role":"assistant","api":"test","provider":"test","model":"test","stopReason":"stop","timestamp":1,"usage":{},"content":[],"deferred":{"deferred":true},"diagnostics":{"safe":"safe"}}'
+  - name: metadata_key_collision_fails_whole_upload
+    data: '{"secret":"one","safe":"two"}'
+    error: true
+  - name: raw_escaped_duplicate_rejected_before_decode
+    data: '{"key":1,"k\u0065y":2}'
+    error: true
+  - name: raw_unsafe_metadata_integer_rejected
+    data: '{"value":9007199254740992}'
+    error: true
+  - name: raw_metadata_underflow_rejected
+    data: '{"value":1e-999}'
+    error: true
+capabilities:
+  - name: all_capabilities_preserved_in_both_parts
+    advertise: [detailed_usage_v1, native_metadata_v1, observed_model_v1, tool_namespace_v1]
+    uploads: 1
+  - name: absent_capabilities_refuse_upload
+    advertise: []
+    uploads: 0
+  - name: missing_usage_refuses_upload
+    advertise: [native_metadata_v1, observed_model_v1, tool_namespace_v1]
+    uploads: 0
+  - name: missing_metadata_refuses_upload
+    advertise: [detailed_usage_v1, observed_model_v1, tool_namespace_v1]
+    uploads: 0
+  - name: missing_model_refuses_upload
+    advertise: [detailed_usage_v1, native_metadata_v1, tool_namespace_v1]
+    uploads: 0
+  - name: unknown_advertisement_is_ignored
+    advertise: [future_v1, detailed_usage_v1, native_metadata_v1, observed_model_v1, tool_namespace_v1]
+    uploads: 1
+  - name: dry_run_no_negotiation_or_upload
+    advertise: []
+    uploads: 0
+    dry_run: true
+  - name: missing_namespace_refuses_upload_without_effects
+    advertise: [detailed_usage_v1, native_metadata_v1, observed_model_v1]
+    uploads: 0
+namespaces:
+  - name: nonempty_namespace_redacted_separately_from_name
+    namespace: secret.extension
+    want: safe.extension
+  - name: empty_namespace_remains_present_after_redaction
+    namespace: ''
+    want: ''

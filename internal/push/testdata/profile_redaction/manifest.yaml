@@ -1,4 +1,5 @@
 requiredNames:
+  - pi-evidence-validation-failure
   - custom-multiple-categories-concurrent-history
   - custom-static-collision-actual-overlap
   - custom-duplicate-same-category

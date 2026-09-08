@@ -418,14 +418,17 @@ func TestProgressiveProvider_E2E_WebSocket_ComponentSpecific(t *testing.T) {
 
 func TestProgressiveProvider_E2E_WebSocket_SessionDetail(t *testing.T) {
 	t.Parallel()
+	offset := time.FixedZone("fixture-offset", -8*60*60)
 
 	mockProv := &wsMockProvider{
 		sessions: []ingest.Session{
 			{
-				ID:      "session-123",
-				Harness: defaults.HarnessClaudeCode,
+				ID:        "session-123",
+				Harness:   defaults.HarnessClaudeCode,
+				StartTime: time.Date(2026, 1, 2, 3, 4, 5, 0, offset),
+				EndTime:   time.Date(2026, 1, 2, 3, 5, 5, 0, offset),
 				Turns: []ingest.Turn{
-					{Index: 0, Role: "user", Content: "Hello"},
+					{Index: 0, Role: "user", Content: "Hello", Timestamp: time.Date(2026, 1, 2, 3, 4, 6, 0, offset)},
 				},
 			},
 		},
@@ -485,10 +488,12 @@ func TestProgressiveProvider_E2E_WebSocket_SessionDetail(t *testing.T) {
 	if msg["type"] != string(api.MsgSessionDetail) {
 		t.Errorf("message type = %q, want %q", msg["type"], api.MsgSessionDetail)
 	}
-
 	dataMap, ok := msg["data"].(map[string]any)
 	if !ok {
 		t.Fatalf("msg.Data = %T, want map", msg["data"])
+	}
+	if dataMap["startTime"] != "2026-01-02T11:04:05Z" || dataMap["endTime"] != "2026-01-02T11:05:05Z" {
+		t.Fatalf("session_detail timestamps are not canonical UTC instants: start=%v end=%v", dataMap["startTime"], dataMap["endTime"])
 	}
 	if dataMap["id"] != "session-123" {
 		t.Errorf("session ID = %v, want %v", dataMap["id"], "session-123")
@@ -496,6 +501,9 @@ func TestProgressiveProvider_E2E_WebSocket_SessionDetail(t *testing.T) {
 	turns, ok := dataMap["turns"].([]any)
 	if !ok || len(turns) != 1 {
 		t.Errorf("turn count = %v, want 1", turns)
+	}
+	if len(turns) == 1 && turns[0].(map[string]any)["timestamp"] != "2026-01-02T11:04:06Z" {
+		t.Fatal("session_detail turn timestamp changed its instant or retained a local offset")
 	}
 }
 

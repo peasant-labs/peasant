@@ -349,11 +349,12 @@ func (p *StoreDataProvider) SessionByID(ctx context.Context, id string) (*ingest
 	if err != nil {
 		return nil, err
 	}
-	turns, validationErr := transcript.EntriesToTurnsValidated(entries)
+	projection, validationErr := transcript.EntriesToProjectionValidated(entries, transcript.ProjectionOptions{Harness: s.Harness})
 	if validationErr != nil {
-		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after full database hydration and before session-detail emission: %w", id, validationErr)
+		return nil, fmt.Errorf("store adapter: session %q observed model evidence is invalid after ListEntries and before session-detail emission: %w", id, validationErr)
 	}
-	s.Turns = turns
+	s.Turns = projection.Turns
+	s.NativeMetadata = projection.NativeMetadata
 
 	return &s, nil
 }

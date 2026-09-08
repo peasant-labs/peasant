@@ -293,6 +293,7 @@ func renderSelectionCapture(
 			storedThenHarnessTurns(selection.Transcripts, sourceTurns),
 			kickstart.WithSessionPreviewNotice(sourceTurns.Notice),
 			kickstart.WithListingPreviewContextSource(source),
+			kickstart.WithDiscoveryInventory(state.DiscoveryInventory),
 		),
 	})
 	program.SetSize(capture.Width, capture.Height)
@@ -311,7 +312,7 @@ func renderSelectionCapture(
 	if state.Key == selectionStateBranchPreview {
 		program = sendProgramMessage(program, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview || state.Key == selectionStateBudgetPreview {
+	if state.Key == selectionStateSessionPreview || state.Key == selectionStateSourcePreview || state.Key == selectionStateBudgetPreview || state.Key == selectionStatePiPreview {
 		program = advanceToMarkers(program, state.WantContains)
 	}
 	return program.View(), nil

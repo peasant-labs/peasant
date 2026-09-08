@@ -160,6 +160,20 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 		}
 
 		// Run all MetricFuncs and merge results.
+		var nativeName *string
+		for _, entry := range entries {
+			if entry.Harness != schema.HarnessPi {
+				continue
+			}
+			extra, _, decodeErr := ingest.DecodePiEntryExtra(entry)
+			if decodeErr != nil {
+				return computed, decodeErr
+			}
+			if extra.SessionName != nil {
+				nativeName = extra.SessionName
+			}
+		}
+		entries = ingest.ConversationalEntries(entries)
 		merged := &ingest.SessionMetrics{
 			SessionID: sid,
 		}
@@ -179,6 +193,23 @@ func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.Session
 			if result != nil {
 				mergeSessionMetrics(merged, result)
 			}
+		}
+		if nativeName != nil {
+			// An explicit native name (including a clear) overrides generated prose.
+			// Use the same title privacy policy as every outward title consumer.
+			name := ""
+			if *nativeName != "" && e.titles != nil {
+				harness, projectPath, err := e.store.GetTitleContext(ctx, sid)
+				if err != nil {
+					return computed, err
+				}
+				result, err := e.titles.Sanitize(*nativeName, redact.TitleContext{Harness: harness, ProjectPath: projectPath})
+				if err != nil {
+					return computed, err
+				}
+				name = result.Text
+			}
+			merged.TitleGenerated = &name
 		}
 
 		// Set metadata.

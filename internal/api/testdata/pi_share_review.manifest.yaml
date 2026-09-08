@@ -1,0 +1,4 @@
+requiredNames:
+  - selected_metadata_is_scanned_on_share_route
+  - metadata_key_collision_fails_share_scan
+  - recognized_replay_signature_is_not_review_content

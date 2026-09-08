@@ -31,6 +31,8 @@ sources:
     enabled: false
   cursor:
     enabled: false
+  pi:
+    enabled: false
 output:
   basePath: ""
 `

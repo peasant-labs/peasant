@@ -14,6 +14,7 @@ const (
 	HarnessCursor      = schema.HarnessCursor
 	HarnessAntigravity = schema.HarnessAntigravity
 	HarnessStrike      = schema.HarnessStrike
+	HarnessPi          = schema.HarnessPi
 )
 
 // LegacyHarnessClaude and LegacyHarnessGemini are the PRE-RENAME harness

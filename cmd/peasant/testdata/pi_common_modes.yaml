@@ -1,0 +1,18 @@
+requiredNames: [normal, logs-only, dry-run, force, reindex-present, reindex-missing, header-replacement, local-redact-managed-reindex, full-content-overlay, invalid-update-retains-prior, disappeared-source-retains-prior]
+source: |
+  {"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/synthetic/project","timestamp":"2026-01-01T00:00:00Z"}
+  {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"native pipeline body contact synthetic@example.com"}}
+  {"type":"message","id":"a","parentId":"u","message":{"role":"assistant","content":[{"type":"thinking","thinking":"native thinking once"},{"type":"text","text":"native answer"}],"usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0}}}
+  {"type":"custom_message","id":"c","parentId":"a","customType":"context","display":false,"content":"searchable Pi context","details":{"state":true}}
+cases:
+  - {name: invalid-update-retains-prior, stored: true, second: [--force], invalidUpdate: true}
+  - {name: disappeared-source-retains-prior, stored: true, second: [--force], removeSource: true}
+  - {name: full-content-overlay, stored: true, longText: 4000}
+  - {name: local-redact-managed-reindex, stored: true, second: [index, --force], redact: true, removeSource: true}
+  - {name: normal, stored: true}
+  - {name: logs-only, first: [logs], managed: true}
+  - {name: dry-run, first: [--dry-run]}
+  - {name: force, stored: true, second: [--force]}
+  - {name: reindex-present, stored: true, second: [index, --force]}
+  - {name: reindex-missing, stored: true, second: [index, --force], removeSource: true}
+  - {name: header-replacement, stored: true, second: [--force], headerOnly: true}

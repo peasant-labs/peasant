@@ -41,6 +41,14 @@ import (
 // folded in here. Callers must treat a nil map as "keep existing preview
 // content", not as a failure.
 func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) (map[int]string, error) {
+	entries, err := fullContentEntries(ctx, fs, harness, sourcePath, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return contentOverlayFromEntries(entries), nil
+}
+
+func fullContentEntries(ctx context.Context, fs ingest.FileSystem, harness defaults.Harness, sourcePath ingest.ResolvedPath, sessionID schema.SessionID) ([]schema.SessionEntry, error) {
 	indexer, ok := ingest.NewIndexerRegistry(fs, ingest.IndexerRegistryOptions{FullContent: true})[ingest.Harness(harness)]
 	if !ok {
 		return nil, nil
@@ -75,7 +83,7 @@ func BuildContentOverlay(ctx context.Context, fs ingest.FileSystem, harness defa
 		)
 	}
 
-	return contentOverlayFromEntries(sourceEntries), nil
+	return sourceEntries, nil
 }
 
 // contentOverlayFromEntries maps entry_index to the full content preview of
@@ -126,8 +134,10 @@ func contentOverlayFromEntries(sourceEntries []schema.SessionEntry) map[int]stri
 // the common all-short-turns case this gate exists to skip.
 func AnyContentTruncated(entries []schema.SessionEntry) bool {
 	for i := range entries {
-		if p := entries[i].ContentPreview; p != nil && len(*p) >= defaults.ContentPreviewLimit {
-			return true
+		for _, p := range []*string{entries[i].ContentPreview, entries[i].ToolInput, entries[i].ToolOutput} {
+			if p != nil && len(*p) >= defaults.ContentPreviewLimit {
+				return true
+			}
 		}
 	}
 	return false

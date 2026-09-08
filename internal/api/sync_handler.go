@@ -267,13 +267,6 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Read transcript content.
-	content, err := h.readTranscriptContent(r.Context(), sessionID)
-	if err != nil {
-		writeJSONError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
 	// Create redactor at the requested level.
 	xdg := redact.XDGPaths{
 		DataHome:   string(defaults.ResolveDataDirPath()),
@@ -283,6 +276,11 @@ func (h *syncHandler) handleSyncRedactions(w http.ResponseWriter, r *http.Reques
 	redactor, err := redact.NewRedactor(redactLevel, userPatterns, xdg)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "create redactor: "+err.Error())
+		return
+	}
+	content, err := h.readReviewContent(r.Context(), sessionID, redactor)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -455,6 +453,10 @@ func truncateLine(s string) string {
 
 // readTranscriptContent assembles scan input from the same capture as publication.
 func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr string) (string, error) {
+	return h.readReviewContent(ctx, sessionIDStr, nil)
+}
+
+func (h *syncHandler) readReviewContent(ctx context.Context, sessionIDStr string, redactor redact.JSONRedactor) (string, error) {
 	input, err := push.LoadPublicationInput(ctx, h.store, sessionIDStr)
 	if err != nil {
 		return "", err
@@ -465,6 +467,15 @@ func (h *syncHandler) readTranscriptContent(ctx context.Context, sessionIDStr st
 	var fields config.PushFieldVisibility
 	if h.config != nil {
 		fields = h.config.Push.Fields
+	}
+	// Validate the same recursive redaction used by publication before reporting
+	// a successful scan. A metadata key collision must remain a failed scan.
+	redacted, err := push.RedactEntries(redactor, input.Entries)
+	if err != nil {
+		return "", err
+	}
+	if _, err := push.BuildTranscriptContentValidated(&input.Metadata, redacted, defaults.PublishSchemaVersion, fields, input.SessionOrigin); err != nil {
+		return "", err
 	}
 	metadata, err := push.MapMetadata(push.MapOptions{Meta: &input.Metadata, Metrics: input.Quality, Entries: input.Entries, Associations: input.Associations, Fields: fields.Resolve()})
 	if err != nil {

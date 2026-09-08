@@ -192,6 +192,17 @@ func indexSessionEntryWriteSavepoint(ctx context.Context, conn *sqlite.Conn, wri
 	if err := sqlitex.ExecuteTransient(conn, "SAVEPOINT "+savepointName, nil); err != nil {
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
+	// A forced retained-content repair replaces the projection, but still uses
+	// the same proven metadata/index revision as a content-only backfill. Resolve
+	// it inside this savepoint before replacement can invalidate the old proof.
+	if write.Mode == ingest.SessionEntryWriteReplaceAll && write.RequireFullContent && write.CaptureRevision == 0 && write.ContentCapture.SourceAuthority == ingest.ContentSourcePeasantSnapshot {
+		var err error
+		write.CaptureRevision, err = contentBackfillPublicationRevision(conn, write.SessionID)
+		if err != nil {
+			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+			return sessionEntryWriteOutcome{}, rollbackErr, fatal
+		}
+	}
 
 	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
@@ -237,9 +248,18 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 }
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
-	for i := range entries {
-		if entries[i].SessionID != sessionID {
+	for _, entry := range entries {
+		if entry.SessionID != sessionID {
 			return sessionEntryWriteOutcome{}, publicationRepairError("entry session identity differs from index request; existing entries were not changed")
+		}
+		if _, _, err := ingest.DecodePiEntryExtra(entry); err != nil {
+			return sessionEntryWriteOutcome{}, err
+		}
+		if !ingest.IsPiCarrier(entry) {
+			continue
+		}
+		if _, pi, err := ingest.DecodePiExtra(entry.Extra); err != nil || !pi || entry.Role != schema.RoleSystem || entry.EntryType != schema.EntryTypeSystem || entry.ContentPreview != nil || entry.ToolInput != nil || entry.ToolOutput != nil || entry.TokensIn != nil || entry.TokensOut != nil {
+			return sessionEntryWriteOutcome{}, fmt.Errorf("store carrier validation failed during index replacement: private Pi rows must have system role/type and no searchable content or token counts (decode: %v); existing entries were not replaced; repair the Pi indexer and re-index", err)
 		}
 	}
 	outcome := sessionEntryWriteOutcome{}

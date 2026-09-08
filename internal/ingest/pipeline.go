@@ -1900,7 +1900,7 @@ func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, _ time
 		}
 	}
 	// Schema version behind current (DB value): re-ingest.
-	if loc.SchemaVersion < CurrentSchemaVersion {
+	if metadataNeedsRefresh(loc.SchemaVersion) {
 		return DiffUpdated
 	}
 	if loc.PublicationReadiness == PublicationNeedsIngest {
@@ -2052,7 +2052,7 @@ func (p *Pipeline) classifyCapturedSession(ctx context.Context, session Discover
 	}
 
 	// Schema version behind current: re-ingest.
-	if existing.SchemaVersion < CurrentSchemaVersion {
+	if metadataNeedsRefresh(existing.SchemaVersion) {
 		if isActive {
 			return DiffActive, nil
 		}
@@ -2200,6 +2200,7 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 	adapterFS := p.fs
 	var capturedSource *captureFileSystem
 	var data []byte
+	var piConsumedBytes int
 	var err error
 	if session.TranscriptOrigin == TranscriptOriginFile {
 		if reader, ok := p.fs.(sourcePrefixReader); ok && session.SourceFormat == SourceFormatJSONL {
@@ -2208,7 +2209,16 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 			data, err = p.fs.ReadFile(session.SourcePath.String())
 		}
 		if err == nil && session.SourceFormat == SourceFormatJSONL && session.Harness != HarnessStrike {
-			data, err = completeJSONLPrefix(data)
+			if session.Harness == HarnessPi {
+				// Classify the original capture before any lossy prefix removal.
+				// The adapter also receives these bytes so semantic validation and
+				// incomplete-tail diagnostics describe the acquired view.
+				var doc piDocument
+				doc, err = parsePiDocument(ctx, data)
+				piConsumedBytes = doc.consumedBytes
+			} else {
+				data, err = completeJSONLPrefix(data)
+			}
 		}
 		if err != nil {
 			return nil, fmt.Errorf("capture transcript source for %s: %w; prior stored state remains unchanged; restore source readability and retry", session.SessionID, err)
@@ -2241,6 +2251,9 @@ func (p *Pipeline) captureSession(ctx context.Context, session DiscoveredSession
 	meta, err := adapter.ExtractMetadata(ctx, session)
 	if err != nil {
 		return nil, err
+	}
+	if session.Harness == HarnessPi {
+		data = data[:piConsumedBytes]
 	}
 	captured := newMaterializedTranscript(meta, data, session.EventSeq)
 	captured.capturedSource = capturedSource

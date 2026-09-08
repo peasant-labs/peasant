@@ -247,7 +247,7 @@ func (c *VillageClient) PublishAuthoritative(ctx context.Context, request schema
 	if err != nil {
 		return schema.AuthoritativePublishResponse{}, 0, fmt.Errorf("authoritative publish: encode schema request before transport: %w", err)
 	}
-	if _, err = schema.DecodeAuthoritativePublishRequest(metadataJSON); err != nil {
+	if _, err = schema.DecodeAuthoritativePublishMetadataRaw(metadataJSON); err != nil {
 		return schema.AuthoritativePublishResponse{}, 0, fmt.Errorf("authoritative publish: validate schema request before transport: %w", err)
 	}
 	var body bytes.Buffer

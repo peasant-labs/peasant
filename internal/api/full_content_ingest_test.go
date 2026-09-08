@@ -1,12 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +62,9 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 	path := filepath.Join(providerDir, "source.jsonl")
 	encoded, _ := json.Marshal(text)
 	data := strings.NewReplacer("TEXT", string(encoded), "SESSION_ID", id).Replace(fixture.Source)
+	if fixture.IncompleteTail {
+		data += `{"type":"message"`
+	}
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +103,9 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 		return &consumerSource{&testutil.StubAdapter{ProviderValue: harness, Sessions: []ingest.DiscoveredSession{session}, Metadata: map[ingest.SessionID]*ingest.UnifiedMetadata{sid: &meta}}}
 	}}
 	osfs := &ingest.OSFileSystem{}
+	if harness == ingest.HarnessPi {
+		adapters[harness] = ingest.DefaultAdapterRegistry[harness]
+	}
 	if fixture.NativeSource != "" {
 		native := testfixture.MaterializeByName(t, fixture.NativeSource)
 		sourcePath, err = ingest.NewResolvedPath(filepath.Dir(native.Path))
@@ -140,10 +148,64 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 	if err != nil || !found || capture.Status != ingest.ContentCaptureComplete {
 		t.Fatalf("normal ingest did not capture full content: %+v %v", capture, err)
 	}
+	if harness == ingest.HarnessPi {
+		input, err := db.LoadPublicationInput(t.Context(), sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundTail := false
+		for _, warning := range input.Metadata.Diagnostics.Warnings {
+			if warning.ErrorType == "incomplete_tail" {
+				foundTail = true
+				if warning.Location == "" || warning.Remediation == "" {
+					t.Fatal("prefix diagnostic is not actionable")
+				}
+			}
+		}
+		if foundTail != fixture.IncompleteTail {
+			t.Fatal("native accepted-prefix diagnostic changed")
+		}
+		locations, err := db.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		accepted := strings.TrimSuffix(data, `{"type":"message"`)
+		hash := sha256.Sum256([]byte(accepted))
+		if !bytes.Equal(hash[:], locations[sid].SourceFingerprint) {
+			t.Fatal("full native capture fingerprint differs from consumed prefix")
+		}
+		repeat, err := pipeline.Run(t.Context())
+		if err != nil || repeat.Summary.Unchanged != 1 || repeat.Summary.Indexed != 0 {
+			t.Fatalf("stable full native capture reindexed: %+v %v", repeat, err)
+		}
+	}
 	if err := os.RemoveAll(providerDir); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.Backfill {
+		var annotationID string
+		var associations []ingest.CurrentCommitAssociation
+		if harness == ingest.HarnessPi {
+			annotator, err := db.GetAnnotatorIDByName(t.Context(), "human-web")
+			if err != nil {
+				t.Fatal(err)
+			}
+			typeID, err := db.GetAnnotationTypeID(t.Context(), "quality.frustration_signal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			annotationID, err = db.CreateEntryAnnotation(t.Context(), ingest.EntryAnnotationParams{SessionID: sid.String(), EntryIndex: 0, EndIndex: 0, AnnotatorID: annotator, AnnotationTypeID: typeID, Value: fixture.Annotation})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.UpsertSessionCommits(t.Context(), sid, []ingest.CommitInfo{{Hash: fixture.Commit, Message: fixture.Annotation}}); err != nil {
+				t.Fatal(err)
+			}
+			associations, err = db.ListCurrentSessionCommitAssociations(t.Context(), sid)
+			if err != nil || len(associations) != 1 {
+				t.Fatalf("seed native association: %v", err)
+			}
+		}
 		// Reproduce a preview-only pre-upgrade database. The only recovery
 		// source now available is the artifact created by normal ingest above.
 		conn, err := db.Pool().Take(t.Context())
@@ -155,6 +217,9 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 		err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_entry_full_content WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
 		if err == nil {
 			err = sqlitex.ExecuteTransient(conn, `DELETE FROM session_content_captures WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
+		}
+		if err == nil && fixture.Mismatch {
+			err = sqlitex.ExecuteTransient(conn, `UPDATE session_entries SET tool_output='legacy output' WHERE session_id=? AND tool_output IS NOT NULL`, &sqlitex.ExecOptions{Args: []any{string(sid)}})
 		}
 		db.Pool().Put(conn)
 		if err != nil {
@@ -172,6 +237,25 @@ func ingestConsumerSession(t *testing.T, fixture fullConsumerFixture, id, basePa
 		capture, found, err = db.GetSessionContentCapture(t.Context(), sid)
 		if err != nil || !found || capture.Status != ingest.ContentCaptureComplete || capture.SourceAuthority != ingest.ContentSourcePeasantSnapshot {
 			t.Fatalf("retained artifact did not backfill content: %+v %v", capture, err)
+		}
+		if harness == ingest.HarnessPi {
+			annotations, err := db.GetAnnotationsForEntry(t.Context(), sid.String(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kept := false
+			for _, annotation := range annotations {
+				if annotation.ID == annotationID && annotation.Value == fixture.Annotation {
+					kept = true
+				}
+			}
+			if !kept {
+				t.Fatal("native retained recovery lost human annotation anchor")
+			}
+			after, err := db.ListCurrentSessionCommitAssociations(t.Context(), sid)
+			if err != nil || !reflect.DeepEqual(associations, after) {
+				t.Fatal("native retained recovery changed commit associations")
+			}
 		}
 	}
 	// Remove every retained artifact, including generated publication metadata.

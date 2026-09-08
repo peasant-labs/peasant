@@ -705,9 +705,9 @@ func villageScanPhase(t *testing.T, opts harnessOptions, villageURL, apiKey, bac
 	if err != nil {
 		t.Skipf("e2e: village contract content fixture not found (%v) — skipping village-scan", err)
 	}
-	// Plant a high-confidence secret in the transcript body.
-	dirtyContent := append(append([]byte(nil), cleanContent...),
-		[]byte("\nleaked token: ghp_0123456789abcdef0123456789abcdef0123\n")...)
+	// Plant the synthetic secret inside valid transcript JSON. Appending plain
+	// text after the envelope tests syntax rejection, not the server's scanner.
+	dirtyContent := plantTranscriptScanSecret(t, cleanContent)
 
 	// Control: clean publish → 2xx.
 	status, _ := directPublish(t, villageURL, apiKey, metadata, cleanContent)
@@ -720,6 +720,43 @@ func villageScanPhase(t *testing.T, opts harnessOptions, villageURL, apiKey, bac
 	check(t, opts, strings.Contains(body, "Redaction check failed. Potential secrets detected"),
 		"village-scan: 422 body is not scanner.FormatScanErrors:\n%s", body)
 	t.Logf("village-scan: planted secret → %d (FormatScanErrors); clean → 2xx", status)
+}
+
+func plantTranscriptScanSecret(t *testing.T, clean []byte) []byte {
+	t.Helper()
+	// Keep the peer fixture's existing shape, including supported sparse legacy
+	// fields. Only content changes; inventing timestamps to satisfy a newer typed
+	// decoder would hide the compatibility path that the clean control exercises.
+	if err := schema.ScanRawJSONDocument(clean, schema.RawJSONPathPolicy{MaxDocumentBytes: 8 << 20, MaxDocumentDepth: 64}); err != nil {
+		t.Fatalf("village-scan fixture failed raw syntax validation before planting a synthetic secret; restore valid fixture JSON and retry: %v", err)
+	}
+	var envelope, detail map[string]json.RawMessage
+	var turns []map[string]json.RawMessage
+	if err := json.Unmarshal(clean, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(envelope["sessionDetail"], &detail); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(detail["turns"], &turns); err != nil || len(turns) == 0 {
+		t.Fatalf("village-scan fixture needs a transcript turn to plant the synthetic secret; restore the peer fixture and retry: %v", err)
+	}
+	var content string
+	if err := json.Unmarshal(turns[0]["content"], &content); err != nil {
+		t.Fatal(err)
+	}
+	content += "\nleaked token: ghp_0123456789abcdef0123456789abcdef0123\n"
+	encode := func(value any) json.RawMessage {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("village-scan could not encode the planted-secret fixture before publication; repair its JSON values and retry: %v", err)
+		}
+		return raw
+	}
+	turns[0]["content"] = encode(content)
+	detail["turns"] = encode(turns)
+	envelope["sessionDetail"] = encode(detail)
+	return encode(envelope)
 }
 
 // unknownHarnessPhase issues a DIRECT multipart publish whose metadata carries
@@ -980,6 +1017,8 @@ sources:
     paths:
       - %q
   opencode:
+    enabled: false
+  pi:
     enabled: false
   codex:
     enabled: true

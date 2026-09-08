@@ -46,7 +46,8 @@ func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
 
 func completeJSONLPrefix(data []byte) ([]byte, error) {
 	lastComplete := bytes.LastIndexByte(data, '\n')
-	for i, record := range bytes.Split(data[:lastComplete+1], []byte{'\n'}) {
+	records := bytes.Split(data[:lastComplete+1], []byte{'\n'})
+	for i, record := range records {
 		if len(bytes.TrimSpace(record)) > 0 && !json.Valid(record) {
 			return nil, fmt.Errorf("capture JSONL record %d: malformed complete JSON; prior stored snapshot was retained; repair this record and retry ingest", i+1)
 		}
@@ -105,6 +106,12 @@ func (f *OSFileSystem) Stat(path string) (os.FileInfo, error) {
 
 func (f *OSFileSystem) Lstat(path string) (os.FileInfo, error) {
 	return os.Lstat(path)
+}
+
+// EvalSymlinks supplies canonical candidate ordering to file-backed discovery.
+// In-memory filesystems may omit this optional capability when they have no links.
+func (f *OSFileSystem) EvalSymlinks(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
 }
 
 func (f *OSFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {

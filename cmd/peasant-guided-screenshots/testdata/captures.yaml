@@ -19,7 +19,7 @@ sheets:
     kind: selection
     title: "mounted selection: linked submodule project, branch, and session previews"
     theme: dark
-    viewport: {width: 1800, height: 7920}
+    viewport: {width: 1800, height: 10440}
   - name: push
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
@@ -46,6 +46,15 @@ guidedSections:
     wantContains: [how long claude code keeps its transcripts, 30 days]
 
 selectionStates:
+  - key: discovery-notes
+    query: pi fixture
+    discoveryInventory:
+      pi:
+        detail: "1 source(s) could not be fully read: /fixtures/corrupt.jsonl (Pi source skipped during discovery)"
+    wantContains: [discovery notes, corrupt.jsonl, repair]
+  - key: pi-preview
+    query: pi fixture
+    wantContains: ["harness: pi", "pi-context-body", "Pi keeps full"]
   - key: default
     query: ""
     wantContains: ["search:", harness, claude code, cursor]
@@ -106,6 +115,15 @@ selection:
     - {clonePath: /fixtures/worktrees/pasture-a, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-a}
     - {clonePath: /fixtures/worktrees/pasture-b, cohortKey: "submodule:fixture-super:7:pasture", gitDirectory: /fixtures/gitdirs/pasture-b}
   listings:
+    - harness: pi
+      projectName: acme/tool
+      gitRemote: "git@github.com:acme/tool.git"
+      branch: main
+      title: pi fixture session
+      workingDir: /fixtures/worktrees/pasture-a
+      sessionId: 11111111-2222-4333-8444-555555555555
+      source:
+        origin: file
     - harness: claude-code
       projectName: acme/tool
       gitRemote: "git@github.com:acme/tool.git"
@@ -170,6 +188,7 @@ selection:
   # cohort that holds no child at all - so the capture proves what a person
   # will actually see, not merely that the renderer can draw a count.
   subagentDiscovery:
+    - {sessionId: 11111111-2222-4333-8444-555555555555}
     - {sessionId: cc-parent, subagentIds: [cc-child]}
     - {sessionId: cc-child, subagentIds: [cc-grandchild]}
     - {sessionId: cc-grandchild}
@@ -184,6 +203,10 @@ selection:
       - {role: user, entryType: text, content: "scrubbed-body: inspect the fixture safely"}
       - {role: assistant, entryType: text, content: "the fixture transcript is loaded through the normal preview boundary"}
   sourceTranscripts:
+    11111111-2222-4333-8444-555555555555:
+      - '{"type":"session","version":3,"id":"11111111-2222-4333-8444-555555555555","cwd":"/fixtures/worktrees/pasture-a","timestamp":"2026-01-01T00:00:00Z"}'
+      - '{"type":"custom_message","id":"context","parentId":null,"customType":"context","display":false,"content":"pi-context-body: visible Pi context read in place"}'
+      - '{"type":"message","id":"assistant","parentId":"context","message":{"role":"assistant","content":[{"type":"text","text":"Pi keeps full active history"}]}}'
     5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47:
       - '{"type":"user","uuid":"h1","message":{"role":"user","content":"scrubbed-source-body: peasant read in place from the harness file"}}'
       - '{"type":"assistant","uuid":"h2","parentUuid":"h1","message":{"role":"assistant","content":[{"type":"text","text":"peasant copies nothing and imports nothing to show this preview"}]}}'
@@ -193,6 +216,7 @@ selection:
     ses_sourceBudgetVisible: {lineCount: 70, contentBytes: 131072}
   ingested: [cc-imported]
   requiredSessionNames:
+    - 11111111-2222-4333-8444-555555555555
     - cc-parent
     - cc-imported
     - 5c8b1a24-7d63-4e19-9f02-3b6d8c1e5a47
@@ -201,6 +225,7 @@ selection:
     - origin-user-visible
     - ses_sourceBudgetVisible
   requiredHarnessNames:
+    - pi
     - claude-code
     - cursor
   requiredIngestedNames:
@@ -239,6 +264,14 @@ guidedCaptures:
   - {name: retention-light-120x40, section: retention, theme: light, width: 120, height: 40}
 
 selectionCaptures:
+  - {name: selection-discovery-notes-dark-80x24, state: discovery-notes, theme: dark, width: 80, height: 24}
+  - {name: selection-discovery-notes-dark-120x40, state: discovery-notes, theme: dark, width: 120, height: 40}
+  - {name: selection-discovery-notes-light-80x24, state: discovery-notes, theme: light, width: 80, height: 24}
+  - {name: selection-discovery-notes-light-120x40, state: discovery-notes, theme: light, width: 120, height: 40}
+  - {name: selection-pi-preview-dark-80x24, state: pi-preview, theme: dark, width: 80, height: 24}
+  - {name: selection-pi-preview-dark-120x40, state: pi-preview, theme: dark, width: 120, height: 40}
+  - {name: selection-pi-preview-light-80x24, state: pi-preview, theme: light, width: 80, height: 24}
+  - {name: selection-pi-preview-light-120x40, state: pi-preview, theme: light, width: 120, height: 40}
   - {name: selection-default-dark-80x24, state: default, theme: dark, width: 80, height: 24}
   - {name: selection-default-dark-120x40, state: default, theme: dark, width: 120, height: 40}
   - {name: selection-search-dark-80x24, state: search, theme: dark, width: 80, height: 24}

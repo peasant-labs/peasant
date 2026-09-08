@@ -63,7 +63,7 @@ func NewPublishedTurns(entries StoredEntriesFunc, redactor redact.JSONRedactor) 
 		if err != nil {
 			return nil, err
 		}
-		return transcript.EntriesToTurns(redacted), nil
+		return transcript.EntriesToTurnsValidated(redacted)
 	}
 }
 

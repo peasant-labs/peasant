@@ -1,0 +1,8 @@
+requiredNames:
+  - TestSkipGateE2E
+  - TestPullRoundTripE2E
+  - TestHarnessRefreshE2E
+  - TestPublicationConvergenceE2E
+  - TestPostCommitHookPublishesConfiguredRepositoryToRealVillage
+  - TestPrePushHookRefusesUnsupportedRedactionWithoutBlockingThePush
+  - TestPiRoundTripE2E

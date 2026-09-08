@@ -260,6 +260,7 @@ var migrationV24 = createSessionCommands + ";\n" +
 // target repair state. See schema_v49.go.
 
 // migrationV50 adds nullable captured-source evidence. See schema_v50.go.
+// migrationV53 widens the two local harness CHECK mirrors to admit Pi. See schema_v53.go.
 
 // dbSchema is the sqlitemigration schema applied on Open().
 var dbSchema = sqlitemigration.Schema{
@@ -316,6 +317,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV50,
 		migrationV51,
 		migrationV52,
+		migrationV53,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -361,5 +363,7 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V49: CREATE TABLE annotation_target_anchors
 		nil,                        // V50: captured-source evidence
 		nil,                        // V51: durable publication metadata
+		nil,                        // V52: full transcript content
+		{DisableForeignKeys: true}, // V53: widen the two harness CHECK mirrors
 	},
 }

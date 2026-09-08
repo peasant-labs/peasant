@@ -151,6 +151,7 @@ const (
 	HarnessCursor      = schema.HarnessCursor
 	HarnessAntigravity = schema.HarnessAntigravity
 	HarnessStrike      = schema.HarnessStrike
+	HarnessPi          = schema.HarnessPi
 )
 
 // AllHarnesses is the canonical list of harnesses peasant supports for ingestion.

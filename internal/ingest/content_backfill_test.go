@@ -111,7 +111,7 @@ func TestRetainedContentBackfill(t *testing.T) {
 					t.Fatal(err)
 				}
 				if fixture.Mismatch {
-					value := "legacy anchor"
+					value := `{"legacy":"anchor"}`
 					entries[0].Extra = &value
 				}
 				if err := database.IndexSessionEntries(ctx, id, entries); err != nil {

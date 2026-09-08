@@ -127,6 +127,7 @@ JOIN session_entries e ON e.rowid = f.rowid
 JOIN sessions s        ON s.session_id = f.session_id
 LEFT JOIN projects p   ON p.project_hash = s.project_hash
 WHERE session_entries_fts MATCH ?
+  AND COALESCE(e.part_type, '') <> 'pi.carrier'
   AND NOT (
     e.depth > 0
     AND e.content_preview IS NOT NULL

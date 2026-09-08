@@ -65,6 +65,7 @@ type redactionProfileFixture struct {
 	InvalidRule          string                  `yaml:"invalidRule"`
 	FailureSeam          string                  `yaml:"failureSeam"`
 	FailureShape         bool                    `yaml:"failureShape"`
+	PiExtra              *string                 `yaml:"piExtra"`
 	ExpectedFailures     int64                   `yaml:"expectedFailures"`
 }
 
@@ -173,11 +174,15 @@ func TestPipelineRedactionProfile(t *testing.T) {
 			}
 			store := &testutil.StubPushStore{Entries: make(map[ingest.SessionID][]schema.SessionEntry)}
 			for _, sid := range ids {
-				seedMemFS(t, fs, testutil.TestHostSlug, sid, defaults.HarnessClaudeCode)
-				store.Sessions = append(store.Sessions, makeSession(sid, testutil.TestHostSlug, string(defaults.HarnessClaudeCode), nil))
+				harness := defaults.HarnessClaudeCode
+				if fixture.PiExtra != nil {
+					harness = defaults.HarnessPi
+				}
+				seedMemFS(t, fs, testutil.TestHostSlug, sid, harness)
+				store.Sessions = append(store.Sessions, makeSession(sid, testutil.TestHostSlug, string(harness), nil))
 				store.Entries[ingest.SessionID(sid)] = []schema.SessionEntry{{
 					SessionID: schema.SessionID(sid), EntryIndex: 1, Role: schema.RoleAssistant,
-					Harness: schema.Harness(defaults.HarnessClaudeCode), EntryType: schema.EntryTypeText, ContentPreview: &fixture.Input,
+					Harness: harness, EntryType: schema.EntryTypeText, ContentPreview: &fixture.Input, Extra: fixture.PiExtra,
 				}}
 			}
 			cfg := baseTestConfig()
@@ -207,7 +212,7 @@ func TestPipelineRedactionProfile(t *testing.T) {
 			if fixture.ReportUnavailable {
 				redactor = profileNoReportRedactor{TextRedactor: r}
 			}
-			if fixture.FailureSeam != "" {
+			if fixture.FailureSeam != "" && fixture.PiExtra == nil {
 				var broken any = math.NaN()
 				if fixture.FailureShape {
 					broken = map[string]any{"not": "entries"}
@@ -362,7 +367,15 @@ func TestPipelineRedactionProfile(t *testing.T) {
 				}
 			}
 			requireRedactionTraceMetrics(t, trace.Bytes(), doc.Redaction)
-			if doc.Redaction.EntriesScanned != int64(len(ids)) || doc.Redaction.BytesScanned < int64(len(fixture.Input)*len(ids)) {
+			minimumBytes := int64(len(fixture.Input) * len(ids))
+			if fixture.PiExtra != nil {
+				// Invalid private evidence fails before any engine string scan.
+				minimumBytes = 0
+				if doc.Redaction.BytesScanned != 0 {
+					t.Errorf("invalid Pi evidence reached the engine: %+v", doc.Redaction)
+				}
+			}
+			if doc.Redaction.EntriesScanned != int64(len(ids)) || doc.Redaction.BytesScanned < minimumBytes {
 				t.Errorf("missing scanned input aggregates: %+v", doc.Redaction)
 			}
 			if len(doc.Spans) == 0 || trace.Len() == 0 {

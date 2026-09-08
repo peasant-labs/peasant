@@ -151,17 +151,12 @@ func (p *Pipeline) backfillContentSession(ctx context.Context, store ContentBack
 }
 
 func captureHarness(raw string) (Harness, error) {
-	switch raw {
-	case string(HarnessClaudeCode):
-		return HarnessClaudeCode, nil
-	case string(HarnessOpenCode):
-		return HarnessOpenCode, nil
-	case string(HarnessCodex):
-		return HarnessCodex, nil
-	case string(HarnessCursor):
-		return HarnessCursor, nil
-	case string(HarnessStrike):
-		return HarnessStrike, nil
+	// The parser registry owns the supported capture inventory. Match its typed
+	// keys at this raw-string boundary rather than maintaining a second menu.
+	for harness := range NewIndexerRegistry(nil, IndexerRegistryOptions{}) {
+		if harness.String() == raw {
+			return harness, nil
+		}
 	}
 	return "", fmt.Errorf("content capture: unsupported harness %q; select a supported source before retrying", raw)
 }

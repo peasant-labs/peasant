@@ -1,4 +1,13 @@
 cases:
+  - name: pi-evidence-validation-failure
+    input: private-evidence-must-not-enter-profile
+    piExtra: '{"kind":"pi.usage","harness":"pi","namespace":null}'
+    failureSeam: entries
+    expectedCode: redaction_entries_validation
+    diagnosticContains: [publication was refused, Correct]
+    rules: {}
+    categories: {}
+    expectedFailures: 1
   - name: custom-multiple-categories-concurrent-history
     input: 'CUSTOMPII CUSTOMSECRET CUSTOMPATH CUSTOMPROJECT contact zzmail@example.test /data/zzxdg/main.go'
     xdgDataHome: /data/zzxdg/share

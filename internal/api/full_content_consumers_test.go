@@ -2,15 +2,20 @@ package api
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
 	"github.com/peasant-labs/peasant/internal/config"
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/export"
@@ -33,6 +38,9 @@ type fullConsumerFixture struct {
 	ToolFile                                string
 	Backfill                                bool
 	StructuredOutput                        bool
+	IncompleteTail                          bool
+	Mismatch                                bool
+	Annotation, Commit                      string
 	Roles                                   []schema.Role
 	Repetitions                             int
 }
@@ -43,8 +51,14 @@ func loadFullConsumerFixtures(t *testing.T) []fullConsumerFixture {
 		RequiredNames []string              `yaml:"requiredNames"`
 		Cases         []fullConsumerFixture `yaml:"cases"`
 	}
-	if err := yaml.Unmarshal(fullConsumerYAML, &fixture); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(fullConsumerYAML))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		t.Fatalf("trailing full-content fixture document: %v", err)
 	}
 	seen := map[string]bool{}
 	for _, c := range fixture.Cases {
@@ -53,10 +67,12 @@ func loadFullConsumerFixtures(t *testing.T) []fullConsumerFixture {
 		}
 		seen[c.Name] = true
 	}
-	for _, name := range fixture.RequiredNames {
-		if !seen[name] {
-			t.Fatalf("missing required fixture %s", name)
-		}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	if err := testutil.ValidateRequiredNames(testutil.RequiredNamesManifest{RequiredNames: fixture.RequiredNames}, names, "full-content consumers"); err != nil {
+		t.Fatal(err)
 	}
 	return fixture.Cases
 }
@@ -112,7 +128,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 				if err := db.IndexSessionEntries(t.Context(), sid, entries); err != nil {
 					t.Fatal(err)
 				}
-			case "chunk", "projection":
+			case "chunk", "projection", "hash":
 				conn, err := db.Pool().Take(t.Context())
 				if err != nil {
 					t.Fatal(err)
@@ -120,6 +136,9 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 				query := `UPDATE session_entry_full_content_chunks SET data=zeroblob(byte_length) WHERE session_id=? AND entry_index=1 AND chunk_index=0`
 				if fixture.Damage == "projection" {
 					query = `UPDATE session_entries SET tool_output='damaged' WHERE session_id=? AND entry_index=1`
+				}
+				if fixture.Damage == "hash" {
+					query = `UPDATE session_content_captures SET full_capture_sha256=lower(hex(zeroblob(32))) WHERE session_id=?`
 				}
 				err = sqlitex.ExecuteTransient(conn, query, &sqlitex.ExecOptions{Args: []any{id}})
 				db.Pool().Put(conn)
@@ -173,7 +192,7 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if !strings.Contains(r.URL.Path, "/transcripts/publish") {
-					_, _ = w.Write([]byte(`{}`))
+					_ = json.NewEncoder(w).Encode(schema.SchemaVersionResponse{ContentCapabilities: schema.AllContentCapabilities})
 					return
 				}
 				captured.record(r)
@@ -202,6 +221,9 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 			} else {
 				if detailErr != nil || exportErr != nil {
 					t.Fatalf("detail=%v export=%v", detailErr, exportErr)
+				}
+				if fixture.Harness == schema.HarnessPi.String() {
+					assertFullPiWebSocket(t, provider, detail)
 				}
 				if fixture.Source == "" && (len(session.Turns) != 2 || len(detail.Turns) != 2) {
 					t.Fatal("full conversation structure lost")
@@ -253,5 +275,57 @@ func TestFullContentConsumersDatabaseAuthority(t *testing.T) {
 				t.Fatalf("authoritative consumers attempted %d denied transcript reads", denied.reads)
 			}
 		})
+	}
+}
+
+func assertFullPiWebSocket(t *testing.T, provider *StoreDataProvider, expected *schema.SessionDetailPayload) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	hub := NewHub(provider)
+	go hub.Run(ctx)
+	server := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
+	defer server.Close()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(8 << 20)
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(ClientMessage{Type: MsgSubscribe, Channels: []ChannelSubscription{{Topic: TopicSessionDetail, ID: expected.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, request); err != nil {
+		t.Fatal(err)
+	}
+	_, raw, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var message struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.Type != string(MsgSessionDetail) {
+		t.Fatalf("expected full native detail, got %s", message.Type)
+	}
+	detail, err := schema.DecodeSessionDetailPayloadRaw(message.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(detail.Turns, expected.Turns) || !reflect.DeepEqual(detail.NativeMetadata, expected.NativeMetadata) || !detail.StartTime.Equal(expected.StartTime) || !detail.EndTime.Equal(expected.EndTime) {
+		t.Fatal("full native WebSocket/export projection diverged after source removal")
+	}
+	for _, turn := range detail.Turns {
+		if turn.Timestamp.Location() != time.UTC {
+			t.Fatal("native WebSocket turn timestamp is not canonical UTC")
+		}
 	}
 }

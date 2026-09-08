@@ -1,4 +1,4 @@
-expected_village_ref: ada9176cfcc02f91fc21513e4c1712b791c9a3e1
+expected_village_ref: 830cbcbe3cd00613d04bd8f6a2ae9f1db955d503
 e2e:
   required_triggers:
     - push
@@ -28,6 +28,7 @@ e2e:
     - make e2e
     - E2E_TEST_FLAGS=-v
   asserted_tests:
+    - TestPiRoundTripE2E
     - TestSkipGateE2E
     - TestPullRoundTripE2E
     - TestHarnessRefreshE2E

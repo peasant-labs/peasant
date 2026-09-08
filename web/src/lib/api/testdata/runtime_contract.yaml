@@ -4,7 +4,7 @@ validValues:
   fileChangeStatuses: [M, A, D, R]
   diffLineKinds: [context, add, del]
   changeBindings: [bound, candidate]
-  harnesses: [claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike]
+  harnesses: [claude-code, gemini-cli, codex, opencode, cursor, antigravity, strike, pi]
 invalidCases:
   - {name: map graph rejects unknown node kind, operation: map-graph, field: 'nodes[].kind', value: subsystem, expectedError: 'nodes\[\]\.kind.*decodeMapGraph'}
   - {name: map graph rejects unknown violation kind, operation: map-graph, field: 'violations[].kind', value: sideways, expectedError: 'violations\[\]\.kind.*decodeMapGraph'}

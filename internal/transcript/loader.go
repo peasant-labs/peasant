@@ -48,9 +48,9 @@ func LoadSessionDetail(ctx context.Context, r ingest.FullSessionEntryReader, ses
 		return nil, err
 	}
 	copy := *session
-	copy.Turns, err = EntriesToTurnsValidated(entries)
+	projection, err := EntriesToProjectionValidated(entries, ProjectionOptions{Harness: session.Harness})
 	if err != nil {
 		return nil, err
 	}
-	return SessionToDetailValidated(&copy)
+	return SessionToDetailValidatedWithProjection(&copy, projection)
 }
