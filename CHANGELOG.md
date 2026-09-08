@@ -20,19 +20,20 @@ Release, which holds the signed artifacts and checksums.
   recorded. Sessions without a recorded branch keep the existing three-day
   window, and a branch that can no longer be resolved falls back to that window
   with a diagnostic (#324).
-- Active sessions are captured by default with source snapshots and tracked
-  upstream project attribution. Repeated ingest can use those snapshots without
-  opening the store, and explicit publications update through their existing
-  receipts (#331).
+- Active sessions are ingested by default, and repeated runs compare captured
+  source evidence, including store-free harvest logs (#331).
 
 ### Fixed
 - OpenCode v2 and beta storage layouts ingest authoritative session metadata,
-  normalize message identities, preserve tool output, and recover live legacy
-  sessions from mixed stores (#310).
+  normalize message identities, decode supported native messages, and discover
+  live sessions across mixed V1 and V2 stores (#310).
 - Harvest cancellation now stops in-flight ingest and diff work while harvest
   and kickstart share consistent progress and completion behavior (#316).
 - Ingest preserves sessions while repairing upstream attribution and remains
   idempotent when captured source state has not changed (#331).
+- When content or identity changes, the next user-initiated publication updates
+  the same existing Village transcript through its receipt without requiring
+  `--force` (#331).
 
 ### Database
 - Store migration V50 records captured-source fingerprints for durable change
