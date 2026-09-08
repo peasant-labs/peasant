@@ -37,7 +37,7 @@ WHERE s.session_id = ? LIMIT 1`
     computed_at, compute_version,
     cost_input_usd, cost_output_usd, cost_reasoning_usd,
     cost_cache_read_usd, cost_cache_write_usd, cost_total_usd, cost_model_id,
-    scope
+    scope, input_hash, output_hash
 FROM session_metrics WHERE session_id = ?`
 
 	sqlMetricsExist = `SELECT compute_version FROM session_metrics WHERE session_id = ?`
@@ -353,6 +353,14 @@ func scanSessionMetrics(stmt *sqlite.Stmt) *ingest.SessionMetrics {
 		SessionID: schema.SessionID(stmt.ColumnText(0)),
 	}
 	m.ComputeVersion = &cv
+	if stmt.ColumnType(43) != sqlite.TypeNull {
+		value := stmt.ColumnText(43)
+		m.InputHash = &value
+	}
+	if stmt.ColumnType(44) != sqlite.TypeNull {
+		value := stmt.ColumnText(44)
+		m.OutputHash = &value
+	}
 
 	// Column 1: turn_count (nullable INTEGER)
 	if stmt.ColumnType(1) != sqlite.TypeNull {
