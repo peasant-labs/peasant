@@ -177,7 +177,11 @@ func seedEntryCarrying(t *testing.T, dir, sessionID, content string) {
 	}
 	defer db.Close()
 	preview := content
-	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), []schema.SessionEntry{{
+	input, err := db.LoadPublicationInput(t.Context(), ingest.SessionID(sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.SeedReadyPublication(t, db, &input.Metadata, []schema.SessionEntry{{
 		SessionID:      schema.SessionID(sessionID),
 		EntryIndex:     1,
 		Depth:          0,
@@ -185,7 +189,5 @@ func seedEntryCarrying(t *testing.T, dir, sessionID, content string) {
 		Harness:        schema.Harness(defaults.HarnessClaudeCode),
 		EntryType:      schema.EntryTypeText,
 		ContentPreview: &preview,
-	}}); err != nil {
-		t.Fatalf("index entries: %v", err)
-	}
+	}})
 }

@@ -422,6 +422,9 @@ func renderPushCapture(fixture pushFixture, capture pushCaptureFixture) (string,
 		// One row down from the opening project row is its session, which is
 		// what makes the pane draw a transcript.
 		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyDown})
+	case pushStateNeedsIngest:
+		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyDown})
+		current = sendPushMessage(current, tea.KeyPressMsg{Code: tea.KeyDown})
 	case pushStateConsent:
 		current = sendPushMessage(acceptPushStart(current), tea.KeyPressMsg{Code: tea.KeyEnter})
 	case pushStateReceipt:
@@ -486,6 +489,11 @@ func pushWizardSessions(fixture pushFixture) []push.PushWizardSession {
 		if row.Withheld {
 			candidate.Action = push.PushExclude
 			candidate.Locked = true
+		}
+		if row.NeedsIngest {
+			candidate.Action = push.PushExclude
+			candidate.NeedsIngest = true
+			candidate.Meta = nil
 		}
 		sessions = append(sessions, candidate)
 	}

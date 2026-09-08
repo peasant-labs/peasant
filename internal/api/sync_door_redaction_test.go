@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/config"
@@ -39,6 +41,7 @@ const syncDoorSecret = "sk-ant-api03-SYNCDOORKEY00000000000x"
 // the transcript text leaves in more than one of them.
 func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 	captured := &syncCapturedPublish{parts: map[string]string{}}
+	var publications atomic.Int32
 	village := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if !strings.Contains(r.URL.Path, "/transcripts/publish") {
@@ -46,13 +49,18 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 			return
 		}
 		captured.record(r)
-		receipt, err := testutil.AuthoritativePublishReceipt([]byte(captured.snapshot()["metadata"]), true)
+		created := publications.Add(1) == 1
+		receipt, err := testutil.AuthoritativePublishReceipt([]byte(captured.snapshot()["metadata"]), created)
 		if err != nil {
 			t.Errorf("build authoritative receipt: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusCreated)
+		if created {
+			w.WriteHeader(http.StatusCreated)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
 		_, _ = w.Write(receipt)
 	}))
 	t.Cleanup(village.Close)
@@ -70,20 +78,54 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 
 	cfg := config.BaseConfig()
 	cfg.Output.BasePath = basePath
-	handler := &syncHandler{store: db, config: cfg}
+	ctx, cancel := context.WithCancel(context.Background())
+	server := NewServer(ServerConfig{Port: 0, Store: db, Config: cfg})
+	if err := server.Listen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-errCh; err != nil {
+			t.Error(err)
+		}
+	})
+	baseURL := "http://" + server.Addr().String()
+	status, err := http.Get(baseURL + defaults.RouteSyncSessions.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusBody, _ := io.ReadAll(status.Body)
+	status.Body.Close()
+	if status.StatusCode != http.StatusOK || !bytes.Contains(statusBody, []byte(`"syncStatus":"new"`)) {
+		t.Fatalf("DB-ready session held without sidecar: %s", statusBody)
+	}
+	scan, err := http.Get(baseURL + defaults.RouteSyncRedactions.String() + "?session_id=" + sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanBody, _ := io.ReadAll(scan.Body)
+	scan.Body.Close()
+	if scan.StatusCode != http.StatusOK || !bytes.Contains(scanBody, []byte(syncDoorSecret)) {
+		t.Fatalf("registered scan missed stored entry: status=%d %s", scan.StatusCode, scanBody)
+	}
 
 	body, err := json.Marshal(pushRequest{SessionIDs: []string{sessionID}, Visibility: "private"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body))
-	response := httptest.NewRecorder()
-	handler.handleSyncPush(response, request)
+	response, err := http.Post(baseURL+defaults.RouteSyncPush.String(), "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseBody, _ := io.ReadAll(response.Body)
+	response.Body.Close()
 
 	parts := captured.snapshot()
 	if len(parts) == 0 {
 		t.Fatalf("the village received no publish, so this test cannot say anything about what the door sends. "+
-			"status=%d body=%s", response.Code, response.Body.String())
+			"status=%d body=%s", response.StatusCode, responseBody)
 	}
 	sawContent := false
 	for name, part := range parts {
@@ -104,6 +146,28 @@ func TestHandleSyncPush_TheShareDoorGivesThePipelineARedactor(t *testing.T) {
 	if !sawContent {
 		t.Errorf("no captured part carries a redacted placeholder, so the planted content never reached the wire and the " +
 			"sweep above ran over a body that could not leak")
+	}
+	for _, name := range []string{"metadata", "transcript_file"} {
+		if !strings.Contains(parts[name], "ANTHROPIC_KEY") {
+			t.Fatalf("%s missing redacted stored entry: %v", name, parts)
+		}
+	}
+	first, err := db.Publication(ctx, village.URL, "user-1", testutil.TestProjectHash, sessionID)
+	if err != nil || first == nil {
+		t.Fatalf("receipt missing: %v", err)
+	}
+	response, err = http.Post(baseURL+defaults.RouteSyncPush.String(), "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	second, err := db.Publication(ctx, village.URL, "user-1", testutil.TestProjectHash, sessionID)
+	if err != nil || second == nil || publications.Load() != 2 {
+		t.Fatalf("repeat publication failed: count=%d receipt=%+v err=%v", publications.Load(), second, err)
+	}
+	if second.Receipt.RequestOperationFingerprint != first.Receipt.RequestOperationFingerprint {
+		t.Fatal("repeat changed publication identity")
 	}
 }
 
@@ -191,11 +255,8 @@ func seedSyncDoorSession(t *testing.T, sessionID, basePath string) *store.Store 
 	meta.Project = ingest.ProjectInfo{Hash: testutil.TestProjectHash, Name: "myapp", FilePath: "/home/test/myapp"}
 	meta.Stats = ingest.StatsInfo{TurnCount: 5, ToolCallCount: 3, DurationMs: 60000, TokensIn: 100, TokensOut: 50}
 	meta.Git = ingest.GitContext{Remote: &remote, Branch: &branch}
-	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: &meta}}); err != nil {
-		t.Fatal(err)
-	}
 	preview := "here is the key " + syncDoorSecret + " thanks"
-	if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sessionID), []schema.SessionEntry{{
+	testutil.SeedReadyPublication(t, db, &meta, []schema.SessionEntry{{
 		SessionID:      schema.SessionID(sessionID),
 		EntryIndex:     1,
 		Depth:          0,
@@ -203,18 +264,12 @@ func seedSyncDoorSession(t *testing.T, sessionID, basePath string) *store.Store 
 		Harness:        schema.Harness(defaults.HarnessClaudeCode),
 		EntryType:      schema.EntryTypeText,
 		ContentPreview: &preview,
-	}}); err != nil {
+	}})
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	sessionDir := filepath.Join(basePath, "github.com-user-repo", sessionID)
-	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(meta)
+	db, err = store.Open(dbPath)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, sessionID+"--metadata.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return db

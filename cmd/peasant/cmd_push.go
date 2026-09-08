@@ -356,8 +356,8 @@ func BuildPushCommand() *cobra.Command {
 						Sources:        cfg.Push.Sources,
 					}
 					wizardIDs, wizErr := runPushWizard(
-						ctx, db, fs, theme.New(themeModeFor(cfg)),
-						cfg.Output.BasePath, wizQuery, runCfg.Selection,
+						ctx, db, theme.New(themeModeFor(cfg)),
+						wizQuery, runCfg.Selection,
 						push.NewPublishedTurns(storedSessionEntries(ctx, db), pushRedactor),
 					)
 					if wizErr != nil {
@@ -412,7 +412,7 @@ func BuildPushCommand() *cobra.Command {
 							// protection this push actually applies rather than a
 							// flag recorded by an earlier import.
 							printRedactionReport(cmd.ErrOrStderr(),
-								buildRedactionRecord(reportSessions, cfg.Output.BasePath, fs, effectiveLevel))
+								buildRedactionRecord(cmd.Context(), reportSessions, db, effectiveLevel))
 						}
 					}
 				}
@@ -1922,6 +1922,13 @@ func printErrorSummaryTable(w io.Writer, result *push.PushResult) {
 	}
 }
 
+type publicationWizardStore interface {
+	push.CandidateStore
+	ingest.PublicationInputReader
+}
+
+var _ publicationWizardStore = (*store.Store)(nil)
+
 // buildPushWizardSessions assembles the exact []push.PushWizardSession the TUI
 // will display: it runs the SHARED base query (QueryPushCandidates), partitions
 // the rows with command-prepared branch-aware decisions (WizardCandidates — kept
@@ -1934,9 +1941,7 @@ func printErrorSummaryTable(w io.Writer, result *push.PushResult) {
 // uses, so the wizard view and the dry-run/real push set cannot diverge.
 func buildPushWizardSessions(
 	ctx context.Context,
-	db push.CandidateStore,
-	fs ingest.FileSystem,
-	outputBasePath string,
+	db publicationWizardStore,
 	q push.PushCandidateQuery,
 	selection *push.SessionSelection,
 ) ([]push.PushWizardSession, error) {
@@ -1948,21 +1953,12 @@ func buildPushWizardSessions(
 	wizSessions := push.WizardCandidates(sessions, selection)
 	for i := range wizSessions {
 		sess := wizSessions[i].Row
-		// Load metadata for redaction status (best-effort). Resolved via the
-		// shared ingest helper so subagent sessions read from the correct
-		// {parentID}/subagents/{id} location.
-		metaPath := ingest.SessionMetadataPath(
-			outputBasePath, sess.HostSlug, sess.SessionID, sess.ParentID,
-		)
-		metaBytes, readErr := fs.ReadFile(metaPath)
+		input, readErr := push.LoadReadyPublicationInput(ctx, db, sess.SessionID)
 		if readErr != nil {
+			wizSessions[i].NeedsIngest = true
 			continue
 		}
-		var meta schema.UnifiedMetadata
-		if jsonErr := json.Unmarshal(metaBytes, &meta); jsonErr != nil {
-			continue
-		}
-		wizSessions[i].Meta = &meta
+		wizSessions[i].Meta = &input.Metadata
 	}
 	return wizSessions, nil
 }
@@ -1973,15 +1969,13 @@ func buildPushWizardSessions(
 // slice if there was nothing to show).
 func runPushWizard(
 	ctx context.Context,
-	db push.CandidateStore,
-	fs ingest.FileSystem,
+	db publicationWizardStore,
 	th theme.Theme,
-	outputBasePath string,
 	q push.PushCandidateQuery,
 	selection *push.SessionSelection,
 	turns push.PublishedTurnsFunc,
 ) ([]string, error) {
-	wizSessions, err := buildPushWizardSessions(ctx, db, fs, outputBasePath, q, selection)
+	wizSessions, err := buildPushWizardSessions(ctx, db, q, selection)
 	if err != nil {
 		return nil, err
 	}
@@ -2015,7 +2009,11 @@ func storedSessionEntries(ctx context.Context, db *store.Store) push.StoredEntri
 		if err != nil {
 			return nil, fmt.Errorf("preview session %q: %w", sessionID, err)
 		}
-		return db.ListEntries(ctx, id)
+		input, err := push.LoadReadyPublicationInput(ctx, db, string(id))
+		if err != nil {
+			return nil, err
+		}
+		return input.Entries, nil
 	}
 }
 
@@ -2144,22 +2142,20 @@ type redactionRecord struct {
 	// "stale" case: the outward redaction always runs the current rules,
 	// whatever an older import happened to record.
 	RuleSetVersion string
-	// MissingMetadataCount is the number of sessions whose metadata file could
-	// not be read or parsed. These are reported because the push itself needs
-	// that file, so it is an early warning rather than a redaction fact.
+	// MissingMetadataCount counts sessions without publishable database inputs.
+	// It is an early warning, not a claim about redaction coverage.
 	MissingMetadataCount int
 }
 
 // buildRedactionRecord assembles the record for a push at the given level.
 //
-// The only thing it reads from disk is whether each session's metadata file can
-// be read at all. It deliberately does NOT read RedactionInfo: that field
+// It checks database capture readiness, not RedactionInfo: that field
 // describes what happened at import, and what happens at import is no longer
 // what is published.
 func buildRedactionRecord(
+	ctx context.Context,
 	sessions []ingest.PushSessionRow,
-	outputBasePath string,
-	fs ingest.FileSystem,
+	db ingest.PublicationInputReader,
 	level redact.RedactionLevel,
 ) redactionRecord {
 	record := redactionRecord{
@@ -2168,16 +2164,8 @@ func buildRedactionRecord(
 		RuleSetVersion: redact.RuleSetVersion,
 	}
 	for _, sess := range sessions {
-		metaPath := ingest.SessionMetadataPath(
-			outputBasePath, sess.HostSlug, sess.SessionID, sess.ParentID,
-		)
-		data, readErr := fs.ReadFile(metaPath)
+		_, readErr := push.LoadReadyPublicationInput(ctx, db, sess.SessionID)
 		if readErr != nil {
-			record.MissingMetadataCount++
-			continue
-		}
-		var meta schema.UnifiedMetadata
-		if jsonErr := json.Unmarshal(data, &meta); jsonErr != nil {
 			record.MissingMetadataCount++
 		}
 	}
@@ -2228,7 +2216,7 @@ func printRedactionReport(w io.Writer, record redactionRecord) {
 	}
 	if record.MissingMetadataCount > 0 {
 		entries = append(entries, redactionRecordEntry("note:",
-			fmt.Sprintf("%d session(s) missing metadata - the upload will fail for those until 'peasant ingest' re-creates them",
+			fmt.Sprintf("%d session(s) need database metadata and matching entries - run 'peasant ingest' with the retained source available before upload",
 				record.MissingMetadataCount)))
 	}
 	fmt.Fprintln(w, strings.Join(entries, redactionRecordEntrySeparator))

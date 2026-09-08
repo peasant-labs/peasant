@@ -2,6 +2,7 @@ requiredPushSessionNames:
   - push-current-0001
   - push-stale-0002
   - push-raw-0003
+  - push-incomplete-0004
 
 sheets:
   - name: guided-dark
@@ -23,7 +24,7 @@ sheets:
     kind: push
     title: "mounted push wizard: start, selection, published-transcript preview, consent, and receipt in both themes"
     theme: dark
-    viewport: {width: 1800, height: 6000}
+    viewport: {width: 1800, height: 7200}
   - name: ingest-progress
     kind: ingest-progress
     title: "shared local import progress: kickstart and inline harvest"
@@ -243,10 +244,12 @@ selectionCaptures:
   - {name: selection-origin-hidden-light-120x40, state: origin-hidden, theme: light, width: 120, height: 40}
 
 pushStates:
+  - key: needs-ingest
+    wantContains: ["push-incomplete-0004", "needs ingest", "run peasant ingest", "not selected:"]
   - key: start
     wantContains: ["push to village", "session(s) are ready to push", "yes"]
   - key: selection
-    wantContains: ["selected", "withheld by a branch conflict", "tab", "project: peasant", "sessions: 1"]
+    wantContains: ["selected", "withheld by a branch conflict", "needs ingest", "tab", "project: peasant", "sessions: 2"]
   - key: session-preview
     wantContains: ["push-current-0001", "<ANTHROPIC_KEY>", "peasant publishes the redacted form"]
   - key: consent
@@ -272,6 +275,12 @@ push:
       startMs: 1700002000000
       redaction: raw
       withheld: true
+    - sessionId: push-incomplete-0004
+      harness: claude-code
+      project: peasant
+      startMs: 1700003000000
+      redaction: raw
+      needsIngest: true
   transcripts:
     push-current-0001:
       - {role: user, entryType: text, content: "ship the release with sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}
@@ -280,6 +289,10 @@ push:
       - {role: user, entryType: text, content: "check the village accepted the last publish"}
 
 pushCaptures:
+  - {name: push-needs-ingest-dark-80x24, state: needs-ingest, theme: dark, width: 80, height: 24}
+  - {name: push-needs-ingest-dark-120x40, state: needs-ingest, theme: dark, width: 120, height: 40}
+  - {name: push-needs-ingest-light-80x24, state: needs-ingest, theme: light, width: 80, height: 24}
+  - {name: push-needs-ingest-light-120x40, state: needs-ingest, theme: light, width: 120, height: 40}
   - {name: push-start-dark-80x24, state: start, theme: dark, width: 80, height: 24}
   - {name: push-start-dark-120x40, state: start, theme: dark, width: 120, height: 40}
   - {name: push-start-light-80x24, state: start, theme: light, width: 80, height: 24}

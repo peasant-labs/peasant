@@ -326,6 +326,7 @@ func runPushProfileFixture(t *testing.T, tc pushProfileCase) pushProfileEvidence
 	if tc.Barrier {
 		redactor = &concurrentProfileRedactor{TextRedactor: redactor, expected: int64(len(tc.Sessions)), release: make(chan struct{}), ctx: ctx, t: t}
 	}
+	testutil.SeedPublicationInputs(st, fs, cfg.Output.BasePath)
 	pipeline, err := push.NewPipeline(st, client, creds, cfg, fs, runCfg, redactor, &output)
 	if err != nil {
 		t.Fatal(err)

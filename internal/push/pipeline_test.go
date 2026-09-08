@@ -661,6 +661,7 @@ func newTestPipeline(
 	runCfg push.PipelineConfig,
 	stderr *bytes.Buffer,
 ) *push.Pipeline {
+	testutil.SeedPublicationInputs(store, fs, cfg.Output.BasePath)
 	p, err := push.NewPipeline(store, pub, baseCreds(), cfg, fs, runCfg, &testutil.NoopRedactor{}, stderr)
 	if err != nil {
 		panic(fmt.Sprintf("newTestPipeline: %v", err))
@@ -1861,9 +1862,8 @@ func TestPipeline_MetricsAbsent_PushSucceedsWithoutQuality(t *testing.T) {
 	}
 }
 
-func TestPipeline_MetricsError_PushSucceedsWithoutQuality(t *testing.T) {
-	// When GetQualityMetrics returns an error, the pipeline should degrade
-	// gracefully: push the session without quality metrics (no abort).
+func TestPipeline_MetricsError_RefusesIncompleteBundle(t *testing.T) {
+	// A database error must not produce a partially read publication bundle.
 	ctx := context.Background()
 	fs := testutil.NewMemFS()
 
@@ -1886,20 +1886,8 @@ func TestPipeline_MetricsError_PushSucceedsWithoutQuality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if result.New != 1 {
-		t.Errorf("new: got %d, want 1", result.New)
-	}
-
-	// Should still have pushed (no quality key).
-	if len(pub.Calls) != 1 {
-		t.Fatalf("expected 1 HTTP call, got %d", len(pub.Calls))
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(pub.Calls[0].MetadataJSON, &payload); err != nil {
-		t.Fatalf("unmarshal published metadata: %v", err)
-	}
-	if _, exists := payload["quality"]; exists {
-		t.Error("quality key should be absent when GetQualityMetrics fails")
+	if result.Errors != 1 || result.New != 0 || len(pub.Calls) != 0 || len(store.Publications) != 0 {
+		t.Fatalf("partial database read published: result=%+v calls=%d receipts=%d", result, len(pub.Calls), len(store.Publications))
 	}
 }
 
