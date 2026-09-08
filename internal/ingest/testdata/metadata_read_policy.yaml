@@ -357,6 +357,7 @@ cases:
   - name: db v9 remains unchanged
     schemaVersion: 9
     database: true
+    reconciled: true
   - name: file v9 remains unchanged without a database
     schemaVersion: 9
   - name: db v8 requires native refresh
@@ -381,6 +382,7 @@ cases:
     schemaVersion: 10
     adapterVersion: 1
     database: true
+    reconciled: true
   - name: retained v9 index does not reread native input
     schemaVersion: 9
     database: true
@@ -418,7 +420,9 @@ cases:
     schemaVersion: 10
     adapterVersion: 999
     database: true
+    reconciled: true
     force: true
+    wantIndexed: 1
   - name: future adapter index preserves producer
     schemaVersion: 10
     adapterVersion: 999
