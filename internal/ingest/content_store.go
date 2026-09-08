@@ -74,8 +74,7 @@ const (
 	// SessionEntryWriteFormatConversion rewrites the stored representation of
 	// entries that a prior parser run already produced. It is not a parser run:
 	// it preserves the producing indexer, its timestamp and the retained input
-	// proof. The store does not perform the conversion yet; the mode exists so
-	// callers and the store agree on one closed set of write intents.
+	// proof.
 	SessionEntryWriteFormatConversion SessionEntryWriteMode = "format_conversion"
 )
 
@@ -123,8 +122,8 @@ const (
 	// SessionEntryReadAvailable reads the content that is actually stored: the
 	// full content when the capture is complete, the bounded preview projection
 	// otherwise. It is never gated on capture completeness, publication
-	// readiness, recovery or a native source. It never certifies content for
-	// export or publication; use SessionEntryReadFullContent for that.
+	// readiness, recovery or a native source, and it never certifies content
+	// for export or publication; use SessionEntryReadFullContent for that.
 	SessionEntryReadAvailable SessionEntryReadMode = "available"
 )
 

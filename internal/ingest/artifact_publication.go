@@ -90,9 +90,9 @@ type ArtifactPublication struct {
 	Origin                *sessionorigin.Origin
 	// SourceEvidence is the file-only harvest freshness marker. It records what
 	// the harvest actually read from the retained files, so a later run can tell
-	// whether the source changed without opening a native provider database. The
-	// publisher writes it beside the metadata artifact in the same intent; a
-	// later change adds that write. An empty value records no marker.
+	// whether the source changed without opening a native provider database. It
+	// is written in the same intent as the metadata artifact it describes, so a
+	// marker never outlives its artifact. Empty means no marker was recorded.
 	SourceEvidence []byte
 }
 

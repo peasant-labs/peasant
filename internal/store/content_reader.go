@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -97,7 +98,11 @@ func (s *Store) ListContentCaptureIncompleteSessionsAfter(ctx context.Context, a
 		}
 		var harness schema.Harness
 		if e := harness.UnmarshalText([]byte(st.ColumnText(1))); e != nil || !harness.IsKnown() {
-			return fmt.Errorf("store: session %s records harness %q, which this build does not recognize; no recovery target was listed; restore valid session metadata before harvesting", id, st.ColumnText(1))
+			// One unreadable row must never starve the rest of the page: this
+			// listing promises that a failed target cannot block later ones.
+			slog.Warn("store: session records a harness this build does not recognize; it was left out of the content recovery targets and every other target still stands; upgrade Peasant or restore valid session metadata before harvesting it",
+				"session_id", id, "model_harness", st.ColumnText(1))
+			return nil
 		}
 		targets = append(targets, ingest.ContentCaptureIncompleteSession{SessionID: id, Harness: harness, StartMs: st.ColumnInt64(2)})
 		return nil
@@ -227,9 +232,9 @@ func (s *Store) ReadSessionEntries(ctx context.Context, id ingest.SessionID, opt
 	if err != nil {
 		return page, err
 	}
-	// The available-content read is declared in the contract but not served yet.
-	// Refuse it plainly rather than silently serving a preview page under a mode
-	// whose promise (full content when the capture is complete) is not kept.
+	// This build refuses the available-content read rather than serving a
+	// bounded preview page under a mode that promises full content whenever the
+	// capture is complete. A silent preview would look like the whole session.
 	if mode == ingest.SessionEntryReadAvailable {
 		return page, fmt.Errorf("store content page: session %s requested the available-content read mode, which this build declares but does not serve yet; no entries were read; use preview for bounded content or full_content for a verified complete capture", id)
 	}

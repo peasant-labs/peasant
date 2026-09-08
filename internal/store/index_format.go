@@ -108,20 +108,26 @@ func (e *UnsupportedIndexFormatError) Error() string {
 	return fmt.Sprintf("store: session %s has unsupported index format %d; before reading or replacing its transcript projection, this build refused the operation and preserved its index; use a Peasant build that supports this format", e.SessionID, e.Version)
 }
 
+// publicationBindingSQL is the revision half of publication readiness: the
+// captured metadata revision is the one the session carries and the one the
+// index write recorded, over recovered working-directory provenance. It binds
+// a session row (aliased s) to its captured metadata row (aliased p). Readiness
+// ANDs a current metadata schema_version on top of it; binding does not.
+// Every statement that decides binding builds its predicate from this constant,
+// so binding cannot drift between readiness and captured index state.
+const publicationBindingSQL = `p.capture_revision > 0 AND p.capture_revision = s.publication_capture_revision
+ AND p.capture_revision = s.indexed_publication_capture_revision
+ AND s.cwd_provenance_kind != 'not_recovered'`
+
 func readIndexStateOnConn(conn *sqlite.Conn, sessionID schema.SessionID) (*ingest.SessionIndexState, error) {
 	var state *ingest.SessionIndexState
 	// One snapshot, one statement: the publication binding and the content
-	// capture status must describe the same instant as the index columns.
-	// The binding predicate is the revision half of the publication readiness
-	// query in reader.go; readiness additionally requires a current metadata
-	// schema version, which is not part of this binding.
+	// capture status describe the same instant as the index columns.
 	err := sqlitex.ExecuteTransient(conn, `SELECT s.index_version, s.index_format_version, s.indexed_at, s.model_harness,
 s.artifact_hash, s.indexed_input_hash, s.session_entries_hash,
 CASE WHEN s.cwd_provenance_kind != 'not_recovered' THEN s.publication_capture_revision ELSE 0 END,
-CASE WHEN p.capture_revision > 0 AND p.capture_revision = s.publication_capture_revision
- AND p.capture_revision = s.indexed_publication_capture_revision
- AND s.cwd_provenance_kind != 'not_recovered' THEN 1 ELSE 0 END,
-COALESCE(c.status, 'incomplete')
+CASE WHEN `+publicationBindingSQL+` THEN 1 ELSE 0 END,
+c.status
 FROM sessions s
 LEFT JOIN session_publication_metadata p ON p.session_id = s.session_id
 LEFT JOIN session_content_captures c ON c.session_id = s.session_id
@@ -132,9 +138,14 @@ WHERE s.session_id = ?`, &sqlitex.ExecOptions{
 			if err := harness.UnmarshalText([]byte(stmt.ColumnText(3))); err != nil || !harness.IsKnown() {
 				return fmt.Errorf("stored harness %q is not recognized; restore valid session metadata before indexing", stmt.ColumnText(3))
 			}
-			status, statusErr := ingest.NewContentCaptureStatus(stmt.ColumnText(9))
-			if statusErr != nil {
-				return fmt.Errorf("stored content capture status for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, statusErr)
+			// A session with no capture row holds no content, which is the
+			// incomplete state. The default lives here, with the enum.
+			status := ingest.ContentCaptureIncomplete
+			if stmt.ColumnType(9) != sqlite.TypeNull {
+				var statusErr error
+				if status, statusErr = ingest.NewContentCaptureStatus(stmt.ColumnText(9)); statusErr != nil {
+					return fmt.Errorf("stored content capture status for session %s is not recognized: %w; indexing was refused before replacement; restore valid capture state", sessionID, statusErr)
+				}
 			}
 			state = &ingest.SessionIndexState{SessionID: sessionID, IndexerVersion: stmt.ColumnInt(0), Harness: harness}
 			state.PublicationCaptureRevision = stmt.ColumnInt64(7)

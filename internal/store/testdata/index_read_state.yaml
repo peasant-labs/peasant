@@ -16,7 +16,7 @@ requiredNames:
   - unbound-by-provenance
   - unbound-without-metadata-row
   - no-capture-row-reads-incomplete
-  - preview-capture-reads-incomplete
+  - failed-capture-reads-failed
 cases:
   - name: bound-with-complete-capture
     capture: full
@@ -42,11 +42,13 @@ cases:
     provenance: source_exact
     wantBound: false
     wantStatus: complete
+  # A realistic stale state: indexed at 6 while the metadata is now at 7. A
+  # zero here could not tell equality from a bare "is positive" test.
   - name: unbound-by-indexed-revision
     capture: full
     publicationRevision: 7
     sessionRevision: 7
-    indexedRevision: 0
+    indexedRevision: 6
     provenance: source_exact
     wantBound: false
     wantStatus: complete
@@ -74,11 +76,13 @@ cases:
     provenance: source_exact
     wantBound: true
     wantStatus: incomplete
-  - name: preview-capture-reads-incomplete
+  # The third capture status must read back through the new column too.
+  - name: failed-capture-reads-failed
     capture: preview
-    publicationRevision: 0
-    sessionRevision: 0
-    indexedRevision: 0
-    provenance: not_recovered
-    wantBound: false
-    wantStatus: incomplete
+    statusOverride: failed
+    publicationRevision: 7
+    sessionRevision: 7
+    indexedRevision: 7
+    provenance: source_exact
+    wantBound: true
+    wantStatus: failed

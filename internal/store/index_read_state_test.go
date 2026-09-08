@@ -31,7 +31,8 @@ type indexReadStateCase struct {
 	PublicationRevision int64                       `yaml:"publicationRevision"`
 	SessionRevision     int64                       `yaml:"sessionRevision"`
 	IndexedRevision     int64                       `yaml:"indexedRevision"`
-	Provenance          string                      `yaml:"provenance"`
+	Provenance          ingest.CWDProvenanceKind    `yaml:"provenance"`
+	StatusOverride      ingest.ContentCaptureStatus `yaml:"statusOverride"`
 	WantBound           bool                        `yaml:"wantBound"`
 	WantStatus          ingest.ContentCaptureStatus `yaml:"wantStatus"`
 }
@@ -68,10 +69,13 @@ func loadIndexReadStateFixtures(t *testing.T) indexReadStateDocument {
 		if _, err := ingest.NewContentCaptureStatus(string(row.WantStatus)); err != nil {
 			t.Fatalf("case %q expects an unknown capture status: %v", row.Name, err)
 		}
-		switch row.Provenance {
-		case "source_exact", "source_workspace", "source_worktree", "source_absent", "not_recovered":
-		default:
-			t.Fatalf("unknown provenance kind %q in case %q", row.Provenance, row.Name)
+		if _, err := ingest.NewCWDProvenanceKind(string(row.Provenance)); err != nil {
+			t.Fatalf("case %q names an unknown provenance kind %q: %v", row.Name, row.Provenance, err)
+		}
+		if row.StatusOverride != "" {
+			if _, err := ingest.NewContentCaptureStatus(string(row.StatusOverride)); err != nil {
+				t.Fatalf("case %q overrides the capture status with an unknown value: %v", row.Name, err)
+			}
 		}
 		names[row.Name] = true
 	}
@@ -97,7 +101,7 @@ VALUES (?,?,?,?,?,?,?)`,
 	inputSQL(t, db, sid,
 		`UPDATE sessions SET publication_capture_revision=?, indexed_publication_capture_revision=?,
 cwd_provenance_kind=? WHERE session_id=?`,
-		row.SessionRevision, row.IndexedRevision, row.Provenance)
+		row.SessionRevision, row.IndexedRevision, string(row.Provenance))
 }
 
 // TestIndexReadStateReportsPublicationBindingAndContentStatus proves that one
@@ -111,7 +115,7 @@ func TestIndexReadStateReportsPublicationBindingAndContentStatus(t *testing.T) {
 			db := openTestStore(t)
 			sid := schema.SessionID(testutil.TestSessionUUID)
 			seedSession(t, db, string(sid))
-			entries := contentEntries(ingest.SessionID(sid), loadContentFixtures(t).Cases[0])
+			entries := contentEntries(ingest.SessionID(sid), contentCaseNamed(t, loadContentFixtures(t), "long_unicode"))
 			switch row.Capture {
 			case indexReadCapturePreview:
 				if err := db.IndexSessionEntries(t.Context(), ingest.SessionID(sid), entries); err != nil {
@@ -119,6 +123,12 @@ func TestIndexReadStateReportsPublicationBindingAndContentStatus(t *testing.T) {
 				}
 			case indexReadCaptureFull:
 				writeFull(t, db, ingest.SessionID(sid), entries, ingest.SessionEntryWriteReplaceAll)
+			}
+			if row.StatusOverride != "" {
+				// The capture writers cannot certify a failed capture, so the
+				// stored status is set directly. The read side must report
+				// whatever the row holds, not only the statuses it can write.
+				inputSQL(t, db, sid, "UPDATE session_content_captures SET status = ? WHERE session_id = ?", string(row.StatusOverride))
 			}
 			seedPublicationBinding(t, db, sid, row, document)
 

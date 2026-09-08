@@ -50,6 +50,7 @@ type indexInputCase struct {
 	InvalidHash           *string             `yaml:"invalidHash"`
 	WrongSession          bool                `yaml:"wrongSession"`
 	ExpectedEmptyArtifact bool                `yaml:"expectedEmptyArtifact"`
+	SeedSQL               []string            `yaml:"seedSQL"`
 	MutationSQL           string              `yaml:"mutationSQL"`
 	BeforeMutationSQL     string              `yaml:"beforeMutationSQL"`
 	FailColumn            string              `yaml:"failColumn"`
@@ -159,6 +160,11 @@ func TestIndexInputStateConditionalWritesAndInvalidation(t *testing.T) {
 			}
 			if !row.NoArtifact {
 				inputSQL(t, db, sid, "UPDATE sessions SET artifact_hash = ? WHERE session_id = ?", document.ArtifactHash)
+			}
+			// Seeding runs BEFORE the snapshot, so the mutation below is the
+			// only difference between the captured state and the current row.
+			for _, statement := range row.SeedSQL {
+				inputSQL(t, db, sid, statement)
 			}
 			expected := readInputState(t, db, sid)
 			if row.ExpectedEmptyArtifact {

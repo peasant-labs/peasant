@@ -196,13 +196,10 @@ type SessionIndexState struct {
 	SessionEntriesHash         *string
 	// PublicationBound reports that the stored index write is bound to the
 	// current publication metadata capture. It is read in the same snapshot as
-	// the fields above, by the revision predicate the publication readiness
-	// query already uses: the captured metadata revision is positive, equals
-	// sessions.publication_capture_revision, equals
-	// sessions.indexed_publication_capture_revision, and the recorded working
-	// directory provenance is not 'not_recovered'. It does not assert that the
-	// captured metadata matches the current wire schema version; readiness adds
-	// that check separately.
+	// the fields above, and it is the revision half of publication readiness:
+	// readiness ANDs a current metadata schema version on top of it, because
+	// binding and schema currency are different facts. The store owns the one
+	// predicate both sides use (store.publicationBindingSQL).
 	PublicationBound bool
 	// ContentStatus is the stored session_content_captures.status for this
 	// session. A session with no capture row reads as ContentCaptureIncomplete:
