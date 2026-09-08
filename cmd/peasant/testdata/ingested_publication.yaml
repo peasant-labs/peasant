@@ -1,0 +1,9 @@
+- name: fresh-source-capture
+  legacy: false
+  cwd: /synthetic/project/../recorded-session
+- name: unchanged-legacy-source-recovery
+  legacy: true
+  cwd: /synthetic/project/../recorded-session
+- name: source-confirmed-cwd-absence
+  legacy: true
+  cwd: ""
