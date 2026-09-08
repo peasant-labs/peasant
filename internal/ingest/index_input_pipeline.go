@@ -50,17 +50,8 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 		if state == nil || state.SessionID != artifact.Metadata.SessionID || state.ArtifactHash == nil || *state.ArtifactHash != artifact.ArtifactHash || state.Harness != artifact.Metadata.ModelHarness || artifact.Metadata.ModelHarness != im.session.Harness {
 			return fmt.Errorf("capture index input for session %s: committed files and stored metadata do not identify the same artifact; no parser ran or entries changed; run harvest to reconcile the committed files before retrying indexing", im.session.SessionID)
 		}
-		target := p.versionTargets()[state.Harness]
-		if state.IndexerVersion > target.IndexerVersion {
-			return fmt.Errorf("capture index input for session %s: stored producer revision %d is newer than this indexer's revision %d; no parser ran or entries changed; use a compatible newer indexer", state.SessionID, state.IndexerVersion, target.IndexerVersion)
-		}
-		if state.IndexVersion != nil {
-			if support, ok := p.metricsStore.(IndexFormatSupport); ok && !support.SupportsIndexFormat(*state.IndexVersion) {
-				return fmt.Errorf("capture index input for session %s: unsupported index format %d; no parser ran or entries changed; use a build supporting the stored representation", state.SessionID, *state.IndexVersion)
-			}
-			if *state.IndexVersion > target.IndexVersion {
-				return fmt.Errorf("capture index input for session %s: stored index format %d is newer than output format %d; no parser ran or entries changed; use an indexer that can preserve the stored format", state.SessionID, *state.IndexVersion, target.IndexVersion)
-			}
+		if err := p.checkIndexProducer(state); err != nil {
+			return err
 		}
 		session := im.session
 		session.SourcePath = ResolvedPath(im.outputTranscriptPath)
@@ -75,6 +66,22 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 		return nil, err
 	}
 	return input, nil
+}
+
+func (p *Pipeline) checkIndexProducer(state *SessionIndexState) error {
+	target := p.versionTargets()[state.Harness]
+	if state.IndexerVersion > target.IndexerVersion {
+		return fmt.Errorf("capture index input for session %s: stored producer revision %d is newer than this indexer's revision %d; no parser ran or entries changed; use a compatible newer indexer", state.SessionID, state.IndexerVersion, target.IndexerVersion)
+	}
+	if state.IndexVersion != nil {
+		if support, ok := p.metricsStore.(IndexFormatSupport); ok && !support.SupportsIndexFormat(*state.IndexVersion) {
+			return fmt.Errorf("capture index input for session %s: unsupported index format %d; no parser ran or entries changed; use a build supporting the stored representation", state.SessionID, *state.IndexVersion)
+		}
+		if *state.IndexVersion > target.IndexVersion {
+			return fmt.Errorf("capture index input for session %s: stored index format %d is newer than output format %d; no parser ran or entries changed; use an indexer that can preserve the stored format", state.SessionID, *state.IndexVersion, target.IndexVersion)
+		}
+	}
+	return nil
 }
 
 // CaptureIndexInput captures parser input while the caller owns the artifact.

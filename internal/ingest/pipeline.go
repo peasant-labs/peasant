@@ -3387,13 +3387,27 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 		}
 	}
 
-	return &DiscoveredSession{
+	session := &DiscoveredSession{
 		SessionID:        sid,
 		SourcePath:       resolvedSrc,
 		SourceFormat:     sourceFormat,
 		Harness:          provider,
 		TranscriptOrigin: transcriptOrigin,
-	}, 0, outputTranscriptPath
+	}
+	if sourceFormat == SourceFormatJSONL || transcriptOrigin == TranscriptOriginOpenCodeLegacySQLite || transcriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
+		artifact, err := p.recoverRetainedMetadata(ctx, *session, outputTranscriptPath)
+		if err != nil {
+			p.reportMetadataRefusal(string(sid), err)
+			slog.Warn("reconstructFromSourceInfo: retained metadata recovery refused", "session_id", sid, "error", err)
+			return nil, 0, ""
+		}
+		if artifact == nil {
+			return nil, 0, ""
+		}
+		session.ParentUUID = artifact.Metadata.ParentUUID
+		return session, artifact.Metadata.Timestamp.Start, outputTranscriptPath
+	}
+	return session, 0, outputTranscriptPath
 }
 
 // runReindex implements the --reindex pipeline mode.
