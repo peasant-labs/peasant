@@ -7,3 +7,6 @@
 - name: source-confirmed-cwd-absence
   legacy: true
   cwd: ""
+- name: source-reindex-publication
+  reindex: true
+  cwd: /synthetic/project/../literal/subdir

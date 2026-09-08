@@ -35,9 +35,10 @@ var ingestedPublicationYAML []byte
 // real adapter, indexer and metrics engine. Only the external Village is fake.
 func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 	var cases []struct {
-		Name   string `yaml:"name"`
-		Legacy bool   `yaml:"legacy"`
-		CWD    string `yaml:"cwd"`
+		Name    string `yaml:"name"`
+		Legacy  bool   `yaml:"legacy"`
+		Reindex bool   `yaml:"reindex"`
+		CWD     string `yaml:"cwd"`
 	}
 	if err := yaml.Unmarshal(ingestedPublicationYAML, &cases); err != nil {
 		t.Fatal(err)
@@ -46,7 +47,7 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 	for _, tc := range cases {
 		seen[tc.Name] = true
 	}
-	if err := testutil.RequireFixtureNames("ingested publication", "case", strings.Fields("fresh-source-capture unchanged-legacy-source-recovery source-confirmed-cwd-absence"), seen); err != nil {
+	if err := testutil.RequireFixtureNames("ingested publication", "case", strings.Fields("fresh-source-capture unchanged-legacy-source-recovery source-confirmed-cwd-absence source-reindex-publication"), seen); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range cases {
@@ -100,6 +101,28 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			originalHash := input.ReceiptProjectHash
 			originalHost := input.Metadata.HostSlug
 			metadataPath := ingest.SessionMetadataPath(output, originalHost.String(), id, "")
+			if tc.Reindex {
+				priorRevision := input.CaptureRevision
+				db.Close()
+				source = bytes.ReplaceAll(source, []byte("synthetic response"), []byte("fresh reindexed response"))
+				if err := os.WriteFile(sourcePath, source, 0600); err != nil {
+					t.Fatal(err)
+				}
+				reindexConfig := writeCfg(t, dir, "reindex.yaml", "version: 1\nsources:\n  claude-code:\n    enabled: true\n    paths: ["+sourceRoot+"]\n  opencode: {enabled: false}\n  cursor: {enabled: false}\n  codex: {enabled: false}\n  strike: {enabled: false}\noutput:\n  basePath: "+output+"\n")
+				text, err := executeHarvestCmd(t, dir, []string{"--config", reindexConfig, "index", "--force"})
+				if err != nil {
+					t.Fatalf("mounted reindex: %v\n%s", err, text)
+				}
+				db = open()
+				input, err = db.LoadPublicationInput(t.Context(), id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				entries, err := json.Marshal(input.Entries)
+				if err != nil || input.CaptureRevision <= priorRevision || !bytes.Contains(entries, []byte("fresh reindexed response")) {
+					t.Fatalf("reindex did not durably refresh the actual source: %+v, %v", input, err)
+				}
+			}
 			if tc.Legacy {
 				// Simulate a shipped legacy row, not a certified test capture. Normal
 				// ingest must recover absent model/CWD and the entire missing snapshot.

@@ -1026,7 +1026,7 @@ func (p *Pipeline) drainLoop(
 						storeBatch = append(storeBatch, StoreEntry{
 							Metadata:           wr.meta,
 							Session:            sessionFromWorkerResult(wr),
-							PublicationCapture: !p.config.Reindex,
+							PublicationCapture: true,
 							CWDProvenance:      wr.cwdProvenance,
 						})
 					}
@@ -2539,7 +2539,7 @@ func indexWithSourceKind(
 		}
 		return indexer.IndexTranscript(ctx, session)
 	case TranscriptSourceFile:
-		if len(transcriptData) > 0 {
+		if transcriptData != nil {
 			return indexer.IndexTranscriptBytes(ctx, session, transcriptData)
 		}
 		return indexer.IndexTranscript(ctx, session)
@@ -3501,6 +3501,23 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	entryByID := make(map[SessionID]DiffEntry, len(targeted))
 	childrenOf := make(map[SessionID][]SessionID, len(targeted))
 	inBatch := make(map[SessionID]bool, len(targeted))
+	// Reuse canonical discovery facts (notably Cursor workspace and SQLite
+	// source kind) instead of reconstructing them from a managed sidecar.
+	sourceSessions := make(map[SessionID]DiscoveredSession)
+	for harness, config := range p.config.Sources {
+		factory, ok := p.adapters[harness]
+		if !ok || !config.Enabled {
+			continue
+		}
+		sessions, err := factory(p.fs, p.git, p.salt).Discover(ctx, config)
+		if err != nil {
+			slog.Warn("reindex: source discovery unavailable", "harness", harness, "error", err)
+			continue
+		}
+		for _, session := range sessions {
+			sourceSessions[session.SessionID] = session
+		}
+	}
 
 	for _, t := range targeted {
 		sourceExists := false
@@ -3513,6 +3530,9 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		if sourceExists {
 			sourceSession := t.session
 			sourceSession.SourcePath = ResolvedPath(t.originalSourcePath)
+			if discovered, ok := sourceSessions[sourceSession.SessionID]; ok && discovered.SourcePath == sourceSession.SourcePath && discovered.Harness == sourceSession.Harness {
+				sourceSession = discovered
+			}
 			entry := DiffEntry{
 				Session: sourceSession,
 				Status:  DiffUpdated,
@@ -3667,11 +3687,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 				outputTranscriptPath: t.transcriptPath,
 			}, IndexOutcomeFallback, 0, indexStartMs, &reason, nil))
 
-			indexSessions = append(indexSessions, indexedMeta{
-				session:              t.session,
-				startMs:              t.startMs,
-				outputTranscriptPath: t.transcriptPath,
-			})
+			indexSessions = append(indexSessions, p.prepareReindexFallback(ctx, t))
 
 			sessionResults = append(sessionResults, SessionResult{
 				SessionID: t.session.SessionID,
@@ -3708,11 +3724,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 			outputTranscriptPath: t.transcriptPath,
 		}, IndexOutcomeFallback, 0, indexStartMs, &reason, nil))
 
-		indexSessions = append(indexSessions, indexedMeta{
-			session:              t.session,
-			startMs:              t.startMs,
-			outputTranscriptPath: t.transcriptPath,
-		})
+		indexSessions = append(indexSessions, p.prepareReindexFallback(ctx, t))
 
 		sessionResults = append(sessionResults, SessionResult{
 			SessionID: t.session.SessionID,

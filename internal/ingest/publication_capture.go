@@ -1,9 +1,55 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
+
+	"github.com/peasant-labs/schema"
 )
+
+// A fallback never creates metadata. It can reuse a persisted capture only
+// after proving the input, and the entry writer still checks its revision in
+// the write transaction. Keep the verified bytes, not a path to reread later.
+func (p *Pipeline) prepareReindexFallback(ctx context.Context, target reindexTarget) indexedMeta {
+	im := indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath}
+	data, err := p.fs.ReadFile(target.transcriptPath)
+	if err != nil {
+		slog.Warn("reindex: cannot read managed capture", "session_id", target.session.SessionID, "error", err,
+			"impact", "no publication proof will be assigned", "fix", "restore the retained source and run peasant ingest")
+		// Do not retry a failed read later against a potentially different file.
+		im.transcriptData = []byte{}
+		return im
+	}
+	im.transcriptData = data
+	reader, ok := p.store.(PublicationInputReader)
+	if !ok {
+		return im
+	}
+	bundle, err := reader.LoadPublicationInput(ctx, target.session.SessionID)
+	if err != nil || bundle.Readiness != PublicationReady || bundle.Metadata.ModelHarness != target.session.Harness || bundle.Metadata.Source.Format != target.session.SourceFormat || bundle.Metadata.ContentHash != schema.ComputeTranscriptHash(data) {
+		return im
+	}
+	indexer, ok := p.indexers[target.session.Harness]
+	if !ok {
+		return im
+	}
+	sourceKind := indexer.SourceKind()
+	if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
+		sourceKind = resolver.TranscriptSourceKindFor(indexTargetSession(im))
+	}
+	if sourceKind != TranscriptSourceFile {
+		// Legacy JSON captures hash the header, not the separate message/part
+		// files. Equal parsed entries cannot prove metadata facts (such as a
+		// model) that the index might omit. Without the original source header
+		// this format has no complete byte proof; do not certify it. SQLite
+		// projections are self-contained and use the verified-bytes path below.
+		return im
+	}
+	im.captureRevision = bundle.CaptureRevision
+	return im
+}
 
 // captureFileSystem retains exactly the source reads used by extraction. The
 // OpenCode JSON indexer consumes the same message/part tree, rather than a newer

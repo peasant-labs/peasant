@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"os"
@@ -29,22 +30,30 @@ import (
 var publicationCaptureYAML []byte
 
 type publicationCaptureCase struct {
-	Name                   string            `yaml:"name"`
-	Harness                string            `yaml:"harness"`
-	ID                     string            `yaml:"id"`
-	CWD                    string            `yaml:"cwd"`
-	Provenance             string            `yaml:"provenance"`
-	Files                  map[string]string `yaml:"files"`
-	DatabaseFixture        string            `yaml:"database_fixture"`
-	StripCWD               bool              `yaml:"strip_cwd"`
-	StripModel             bool              `yaml:"strip_model"`
-	RemoveSource           bool              `yaml:"remove_source"`
-	MismatchIdentity       bool              `yaml:"mismatch_identity"`
-	DisappearDuringExtract bool              `yaml:"disappear_during_extract"`
-	FailSidecar            bool              `yaml:"fail_sidecar"`
-	ChangeSource           bool              `yaml:"change_source"`
-	MutateIndexFile        string            `yaml:"mutate_index_file"`
-	ExpectedManualIndexed  *int              `yaml:"expected_manual_indexed"`
+	Name                     string            `yaml:"name"`
+	Harness                  string            `yaml:"harness"`
+	ID                       string            `yaml:"id"`
+	CWD                      string            `yaml:"cwd"`
+	Provenance               string            `yaml:"provenance"`
+	Files                    map[string]string `yaml:"files"`
+	DatabaseFixture          string            `yaml:"database_fixture"`
+	StripCWD                 bool              `yaml:"strip_cwd"`
+	StripModel               bool              `yaml:"strip_model"`
+	RemoveSource             bool              `yaml:"remove_source"`
+	MismatchIdentity         bool              `yaml:"mismatch_identity"`
+	DisappearDuringExtract   bool              `yaml:"disappear_during_extract"`
+	FailSidecar              bool              `yaml:"fail_sidecar"`
+	ChangeSource             bool              `yaml:"change_source"`
+	MutateIndexFile          string            `yaml:"mutate_index_file"`
+	ExpectedManualIndexed    *int              `yaml:"expected_manual_indexed"`
+	ExpectedManualReadiness  string            `yaml:"expected_manual_readiness"`
+	ReindexRemoveSource      bool              `yaml:"reindex_remove_source"`
+	ReindexChangeManaged     bool              `yaml:"reindex_change_managed"`
+	ReindexRemoveProof       bool              `yaml:"reindex_remove_proof"`
+	ReindexChangeSource      bool              `yaml:"reindex_change_source"`
+	ReindexChangeTree        string            `yaml:"reindex_change_tree"`
+	ReindexConcurrentCapture bool              `yaml:"reindex_concurrent_capture"`
+	ReindexMutateAfterRead   bool              `yaml:"reindex_mutate_after_read"`
 }
 
 func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
@@ -67,6 +76,12 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		"disappeared_source_during_extraction": true, "optional_metadata_write_failure_still_ready": true,
 		"changed_source_updates_metadata_and_entries": true, "opencode_json_index_uses_captured_tree": true,
 		"absent_model_is_not_fabricated": true,
+		"reindex_fresh_source_ready":     true, "reindex_verified_fallback_ready": true,
+		"reindex_changed_fallback_held": true, "reindex_legacy_fallback_held": true,
+		"reindex_opencode_unverified_tree_held": true, "reindex_opencode_changed_tree_held": true,
+		"reindex_stale_source_capture_held": true, "reindex_stale_fallback_capture_held": true,
+		"reindex_opencode_current_projection_ready": true, "reindex_opencode_legacy_projection_ready": true,
+		"reindex_fallback_uses_verified_bytes": true,
 	}
 	seen := make(map[string]bool)
 	for _, c := range doc.Cases {
@@ -76,7 +91,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		seen[c.Name] = true
 		delete(required, c.Name)
 		unrecoverable := c.RemoveSource || c.MismatchIdentity || c.DisappearDuringExtract
-		if !unrecoverable && c.ExpectedManualIndexed == nil {
+		if !unrecoverable && (c.ExpectedManualIndexed == nil || c.ExpectedManualReadiness == "") {
 			t.Fatalf("fixture %s has no expected manual indexing outcome", c.Name)
 		}
 	}
@@ -117,7 +132,9 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if c.DatabaseFixture != "" {
 				source := testfixture.MaterializeByName(t, c.DatabaseFixture)
 				before := testfixture.SnapshotSource(t, source)
-				defer testfixture.AssertUnchanged(t, source, before)
+				if !c.ReindexRemoveSource {
+					defer testfixture.AssertUnchanged(t, source, before)
+				}
 				root = filepath.Dir(source.Path)
 				environment["OPENCODE_DB"] = source.Path
 			}
@@ -193,8 +210,9 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			}
 			git.Remote = "https://example.com/changed/current.git"
 			run := func() *ingest.PipelineResult {
+				writer := &publicationReindexStore{Store: database, recapture: cfg.Reindex && c.ReindexConcurrentCapture}
 				pipeline, err := ingest.NewPipeline(filesystem, git, map[ingest.Harness]ingest.AdapterFactory{harness: factory}, cfg,
-					ingest.WithSalt(installationSalt), ingest.WithStore(database), ingest.WithMetricsStore(database),
+					ingest.WithSalt(installationSalt), ingest.WithStore(database), ingest.WithMetricsStore(writer),
 					ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 				if err != nil {
 					t.Fatal(err)
@@ -202,6 +220,9 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				result, err := pipeline.Run(ctx)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if cfg.Reindex && c.ReindexConcurrentCapture && (writer.recapture || writer.captureErr != nil) {
+					t.Fatalf("competing capture did not execute successfully: %v", writer.captureErr)
 				}
 				return result
 			}
@@ -321,9 +342,47 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 					t.Fatal("changed CWD reassigned historical project")
 				}
 			}
-			// Manual reindex reads managed/source files but must not certify that
-			// their input is the exact persisted capture by guessing a revision.
+			// Source-backed reindex captures metadata and index inputs together.
+			if c.ReindexRemoveSource {
+				if err := os.Remove(session.SourcePath.String()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.ReindexChangeManaged || c.ReindexChangeSource || c.ReindexChangeTree != "" {
+				path := session.SourcePath.String()
+				if c.ReindexChangeManaged {
+					path = filepath.Join(filepath.Dir(metadataPath), c.ID+"--transcript."+string(session.SourceFormat))
+				}
+				if c.ReindexChangeTree != "" {
+					path = filepath.Join(root, c.ReindexChangeTree)
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data = bytes.ReplaceAll(data, []byte("synthetic response"), []byte("reindexed response"))
+				if c.ReindexChangeSource {
+					data = bytes.ReplaceAll(data, []byte(c.CWD), []byte("/synthetic/reindex/../literal"))
+				}
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.ReindexRemoveProof {
+				conn, err := sqlite.OpenConn(dbPath, sqlite.OpenReadWrite)
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = sqlitex.ExecuteTransient(conn, "DELETE FROM session_publication_metadata WHERE session_id = ?", &sqlitex.ExecOptions{Args: []any{c.ID}})
+				_ = conn.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			cfg.Reindex = true
+			if c.ReindexMutateAfterRead {
+				filesystem.mutateAfterRead = filepath.Join(filepath.Dir(metadataPath), c.ID+"--transcript."+string(session.SourceFormat))
+			}
 			manualResult := run()
 			if manualResult.Summary.Errors != 0 || manualResult.Summary.StoreError != nil {
 				t.Fatalf("manual reindex failed: %+v", manualResult)
@@ -331,22 +390,80 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if manualResult.Summary.Indexed != *c.ExpectedManualIndexed {
 				t.Fatalf("manual indexed = %d want %d: %+v", manualResult.Summary.Indexed, *c.ExpectedManualIndexed, manualResult)
 			}
+			if err := database.Close(); err != nil {
+				t.Fatal(err)
+			}
+			database, err = store.Open(dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
 			manual, err := database.LoadPublicationInput(ctx, id)
 			if err != nil {
 				t.Fatalf("load after manual reindex: %v", err)
 			}
-			if *c.ExpectedManualIndexed > 0 && manual.Readiness != ingest.PublicationNeedsIngest {
-				t.Fatalf("manual reindex guessed readiness: %+v, %v", manual, err)
+			if string(manual.Readiness) != c.ExpectedManualReadiness {
+				t.Fatalf("manual reindex readiness = %s want %s", manual.Readiness, c.ExpectedManualReadiness)
+			}
+			if manual.Readiness == ingest.PublicationReady {
+				wantCWD := c.CWD
+				if c.ChangeSource {
+					wantCWD = "/synthetic/new/literal"
+				}
+				if c.ReindexChangeSource {
+					wantCWD = "/synthetic/reindex/../literal"
+				}
+				if manual.Metadata.CWD != wantCWD || publicationStoredProvenance(t, dbPath, id) != c.Provenance || manual.Metadata.Project.Hash != meta.Project.Hash || manual.Metadata.HostSlug != meta.HostSlug || !reflect.DeepEqual(manual.Metadata.Git.Remote, meta.Git.Remote) || !reflect.DeepEqual(manual.Associations, repeated.Associations) {
+					t.Fatalf("reindex changed source provenance or historical attribution: %+v", manual)
+				}
+			}
+			if c.ReindexMutateAfterRead {
+				data, err := json.Marshal(manual.Entries)
+				if err != nil || !filesystem.mutatedAfterRead || bytes.Contains(data, []byte("racing response")) || !bytes.Contains(data, []byte("synthetic response")) {
+					t.Fatalf("fallback reread input after verification: %s, %v", data, err)
+				}
+			}
+			if c.ReindexChangeSource {
+				data, err := json.Marshal(manual.Entries)
+				if err != nil || !bytes.Contains(data, []byte("reindexed response")) || manual.Metadata.CWD != "/synthetic/reindex/../literal" || manual.CaptureRevision <= repeated.CaptureRevision || manual.Metadata.Project.Hash != meta.Project.Hash {
+					t.Fatalf("fresh reindex did not capture coherent source facts: %+v, %v", manual, err)
+				}
 			}
 		})
 	}
 }
 
+// Interpose a real competing capture immediately before the real entry writer.
+// Both operations use the production SQLite transactions, including no-op writes.
+type publicationReindexStore struct {
+	*store.Store
+	recapture  bool
+	captureErr error
+}
+
+var _ ingest.SessionEntryBatchStore = (*publicationReindexStore)(nil)
+
+func (s *publicationReindexStore) IndexSessionEntryBatch(ctx context.Context, writes []ingest.SessionEntryWrite) []ingest.SessionEntryWriteResult {
+	if s.recapture && len(writes) > 0 {
+		s.recapture = false
+		bundle, err := s.LoadPublicationInput(ctx, writes[0].SessionID)
+		if err == nil {
+			_, err = s.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{{Metadata: &bundle.Metadata, PublicationCapture: true, CWDProvenance: ingest.CWDSourceExact}})
+		}
+		s.captureErr = err
+		if err != nil {
+			return []ingest.SessionEntryWriteResult{{SessionID: writes[0].SessionID, Err: err}}
+		}
+	}
+	return s.Store.IndexSessionEntryBatch(ctx, writes)
+}
+
 type publicationCaptureFS struct {
 	*ingest.OSFileSystem
-	disappearPath string
-	failSidecar   bool
-	mutatePath    string
+	disappearPath    string
+	failSidecar      bool
+	mutatePath       string
+	mutateAfterRead  string
+	mutatedAfterRead bool
 }
 
 var _ ingest.FileSystem = (*publicationCaptureFS)(nil)
@@ -355,7 +472,14 @@ func (fs *publicationCaptureFS) ReadFile(path string) ([]byte, error) {
 	if path == fs.disappearPath {
 		_ = os.Remove(path)
 	}
-	return fs.OSFileSystem.ReadFile(path)
+	data, err := fs.OSFileSystem.ReadFile(path)
+	if err == nil && path == fs.mutateAfterRead && !fs.mutatedAfterRead {
+		if err := os.WriteFile(path, bytes.ReplaceAll(data, []byte("synthetic response"), []byte("racing response")), 0600); err != nil {
+			return nil, err
+		}
+		fs.mutatedAfterRead = true
+	}
+	return data, err
 }
 
 func (fs *publicationCaptureFS) WriteFile(path string, data []byte, mode os.FileMode) error {
