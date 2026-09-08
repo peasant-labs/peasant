@@ -110,12 +110,25 @@ func (r *osArtifactRoot) CreateFile(path string, data []byte, perm fs.FileMode) 
 }
 
 func (r *osArtifactRoot) ReadDir(path string) ([]fs.DirEntry, error) {
-	file, err := r.OpenFile(path, os.O_RDONLY|artifactNonblockFlag, 0)
+	file, err := r.OpenDirectory(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 	return file.ReadDir(-1)
+}
+
+func (r *osArtifactRoot) OpenDirectory(path string) (fs.ReadDirFile, error) {
+	file, err := r.OpenFile(path, os.O_RDONLY|artifactNonblockFlag, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("open managed artifact directory %q: expected readable directory: %w", path, errors.Join(err, fs.ErrInvalid))
+	}
+	return file, nil
 }
 
 func (r *osArtifactRoot) SyncFile(path string) error { return r.sync(path, false) }

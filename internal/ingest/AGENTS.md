@@ -7,6 +7,14 @@ For detailed diagrams and sequence flows, see [README.md](README.md).
 
 ## Pipeline at a Glance
 
+Before persistent work selection, startup reconciliation recovers pending
+publications and walks exact managed metadata locators in bounded directory
+pages, parent before child. It mirrors validated missing/different artifacts
+without an adapter call; a matching artifact hash leaves metadata and DerivedAt
+unchanged. Explicit harness/session/since filters apply independently of saved
+discovery selection. Dry-run bypasses recovery/bootstrap, and file-only runs do
+not open a database. Reconciled IDs are candidates, never index success claims.
+
 ```
 DISCOVER ─▶ DIFF ─▶ FILTER ─┬─▶ EXTRACT+WRITE (N workers) ─▶ StagingBuffer.Add()
                              │                                       │ lock-free CAS

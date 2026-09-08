@@ -254,6 +254,9 @@ type Pipeline struct {
 	// when no time column moved, closing the in-place-rewrite blind spot. Nil when
 	// the store does not record the cursor, which keeps the clock-only behaviour.
 	seqCursorCache map[SessionID]int64
+	// Retained artifacts reconciled during this invocation are candidates for
+	// input-based work selection, not unconditional requests to run an indexer.
+	reconciledArtifacts []SessionID
 
 	// discoveryDiagnostics accumulates per-location discovery failures reported
 	// by adapters during discover(), copied into every PipelineResult so a
@@ -454,6 +457,7 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	p.resetDiagnostics()
 	p.locationCache = nil
 	p.seqCursorCache = nil
+	p.reconciledArtifacts = nil
 	defer func() {
 		if result != nil {
 			result.Diagnostics = p.snapshotDiagnostics()
@@ -463,6 +467,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		return nil, err
 	}
 	start := time.Now()
+	if !p.config.DryRun {
+		p.reconcileManagedArtifacts(ctx)
+	}
 
 	// REINDEX mode: alternative code path that scans peasant-sync output
 	// instead of discovering from source providers.

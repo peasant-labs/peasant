@@ -212,6 +212,23 @@ func readMetadataPolicyIndexState(t *testing.T, database *store.Store, sid inges
 	return state
 }
 
+func assertOnlyDerivedAtChanged(t *testing.T, before, after []byte) {
+	t.Helper()
+	decode := func(data []byte) map[string]any {
+		var fields map[string]any
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		if err := decoder.Decode(&fields); err != nil {
+			t.Fatal(err)
+		}
+		delete(fields, "derivedAt")
+		return fields
+	}
+	if !reflect.DeepEqual(decode(before), decode(after)) {
+		t.Fatal("first persistent reconciliation changed metadata fields other than DerivedAt")
+	}
+}
+
 func TestPipelineMetadataReadPolicy(t *testing.T) {
 	t.Parallel()
 	fixtures := loadMetadataReadPolicyFixtures(t)
@@ -294,6 +311,7 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			var beforeLocations map[ingest.SessionID]ingest.SessionLocation
 			var beforeIndexState metadataPolicyIndexState
 			var beforeMetrics *ingest.SessionMetrics
+			var beforeArtifactState *ingest.SessionIndexState
 			if fixture.Database {
 				database, err = store.Open(filepath.Join(t.TempDir(), "peasant.db"))
 				if err != nil {
@@ -394,9 +412,15 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				beforeArtifactState, err = database.ReadIndexState(ctx, sid)
+				if err != nil {
+					t.Fatal(err)
+				}
 				lookupStore.remainingFailures.Store(int64(fixture.LookupFailures))
 			}
+			runStartedMs := time.Now().UnixMilli()
 			result, err := pipeline.Run(ctx)
+			runFinishedMs := time.Now().UnixMilli()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -440,7 +464,27 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			}
 			if fixture.WantExtract == 0 {
 				if !fixture.MetadataAbsent && !bytes.Equal(afterMetadata, beforeMetadata) {
-					t.Error("read-only metadata adoption changed bytes or producer evidence")
+					// First persistent reconciliation may add only its verified
+					// DerivedAt cache timestamp to a previously unproven DB mirror.
+					// Producer fields, unknown metadata and all retained input stay
+					// unchanged. A known equal artifact must remain byte-identical.
+					if database == nil || beforeArtifactState != nil && beforeArtifactState.ArtifactHash != nil {
+						t.Fatal("known/read-only metadata changed without a first artifact reconciliation")
+					}
+					beforeArtifact, beforeErr := ingest.NewManagedArtifact(beforeMetadata, []byte(fixtures.Transcript))
+					afterArtifact, afterErr := ingest.NewManagedArtifact(afterMetadata, []byte(fixtures.Transcript))
+					if beforeErr != nil || afterErr != nil || beforeArtifact.ArtifactHash != afterArtifact.ArtifactHash {
+						t.Fatalf("retained metadata semantics changed: before=%v after=%v", beforeErr, afterErr)
+					}
+					assertOnlyDerivedAtChanged(t, beforeMetadata, afterMetadata)
+					derived := afterArtifact.Metadata.DerivedAt
+					if derived == nil || *derived < runStartedMs || *derived > runFinishedMs {
+						t.Fatal("DerivedAt does not describe the current successful reconciliation")
+					}
+					state, err := database.ReadIndexState(ctx, sid)
+					if err != nil || state == nil || state.ArtifactHash == nil || *state.ArtifactHash != afterArtifact.ArtifactHash {
+						t.Fatalf("DerivedAt changed without matching committed DB artifact proof: %+v %v", state, err)
+					}
 				}
 				if filesystem.nativeRead.Load() != 0 || filesystem.nativeStat.Load() != 0 {
 					t.Errorf("retained/no-work path accessed native input: read=%d stat=%d", filesystem.nativeRead.Load(), filesystem.nativeStat.Load())
