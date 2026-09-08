@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/ingest"
@@ -166,6 +167,10 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			beforeState, err := database.ReadIndexState(t.Context(), fixture.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			applyAcquiredCursorSetup(t, source, row.Change)
 			beforeSource := testfixture.SnapshotSource(t, source)
 			config.Force = true
@@ -177,16 +182,47 @@ func TestPipelineStoresOnlyAcquiredOpenCodeCursor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (second.Summary.Errors != 0) != row.WantError {
-				t.Fatalf("changed-input outcome: %+v", second)
+			if second.Summary.Errors != 0 || second.Summary.StoreError != nil {
+				t.Fatalf("native refresh failure became a blocking pipeline outcome: %+v", second)
 			}
 			cursors, err := database.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{fixture.SessionID})
-			if err != nil || cursors[fixture.SessionID] != row.WantCursor {
+			cursor, recorded := cursors[fixture.SessionID]
+			if err != nil || !recorded || cursor != row.WantCursor {
 				t.Fatalf("stored cursor = %v, want %d: %v", cursors, row.WantCursor, err)
 			}
 			if row.WantError {
-				afterMetadata, _ := os.ReadFile(metadataPath)
-				afterTranscript, _ := os.ReadFile(filepath.Join(filepath.Dir(metadataPath), string(fixture.SessionID)+"--transcript.json"))
+				// The fixture error belongs to native acquisition. The pipeline
+				// preserves the last-good artifact and reports a nonfatal warning.
+				unchanged := false
+				for _, session := range second.Sessions {
+					if session.SessionID == fixture.SessionID {
+						unchanged = session.Status == ingest.DiffUnchanged && session.Error == nil
+					}
+				}
+				if !unchanged || second.Summary.New != 0 || second.Summary.Updated != 0 || second.Summary.Indexed != 0 || second.Summary.Computed != 0 {
+					t.Fatalf("unavailable native refresh claimed new completion: %+v", second)
+				}
+				warned := false
+				for _, diagnostic := range second.Diagnostics {
+					if diagnostic.ErrorType == "adapter_refresh_unavailable" && strings.Contains(diagnostic.Message, "changed after discovery") && diagnostic.Location != "" && diagnostic.Remediation != "" {
+						warned = true
+					}
+				}
+				if !warned {
+					t.Fatalf("missing actionable nonfatal refresh warning: %+v", second.Diagnostics)
+				}
+				afterState, err := database.ReadIndexState(t.Context(), fixture.SessionID)
+				if err != nil || !reflect.DeepEqual(beforeState, afterState) {
+					t.Fatalf("failed refresh changed stored artifact/index completion: before=%+v after=%+v error=%v", beforeState, afterState, err)
+				}
+				afterMetadata, err := os.ReadFile(metadataPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				afterTranscript, err := os.ReadFile(filepath.Join(filepath.Dir(metadataPath), string(fixture.SessionID)+"--transcript.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
 				if !bytes.Equal(beforeMetadata, afterMetadata) || !bytes.Equal(beforeTranscript, afterTranscript) {
 					t.Fatal("changed consumed attribution replaced last-good artifact")
 				}
