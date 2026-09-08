@@ -409,7 +409,17 @@ func isStoppedPodmanStatus(status string) bool {
 	return false
 }
 
-func staleStoppedE2EInfraNames(podmanPSOutput string, now time.Time, ttl time.Duration) []string {
+func isRunningPodmanStatus(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return strings.HasPrefix(status, "up") || strings.HasPrefix(status, "running")
+}
+
+// reapableE2EInfraNames returns harness containers that no live test process can
+// still own. Terminal containers retain the age gate so a sibling invocation
+// cannot race a container through its startup states. Running containers are
+// removable only when the PID embedded by uniqueName no longer exists; this is
+// the hard-crash path where testing cleanup functions never get a chance to run.
+func reapableE2EInfraNames(podmanPSOutput string, now time.Time, ttl time.Duration, processAlive func(int) bool) []string {
 	var names []string
 	for _, line := range strings.Split(podmanPSOutput, "\n") {
 		fields := strings.SplitN(strings.TrimSpace(line), "\t", 2)
@@ -418,7 +428,10 @@ func staleStoppedE2EInfraNames(podmanPSOutput string, now time.Time, ttl time.Du
 		}
 		name := strings.TrimSpace(fields[0])
 		status := strings.TrimSpace(fields[1])
-		if isStoppedPodmanStatus(status) && isStaleE2EInfraName(name, now, ttl) {
+		parsed, validName := parseE2EInfraName(name)
+		staleTerminal := isStoppedPodmanStatus(status) && isStaleE2EInfraName(name, now, ttl)
+		orphanedRunning := validName && isRunningPodmanStatus(status) && !processAlive(parsed.pid)
+		if staleTerminal || orphanedRunning {
 			names = append(names, name)
 		}
 	}

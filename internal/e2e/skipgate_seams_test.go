@@ -274,7 +274,7 @@ func TestInfraReaperTargetsOnlyStalePeasantE2EContainers(t *testing.T) {
 	oldRelease := uniqueNameAt("release-ubuntu-22-04", 202, old)
 	recentMinIO := uniqueNameAt("minio", 303, recent)
 	oldRunningVillage := uniqueNameAt("village", 404, old)
-	names := staleStoppedE2EInfraNames(strings.Join([]string{
+	names := reapableE2EInfraNames(strings.Join([]string{
 		oldPG + "\tExited (0) 25 hours ago",
 		"unrelated\tExited (0) 25 hours ago",
 		" " + recentMinIO + " \tExited (0) 10 minutes ago",
@@ -282,14 +282,14 @@ func TestInfraReaperTargetsOnlyStalePeasantE2EContainers(t *testing.T) {
 		"peasant-e2e-transcripts-static",
 		oldRunningVillage + "\tUp 25 hours",
 		oldRelease + "\tCreated",
-	}, "\n"), now, staleE2ETTL)
-	wantNames := []string{oldPG, oldRelease}
+	}, "\n"), now, staleE2ETTL, func(pid int) bool { return pid != 404 })
+	wantNames := []string{oldPG, oldRunningVillage, oldRelease}
 	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
 		t.Fatalf("stale infra names = %v, want %v", names, wantNames)
 	}
 
 	args := podmanReapE2EInfraArgs(names)
-	wantArgs := []string{"rm", "-fv", oldPG, oldRelease}
+	wantArgs := []string{"rm", "-fv", oldPG, oldRunningVillage, oldRelease}
 	if strings.Join(args, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("reap args = %v, want %v", args, wantArgs)
 	}
