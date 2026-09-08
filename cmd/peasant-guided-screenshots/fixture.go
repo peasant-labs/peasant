@@ -524,7 +524,7 @@ func validateSheets(sheets []sheetFixture) error {
 	}{
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
-		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 7800},
+		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 7920},
 		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 	}
