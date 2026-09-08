@@ -314,6 +314,7 @@ var dbSchema = sqlitemigration.Schema{
 		migrationV50,
 		migrationV51,
 		migrationV52,
+		migrationV53,
 	},
 	// V16 rebuilds annotation tables with new FKs; disable FK checking during
 	// the migration transaction so renamed/recreated tables don't cause violations.
@@ -360,5 +361,6 @@ var dbSchema = sqlitemigration.Schema{
 		nil,                        // V50: nullable actual index representation evidence
 		nil,                        // V51: retained adapter and artifact evidence
 		nil,                        // V52: nullable consumed index input evidence
+		nil,                        // V53: nullable metrics input/output evidence
 	},
 }

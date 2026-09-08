@@ -34,6 +34,13 @@ func (s *recomputeSaveStore) SaveMetrics(ctx context.Context, result *ingest.Ses
 	return s.Store.SaveMetrics(ctx, result)
 }
 
+func (s *recomputeSaveStore) SaveMetricsForInput(ctx context.Context, input *ingest.MetricInput, result *ingest.SessionMetrics) error {
+	if s.fail {
+		return errors.New("synthetic metrics save failure")
+	}
+	return s.Store.SaveMetricsForInput(ctx, input, result)
+}
+
 func TestRecomputeMetricsPreservesActualProducerAndLastGoodValues(t *testing.T) {
 	t.Parallel()
 	var fixture struct {

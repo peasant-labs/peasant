@@ -21,8 +21,12 @@ func (s *Store) GetMetricSeed(ctx context.Context, sid ingest.SessionID) (*inges
 		return nil, fmt.Errorf("store: read retained metric seed for session %s: %w; retry when database access is available", sid, err)
 	}
 	defer s.pool.Put(conn)
+	return getMetricSeedOnConn(conn, sid)
+}
+
+func getMetricSeedOnConn(conn *sqlite.Conn, sid ingest.SessionID) (*ingest.StatsInfo, error) {
 	var seed *ingest.StatsInfo
-	err = sqlitex.ExecuteTransient(conn, "SELECT metric_seed_json FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, "SELECT metric_seed_json FROM sessions WHERE session_id = ?", &sqlitex.ExecOptions{
 		Args: []any{string(sid)}, ResultFunc: func(stmt *sqlite.Stmt) error {
 			if stmt.ColumnType(0) == sqlite.TypeNull {
 				return nil

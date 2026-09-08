@@ -167,7 +167,9 @@ var AllHarnesses = schema.AllHarnesses
 // ComputedAt, ComputeVersion, and all quality/cost signal fields.
 // Fields below are SQLite-specific bookkeeping not present in the wire format.
 type SessionMetrics struct {
-	SessionID SessionID
+	SessionID  SessionID
+	InputHash  *string `json:"-"`
+	OutputHash *string `json:"-"`
 	schema.QualityMetrics
 }
 

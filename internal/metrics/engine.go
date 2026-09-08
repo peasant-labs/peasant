@@ -18,7 +18,7 @@ import (
 
 // CurrentComputeVersion is the compute_version written by this build.
 // Increment when MetricFunc logic changes to trigger recomputation.
-const CurrentComputeVersion = 7
+const CurrentComputeVersion = 8
 
 // MetricFunc computes a partial SessionMetrics update from session entries.
 // It receives the session's entries and existing metrics, and returns a
@@ -36,6 +36,8 @@ type Engine struct {
 	funcs  []namedMetricFunc
 	force  bool
 	titles title.Pipeline
+	models ingest.ModelsSyncer
+	git    ingest.GitDiffAnalyzer
 }
 
 type namedMetricFunc struct {
@@ -57,6 +59,7 @@ func NewEngine(store ingest.MetricsStore) *Engine {
 // context window lookups and cost computation via the closure pattern.
 func NewEngineWithModels(store ingest.MetricsStore, syncer ingest.ModelsSyncer) *Engine {
 	e := newEngine(store)
+	e.models = syncer
 	e.funcs = defaultMetricFuncs(syncer, nil, e.computeTitle)
 	return e
 }
@@ -65,6 +68,7 @@ func NewEngineWithModels(store ingest.MetricsStore, syncer ingest.ModelsSyncer) 
 // and GitDiffAnalyzer for M6 output survival computation.
 func NewEngineWithAll(store ingest.MetricsStore, syncer ingest.ModelsSyncer, analyzer ingest.GitDiffAnalyzer) *Engine {
 	e := newEngine(store)
+	e.models, e.git = syncer, analyzer
 	e.funcs = defaultMetricFuncs(syncer, analyzer, e.computeTitle)
 	return e
 }
@@ -85,6 +89,15 @@ func newEngine(store ingest.MetricsStore) *Engine {
 // Both are skipped in favour of the next candidate. When no candidate is usable
 // the metric is omitted and the generic harness fallback applies downstream.
 func (e *Engine) computeTitle(ctx context.Context, sessionID ingest.SessionID, entries []schema.SessionEntry, _ *ingest.SessionMetrics) *ingest.SessionMetrics {
+	harness, projectPath, err := e.store.GetTitleContext(ctx, sessionID)
+	if err != nil {
+		slog.Warn("metrics: load title context", "session_id", sessionID, "error", err)
+		return nil
+	}
+	return e.computeTitleWithContext(sessionID, entries, harness, projectPath)
+}
+
+func (e *Engine) computeTitleWithContext(sessionID ingest.SessionID, entries []schema.SessionEntry, harness schema.Harness, projectPath string) *ingest.SessionMetrics {
 	if e.titles == nil {
 		return nil
 	}
@@ -97,9 +110,8 @@ func (e *Engine) computeTitle(ctx context.Context, sessionID ingest.SessionID, e
 	if len(candidates) == 0 {
 		return nil
 	}
-	harness, projectPath, err := e.store.GetTitleContext(ctx, sessionID)
-	if err != nil || harness == "" || projectPath == "" {
-		slog.Warn("metrics: load complete title context; generated title omitted", "session_id", sessionID, "error", err)
+	if harness == "" || projectPath == "" {
+		slog.Warn("metrics: incomplete title context; generated title omitted", "session_id", sessionID)
 		return nil
 	}
 	result, index, skipped := e.titles.GenerateFromTurns(candidates, redact.TitleContext{Harness: harness, ProjectPath: projectPath})
@@ -123,16 +135,17 @@ func (e *Engine) SetForce(force bool) {
 
 // ComputeMetrics computes metrics for the given sessions.
 // Returns the count of sessions that were actually (re)computed.
-// Sessions that already have compute_version >= CurrentComputeVersion
-// are skipped unless Force is true.
+// Production stores skip only matching proven inputs at the current version.
 func (e *Engine) ComputeMetrics(ctx context.Context, sessionIDs []ingest.SessionID) (int, error) {
 	return e.computeMetrics(ctx, sessionIDs, false)
 }
 
 // RecomputeMetrics refreshes only the successful index targets supplied by the
-// current pipeline invocation. A value copy avoids changing shared force state.
-// This is not a durable freshness proof; last-good values survive failed saves.
+// current pipeline invocation. Proven equal inputs need no recomputation.
 func (e *Engine) RecomputeMetrics(ctx context.Context, sessionIDs []ingest.SessionID) (int, error) {
+	if backing, ok := e.store.(ingest.MetricInputStore); ok {
+		return e.computeCapturedMetrics(ctx, backing, sessionIDs)
+	}
 	forced := *e
 	forced.force = true
 	computed := 0
@@ -151,6 +164,9 @@ func (e *Engine) RecomputeMetrics(ctx context.Context, sessionIDs []ingest.Sessi
 }
 
 func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.SessionID, reportFailures bool) (int, error) {
+	if backing, ok := e.store.(ingest.MetricInputStore); ok {
+		return e.computeCapturedMetrics(ctx, backing, sessionIDs)
+	}
 	computed := 0
 
 	for _, sid := range sessionIDs {
@@ -230,7 +246,7 @@ func (e *Engine) computeMetrics(ctx context.Context, sessionIDs []ingest.Session
 		}
 
 		for _, nf := range e.funcs {
-			result := nf.fn(ctx, sid, entries, existing)
+			result := nf.fn(ctx, sid, entries, merged)
 			if result != nil {
 				mergeSessionMetrics(merged, result)
 			}
