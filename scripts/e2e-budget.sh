@@ -23,6 +23,9 @@ done
 
 if [[ ${1:-} == --inside ]]; then
     shift
+    # Only the outer wrapper owns the lock. Daemonized Podman helpers must not
+    # retain it after a failed test skips its cleanup.
+    exec 9>&-
     group=$(sed -n 's/^0:://p' /proc/self/cgroup)
     cg="/sys/fs/cgroup$group"
     [[ -n $group && -r $cg/memory.max ]] || fail "cannot read cgroup v2 memory controller inside scope"
