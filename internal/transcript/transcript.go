@@ -164,15 +164,18 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 			resultMap[*e.ToolCallID] = rd
 			continue
 		}
-		// Backward compat: depth=0 entries with ToolOutput (old-style).
-		// Only used for duration computation on old-style entries.
-		if e.ToolOutput != nil && e.TimestampMs != nil {
+		// Flat harnesses keep results at depth=0. Their output/error does not
+		// require timing evidence; timestamps only contribute optional duration.
+		if e.Depth == 0 && (e.ToolOutput != nil || e.EntryType == schema.EntryTypeToolResult) {
 			if _, exists := resultMap[*e.ToolCallID]; !exists {
-				resultMap[*e.ToolCallID] = toolResultData{
-					Output:    *e.ToolOutput,
-					IsError:   e.IsError,
-					Timestamp: *e.TimestampMs,
+				rd := toolResultData{IsError: e.IsError}
+				if e.ToolOutput != nil {
+					rd.Output = *e.ToolOutput
 				}
+				if e.TimestampMs != nil {
+					rd.Timestamp = *e.TimestampMs
+				}
+				resultMap[*e.ToolCallID] = rd
 			}
 		}
 	}
@@ -343,6 +346,10 @@ func EntriesToTurns(entries []schema.SessionEntry) []ingest.Turn {
 				tc.ToolKind = *e.ToolKind
 			}
 			tc.IsError = e.IsError
+			if rd, ok := resultMap[*e.ToolCallID]; ok && e.EntryType == schema.EntryTypeToolUse {
+				tc.Result = rd.Output
+				tc.IsError = rd.IsError
+			}
 
 			// Compute duration from tool_use → tool_result timestamps.
 			if e.TimestampMs != nil {

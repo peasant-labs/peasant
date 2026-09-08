@@ -27,6 +27,8 @@ type depthZeroParentLinkEntry struct {
 	EntryType     string `yaml:"entryType,omitempty"`
 	ToolCallID    string `yaml:"toolCallId,omitempty"`
 	Content       string `yaml:"content,omitempty"`
+	ToolOutput    string `yaml:"toolOutput,omitempty"`
+	IsError       bool   `yaml:"isError,omitempty"`
 }
 
 type depthZeroParentLinkTurn struct {
@@ -41,6 +43,8 @@ type depthZeroParentLinkCase struct {
 	ExpectedTurns          []depthZeroParentLinkTurn  `yaml:"expectedTurns,omitempty"`
 	ExpectedOverlay        map[int]string             `yaml:"expectedOverlay,omitempty"`
 	ExpectedMissingOverlay []int                      `yaml:"expectedMissingOverlay,omitempty"`
+	ExpectedToolOutput     map[string]string          `yaml:"expectedToolOutput,omitempty"`
+	ExpectedToolErrors     map[string]bool            `yaml:"expectedToolErrors,omitempty"`
 }
 
 type depthZeroParentLinkFixture struct {
@@ -59,16 +63,18 @@ func loadDepthZeroParentLinkFixture(t *testing.T) depthZeroParentLinkFixture {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		t.Fatalf("depth-zero parent link fixture must contain exactly one YAML document: %v", err)
 	}
-	manifest, err := testutil.DecodeSemanticManifest(depthZeroParentLinkManifestYAML, "depth-zero parent link")
-	if err != nil {
+	var manifest struct {
+		RequiredNames []string `yaml:"requiredNames"`
+	}
+	if err := yaml.Unmarshal(depthZeroParentLinkManifestYAML, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	names := make([]string, len(fixture.Cases))
-	for index, fixtureCase := range fixture.Cases {
-		names[index] = fixtureCase.Name
-		if fixtureCase.Name == "" || len(fixtureCase.Entries) == 0 {
+	names := make(map[string]bool)
+	for _, fixtureCase := range fixture.Cases {
+		if fixtureCase.Name == "" || names[fixtureCase.Name] || len(fixtureCase.Entries) == 0 {
 			t.Fatalf("depth-zero parent link fixture case %q is incomplete", fixtureCase.Name)
 		}
+		names[fixtureCase.Name] = true
 		if len(fixtureCase.ExpectedTurns) == 0 && len(fixtureCase.ExpectedOverlay) == 0 {
 			t.Fatalf("depth-zero parent link fixture case %q asserts nothing", fixtureCase.Name)
 		}
@@ -78,7 +84,7 @@ func loadDepthZeroParentLinkFixture(t *testing.T) depthZeroParentLinkFixture {
 			}
 		}
 	}
-	if err := testutil.ValidateSemanticNames(manifest, names, "depth-zero parent link"); err != nil {
+	if err := testutil.RequireFixtureNames("depth-zero parent link", "case", manifest.RequiredNames, names); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
@@ -93,6 +99,7 @@ func depthZeroParentLinkEntries(fixtureCase depthZeroParentLinkCase) []schema.Se
 			Depth:       source.Depth,
 			ParentIndex: source.ParentIndex,
 			EntryType:   schema.EntryType(source.EntryType),
+			IsError:     source.IsError,
 		}
 		if source.ParentEntryID != "" {
 			parentEntryID := source.ParentEntryID
@@ -109,6 +116,10 @@ func depthZeroParentLinkEntries(fixtureCase depthZeroParentLinkCase) []schema.Se
 			id := source.ToolCallID
 			entry.ToolCallID = &id
 			entry.HasToolUse = entry.EntryType == schema.EntryTypeToolUse
+		}
+		if source.ToolOutput != "" {
+			output := source.ToolOutput
+			entry.ToolOutput = &output
 		}
 		entries = append(entries, entry)
 	}
@@ -134,6 +145,22 @@ func TestDepthZeroParentLinkIsNotAChild(t *testing.T) {
 					if turns[i].Index != want.Index || string(turns[i].Role) != want.Role || len(turns[i].ToolCalls) != want.ToolCalls {
 						t.Errorf("turn %d = (index %d, role %s, tool calls %d), want (index %d, role %s, tool calls %d)",
 							i, turns[i].Index, turns[i].Role, len(turns[i].ToolCalls), want.Index, want.Role, want.ToolCalls)
+					}
+				}
+				for id, want := range fixtureCase.ExpectedToolOutput {
+					found := false
+					for _, turn := range turns {
+						for _, call := range turn.ToolCalls {
+							if call.ID == id {
+								found = true
+								if call.Result != want || call.IsError != fixtureCase.ExpectedToolErrors[id] || call.DurationMs != nil {
+									t.Errorf("tool %s lost untimed output/error: %+v", id, call)
+								}
+							}
+						}
+					}
+					if !found {
+						t.Errorf("missing tool %s", id)
 					}
 				}
 			}
