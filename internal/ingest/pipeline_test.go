@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/defaults"
 	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/salt"
+	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
 	"github.com/peasant-labs/redact"
 	"github.com/peasant-labs/schema"
@@ -2493,11 +2495,12 @@ func TestPipeline_WithIndexers_IndexesTranscripts(t *testing.T) {
 	metricsStore := testutil.NewStubMetricsStore()
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -2551,12 +2554,13 @@ func TestPipeline_WithAnalyzer_ComputesMetrics(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithStore(store),
+		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 	)
 	if err != nil {
@@ -2620,12 +2624,13 @@ func TestPipeline_WithClassifier_AnnotatesNewSessions(t *testing.T) {
 	store := &testutil.StubSessionStore{}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, store, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithStore(store),
+		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithClassifier(classifier),
 	)
 	if err != nil {
@@ -2734,12 +2739,13 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 	cfg := makePipelineConfig(testOutputDir, func(c *ingest.PipelineConfig) {
 		c.Parallelism = 2
 	})
+	fixtureStore := newPipelineFixtureStore(t, nil, testutil.NewStubMetricsStore())
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
-		ingest.WithStore(&testutil.StubSessionStore{}),
+		ingest.WithStore(fixtureStore),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(testutil.NewStubMetricsStore()),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithClassifier(classifier),
 	)
 	if err != nil {
@@ -2754,11 +2760,17 @@ func TestPipeline_WithBufferedClassifier_FlushesPreparedSessions(t *testing.T) {
 	if len(classifier.annotated) != 0 {
 		t.Fatalf("Annotate calls = %d, want 0 buffered path calls", len(classifier.annotated))
 	}
-	if len(classifier.prepared) != 2 {
-		t.Fatalf("PrepareAnnotations calls = %d, want 2", len(classifier.prepared))
+	want := []ingest.SessionID{sidA, sidB}
+	prepared := slices.Clone(classifier.prepared)
+	var flushed []ingest.SessionID
+	for _, batch := range classifier.flushes {
+		flushed = append(flushed, batch...)
 	}
-	if len(classifier.flushes) != 1 || len(classifier.flushes[0]) != 2 {
-		t.Fatalf("flushes = %+v, want one flush containing both sessions", classifier.flushes)
+	slices.Sort(want)
+	slices.Sort(prepared)
+	slices.Sort(flushed)
+	if !slices.Equal(prepared, want) || !slices.Equal(flushed, want) {
+		t.Fatalf("prepared=%v flushed=%v, want each selected session %v", prepared, flushed, want)
 	}
 }
 
@@ -2785,11 +2797,12 @@ func TestPipeline_IndexError_NonFatal(t *testing.T) {
 	metricsStore := testutil.NewStubMetricsStore()
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -2850,11 +2863,12 @@ func TestPipeline_ComputeError_NonFatal(t *testing.T) {
 	analyzer := &testutil.StubAnalyzer{ComputeErr: errors.New("compute failed")}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 	)
 	if err != nil {
@@ -2911,11 +2925,12 @@ func TestPipeline_StreamedDownstreamAnnotatesAfterComputeError(t *testing.T) {
 
 	cfg := makePipelineConfig(testOutputDir)
 	cfg.IndexProfiler = profiler
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 		ingest.WithClassifier(classifier),
 	)
@@ -3030,11 +3045,12 @@ func TestPipeline_WithAnalyzer_NoWithStore(t *testing.T) {
 
 	// Deliberately NOT using WithStore — p.store will be nil.
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 		// No WithStore
 	)
@@ -3142,11 +3158,12 @@ func TestPipeline_WithAnalyzer_IndexStoreError_NotPassedToCompute(t *testing.T) 
 	analyzer := &testutil.StubAnalyzer{}
 
 	cfg := makePipelineConfig(testOutputDir)
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithAnalyzer(analyzer),
 	)
 	if err != nil {
@@ -3733,11 +3750,12 @@ func TestPipeline_Reindex_DiscoversSessions(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -3793,11 +3811,12 @@ func TestPipeline_Reindex_ReExtractsWhenSourceExists(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -3862,11 +3881,12 @@ func TestPipeline_Reindex_FallbackWhenSourceMissing(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithIndexLogger(indexLogger),
 	)
 	if err != nil {
@@ -3925,14 +3945,22 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, meta1)
 
 	meta2 := makeReindexMeta(t, testSessionID2, "/nonexistent/2.jsonl")
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, meta2)
+	_, peerPath := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID2, meta2)
 
 	sid1, _ := ingest.NewSessionID(testSessionID)
 	sid2, _ := ingest.NewSessionID(testSessionID2)
 
-	// Only mark sid1 as stale. sid2 is NOT stale.
+	// Only sid1 lacks a current input proof; sid2 has a real completed index.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid1}
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	adapterVersion := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].AdapterVersion
+	meta2.AdapterVersion = &adapterVersion
+	meta2.Project.Hash = testutil.TestProjectHash
+	peerTranscript, err := mfs.ReadFile(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *meta2, peerTranscript)
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -3954,7 +3982,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline (no force): %v", err)
@@ -3977,7 +4005,7 @@ func TestPipeline_Reindex_ForceTargetsAll(t *testing.T) {
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline (force): %v", err)
@@ -4027,11 +4055,12 @@ func TestPipeline_Reindex_IndexLogPopulated(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 		ingest.WithIndexLogger(indexLogger),
 	)
 	if err != nil {
@@ -4140,11 +4169,12 @@ func TestPipeline_Reindex_UpdatesIndexState(t *testing.T) {
 		c.Reindex = true
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4273,18 +4303,18 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	// but the parent itself is not stale — only the subagent is.
 	parentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	parentMeta := makeReindexMeta(t, testSessionID, parentSourcePath)
-	setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
+	_, parentTranscript := setupPeasantSyncSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, parentMeta)
 
 	// Set up subagent in nested layout.
 	subagentSourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testutil.TestSubagentID)
 	subagentMeta := makeReindexMeta(t, testutil.TestSubagentID, subagentSourcePath)
+	parentID := ingest.SessionID(testSessionID)
+	subagentMeta.ParentUUID = &parentID
 	setupPeasantSyncSubagentSession(t, mfs, testOutputDir, testutil.TestHostSlug, testSessionID, testutil.TestSubagentID, subagentMeta)
 
 	subSID, _ := ingest.NewSessionID(testutil.TestSubagentID)
 
-	// MetricsStore reports only the subagent as stale.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{subSID}
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4302,11 +4332,20 @@ func TestPipeline_AutoDetect_ReconstructsSubagent(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	adapterVersion := ingest.HarvesterVersionRegistry[ingest.HarnessClaudeCode].AdapterVersion
+	parentMeta.AdapterVersion = &adapterVersion
+	parentMeta.Project.Hash = testutil.TestProjectHash
+	parentBytes, err := mfs.ReadFile(parentTranscript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storetest.SeedManagedInput(t, fixtureStore.Store, mfs, testOutputDir, *parentMeta, parentBytes)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4368,11 +4407,12 @@ func TestPipeline_AutoDetect_StaleVersionTriggersReindex(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4432,22 +4472,7 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
 
 	// MetricsStore reports this session as stale and provides source info via DB.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
-	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
-	metricsStore.SourceInfoByID = map[ingest.SessionID]struct {
-		SourcePath   string
-		SourceFormat ingest.SourceFormat
-		Harness      string
-	}{
-		sid: {
-			SourcePath:   sourcePath,
-			SourceFormat: ingest.SourceFormatJSONL,
-			Harness:      string(ingest.HarnessClaudeCode),
-		},
-	}
-	metricsStore.LookupSessionLocationFunc = func(_ context.Context, _ ingest.SessionID) (string, string, error) {
-		return testutil.TestHostSlug, "", nil
-	}
+	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, string(sid))
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4466,11 +4491,16 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	storedMeta := makeReindexMeta(t, string(sid), sourcePath)
+	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: storedMeta}}); err != nil {
+		t.Fatal(err)
+	}
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -4538,23 +4568,7 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
 
 	// MetricsStore reports the subagent as stale and provides source info + location.
 	metricsStore := testutil.NewStubMetricsStore()
-	metricsStore.StaleIndexSessions = []ingest.SessionID{sid}
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, string(sid))
-	metricsStore.SourceInfoByID = map[ingest.SessionID]struct {
-		SourcePath   string
-		SourceFormat ingest.SourceFormat
-		Harness      string
-	}{
-		sid: {
-			SourcePath:   sourcePath,
-			SourceFormat: ingest.SourceFormatJSONL,
-			Harness:      string(ingest.HarnessClaudeCode),
-		},
-	}
-	// LookupSessionLocation returns a non-empty parentID, indicating subagent layout.
-	metricsStore.LookupSessionLocationFunc = func(_ context.Context, sessionID ingest.SessionID) (string, string, error) {
-		return testutil.TestHostSlug, string(parentSid), nil
-	}
 
 	indexer := &testutil.StubIndexer{
 		Kind: ingest.TranscriptSourceFile,
@@ -4573,11 +4587,17 @@ func TestPipeline_AutoDetect_ReconstructFromSourceInfo_Subagent(t *testing.T) {
 	}
 	cfg := makePipelineConfig(testOutputDir)
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
+	storedMeta := makeReindexMeta(t, string(sid), sourcePath)
+	storedMeta.ParentUUID = &parentSid
+	if err := fixtureStore.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: makeMinimalMeta(t, string(parentSid))}, {Metadata: storedMeta}}); err != nil {
+		t.Fatal(err)
+	}
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
@@ -5487,11 +5507,12 @@ func TestPipeline_Reindex_ParallelExtract(t *testing.T) {
 		c.Parallelism = 2 // explicitly use 2 workers
 	})
 
+	fixtureStore := newPipelineFixtureStore(t, nil, metricsStore)
 	pipeline, err := ingest.NewPipeline(mfs, git, adapters, cfg,
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{
 			ingest.HarnessClaudeCode: indexer,
 		}),
-		ingest.WithMetricsStore(metricsStore),
+		ingest.WithMetricsStore(fixtureStore),
 	)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)

@@ -386,7 +386,8 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 	}
 	store := &testutil.StubSessionStore{}
 	metrics := testutil.NewStubMetricsStore()
-	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}, ingest.WithStore(store), ingest.WithMetricsStore(metrics), ingest.WithAnalyzer(metricspkg.NewEngine(metrics)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: indexer}))
+	fixtureStore := newPipelineFixtureStore(t, store, metrics)
+	pipeline, err := ingest.NewPipeline(&ingest.OSFileSystem{}, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessOpenCode: adapterFactory}, ingest.PipelineConfig{Sources: map[ingest.Harness]ingest.SourceConfig{ingest.HarnessOpenCode: {Enabled: true, Paths: []ingest.ResolvedPath{root}}}, OutputDir: output, Parallelism: 1}, ingest.WithStore(fixtureStore), ingest.WithMetricsStore(fixtureStore), ingest.WithAnalyzer(metricspkg.NewEngine(fixtureStore)), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessOpenCode: indexer}))
 	if err != nil {
 		t.Fatal(err)
 	}
