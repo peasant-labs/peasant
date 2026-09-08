@@ -518,17 +518,28 @@ func TestStore_InsertSessions_Idempotent(t *testing.T) {
 
 	hash := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	entry := makeStoreEntry(t, "44444444-4444-4444-4444-444444444444", hash, "github.com-user-repo", defaults.HarnessClaudeCode, 1700000000000, 1000, 500)
+	entry.SourceFingerprint = []byte("first captured source")
 
 	// Insert once.
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("first InsertSessions: %v", err)
 	}
+	if err := s.UpdateIndexState(ctx, entry.Metadata.SessionID, ingest.CurrentIndexVersion, 1700000000001); err != nil {
+		t.Fatal(err)
+	}
 
 	// Modify tokens and re-insert (INSERT OR REPLACE should upsert, not duplicate).
 	entry.Metadata.Stats.TokensIn = 2000
 	entry.Metadata.Stats.TokensOut = 900
+	entry.SourceFingerprint = []byte("later captured source")
 	if err := s.InsertSessions(ctx, []ingest.StoreEntry{entry}); err != nil {
 		t.Fatalf("second InsertSessions: %v", err)
+	}
+	// Metadata persistence must leave indexing retryable until the separate
+	// streamed index transaction acknowledges this source's entries.
+	stale, err := s.ListStaleIndexSessions(ctx, ingest.CurrentIndexVersion)
+	if err != nil || len(stale) != 1 || stale[0] != entry.Metadata.SessionID {
+		t.Fatalf("changed captured source did not invalidate old index: %v, %v", stale, err)
 	}
 
 	conn := takeConn(t, s.PoolForTest())

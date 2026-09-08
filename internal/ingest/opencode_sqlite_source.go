@@ -333,6 +333,7 @@ type OpenCodeSessionRecordPageRequest struct {
 	Selection OpenCodeSessionRecordSelection
 	PageSize  OpenCodeCurrentPageSize
 	After     *OpenCodeSessionRecordCursor
+	SessionID *OpenCodeSessionLinkID // Optional exact lookup for captured materialization.
 }
 
 // OpenCodeSessionLinkID is a validated identifier from the shared session

@@ -768,7 +768,6 @@ func (h *syncHandler) handleSyncPush(w http.ResponseWriter, r *http.Request) {
 		&pushCfg,
 		&ingest.OSFileSystem{},
 		push.PipelineConfig{
-			Force:            len(req.SessionIDs) > 0,
 			FilterSessionIDs: req.SessionIDs,
 			Visibility:       visibility,
 		},

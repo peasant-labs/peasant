@@ -67,7 +67,7 @@ func loadPublicationCaptureCases(t *testing.T) []publicationCaptureCase {
 		t.Fatal(err)
 	}
 	required := map[string]bool{
-		"claude_literal_cwd_and_historical_identity": true, "claude_source_absent": true,
+		"claude_literal_cwd_and_tracked_identity_repair": true, "claude_source_absent": true,
 		"codex_literal_cwd": true, "codex_directory_fallback_not_exact": true,
 		"cursor_workspace_not_exact": true, "strike_worktree_not_exact": true,
 		"opencode_json_literal_cwd": true, "opencode_legacy_sqlite_capture": true,
@@ -240,7 +240,11 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 			if result.Summary.Errors != 0 || result.Summary.StoreError != nil || result.Summary.Indexed != 1 {
 				t.Fatalf("recovery failed: %+v", result)
 			}
-			metadataPath := filepath.Join(ingest.SessionDir(cfg.OutputDir.String(), string(meta.HostSlug), c.ID, ""), c.ID+"--metadata.json")
+			repairedHost, repairedParent, err := database.LookupSessionLocation(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadataPath := filepath.Join(ingest.SessionDir(cfg.OutputDir.String(), repairedHost, c.ID, repairedParent), c.ID+"--metadata.json")
 			if err := os.Remove(metadataPath); err != nil && !(c.FailSidecar && os.IsNotExist(err)) {
 				t.Fatal(err)
 			}
@@ -270,9 +274,14 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 					t.Fatalf("index mixed a newer source tree into the capture: %s, %v", entryJSON, err)
 				}
 			}
-			if bundle.Metadata.Project.Hash != meta.Project.Hash || bundle.Metadata.HostSlug != meta.HostSlug || !reflect.DeepEqual(bundle.Metadata.Git.Remote, meta.Git.Remote) {
-				t.Fatal("current Git rewrote historical identity")
+			wantProject, wantHost, err := ingest.DeriveProjectIdentifiers(installationSalt, git.Remote, session.CWD)
+			if err != nil {
+				t.Fatal(err)
 			}
+			if bundle.Metadata.Project.Hash != wantProject || bundle.Metadata.HostSlug != wantHost || bundle.Metadata.Git.Remote == nil || *bundle.Metadata.Git.Remote != git.Remote || bundle.Metadata.SessionID != id {
+				t.Fatalf("capture did not follow tracked project repair: %+v", bundle.Metadata)
+			}
+			meta = &bundle.Metadata
 			if len(bundle.Associations) != 1 {
 				t.Fatalf("lost historical association: %+v", bundle.Associations)
 			}
@@ -284,8 +293,8 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 				t.Fatalf("origin verdict invalidated independent capture proof: %+v, %v", judged, err)
 			}
 			locations, err := database.BulkLookupSessionLocations(ctx, []ingest.SessionID{id})
-			if err != nil || locations[id].OpaqueHostID != priorLocations[id].OpaqueHostID {
-				t.Fatalf("host relation drift: %v", err)
+			if err != nil || locations[id].HostSlug != repairedHost || locations[id].ProjectHash != wantProject {
+				t.Fatalf("repaired host relation disagrees with snapshot: %v", err)
 			}
 			// Force a same-entry index no-op through a new capture transaction.
 			cfg.Force = true
@@ -339,7 +348,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 					t.Fatalf("changed entries missing: %s, %v", entryJSON, err)
 				}
 				if changedBundle.Metadata.Project.Hash != meta.Project.Hash {
-					t.Fatal("changed CWD reassigned historical project")
+					t.Fatal("changed CWD overrode tracked project identity")
 				}
 			}
 			// Source-backed reindex captures metadata and index inputs together.
@@ -413,7 +422,7 @@ func TestPublicationCaptureNormalIngestRecovery(t *testing.T) {
 					wantCWD = "/synthetic/reindex/../literal"
 				}
 				if manual.Metadata.CWD != wantCWD || publicationStoredProvenance(t, dbPath, id) != c.Provenance || manual.Metadata.Project.Hash != meta.Project.Hash || manual.Metadata.HostSlug != meta.HostSlug || !reflect.DeepEqual(manual.Metadata.Git.Remote, meta.Git.Remote) || !reflect.DeepEqual(manual.Associations, repeated.Associations) {
-					t.Fatalf("reindex changed source provenance or historical attribution: %+v", manual)
+					t.Fatalf("reindex changed source provenance or repaired attribution: %+v", manual)
 				}
 			}
 			if c.ReindexMutateAfterRead {
@@ -467,6 +476,13 @@ type publicationCaptureFS struct {
 }
 
 var _ ingest.FileSystem = (*publicationCaptureFS)(nil)
+
+func (fs *publicationCaptureFS) ReadSourcePrefix(path string) ([]byte, error) {
+	if path == fs.disappearPath {
+		_ = os.Remove(path)
+	}
+	return fs.OSFileSystem.ReadSourcePrefix(path)
+}
 
 func (fs *publicationCaptureFS) ReadFile(path string) ([]byte, error) {
 	if path == fs.disappearPath {

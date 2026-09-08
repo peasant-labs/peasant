@@ -199,7 +199,8 @@ func TestOpenCodeSessionAuthority(t *testing.T) {
 					if session.ModTime.UnixMilli() != expected.Updated {
 						t.Fatalf("freshness = %v, want %d", session.ModTime, expected.Updated)
 					}
-					metadata, transcript, err := adapter.MaterializeTranscript(t.Context(), session)
+					captured, err := adapter.MaterializeTranscript(t.Context(), session)
+					metadata, transcript := captured.Metadata, captured.Data
 					if err != nil || metadata == nil || !strings.Contains(string(transcript), expected.Transcript) {
 						t.Fatalf("materialize selected transcript: metadata present=%t bytes=%d err=%v", metadata != nil, len(transcript), err)
 					}

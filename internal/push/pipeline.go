@@ -113,14 +113,14 @@ type Publisher interface {
 }
 
 // PipelineStore is the complete local persistence surface required by the push
-// pipeline. Receipt reads remain available on store.Store but are not needed to
-// publish or persist authoritative results.
+// pipeline.
 type PipelineStore interface {
 	CandidateStore
 	InsertPushLog(context.Context, ingest.PushLogEntry) error
 	SessionsWithoutMetrics(context.Context) ([]ingest.HeldSession, error)
 	ingest.PublicationInputReader
 	ListEntries(context.Context, ingest.SessionID) ([]schema.SessionEntry, error)
+	Publication(context.Context, string, string, schema.ProjectHash, string) (*store.PublicationRecord, error)
 	SavePublication(context.Context, store.PublicationRecord) error
 	RecordPublicationAttempt(context.Context, store.PublicationAttemptDiagnostic) error
 }
@@ -360,6 +360,13 @@ func (p *Pipeline) Run(ctx context.Context) (result *PushResult, err error) {
 	if abortErr != nil {
 		rec.Error(perf.StagePushRun, fmt.Errorf("push stopped after repeated connection failures; check network access before retrying"), nil)
 		return result, abortErr
+	}
+	if result.Skipped > 0 && result.New == 0 && result.Updated == 0 && result.Errors == 0 && result.Held == 0 {
+		if p.runCfg.Repository != nil {
+			result.EmptyReason = p.emptyReason(ctx, baseCount)
+		} else {
+			result.EmptyReason = "All selected sessions already pushed with unchanged content and publication settings."
+		}
 	}
 
 	// 8. Write audit log entry. Like receipt persistence this records work that
@@ -1143,6 +1150,16 @@ func (p *Pipeline) pushSession(
 	projectHash, hashErr := schema.NewProjectHash(string(input.ReceiptProjectHash))
 	if hashErr != nil {
 		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("publish authoritative session: local project identity is invalid: %w", hashErr)}
+	}
+	previous, err := ledger.Publication(ctx, p.creds.VillageURL, p.creds.UserID, projectHash, sess.SessionID)
+	if err != nil {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusError, Error: fmt.Errorf("compare authoritative publication receipt before upload: %w", err)}
+	}
+	if !p.runCfg.Force && sess.PushedAt != nil && previous != nil && previous.Receipt.Validate() == nil &&
+		previous.Receipt.ContentHash == request.ContentHash &&
+		previous.Receipt.RequestOperationFingerprint == expectedFingerprint &&
+		schema.Visibility(previous.Receipt.Visibility) == visibility {
+		return SessionPushResult{SessionID: sess.SessionID, HostSlug: sess.HostSlug, Title: title, Status: PushStatusSkipped}
 	}
 	stage.next(perf.StagePushPublish)
 	receipt, statusCode, err := client.PublishAuthoritative(uploadCtx, request, bytes.NewReader(transcriptBytes), transcriptFilename)

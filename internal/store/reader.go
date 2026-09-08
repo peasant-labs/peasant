@@ -641,7 +641,7 @@ s.project_hash,s.opaque_host_id,h.git_remote,s.publication_capture_revision,
 CASE WHEN p.capture_revision > 0 AND p.capture_revision=s.publication_capture_revision
  AND p.capture_revision=s.indexed_publication_capture_revision AND p.schema_version=?
  AND s.cwd_provenance_kind!='not_recovered' THEN 1 ELSE 0 END,
-p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind
+p.metadata_json,p.metadata_hash,p.content_hash,COALESCE(s.session_cwd,''),s.cwd_provenance_kind,s.source_fingerprint
 FROM sessions s
 JOIN host_slugs h ON s.opaque_host_id = h.opaque_id
 LEFT JOIN session_publication_metadata p ON p.session_id=s.session_id
@@ -666,16 +666,23 @@ WHERE s.session_id IN (` +
 			}
 			ingestedMs := stmt.ColumnInt64(3)
 			schemaVersion := int(stmt.ColumnInt64(4))
+			var sourceFingerprint []byte
+			if stmt.ColumnType(15) != sqlite.TypeNull {
+				sourceFingerprint = make([]byte, stmt.ColumnLen(15))
+				stmt.ColumnBytes(15, sourceFingerprint)
+			}
 			result[id] = ingest.SessionLocation{
-				ProjectHash:          projectHash,
-				OpaqueHostID:         stmt.ColumnText(6),
-				GitRemote:            nullableColumnText(stmt, 7),
-				CaptureRevision:      stmt.ColumnInt64(8),
-				PublicationReadiness: readiness,
-				HostSlug:             stmt.ColumnText(1),
-				ParentID:             stmt.ColumnText(2),
-				IngestedMs:           &ingestedMs,
-				SchemaVersion:        schemaVersion,
+				ProjectHash:             projectHash,
+				OpaqueHostID:            stmt.ColumnText(6),
+				GitRemote:               nullableColumnText(stmt, 7),
+				CaptureRevision:         stmt.ColumnInt64(8),
+				PublicationReadiness:    readiness,
+				HostSlug:                stmt.ColumnText(1),
+				ParentID:                stmt.ColumnText(2),
+				IngestedMs:              &ingestedMs,
+				SchemaVersion:           schemaVersion,
+				SourceFingerprint:       sourceFingerprint,
+				SourceEvidenceSupported: true,
 			}
 			return nil
 		},

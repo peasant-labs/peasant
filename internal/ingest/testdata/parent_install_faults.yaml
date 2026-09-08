@@ -20,3 +20,12 @@ cases:
     mode: exit_before
   - name: interrupted_after_install_survives_restart_cleanup
     mode: exit_after
+  - name: relocated_parent_preserves_old_child_and_destination
+    mode: success
+    remote: https://example.com/repaired/upstream.git
+  - name: relocated_parent_io_failure_recovers
+    mode: fail_persistent
+    remote: https://example.com/repaired/upstream.git
+  - name: relocated_parent_interruption_recovers
+    mode: exit_after
+    remote: https://example.com/repaired/upstream.git

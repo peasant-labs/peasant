@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -26,7 +28,42 @@ type SourceAdapter interface {
 // legacy OpenCode SQLite, where copying database bytes would not produce a
 // transcript.
 type TranscriptMaterializer interface {
-	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
+	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (MaterializedTranscript, error)
+}
+
+// MaterializedTranscript is one captured source view used for metadata,
+// transcript persistence, and durable freshness evidence.
+type MaterializedTranscript struct {
+	capturedSource    *captureFileSystem
+	Metadata          *UnifiedMetadata
+	Data              []byte
+	SourceFingerprint []byte
+	EventSeq          int64
+	Session           *DiscoveredSession
+}
+
+func newMaterializedTranscript(metadata *UnifiedMetadata, data []byte, eventSeq int64) MaterializedTranscript {
+	fingerprint := sha256.Sum256(data)
+	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: fingerprint[:], EventSeq: eventSeq}
+}
+
+func newSQLiteMaterializedTranscript(metadata *UnifiedMetadata, data []byte, session DiscoveredSession) (MaterializedTranscript, error) {
+	// Only source-owned attributes participate, never discovery file/WAL clocks
+	// or decision-time Git configuration. The latter has its own identity trigger.
+	attrs := DiscoveredSession{ParentUUID: session.ParentUUID, CWD: session.CWD,
+		Title: session.Title, Agent: session.Agent, Version: session.Version,
+		Slug: session.Slug, Cost: session.Cost, TokensIn: session.TokensIn,
+		TokensOut: session.TokensOut, CreatedAt: session.CreatedAt, ModTime: session.ModTime,
+		ProjectWorktree: session.ProjectWorktree, ProjectName: session.ProjectName, EventSeq: session.EventSeq}
+	encoded, err := json.Marshal(attrs)
+	if err != nil {
+		return MaterializedTranscript{}, fmt.Errorf("fingerprint captured OpenCode attributes: %w; no state written; repair source attributes and retry", err)
+	}
+	hash := sha256.New()
+	hash.Write(encoded)
+	hash.Write([]byte{'\n'})
+	hash.Write(data)
+	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: hash.Sum(nil), EventSeq: session.EventSeq, Session: &session}, nil
 }
 
 // DiscoveryStatistics is an optional capability. An adapter that can report

@@ -130,11 +130,13 @@ func drainHeap(h *sessionSizeHeap) []sessionSize {
 
 // workerResult is the output of a single processSession call.
 type workerResult struct {
-	capturedSource *captureFileSystem
-	cwdProvenance  CWDProvenanceKind
-	eventSeq       int64
-	result         SessionResult
-	meta           *UnifiedMetadata
+	capturedSource      *captureFileSystem
+	cwdProvenance       CWDProvenanceKind
+	eventSeq            int64
+	result              SessionResult
+	meta                *UnifiedMetadata
+	sourceFingerprint   []byte
+	fileCaptureEvidence []byte
 	// transcriptData holds the already-read bytes for the in-memory index path.
 	// Nil on error or skip.
 	//

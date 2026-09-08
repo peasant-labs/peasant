@@ -5,6 +5,8 @@ cases:
     expected_sessions: 2
     expected_discovery_message_reads: 0
     expected_discovery_part_reads: 0
+    expected_capture_message_reads: 2
+    expected_capture_part_reads: 2
     commit_hash: abc123
     commit_email: test@example.com
     commit_message: synthetic timestamp candidate

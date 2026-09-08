@@ -66,9 +66,9 @@ func validateCaptureMetadata(m *schema.UnifiedMetadata, kind ingest.CWDProvenanc
 	return nil
 }
 
-// Compare historical identity before any dimensions or session facts are changed.
-// The ingest normalizer must overlay this attribution before computing hashes.
-func validatePublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) error {
+// Validate source evidence before any dimensions or session facts change.
+// Project attribution may transition with the adapter's tracked project repair.
+func validatePublicationCapture(entry ingest.StoreEntry) error {
 	m := entry.Metadata
 	if err := validateCaptureMetadata(m, entry.CWDProvenance); err != nil {
 		return err
@@ -76,6 +76,13 @@ func validatePublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) erro
 	if entry.Session.SessionID != "" && entry.Session.SessionID != m.SessionID {
 		return publicationRepairError("discovered and captured session identities disagree")
 	}
+	return nil
+}
+
+// Validate the resulting relation inside the same transaction as the upsert,
+// before publishing its capture revision. Receipts are not changed by ingest.
+func validateStoredPublicationCapture(conn *sqlite.Conn, entry ingest.StoreEntry) error {
+	m := entry.Metadata
 	return sqlitex.ExecuteTransient(conn, `SELECT s.project_hash, COALESCE(s.parent_id,''), h.host_slug, COALESCE(h.git_remote,'')
 FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.session_id=?`, &sqlitex.ExecOptions{
 		Args: []any{string(m.SessionID)}, ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -87,7 +94,7 @@ FROM sessions s JOIN host_slugs h ON h.opaque_id=s.opaque_host_id WHERE s.sessio
 				remote = *m.Git.Remote
 			}
 			if stmt.ColumnText(0) != string(m.Project.Hash) || stmt.ColumnText(1) != parent || stmt.ColumnText(2) != string(m.HostSlug) || stmt.ColumnText(3) != remote {
-				return publicationRepairError("captured metadata disagrees with stored historical attribution")
+				return publicationRepairError("captured metadata disagrees with stored attribution")
 			}
 			return nil
 		},

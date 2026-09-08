@@ -662,10 +662,8 @@ selection:
 	}
 }
 
-// TestPushCmd_AllAlreadyPushed_SelectionActive_NoSelectionNote verifies the third
-// empty-state case: when every candidate is already pushed (base unpushed set is
-// empty), an active selection must NOT trigger the selection-specific note — the
-// generic "all already pushed" path applies. Exit 0.
+// Legacy timestamps without receipts must not exclude selected candidates from
+// the dry-run forecast or falsely report that no sessions match the selection.
 func TestPushCmd_AllAlreadyPushed_SelectionActive_NoSelectionNote(t *testing.T) {
 	// PARALLEL: credential gate reads via --config-dir; store opens from `dir`.
 	t.Parallel()
@@ -674,8 +672,7 @@ func TestPushCmd_AllAlreadyPushed_SelectionActive_NoSelectionNote(t *testing.T) 
 
 	selectedID, otherID, remote := seedCrossBranchSessions(t, dir)
 
-	// Seed legacy cursors so the unpushed base query returns empty. Production
-	// cursor updates are available only through receipt-validated SavePublication.
+	// Seed legacy cursors without authoritative receipts.
 	var sids []ingest.SessionID
 	for _, raw := range []string{selectedID, otherID} {
 		sid, sErr := ingest.NewSessionID(raw)
@@ -707,8 +704,8 @@ selection:
 	if strings.Contains(errs, "no sessions match the configured selection") {
 		t.Errorf("selection note must NOT fire when all sessions are already pushed; stderr: %s", errs)
 	}
-	if !strings.Contains(out, "All sessions already pushed") {
-		t.Errorf("generic 'all already pushed' message should appear on STDOUT; stdout: %s", out)
+	if strings.Contains(out, "All sessions already pushed") || !strings.Contains(out, selectedID) || strings.Contains(out, otherID) {
+		t.Errorf("forecast must reconsider only the selected legacy session; stdout: %s", out)
 	}
 }
 

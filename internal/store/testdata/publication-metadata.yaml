@@ -95,19 +95,19 @@
   kind: source_workspace
   cwd: /not/exact
   capture_error: true
-- name: incompatible-history
+- name: repaired-project-capture
   kind: source_absent
   action: changed-identity
   readiness: ready
-- name: incompatible-parent-history
+- name: captured-parent-transition
   kind: source_absent
   action: changed-parent
   readiness: ready
-- name: incompatible-host-history
+- name: repaired-host-capture
   kind: source_absent
   action: changed-host
   readiness: ready
-- name: incompatible-remote-history
+- name: repaired-remote-capture
   kind: source_absent
   action: changed-remote
   readiness: ready

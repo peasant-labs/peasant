@@ -41,9 +41,9 @@ func loadPublicationMetadataFixtures(t *testing.T) []publicationMetadataFixture 
 	if err := yaml.Unmarshal(publicationMetadataYAML, &cases); err != nil {
 		t.Fatal(err)
 	}
-	required := strings.Fields(`exact-root-reopened exact-child-reopened confirmed-absent workspace-is-not-exact worktree-is-not-exact legacy-seed capture-before-index noop-stamps-new-capture stale-writer-refused stale-noop-refused manual-entry-reindex manual-index-state manual-hashed-index-state zero-revision-noop legacy-upsert-invalidates metrics-are-independent unsupported-snapshot malformed-snapshot corrupt-snapshot-digest conflicting-cwd-column conflicting-snapshot-identity unknown-capture-intent exact-without-literal workspace-with-fake-cwd incompatible-history model-absence-is-consumer-policy`)
+	required := strings.Fields(`exact-root-reopened exact-child-reopened confirmed-absent workspace-is-not-exact worktree-is-not-exact legacy-seed capture-before-index noop-stamps-new-capture stale-writer-refused stale-noop-refused manual-entry-reindex manual-index-state manual-hashed-index-state zero-revision-noop legacy-upsert-invalidates metrics-are-independent unsupported-snapshot malformed-snapshot corrupt-snapshot-digest conflicting-cwd-column conflicting-snapshot-identity unknown-capture-intent exact-without-literal workspace-with-fake-cwd repaired-project-capture model-absence-is-consumer-policy`)
 	seen := make(map[string]bool)
-	required = append(required, strings.Fields("incompatible-parent-history incompatible-host-history incompatible-remote-history incompatible-source-identity corrupt-capture-digest manual-reindex-restamped")...)
+	required = append(required, strings.Fields("captured-parent-transition repaired-host-capture repaired-remote-capture incompatible-source-identity corrupt-capture-digest manual-reindex-restamped")...)
 	for _, c := range cases {
 		if seen[c.Name] {
 			t.Fatalf("duplicate fixture %s", c.Name)
@@ -231,8 +231,9 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 				case "changed-identity":
 					m.Project.Hash = schema.ProjectHash(strings.Repeat("b", 64))
 				case "changed-parent":
-					parent := schema.SessionID("33333333-3333-4333-8333-333333333333")
-					m.ParentUUID = &parent
+					parent := publicationEntry(t, "33333333-3333-4333-8333-333333333333")
+					capturePublication(t, s, parent)
+					m.ParentUUID = &parent.Metadata.SessionID
 				case "changed-host":
 					m.HostSlug = "example-other-host"
 				case "changed-remote":
@@ -242,9 +243,27 @@ func TestPublicationMetadataFixtures(t *testing.T) {
 					changed.Session.SessionID = "33333333-3333-4333-8333-333333333333"
 				}
 				m.MetadataHash = schema.ComputeMetadataHash(&m)
-				if _, captureErr := s.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{changed}); captureErr == nil {
-					t.Fatal("historical attribution changed")
+				next, captureErr := s.InsertSessionsWithRevisions(ctx, []ingest.StoreEntry{changed})
+				if tc.Action == "changed-source-id" {
+					if captureErr == nil {
+						t.Fatal("incompatible source identity accepted")
+					}
+					break
 				}
+				if captureErr != nil || next[id] != revision+1 {
+					t.Fatalf("attribution capture transition failed: %v, %v", next, captureErr)
+				}
+				pending, readErr := s.LoadPublicationInput(ctx, id)
+				if readErr != nil || pending.Readiness != ingest.PublicationNeedsIngest || !reflect.DeepEqual(pending.Metadata, m) {
+					t.Fatalf("repair was not coherent and held before indexing: %+v, %v", pending, readErr)
+				}
+				if stale := indexPublication(t, s, e, revision, entries); stale.Err == nil {
+					t.Fatal("pre-repair writer certified the new attribution")
+				}
+				if indexed := indexPublication(t, s, changed, next[id], entries); indexed.Err != nil {
+					t.Fatal(indexed.Err)
+				}
+				e = changed
 			}
 			if err != nil {
 				t.Fatal(err)

@@ -42,8 +42,9 @@ type parentInstallFaultFixture struct {
 	UpdatedParent string `yaml:"updated_parent"`
 	Child         string `yaml:"child"`
 	Cases         []struct {
-		Name string                 `yaml:"name"`
-		Mode parentInstallFaultMode `yaml:"mode"`
+		Name   string                 `yaml:"name"`
+		Mode   parentInstallFaultMode `yaml:"mode"`
+		Remote string                 `yaml:"remote"`
 	} `yaml:"cases"`
 }
 
@@ -60,6 +61,9 @@ type parentInstallFaultFS struct {
 var _ ingest.FileSystem = (*parentInstallFaultFS)(nil)
 
 func (f *parentInstallFaultFS) Rename(src, dst string) error {
+	if !strings.Contains(src, defaults.TempDirPrefix) {
+		return f.OSFileSystem.Rename(src, dst)
+	}
 	return f.install(dst, func() error { return f.OSFileSystem.Rename(src, dst) })
 }
 
@@ -95,12 +99,21 @@ func (f *parentInstallFaultFS) WriteFile(path string, data []byte, mode fs.FileM
 	return f.OSFileSystem.WriteFile(path, data, mode)
 }
 
-func runParentInstallPipeline(t *testing.T, filesystem ingest.FileSystem, database *store.Store, source, output string) *ingest.PipelineResult {
+func runParentInstallPipeline(t *testing.T, filesystem ingest.FileSystem, database *store.Store, source, output, remote, parentID string) *ingest.PipelineResult {
 	t.Helper()
 	cfg := ingest.PipelineConfig{OutputDir: ingest.ResolvedPath(output), Parallelism: 1, Sources: map[ingest.Harness]ingest.SourceConfig{
 		ingest.HarnessClaudeCode: {Enabled: true, Paths: []ingest.ResolvedPath{ingest.ResolvedPath(source)}},
 	}}
-	pipeline, err := ingest.NewPipeline(filesystem, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, cfg,
+	git := testutil.DefaultGitResolver()
+	if remote != "" {
+		git.Remote = remote
+		id, err := ingest.NewSessionID(parentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.AllowedSessionIDs = map[ingest.SessionID]bool{id: true}
+	}
+	pipeline, err := ingest.NewPipeline(filesystem, git, ingest.DefaultAdapterRegistry, cfg,
 		ingest.WithSalt(database.InstallationSalt()), ingest.WithStore(database), ingest.WithMetricsStore(database),
 		ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(filesystem)}), ingest.WithAnalyzer(metrics.NewEngine(database)))
 	if err != nil {
@@ -125,7 +138,7 @@ func TestParentInstallFaultProcess(t *testing.T) {
 	}
 	defer database.Close()
 	filesystem := &parentInstallFaultFS{OSFileSystem: &ingest.OSFileSystem{}, target: os.Getenv("PEASANT_INSTALL_TEST_TARGET"), mode: mode}
-	result := runParentInstallPipeline(t, filesystem, database, filepath.Join(root, "source"), filepath.Join(root, "output"))
+	result := runParentInstallPipeline(t, filesystem, database, filepath.Join(root, "source"), filepath.Join(root, "output"), os.Getenv("PEASANT_INSTALL_TEST_REMOTE"), os.Getenv("PEASANT_INSTALL_TEST_PARENT"))
 	if !filesystem.tripped {
 		t.Fatal("installation fault was not exercised")
 	}
@@ -199,7 +212,7 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			filesystem := &ingest.OSFileSystem{}
-			if result := runParentInstallPipeline(t, filesystem, database, source, output); result.Summary.Errors != 0 {
+			if result := runParentInstallPipeline(t, filesystem, database, source, output, "", ""); result.Summary.Errors != 0 {
 				t.Fatalf("initial ingest: %+v", result.Summary)
 			}
 			parent, err := database.LoadPublicationInput(t.Context(), parentID)
@@ -232,8 +245,20 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 			if err := database.Close(); err != nil {
 				t.Fatal(err)
 			}
+			var sentinel string
+			if c.Remote != "" {
+				_, host, err := ingest.DeriveProjectIdentifiers(database.InstallationSalt(), c.Remote, "/synthetic/parent")
+				if err != nil {
+					t.Fatal(err)
+				}
+				parentDir = ingest.SessionDir(output, host.String(), fixture.ParentID, "")
+				parentTranscript = filepath.Join(parentDir, fixture.ParentID+"--transcript.jsonl")
+				parentMetadata = filepath.Join(parentDir, fixture.ParentID+"--metadata.json")
+				sentinel = filepath.Join(parentDir, "unrelated.txt")
+				write(sentinel, "retain unrelated destination member")
+			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestParentInstallFaultProcess$", "-test.v")
-			cmd.Env = append(os.Environ(), "PEASANT_INSTALL_TEST_ROOT="+root, "PEASANT_INSTALL_TEST_MODE="+string(c.Mode), "PEASANT_INSTALL_TEST_TARGET="+parentTranscript)
+			cmd.Env = append(os.Environ(), "PEASANT_INSTALL_TEST_ROOT="+root, "PEASANT_INSTALL_TEST_MODE="+string(c.Mode), "PEASANT_INSTALL_TEST_TARGET="+parentTranscript, "PEASANT_INSTALL_TEST_REMOTE="+c.Remote, "PEASANT_INSTALL_TEST_PARENT="+fixture.ParentID)
 			log, err := cmd.CombinedOutput()
 			if c.Mode == installExitBefore || c.Mode == installExitAfter {
 				var exit *exec.ExitError
@@ -267,12 +292,19 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer database.Close()
-			result := runParentInstallPipeline(t, filesystem, database, source, output)
+			result := runParentInstallPipeline(t, filesystem, database, source, output, c.Remote, fixture.ParentID)
 			if result.Summary.Errors != 0 || result.Summary.Unchanged < 1 {
 				t.Fatalf("restart: %+v", result.Summary)
 			}
 			if !reflect.DeepEqual(before, snapshotManagedTree(t, childDir)) {
 				t.Fatal("child bytes changed after restart cleanup")
+			}
+			if sentinel != "" {
+				assertFileBytes(t, filesystem, sentinel, []byte("retain unrelated destination member"))
+				repaired, err := database.LoadPublicationInput(t.Context(), parentID)
+				if err != nil || repaired.Readiness != ingest.PublicationReady || repaired.Metadata.Git.Remote == nil || *repaired.Metadata.Git.Remote != c.Remote || repaired.Metadata.Project.Hash == parent.Metadata.Project.Hash {
+					t.Fatalf("parent relocation did not recover a coherent capture: %+v, %v", repaired, err)
+				}
 			}
 			assertFileBytes(t, filesystem, parentTranscript, []byte(fixture.UpdatedParent))
 			assertFileBytes(t, filesystem, parentSource, []byte(fixture.UpdatedParent))
@@ -290,12 +322,12 @@ func TestParentInstallFaultRecovery(t *testing.T) {
 				}
 			}
 			after, err := database.LoadPublicationInput(t.Context(), childID)
-			if err != nil || after.CaptureRevision != child.CaptureRevision || !reflect.DeepEqual(after.Entries, child.Entries) {
+			if err != nil || after.CaptureRevision != child.CaptureRevision || !reflect.DeepEqual(after.Metadata, child.Metadata) || !reflect.DeepEqual(after.Entries, child.Entries) {
 				t.Fatalf("unchanged child was rewritten: %+v, %v", after, err)
 			}
 		})
 	}
-	for _, name := range []string{"successful_install_prunes_stale_parent_files", "failed_install_preserves_canonical_files_after_cleanup", "persistent_io_failure_needs_no_rollback", "interrupted_before_install_survives_restart_cleanup", "interrupted_after_install_survives_restart_cleanup"} {
+	for _, name := range []string{"successful_install_prunes_stale_parent_files", "failed_install_preserves_canonical_files_after_cleanup", "persistent_io_failure_needs_no_rollback", "interrupted_before_install_survives_restart_cleanup", "interrupted_after_install_survives_restart_cleanup", "relocated_parent_preserves_old_child_and_destination", "relocated_parent_io_failure_recovers", "relocated_parent_interruption_recovers"} {
 		if !seen[name] {
 			t.Fatalf("missing required fixture %s", name)
 		}

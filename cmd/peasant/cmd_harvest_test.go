@@ -104,7 +104,7 @@ func TestHarvestCmd_Flags(t *testing.T) {
 	boolFlags := []flagCheck{
 		{"dry-run", "false"},
 		{"force", "false"},
-		{"include-active", "false"},
+		{"include-active", "true"},
 		{"verbose", "false"},
 		{"debug", "false"},
 		{defaults.JSONFlagName, "false"},

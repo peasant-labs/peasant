@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -265,13 +266,13 @@ func TestIngestedPublicationThroughCLIAndRegisteredShare(t *testing.T) {
 			}
 			raw, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode != 200 || publications.Load() != 2 {
+			if resp.StatusCode != 200 || publications.Load() != 1 || !bytes.Contains(raw, []byte(`"skipped":1`)) {
 				t.Fatalf("Share repeat: %d %s uploads=%d", resp.StatusCode, raw, publications.Load())
 			}
 			second := captured.snapshot()
 			secondReceipt, err := db.Publication(t.Context(), village.URL, "user-00001", originalHash, id)
-			if err != nil || secondReceipt == nil || secondReceipt.Receipt.Created || secondReceipt.Receipt.TranscriptID != firstReceipt.Receipt.TranscriptID || secondReceipt.Receipt.RequestOperationFingerprint != firstReceipt.Receipt.RequestOperationFingerprint {
-				t.Fatalf("repeat did not update the same upstream identity: first=%+v second=%+v err=%v", firstReceipt, secondReceipt, err)
+			if err != nil || !reflect.DeepEqual(secondReceipt, firstReceipt) {
+				t.Fatalf("unchanged Share publication changed the authoritative receipt: first=%+v second=%+v err=%v", firstReceipt, secondReceipt, err)
 			}
 			if first["metadata"] != second["metadata"] || first["transcript_file"] != second["transcript_file"] {
 				t.Fatal("same capture changed upstream identity/content across doors")

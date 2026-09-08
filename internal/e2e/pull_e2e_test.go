@@ -635,8 +635,8 @@ func assertQuietAssociationPush(t *testing.T, result pushJSON, expectedAnnotatio
 	if expectedAnnotationSkips <= 0 {
 		t.Fatal("first association push produced no annotations to exercise the ordinary skip gate")
 	}
-	if result.New != 0 || result.Updated != 0 || result.Skipped != 0 || result.Errors != 0 || result.Held != 0 || len(result.Sessions) != 0 || strings.TrimSpace(result.EmptyReason) == "" {
-		t.Fatalf("second ordinary association push transcript result = %+v, want no transcript outcomes and an empty-candidate reason", result)
+	if result.New != 0 || result.Updated != 0 || result.Skipped == 0 || result.Errors != 0 || result.Held != 0 || len(result.Sessions) != result.Skipped || strings.TrimSpace(result.EmptyReason) == "" {
+		t.Fatalf("second ordinary association push transcript result = %+v, want unchanged transcript skips and an explanatory reason", result)
 	}
 	if result.Annotations.Total != expectedAnnotationSkips || result.Annotations.Created != 0 || result.Annotations.Updated != 0 || result.Annotations.Skipped != expectedAnnotationSkips || result.Annotations.Retracted != 0 || result.Annotations.Errors != 0 || result.Annotations.Error != "" || result.Annotations.SkipReason != "" {
 		t.Fatalf("second ordinary association push annotation result = %+v, want only %d skipped annotations", result.Annotations, expectedAnnotationSkips)

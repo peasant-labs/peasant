@@ -3,7 +3,7 @@ package store
 // Legacy rows deliberately remain unproven; no lossy metadata backfill runs.
 // The session-update trigger invalidates old snapshots even for legacy writers.
 // A source-proven capture restores provenance inside the same transaction.
-const migrationV50 = `
+const migrationV51 = `
 ALTER TABLE sessions ADD COLUMN session_cwd TEXT;
 ALTER TABLE sessions ADD COLUMN cwd_provenance_kind TEXT NOT NULL DEFAULT 'not_recovered'
  CHECK (cwd_provenance_kind IN ('source_exact','source_workspace','source_worktree','source_absent','not_recovered'));

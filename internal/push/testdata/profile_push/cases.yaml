@@ -136,7 +136,7 @@ cases:
   - <<: *success
     name: push_provider_query_accounting
     sources: [claude-code, codex]
-    expectedDBReads: 5
+    expectedDBReads: 4
   - <<: *success
     name: push_selection_excludes_everything
     excludeAll: true

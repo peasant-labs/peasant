@@ -19,17 +19,18 @@ type CurrentCommitAssociation struct {
 // for a session already in the database. Populated by BulkLookupSessionLocations
 // before the DIFF stage so classifySession can use DB state without reading metadata.json.
 type SessionLocation struct {
-	// Historical attribution is overlaid before hashing recovery metadata.
 	// Readiness is a bulk repair hint, not a substitute for the bundle read.
-	ProjectHash          schema.ProjectHash
-	OpaqueHostID         string
-	GitRemote            *string
-	PublicationReadiness PublicationReadiness
-	CaptureRevision      int64
-	HostSlug             string
-	ParentID             string // empty string if the session has no parent
-	IngestedMs           *int64 // nil if unknown; populated from DB ingested_ms column
-	SchemaVersion        int    // 0 if unknown; populated from DB schema_version column
+	ProjectHash             schema.ProjectHash
+	OpaqueHostID            string
+	GitRemote               *string
+	PublicationReadiness    PublicationReadiness
+	CaptureRevision         int64
+	HostSlug                string
+	ParentID                string // empty string if the session has no parent
+	IngestedMs              *int64 // nil if unknown; populated from DB ingested_ms column
+	SchemaVersion           int    // 0 if unknown; populated from DB schema_version column
+	SourceFingerprint       []byte // nil for rows created before captured-source evidence
+	SourceEvidenceSupported bool   // true when the backing schema carries source_fingerprint
 }
 
 // SessionLocationLookup is satisfied by anything that can answer where a
@@ -93,6 +94,8 @@ type StoreEntry struct {
 	CWDProvenance      CWDProvenanceKind
 	Metadata           *UnifiedMetadata
 	Session            DiscoveredSession
+	SourceFingerprint  []byte
+	EventSeq           int64
 }
 
 // MetricsStore abstracts the analytics read/write path for session entries

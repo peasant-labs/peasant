@@ -1,6 +1,6 @@
 cases:
   - &claude
-    name: claude_literal_cwd_and_historical_identity
+    name: claude_literal_cwd_and_tracked_identity_repair
     harness: claude-code
     id: 00000000-0000-4000-8000-000000000020
     cwd: /synthetic/project/../literal/subdir

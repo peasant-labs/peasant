@@ -290,7 +290,12 @@ func (a *OpenCodeAdapter) withOpenCodeSQLiteSource(ctx context.Context, candidat
 	if err != nil {
 		return err
 	}
-	fnErr := fn(source)
+	var fnErr error
+	if sqliteSource, ok := source.(*zombiezenOpenCodeSQLiteSource); ok {
+		fnErr = sqliteSource.withReadTransaction(ctx, func() error { return fn(source) })
+	} else {
+		fnErr = fn(source)
+	}
 	closeErr := source.Close(ctx)
 	return errors.Join(fnErr, closeErr)
 }
@@ -1302,8 +1307,8 @@ func cloneOpenCodeProbeResults(results []OpenCodeProbeResult) []OpenCodeProbeRes
 //  4. Git metadata from the session's working directory.
 func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, error) {
 	if session.TranscriptOrigin == TranscriptOriginOpenCodeLegacySQLite || session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
-		metadata, _, err := a.MaterializeTranscript(ctx, session)
-		return metadata, err
+		captured, err := a.MaterializeTranscript(ctx, session)
+		return captured.Metadata, err
 	}
 	// ── 1. Read session JSON ──────────────────────────────────────────────────
 	sesData, err := a.fs.ReadFile(session.SourcePath.String())
@@ -1336,13 +1341,17 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	var gitBranch, gitRemote, gitWorktree *string
 
 	branch, err := a.git.Branch(ctx, workDir)
+	if session.Branch != "" {
+		branch = session.Branch
+		err = nil
+	}
 	if err == nil && branch != "" {
 		b := branch
 		gitBranch = &b
 	}
 
-	remote, err := a.git.RemoteURL(ctx, workDir)
-	if err == nil && remote != "" {
+	remote, tracking := ResolveGitRemote(ctx, a.git, workDir, session.Branch, "")
+	if remote != "" {
 		r := remote
 		gitRemote = &r
 	}
@@ -1354,8 +1363,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 	}
 
 	var gitTracking *string
-	tracking, err := a.git.TrackingBranch(ctx, workDir)
-	if err == nil && tracking != "" {
+	if tracking != "" {
 		tr := tracking
 		gitTracking = &tr
 	}
@@ -1374,7 +1382,7 @@ func (a *OpenCodeAdapter) ExtractMetadata(ctx context.Context, session Discovere
 		worktreeForHash = workDir
 	}
 
-	projectHash, hostSlug, err := DeriveProjectIdentifiersWithGit(ctx, a.salt, a.git, remoteForHash, worktreeForHash)
+	projectHash, hostSlug, err := DeriveProjectIdentifiers(a.salt, remoteForHash, worktreeForHash)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: derive project identifiers for session %s: %w", session.SessionID, err)
 	}

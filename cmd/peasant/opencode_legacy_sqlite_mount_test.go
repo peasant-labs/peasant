@@ -292,9 +292,23 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 
 			firstBytes := append([]byte(nil), managedBytes...)
 			firstRows := len(rows)
+			firstLocations, err := localStore.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil || len(firstLocations[sessionID].SourceFingerprint) == 0 {
+				t.Fatalf("initial consumed evidence missing: %v", err)
+			}
+			firstCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := firstCursors[sessionID]; !ok {
+				t.Fatal("initial SQLite cursor was not persisted")
+			}
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil {
 				t.Fatalf("repeat mounted harvest command: %v\n%s", err, output)
+			}
+			if !harvestSummaryHasCount(output, firstRows, "unchanged") {
+				t.Fatalf("first ordinary repeat did not skip captured sources:\n%s", output)
 			}
 			repeatedStore, err := store.Open(databasePath, store.WithPoolSize(1))
 			if err != nil {
@@ -329,6 +343,14 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				t.Fatalf("reopen changed-source store: %v", err)
 			}
 			changedRows, listErr := changedStore.ListSessionsFiltered(t.Context(), store.SessionListFilter{})
+			changedLocations, evidenceErr := changedStore.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sessionID})
+			if evidenceErr != nil || bytes.Equal(firstLocations[sessionID].SourceFingerprint, changedLocations[sessionID].SourceFingerprint) {
+				t.Fatalf("changed source did not persist captured evidence: %v", evidenceErr)
+			}
+			changedEntries, entriesErr := changedStore.ListEntries(t.Context(), sessionID)
+			if entriesErr != nil || len(changedEntries) != len(entries) {
+				t.Fatalf("changed source index roundtrip: %v", entriesErr)
+			}
 			closeErr = changedStore.Close()
 			if listErr != nil || closeErr != nil || len(changedRows) != firstRows {
 				t.Fatalf("changed-source harvest rows=%d want=%d error=%v", len(changedRows), firstRows, errors.Join(listErr, closeErr))
@@ -336,6 +358,50 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			if changedBytes := mustReadFile(t, managedPath); bytes.Equal(changedBytes, firstBytes) {
 				t.Fatal("changed selected source row did not update the managed projection")
 			}
+			output, err = executeHarvestCmd(t, commandRoot, args)
+			if err != nil || !harvestSummaryHasCount(output, firstRows, "unchanged") {
+				t.Fatalf("ordinary repeat after captured update did not converge: %v\n%s", err, output)
+			}
+			stableLocations, err := localStore.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil || !bytes.Equal(stableLocations[sessionID].SourceFingerprint, changedLocations[sessionID].SourceFingerprint) || *stableLocations[sessionID].IngestedMs != *changedLocations[sessionID].IngestedMs {
+				t.Fatalf("unchanged source rewrote consumed state: %v", err)
+			}
+			stableCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil || stableCursors[sessionID] != firstCursors[sessionID] {
+				t.Fatalf("ordinary no-sequence source changed cursor: %v", err)
+			}
+			stableBytes := mustReadFile(t, managedPath)
+			sourceConn, err := sqlite.OpenConn(materialized.Path, sqlite.OpenReadWrite)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutationErr := sqlitex.ExecuteTransient(sourceConn, `UPDATE message SET data = '{' WHERE id = 'msg_equal_a'`, nil)
+			closeErr = sourceConn.Close()
+			if err := errors.Join(mutationErr, closeErr); err != nil {
+				t.Fatal(err)
+			}
+			output, err = executeHarvestCmd(t, commandRoot, args)
+			if err == nil || !strings.Contains(err.Error(), "session(s) failed") {
+				t.Fatalf("malformed captured row was accepted: %v\n%s", err, output)
+			}
+			preservedLocations, err := localStore.BulkLookupSessionLocations(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil || !bytes.Equal(stableLocations[sessionID].SourceFingerprint, preservedLocations[sessionID].SourceFingerprint) || *stableLocations[sessionID].IngestedMs != *preservedLocations[sessionID].IngestedMs {
+				t.Fatalf("failed acquisition advanced consumed state: %v", err)
+			}
+			preservedCursors, err := localStore.BulkLookupOpenCodeSeqCursors(t.Context(), []ingest.SessionID{sessionID})
+			if err != nil || preservedCursors[sessionID] != stableCursors[sessionID] {
+				t.Fatalf("failed acquisition advanced SQLite cursor: %v", err)
+			}
+			if !bytes.Equal(stableBytes, mustReadFile(t, managedPath)) {
+				t.Fatal("failed acquisition replaced managed snapshot")
+			}
+			preservedEntries, err := localStore.ListEntries(t.Context(), sessionID)
+			if err != nil || !reflect.DeepEqual(preservedEntries, changedEntries) {
+				t.Fatalf("failed acquisition changed indexed entries: %v", err)
+			}
+			// Restore the accepted source before exercising the existing forced
+			// reindex path, which deliberately reacquires original source content.
+			mutateLegacySQLiteMessageVersion(t, materialized.Path, changedAt.UnixMilli())
 			reindexConfig := filepath.Join(commandRoot, "reindex-config.yaml")
 			reindexConfigData := []byte("version: 1\nsources:\n  claude-code: {enabled: false}\n  opencode: {enabled: false}\n  cursor: {enabled: false}\noutput:\n  basePath: " + outputRoot + "\n")
 			if writeErr := os.WriteFile(reindexConfig, reindexConfigData, 0o600); writeErr != nil {
@@ -517,7 +583,7 @@ func assertMalformedLegacyMaterializationIsActionable(t testing.TB, databasePath
 		if string(session.SessionID) != targetSession {
 			continue
 		}
-		_, _, err = adapter.MaterializeTranscript(context.Background(), session)
+		_, err = adapter.MaterializeTranscript(context.Background(), session)
 		if err == nil || !strings.Contains(err.Error(), "not valid JSON") || !strings.Contains(err.Error(), "no partial") {
 			t.Fatalf("malformed required row diagnostic=%v, want reason, no-partial meaning, location, and remediation", err)
 		}

@@ -393,7 +393,13 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 		return
 	}
 
-	remoteURL, remoteErr := a.git.RemoteURL(ctx, projectDir)
+	branchStr, branchErr := a.git.Branch(ctx, projectDir)
+	branch := session.Branch
+	if branch == "" && branchErr == nil {
+		branch = branchStr
+	}
+	remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, projectDir, branch, "")
+	remoteErr := error(nil)
 	// Walk up parent directories if direct remote lookup fails — handles cases where
 	// projectDir decoded to a subdirectory of the actual repo root.
 	if remoteErr != nil || remoteURL == "" {
@@ -402,13 +408,11 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 			remoteErr = nil
 		}
 	}
-	branchStr, branchErr := a.git.Branch(ctx, projectDir)
 	worktreeStr, worktreeErr := a.git.Worktree(ctx, projectDir)
-	trackingStr, trackingErr := a.git.TrackingBranch(ctx, projectDir)
 
 	gitInfo := GitContext{}
-	if branchErr == nil && branchStr != "" {
-		gitInfo.Branch = &branchStr
+	if branch != "" {
+		gitInfo.Branch = &branch
 	}
 	if remoteErr == nil && remoteURL != "" {
 		gitInfo.Remote = &remoteURL
@@ -416,7 +420,7 @@ func (a *CursorAdapter) enrichCursorProject(ctx context.Context, meta *UnifiedMe
 	if worktreeErr == nil && worktreeStr != "" {
 		gitInfo.Worktree = &worktreeStr
 	}
-	if trackingErr == nil && trackingStr != "" {
+	if trackingStr != "" {
 		gitInfo.Tracking = &trackingStr
 	}
 	meta.Git = gitInfo

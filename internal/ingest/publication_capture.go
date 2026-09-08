@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 
@@ -116,30 +115,4 @@ func publicationCWDProvenance(meta *UnifiedMetadata, session DiscoveredSession) 
 		return CWDSourceAbsent
 	}
 	return CWDSourceAbsent
-}
-
-// Normalize historical locators before constructing any output paths or hashes.
-// The store verifies the corresponding opaque-host relation transactionally.
-func normalizePublicationAttribution(meta *UnifiedMetadata, loc SessionLocation) error {
-	// Old external store doubles may only implement the original locator fields.
-	if loc.ProjectHash != "" {
-		meta.Project.Hash = loc.ProjectHash
-		meta.Git.Remote = loc.GitRemote
-	}
-	if loc.HostSlug != "" {
-		slug, err := NewHostSlug(loc.HostSlug)
-		if err != nil {
-			return fmt.Errorf("normalize publication capture for %s: stored host locator is invalid: %w; no capture was written; repair the stored locator before running peasant ingest", meta.SessionID, err)
-		}
-		meta.HostSlug = slug
-	}
-	meta.ParentUUID = nil
-	if loc.ParentID != "" {
-		parent, err := NewSessionID(loc.ParentID)
-		if err != nil {
-			return fmt.Errorf("normalize publication capture for %s: stored parent identity is invalid: %w; no capture was written; repair the stored parent before running peasant ingest", meta.SessionID, err)
-		}
-		meta.ParentUUID = &parent
-	}
-	return nil
 }
