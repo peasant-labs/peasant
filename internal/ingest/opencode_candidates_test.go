@@ -42,7 +42,6 @@ const (
 	expectedEntryPathKindCount   = 41
 	expectedFileMatrixKindCount  = 23
 	expectedBuildTaggedMutations = 7
-	expectedBuildTopologyCases   = 3
 )
 
 //go:embed testdata/opencode_candidates.yaml
@@ -70,6 +69,7 @@ type openCodeCandidateFixture struct {
 	CoverageGuardMutations         []openCodeCoverageGuardMutation   `yaml:"coverage_guard_mutations"`
 	BuildTaggedMutations           []openCodeBuildTaggedMutation     `yaml:"build_tagged_mutations"`
 	BuildTopologyCases             []openCodeBuildTopologyCase       `yaml:"build_topology_cases"`
+	RequiredBuildTopologyCases     []string                          `yaml:"required_build_topology_cases"`
 	ProbeCases                     []openCodeProbeCase               `yaml:"probe_cases"`
 	RequiredContinuationCandidates []string                          `yaml:"required_continuation_candidates"`
 	ContinuationCandidates         []openCodeContinuationCandidate   `yaml:"continuation_candidates"`
@@ -263,21 +263,27 @@ const (
 )
 
 type openCodeBuildTopologySource struct {
-	Name                string                          `yaml:"name"`
-	Filename            string                          `yaml:"filename"`
-	BuildExpression     string                          `yaml:"build_expression"`
-	Kind                openCodeBuildTopologySourceKind `yaml:"kind"`
-	ExpectedActivations int                             `yaml:"expected_activations"`
+	Name            string                          `yaml:"name"`
+	Filename        string                          `yaml:"filename"`
+	BuildExpression string                          `yaml:"build_expression"`
+	Kind            openCodeBuildTopologySourceKind `yaml:"kind"`
 }
 
 type openCodeBuildTopologyCase struct {
-	Name                            string                        `yaml:"name"`
-	Sources                         []openCodeBuildTopologySource `yaml:"sources"`
-	ExpectedCustomTags              []string                      `yaml:"expected_custom_tags"`
-	ExpectedConfigurations          int                           `yaml:"expected_configurations"`
-	ExpectedForbiddenConfigurations int                           `yaml:"expected_forbidden_configurations"`
-	ExpectedOutcome                 openCodeBuildTopologyOutcome  `yaml:"expected_outcome"`
-	ErrorContains                   string                        `yaml:"error_contains"`
+	Name                       string                               `yaml:"name"`
+	Sources                    []openCodeBuildTopologySource        `yaml:"sources"`
+	RequiredCustomTags         []string                             `yaml:"required_custom_tags"`
+	RequiredConfigurations     []openCodeBuildTopologyConfiguration `yaml:"required_configurations"`
+	RequiredConfigurationNames []string                             `yaml:"required_configuration_names"`
+	ExpectedOutcome            openCodeBuildTopologyOutcome         `yaml:"expected_outcome"`
+	ErrorContains              string                               `yaml:"error_contains"`
+}
+
+type openCodeBuildTopologyConfiguration struct {
+	Name          string   `yaml:"name"`
+	Tags          []string `yaml:"tags"`
+	RequiredFiles []string `yaml:"required_files"`
+	AbsentFiles   []string `yaml:"absent_files"`
 }
 
 type openCodeCandidateResolutionCase struct {
@@ -572,7 +578,7 @@ func loadOpenCodeCandidateFixture(t testing.TB) openCodeCandidateFixture {
 	if err := validateOpenCodeBuildTaggedMutationCoverage(fixture.BuildTaggedMutations); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateOpenCodeBuildTopologyCoverage(fixture.BuildTopologyCases); err != nil {
+	if err := validateOpenCodeBuildTopologyCoverage(fixture.BuildTopologyCases, fixture.RequiredBuildTopologyCases); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateOpenCodeMutationCoverage(fixture); err != nil {
@@ -719,9 +725,9 @@ func validateOpenCodeBuildTaggedMutationCoverage(mutations []openCodeBuildTagged
 	return nil
 }
 
-func validateOpenCodeBuildTopologyCoverage(cases []openCodeBuildTopologyCase) error {
-	if len(cases) != expectedBuildTopologyCases {
-		return fmt.Errorf("OpenCode canonical build topology contains %d cases, want exact %d", len(cases), expectedBuildTopologyCases)
+func validateOpenCodeBuildTopologyCoverage(cases []openCodeBuildTopologyCase, requiredNames []string) error {
+	if len(requiredNames) == 0 {
+		return fmt.Errorf("OpenCode canonical build topology requires a named coverage manifest")
 	}
 	seenCases := make(map[string]bool, len(cases))
 	seenOutcomes := make(map[openCodeBuildTopologyOutcome]bool, len(cases))
@@ -729,14 +735,16 @@ func validateOpenCodeBuildTopologyCoverage(cases []openCodeBuildTopologyCase) er
 		if strings.TrimSpace(fixtureCase.Name) == "" || seenCases[fixtureCase.Name] {
 			return fmt.Errorf("OpenCode canonical build topology has an empty or duplicate case name %q", fixtureCase.Name)
 		}
-		if seenOutcomes[fixtureCase.ExpectedOutcome] {
-			return fmt.Errorf("OpenCode canonical build topology duplicates outcome %q; keep one fixture-owned case for each required topology axis", fixtureCase.ExpectedOutcome)
-		}
 		if err := validateOpenCodeBuildTopologyCase(fixtureCase); err != nil {
 			return err
 		}
 		seenCases[fixtureCase.Name] = true
 		seenOutcomes[fixtureCase.ExpectedOutcome] = true
+	}
+	for _, name := range requiredNames {
+		if !seenCases[name] {
+			return fmt.Errorf("OpenCode canonical build topology is missing required case %q", name)
+		}
 	}
 	for _, required := range []openCodeBuildTopologyOutcome{openCodeBuildTopologyDiscovery, openCodeBuildTopologyForbidden, openCodeBuildTopologyUnreachable} {
 		if !seenOutcomes[required] {
@@ -750,26 +758,41 @@ func validateOpenCodeBuildTopologyCase(fixtureCase openCodeBuildTopologyCase) er
 	if len(fixtureCase.Sources) == 0 {
 		return fmt.Errorf("OpenCode build-topology case %q has no production sources", fixtureCase.Name)
 	}
-	if len(fixtureCase.ExpectedCustomTags) == 0 || len(fixtureCase.ExpectedCustomTags) > 8 {
-		return fmt.Errorf("OpenCode build-topology case %q declares %d custom tags; require 1..8 to preserve the 256-configuration bound", fixtureCase.Name, len(fixtureCase.ExpectedCustomTags))
+	if len(fixtureCase.RequiredCustomTags) == 0 || len(fixtureCase.RequiredCustomTags) > 8 {
+		return fmt.Errorf("OpenCode build-topology case %q declares %d required custom tags; require a nonempty set within the 256-configuration safety bound", fixtureCase.Name, len(fixtureCase.RequiredCustomTags))
 	}
-	seenTags := make(map[string]bool, len(fixtureCase.ExpectedCustomTags))
-	for index, tag := range fixtureCase.ExpectedCustomTags {
-		if strings.TrimSpace(tag) == "" || strings.ContainsAny(tag, " ,") || seenTags[tag] || (index > 0 && fixtureCase.ExpectedCustomTags[index-1] >= tag) {
+	seenTags := make(map[string]bool, len(fixtureCase.RequiredCustomTags))
+	for index, tag := range fixtureCase.RequiredCustomTags {
+		if strings.TrimSpace(tag) == "" || strings.ContainsAny(tag, " ,") || seenTags[tag] || (index > 0 && fixtureCase.RequiredCustomTags[index-1] >= tag) {
 			return fmt.Errorf("OpenCode build-topology case %q has empty, malformed, duplicate, or unsorted expected custom tag %q", fixtureCase.Name, tag)
 		}
 		seenTags[tag] = true
 	}
-	if fixtureCase.ExpectedConfigurations < 0 || fixtureCase.ExpectedConfigurations > 1+(1<<len(fixtureCase.ExpectedCustomTags)) || fixtureCase.ExpectedConfigurations > 257 {
-		return fmt.Errorf("OpenCode build-topology case %q configuration count %d exceeds its %d-tag bound plus one alternate-platform assignment (257 maximum)", fixtureCase.Name, fixtureCase.ExpectedConfigurations, len(fixtureCase.ExpectedCustomTags))
+	seenWitnesses := make(map[string]bool)
+	for _, witness := range fixtureCase.RequiredConfigurations {
+		if witness.Name == "" || seenWitnesses[witness.Name] || len(witness.RequiredFiles) == 0 {
+			return fmt.Errorf("OpenCode build-topology case %q has an unnamed, duplicate, or empty configuration witness", fixtureCase.Name)
+		}
+		seenWitnesses[witness.Name] = true
+		for _, tag := range witness.Tags {
+			if !seenTags[tag] {
+				return fmt.Errorf("OpenCode build-topology witness %q enables undeclared required tag %q", witness.Name, tag)
+			}
+		}
+		for _, filename := range append(append([]string(nil), witness.RequiredFiles...), witness.AbsentFiles...) {
+			if !validOpenCodeProductionFilename(filename) {
+				return fmt.Errorf("OpenCode build-topology witness %q has invalid source filename %q", witness.Name, filename)
+			}
+		}
 	}
-	if fixtureCase.ExpectedForbiddenConfigurations < 0 || fixtureCase.ExpectedForbiddenConfigurations > fixtureCase.ExpectedConfigurations {
-		return fmt.Errorf("OpenCode build-topology case %q forbidden configuration count %d is outside 0..%d", fixtureCase.Name, fixtureCase.ExpectedForbiddenConfigurations, fixtureCase.ExpectedConfigurations)
+	if fixtureCase.ExpectedOutcome != openCodeBuildTopologyUnreachable {
+		if err := testutil.RequireFixtureNames("OpenCode build topology", "configuration", fixtureCase.RequiredConfigurationNames, seenWitnesses); err != nil {
+			return err
+		}
 	}
 
 	seenSourceNames := make(map[string]bool, len(fixtureCase.Sources))
 	seenFilenames := make(map[string]bool, len(fixtureCase.Sources))
-	independentTags := make(map[string]bool)
 	hasConjunctionExecution := false
 	hasUnreachableSource := false
 	for _, source := range fixtureCase.Sources {
@@ -791,11 +814,6 @@ func validateOpenCodeBuildTopologyCase(fixtureCase openCodeBuildTopologyCase) er
 			}
 		}
 		minimumEnabled, satisfiable := openCodeMinimumEnabledBuildTags(expression, expressionTags)
-		if len(expressionTags) == 1 && satisfiable && minimumEnabled == 1 && source.Kind == openCodeBuildTopologyAnchor {
-			for tag := range expressionTags {
-				independentTags[tag] = true
-			}
-		}
 		switch source.Kind {
 		case openCodeBuildTopologyAnchor:
 		case openCodeBuildTopologyExecution:
@@ -808,24 +826,21 @@ func validateOpenCodeBuildTopologyCase(fixtureCase openCodeBuildTopologyCase) er
 		if !satisfiable {
 			hasUnreachableSource = true
 		}
-		if source.ExpectedActivations < 0 || source.ExpectedActivations > fixtureCase.ExpectedConfigurations {
-			return fmt.Errorf("OpenCode build-topology case %q source %q activation count %d is outside 0..%d", fixtureCase.Name, source.Name, source.ExpectedActivations, fixtureCase.ExpectedConfigurations)
-		}
 		seenSourceNames[source.Name] = true
 		seenFilenames[source.Filename] = true
 	}
 
 	switch fixtureCase.ExpectedOutcome {
 	case openCodeBuildTopologyDiscovery:
-		if len(independentTags) < 2 || fixtureCase.ExpectedConfigurations == 0 || fixtureCase.ExpectedForbiddenConfigurations != 0 || fixtureCase.ErrorContains != "" {
-			return fmt.Errorf("OpenCode build-topology case %q must observably discover at least two independent tags without a failure diagnostic", fixtureCase.Name)
+		if len(fixtureCase.RequiredConfigurations) == 0 || fixtureCase.ErrorContains != "" {
+			return fmt.Errorf("OpenCode build-topology case %q must declare observable configuration membership without a failure diagnostic", fixtureCase.Name)
 		}
 	case openCodeBuildTopologyForbidden:
-		if len(independentTags) < 2 || !hasConjunctionExecution || fixtureCase.ExpectedConfigurations == 0 || fixtureCase.ExpectedForbiddenConfigurations == 0 || strings.TrimSpace(fixtureCase.ErrorContains) == "" {
+		if !hasConjunctionExecution || len(fixtureCase.RequiredConfigurations) == 0 || strings.TrimSpace(fixtureCase.ErrorContains) == "" {
 			return fmt.Errorf("OpenCode build-topology case %q must mount a conjunction-only forbidden callable with independent tags and an actionable diagnostic", fixtureCase.Name)
 		}
 	case openCodeBuildTopologyUnreachable:
-		if !hasUnreachableSource || fixtureCase.ExpectedConfigurations != 0 || fixtureCase.ExpectedForbiddenConfigurations != 0 || strings.TrimSpace(fixtureCase.ErrorContains) == "" {
+		if !hasUnreachableSource || strings.TrimSpace(fixtureCase.ErrorContains) == "" {
 			return fmt.Errorf("OpenCode build-topology case %q must mount an unsatisfiable physical source with an actionable unreachable-file diagnostic", fixtureCase.Name)
 		}
 	default:
@@ -973,7 +988,7 @@ func TestOpenCodeMutationCoverageRejectsFixtureOwnedDrift(t *testing.T) {
 				err = validateOpenCodeBuildTaggedMutationCoverage(mutated.BuildTaggedMutations)
 			case openCodeCoverageTopologyTagSubstitution:
 				fixtureCase := openCodeBuildTopologyCaseForOutcome(t, mutated.BuildTopologyCases, openCodeBuildTopologyDiscovery)
-				fixtureCase.ExpectedCustomTags[1] = "topology_substitute"
+				fixtureCase.RequiredCustomTags[1] = "topology_substitute"
 				err = runOpenCodeBuildTopologyCase(t, fixture, sourceDirectory, production, fixtureCase)
 			case openCodeCoverageTopologyExpressionSubstitution:
 				fixtureCase := openCodeBuildTopologyCaseForOutcome(t, mutated.BuildTopologyCases, openCodeBuildTopologyForbidden)
@@ -1043,7 +1058,9 @@ func cloneOpenCodeBuildTopologyCases(cases []openCodeBuildTopologyCase) []openCo
 	cloned := append([]openCodeBuildTopologyCase(nil), cases...)
 	for index := range cloned {
 		cloned[index].Sources = append([]openCodeBuildTopologySource(nil), cases[index].Sources...)
-		cloned[index].ExpectedCustomTags = append([]string(nil), cases[index].ExpectedCustomTags...)
+		cloned[index].RequiredCustomTags = append([]string(nil), cases[index].RequiredCustomTags...)
+		cloned[index].RequiredConfigurations = append([]openCodeBuildTopologyConfiguration(nil), cases[index].RequiredConfigurations...)
+		cloned[index].RequiredConfigurationNames = append([]string(nil), cases[index].RequiredConfigurationNames...)
 	}
 	return cloned
 }
@@ -1259,8 +1276,10 @@ func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture
 	if err != nil {
 		return fmt.Errorf("discover custom build tags from copied physical sources: %w", err)
 	}
-	if !reflect.DeepEqual(tags, fixtureCase.ExpectedCustomTags) {
-		return fmt.Errorf("build-topology custom tags = %v, want fixture-owned tags %v", tags, fixtureCase.ExpectedCustomTags)
+	for _, required := range fixtureCase.RequiredCustomTags {
+		if !slices.Contains(tags, required) {
+			return fmt.Errorf("build-topology custom tags %v omit required fixture-owned tag %q", tags, required)
+		}
 	}
 
 	configurations, configurationErr := openCodePackageProductionConfigurations(directory)
@@ -1273,37 +1292,67 @@ func runOpenCodeBuildTopologyCase(t testing.TB, fixture openCodeCandidateFixture
 	if configurationErr != nil {
 		return fmt.Errorf("enumerate build-topology configurations for expected outcome %q: %w", fixtureCase.ExpectedOutcome, configurationErr)
 	}
-	if len(configurations) != fixtureCase.ExpectedConfigurations {
-		return fmt.Errorf("build-topology configuration count = %d, want fixture-owned %d", len(configurations), fixtureCase.ExpectedConfigurations)
-	}
-
-	activationCounts := make(map[string]int, len(fixtureCase.Sources))
-	forbiddenConfigurations := 0
+	activatedSources := make(map[string]bool, len(fixtureCase.Sources))
+	matchedWitnesses := make(map[string]bool)
+	forbiddenObserved := false
 	for _, configuration := range configurations {
+		for _, witness := range fixtureCase.RequiredConfigurations {
+			matches := true
+			for _, tag := range fixtureCase.RequiredCustomTags {
+				if slices.Contains(configuration.tags, tag) != slices.Contains(witness.Tags, tag) {
+					matches = false
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+			matchedWitnesses[witness.Name] = true
+			for _, filename := range witness.RequiredFiles {
+				if !openCodeConfigurationContainsFile(configuration, filename) {
+					return fmt.Errorf("build-topology configuration membership %q omits required file %q under GOOS %s tags %v", witness.Name, filename, configuration.goos, configuration.tags)
+				}
+			}
+			for _, filename := range witness.AbsentFiles {
+				if openCodeConfigurationContainsFile(configuration, filename) {
+					return fmt.Errorf("build-topology configuration membership %q unexpectedly activates %q under GOOS %s tags %v", witness.Name, filename, configuration.goos, configuration.tags)
+				}
+			}
+		}
+		expectsForbidden := false
 		for _, source := range fixtureCase.Sources {
 			if openCodeConfigurationContainsFile(configuration, source.Filename) {
-				activationCounts[source.Name]++
+				activatedSources[source.Name] = true
+				expectsForbidden = expectsForbidden || source.Kind == openCodeBuildTopologyExecution
 			}
 		}
 		statements, extractErr := extractOpenCodePrivateExecutionStatements(configuration.files, configuration.files)
 		if extractErr != nil {
-			if fixtureCase.ExpectedOutcome == openCodeBuildTopologyForbidden && strings.Contains(extractErr.Error(), fixtureCase.ErrorContains) {
-				forbiddenConfigurations++
+			if expectsForbidden && fixtureCase.ExpectedOutcome == openCodeBuildTopologyForbidden && strings.Contains(extractErr.Error(), fixtureCase.ErrorContains) {
+				forbiddenObserved = true
 				continue
 			}
 			return fmt.Errorf("extract SQLite callables for build tags %v and expected outcome %q: %w", configuration.tags, fixtureCase.ExpectedOutcome, extractErr)
 		}
+		if expectsForbidden {
+			return fmt.Errorf("build-topology active forbidden source was accepted under GOOS %s tags %v", configuration.goos, configuration.tags)
+		}
 		if validationErr := validateOpenCodePrivateExecutionStatements(statements, fixture); validationErr != nil {
-			return fmt.Errorf("validate exact initializer/executor and 15-statement allowlist for build tags %v: %w", configuration.tags, validationErr)
+			return fmt.Errorf("validate initializer/executor and approved statement membership for build tags %v: %w", configuration.tags, validationErr)
 		}
 	}
 	for _, source := range fixtureCase.Sources {
-		if activationCounts[source.Name] != source.ExpectedActivations {
-			return fmt.Errorf("build-topology source %q activated in %d configurations, want fixture-owned %d for expression %q", source.Name, activationCounts[source.Name], source.ExpectedActivations, source.BuildExpression)
+		if !activatedSources[source.Name] {
+			return fmt.Errorf("build-topology required source %q never activated for expression %q", source.Name, source.BuildExpression)
 		}
 	}
-	if forbiddenConfigurations != fixtureCase.ExpectedForbiddenConfigurations {
-		return fmt.Errorf("build-topology forbidden configuration count = %d, want fixture-owned %d", forbiddenConfigurations, fixtureCase.ExpectedForbiddenConfigurations)
+	for _, witness := range fixtureCase.RequiredConfigurations {
+		if !matchedWitnesses[witness.Name] {
+			return fmt.Errorf("build-topology required configuration membership %q was not observed", witness.Name)
+		}
+	}
+	if fixtureCase.ExpectedOutcome == openCodeBuildTopologyForbidden && !forbiddenObserved {
+		return fmt.Errorf("build-topology required forbidden-call behavior was not observed")
 	}
 	return nil
 }

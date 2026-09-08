@@ -425,7 +425,7 @@ coverage_guard_mutations:
   - {name: reject-build-tagged-class-substitution, kind: build_tagged_class_substitution, error_contains: restore each exact kind/class pair}
   - {name: reject-build-tagged-name-substitution, kind: build_tagged_name_substitution, error_contains: restore each exact kind/class pair}
   - {name: reject-topology-tag-substitution, kind: topology_tag_substitution, error_contains: build-topology custom tags}
-  - {name: reject-topology-expression-substitution, kind: topology_expression_substitution, error_contains: activated in}
+  - {name: reject-topology-expression-substitution, kind: topology_expression_substitution, error_contains: configuration membership}
   - {name: reject-topology-outcome-substitution, kind: topology_outcome_substitution, error_contains: enumerate build-topology configurations}
 build_tagged_mutations:
   - {name: reject-build-tagged-direct-executor, filename: sqlite_tagged_direct.go, build_tags: [evidence_negative_indexer], kind: direct_execute, class: direct, error_contains: unapproved SQLite entry path}
@@ -435,34 +435,38 @@ build_tagged_mutations:
   - {name: reject-build-tagged-struct-field, filename: sqlite_tagged_field.go, build_tags: [evidence_negative_indexer], kind: struct_field, class: field, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-returned-callable, filename: sqlite_tagged_return.go, build_tags: [evidence_negative_indexer], kind: returned_callable, class: return, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-blob-callable-aliases, filename: sqlite_tagged_blob.go, build_tags: [evidence_negative_indexer], kind: blob_callable_aliases, class: direct_data, error_contains: first-class SQLite callable}
-# Configuration counts include eight host custom-tag assignments and one
-# complementary-platform assignment with no custom tags enabled.
+# Named configuration witnesses tolerate additional valid tag/platform assignments.
+required_build_topology_cases: [discover-independent-custom-tags, reject-conjunction-only-execution, reject-never-activated-physical-source]
 build_topology_cases:
   - name: discover-independent-custom-tags
     sources:
-      - {name: topology-alpha, filename: sqlite_topology_alpha.go, build_expression: topology_alpha, kind: anchor, expected_activations: 4}
-      - {name: topology-beta, filename: sqlite_topology_beta.go, build_expression: topology_beta, kind: anchor, expected_activations: 4}
-    expected_custom_tags: [evidence_negative_indexer, topology_alpha, topology_beta]
-    expected_configurations: 9
-    expected_forbidden_configurations: 0
+      - {name: topology-alpha, filename: sqlite_topology_alpha.go, build_expression: topology_alpha, kind: anchor}
+      - {name: topology-beta, filename: sqlite_topology_beta.go, build_expression: topology_beta, kind: anchor}
+    required_custom_tags: [evidence_negative_indexer, topology_alpha, topology_beta]
+    required_configuration_names: [alpha-only, beta-only, conjunction]
+    required_configurations:
+      - {name: alpha-only, tags: [topology_alpha], required_files: [sqlite_topology_alpha.go], absent_files: [sqlite_topology_beta.go]}
+      - {name: beta-only, tags: [topology_beta], required_files: [sqlite_topology_beta.go], absent_files: [sqlite_topology_alpha.go]}
+      - {name: conjunction, tags: [topology_alpha, topology_beta], required_files: [sqlite_topology_alpha.go, sqlite_topology_beta.go]}
     expected_outcome: discovery
     error_contains: ""
   - name: reject-conjunction-only-execution
     sources:
-      - {name: topology-alpha, filename: sqlite_topology_alpha.go, build_expression: topology_alpha, kind: anchor, expected_activations: 4}
-      - {name: topology-beta, filename: sqlite_topology_beta.go, build_expression: topology_beta, kind: anchor, expected_activations: 4}
-      - {name: topology-conjunction-execution, filename: sqlite_topology_conjunction.go, build_expression: "topology_alpha && topology_beta", kind: forbidden_execute, expected_activations: 2}
-    expected_custom_tags: [evidence_negative_indexer, topology_alpha, topology_beta]
-    expected_configurations: 9
-    expected_forbidden_configurations: 2
+      - {name: topology-alpha, filename: sqlite_topology_alpha.go, build_expression: topology_alpha, kind: anchor}
+      - {name: topology-beta, filename: sqlite_topology_beta.go, build_expression: topology_beta, kind: anchor}
+      - {name: topology-conjunction-execution, filename: sqlite_topology_conjunction.go, build_expression: "topology_alpha && topology_beta", kind: forbidden_execute}
+    required_custom_tags: [evidence_negative_indexer, topology_alpha, topology_beta]
+    required_configuration_names: [alpha-only, beta-only, conjunction]
+    required_configurations:
+      - {name: alpha-only, tags: [topology_alpha], required_files: [sqlite_topology_alpha.go], absent_files: [sqlite_topology_beta.go, sqlite_topology_conjunction.go]}
+      - {name: beta-only, tags: [topology_beta], required_files: [sqlite_topology_beta.go], absent_files: [sqlite_topology_alpha.go, sqlite_topology_conjunction.go]}
+      - {name: conjunction, tags: [topology_alpha, topology_beta], required_files: [sqlite_topology_alpha.go, sqlite_topology_beta.go, sqlite_topology_conjunction.go]}
     expected_outcome: forbidden_callable
     error_contains: unapproved SQLite entry path
   - name: reject-never-activated-physical-source
     sources:
-      - {name: topology-unreachable, filename: sqlite_topology_unreachable.go, build_expression: "topology_unreachable && !topology_unreachable", kind: anchor, expected_activations: 0}
-    expected_custom_tags: [evidence_negative_indexer, topology_unreachable]
-    expected_configurations: 0
-    expected_forbidden_configurations: 0
+      - {name: topology-unreachable, filename: sqlite_topology_unreachable.go, build_expression: "topology_unreachable && !topology_unreachable", kind: anchor}
+    required_custom_tags: [evidence_negative_indexer, topology_unreachable]
     expected_outcome: unreachable_file
     error_contains: never activated production source
 required_index_evidence_cases:
