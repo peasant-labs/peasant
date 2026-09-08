@@ -2306,27 +2306,16 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		return workerResult{result: result}
 	}
 
-	// KNOWN LIMITATION (M11): RemoveAll + renameDir is not atomic. There is a brief
-	// window where the session directory does not exist. For MVP this is acceptable
-	// since ingestion runs as a single sequential process. If concurrent readers are
-	// added, this should use a two-phase approach (rename old to .old, rename new to
-	// final, then remove .old).
-	if _, err := p.fs.Stat(sessionDir); err == nil {
-		if err := p.fs.RemoveAll(sessionDir); err != nil {
-			result.Error = errors.Join(
-				fmt.Errorf("remove old session dir for %s: %w", session.SessionID, err),
-				p.fs.RemoveAll(tmpDir),
-			)
-			return workerResult{result: result}
-		}
-	}
-
-	// Atomic rename: move temp dir to final location.
-	// FileSystem.Rename may not move directory contents recursively (MemFS),
-	// so we use a recursive move implementation.
-	if err := p.renameDir(tmpDir, sessionDir); err != nil {
+	// A root session owns the files directly in sessionDir, but child sessions own
+	// the nested subagents tree. FILTER does not send unchanged children through
+	// processSession, so replacing the whole parent directory would otherwise erase
+	// their current managed output. Stage the old directory, move that child-owned
+	// tree into the replacement, and retain enough state to restore the old output
+	// if installation fails.
+	backupDir := fmt.Sprintf("%s/%sbackup-%s-%s", outputDir, defaults.TempDirPrefix, session.SessionID, tmpSuffix)
+	if err := p.replaceSessionDir(tmpDir, sessionDir, backupDir); err != nil {
 		result.Error = errors.Join(
-			fmt.Errorf("rename temp dir for %s: %w", session.SessionID, err),
+			fmt.Errorf("replace output dir for %s: %w", session.SessionID, err),
 			p.fs.RemoveAll(tmpDir),
 		)
 		return workerResult{result: result}
@@ -2355,6 +2344,39 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		metaFilename:     metaFilename,
 		sessionDir:       sessionDir,
 	}
+}
+
+// replaceSessionDir replaces parent-owned output while preserving the child-owned
+// subagents subtree. Root-owns-subtree scheduling guarantees no child writer can
+// race this operation.
+func (p *Pipeline) replaceSessionDir(src, dst, backup string) error {
+	if _, err := p.fs.Stat(dst); err != nil {
+		return p.renameDir(src, dst)
+	}
+	if err := p.renameDir(dst, backup); err != nil {
+		return fmt.Errorf("stage existing output %s: %w", dst, err)
+	}
+
+	backupChildren := fmt.Sprintf("%s/%s", backup, defaults.DirSubagents.String())
+	srcChildren := fmt.Sprintf("%s/%s", src, defaults.DirSubagents.String())
+	childrenPreserved := false
+	if _, err := p.fs.Stat(backupChildren); err == nil {
+		if err := p.renameDir(backupChildren, srcChildren); err != nil {
+			restoreErr := p.renameDir(backup, dst)
+			return errors.Join(fmt.Errorf("preserve child output from %s: %w", backupChildren, err), restoreErr)
+		}
+		childrenPreserved = true
+	}
+
+	if err := p.renameDir(src, dst); err != nil {
+		var restoreChildrenErr error
+		if childrenPreserved {
+			restoreChildrenErr = p.renameDir(srcChildren, backupChildren)
+		}
+		restoreErr := p.renameDir(backup, dst)
+		return errors.Join(fmt.Errorf("install replacement output %s: %w", dst, err), restoreChildrenErr, restoreErr)
+	}
+	return p.fs.RemoveAll(backup)
 }
 
 // indexTargetSession is the session handed to an indexer at the INDEX stage.
