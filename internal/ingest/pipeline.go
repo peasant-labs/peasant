@@ -779,12 +779,10 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// deadlock once the 2 GiB arena fills — workers spin in copyToArena waiting
 	// for arenaTail to advance, but drain only starts after runParallel returns.
 	var workersDone atomic.Bool
-	// errCh buffer sized to the maximum number of drain batches that can be
-	// emitted (ceil(toProcess/DefaultMaxDrainBatch)), plus a safety margin.
-	// Without dynamic sizing the channel could block the drain goroutine if
-	// every batch fails DB INSERT — stalling the consumer until the controller
-	// drains errCh (which only runs after wg.Wait finishes), causing deadlock.
-	errChSize := len(toProcessEntries)/DefaultMaxDrainBatch + 2
+	// Every session can independently fail reconciliation. The controller reads
+	// errors after workers finish, so reserve the complete bounded run's capacity
+	// rather than assuming full drain batches while producers run concurrently.
+	errChSize := len(toProcessEntries) + 1
 	if errChSize < 16 {
 		errChSize = 16
 	}
@@ -1007,97 +1005,41 @@ func (p *Pipeline) drainLoop(
 		batch := staging.Drain()
 
 		if len(batch.Results) > 0 {
-			var storeBatch []StoreEntry
 			var batchMetas []indexedMeta
 			var committedIDs []SessionID
-			for _, wr := range batch.Results {
-				sessionResults = append(sessionResults, wr.result)
+			for index := range batch.Results {
+				wr := &batch.Results[index]
+				if wr.result.Error == nil && wr.artifact != nil {
+					publisher, err := p.artifactPublisher(writeLane)
+					if err == nil {
+						var reconciled *ManagedArtifact
+						reconciled, err = publisher.Reconcile(ctx, wr.artifact)
+						if err == nil && reconciled == nil {
+							err = fmt.Errorf("artifact reconciliation for %s restored prior files instead of this worker's candidate", wr.result.SessionID)
+						}
+						if err == nil {
+							wr.artifact = reconciled
+							wr.meta = &reconciled.Metadata
+						}
+					}
+					if err != nil {
+						wr.result.Error = fmt.Errorf("reconcile committed session %s: %w; recovery state was retained for a later harvest", wr.result.SessionID, err)
+						p.reportDiagnostic(artifactRecoveryDiagnostic(string(wr.result.SessionID), wr.result.Error))
+						if p.store != nil {
+							errCh <- wr.result.Error
+						}
+					}
+				}
 				if wr.result.Error == nil && wr.result.OutputPath != "" && wr.meta != nil {
 					batchMetas = append(batchMetas, indexedMeta{
-						session:              sessionFromWorkerResult(wr),
+						session:              sessionFromWorkerResult(*wr),
 						startMs:              wr.startMs,
 						outputTranscriptPath: wr.outputTranscriptPath,
 						transcriptData:       wr.transcriptData,
 					})
-					if p.store != nil {
-						storeBatch = append(storeBatch, StoreEntry{
-							Metadata: wr.meta,
-							Session:  sessionFromWorkerResult(wr),
-						})
-					}
 				}
+				sessionResults = append(sessionResults, wr.result)
 				committedIDs = append(committedIDs, wr.result.SessionID)
-			}
-
-			// DB INSERT (best-effort).
-			if p.store != nil && len(storeBatch) > 0 {
-				var insertErr error
-				p.runStoreWrite(writeLane, func() {
-					if err := p.store.InsertSessions(ctx, storeBatch); err != nil {
-						insertErr = fmt.Errorf("store insert (%d sessions): %w", len(storeBatch), err)
-					} else {
-						// Persist session commits (non-fatal): runs only after InsertSessions
-						// succeeds so the FK constraint on session_commits(session_id) is satisfied.
-						// Called unconditionally (including empty slice) so that a --force re-ingest
-						// that finds 0 commits deletes stale DB rows, keeping JSON and DB in sync.
-						cursorStore, cursorStoreOK := p.store.(OpenCodeSeqCursorStore)
-						for _, entry := range storeBatch {
-							if err := p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits); err != nil {
-								slog.Warn("pipeline: upsert session_commits",
-									"session_id", entry.Metadata.SessionID,
-									"error", err)
-							}
-							// Record the OpenCode change cursor for a session just ingested,
-							// so a later in-place rewrite that bumps the sequence without
-							// moving a time column re-ingests it. Non-fatal.
-							if cursorStoreOK && entry.Session.Harness == HarnessOpenCode {
-								if err := cursorStore.UpsertOpenCodeSeqCursor(ctx, entry.Metadata.SessionID, entry.Session.EventSeq); err != nil {
-									slog.Warn("pipeline: upsert opencode_session_seq_cursor",
-										"session_id", entry.Metadata.SessionID,
-										"error", err)
-								}
-							}
-						}
-					}
-				})
-				if insertErr != nil {
-					errCh <- insertErr
-				}
-			}
-
-			// WRITE metadata.json (v8 write order: DB INSERT first, file second).
-			//
-			// For each successful worker result, set DerivedAt (if store configured)
-			// and write metadata.json to the session directory. This is the canonical
-			// write path for metadata — processSession writes only the transcript.
-			//
-			// Best-effort: a metadata write failure is logged and recorded in
-			// SessionResult.Error, but does not abort the pipeline.
-			for i := range batch.Results {
-				wr := &batch.Results[i]
-				if wr.result.Error != nil || wr.meta == nil || wr.metaFilename == "" || wr.sessionDir == "" {
-					continue
-				}
-				// Set DerivedAt to mark metadata.json as derived from DB state (v8+).
-				// Nil when no store is configured (file is primary artifact, not a cache).
-				if p.store != nil {
-					ts := time.Now().UnixMilli()
-					wr.meta.DerivedAt = &ts
-				}
-				metaJSON, err := json.Marshal(wr.meta)
-				if err != nil {
-					slog.Warn("pipeline: marshal metadata",
-						"session_id", wr.result.SessionID,
-						"error", err)
-					continue
-				}
-				metaPath := fmt.Sprintf("%s/%s", wr.sessionDir, wr.metaFilename)
-				if err := p.fs.WriteFile(metaPath, metaJSON, defaults.PrivateFilePerm); err != nil {
-					slog.Warn("pipeline: write metadata.json",
-						"session_id", wr.result.SessionID,
-						"path", metaPath,
-						"error", err)
-				}
 			}
 
 			// Commit BEFORE Ack — unlocks children for next Drain sooner.
@@ -1973,6 +1915,18 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		result.Status = DiffUnchanged
 		return workerResult{result: result}
 	}
+	publisher, publishErr := p.artifactPublisher(nil)
+	if publishErr != nil {
+		return fail(publishErr)
+	}
+	metadataPath, pathErr := p.findMetadataPath(session)
+	if pathErr != nil {
+		return fail(pathErr)
+	}
+	observation, observeErr := publisher.Observe(ctx, session, metadataPath)
+	if observeErr != nil {
+		return fail(observeErr)
+	}
 
 	// Find the adapter for this provider.
 	factory, ok := p.adapters[session.Harness]
@@ -1999,6 +1953,9 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if err != nil {
 		return fail(fmt.Errorf("extract metadata and transcript for %s: %w", session.SessionID, err))
 	}
+	adapterVersion := p.versionTargets()[session.Harness].AdapterVersion
+	meta.AdapterVersion = &adapterVersion
+	meta.DerivedAt = nil
 
 	// Set ingested timestamp.
 	ingested := time.Now().UnixMilli()
@@ -2217,50 +2174,50 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 
 	// Compute MetadataHash after all content-bearing fields are set.
-	// NOTE: DerivedAt is NOT set here. It will be set in drainLoop after DB INSERT
-	// (v8 write order: DB first, metadata.json second). For the no-store path,
-	// metadata.json is written by the pipeline finalization step without DerivedAt.
+	// DerivedAt stays absent when the complete file pair commits. The drain loop
+	// adds it only after a successful transactional mirror of this same artifact.
 	meta.MetadataHash = schema.ComputeMetadataHash(meta)
 
-	// tmpDir holds transcript (and optional debug files) only — NOT metadata.json.
-	// metadata.json is written after the atomic rename in drainLoop (store path)
-	// or the no-store finalization path, ensuring DB INSERT always precedes file write.
-
-	// Ensure parent directory of final session dir exists.
-	parentDir := filepath.Dir(sessionDir)
-	if err := p.fs.MkdirAll(parentDir, defaults.PrivateDirPerm); err != nil {
-		result.Error = errors.Join(
-			fmt.Errorf("create output dir for %s: %w", session.SessionID, err),
-			p.fs.RemoveAll(tmpDir),
-		)
-		return workerResult{result: result}
+	metaJSON, marshalErr := json.Marshal(meta)
+	if marshalErr != nil {
+		return fail(errors.Join(marshalErr, p.fs.RemoveAll(tmpDir)))
 	}
-
-	// KNOWN LIMITATION (M11): RemoveAll + renameDir is not atomic. There is a brief
-	// window where the session directory does not exist. For MVP this is acceptable
-	// since ingestion runs as a single sequential process. If concurrent readers are
-	// added, this should use a two-phase approach (rename old to .old, rename new to
-	// final, then remove .old).
-	if _, err := p.fs.Stat(sessionDir); err == nil {
-		if err := p.fs.RemoveAll(sessionDir); err != nil {
-			result.Error = errors.Join(
-				fmt.Errorf("remove old session dir for %s: %w", session.SessionID, err),
-				p.fs.RemoveAll(tmpDir),
-			)
-			return workerResult{result: result}
+	artifact, captureErr := NewManagedArtifact(metaJSON, writeData)
+	if captureErr != nil {
+		return fail(errors.Join(captureErr, p.fs.RemoveAll(tmpDir)))
+	}
+	debugFiles := make(map[string][]byte)
+	debugDir := filepath.Join(tmpDir, defaults.DirDebug.String())
+	debugEntries, debugErr := p.fs.ReadDir(debugDir)
+	if debugErr != nil && !errors.Is(debugErr, fs.ErrNotExist) {
+		return fail(errors.Join(debugErr, p.fs.RemoveAll(tmpDir)))
+	}
+	for _, entry := range debugEntries {
+		if entry.IsDir() {
+			return fail(errors.Join(fmt.Errorf("prepare debug publication for session %s: unexpected nested directory", session.SessionID), p.fs.RemoveAll(tmpDir)))
 		}
+		data, readErr := p.fs.ReadFile(filepath.Join(debugDir, entry.Name()))
+		if readErr != nil {
+			return fail(errors.Join(readErr, p.fs.RemoveAll(tmpDir)))
+		}
+		debugFiles[entry.Name()] = data
 	}
-
-	// Atomic rename: move temp dir to final location.
-	// FileSystem.Rename may not move directory contents recursively (MemFS),
-	// so we use a recursive move implementation.
-	if err := p.renameDir(tmpDir, sessionDir); err != nil {
-		result.Error = errors.Join(
-			fmt.Errorf("rename temp dir for %s: %w", session.SessionID, err),
-			p.fs.RemoveAll(tmpDir),
-		)
-		return workerResult{result: result}
+	publication := ArtifactPublication{Artifact: artifact, Observation: observation, DebugFiles: debugFiles}
+	if session.Origin != "" {
+		origin := session.Origin
+		publication.Origin = &origin
 	}
+	// Event cursor evidence is supplied only by a materialization path that
+	// proves acquisition; discovery's optional clock hint is not a success stamp.
+	committed, commitErr := publisher.Publish(ctx, publication)
+	cleanupErr := p.fs.RemoveAll(tmpDir)
+	if commitErr != nil {
+		return fail(errors.Join(commitErr, cleanupErr))
+	}
+	if cleanupErr != nil {
+		p.reportDiagnostic(DiagnosticEntry{ErrorType: "artifact_cleanup", Location: tmpDir, Message: cleanupErr.Error(), Remediation: "Inspect the retained temporary extraction directory; the complete committed artifact was preserved."})
+	}
+	meta = &committed.Metadata
 
 	result.OutputPath = sessionDir
 
@@ -2273,6 +2230,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	return workerResult{
 		result:               result,
 		meta:                 meta,
+		artifact:             committed,
 		transcriptData:       transcriptData,
 		outputTranscriptPath: outputTranscriptPath,
 		// Carried from the DISCOVERED session, which is the only place it exists.
@@ -3456,9 +3414,8 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 		staging := NewStagingBuffer(extractTotal+1, resolveArenaSizeBytes(DefaultArenaSizeBytes))
 
 		var reindexWorkersDone atomic.Bool
-		// errCh buffer: ceil(extractTotal/DefaultMaxDrainBatch) + safety margin,
-		// same rationale as Run() — prevents blocking the consumer when every batch fails.
-		reindexErrChSize := extractTotal/DefaultMaxDrainBatch + 2
+		// Reserve every possible per-session reconciliation failure, as in Run.
+		reindexErrChSize := extractTotal + 1
 		if reindexErrChSize < 16 {
 			reindexErrChSize = 16
 		}

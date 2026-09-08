@@ -18,17 +18,22 @@ func findArtifactDirectory(root ArtifactRoot, sid SessionID) (string, error) {
 	}
 	found := ""
 	check := func(directory string) error {
-		_, err := root.Lstat(filepath.Join(directory, string(sid)+defaults.MetadataSuffix))
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+		// Metadata may be missing after an interrupted legacy write. Observe
+		// any exact owned transcript too, so replacement can prove its old bytes.
+		for _, suffix := range []string{defaults.MetadataSuffix, "--transcript.json", "--transcript.jsonl"} {
+			_, err := root.Lstat(filepath.Join(directory, string(sid)+suffix))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if found != "" && found != directory {
+				return fmt.Errorf("observe session %s: multiple managed artifact locations exist; no files were changed; resolve duplicate session artifacts before retrying", sid)
+			}
+			found = directory
+			break
 		}
-		if err != nil {
-			return err
-		}
-		if found != "" && found != directory {
-			return fmt.Errorf("observe session %s: multiple managed metadata locations exist; no files were changed; resolve duplicate session artifacts before retrying", sid)
-		}
-		found = directory
 		return nil
 	}
 	for _, host := range hosts {

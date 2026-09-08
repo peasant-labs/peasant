@@ -109,6 +109,7 @@ func makeMinimalMeta(t *testing.T, sessionIDStr string) *ingest.UnifiedMetadata 
 	meta := ingest.NewUnifiedMetadata()
 	meta.SessionID = sid
 	meta.ModelHarness = ingest.HarnessClaudeCode
+	meta.Source.Format = ingest.SourceFormatJSONL
 	ingested := time.Now().UnixMilli()
 	meta.Timestamp = ingest.TimestampInfo{
 		Start:    1708300800000, // 2024-02-19T00:00:00Z
@@ -6215,9 +6216,8 @@ func TestPipeline_SchemaV8_DerivedAtNilWithoutStore(t *testing.T) {
 // successful pipeline run. DerivedAt marks metadata.json as a derived artifact;
 // the DB INSERT records the session in the store.
 //
-// Note: write-order enforcement (DB INSERT before metadata.json) is a future
-// enhancement requiring pipeline restructuring. This test verifies the observable
-// outcomes without asserting on ordering.
+// The complete file pair commits before its database mirror; DerivedAt is added
+// only after that mirror succeeds.
 func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
@@ -6239,6 +6239,16 @@ func TestPipeline_SchemaV8_StoreAndDerivedAtBothPresent(t *testing.T) {
 	store := &testutil.StubSessionStore{
 		OnInsert: func(_ []ingest.StoreEntry) {
 			dbInsertCalled = true
+			path := fmt.Sprintf("%s/%s--metadata.json", expectedOutputBase(testOutputDir, testSessionID), testSessionID)
+			data, readErr := mfs.ReadFile(path)
+			if readErr != nil {
+				t.Errorf("database mirror started before complete metadata commit: %v", readErr)
+				return
+			}
+			var committed ingest.UnifiedMetadata
+			if err := json.Unmarshal(data, &committed); err != nil || committed.DerivedAt != nil {
+				t.Errorf("unmirrored file metadata must be readable without DerivedAt: %v", err)
+			}
 		},
 	}
 	cfg := makePipelineConfig(testOutputDir)

@@ -38,8 +38,8 @@ Design is MPMC; currently runs **MPSC** (workers produce, drainLoop goroutine co
 | 1 | DISCOVER | Sequential | Partial | `Discover()` per provider. All-fail is fatal; partial OK. |
 | 2 | DIFF | Sequential | No | Classify: New / Updated / Unchanged / Active. |
 | 3 | FILTER | Sequential | No | Skip Unchanged + Active; resolve FK parent deps. |
-| 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, atomic write (tmp + rename). |
-| 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Best-effort | Drain StagingBuffer → upsert SQLite → stream indexable sessions. Pipelined with INDEX. |
+| 4a | EXTRACT+WRITE | **Parallel** (N) | Per-session | Extract metadata, redact, replace owned files under an OS lock; complete metadata commits last. |
+| 4b | DB INSERT | **Concurrent** (drainLoop goroutine) | Per-session | Reconcile committed artifact, retained seeds and acquired evidence transactionally → add DerivedAt → stream indexable sessions. Failures retain file/recovery state and do not enqueue that session. |
 | 5 | INDEX | **Concurrent** (parser workers + serial writer) | Best-effort | Parse transcripts in bounded workers → serial `session_entries` writes. Receives streamed work from drainLoop. |
 | 6 | COMPUTE | Sequential | Best-effort | 16 metric functions + daily insights. |
 | 7 | CLEANUP | Sequential | Best-effort | Remove orphan `.tmp-*` dirs. |
@@ -75,7 +75,7 @@ See [README.md](README.md) for full sequence diagrams covering contention, backp
 |----|------|------|
 | C1 | Root-Owns-Subtree | One goroutine processes a root + its entire BFS subtree. Prevents directory races on `{hostSlug}/{parentID}/`. |
 | C2 | Parent-Before-Child DB | FK ordering via `StagingBuffer.Commit()`: children invisible to `Drain()` until parent committed. |
-| C3 | Atomic File Writes | Write to `.tmp-*` dir, then `os.Rename()`. CLEANUP removes orphans. |
+| C3 | Atomic File Writes | Root-confined owned-file publication uses OS advisory locks, synced temporary intents and metadata-last commit. Never delete a session subtree; children and unrelated files are not owned. Acquire file ownership before entering the serial database writer lane. |
 | C4 | Metadata Compatibility | Versions below 9 require native refresh. Versions 9/10 remain readable without a version-only adapter call or metadata rewrite; absent adapter provenance stays unknown. Future schemas refuse refresh/index without modifying their artifacts; future adapter revisions refuse older-adapter replacement but allow supported retained reads. |
 | C5 | Arena Concurrent Drain | `Add()` uses bounded exponential backoff (1ms→16ms) when arena full. drainLoop goroutine runs concurrently with workers; arena only recycles via `AckBatch`. |
 | C6 | Non-Blocking Progress | `ProgressState` pull model — `Update()` writes (pipeline goroutines), `Snapshot()` reads (renderer at its own tick rate). Never drops events. |
