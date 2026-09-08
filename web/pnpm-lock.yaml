@@ -12,8 +12,8 @@ importers:
         specifier: 0.0.18
         version: 0.0.18(@types/react@19.2.17)(@xyflow/react@12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react-is@18.3.1)(react@19.2.7)(redux@5.0.1)
       '@peasant-labs/schema':
-        specifier: 0.16.0
-        version: 0.16.0
+        specifier: 0.18.0
+        version: 0.18.0
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.8)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -604,8 +604,8 @@ packages:
     resolution: {integrity: sha512-55IxFVSPXzbNG2ym+GrYHXCm/wyaQNDhTlI7nSuasiUlFF7qHhY8/DyDpVhuuiwLh1N/O3iX2V2Pw81BLLcrOQ==}
     engines: {node: '>=24'}
 
-  '@peasant-labs/schema@0.16.0':
-    resolution: {integrity: sha512-qc4xm9gCfR8MBT9CDIZduvY4LPNw/aPo8yipWDeR55XkpquWv1TN1cpJH7PFvK/iQDmL4yXByyVMcp3Sol3Y/Q==}
+  '@peasant-labs/schema@0.18.0':
+    resolution: {integrity: sha512-exGtK5d2qpEtgRRkiM8JKQLctthCNB8ahpvOggxBvySsOY1FvlAF0HFtavkhaVBDHb5km8kcITm52YfeVkO0WA==}
     engines: {node: '>=26'}
 
   '@puppeteer/browsers@3.0.5':
@@ -2630,7 +2630,7 @@ snapshots:
       yaml: 2.9.0
       zod: 4.4.3
 
-  '@peasant-labs/schema@0.16.0':
+  '@peasant-labs/schema@0.18.0':
     dependencies:
       yaml: 2.9.0
       zod: 4.4.3

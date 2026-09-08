@@ -93,6 +93,7 @@ type piSourceCase struct {
 	PaddingStringBytes          int               `yaml:"paddingStringBytes"`
 	SelectedMetadataBytes       int               `yaml:"selectedMetadataBytes"`
 	AssertOrdinaryLongContent   bool              `yaml:"assertOrdinaryLongContent"`
+	InvalidUTF8Namespace        bool              `yaml:"invalidUTF8Namespace"`
 	RejectContains              string            `yaml:"rejectContains"`
 	Title                       string            `yaml:"title"`
 	ExpectedModel               *piFixtureModelID `yaml:"expectedModel"`
@@ -198,11 +199,28 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 		if tc.PaddingStringBytes > 0 {
 			tc.Source = strings.ReplaceAll(tc.Source, "native-boundary-padding", strings.Repeat("p", tc.PaddingStringBytes))
 		}
+		if tc.InvalidUTF8Namespace {
+			tc.Source = strings.ReplaceAll(tc.Source, "invalid-utf8-namespace", string([]byte{0xff}))
+		}
 		if tc.Name == "" || seen[tc.Name] {
 			t.Fatal("duplicate or empty fixture name")
 		}
 		seen[tc.Name] = true
 		t.Run(tc.Name, func(t *testing.T) {
+			if tc.SelectedMetadataBytes > 0 {
+				var result struct {
+					Message struct {
+						Details json.RawMessage `json:"details"`
+					} `json:"message"`
+				}
+				lines := strings.Split(strings.TrimSpace(tc.Source), "\n")
+				if err := json.Unmarshal([]byte(lines[len(lines)-1]), &result); err != nil {
+					t.Fatal(err)
+				}
+				if len(result.Message.Details) != tc.SelectedMetadataBytes {
+					t.Fatalf("synthetic selected subtree has %d bytes, want %d", len(result.Message.Details), tc.SelectedMetadataBytes)
+				}
+			}
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "recording.jsonl")
 			if err := os.WriteFile(path, []byte(tc.Source), 0600); err != nil {
@@ -219,20 +237,6 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.Reject {
-				if tc.SelectedMetadataBytes > 0 {
-					var result struct {
-						Message struct {
-							Details json.RawMessage `json:"details"`
-						} `json:"message"`
-					}
-					lines := strings.Split(strings.TrimSpace(tc.Source), "\n")
-					if err := json.Unmarshal([]byte(lines[len(lines)-1]), &result); err != nil {
-						t.Fatal(err)
-					}
-					if len(result.Message.Details) != tc.SelectedMetadataBytes {
-						t.Fatalf("synthetic selected subtree has %d bytes, want %d", len(result.Message.Details), tc.SelectedMetadataBytes)
-					}
-				}
 				if len(sessions) != 0 {
 					t.Fatal("invalid source accepted")
 				}
@@ -240,7 +244,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 					t.Fatal("missing rejection diagnostic")
 				}
 				if tc.RejectContains != "" && !strings.Contains(adapter.(ingest.DiscoveryDiagnosticReporter).DiscoveryDiagnostics()[0].Detail, tc.RejectContains) {
-					t.Fatal("source rejected for the wrong reason")
+					t.Fatalf("source rejected for the wrong reason: %s", adapter.(ingest.DiscoveryDiagnosticReporter).DiscoveryDiagnostics()[0].Detail)
 				}
 				if tc.RejectContains != "" {
 					assertPiSourceRejectionPipeline(t, resolved, tc.Source, tc.RejectContains)
@@ -378,6 +382,11 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 			if _, err := schema.DecodeSessionDetailPayloadRaw(raw); err != nil {
 				t.Fatalf("actual native producer failed published Schema: %v", err)
 			}
+			if tc.ExpectedNamespace != nil {
+				if len(detail.Turns) != 1 || len(detail.Turns[0].ToolCalls) != 1 || detail.Turns[0].ToolCalls[0].Namespace == nil || *detail.Turns[0].ToolCalls[0].Namespace != *tc.ExpectedNamespace || detail.Turns[0].ToolCalls[0].Name != "original_name" {
+					t.Fatalf("published name/namespace identity changed: %+v", detail.Turns)
+				}
+			}
 			if tc.ExpectedAssistantContent != nil {
 				found := false
 				for _, turn := range detail.Turns {
@@ -422,7 +431,7 @@ func TestPiNativeRegistryProjection(t *testing.T) {
 					t.Fatal("native tool did not survive")
 				}
 				tool := assistant.ToolCalls[0]
-				if tool.ID != ingest.PiPublicRef(session.SessionID.String(), "tool", "call") || tool.CallEntryRef != assistant.SourceEntryRef || tool.ResultEntryRef != ingest.PiPublicRef(session.SessionID.String(), "entry", "r") || tool.Usage == nil || tool.Usage.Completeness != schema.UsageUnknown || !tool.IsError {
+				if tool.ID != ingest.PiPublicRef(session.SessionID.String(), "tool", "call") || tool.Name != "custom_tool" || tool.Namespace == nil || *tool.Namespace != "fixture.extension" || tool.CallEntryRef != assistant.SourceEntryRef || tool.ResultEntryRef != ingest.PiPublicRef(session.SessionID.String(), "entry", "r") || tool.Usage == nil || tool.Usage.Completeness != schema.UsageUnknown || !tool.IsError {
 					t.Fatalf("tool source/result/unknown owner not preserved: %+v", tool)
 				}
 				if strings.Count(string(raw), "[image omitted]") != 4 {
@@ -455,16 +464,16 @@ func assertPiNativeOutward(t *testing.T, db *store.Store, fs ingest.FileSystem, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = transcript.SessionToDetailValidated(local)
+	localDetail, err := transcript.SessionToDetailValidated(local)
 	if (err != nil) != tc.ProjectionReject || (err != nil && !strings.Contains(err.Error(), "namespace")) {
 		t.Fatalf("API detail namespace outcome: %v", err)
 	}
-	_, err = export.ExportSession(ctx, db, fs, sid.String())
+	exported, err := export.ExportSession(ctx, db, fs, sid.String())
 	if (err != nil) != tc.ProjectionReject || (err != nil && !strings.Contains(err.Error(), "namespace")) {
 		t.Fatalf("export namespace outcome: %v", err)
 	}
 	for _, dryRun := range tc.OutboundDryRunModes {
-		publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilityDetailedUsageV1, schema.ContentCapabilityNativeMetadataV1}}}
+		publisher := &testutil.StubPublisher{SchemaVersionResp: &schema.SchemaVersionResponse{MinPushContractVersion: "0.1.0", PushContractVersion: defaults.PublishSchemaVersion, ContentCapabilities: []schema.ContentCapability{schema.ContentCapabilityObservedModelV1, schema.ContentCapabilityDetailedUsageV1, schema.ContentCapabilityNativeMetadataV1, schema.ContentCapabilityToolNamespaceV1}}}
 		var stderr bytes.Buffer
 		cfg := &config.Config{Output: config.OutputConfig{BasePath: output.String()}, Push: config.PushConfig{Method: config.PushMethodAll, Visibility: config.VisibilityPrivate}}
 		creds := &auth.Credentials{APIKey: "synthetic-key", KeyID: "synthetic-key-id", UserID: "synthetic-user", Username: "fixture", VillageURL: "https://village.example.com"}
@@ -488,6 +497,17 @@ func assertPiNativeOutward(t *testing.T, db *store.Store, fs ingest.FileSystem, 
 			}
 		} else if len(publisher.Calls) != 1 {
 			t.Fatalf("omitted namespace did not upload: %+v", result)
+		}
+		if !dryRun && !tc.ProjectionReject && tc.ExpectedNamespace != nil {
+			for surface, detail := range map[string]*schema.SessionDetailPayload{"local API": localDetail, "export": exported} {
+				if detail == nil || len(detail.Turns) != 1 || len(detail.Turns[0].ToolCalls) != 1 || detail.Turns[0].ToolCalls[0].Namespace == nil || *detail.Turns[0].ToolCalls[0].Namespace != *tc.ExpectedNamespace || detail.Turns[0].ToolCalls[0].Name != "original_name" {
+					t.Fatalf("%s lost separate namespace: %+v", surface, detail)
+				}
+			}
+			content, decodeErr := schema.DecodeTranscriptContentRaw(publisher.Calls[0].TranscriptBody)
+			if decodeErr != nil || content.SessionDetail.Turns[0].ToolCalls[0].Namespace == nil || *content.SessionDetail.Turns[0].ToolCalls[0].Namespace != *tc.ExpectedNamespace {
+				t.Fatalf("transcript multipart lost namespace: %+v error=%v", content, decodeErr)
+			}
 		}
 		if dryRun && publisher.SchemaVersionCalls != 0 {
 			t.Fatal("dry-run negotiated remotely")

@@ -1,5 +1,5 @@
 cases:
-  - name: empty_namespace_refuses_lossy_public_conversion
+  - name: empty_namespace_survives_public_conversion
     entries:
       - {id: a, role: assistant, content: response}
       - {id: a, role: assistant, type: tool_use, parent: 0, tool: call, name: search, namespace: '', arguments: '{}'}
@@ -7,7 +7,7 @@ cases:
     want_scopes: [assistant]
     want_completeness: [unknown]
     want_costs: ['']
-    error: tool namespace preservation is unavailable
+    want_namespace: ''
   - name: namespace_without_tool_id_rejected
     entries:
       - {id: a, role: assistant, content: response}
@@ -21,15 +21,15 @@ cases:
     entries:
       - {id: a, role: system, carrier: true, namespace: ''}
     projection_error: namespace evidence requires a surviving tool-call row
-  - name: separate_namespace_refuses_lossy_public_conversion
+  - name: unicode_namespace_survives_public_conversion
     entries:
       - {id: a, role: assistant, content: response}
-      - {id: a, role: assistant, type: tool_use, parent: 0, tool: call, name: search, namespace: extension, arguments: '{}'}
+      - {id: a, role: assistant, type: tool_use, parent: 0, tool: call, name: search, namespace: '扩展.工具', arguments: '{}'}
     want_turns: 1
     want_scopes: [assistant]
     want_completeness: [unknown]
     want_costs: ['']
-    error: tool namespace preservation is unavailable
+    want_namespace: '扩展.工具'
   - name: trailing_usage_carrier_resolves_visible_owner
     entries:
       - {id: a, role: assistant, content: response, no_owner: true}

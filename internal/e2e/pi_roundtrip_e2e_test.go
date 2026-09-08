@@ -251,6 +251,7 @@ func assertPiRoundTripDetail(t *testing.T, fixture piRoundTripCase, detail *sche
 			toolCount++
 			piEqual(t, ingest.PiPublicRef(fixture.SessionID, "tool", fixture.Tool.NativeID), tool.ID)
 			piEqual(t, fixture.Tool.Name, tool.Name)
+			piEqual(t, fixture.Tool.Namespace, tool.Namespace)
 			piEqual(t, fixture.Tool.Result, tool.Result)
 			piEqual(t, fixture.Tool.IsError, tool.IsError)
 			var gotArguments, wantArguments any

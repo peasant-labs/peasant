@@ -1,4 +1,7 @@
 requiredNames:
+  - nonempty_namespace_redacted_separately_from_name
+  - empty_namespace_remains_present_after_redaction
+  - missing_namespace_refuses_upload_without_effects
   - raw_metadata_bytes_checked_before_json_compaction
   - redaction_expansion_rechecks_metadata_string_budget
   - recognized_tool_result_reference_is_not_public_metadata

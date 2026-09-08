@@ -39,6 +39,11 @@ type piOutboundFixture struct {
 		Uploads   int                        `yaml:"uploads"`
 		DryRun    bool                       `yaml:"dry_run"`
 	} `yaml:"capabilities"`
+	Namespaces []struct {
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
+		Want      string `yaml:"want"`
+	} `yaml:"namespaces"`
 }
 
 func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
@@ -64,10 +69,41 @@ func loadPiOutboundFixtures(t *testing.T) piOutboundFixture {
 	for _, c := range f.Capabilities {
 		names = append(names, c.Name)
 	}
+	for _, c := range f.Namespaces {
+		names = append(names, c.Name)
+	}
 	if err := testutil.ValidateRequiredNames(m, names, "Pi outbound"); err != nil {
 		t.Fatal(err)
 	}
 	return f
+}
+
+func TestPiOutboundNamespaceRedaction(t *testing.T) {
+	for _, c := range loadPiOutboundFixtures(t).Namespaces {
+		t.Run(c.Name, func(t *testing.T) {
+			entries, err := piOutboundEntries(`{"safe":true}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			extra, _, err := ingest.DecodePiExtra(entries[1].Extra)
+			if err != nil {
+				t.Fatal(err)
+			}
+			extra.Namespace = &c.Namespace
+			entries[1].Extra, err = ingest.EncodePiExtra(extra)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err = push.RedactEntries(piRewriteRedactor{}, entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			extra, _, err = ingest.DecodePiExtra(entries[1].Extra)
+			if err != nil || extra.Namespace == nil || *extra.Namespace != c.Want {
+				t.Fatalf("redacted namespace=%v want %q error=%v", extra.Namespace, c.Want, err)
+			}
+		})
+	}
 }
 
 func TestPiOutboundMetadataRedaction(t *testing.T) {
@@ -86,7 +122,7 @@ func TestPiOutboundMetadataRedaction(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			extra, pi, err := ingest.DecodePiExtra(entries[1].Extra)
+			extra, pi, err := ingest.DecodePiExtra(entries[2].Extra)
 			if err != nil || !pi {
 				t.Fatalf("decode: %v pi=%t", err, pi)
 			}
@@ -146,14 +182,16 @@ func TestPiPipelineCapabilityAndMultipartPreservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(content.SessionDetail.NativeMetadata) != 1 || content.SessionDetail.Turns[0].Usage == nil || content.SessionDetail.Turns[0].ObservedModel == "" {
+			if len(content.SessionDetail.NativeMetadata) != 1 || content.SessionDetail.Turns[0].Usage == nil || content.SessionDetail.Turns[0].ObservedModel == "" || len(content.SessionDetail.Turns[0].ToolCalls) != 1 || content.SessionDetail.Turns[0].ToolCalls[0].Namespace == nil || *content.SessionDetail.Turns[0].ToolCalls[0].Namespace != "extension" {
 				t.Fatal("capability-bearing evidence disappeared")
 			}
-			if len(publisher.AuthoritativeCalls) != 1 || len(publisher.AuthoritativeCalls[0].Entries) != 1 {
+			if len(publisher.AuthoritativeCalls) != 1 || len(publisher.AuthoritativeCalls[0].Entries) != 2 {
 				t.Fatal("metadata carrier was not excluded")
 			}
-			if publisher.AuthoritativeCalls[0].Entries[0].Extra != nil {
-				t.Fatal("private Extra escaped in multipart metadata")
+			for _, entry := range publisher.AuthoritativeCalls[0].Entries {
+				if entry.Extra != nil {
+					t.Fatal("private Extra escaped in multipart metadata")
+				}
 			}
 			if bytes.Contains(publisher.Calls[0].TranscriptBody, []byte("pi.carrier")) {
 				t.Fatal("private carrier escaped transcript part")
@@ -174,9 +212,16 @@ func piOutboundEntries(data string) ([]schema.SessionEntry, error) {
 	}
 	text := "answer"
 	entry := schema.SessionEntry{SessionID: sid, Harness: schema.HarnessPi, EntryIndex: 0, Role: schema.RoleAssistant, EntryType: schema.EntryTypeText, ContentPreview: &text, Extra: extra}
+	namespace := "extension"
+	toolID, toolName, toolInput, parent := ingest.PiPublicRef(string(sid), "tool", "tool"), "search", "{}", 0
+	toolExtra, err := ingest.EncodePiExtra(ingest.PiExtra{Kind: ingest.PiExtraState, Harness: schema.HarnessPi, SourceRef: u.SourceEntryRef, Namespace: &namespace})
+	if err != nil {
+		return nil, err
+	}
+	toolEntry := schema.SessionEntry{SessionID: sid, Harness: schema.HarnessPi, EntryIndex: 1, Role: schema.RoleAssistant, EntryType: schema.EntryTypeToolUse, Depth: 1, ParentIndex: &parent, ToolCallID: &toolID, ToolNamesCSV: &toolName, ToolInput: &toolInput, Extra: toolExtra}
 	ref := ingest.PiPublicRef(string(sid), "entry", "custom")
-	carrier, err := ingest.NewPiCarrier(sid, 1, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: ref, SourceType: schema.NativeSourcePiCustom}, CustomType: "extension", Data: json.RawMessage(data)}}})
-	return []schema.SessionEntry{entry, carrier}, err
+	carrier, err := ingest.NewPiCarrier(sid, 2, ingest.PiExtra{Kind: ingest.PiExtraCarrier, Harness: schema.HarnessPi, SourceRef: ref, Metadata: []schema.NativeMetadataRecord{{ID: ingest.PiPublicRef(string(sid), "metadata", "custom"), Kind: schema.NativeMetadataPiCustomData, Source: schema.NativeSourceRef{EntryRef: ref, SourceType: schema.NativeSourcePiCustom}, CustomType: "extension", Data: json.RawMessage(data)}}})
+	return []schema.SessionEntry{entry, toolEntry, carrier}, err
 }
 
 type piRewriteRedactor struct {

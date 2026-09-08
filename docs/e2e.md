@@ -150,7 +150,7 @@ A pass checks:
 
 The test is included in `make e2e`. It builds the real backend CLI through the existing
 E2E helper; it does **not** validate the embedded browser bundle or replace the required
-full `make build` and mounted browser review. Pi's current UI and namespace limitations
+full `make build` and mounted browser review. Pi's current UI limitations
 are recorded in [Pi recordings](pi.md).
 
 The staged pull flow, the idempotency/304 fast-paths, and the

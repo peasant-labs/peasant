@@ -32,11 +32,12 @@ type piRoundTripCase struct {
 	Metadata        int                                  `yaml:"metadata"`
 	MetadataSources map[schema.NativeMetadataKind]string `yaml:"metadataSources"`
 	Tool            struct {
-		NativeID  string `yaml:"nativeID"`
-		Name      string `yaml:"name"`
-		Arguments string `yaml:"arguments"`
-		Result    string `yaml:"result"`
-		IsError   bool   `yaml:"isError"`
+		NativeID  string  `yaml:"nativeID"`
+		Name      string  `yaml:"name"`
+		Namespace *string `yaml:"namespace"`
+		Arguments string  `yaml:"arguments"`
+		Result    string  `yaml:"result"`
+		IsError   bool    `yaml:"isError"`
 	} `yaml:"tool"`
 	AssistantCost      *schema.RecordedCostAmount `yaml:"assistantCost"`
 	AssistantTokens    map[string]int64           `yaml:"assistantTokens"`

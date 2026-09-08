@@ -63,6 +63,7 @@ type piProjectionCase struct {
 	WantCompleteness []string            `yaml:"want_completeness"`
 	WantCosts        []string            `yaml:"want_costs"`
 	WantContent      string              `yaml:"want_content"`
+	WantNamespace    *string             `yaml:"want_namespace"`
 	Error            string              `yaml:"error"`
 	ProjectionError  string              `yaml:"projection_error"`
 }
@@ -197,6 +198,12 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if c.WantNamespace != nil {
+				tool := content.SessionDetail.Turns[0].ToolCalls[0]
+				if tool.Namespace == nil || *tool.Namespace != *c.WantNamespace || tool.Name != "search" {
+					t.Fatalf("separate tool identity changed: name=%q namespace=%v", tool.Name, tool.Namespace)
+				}
 			}
 			raw, err := json.Marshal(content)
 			if err != nil {

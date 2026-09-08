@@ -57,7 +57,7 @@ that recording with a diagnostic. Other recordings continue. Parser limits are 6
 file, 8 MiB per physical line, and 200,000 physical lines.
 
 Selected extension metadata has separate shared-contract safety limits, including
-16 KiB per string and 64 KiB per metadata record. A valid Pi recording can exceed
+64 KiB per string and 64 KiB per metadata record. A valid Pi recording can exceed
 these limits. Peasant currently rejects that recording rather than silently removing
 its extension state; the diagnostic names the exceeded limit. Ordinary transcript
 text is not subject to the metadata string limit.
@@ -79,6 +79,7 @@ metadata. This synthetic fixture does not establish that every real recording fi
 metadata limits or that the browser UI is ready. See [the E2E guide](e2e.md).
 
 Pi v1/v2 compatibility, first-class images, extension execution, and fork navigation are
-not supported. A separate native tool namespace is retained in local evidence, but public
-detail/export currently refuses it because the released shared contract cannot represent
-that field. Peasant does not silently concatenate it into the tool name or discard it.
+not supported. A separate native tool namespace remains distinct from the tool name through
+local storage, detail, export, redaction, and publication. An explicitly recorded empty
+namespace remains distinct from an omitted namespace. Publication requires the receiving
+Village server to advertise `tool_namespace_v1`; Peasant refuses before upload otherwise.

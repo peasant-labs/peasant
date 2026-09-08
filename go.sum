@@ -127,6 +127,8 @@ github.com/peasant-labs/schema v0.1.3 h1:bKs5mHqYFuBAoO2Rf3MYuS1ugoeAC9aR9f3c7hW
 github.com/peasant-labs/schema v0.1.3/go.mod h1:zuSUP1kUd6Bn3QcNPFfjJbMqZHV6HLpsKPSihU+Q1qo=
 github.com/peasant-labs/schema v0.16.0 h1:XA7p4HAlNV/wEIw/4GVyzCLXcXrIjAQIOws5tFbbDPg=
 github.com/peasant-labs/schema v0.16.0/go.mod h1:Jv78ZReuAmOx+83NGo39hCRcH48FG/DiD7MvFf2lUrI=
+github.com/peasant-labs/schema v0.18.0 h1:ZKEmAkFHnBmOhT6EvoOjyC62zde3yEWxGy88quMX0FM=
+github.com/peasant-labs/schema v0.18.0/go.mod h1:Jv78ZReuAmOx+83NGo39hCRcH48FG/DiD7MvFf2lUrI=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
 github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

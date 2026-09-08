@@ -3,7 +3,7 @@ cases:
     name: native-active-history-encrypted-roundtrip
     nativeCase: active-history
     sessionID: 11111111-2222-4333-8444-555555555555
-    capabilities: [detailed_usage_v1, native_metadata_v1, observed_model_v1]
+    capabilities: [detailed_usage_v1, native_metadata_v1, observed_model_v1, tool_namespace_v1]
     contents: [full history, think once, answer, visible context, visible summary, visible branch summary]
     forbidden: [synthetic-image, pi.carrier, pi.usage, pi.native_metadata, '"extra"', '"parentId"']
     metadataOnly: not searchable
@@ -13,6 +13,7 @@ cases:
     tool:
       nativeID: call
       name: custom_tool
+      namespace: fixture.extension
       arguments: '{"nested":{"items":[1,true]}}'
       result: "result\n[image omitted]"
       isError: true
@@ -32,7 +33,7 @@ cases:
       - name: metadata-string-over-bound
         find: 'not searchable'
         replacement: '$REPEAT'
-        repeat: 16385
+        repeat: 65537
         status: 409
   - <<: *active
     name: native-complete-base-no-cost-roundtrip

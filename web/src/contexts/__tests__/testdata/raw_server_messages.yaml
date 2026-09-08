@@ -4,6 +4,18 @@ cases:
     topic: session_detail
     accepted: true
     raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","sourceEntryRef":"source-one","usage":{"ownerId":"owner-one","sourceEntryRef":"source-one","scope":"assistant","completeness":"unknown","cost":{"source":"recorded_harness_estimate","total":"1e-7"}}}],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":{"nested":{"enabled":true}}}]}}'
+  - name: empty tool namespace survives mounted channel
+    topic: session_detail
+    accepted: true
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":"","arguments":"{}","result":""}]}]}}'
+  - name: null tool namespace rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":null,"arguments":"{}","result":""}]}]}}'
+  - name: duplicate tool namespace rejects before dispatch
+    topic: session_detail
+    accepted: false
+    raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"assistant","content":"hello","depth":0,"timestamp":"2026-01-01T00:00:00Z","toolCalls":[{"id":"tool-one","name":"search","namespace":"one","n\u0061mespace":"two","arguments":"{}","result":""}]}]}}'
   - name: legacy detail accepts nullable turns and scorecard
     topic: session_detail
     accepted: true
@@ -20,16 +32,16 @@ cases:
     topic: session_detail
     accepted: false
     raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":{"safe":1,"s\u0061fe":2}}]}}'
-  - name: metadata string at decoded bound survives
+  - name: measured metadata string within record bound survives
     topic: session_detail
     accepted: true
     raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":"$REPEAT"}]}}'
-    repeat: { unit: x, count: 16384 }
+    repeat: { unit: x, count: 51175 }
   - name: metadata string over decoded bound rejects
     topic: session_detail
     accepted: false
     raw: '{"type":"session_detail","data":{$DETAIL,"turns":[],"nativeMetadata":[{"id":"meta-one","kind":"pi.custom.data","source":{"entryRef":"custom-one","sourceType":"pi.custom"},"customType":"extension-state","data":"$REPEAT"}]}}'
-    repeat: { unit: x, count: 16385 }
+    repeat: { unit: x, count: 65537 }
   - name: escaped metadata raw byte bound rejects with type last
     topic: session_detail
     accepted: false
@@ -44,7 +56,7 @@ cases:
     topic: session_detail
     accepted: true
     raw: '{"type":"session_detail","data":{$DETAIL,"turns":[{"index":0,"role":"user","content":"$REPEAT","depth":0,"timestamp":"2026-01-01T00:00:00Z"}]}}'
-    repeat: { unit: x, count: 16385 }
+    repeat: { unit: x, count: 65537 }
   - name: unrelated dashboard metadata is not detail validated
     topic: dashboard
     accepted: true

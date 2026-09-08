@@ -5,7 +5,7 @@ cases:
     error: true
   - name: redaction_expansion_rechecks_metadata_string_budget
     data: '{"marker":"expand"}'
-    expand: 16385
+    expand: 65537
     error: true
   - name: benign_extension_keys_preserved
     data: '{"deferred":true,"responseId":"extension-local","thoughtSignature":"extension-local","toolCallId":"extension-local","secret-key":"secret-value"}'
@@ -33,24 +33,34 @@ cases:
     error: true
 capabilities:
   - name: all_capabilities_preserved_in_both_parts
-    advertise: [detailed_usage_v1, native_metadata_v1, observed_model_v1]
+    advertise: [detailed_usage_v1, native_metadata_v1, observed_model_v1, tool_namespace_v1]
     uploads: 1
   - name: absent_capabilities_refuse_upload
     advertise: []
     uploads: 0
   - name: missing_usage_refuses_upload
-    advertise: [native_metadata_v1, observed_model_v1]
+    advertise: [native_metadata_v1, observed_model_v1, tool_namespace_v1]
     uploads: 0
   - name: missing_metadata_refuses_upload
-    advertise: [detailed_usage_v1, observed_model_v1]
+    advertise: [detailed_usage_v1, observed_model_v1, tool_namespace_v1]
     uploads: 0
   - name: missing_model_refuses_upload
-    advertise: [detailed_usage_v1, native_metadata_v1]
+    advertise: [detailed_usage_v1, native_metadata_v1, tool_namespace_v1]
     uploads: 0
   - name: unknown_advertisement_is_ignored
-    advertise: [future_v1, detailed_usage_v1, native_metadata_v1, observed_model_v1]
+    advertise: [future_v1, detailed_usage_v1, native_metadata_v1, observed_model_v1, tool_namespace_v1]
     uploads: 1
   - name: dry_run_no_negotiation_or_upload
     advertise: []
     uploads: 0
     dry_run: true
+  - name: missing_namespace_refuses_upload_without_effects
+    advertise: [detailed_usage_v1, native_metadata_v1, observed_model_v1]
+    uploads: 0
+namespaces:
+  - name: nonempty_namespace_redacted_separately_from_name
+    namespace: secret.extension
+    want: safe.extension
+  - name: empty_namespace_remains_present_after_redaction
+    namespace: ''
+    want: ''

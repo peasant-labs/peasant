@@ -144,6 +144,13 @@ func RedactEntries(redactor redact.JSONRedactor, entries []schema.SessionEntry) 
 				}
 			}
 		}
+		if extra.Namespace != nil {
+			redactedNamespace, rewriteErr := rewrite(*extra.Namespace)
+			if rewriteErr != nil {
+				return nil, rewriteErr
+			}
+			extra.Namespace = &redactedNamespace
+		}
 		protected[i], err = ingest.EncodePiExtra(extra)
 		if err != nil {
 			return nil, err

@@ -23,11 +23,13 @@ requiredNames:
   - duplicate-result
   - invalid-usage
   - display-true-context
-  - separate-native-namespace
+  - unicode-native-namespace
   - empty-native-namespace
   - omitted-native-namespace
   - null-native-namespace
   - number-native-namespace
+  - duplicate-native-namespace
+  - invalid-utf8-native-namespace
   - response-model-omitted
   - response-model-valid
   - response-model-empty
@@ -58,8 +60,9 @@ cases:
     metadataStringBytes: 51175
     paddingStringBytes: 1404
     selectedMetadataBytes: 52620
-    reject: true
-    rejectContains: metadata string exceeds 16 KiB
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 2
+    expectedNativeMetadataCount: 1
   - name: ordinary-content-outside-selected-metadata-budget
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
@@ -77,17 +80,18 @@ cases:
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"custom","id":"m","parentId":null,"customType":"state","data":{"value":"native-boundary-string"}}
-    metadataStringBytes: 16385
+    metadataStringBytes: 65537
     reject: true
-    rejectContains: metadata string exceeds 16 KiB
-  - name: separate-native-namespace
+    rejectContains: document exceeds 65536 bytes
+  - name: unicode-native-namespace
     expectedModel: observed-model
     outboundDryRunModes: [true, false]
-    expectedNamespace: native.extension
+    expectedNamespace: '扩展.工具'
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
-      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"observed-model","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"native.extension","arguments":{}}]}}
-    projectionReject: true
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"observed-model","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"扩展.工具","arguments":{}}]}}
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
   - name: empty-native-namespace
     expectedModel: observed-model
     outboundDryRunModes: [true, false]
@@ -95,7 +99,8 @@ cases:
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
       {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","model":"observed-model","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"","arguments":{}}]}}
-    projectionReject: true
+    expectedTurnCount: 1
+    expectedUsageOwnerCount: 1
   - name: omitted-native-namespace
     expectedModel: observed-model
     outboundDryRunModes: [true, false]
@@ -117,6 +122,19 @@ cases:
       {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":3,"arguments":{}}]}}
     reject: true
     rejectContains: namespace
+  - name: duplicate-native-namespace
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"one","n\u0061mespace":"two","arguments":{}}]}}
+    reject: true
+    rejectContains: duplicate object key
+  - name: invalid-utf8-native-namespace
+    invalidUTF8Namespace: true
+    source: |
+      {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project"}
+      {"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"tool","name":"original_name","namespace":"invalid-utf8-namespace","arguments":{}}]}}
+    reject: true
+    rejectContains: UTF-8
   - name: response-model-omitted
     expectedModel: fallback-model
     source: |
@@ -196,7 +214,7 @@ cases:
     source: |
       {"type":"session","version":3,"id":"pi-native-fixture","cwd":"/synthetic/project","timestamp":"2026-01-01T00:00:00Z"}
       {"type":"message","id":"u","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"full history"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}]}}
-      {"type":"message","id":"a","parentId":"u","message":{"role":"assistant","model":"fallback-model","responseModel":"observed-model","content":[{"type":"thinking","thinking":"think once"},{"type":"text","text":"answer"},{"type":"toolCall","id":"call","name":"custom_tool","arguments":{"nested":{"items":[1,true]}}},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"usage":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}}}}
+      {"type":"message","id":"a","parentId":"u","message":{"role":"assistant","model":"fallback-model","responseModel":"observed-model","content":[{"type":"thinking","thinking":"think once"},{"type":"text","text":"answer"},{"type":"toolCall","id":"call","name":"custom_tool","namespace":"fixture.extension","arguments":{"nested":{"items":[1,true]}}},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"usage":{"input":1,"output":2,"cacheRead":3,"cacheWrite":4,"totalTokens":10,"cost":{"total":1e-7}}}}
       {"type":"message","id":"r","parentId":"a","message":{"role":"toolResult","toolCallId":"call","toolName":"custom_tool","content":[{"type":"text","text":"result"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"isError":true,"details":{"extension":"safe"}}}
       {"type":"custom_message","id":"c","parentId":"r","customType":"context","display":false,"content":[{"type":"text","text":"visible context"},{"type":"image","data":"synthetic-image","mimeType":"image/png"}],"details":{"state":true}}
       {"type":"compaction","id":"s","parentId":"c","summary":"visible summary","details":{"count":1}}

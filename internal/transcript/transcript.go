@@ -15,7 +15,6 @@ package transcript
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -504,13 +503,6 @@ func SessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 // SessionToDetailValidated is the canonical producer trust boundary. Callers
 // that can surface failures use it so invalid attribution never reaches a wire.
 func SessionToDetailValidated(s *ingest.Session) (*schema.SessionDetailPayload, error) {
-	for _, turn := range s.Turns {
-		for _, tool := range turn.ToolCalls {
-			if tool.Namespace != nil {
-				return nil, fmt.Errorf("tool namespace preservation is unavailable: the recorded tool on turn %d has a separate namespace but the pinned schema has no namespace field; transcript.SessionToDetailValidated stopped before detail/export/publication so no evidence was silently dropped; upgrade the shared schema and Peasant together to a release supporting tool namespaces, then retry (the original recording is unchanged)", turn.Index)
-			}
-		}
-	}
 	if err := validateSessionObservedModelEvidence(s); err != nil {
 		return nil, err
 	}
@@ -543,6 +535,7 @@ func sessionToDetail(s *ingest.Session) *schema.SessionDetailPayload {
 				Usage:          tc.Usage,
 				ID:             tc.ID,
 				Name:           tc.Name,
+				Namespace:      tc.Namespace,
 				Arguments:      tc.Arguments,
 				Result:         tc.Result,
 				DurationMs:     tc.DurationMs,

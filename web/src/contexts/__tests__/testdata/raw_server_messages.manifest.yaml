@@ -1,10 +1,13 @@
 requiredNames:
+  - empty tool namespace survives mounted channel
+  - null tool namespace rejects before dispatch
+  - duplicate tool namespace rejects before dispatch
   - pi usage and metadata survive mounted channel
   - legacy detail accepts nullable turns and scorecard
   - duplicate envelope type rejects before dispatch
   - escaped duplicate payload member rejects before dispatch
   - escaped duplicate metadata key rejects before dispatch
-  - metadata string at decoded bound survives
+  - measured metadata string within record bound survives
   - metadata string over decoded bound rejects
   - escaped metadata raw byte bound rejects with type last
   - metadata array over bound rejects
