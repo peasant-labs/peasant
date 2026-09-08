@@ -1,6 +1,115 @@
 package ingest
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+)
+
+func (p *Pipeline) hasStoredMetricRefresh() bool {
+	_, sessions := p.metricsStore.(MetricSessionReader)
+	_, metrics := p.analyzer.(SessionMetricsEnsurer)
+	return !p.config.DryRun && sessions && metrics
+}
+
+// refreshStoredMetrics runs after the index writers have drained. Paging keeps
+// the cohort bounded; only explicit invocation filters scope stored maintenance.
+func (p *Pipeline) refreshStoredMetrics(ctx context.Context) (computed, checked, annotated int, days map[string]bool) {
+	days = make(map[string]bool)
+	reader := p.metricsStore.(MetricSessionReader)
+	engine := p.analyzer.(SessionMetricsEnsurer)
+	var after SessionID
+	for ctx.Err() == nil {
+		page, err := reader.ListMetricSessions(ctx, after, 256)
+		if err != nil {
+			p.reportMetricFailure("stored session page", err)
+			break
+		}
+		if len(page) == 0 {
+			break
+		}
+		var ready []SessionID
+		for _, session := range page {
+			after = session.SessionID
+			if ctx.Err() != nil {
+				break
+			}
+			if p.config.Harness != nil && session.Harness != *p.config.Harness ||
+				p.config.AllowedSessionIDs != nil && !p.config.AllowedSessionIDs[session.SessionID] ||
+				p.config.Since != nil && time.UnixMilli(session.StartMS).Before(*p.config.Since) {
+				continue
+			}
+			checked++
+			if err := p.checkStoredMetadataVersion(ctx, session.SessionID); err != nil {
+				p.reportMetadataRefusal(string(session.SessionID), err)
+				continue
+			}
+			changed, current, err := engine.EnsureSessionMetrics(ctx, session.SessionID)
+			if err != nil {
+				p.reportMetricFailure(string(session.SessionID), err)
+				continue
+			}
+			if changed {
+				computed++
+				if session.StartMS > 0 {
+					days[time.UnixMilli(session.StartMS).UTC().Format("2006-01-02")] = true
+				}
+			}
+			if !current || p.classifier == nil {
+				continue
+			}
+			ready = append(ready, session.SessionID)
+		}
+		// Classifier preparation independently revalidates the captured input;
+		// a metrics failure cannot authorize classification of last-good values.
+		if len(ready) > 0 && ctx.Err() == nil {
+			if err := p.stageAnnotate(ctx, ready, nil); err != nil {
+				slog.Warn("harvest: annotate stored sessions", "error", err)
+			}
+			annotated += len(ready)
+		}
+	}
+	return
+}
+
+func (p *Pipeline) reportMetricFailure(location string, err error) {
+	p.reportDiagnostic(DiagnosticEntry{
+		ErrorType: "metrics_incomplete", Location: location, Message: err.Error(),
+		Remediation: "Resolve the reported cause, then run peasant harvest again to retry this session's metrics and annotations.",
+	})
+	slog.Warn("harvest: stored metrics remain retryable", "location", location, "error", err)
+}
+
+// computeReadyMetrics retains injected analyzer compatibility while production
+// engines report a separate confirmed-current result for every requested ID.
+func (p *Pipeline) computeReadyMetrics(ctx context.Context, ids []SessionID) (int, []SessionID, error) {
+	if engine, ok := p.analyzer.(SessionMetricsEnsurer); ok {
+		var computed int
+		var ready []SessionID
+		for _, sid := range ids {
+			changed, current, err := engine.EnsureSessionMetrics(ctx, sid)
+			if err != nil {
+				p.reportMetricFailure(string(sid), err)
+				continue
+			}
+			if changed {
+				computed++
+			}
+			if current {
+				ready = append(ready, sid)
+			}
+		}
+		return computed, ready, nil
+	}
+	n, err := p.computeIndexedMetrics(ctx, ids)
+	if err != nil {
+		return n, nil, fmt.Errorf("metrics prerequisite was not confirmed: %w", err)
+	}
+	// Legacy injected analyzers have no input-proof contract. Their classifier
+	// must establish its own freshness before writing.
+	return n, ids, nil
+}
 
 // computeIndexedMetrics refreshes this invocation's successful index targets.
 // Ordinary maintenance retains the analyzer's existing version-skip behavior.

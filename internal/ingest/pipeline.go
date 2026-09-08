@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -491,6 +492,16 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Err: err})
 		p.recordIndexProfileStage(StageDiscover, discoverProfileStart, 0, 0)
 		if ctx.Err() != nil || !p.hasUsableRetainedSession(ctx) {
+			if ctx.Err() == nil && p.hasStoredMetricRefresh() {
+				// Native discovery can fail even though stored entries remain
+				// sufficient for downstream retry. Preserve the discovery error.
+				_, _, _, days := p.refreshStoredMetrics(ctx)
+				if len(days) > 0 {
+					if insightErr := p.analyzer.ComputeInsights(ctx, slices.Collect(maps.Keys(days))); insightErr != nil {
+						slog.Warn("harvest: refresh stored-session daily summaries", "error", insightErr)
+					}
+				}
+			}
 			return nil, fmt.Errorf("pipeline discover: %w", err)
 		}
 		p.reportDiagnostic(DiagnosticEntry{ErrorType: "native_discovery_unavailable", Location: "native discovery", Message: err.Error() + "; continuing maintenance of usable retained sessions", Remediation: "Restore access to the configured harness sources and retry harvest to acquire unseen native changes."})
@@ -2582,6 +2593,16 @@ func (p *Pipeline) cleanOrphans() {
 
 func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan indexedMeta, prog *ProgressState, total int, logPrefix string, writeLane *storeWriteLane) (result streamedDownstreamResult) {
 	result.Days = make(map[string]bool)
+	if p.hasStoredMetricRefresh() {
+		// Persistent maintenance runs once over stored pages after all index
+		// writers finish, avoiding a second capture of newly indexed sessions.
+		for im := range indexedCh {
+			if im.startMs > 0 {
+				result.Days[time.UnixMilli(im.startMs).UTC().Format("2006-01-02")] = true
+			}
+		}
+		return result
+	}
 	var computeDuration time.Duration
 	var annotateDuration time.Duration
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageCompute, Total: total})
@@ -2676,7 +2697,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 			var n int
 			var err error
 			p.runStoreWrite(writeLane, func() {
-				n, err = p.computeIndexedMetrics(ctx, ids)
+				n, ids, err = p.computeReadyMetrics(ctx, ids)
 			})
 			computeDuration += time.Since(computeStarted)
 			if err != nil {
@@ -2727,7 +2748,7 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 				}
 				return true
 			}
-			for _, im := range batch {
+			for _, sid := range ids {
 				if ctx.Err() != nil {
 					return false
 				}
@@ -2735,15 +2756,15 @@ func (p *Pipeline) runStreamedDownstream(ctx context.Context, indexedCh <-chan i
 				var err error
 				p.runStoreWrite(writeLane, func() {
 					if useProfile && p.config.IndexProfiler != nil {
-						err = profiled.AnnotateWithProfile(ctx, im.session.SessionID, p.config.IndexProfiler)
+						err = profiled.AnnotateWithProfile(ctx, sid, p.config.IndexProfiler)
 					} else {
-						err = p.classifier.Annotate(ctx, im.session.SessionID)
+						err = p.classifier.Annotate(ctx, sid)
 					}
 				})
 				annotateDuration += time.Since(annotateStarted)
 				if err != nil {
 					slog.Warn(logPrefix+": annotate indexed session",
-						"session_id", im.session.SessionID,
+						"session_id", sid,
 						"error", err,
 						"what", "failed to annotate a session after its metrics step finished",
 						"why", "the classifier or annotation store returned an error for this session",
@@ -2822,8 +2843,8 @@ func (p *Pipeline) indexComputeAndFinalize(
 	prog := p.config.Progress
 
 	// INDEX session_entries (best-effort, non-fatal).
-	// successfullyIndexed tracks only sessions that had entries returned AND were
-	// stored successfully. These are the only sessions passed to ComputeMetrics.
+	// successfullyIndexed tracks successfully stored index results. Persistent
+	// downstream maintenance also checks sessions from earlier invocations.
 	indexed := 0
 	successfullyIndexed := make([]SessionID, 0, len(priorIndexed)+len(indexSessions))
 	remainingSuccessfullyIndexed := make([]SessionID, 0, len(indexSessions))
@@ -2872,9 +2893,7 @@ func (p *Pipeline) indexComputeAndFinalize(
 	p.recordIndexProfileStage(StageIndexLog, indexLogProfileStart, len(indexLogEntries), len(indexLogEntries))
 
 	// COMPUTE metrics + insights (best-effort, non-fatal).
-	// Gate on len(indexSessions) > 0 (sessions that were written this run),
-	// not on indexed > 0 (which would miss sessions whose entries already exist
-	// from a prior run). The engine handles idempotency via MetricsExist.
+	// Persistent stores inspect bounded pages even when no session needed indexing.
 	computed := 0
 	computeAlreadyDone := 0
 	annotateAlreadyDone := 0
@@ -2892,18 +2911,28 @@ func (p *Pipeline) indexComputeAndFinalize(
 		}
 	}
 	computeProfileStart := time.Now()
+	storedRefresh := p.hasStoredMetricRefresh()
+	var storedChecked, storedAnnotated int
+	var refreshedDays map[string]bool
+	var readyForAnnotations []SessionID
 	if priorDownstream == nil {
 		emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageCompute, Total: len(successfullyIndexed)})
 	} else if len(indexSessions) > 0 {
 		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageCompute, Done: computeAlreadyDone, Total: computeAlreadyDone + len(indexSessions)})
 	}
-	if p.analyzer != nil && (len(indexSessions) > 0 || len(priorIndexed) > 0) {
+	if storedRefresh {
+		var n int
+		n, storedChecked, storedAnnotated, refreshedDays = p.refreshStoredMetrics(ctx)
+		computed += n
+	}
+	if p.analyzer != nil && (len(indexSessions) > 0 || len(priorIndexed) > 0 || len(refreshedDays) > 0) {
 		computeTargets := successfullyIndexed
 		if priorDownstream != nil {
 			computeTargets = remainingSuccessfullyIndexed
 		}
-		if len(computeTargets) > 0 {
-			n, err := p.computeIndexedMetrics(ctx, computeTargets)
+		if !storedRefresh && len(computeTargets) > 0 {
+			n, ready, err := p.computeReadyMetrics(ctx, computeTargets)
+			readyForAnnotations = ready
 			if err != nil {
 				slog.Warn(logPrefix+": compute metrics", "error", err)
 			}
@@ -2914,6 +2943,9 @@ func (p *Pipeline) indexComputeAndFinalize(
 		// Derive days from both drain-loop indexed and stale-session indexed metas
 		// so this works even when p.store is nil (e.g. WithIndexers+WithAnalyzer only).
 		daySet := make(map[string]bool)
+		for day := range refreshedDays {
+			daySet[day] = true
+		}
 		for _, im := range priorIndexed {
 			if priorDownstream != nil && im.indexed {
 				continue
@@ -2946,6 +2978,9 @@ func (p *Pipeline) indexComputeAndFinalize(
 	if priorDownstream != nil {
 		computeDoneTotal = computeAlreadyDone + len(indexSessions)
 	}
+	if storedRefresh {
+		computeDoneTotal = storedChecked
+	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageCompute, Done: computeDoneTotal, Total: computeDoneTotal})
 	p.config.IndexProfiler.RecordStage(StageCompute, streamedComputeDuration+time.Since(computeProfileStart), computeDoneTotal, computeDoneTotal)
 
@@ -2961,15 +2996,13 @@ func (p *Pipeline) indexComputeAndFinalize(
 	} else if annotateTotal > annotateAlreadyDone {
 		emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageAnnotate, Done: annotateAlreadyDone, Total: annotateTotal})
 	}
-	if p.classifier != nil && len(successfullyIndexed) > 0 {
+	if !storedRefresh && p.classifier != nil && len(successfullyIndexed) > 0 {
 		annotateTargets := successfullyIndexed
 		if priorDownstream != nil {
-			annotateTargets = annotateTargets[:0]
-			for _, im := range indexSessions {
-				if im.indexed {
-					annotateTargets = append(annotateTargets, im.session.SessionID)
-				}
-			}
+			annotateTargets = remainingSuccessfullyIndexed
+		}
+		if p.analyzer != nil {
+			annotateTargets = readyForAnnotations
 		}
 		if len(annotateTargets) > 0 {
 			annotateProg := prog
@@ -2991,6 +3024,9 @@ func (p *Pipeline) indexComputeAndFinalize(
 		annotateDoneTotal = len(successfullyIndexed)
 	} else if p.classifier == nil {
 		annotateDoneTotal = annotateTotal
+	}
+	if storedRefresh {
+		annotateDoneTotal = storedAnnotated
 	}
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageAnnotate, Done: annotateDoneTotal, Total: annotateDoneTotal})
 	p.config.IndexProfiler.RecordStage(StageAnnotate, streamedAnnotateDuration+time.Since(annotateProfileStart), annotateDoneTotal, annotateDoneTotal)
