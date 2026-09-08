@@ -429,6 +429,9 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 		case codexTypeSessionMeta:
 			var sm codexSessionMeta
 			if err := json.Unmarshal(env.Payload, &sm); err == nil {
+				if sm.ID != "" && sm.ID != session.SessionID.String() {
+					return nil, fmt.Errorf("Codex metadata capture for %s: session_meta.id disagrees with the discovered filename identity; no capture was written; restore the matching rollout and rerun peasant ingest", session.SessionID)
+				}
 				sessionMeta = &sm
 				gotSessionMeta = true
 			} else {
@@ -533,10 +536,10 @@ func (a *CodexAdapter) ExtractMetadata(ctx context.Context, session DiscoveredSe
 			}
 		}
 	}
+	meta.CWD = cwd
 	if cwd == "" {
 		cwd = filepath.Dir(string(session.SourcePath))
 	}
-	meta.CWD = cwd
 	var recordedBranch string
 	if meta.Git.Branch != nil {
 		recordedBranch = *meta.Git.Branch

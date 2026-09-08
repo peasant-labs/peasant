@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/peasant-labs/peasant/internal/testutil"
 	"io"
 	"net"
 	"net/http"
@@ -220,22 +221,9 @@ func seedUploadableSession(t *testing.T, dir, sessionID string, projectPaths ...
 	}
 	defer db.Close()
 	entry := makeCmdStoreEntry(t, sessionID, hostSlug, "git@github.com:user/repo.git", "main", 1700000000000, projectPaths...)
-	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{entry}); err != nil {
-		t.Fatal(err)
-	}
+	testutil.SeedReadyPublication(t, db, entry.Metadata, nil)
 
 	basePath := filepath.Join(dir, "peasant-sync")
-	sessionDir := filepath.Join(basePath, hostSlug, sessionID)
-	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(entry.Metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sessionDir, sessionID+"--metadata.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	return writeCfg(t, dir, "uploadable.yaml", "version: 1\noutput:\n  basePath: "+basePath+
 		"\npush:\n  method: all\n  visibility: private\n")
 }

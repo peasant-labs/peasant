@@ -113,6 +113,9 @@ func (s *Store) IndexSessionEntries(ctx context.Context, sessionID ingest.Sessio
 		err = errors.Join(err, stmts.Close())
 	}()
 	_, err = indexSessionEntriesOnConn(conn, sessionID, entries, stmts)
+	if err == nil {
+		err = stampPublicationIndex(conn, sessionID, 0)
+	}
 	return err
 }
 
@@ -190,6 +193,10 @@ func indexSessionEntryWriteSavepoint(conn *sqlite.Conn, write ingest.SessionEntr
 		return sessionEntryWriteOutcome{}, fmt.Errorf("store: start session entry savepoint for %s: %w", write.SessionID, err), true
 	}
 
+	if err := checkPublicationIndexRevision(conn, write.SessionID, write.CaptureRevision); err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return sessionEntryWriteOutcome{}, rollbackErr, fatal
+	}
 	outcome, err := indexSessionEntriesOnConn(conn, write.SessionID, write.Entries, stmts)
 	if err != nil {
 		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
@@ -200,6 +207,10 @@ func indexSessionEntryWriteSavepoint(conn *sqlite.Conn, write ingest.SessionEntr
 			rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, fmt.Errorf("store: update index state for %s: %w", write.SessionID, err), write.SessionID)
 			return outcome, rollbackErr, fatal
 		}
+	}
+	if err := stampPublicationIndex(conn, write.SessionID, write.CaptureRevision); err != nil {
+		rollbackErr, fatal := rollbackSessionEntrySavepoint(conn, savepointName, err, write.SessionID)
+		return outcome, rollbackErr, fatal
 	}
 	if err := sqlitex.ExecuteTransient(conn, "RELEASE SAVEPOINT "+savepointName, nil); err != nil {
 		return outcome, fmt.Errorf("store: release session entry savepoint for %s: %w", write.SessionID, err), true
@@ -224,6 +235,11 @@ func rollbackSessionEntrySavepoint(conn *sqlite.Conn, savepointName string, caus
 }
 
 func indexSessionEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID, entries []schema.SessionEntry, stmts *sessionEntryWriteStatements) (sessionEntryWriteOutcome, error) {
+	for i := range entries {
+		if entries[i].SessionID != sessionID {
+			return sessionEntryWriteOutcome{}, publicationRepairError("entry session identity differs from index request; existing entries were not changed")
+		}
+	}
 	outcome := sessionEntryWriteOutcome{}
 	sessionEntriesHash, err := computeSessionEntriesHash(entries)
 	if err != nil {

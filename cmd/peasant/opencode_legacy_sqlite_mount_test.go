@@ -326,7 +326,10 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 				t.Fatal("repeat harvest changed deterministic managed projection bytes")
 			}
 
-			mutateLegacySQLiteMessageVersion(t, materialized.Path)
+			// Advance source evidence instead of editing the captured local row:
+			// an unproven local metadata UPDATE correctly invalidates publication.
+			changedAt := time.Now().Add(time.Second)
+			mutateLegacySQLiteMessageVersion(t, materialized.Path, changedAt.UnixMilli())
 			setSyntheticSQLiteContentModTime(t, materialized.Path, time.Unix(1_700_002_000, 0))
 			output, err = executeHarvestCmd(t, commandRoot, args)
 			if err != nil {
@@ -398,7 +401,7 @@ func TestLegacyOpenCodeSQLiteMountedHarvestCreatesManagedIndexedAnalyticsState(t
 			}
 			// Restore the accepted source before exercising the existing forced
 			// reindex path, which deliberately reacquires original source content.
-			mutateLegacySQLiteMessageVersion(t, materialized.Path)
+			mutateLegacySQLiteMessageVersion(t, materialized.Path, changedAt.UnixMilli())
 			reindexConfig := filepath.Join(commandRoot, "reindex-config.yaml")
 			reindexConfigData := []byte("version: 1\nsources:\n  claude-code: {enabled: false}\n  opencode: {enabled: false}\n  cursor: {enabled: false}\noutput:\n  basePath: " + outputRoot + "\n")
 			if writeErr := os.WriteFile(reindexConfig, reindexConfigData, 0o600); writeErr != nil {
@@ -491,7 +494,7 @@ func mutateLegacySQLiteMessageJSON(t testing.TB, path string) {
 	}
 }
 
-func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
+func mutateLegacySQLiteMessageVersion(t testing.TB, path string, changedAt int64) {
 	t.Helper()
 	connection, err := sqlite.OpenConn(path, sqlite.OpenReadWrite)
 	if err != nil {
@@ -503,7 +506,7 @@ func mutateLegacySQLiteMessageVersion(t testing.TB, path string) {
 		// content edit, and freshness is clock-first for a session that has a
 		// clock. Move the clock so the edited session re-ingests while its
 		// sibling session, whose clock is untouched, stays unchanged.
-		updateErr = sqlitex.ExecuteTransient(connection, `UPDATE session SET time_updated = 1700002000010 WHERE id = (SELECT session_id FROM message WHERE id = 'msg_equal_a')`, nil)
+		updateErr = sqlitex.ExecuteTransient(connection, `UPDATE session SET time_updated = ? WHERE id = (SELECT session_id FROM message WHERE id = 'msg_equal_a')`, &sqlitex.ExecOptions{Args: []any{changedAt}})
 	}
 	closeErr := connection.Close()
 	if updateErr != nil || closeErr != nil {
@@ -515,19 +518,6 @@ func setSyntheticSourceModTime(t testing.TB, path string, modified time.Time) {
 	t.Helper()
 	if err := os.Chtimes(path, modified, modified); err != nil {
 		t.Fatalf("set synthetic source modification time: %v", err)
-	}
-}
-
-func setLocalIngestedTimestamp(t testing.TB, databasePath string, timestamp int64) {
-	t.Helper()
-	connection, err := sqlite.OpenConn(databasePath, sqlite.OpenReadWrite)
-	if err != nil {
-		t.Fatalf("open local update-classification control: %v", err)
-	}
-	updateErr := sqlitex.ExecuteTransient(connection, "UPDATE sessions SET ingested_ms = ?1", &sqlitex.ExecOptions{Args: []any{timestamp}})
-	closeErr := connection.Close()
-	if updateErr != nil || closeErr != nil {
-		t.Fatalf("prepare local update-classification control: %v", errors.Join(updateErr, closeErr))
 	}
 }
 

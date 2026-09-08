@@ -124,9 +124,12 @@ func (s *Store) GetMetrics(ctx context.Context, sessionID ingest.SessionID) (*in
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return getMetricsOnConn(conn, sessionID)
+}
 
+func getMetricsOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) (*ingest.SessionMetrics, error) {
 	var m *ingest.SessionMetrics
-	err = sqlitex.ExecuteTransient(conn, sqlGetMetrics, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlGetMetrics, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			m = scanSessionMetrics(stmt)
@@ -172,9 +175,12 @@ func (s *Store) ListEntries(ctx context.Context, sessionID ingest.SessionID) ([]
 		return nil, fmt.Errorf("store: take connection: %w", err)
 	}
 	defer s.pool.Put(conn)
+	return listEntriesOnConn(conn, sessionID)
+}
 
+func listEntriesOnConn(conn *sqlite.Conn, sessionID ingest.SessionID) ([]schema.SessionEntry, error) {
 	var entries []schema.SessionEntry
-	err = sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
+	err := sqlitex.ExecuteTransient(conn, sqlListEntries, &sqlitex.ExecOptions{
 		Args: []any{string(sessionID)},
 		ResultFunc: func(stmt *sqlite.Stmt) error {
 			entries = append(entries, scanSessionEntry(stmt))

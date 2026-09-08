@@ -129,11 +129,12 @@ const (
 	pushStateSessionPreview pushState = "session-preview"
 	pushStateConsent        pushState = "consent"
 	pushStateReceipt        pushState = "receipt"
+	pushStateNeedsIngest    pushState = "needs-ingest"
 )
 
 func (s pushState) valid() bool {
 	switch s {
-	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt:
+	case pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest:
 		return true
 	default:
 		return false
@@ -188,12 +189,13 @@ type pushCaptureFixture struct {
 
 // pushSessionFixture is one candidate session the captured wizard offers.
 type pushSessionFixture struct {
-	SessionID string             `yaml:"sessionId"`
-	Harness   string             `yaml:"harness"`
-	Project   string             `yaml:"project"`
-	StartMs   int64              `yaml:"startMs"`
-	Redaction pushRedactionState `yaml:"redaction"`
-	Withheld  bool               `yaml:"withheld"`
+	SessionID   string             `yaml:"sessionId"`
+	Harness     string             `yaml:"harness"`
+	Project     string             `yaml:"project"`
+	StartMs     int64              `yaml:"startMs"`
+	Redaction   pushRedactionState `yaml:"redaction"`
+	Withheld    bool               `yaml:"withheld"`
+	NeedsIngest bool               `yaml:"needsIngest"`
 }
 
 // pushFixture is the candidate inventory the captured wizard mounts over.
@@ -405,7 +407,7 @@ func validatePushMatrix(states []pushStateFixture, captures []pushCaptureFixture
 		stateRows[state.Key] = state
 	}
 	for _, key := range []pushState{
-		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt,
+		pushStateStart, pushStateSelection, pushStateSessionPreview, pushStateConsent, pushStateReceipt, pushStateNeedsIngest,
 	} {
 		if stateRows[key].Key == "" {
 			return fmt.Errorf("screenshot fixture omits push state %q", key)
@@ -442,6 +444,7 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 	ids := make(map[string]bool, len(fixture.Sessions))
 	states := make(map[pushRedactionState]bool, len(fixture.Sessions))
 	withheld := 0
+	needsIngest := false
 	for _, session := range fixture.Sessions {
 		if strings.TrimSpace(session.SessionID) == "" || strings.TrimSpace(session.Harness) == "" ||
 			strings.TrimSpace(session.Project) == "" || session.StartMs <= 0 ||
@@ -449,6 +452,7 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 			return fmt.Errorf("screenshot fixture has an incomplete or duplicate push session: %#v", session)
 		}
 		ids[session.SessionID] = true
+		needsIngest = needsIngest || session.NeedsIngest
 		states[session.Redaction] = true
 		if session.Withheld {
 			withheld++
@@ -462,6 +466,9 @@ func validatePushData(fixture pushFixture, requiredSessionNames []string) error 
 	}
 	if withheld != 1 {
 		return fmt.Errorf("screenshot fixture push sessions hold %d withheld rows, want exactly 1", withheld)
+	}
+	if !needsIngest {
+		return fmt.Errorf("screenshot fixture needs a database-incomplete push session")
 	}
 	// The preview capture is only evidence if a session actually has a stored
 	// transcript to draw. Without this the sheet would show the empty-transcript
@@ -507,7 +514,7 @@ func validateSheets(sheets []sheetFixture) error {
 		sheetGuidedDark:  {kind: sheetKindGuided, theme: captureThemeDark, width: 1800, height: 3420},
 		sheetGuidedLight: {kind: sheetKindGuided, theme: captureThemeLight, width: 1800, height: 3420},
 		sheetSelection:   {kind: sheetKindSelection, theme: captureThemeDark, width: 1800, height: 6750},
-		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 6000},
+		sheetPush:        {kind: sheetKindPush, theme: captureThemeDark, width: 1800, height: 7200},
 		sheetIngest:      {kind: sheetKindIngest, theme: captureThemeDark, width: 1800, height: 4590},
 	}
 	seen := make(map[sheetName]bool, len(sheets))

@@ -66,6 +66,9 @@ ON CONFLICT(project_hash) DO UPDATE SET
 VALUES (?, ?, ?, ?)`
 
 	// sqlInsertSession upserts a session row (V23+: opaque_host_id replaces host_slug FK).
+	// Project attribution follows the source adapter's current tracked identity.
+	// The publication invalidation trigger also covers legacy callers
+	// that update mutable metadata without supplying a source-proven snapshot.
 	// The conflict path updates only metadata fields owned by InsertSessions. It
 	// marks the index stale when captured source evidence changes, but retains
 	// the prior session_entries_hash for the indexer's content comparison;
@@ -80,10 +83,10 @@ VALUES (?, ?, ?, ?)`
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     parent_id = excluded.parent_id,
-    model_harness = excluded.model_harness,
-    model_id = excluded.model_id,
     opaque_host_id = excluded.opaque_host_id,
     project_hash = excluded.project_hash,
+    model_harness = excluded.model_harness,
+    model_id = excluded.model_id,
     start_ms = excluded.start_ms,
     end_ms = excluded.end_ms,
     ingested_ms = excluded.ingested_ms,
@@ -94,7 +97,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     git_worktree = excluded.git_worktree,
     git_tracking = excluded.git_tracking,
     tool_version = excluded.tool_version,
-    session_origin = excluded.session_origin,
+    session_origin = sessions.session_origin,
     index_version = CASE
       WHEN excluded.source_fingerprint IS NOT NULL
        AND sessions.source_fingerprint IS NOT excluded.source_fingerprint THEN 0
@@ -215,6 +218,21 @@ GROUP BY date_utc, s.project_hash`
 // Entries with nil Metadata are silently skipped — this occurs when extraction
 // fails for a session but the pipeline continues with partial results.
 func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry) (err error) {
+	_, err = s.InsertSessionsWithRevisions(ctx, entries)
+	return err
+}
+
+// InsertSessionsWithRevisions commits sessions, seed metrics and source-proven
+// metadata together. No revision escapes a failed transaction.
+func (s *Store) InsertSessionsWithRevisions(ctx context.Context, entries []ingest.StoreEntry) (map[ingest.SessionID]int64, error) {
+	revisions := make(map[ingest.SessionID]int64)
+	if err := s.insertSessions(ctx, entries, revisions); err != nil {
+		return nil, err
+	}
+	return revisions, nil
+}
+
+func (s *Store) insertSessions(ctx context.Context, entries []ingest.StoreEntry, revisions map[ingest.SessionID]int64) (err error) {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -262,6 +280,11 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 		m := sorted[i].Metadata
 		if m == nil {
 			continue
+		}
+		if sorted[i].PublicationCapture {
+			if err = validatePublicationCapture(sorted[i]); err != nil {
+				return err
+			}
 		}
 
 		// 1. Insert project dimension.
@@ -367,6 +390,16 @@ func (s *Store) InsertSessions(ctx context.Context, entries []ingest.StoreEntry)
 			},
 		}); err != nil {
 			return fmt.Errorf("store: insert session_metrics %s: %w", m.SessionID, err)
+		}
+		if sorted[i].PublicationCapture {
+			if err = validateStoredPublicationCapture(conn, sorted[i]); err != nil {
+				return err
+			}
+			revision, captureErr := persistPublicationCapture(conn, sorted[i])
+			if captureErr != nil {
+				return captureErr
+			}
+			revisions[m.SessionID] = revision
 		}
 		if sorted[i].Session.Harness == ingest.HarnessOpenCode {
 			if err = upsertOpenCodeSeqCursorConn(conn, m.SessionID, sorted[i].EventSeq); err != nil {

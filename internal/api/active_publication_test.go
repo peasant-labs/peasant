@@ -150,6 +150,8 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	}
 	publish := func() pushResponse {
 		t.Helper()
+		restoreSource := prepareSourceFreePublication(t, db, cfg.Output.BasePath, filepath.Join(source, selectedID+".jsonl"), selectedID, repo)
+		defer restoreSource()
 		body, _ := json.Marshal(pushRequest{SessionIDs: []string{selectedID}, Visibility: "private"})
 		response := httptest.NewRecorder()
 		handler.handleSyncPush(response, httptest.NewRequest("POST", "/api/v1/sync/push", bytes.NewReader(body)))
@@ -230,6 +232,37 @@ func TestActiveSnapshotSharePublicationConverges(t *testing.T) {
 	for _, row := range rows {
 		if row.SessionID == sentinelID && row.PushedAt != nil {
 			t.Fatal("unselected sentinel was published")
+		}
+	}
+}
+
+// Exercise the mounted publisher from a captured active/re-attributed session,
+// with neither original transcript nor generated metadata available to it.
+func prepareSourceFreePublication(t *testing.T, db *store.Store, output, source, rawID, cwd string) func() {
+	t.Helper()
+	id, err := ingest.NewSessionID(rawID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := db.LoadPublicationInput(t.Context(), id)
+	if err != nil || bundle.Readiness != ingest.PublicationReady || bundle.Metadata.CWD != cwd || bundle.Metadata.Project.Hash != bundle.ReceiptProjectHash || len(bundle.Entries) == 0 {
+		t.Fatalf("publication capture is not coherent: %+v, %v", bundle, err)
+	}
+	host, parent, err := db.LookupSessionLocation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := ingest.SessionMetadataPath(output, host, rawID, parent)
+	if err := os.Remove(metadata); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Rename(source, source+".held"); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if err := os.Rename(source+".held", source); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

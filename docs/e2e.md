@@ -112,6 +112,12 @@ It drives the anchored validation set through the real CLI in two sandboxes:
 
 It runs as part of `make e2e` (same build tag, same prereqs).
 
+The historical association case constructs a V39 database, opens it through the
+current CLI to apply migrations, then runs normal ingest over the retained
+fixture source. Migration alone cannot recover a missing publication metadata
+snapshot. The test checks that ingest preserves the migrated association ID and
+its annotation before the ordinary, non-force publication replay.
+
 ## Warm-stack refresh (`TestHarnessRefreshE2E`)
 
 The refresh regression publishes into a non-empty harness-owned Postgres and

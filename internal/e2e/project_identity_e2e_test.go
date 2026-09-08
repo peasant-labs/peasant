@@ -5,7 +5,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +15,7 @@ import (
 
 // TestPushProjectIdentityDefaultsRenderOnVillage drives a real push, through
 // the real peasant binary, against a real Village, for two disposable
-// repositories - one with a recognizable git remote, one without - and reads
+// projects - one with a recognizable git remote, one without - and reads
 // back the Village project page each pushed session belongs to
 // (GET /api/v1/users/{username}/projects/{projectHash}).
 //
@@ -33,8 +33,15 @@ func TestPushProjectIdentityDefaultsRenderOnVillage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fixture.Cases[0]
+	for _, want := range fixture.Cases {
+		t.Run(want.Name, func(t *testing.T) {
+			testPushProjectIdentityDefaultsRenderOnVillage(t, want)
+		})
+	}
+}
 
+func testPushProjectIdentityDefaultsRenderOnVillage(t *testing.T, want projectIdentityCase) {
+	t.Helper()
 	bins := resolveVillageBinaries(t)
 	peasantBin := buildPeasant(t)
 	stack := provisionHarnessStack(t, bins)
@@ -53,10 +60,16 @@ func TestPushProjectIdentityDefaultsRenderOnVillage(t *testing.T) {
 		SubagentSessionID:        want.RemoteSubagentSessionID,
 	})
 
-	noRemoteRepo := sandbox.initRepository(t, "identity-no-remote")
+	// A recorded project need not still exist on the publishing machine. Use a
+	// synthetic home-rooted CWD to exercise home/project path redaction, not the
+	// unrelated shape of XDG_STATE_HOME or TMPDIR. Refuse an existing location
+	// before ingest could inspect its Git state; this test owns no files there.
+	if _, err := os.Lstat(want.NoRemoteRecordedCWD); !os.IsNotExist(err) {
+		t.Fatalf("synthetic recorded CWD %q must not exist; choose an unused fixture path before ingest (stat error: %v)", want.NoRemoteRecordedCWD, err)
+	}
 	noRemoteSource := reseedClaudeFixture(t, claudeReseed{
 		Destination:              filepath.Join(sandbox.root, "fixtures", "identity-no-remote"),
-		RecordedWorkingDirectory: noRemoteRepo,
+		RecordedWorkingDirectory: want.NoRemoteRecordedCWD,
 		RootSessionID:            want.NoRemoteRootSessionID,
 		SubagentSessionID:        want.NoRemoteSubagentSessionID,
 	})
@@ -65,9 +78,9 @@ func TestPushProjectIdentityDefaultsRenderOnVillage(t *testing.T) {
 	_ = mintDemoCredentials(t, bins.setupDemo, stack.dsn, stack.villageURL, sandbox.configHome)
 	runPeasantInSandbox(t, peasantBin, sandbox, "ingest", "--include-active")
 
-	for _, repository := range []string{remoteRepo, noRemoteRepo} {
-		pushProjectIdentityRepository(t, peasantBin, sandbox, repository)
-	}
+	// Only the two configured synthetic sources enter this disposable database.
+	// Publish both, including the project whose recorded directory is absent.
+	runPeasantInSandbox(t, peasantBin, sandbox, "village", "push", "--non-interactive", "--yes")
 
 	dbPath := filepath.Join(sandbox.dataHome, string(defaults.AppName), "peasant.db")
 	username := readDemoUsername(t, sandbox.configHome)
@@ -115,18 +128,6 @@ func TestPushProjectIdentityDefaultsRenderOnVillage(t *testing.T) {
 				"a real home directory leaked onto the village project page",
 				noRemoteProject.DisplayName, rawSegment)
 		}
-	}
-}
-
-// pushProjectIdentityRepository pushes one repository's sessions with the
-// real CLI, non-interactively, exactly as a user's automation would.
-func pushProjectIdentityRepository(t *testing.T, binary string, sandbox disposableSandbox, repository string) {
-	t.Helper()
-	command := exec.Command(binary, "village", "push", "--non-interactive", "--yes", "--repository", repository)
-	command.Env = sandbox.environment
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("push %s: %v\n%s", repository, err, output)
 	}
 }
 

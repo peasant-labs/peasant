@@ -34,6 +34,7 @@ type TranscriptMaterializer interface {
 // MaterializedTranscript is one captured source view used for metadata,
 // transcript persistence, and durable freshness evidence.
 type MaterializedTranscript struct {
+	capturedSource    *captureFileSystem
 	Metadata          *UnifiedMetadata
 	Data              []byte
 	SourceFingerprint []byte

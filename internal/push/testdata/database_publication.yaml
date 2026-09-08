@@ -1,0 +1,13 @@
+- name: ready-with-exact-cwd
+  cwd: /synthetic/recorded/session
+- name: ready-with-source-confirmed-absence
+- name: ready-child-without-sidecar
+  child: true
+- name: legacy-capture-needs-ingest
+  incomplete: true
+- name: mismatched-index-needs-ingest
+  invalidateEntries: true
+- name: missing-model-refuses
+  missingModel: true
+- name: database-unavailable-refuses
+  closeDatabase: true

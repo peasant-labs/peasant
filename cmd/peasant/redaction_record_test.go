@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -384,12 +384,11 @@ func TestRedactionRecord_DescribesTheOutwardPushNotTheMetadataOnDisk(t *testing.
 	for _, testCase := range document.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
 			t.Parallel()
-			const basePath = "/data/peasant-sync"
-			fs := testutil.NewMemFS()
+			db := &testutil.StubPushStore{PublicationInputs: make(map[ingest.SessionID]ingest.PublicationInputBundle)}
 			sessions := make([]ingest.PushSessionRow, 0, testCase.SessionCount)
 			for i := range testCase.SessionCount {
 				row := ingest.PushSessionRow{
-					SessionID:    fmt.Sprintf("session-%d", i),
+					SessionID:    fmt.Sprintf("sess_%d", i),
 					HostSlug:     testutil.TestHostSlug,
 					ModelHarness: string(defaults.HarnessClaudeCode),
 				}
@@ -403,23 +402,17 @@ func TestRedactionRecord_DescribesTheOutwardPushNotTheMetadataOnDisk(t *testing.
 				meta := schema.UnifiedMetadata{
 					SessionID: schema.SessionID(row.SessionID),
 					HostSlug:  schema.HostSlug(row.HostSlug),
+					Model:     testutil.TestModel,
 					Redaction: schema.RedactionInfo{
 						Applied:        testCase.StoredApplied,
 						Level:          testCase.StoredLevel,
 						RuleSetVersion: testCase.StoredRuleSetVersion,
 					},
 				}
-				data, marshalErr := json.Marshal(meta)
-				if marshalErr != nil {
-					t.Fatalf("marshal metadata: %v", marshalErr)
-				}
-				path := ingest.SessionMetadataPath(basePath, row.HostSlug, row.SessionID, row.ParentID)
-				if writeErr := fs.WriteFile(path, data, 0o600); writeErr != nil {
-					t.Fatalf("write metadata at %s: %v", path, writeErr)
-				}
+				db.PublicationInputs[meta.SessionID] = ingest.PublicationInputBundle{Metadata: meta, Readiness: ingest.PublicationReady, CaptureRevision: 1}
 			}
 
-			record := buildRedactionRecord(sessions, basePath, fs, testCase.AppliedLevel)
+			record := buildRedactionRecord(context.Background(), sessions, db, testCase.AppliedLevel)
 
 			if record.SessionCount != testCase.SessionCount {
 				t.Errorf("SessionCount = %d, want %d", record.SessionCount, testCase.SessionCount)
@@ -479,7 +472,7 @@ func TestRedactionRecord_DescribesTheOutwardPushNotTheMetadataOnDisk(t *testing.
 				"matched patterns replaced")
 			if testCase.ExpectMissingMetadata > 0 {
 				assertRedactionRecordEntry(t, rendered, "note:",
-					fmt.Sprintf("%d session(s) missing metadata", testCase.ExpectMissingMetadata))
+					fmt.Sprintf("%d session(s) need database metadata and matching entries", testCase.ExpectMissingMetadata))
 			}
 			// The stored level must not appear anywhere in the rendered record. This
 			// needle is not empty, is not derived from production code, and is a

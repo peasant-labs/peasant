@@ -118,6 +118,7 @@ func TestPipeline_CommitHistoryCapture(t *testing.T) {
 			run := func(wantMessages []string) []ingest.CurrentCommitAssociation {
 				t.Helper()
 				meta := makeMinimalMeta(t, testSessionID)
+				meta.Project.Hash = testutil.TestProjectHash
 				meta.Source.Format = ingest.SourceFormatJSONL
 				meta.Source.FilePath = source
 				meta.Git.Worktree = &repo
