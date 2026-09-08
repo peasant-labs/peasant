@@ -48,6 +48,9 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		}
 	}
 	observe := func(name string, session ingest.DiscoveredSession, filesystem ingest.FileSystem) {
+		if _, registered := result.Versions[string(session.Harness)]; !registered {
+			return // A historical revision cannot observe a not-yet-supported harness.
+		}
 		session.ModTime = time.UnixMilli(1700000000000)
 		session.CreatedAt = session.ModTime
 		if session.TranscriptOrigin == ingest.TranscriptOriginFile {
@@ -58,10 +61,22 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		indexer := ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})[session.Harness]
 		var output any
 		var indexErr error
-		// The old API returned the V1 entry slice directly. The new API's
-		// completion-checked method is the production persistence boundary.
+		// Use the same preference as ingestion: authoritative full capture,
+		// then versioned custom formats, then the historical slice API.
+		authoritative := reflect.ValueOf(indexer).MethodByName("IndexTranscriptForCapture")
 		method := reflect.ValueOf(indexer).MethodByName("IndexTranscriptResult")
-		if method.IsValid() {
+		if authoritative.IsValid() {
+			values := authoritative.Call([]reflect.Value{reflect.ValueOf(t.Context()), reflect.ValueOf(session)})
+			if !values[1].IsNil() {
+				indexErr = values[1].Interface().(error)
+			} else {
+				entries := values[0].FieldByName("Entries")
+				if !entries.IsValid() {
+					t.Fatal("authoritative capture API changed; update the probe before comparing parsers")
+				}
+				output = map[string]any{"format": 1, "result": map[string]any{"Entries": entries.Interface()}}
+			}
+		} else if method.IsValid() {
 			values := method.Call([]reflect.Value{reflect.ValueOf(t.Context()), reflect.ValueOf(session)})
 			if !values[1].IsNil() {
 				indexErr = values[1].Interface().(error)
@@ -119,6 +134,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		write(filesystem, "/synthetic/strike_protocol."+suffix, string(data))
 	}
 	observe("strike_protocol", ingest.DiscoveredSession{SessionID: testutil.TestSessionUUID, Harness: ingest.HarnessStrike, SourcePath: "/synthetic/strike_protocol.jsonl", SourceFormat: ingest.SourceFormatJSONL}, filesystem)
+	guardPiCorpus(t, corpus, result.Versions, observe)
 
 	// Reuse the named completion cases, including old failure/new success and
 	// successful empty versus failed parses. Expectations are never digests.
@@ -254,7 +270,7 @@ func TestHarvesterGuardCapture(t *testing.T) {
 		sessions, discoverErr := adapter.Discover(t.Context(), ingest.SourceConfig{Enabled: true, Paths: []ingest.ResolvedPath{root}})
 		outputs := make(map[string]any)
 		for _, session := range sessions {
-			metadata, data, materializeErr := adapter.MaterializeTranscript(t.Context(), session)
+			metadata, data, materializeErr := guardMaterialize(t, adapter, session)
 			var transcript any
 			if len(data) > 0 {
 				if err := json.Unmarshal(data, &transcript); err != nil {
@@ -285,6 +301,124 @@ func TestHarvesterGuardCapture(t *testing.T) {
 	}
 	if err := os.WriteFile(os.Getenv("PEASANT_GUARD_OUTPUT"), data, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Both historical APIs execute the real adapter. Only their return envelope
+// differs; capture fingerprints and cursors are not substitutes for output.
+func guardMaterialize(t *testing.T, adapter *ingest.OpenCodeAdapter, session ingest.DiscoveredSession) (*ingest.UnifiedMetadata, []byte, error) {
+	t.Helper()
+	values := reflect.ValueOf(adapter).MethodByName("MaterializeTranscript").Call([]reflect.Value{reflect.ValueOf(t.Context()), reflect.ValueOf(session)})
+	var metadata, data reflect.Value
+	switch len(values) {
+	case 3:
+		metadata, data = values[0], values[1]
+	case 2:
+		if values[0].Kind() != reflect.Struct {
+			t.Fatal("materialization result is not a captured struct; update the guard API bridge")
+		}
+		metadata, data = values[0].FieldByName("Metadata"), values[0].FieldByName("Data")
+	default:
+		t.Fatal("materialization API changed; update the guard before comparing parsers")
+	}
+	if !metadata.IsValid() || !data.IsValid() {
+		t.Fatal("materialization result lacks metadata or data; update the guard API bridge")
+	}
+	meta, metadataOK := metadata.Interface().(*ingest.UnifiedMetadata)
+	bytes, dataOK := data.Interface().([]byte)
+	if !metadataOK || !dataOK {
+		t.Fatal("materialization result has incompatible metadata or data types; update the guard API bridge")
+	}
+	var err error
+	if last := values[len(values)-1]; !last.IsNil() {
+		err = last.Interface().(error)
+	}
+	return meta, bytes, err
+}
+
+func guardPiCorpus(t *testing.T, corpus string, registered map[string]versions, observe func(string, ingest.DiscoveredSession, ingest.FileSystem)) {
+	t.Helper()
+	if _, ok := registered["pi"]; !ok {
+		return
+	}
+	read := func(name string, target any) {
+		path := filepath.Join(corpus, "internal/ingest/testdata", name)
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			// A new harness uses its first corpus even when the other corpus
+			// predates it. Existing historical cases are never replaced.
+			path = filepath.Join(os.Getenv("PEASANT_GUARD_FALLBACK_CORPUS"), "internal/ingest/testdata", name)
+			data, err = os.ReadFile(path)
+		}
+		if err != nil {
+			t.Fatalf("registered Pi requires native corpus %s: %v", name, err)
+		}
+		if err := yaml.Unmarshal(data, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var capture struct {
+		SessionID   string `yaml:"session_id"`
+		Initial     string `yaml:"initial"`
+		ValidAppend string `yaml:"valid_append"`
+		Cases       []struct {
+			Name        string `yaml:"name"`
+			Tail        string `yaml:"tail"`
+			InvalidUTF8 bool   `yaml:"invalid_utf8"`
+		} `yaml:"cases"`
+	}
+	read("pi_capture.yaml", &capture)
+	id, err := ingest.NewSessionID(capture.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observeSource := func(name, source string) {
+		filesystem := testutil.NewMemFS()
+		path := "/synthetic/pi/transcript.jsonl"
+		if err := filesystem.WriteFile(path, []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+		observe(name, ingest.DiscoveredSession{SessionID: id, Harness: ingest.Harness("pi"), SourcePath: ingest.ResolvedPath(path), SourceFormat: ingest.SourceFormatJSONL}, filesystem)
+	}
+	seen := make(map[string]bool)
+	for _, row := range capture.Cases {
+		guardName(t, seen, row.Name)
+		data := capture.Initial + capture.ValidAppend + row.Tail
+		if row.InvalidUTF8 {
+			data = strings.ReplaceAll(data, "INVALID_UTF8", string([]byte{0xff}))
+		}
+		observeSource("capture/"+row.Name, data)
+	}
+	var native struct {
+		RequiredNames []string `yaml:"requiredNames"`
+		Cases         []struct {
+			Name                 string `yaml:"name"`
+			Source               string `yaml:"source"`
+			MetadataStringBytes  int    `yaml:"metadataStringBytes"`
+			PaddingStringBytes   int    `yaml:"paddingStringBytes"`
+			InvalidUTF8Namespace bool   `yaml:"invalidUTF8Namespace"`
+		} `yaml:"cases"`
+	}
+	read("pi_source_v3_structure.yaml", &native)
+	seen = make(map[string]bool)
+	for _, row := range native.Cases {
+		guardName(t, seen, row.Name)
+		data := strings.ReplaceAll(row.Source, "pi-native-fixture", string(id))
+		if row.MetadataStringBytes > 0 {
+			data = strings.ReplaceAll(data, "native-boundary-string", strings.Repeat("x", row.MetadataStringBytes))
+		}
+		if row.PaddingStringBytes > 0 {
+			data = strings.ReplaceAll(data, "native-boundary-padding", strings.Repeat("p", row.PaddingStringBytes))
+		}
+		if row.InvalidUTF8Namespace {
+			data = strings.ReplaceAll(data, "invalid-utf8-namespace", string([]byte{0xff}))
+		}
+		observeSource("native/"+row.Name, data)
+	}
+	for _, name := range native.RequiredNames {
+		if !seen[name] {
+			t.Fatalf("required Pi native case missing: %s", name)
+		}
 	}
 }
 

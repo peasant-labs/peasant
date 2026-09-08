@@ -106,11 +106,11 @@ func run(base, candidate string) error {
 	}
 	var failures []string
 	for _, corpus := range []string{baseTree, candidateTree} {
-		old, err := capture(baseTree, corpus, temp, builder, nativeCorpora[corpus])
+		old, err := capture(baseTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus])
 		if err != nil {
 			return err
 		}
-		current, err := capture(candidateTree, corpus, temp, builder, nativeCorpora[corpus])
+		current, err := capture(candidateTree, corpus, candidateTree, temp, builder, nativeCorpora[corpus])
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func run(base, candidate string) error {
 	return nil
 }
 
-func capture(tree, corpus, temp, builder string, nativeCorpus []byte) (snapshot, error) {
+func capture(tree, corpus, fallbackCorpus, temp, builder string, nativeCorpus []byte) (snapshot, error) {
 	var result snapshot
 	err := filepath.WalkDir(builder, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -189,7 +189,7 @@ func parserVersions() map[string]versions {
 	output := filepath.Join(temp, "snapshot.json")
 	cmd := exec.Command("go", "test", "-race", "-count=1", "-run", "^TestHarvesterGuardCapture$", "./internal/ingest")
 	cmd.Dir = tree
-	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+filepath.Join(temp, "native"))
+	cmd.Env = append(os.Environ(), "PEASANT_GUARD_CORPUS="+corpus, "PEASANT_GUARD_FALLBACK_CORPUS="+fallbackCorpus, "PEASANT_GUARD_OUTPUT="+output, "PEASANT_GUARD_NATIVE="+filepath.Join(temp, "native"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return result, fmt.Errorf("cannot compare %s against corpus %s; restore compatible probe APIs/fixtures before claiming a guard result: %w\n%s", filepath.Base(tree), filepath.Base(corpus), err, out)
 	}
