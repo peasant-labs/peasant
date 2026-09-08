@@ -10,6 +10,7 @@ import (
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/codemap"
 	"github.com/peasant-labs/peasant/internal/export"
+	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/sessionvisibility"
 	"github.com/peasant-labs/peasant/internal/store"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
@@ -44,14 +45,15 @@ const (
 )
 
 type indexFormatReadCase struct {
-	Name          string               `yaml:"name"`
-	Format        *int                 `yaml:"format"`
-	Entries       bool                 `yaml:"entries"`
-	OtherSession  bool                 `yaml:"otherSession"`
-	Refuse        bool                 `yaml:"refuse"`
-	Operations    []indexReadOperation `yaml:"operations"`
-	PreviewIDs    int                  `yaml:"previewIDs"`
-	VariableLimit int32                `yaml:"variableLimit"`
+	Name              string               `yaml:"name"`
+	Format            *int                 `yaml:"format"`
+	Entries           bool                 `yaml:"entries"`
+	OtherSession      bool                 `yaml:"otherSession"`
+	Refuse            bool                 `yaml:"refuse"`
+	Operations        []indexReadOperation `yaml:"operations"`
+	PreviewIDs        int                  `yaml:"previewIDs"`
+	VariableLimit     int32                `yaml:"variableLimit"`
+	ManagedTranscript string               `yaml:"managedTranscript"`
 }
 
 func loadIndexFormatReadFixtures(t *testing.T) []indexFormatReadCase {
@@ -124,6 +126,11 @@ func TestIndexFormatReadsRefuseUnknownProjectionWithinScope(t *testing.T) {
 			if err := db.IndexSessionEntries(t.Context(), otherID, batchTestEntries(otherID, "searchable healthy", 1)); err != nil {
 				t.Fatal(err)
 			}
+			filesystem, managedRoot := testutil.NewMemFS(), t.TempDir()
+			if row.ManagedTranscript != "" {
+				entry := makeStoreEntry(t, string(otherID), string(testutil.TestProjectHash), testutil.TestHostSlug, ingest.HarnessClaudeCode, 1700000000000, 100, 50)
+				storetest.SeedManagedInput(t, db, filesystem, managedRoot, *entry.Metadata, []byte(row.ManagedTranscript))
+			}
 			conn := takeConn(t, db.Pool())
 			var format any
 			if row.Format != nil {
@@ -144,7 +151,7 @@ func TestIndexFormatReadsRefuseUnknownProjectionWithinScope(t *testing.T) {
 			}
 			for _, operation := range row.Operations {
 				t.Run(string(operation), func(t *testing.T) {
-					err := runIndexReadOperation(t, db, target, operation, row.PreviewIDs)
+					err := runIndexReadOperation(t, db, target, operation, row.PreviewIDs, filesystem, managedRoot)
 					if row.Refuse {
 						var unsupported *store.UnsupportedIndexFormatError
 						if !errors.As(err, &unsupported) || unsupported.SessionID != sid {
@@ -159,7 +166,7 @@ func TestIndexFormatReadsRefuseUnknownProjectionWithinScope(t *testing.T) {
 	}
 }
 
-func runIndexReadOperation(t *testing.T, db *store.Store, sid schema.SessionID, operation indexReadOperation, previewIDs int) error {
+func runIndexReadOperation(t *testing.T, db *store.Store, sid schema.SessionID, operation indexReadOperation, previewIDs int, filesystem ingest.FileSystem, managedRoot string) error {
 	t.Helper()
 	ctx := t.Context()
 	switch operation {
@@ -198,10 +205,10 @@ func runIndexReadOperation(t *testing.T, db *store.Store, sid schema.SessionID, 
 		_, _, err := db.GetCurrentSessionEntriesHash(ctx, sid)
 		return err
 	case indexReadAPIDetail:
-		_, err := api.NewStoreDataProviderWithFS(db, sessionvisibility.All(), testutil.NewMemFS()).SessionByID(ctx, string(sid))
+		_, err := api.NewStoreDataProviderWithFS(db, sessionvisibility.All(), filesystem, managedRoot).SessionByID(ctx, string(sid))
 		return err
 	case indexReadExport:
-		_, err := export.ExportSession(ctx, db, testutil.NewMemFS(), string(sid))
+		_, err := export.ExportSession(ctx, db, filesystem, string(sid), managedRoot)
 		return err
 	case indexReadSearch:
 		_, err := codemap.NewService(db, nil, nil, sessionvisibility.All()).Search(ctx, "searchable", 1)

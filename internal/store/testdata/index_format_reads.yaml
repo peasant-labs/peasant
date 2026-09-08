@@ -14,6 +14,7 @@ cases:
     format: 99
     entries: true
     otherSession: true
+    managedTranscript: '{"type":"user","message":{"role":"user","content":"searchable healthy"}}'
     operations: [entries, range, maximum, exists, first-message, bulk-preview, entry-annotations, entry-annotation, annotation-inputs, entries-hash, api-detail, export]
   - name: never-indexed
     operations: [entries, range, maximum, exists, first-message, bulk-preview, annotation-inputs, entries-hash]
