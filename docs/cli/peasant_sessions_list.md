@@ -19,6 +19,7 @@ peasant sessions list [flags]
       --limit int        Maximum number of sessions to show (0 = no limit) (default 20)
       --project string   Filter by project name (matches git remote URL or directory basename)
       --reverse          Reverse sort order (ascending instead of descending)
+      --session string   Filter to one exact session id
       --since string     Show sessions starting after this date (e.g. 7d, 24h, 2026-01-01)
       --sort string      Sort by field (date, turns, tokens, project) (default "date")
       --tag string       Filter by session tag
