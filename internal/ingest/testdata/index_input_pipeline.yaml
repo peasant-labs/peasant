@@ -1,0 +1,10 @@
+transcript: '{"type":"user","message":{"role":"user","content":"captured input"}}'
+replacement: '{"type":"user","message":{"role":"user","content":"newer publication"}}'
+previousPreview: last-good preview
+expectedPreview: captured input
+requiredNames: [commits-captured-input, commits-captured-empty, refuses-newer-artifact, refuses-newer-sql-state]
+cases:
+  - {name: commits-captured-input}
+  - {name: commits-captured-empty, empty: true}
+  - {name: refuses-newer-artifact, change: artifact}
+  - {name: refuses-newer-sql-state, change: sql}

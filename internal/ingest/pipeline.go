@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1252,6 +1253,7 @@ func (p *Pipeline) indexLoop(
 
 type indexParseResult struct {
 	im            indexedMeta
+	input         *capturedIndexInput
 	output        indexformat.Result
 	entryCount    int
 	startedAt     int64
@@ -1343,7 +1345,13 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	active := activeParses.Add(1)
 	recordIndexProfileMax(maxActiveParses, active)
 	parseStart := time.Now()
-	output, err := indexWithSourceKind(ctx, indexer, indexTargetSession(im), im.transcriptData)
+	input, err := p.captureIndexInput(ctx, im, indexer)
+	var output indexformat.Result
+	if err == nil {
+		result.input = input
+		output, err = parseCapturedIndexInput(ctx, indexer, input)
+		input.transcript, input.tree = nil, nil
+	}
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
 	if err == nil {
@@ -1426,50 +1434,55 @@ func (p *Pipeline) flushIndexParseResultsBatch(ctx context.Context, results []in
 			continue
 		}
 		writes = append(writes, SessionEntryWrite{
-			SessionID:      result.im.session.SessionID,
-			Result:         result.output,
-			IndexVersion:   p.versionTargets()[result.im.session.Harness].IndexVersion,
-			IndexerVersion: p.versionTargets()[result.im.session.Harness].IndexerVersion,
-			IndexedAtMs:    nowMs,
+			SessionID:        result.im.session.SessionID,
+			Result:           result.output,
+			IndexVersion:     p.versionTargets()[result.im.session.Harness].IndexVersion,
+			IndexerVersion:   p.versionTargets()[result.im.session.Harness].IndexerVersion,
+			IndexedAtMs:      nowMs,
+			ExpectedState:    result.input.expected,
+			IndexedInputHash: &result.input.inputHash,
 		})
 		writePositions = append(writePositions, i)
 	}
 
 	writeResults := make([]SessionEntryWriteResult, len(writes))
+	writeDurations := make([]time.Duration, len(writes))
 	writeDuration := time.Duration(0)
 	if len(writes) > 0 {
-		writeStart := time.Now()
-		p.runStoreWrite(writeLane, func() {
-			writeResults = batchStore.IndexSessionEntryBatch(ctx, writes)
-		})
-		writeDuration = time.Since(writeStart)
-		flush.writeDuration = writeDuration
-		flush.writeTxs = 1
-		flush.writeSavepoints = len(writes)
-	}
-	perSessionWriteDuration := time.Duration(0)
-	if len(writes) > 0 {
-		perSessionWriteDuration = writeDuration / time.Duration(len(writes))
-	}
-	if len(writeResults) != len(writes) {
-		resultCount := len(writeResults)
-		writeResults = make([]SessionEntryWriteResult, len(writes))
-		for i := range writes {
-			writeResults[i] = SessionEntryWriteResult{
-				SessionID: writes[i].SessionID,
-				Err:       fmt.Errorf("%s: store returned %d batch write result(s) for %d write(s)", logPrefix, resultCount, len(writes)),
+		order := make([]int, len(writes))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(i, j int) bool { return writes[order[i]].SessionID < writes[order[j]].SessionID })
+		for _, i := range order {
+			writeStart := time.Now()
+			writeResults[i].SessionID = writes[i].SessionID
+			// Hold one session's file ownership before entering the writer lane.
+			// Parent/child ownership is never nested; each item commits atomically.
+			err := p.withCurrentIndexInput(ctx, results[writePositions[i]].input, func() error {
+				p.runStoreWrite(writeLane, func() {
+					flush.writeTxs++
+					flush.writeSavepoints++
+					written := batchStore.IndexSessionEntryBatch(ctx, []SessionEntryWrite{writes[i]})
+					if len(written) != 1 || written[0].SessionID != writes[i].SessionID {
+						writeResults[i].Err = fmt.Errorf("%s: store did not return the one requested session %s", logPrefix, writes[i].SessionID)
+					} else {
+						writeResults[i] = written[0]
+					}
+				})
+				return writeResults[i].Err
+			})
+			if err != nil {
+				writeResults[i].Err = err
+				writeResults[i].Written = false
 			}
+			writeDurations[i] = time.Since(writeStart)
+			writeDuration += writeDurations[i]
 		}
-	}
-	for i, result := range results {
-		if result.output == nil || p.metricsStore == nil {
-			continue
-		}
-		flush.indexed[i] = indexedMeta{session: result.im.session, startMs: result.im.startMs}
-		flush.logEntries[i] = result.logEntry
-		flush.profileSessions[i] = p.makeIndexProfileSession(result, result.logEntry, perSessionWriteDuration)
+		flush.writeDuration = writeDuration
 	}
 	for i, writeResult := range writeResults {
+		perSessionWriteDuration := writeDurations[i]
 		flush.writeStats.Add(writeResult.Stats)
 		if writeResult.Skipped {
 			flush.writeSkipped++
