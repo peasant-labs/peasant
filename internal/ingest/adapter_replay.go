@@ -86,6 +86,9 @@ func (a *ClaudeAdapter) ReplayRetained(ctx context.Context, data []byte, origina
 	if first := parseClaudeTranscriptMetadata(data, &parsed); first == nil || first.Type == "" {
 		return nil, nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessClaudeCode, Reason: "retained input has no identifiable Claude record"}
 	}
+	if err := retainedReplayParsingError(HarnessClaudeCode, &parsed); err != nil {
+		return nil, nil, err
+	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
@@ -109,6 +112,9 @@ func (a *CodexAdapter) ReplayRetained(ctx context.Context, data []byte, original
 	if sessionMeta == nil {
 		return nil, nil, &InsufficientRetainedInputError{SessionID: original.SessionID, Harness: HarnessCodex, Reason: "retained input has no usable session_meta record"}
 	}
+	if err := retainedReplayParsingError(HarnessCodex, &parsed); err != nil {
+		return nil, nil, err
+	}
 	metadata.Model, metadata.Version = parsed.Model, parsed.Version
 	metadata.Timestamp.Start, metadata.Timestamp.End = parsed.Timestamp.Start, parsed.Timestamp.End
 	metadata.Stats.DurationMs = parsed.Stats.DurationMs
@@ -127,6 +133,9 @@ func (a *CursorAdapter) ReplayRetained(ctx context.Context, data []byte, origina
 	parsed := NewUnifiedMetadata()
 	parsed.SessionID = original.SessionID
 	start, end := parseCursorTranscriptMetadata(data, &parsed)
+	if err := retainedReplayParsingError(HarnessCursor, &parsed); err != nil {
+		return nil, nil, err
+	}
 	if start == 0 {
 		start = original.Timestamp.Start
 	}
@@ -143,4 +152,13 @@ func (a *CursorAdapter) ReplayRetained(ctx context.Context, data []byte, origina
 	metadata.Stats.TokensIn, metadata.Stats.TokensOut = parsed.Stats.TokensIn, parsed.Stats.TokensOut
 	metadata.Diagnostics.Warnings = append(metadata.Diagnostics.Warnings, parsed.Diagnostics.Warnings...)
 	return metadata, bytes.Clone(data), nil
+}
+
+func retainedReplayParsingError(harness Harness, parsed *UnifiedMetadata) error {
+	for _, warning := range parsed.Diagnostics.Warnings {
+		if warning.ErrorType == "parse_error" || warning.ErrorType == "read_error" {
+			return &InsufficientRetainedInputError{SessionID: parsed.SessionID, Harness: harness, Reason: warning.Message}
+		}
+	}
+	return nil
 }

@@ -36,6 +36,7 @@ func (p *Pipeline) processRetainedSession(ctx context.Context, session Discovere
 	if err != nil {
 		return fail(err)
 	}
+	result.ParentUUID = original.Metadata.ParentUUID
 	factory, ok := p.adapters[session.Harness]
 	if !ok {
 		return fail(&InsufficientRetainedInputError{SessionID: session.SessionID, Harness: session.Harness, Reason: "no adapter is registered"})

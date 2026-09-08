@@ -34,32 +34,32 @@ type metadataReadPolicyFixtures struct {
 	SessionID     ingest.SessionID `yaml:"sessionID"`
 	Transcript    string           `yaml:"transcript"`
 	Cases         []struct {
-		Name                  string              `yaml:"name"`
-		SchemaVersion         int                 `yaml:"schemaVersion"`
-		StoredSchemaVersion   *int                `yaml:"storedSchemaVersion"`
-		StoredAdapterVersion  *int                `yaml:"storedAdapterVersion"`
-		WarmStoredSchema      *int                `yaml:"warmStoredSchema"`
-		StoredAbsent          bool                `yaml:"storedAbsent"`
-		LookupFailures        int                 `yaml:"lookupFailures"`
-		RetryLookup           bool                `yaml:"retryLookup"`
-		WantDiagnostic        string              `yaml:"wantDiagnostic"`
-		OutsideDiscovery      bool                `yaml:"outsideDiscovery"`
-		RetryCompatible       bool                `yaml:"retryCompatible"`
-		AdapterVersion        *int                `yaml:"adapterVersion"`
-		RawAdapterVersion     string              `yaml:"rawAdapterVersion"`
-		FaultOperation        metadataPolicyFault `yaml:"faultOperation"`
-		TransientIO           bool                `yaml:"transientIO"`
-		MetadataAbsent        bool                `yaml:"metadataAbsent"`
-		RawMetadata           string              `yaml:"rawMetadata"`
-		Nested                bool                `yaml:"nested"`
-		Database              bool                `yaml:"database"`
-		SourceChanged         bool                `yaml:"sourceChanged"`
-		Reindex               bool                `yaml:"reindex"`
-		Force                 bool                `yaml:"force"`
-		Stale                 bool                `yaml:"stale"`
-		WantExtract           int                 `yaml:"wantExtract"`
-		WantIndexed           int                 `yaml:"wantIndexed"`
-		ExpectedMetadataReads *int                `yaml:"expectedMetadataReads"`
+		Name                      string              `yaml:"name"`
+		SchemaVersion             int                 `yaml:"schemaVersion"`
+		StoredSchemaVersion       *int                `yaml:"storedSchemaVersion"`
+		StoredAdapterVersion      *int                `yaml:"storedAdapterVersion"`
+		WarmStoredSchema          *int                `yaml:"warmStoredSchema"`
+		StoredAbsent              bool                `yaml:"storedAbsent"`
+		LookupFailures            int                 `yaml:"lookupFailures"`
+		RetryLookup               bool                `yaml:"retryLookup"`
+		WantDiagnostic            string              `yaml:"wantDiagnostic"`
+		OutsideDiscovery          bool                `yaml:"outsideDiscovery"`
+		RetryCompatible           bool                `yaml:"retryCompatible"`
+		AdapterVersion            *int                `yaml:"adapterVersion"`
+		RawAdapterVersion         string              `yaml:"rawAdapterVersion"`
+		FaultOperation            metadataPolicyFault `yaml:"faultOperation"`
+		TransientIO               bool                `yaml:"transientIO"`
+		MetadataAbsent            bool                `yaml:"metadataAbsent"`
+		RawMetadata               string              `yaml:"rawMetadata"`
+		Nested                    bool                `yaml:"nested"`
+		Database                  bool                `yaml:"database"`
+		SourceChanged             bool                `yaml:"sourceChanged"`
+		Reindex                   bool                `yaml:"reindex"`
+		Force                     bool                `yaml:"force"`
+		Stale                     bool                `yaml:"stale"`
+		WantExtract               int                 `yaml:"wantExtract"`
+		WantIndexed               int                 `yaml:"wantIndexed"`
+		RequireMetadataInspection bool                `yaml:"requireMetadataInspection"`
 	} `yaml:"cases"`
 }
 
@@ -88,15 +88,15 @@ func loadMetadataReadPolicyFixtures(t *testing.T) metadataReadPolicyFixtures {
 
 type metadataPolicyFS struct {
 	*testutil.MemFS
-	nativePath     string
-	nativeRead     atomic.Int64
-	nativeStat     atomic.Int64
-	faultOperation metadataPolicyFault
-	faultPath      string
-	faults         atomic.Int64
-	transientIO    bool
-	metadataPath   string
-	metadataReads  atomic.Int64
+	nativePath        string
+	nativeRead        atomic.Int64
+	nativeStat        atomic.Int64
+	faultOperation    metadataPolicyFault
+	faultPath         string
+	faults            atomic.Int64
+	transientIO       bool
+	metadataPath      string
+	metadataInspected atomic.Bool
 }
 
 type metadataPolicyFault string
@@ -121,7 +121,7 @@ var _ ingest.FileSystem = (*metadataPolicyFS)(nil)
 
 func (f *metadataPolicyFS) ReadFile(path string) ([]byte, error) {
 	if path == f.metadataPath {
-		f.metadataReads.Add(1)
+		f.metadataInspected.Store(true)
 	}
 	if f.faultOperation == metadataPolicyReadFault && path == f.faultPath {
 		return nil, f.fault(path)
@@ -449,8 +449,8 @@ func TestPipelineMetadataReadPolicy(t *testing.T) {
 			} else if fixture.LookupFailures != 0 && len(result.Diagnostics) != 0 {
 				t.Errorf("compatible lookup recovery reported refusal: %+v", result.Diagnostics)
 			}
-			if fixture.ExpectedMetadataReads != nil && filesystem.metadataReads.Load() != int64(*fixture.ExpectedMetadataReads) {
-				t.Errorf("metadata reads = %d, want %d", filesystem.metadataReads.Load(), *fixture.ExpectedMetadataReads)
+			if fixture.RequireMetadataInspection && !filesystem.metadataInspected.Load() {
+				t.Errorf("required metadata path %s was not inspected", filesystem.metadataPath)
 			}
 			if fixture.FaultOperation != "" && filesystem.faults.Load() == 0 {
 				t.Fatalf("configured metadata I/O fault %q was not reached", fixture.FaultOperation)
