@@ -152,7 +152,7 @@ func runWebForeground(cmd *cobra.Command, cfgPath string, port int, devMode bool
 	} else {
 		dbCloser = db.Close
 		analyticsStore = db
-		realProvider = api.NewStoreDataProvider(db, visibility)
+		realProvider = api.NewStoreDataProvider(db, visibility, cfg.Output.BasePath)
 	}
 	if dbCloser != nil {
 		defer dbCloser()

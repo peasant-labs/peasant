@@ -4,13 +4,12 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/peasant-labs/peasant/internal/export"
-	"github.com/peasant-labs/peasant/internal/ingest"
 	"github.com/peasant-labs/peasant/internal/store/storetest"
 	"github.com/peasant-labs/peasant/internal/testutil"
-	"github.com/peasant-labs/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,7 +30,6 @@ type observedModelExportFixture struct {
 	ExpectedSeed           string                    `yaml:"expectedSeed"`
 	Turns                  []observedModelExportTurn `yaml:"turns"`
 	ExpectedObservedModels []string                  `yaml:"expectedObservedModels"`
-	ExpectedCaseCount      int                       `yaml:"expectedCaseCount"`
 	RequiredNames          []string                  `yaml:"requiredNames"`
 }
 
@@ -41,7 +39,7 @@ func TestExportSessionEmitsObservedModelEvidence(t *testing.T) {
 	if err := yaml.Unmarshal(observedModelExportFixtureYAML, &fixture); err != nil {
 		t.Fatalf("decode export fixture: %v", err)
 	}
-	if fixture.SessionID == "" || fixture.ExpectedCaseCount != 2 || len(fixture.Turns) != fixture.ExpectedCaseCount || len(fixture.RequiredNames) != fixture.ExpectedCaseCount || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
+	if fixture.SessionID == "" || len(fixture.ExpectedObservedModels) != len(fixture.Turns) {
 		t.Fatalf("export fixture inventory is incomplete: %+v", fixture)
 	}
 	seen := map[string]bool{}
@@ -58,16 +56,18 @@ func TestExportSessionEmitsObservedModelEvidence(t *testing.T) {
 	}
 	store := storetest.Open(t)
 	storetest.SeedSession(t, store, fixture.SessionID)
-	entries := make([]schema.SessionEntry, len(fixture.Turns))
-	for index, source := range fixture.Turns {
-		extra, _ := json.Marshal(map[string]string{"model_id": source.ObservedModel})
-		extraString := string(extra)
-		entries[index] = schema.SessionEntry{SessionID: schema.SessionID(fixture.SessionID), EntryIndex: source.Index, Harness: ingest.HarnessClaudeCode, Role: schema.Role(source.Role), EntryType: schema.EntryTypeText, Depth: source.Depth, ContentPreview: &source.Content, Extra: &extraString}
+	var native strings.Builder
+	for _, source := range fixture.Turns {
+		line, err := json.Marshal(map[string]any{"type": source.Role, "message": map[string]string{"role": source.Role, "content": source.Content, "model": source.ObservedModel}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		native.Write(line)
+		native.WriteByte('\n')
 	}
-	if err := store.IndexSessionEntries(context.Background(), schema.SessionID(fixture.SessionID), entries); err != nil {
-		t.Fatalf("IndexSessionEntries: %v", err)
-	}
-	payload, err := export.ExportSession(context.Background(), store, testutil.NewMemFS(), fixture.SessionID)
+	fs := testutil.NewMemFS()
+	seedEntriesFromJSONL(t, context.Background(), store, fs, fixture.SessionID, []byte(native.String()))
+	payload, err := export.ExportSession(context.Background(), store, fs, fixture.SessionID, "/managed")
 	if err != nil {
 		t.Fatalf("ExportSession: %v", err)
 	}

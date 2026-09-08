@@ -2170,7 +2170,7 @@ func TestStoreDataProvider_SessionByID_ContentOverlay(t *testing.T) {
 			SourceFormat: ingest.SourceFormatJSONL,
 		},
 	}
-	provider := seedStoreWithFS(t, s, []ingest.StoreEntry{entry}, fs)
+	provider := api.NewStoreDataProviderWithFS(s, sessionvisibility.All(), fs, "/managed")
 
 	// Index the TRUNCATED entry (2000 chars) — what a real ingest run stores.
 	codexIndexer := ingest.NewCodexIndexer(fs)
@@ -2184,9 +2184,7 @@ func TestStoreDataProvider_SessionByID_ContentOverlay(t *testing.T) {
 	if dsEntries[0].ContentPreview == nil || len(*dsEntries[0].ContentPreview) != 2000 {
 		t.Fatalf("indexed preview: expected exactly 2000 chars (truncated), got %v", dsEntries[0].ContentPreview)
 	}
-	if err := s.IndexSessionEntries(ctx, sid, dsEntries); err != nil {
-		t.Fatalf("IndexSessionEntries: %v", err)
-	}
+	storetest.SeedManagedInput(t, s, fs, "/managed", *entry.Metadata, []byte(codexLine+"\n"))
 
 	sess, err := provider.SessionByID(ctx, sidStr)
 	if err != nil {

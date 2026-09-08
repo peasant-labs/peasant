@@ -3,12 +3,12 @@ package ingest
 // IndexerRegistryOptions configures NewIndexerRegistry.
 type IndexerRegistryOptions struct {
 	// FullContent disables ContentPreview truncation on every indexer that
-	// supports the option (Claude, OpenCode, Codex). Real ingest wiring
+	// supports the option (Claude, OpenCode, Codex, Strike). Real ingest wiring
 	// leaves this false — the DB deliberately stores a bounded preview
 	// (defaults.ContentPreviewLimit) to keep session_entries rows sane.
 	// FullContent: true is for RE-INDEXING an already-ingested session's
 	// source transcript to recover its real content (transcript.
-	// BuildContentOverlay / export.ExportSession) — never for a normal
+	// ReadSessionContent / export.ExportSession) — never for a normal
 	// ingest run.
 	FullContent bool
 }
@@ -17,7 +17,7 @@ type IndexerRegistryOptions struct {
 // This is the ONE place that maps a harness to its indexer constructor.
 // Every consumer — the real ingest pipeline wiring (cmd_kickstart.go,
 // cmd_harvest.go) and the full-content re-index path (transcript.
-// BuildContentOverlay) — must build its registry through this function
+// ReadSessionContent) — must build its registry through this function
 // rather than hand-writing the map, so the two purposes (bounded ingest vs.
 // full re-index) can never drift into a THIRD hand-copy that silently omits
 // a harness or dispatches on the wrong thing. That exact divergence produced

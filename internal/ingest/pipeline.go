@@ -1267,7 +1267,7 @@ func (p *Pipeline) indexLoop(
 
 type indexParseResult struct {
 	im            indexedMeta
-	input         *capturedIndexInput
+	input         *CapturedIndexInput
 	output        indexformat.Result
 	entryCount    int
 	startedAt     int64

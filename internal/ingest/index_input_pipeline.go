@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -9,9 +10,9 @@ import (
 	"github.com/peasant-labs/peasant/internal/indexformat"
 )
 
-// capturedIndexInput exists only for one parse/write attempt. Raw bytes are
-// released after parsing; the writer keeps only identity and expected SQL state.
-type capturedIndexInput struct {
+// CapturedIndexInput owns the exact bytes and consumed context for one parse.
+// The native OpenCode tree remains private; Parse never reopens the source.
+type CapturedIndexInput struct {
 	session      DiscoveredSession
 	kind         TranscriptSourceKind
 	metadataPath string
@@ -30,7 +31,7 @@ type openCodeInputIndexer interface {
 
 var _ openCodeInputIndexer = (*OpenCodeIndexer)(nil)
 
-func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexer TranscriptIndexer) (*capturedIndexInput, error) {
+func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexer TranscriptIndexer) (*CapturedIndexInput, error) {
 	reader, ok := p.metricsStore.(SessionIndexStateReader)
 	if !ok {
 		return nil, fmt.Errorf("capture index input for session %s: configured index writer cannot read its complete SQL state; indexing was refused without replacing entries; use a store with SessionIndexStateReader and atomic entry writes", im.session.SessionID)
@@ -39,8 +40,9 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	if err != nil {
 		return nil, err
 	}
-	input := &capturedIndexInput{session: im.session, metadataPath: filepath.Join(filepath.Dir(im.outputTranscriptPath), string(im.session.SessionID)+defaults.MetadataSuffix)}
-	err = publisher.WithCapture(ctx, im.session.SessionID, input.metadataPath, func(artifact *ManagedArtifact) error {
+	metadataPath := filepath.Join(filepath.Dir(im.outputTranscriptPath), string(im.session.SessionID)+defaults.MetadataSuffix)
+	var input *CapturedIndexInput
+	err = publisher.WithCapture(ctx, im.session.SessionID, metadataPath, func(artifact *ManagedArtifact) error {
 		state, err := reader.ReadIndexState(ctx, im.session.SessionID)
 		if err != nil {
 			return err
@@ -60,48 +62,13 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 				return fmt.Errorf("capture index input for session %s: stored index format %d is newer than output format %d; no parser ran or entries changed; use an indexer that can preserve the stored format", state.SessionID, *state.IndexVersion, target.IndexVersion)
 			}
 		}
-		input.expected, input.artifactHash, input.transcript = state, artifact.ArtifactHash, artifact.Transcript
-		input.session.SourcePath = ResolvedPath(im.outputTranscriptPath)
-		input.session.SourceFormat = artifact.Metadata.Source.Format
-		input.session.ParentUUID = artifact.Metadata.ParentUUID
-		if input.session.Harness == HarnessOpenCode {
-			origin, err := recognizeManagedOpenCodeProjection(artifact.Transcript, input.session.SessionID)
-			if err != nil {
-				return err
-			}
-			input.session.TranscriptOrigin = origin
-			if origin == TranscriptOriginFile && input.session.OriginalRoot == "" {
-				// A retained file-origin session may have no enabled source config.
-				// Its original native locator, never the managed copy, supplies root.
-				native, err := NewResolvedPath(artifact.Metadata.Source.FilePath)
-				if err != nil {
-					return fmt.Errorf("capture native OpenCode input for %s: original root and valid native locator are unavailable: %w; stored entries were preserved; restore the native message/part source before retrying", input.session.SessionID, err)
-				}
-				input.session.SourcePath = native
-			}
+		session := im.session
+		session.SourcePath = ResolvedPath(im.outputTranscriptPath)
+		input, err = CaptureIndexInput(ctx, indexer, session, artifact)
+		if err != nil {
+			return err
 		}
-		input.kind = indexer.SourceKind()
-		if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
-			input.kind = resolver.TranscriptSourceKindFor(input.session)
-		}
-		switch input.kind {
-		case TranscriptSourceFile:
-			if _, ok := indexer.(VersionedTranscriptIndexer); !ok {
-				return fmt.Errorf("capture index input for session %s: parser cannot verify completion of captured bytes; no entries changed; use a strict Result indexer", im.session.SessionID)
-			}
-		case TranscriptSourceDirectory:
-			native, ok := indexer.(openCodeInputIndexer)
-			if !ok || input.session.Harness != HarnessOpenCode {
-				return fmt.Errorf("capture index input for session %s: directory indexer has no supported native input capture; no entries changed; provide the OpenCode captured-tree indexer", im.session.SessionID)
-			}
-			input.tree, err = native.captureJSONInput(ctx, input.session)
-			if err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("capture index input for session %s: indexer did not declare a supported source kind; no parser ran; declare a file or supported native directory source", im.session.SessionID)
-		}
-		input.inputHash = indexInputDigest(input.session, input.transcript, input.tree)
+		input.expected, input.metadataPath = state, metadataPath
 		return nil
 	})
 	if err != nil {
@@ -110,7 +77,61 @@ func (p *Pipeline) captureIndexInput(ctx context.Context, im indexedMeta, indexe
 	return input, nil
 }
 
-func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, input *capturedIndexInput) (indexformat.Result, error) {
+// CaptureIndexInput captures parser input while the caller owns the artifact.
+// A validated artifact establishes transcript presence, including zero bytes.
+func CaptureIndexInput(ctx context.Context, indexer TranscriptIndexer, session DiscoveredSession, artifact *ManagedArtifact) (*CapturedIndexInput, error) {
+	if err := artifact.Validate(); err != nil {
+		return nil, err
+	}
+	if indexer == nil || session.SessionID != artifact.Metadata.SessionID || session.Harness != artifact.Metadata.ModelHarness {
+		return nil, fmt.Errorf("capture index input: parser/session does not match the managed artifact; retain stored previews and reconcile before retrying")
+	}
+	input := &CapturedIndexInput{session: session, artifactHash: artifact.ArtifactHash, transcript: bytes.Clone(artifact.Transcript)}
+	input.session.SourceFormat = artifact.Metadata.Source.Format
+	input.session.ParentUUID = artifact.Metadata.ParentUUID
+	if session.Harness == HarnessOpenCode {
+		origin, err := recognizeManagedOpenCodeProjection(artifact.Transcript, session.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		input.session.TranscriptOrigin = origin
+		if origin == TranscriptOriginFile && input.session.OriginalRoot == "" {
+			native, err := NewResolvedPath(artifact.Metadata.Source.FilePath)
+			if err != nil {
+				return nil, fmt.Errorf("capture native OpenCode input for %s: valid original locator is unavailable: %w; restore the native message/part source before retrying", session.SessionID, err)
+			}
+			input.session.SourcePath = native
+		}
+	}
+	input.kind = indexer.SourceKind()
+	if resolver, ok := indexer.(SessionTranscriptSourceResolver); ok {
+		input.kind = resolver.TranscriptSourceKindFor(input.session)
+	}
+	switch input.kind {
+	case TranscriptSourceFile:
+	case TranscriptSourceDirectory:
+		native, ok := indexer.(openCodeInputIndexer)
+		if !ok || session.Harness != HarnessOpenCode {
+			return nil, fmt.Errorf("capture index input for %s: directory indexer has no supported native input capture", session.SessionID)
+		}
+		var err error
+		input.tree, err = native.captureJSONInput(ctx, input.session)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("capture index input for %s: unsupported source kind; declare a file or supported native directory source", session.SessionID)
+	}
+	input.inputHash = indexInputDigest(input.session, input.transcript, input.tree)
+	return input, nil
+}
+
+// Hash identifies actual parser input, independently of preview mode and version.
+func (input *CapturedIndexInput) Hash() string { return input.inputHash }
+
+// Parse runs against captured input only, preserving the existing strict Result
+// and legacy nonempty-result completion rules.
+func (input *CapturedIndexInput) Parse(ctx context.Context, indexer TranscriptIndexer) (indexformat.Result, error) {
 	if input.kind == TranscriptSourceDirectory {
 		return indexer.(openCodeInputIndexer).indexJSONInput(ctx, input.session, input.tree)
 	}
@@ -123,7 +144,11 @@ func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, inp
 	return indexWithSourceKind(ctx, indexer, input.session, data)
 }
 
-func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *capturedIndexInput, use func() error) error {
+func parseCapturedIndexInput(ctx context.Context, indexer TranscriptIndexer, input *CapturedIndexInput) (indexformat.Result, error) {
+	return input.Parse(ctx, indexer)
+}
+
+func (p *Pipeline) withCurrentIndexInput(ctx context.Context, input *CapturedIndexInput, use func() error) error {
 	publisher, err := p.artifactPublisher(nil)
 	if err != nil {
 		return err
