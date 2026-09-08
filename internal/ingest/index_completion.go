@@ -42,8 +42,10 @@ func (completion *indexCompletion) result(entries []schema.SessionEntry, err err
 	if err := completion.ctx.Err(); err != nil {
 		return nil, completion.failure(err)
 	}
-	if completion.records > 0 && completion.recognized == 0 {
-		return nil, completion.failure(fmt.Errorf("the input contains no recognized transcript records; ignored future vocabulary alone cannot prove a supported empty transcript"))
+	// Recognized metadata/control records cannot certify that ignored future
+	// conversation records represent an empty transcript.
+	if len(entries) == 0 && completion.records > completion.recognized {
+		return nil, completion.failure(fmt.Errorf("unrecognized records cannot prove an empty transcript, even when recognized metadata or control records are present"))
 	}
 	return indexformat.V1{Entries: entries}, nil
 }

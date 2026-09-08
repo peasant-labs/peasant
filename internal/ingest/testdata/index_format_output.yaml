@@ -1,4 +1,6 @@
 requiredNames:
+  - codex-control-plus-unknown-preserves-last-good
+  - strike-control-plus-unknown-preserves-last-good
   - completed-empty-opencode-directory
   - mixed-malformed-opencode-preserves-last-good
   - completed-empty-cursor
@@ -24,6 +26,24 @@ requiredNames:
   - future-format-write-refusal-is-visible
   - logs-ignore-unwritten-index-format
 cases:
+  - name: codex-control-plus-unknown-preserves-last-good
+    declaredFormat: 1
+    payload: empty
+    realIndexer: true
+    harness: codex
+    transcript: |
+      {"type":"session_meta","payload":{"id":"synthetic"}}
+      {"type":"response_item","payload":{"type":"future-response","content":{"future":"opaque"}}}
+    wantLogError: unrecognized records cannot prove an empty transcript
+  - name: strike-control-plus-unknown-preserves-last-good
+    declaredFormat: 1
+    payload: empty
+    realIndexer: true
+    harness: strike
+    transcript: |
+      {"type":"session.started","data":{"sessionId":"synthetic"}}
+      {"type":"future.conversation","data":{"text":"not understood"}}
+    wantLogError: unrecognized records cannot prove an empty transcript
   - name: completed-empty-opencode-directory
     declaredFormat: 1
     payload: empty
