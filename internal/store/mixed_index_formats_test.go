@@ -457,7 +457,6 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 			legacyTarget := ingest.HarvesterVersionRegistry[schema.HarnessClaudeCode]
 			seedMixedIndex(t, db, document.LegacySession, schema.HarnessClaudeCode, document.Records, legacyTarget.IndexerVersion, 1)
 			seedMixedIndex(t, db, document.TargetSession, schema.HarnessCodex, document.Records, 14, 1)
-			legacyBefore := mixedSnapshot(t, db, document.LegacySession)
 			fs := testutil.NewMemFS()
 			files := make(map[string][]byte)
 			writeManaged := func(meta *schema.UnifiedMetadata, transcript string) {
@@ -483,6 +482,38 @@ func TestMixedIndexFormatsPipelineUpgradesOnlyItsDeclaringHarness(t *testing.T) 
 			indexers := map[ingest.Harness]ingest.TranscriptIndexer{
 				ingest.HarnessClaudeCode: ingest.NewClaudeIndexer(fs),
 				ingest.HarnessCodex:      &mixedCodexIndexer{ingest.NewCodexIndexer(fs)},
+			}
+			// First establish real file/SQL mirrors and the unrelated parser's
+			// actual input proof. Unknown historical input requires verification;
+			// this case starts after that work, before Codex adopts its new format.
+			publisher, err := ingest.NewArtifactPublisher(fs, "/managed", ingest.ArtifactPublisherOptions{Mirror: db})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, meta := range []*schema.UnifiedMetadata{legacyMeta, targetMeta} {
+				path := ingest.SessionMetadataPath("/managed", string(meta.HostSlug), string(meta.SessionID), "")
+				if _, _, err := publisher.ReconcileStored(t.Context(), meta.SessionID, path, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			legacyHarness := schema.HarnessClaudeCode
+			prepare, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, Force: true, Harness: &legacyHarness, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := prepare.Run(t.Context()); err != nil {
+				t.Fatalf("establish unrelated current input: %v", err)
+			}
+			verified, err := db.ReadIndexState(t.Context(), document.LegacySession)
+			if err != nil || verified == nil || verified.IndexedInputHash == nil || verified.IndexerVersion != legacyTarget.IndexerVersion {
+				t.Fatalf("unrelated input is not verified at its current producer: %+v %v", verified, err)
+			}
+			legacyBefore := mixedSnapshot(t, db, document.LegacySession)
+			for path := range files {
+				files[path], err = fs.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			pipeline, err := ingest.NewPipeline(fs, testutil.DefaultGitResolver(), ingest.DefaultAdapterRegistry, ingest.PipelineConfig{Reindex: true, OutputDir: "/managed"}, ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithIndexLogger(db), ingest.WithIndexers(indexers), ingest.WithHarvesterVersions(versions))
 			if err != nil {

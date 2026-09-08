@@ -30,17 +30,26 @@ const (
 )
 
 type indexInputPipelineFixture struct {
-	Transcript      string   `yaml:"transcript"`
-	Replacement     string   `yaml:"replacement"`
-	PreviousPreview string   `yaml:"previousPreview"`
-	ExpectedPreview string   `yaml:"expectedPreview"`
-	RequiredNames   []string `yaml:"requiredNames"`
-	Cases           []struct {
+	Transcript       string              `yaml:"transcript"`
+	Replacement      string              `yaml:"replacement"`
+	PreviousPreview  string              `yaml:"previousPreview"`
+	ExpectedPreview  string              `yaml:"expectedPreview"`
+	Malformed        string              `yaml:"malformed"`
+	EligibilityModes []indexInputRunMode `yaml:"eligibilityModes"`
+	RequiredNames    []string            `yaml:"requiredNames"`
+	Cases            []struct {
 		Name   string           `yaml:"name"`
 		Empty  bool             `yaml:"empty"`
 		Change indexInputChange `yaml:"change"`
 	} `yaml:"cases"`
 }
+
+type indexInputRunMode string
+
+const (
+	indexInputNormalRun indexInputRunMode = "normal"
+	indexInputIndexRun  indexInputRunMode = "index"
+)
 
 func loadIndexInputPipelineFixture(t *testing.T) indexInputPipelineFixture {
 	t.Helper()
@@ -63,6 +72,16 @@ func loadIndexInputPipelineFixture(t *testing.T) indexInputPipelineFixture {
 	}
 	if err := testutil.RequireFixtureNames("index input pipeline", "case", fixture.RequiredNames, names); err != nil {
 		t.Fatal(err)
+	}
+	modes := make(map[indexInputRunMode]bool)
+	for _, mode := range fixture.EligibilityModes {
+		if modes[mode] || (mode != indexInputNormalRun && mode != indexInputIndexRun) {
+			t.Fatalf("invalid eligibility mode %q", mode)
+		}
+		modes[mode] = true
+	}
+	if !modes[indexInputNormalRun] || !modes[indexInputIndexRun] {
+		t.Fatal("normal and index-only eligibility cases are required")
 	}
 	return fixture
 }
@@ -94,6 +113,20 @@ func (indexer *capturedInputIndexer) IndexTranscriptBytesResult(ctx context.Cont
 	return result, err
 }
 
+func publishIndexInputFixture(ctx context.Context, publisher *ingest.ArtifactPublisher, artifact *ingest.ManagedArtifact, metadataPath string) error {
+	session := ingest.DiscoveredSession{SessionID: artifact.Metadata.SessionID, Harness: artifact.Metadata.ModelHarness}
+	observation, err := publisher.Observe(ctx, session, metadataPath)
+	if err != nil {
+		return err
+	}
+	committed, err := publisher.Publish(ctx, ingest.ArtifactPublication{Artifact: artifact, Observation: observation})
+	if err != nil {
+		return err
+	}
+	_, err = publisher.Reconcile(ctx, committed)
+	return err
+}
+
 func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 	fixture := loadIndexInputPipelineFixture(t)
 	for _, row := range fixture.Cases {
@@ -120,16 +153,7 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			session := ingest.DiscoveredSession{SessionID: sid, Harness: artifact.Metadata.ModelHarness}
 			metadataPath := ingest.SessionMetadataPath(output, string(artifact.Metadata.HostSlug), string(sid), "")
 			publish := func(candidate *ingest.ManagedArtifact) error {
-				observation, err := publisher.Observe(ctx, session, metadataPath)
-				if err != nil {
-					return err
-				}
-				committed, err := publisher.Publish(ctx, ingest.ArtifactPublication{Artifact: candidate, Observation: observation})
-				if err != nil {
-					return err
-				}
-				_, err = publisher.Reconcile(ctx, committed)
-				return err
+				return publishIndexInputFixture(ctx, publisher, candidate, metadataPath)
 			}
 			if err := publish(artifact); err != nil {
 				t.Fatal(err)
@@ -193,6 +217,83 @@ func TestPipelineCommitsOnlyItsCapturedIndexInput(t *testing.T) {
 			}
 			if indexer.fileParses != 0 || indexer.byteParses != 1 {
 				t.Fatalf("parser reopened uncaptured source: files=%d bytes=%d", indexer.fileParses, indexer.byteParses)
+			}
+		})
+	}
+}
+
+func TestPipelineRetriesAndSkipsByActualIndexInput(t *testing.T) {
+	fixture := loadIndexInputPipelineFixture(t)
+	for _, mode := range fixture.EligibilityModes {
+		t.Run(string(mode), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			output := t.TempDir()
+			filesystem := &ingest.OSFileSystem{}
+			database, err := store.Open(filepath.Join(t.TempDir(), "index.db"), store.WithPoolSize(1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			publisher, err := ingest.NewArtifactPublisher(filesystem, output, ingest.ArtifactPublisherOptions{Mirror: database})
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact := publicationTestArtifact(t, fixture.Transcript)
+			sid, harness := artifact.Metadata.SessionID, artifact.Metadata.ModelHarness
+			metadataPath := ingest.SessionMetadataPath(output, string(artifact.Metadata.HostSlug), string(sid), "")
+			if err := publishIndexInputFixture(ctx, publisher, artifact, metadataPath); err != nil {
+				t.Fatal(err)
+			}
+			oldEntries := []schema.SessionEntry{{SessionID: sid, Harness: harness, EntryIndex: 0, EntryType: schema.EntryTypeText, Role: schema.RoleUser, ContentPreview: &fixture.PreviousPreview}}
+			seed := database.IndexSessionEntryBatch(ctx, []ingest.SessionEntryWrite{{SessionID: sid, Result: indexformat.V1{Entries: oldEntries}, IndexVersion: 1, IndexerVersion: ingest.HarvesterVersionRegistry[harness].IndexerVersion, IndexedAtMs: 100}})[0]
+			if seed.Err != nil {
+				t.Fatal(seed.Err)
+			}
+			indexer := &capturedInputIndexer{TranscriptIndexer: ingest.NewIndexerRegistry(filesystem, ingest.IndexerRegistryOptions{})[harness]}
+			config := makePipelineConfig(output)
+			config.Reindex = mode == indexInputIndexRun
+			pipeline, err := ingest.NewPipeline(filesystem, testutil.NoGitResolver(), map[ingest.Harness]ingest.AdapterFactory{harness: makeStubAdapter(nil, nil)}, config, ingest.WithStore(database), ingest.WithMetricsStore(database), ingest.WithIndexers(map[ingest.Harness]ingest.TranscriptIndexer{harness: indexer}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := pipeline.Run(ctx)
+			if err != nil || first.Summary.Indexed != 1 || indexer.byteParses != 1 {
+				t.Fatalf("current producer with unknown input was not verified: %+v parses=%d err=%v", first, indexer.byteParses, err)
+			}
+			state, err := database.ReadIndexState(ctx, sid)
+			if err != nil || state.IndexedInputHash == nil {
+				t.Fatalf("successful verification did not persist input: %+v %v", state, err)
+			}
+			second, err := pipeline.Run(ctx)
+			after, readErr := database.ReadIndexState(ctx, sid)
+			if err != nil || readErr != nil || second.Summary.Indexed != 0 || indexer.byteParses != 1 || !reflect.DeepEqual(state, after) {
+				t.Fatalf("unchanged proven input reran: %+v parses=%d err=%v", second, indexer.byteParses, err)
+			}
+			if err := publishIndexInputFixture(ctx, publisher, publicationTestArtifact(t, fixture.Malformed), metadataPath); err != nil {
+				t.Fatal(err)
+			}
+			lastGood, err := database.ReadIndexState(ctx, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err := pipeline.Run(ctx)
+			after, readErr = database.ReadIndexState(ctx, sid)
+			if err != nil || readErr != nil || failed.Summary.Indexed != 0 || indexer.byteParses != 2 || !reflect.DeepEqual(lastGood, after) {
+				t.Fatalf("changed input failure changed last-good proof or retried within this invocation: %+v parses=%d err=%v", failed, indexer.byteParses, err)
+			}
+			retry, err := pipeline.Run(ctx)
+			after, readErr = database.ReadIndexState(ctx, sid)
+			if err != nil || readErr != nil || retry.Summary.Indexed != 0 || indexer.byteParses != 3 || !reflect.DeepEqual(lastGood, after) {
+				t.Fatalf("next invocation did not retry changed input: %+v parses=%d err=%v", retry, indexer.byteParses, err)
+			}
+			if err := publishIndexInputFixture(ctx, publisher, publicationTestArtifact(t, fixture.Replacement), metadataPath); err != nil {
+				t.Fatal(err)
+			}
+			repaired, err := pipeline.Run(ctx)
+			after, readErr = database.ReadIndexState(ctx, sid)
+			if err != nil || readErr != nil || repaired.Summary.Indexed != 1 || indexer.byteParses != 4 || after.IndexedInputHash == nil || *after.IndexedInputHash == *lastGood.IndexedInputHash {
+				t.Fatalf("repaired input did not complete current-version indexing: %+v parses=%d state=%+v err=%v", repaired, indexer.byteParses, after, err)
 			}
 		})
 	}

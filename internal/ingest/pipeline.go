@@ -898,11 +898,9 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 	// Merge goroutine session results into main result slice.
 	sessionResults = append(sessionResults, drainResults...)
 
-	// Stage 4c: AUTO-DETECT stale index sessions (post-FILTER).
-	// Query DB against each registered harness's indexer revision.
-	// For each stale session, read metadata from peasant-sync output to reconstruct
-	// a DiscoveredSession, then append to indexSessions (skips EXTRACT+WRITE,
-	// goes straight to INDEX+COMPUTE).
+	// Stage 4c: maintain stored indexes independently of native discovery.
+	// Newly reconciled and older-producer sessions are checked first; the managed
+	// inventory also covers missing proofs and failures at an unchanged revision.
 	if p.metricsStore != nil {
 		staleIDs, staleErr := p.metricsStore.ListStaleIndexSessions(ctx, p.indexerTargets())
 		if staleErr != nil {
@@ -918,12 +916,17 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 		for _, im := range indexSessions {
 			queued[im.session.SessionID] = true
 		}
+		for _, im := range drainIndexed {
+			queued[im.session.SessionID] = true
+		}
 		for _, result := range drainResults {
 			if result.mirrorPending {
 				queued[result.SessionID] = true
 			}
 		}
-		for _, sid := range staleIDs {
+		candidates := append([]SessionID(nil), p.reconciledArtifacts...)
+		candidates = append(candidates, staleIDs...)
+		for _, sid := range candidates {
 			if queued[sid] {
 				continue
 			}
@@ -944,11 +947,22 @@ func (p *Pipeline) Run(ctx context.Context) (result *PipelineResult, err error) 
 					continue
 				}
 			}
-			indexSessions = append(indexSessions, indexedMeta{
-				session:              *reconstructed,
-				startMs:              startMs,
-				outputTranscriptPath: transcriptPath,
-			})
+			queued[sid] = true
+			if p.indexTargetNeedsWork(ctx, reindexTarget{session: *reconstructed, startMs: startMs, transcriptPath: transcriptPath}) {
+				indexSessions = append(indexSessions, indexedMeta{session: *reconstructed, startMs: startMs, outputTranscriptPath: transcriptPath})
+			}
+		}
+		// An earlier invocation may have mirrored files but failed indexing at
+		// the same producer revision. Inspect retained inputs, not artifact/index
+		// hash domains against one another or only this run's changed-file list.
+		for _, target := range p.scanPeasantSyncSessions(ctx) {
+			if queued[target.session.SessionID] {
+				continue
+			}
+			queued[target.session.SessionID] = true
+			if p.indexTargetNeedsWork(ctx, target) {
+				indexSessions = append(indexSessions, indexedMeta{session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath})
+			}
 		}
 	}
 
@@ -1349,12 +1363,17 @@ func (p *Pipeline) parseIndexMeta(ctx context.Context, im indexedMeta, activePar
 	var output indexformat.Result
 	if err == nil {
 		result.input = input
-		output, err = parseCapturedIndexInput(ctx, indexer, input)
+		if p.capturedInputNeedsWork(input) {
+			output, err = parseCapturedIndexInput(ctx, indexer, input)
+		} else {
+			reason := "stored index already matches captured input and current producer"
+			result.logEntry = p.makeIndexLogEntry(im, IndexOutcomeSkipped, 0, result.startedAt, &reason, nil)
+		}
 		input.transcript, input.tree = nil, nil
 	}
 	result.parseDuration = time.Since(parseStart)
 	activeParses.Add(-1)
-	if err == nil {
+	if err == nil && output != nil {
 		var version int
 		version, err = indexformat.VersionOf(output)
 		if err == nil && version != p.versionTargets()[im.session.Harness].IndexVersion {
@@ -3337,7 +3356,7 @@ func (p *Pipeline) reconstructFromSourceInfo(ctx context.Context, sid SessionID)
 // Steps:
 //  1. Scan peasant-sync output to enumerate all existing sessions (by reading metadata JSONs)
 //  2. Filter to targeted sessions:
-//     - Default: sessions below their harness indexer target (via DB query)
+//     - Default: stale producer or missing/changed captured input
 //     - With --force: all sessions matching the explicit harness/session/since filters
 //  3. For each targeted session:
 //     a. Index readable v9/v10 metadata from retained input without adapter refresh
@@ -3351,7 +3370,7 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	// Stage 1: DISCOVER — scan peasant-sync output.
 	discoverProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiscover})
-	scanned := p.scanPeasantSyncSessions()
+	scanned := p.scanPeasantSyncSessions(ctx)
 	emitProgress(prog, ProgressEvent{Kind: KindEnd, Stage: StageDiscover, Done: len(scanned), Total: len(scanned)})
 	p.recordIndexProfileStage(StageDiscover, discoverProfileStart, len(scanned), len(scanned))
 	prepareProfileStart := time.Now()
@@ -3361,7 +3380,14 @@ func (p *Pipeline) runReindex(ctx context.Context, start time.Time) (*PipelineRe
 	diffProfileStart := time.Now()
 	emitProgress(prog, ProgressEvent{Kind: KindStart, Stage: StageDiff, Total: len(scanned)})
 	var targeted []reindexTarget
-	if p.config.Force {
+	if !p.config.DryRun {
+		for index, target := range scanned {
+			if p.indexTargetNeedsWork(ctx, target) {
+				targeted = append(targeted, target)
+			}
+			emitProgress(prog, ProgressEvent{Kind: KindAdvance, Stage: StageDiff, Done: index + 1, Total: len(scanned)})
+		}
+	} else if p.config.Force {
 		// Explicit harness scope applies to force as well as stale maintenance.
 		for _, target := range scanned {
 			if p.config.Harness == nil || target.session.Harness == *p.config.Harness {
@@ -3683,101 +3709,6 @@ func (p *Pipeline) reindexFallbackLog(target reindexTarget) IndexLogEntry {
 	return p.makeIndexLogEntry(indexedMeta{
 		session: target.session, startMs: target.startMs, outputTranscriptPath: target.transcriptPath,
 	}, IndexOutcomeFallback, 0, time.Now().UnixMilli(), &reason, nil)
-}
-
-// scanPeasantSyncSessions walks the peasant-sync output directory and enumerates
-// all existing sessions by reading their metadata JSON files.
-// Returns a list of reindexTargets with reconstructed session info and original source paths.
-func (p *Pipeline) scanPeasantSyncSessions() []reindexTarget {
-	outputDir := string(p.config.OutputDir)
-	entries, err := p.fs.ReadDir(outputDir)
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			slog.Warn("reindex: managed output lookup failed", "error", managedInputIOError(outputDir, err))
-			p.reportMetadataRefusal(outputDir, managedInputIOError(outputDir, err))
-		}
-		return nil // Nothing can be enumerated safely.
-	}
-
-	var targets []reindexTarget
-	for _, hostEntry := range entries {
-		if !hostEntry.IsDir() || strings.HasPrefix(hostEntry.Name(), defaults.TempDirPrefix) {
-			continue
-		}
-		hostDir := fmt.Sprintf("%s/%s", outputDir, hostEntry.Name())
-		sessionEntries, err := p.fs.ReadDir(hostDir)
-		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				slog.Warn("reindex: managed host lookup failed", "error", managedInputIOError(hostDir, err))
-				p.reportMetadataRefusal(hostDir, managedInputIOError(hostDir, err))
-			}
-			continue
-		}
-		for _, sessionEntry := range sessionEntries {
-			if !sessionEntry.IsDir() {
-				continue
-			}
-			// Validate directory name as a SessionID (skip invalid names).
-			sid, err := NewSessionID(sessionEntry.Name())
-			if err != nil {
-				continue
-			}
-
-			smr, metadataErr := p.readSessionMetadata(hostDir, sid, "reindex")
-			if metadataErr == nil && smr != nil {
-				targets = append(targets, reindexTarget{
-					session:            smr.session,
-					startMs:            smr.startMs,
-					transcriptPath:     smr.transcriptPath,
-					originalSourcePath: smr.originalSourcePath,
-					refreshMetadata:    smr.refreshMetadata,
-				})
-			}
-
-			// Child metadata has its own compatibility boundary. A refused or
-			// missing parent artifact does not prevent indexing a supported child.
-			subagentsDir := fmt.Sprintf("%s/%s/%s", hostDir, sessionEntry.Name(), defaults.DirSubagents.String())
-			subEntries, subErr := p.fs.ReadDir(subagentsDir)
-			if subErr != nil {
-				if !errors.Is(subErr, fs.ErrNotExist) {
-					slog.Warn("reindex: managed subagent lookup failed", "error", managedInputIOError(subagentsDir, subErr))
-					p.reportMetadataRefusal(subagentsDir, managedInputIOError(subagentsDir, subErr))
-				}
-				continue
-			}
-			for _, subEntry := range subEntries {
-				if !subEntry.IsDir() {
-					continue
-				}
-				subSID, subSIDErr := NewSessionID(subEntry.Name())
-				if subSIDErr != nil {
-					continue
-				}
-				// readSessionMetadata builds: {hostDir}/{sid}/{metaFilename},
-				// so pass {hostDir}/{parentID}/subagents as the "hostDir"
-				// to produce the correct nested path.
-				subHostDir := subagentsDir
-				smr, metadataErr := p.readSessionMetadata(subHostDir, subSID, "reindex")
-				if metadataErr != nil || smr == nil {
-					continue
-				}
-				slog.Debug("reindex: discovered subagent session",
-					"parent_session_id", sid,
-					"subagent_session_id", subSID,
-					"host_slug", hostEntry.Name(),
-				)
-				targets = append(targets, reindexTarget{
-					session:            smr.session,
-					startMs:            smr.startMs,
-					transcriptPath:     smr.transcriptPath,
-					originalSourcePath: smr.originalSourcePath,
-					refreshMetadata:    smr.refreshMetadata,
-				})
-			}
-		}
-	}
-
-	return targets
 }
 
 // randomHex returns n random bytes encoded as a hex string.
