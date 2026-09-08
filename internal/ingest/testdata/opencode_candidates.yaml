@@ -435,13 +435,15 @@ build_tagged_mutations:
   - {name: reject-build-tagged-struct-field, filename: sqlite_tagged_field.go, build_tags: [evidence_negative_indexer], kind: struct_field, class: field, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-returned-callable, filename: sqlite_tagged_return.go, build_tags: [evidence_negative_indexer], kind: returned_callable, class: return, error_contains: first-class SQLite callable}
   - {name: reject-build-tagged-blob-callable-aliases, filename: sqlite_tagged_blob.go, build_tags: [evidence_negative_indexer], kind: blob_callable_aliases, class: direct_data, error_contains: first-class SQLite callable}
+# Configuration counts include eight host custom-tag assignments and one
+# complementary-platform assignment with no custom tags enabled.
 build_topology_cases:
   - name: discover-independent-custom-tags
     sources:
       - {name: topology-alpha, filename: sqlite_topology_alpha.go, build_expression: topology_alpha, kind: anchor, expected_activations: 4}
       - {name: topology-beta, filename: sqlite_topology_beta.go, build_expression: topology_beta, kind: anchor, expected_activations: 4}
     expected_custom_tags: [evidence_negative_indexer, topology_alpha, topology_beta]
-    expected_configurations: 8
+    expected_configurations: 9
     expected_forbidden_configurations: 0
     expected_outcome: discovery
     error_contains: ""
@@ -451,7 +453,7 @@ build_topology_cases:
       - {name: topology-beta, filename: sqlite_topology_beta.go, build_expression: topology_beta, kind: anchor, expected_activations: 4}
       - {name: topology-conjunction-execution, filename: sqlite_topology_conjunction.go, build_expression: "topology_alpha && topology_beta", kind: forbidden_execute, expected_activations: 2}
     expected_custom_tags: [evidence_negative_indexer, topology_alpha, topology_beta]
-    expected_configurations: 8
+    expected_configurations: 9
     expected_forbidden_configurations: 2
     expected_outcome: forbidden_callable
     error_contains: unapproved SQLite entry path
