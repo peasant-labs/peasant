@@ -138,30 +138,47 @@ func sqliteContentModTime(filesystem FileSystem, databasePath string) (time.Time
 // the versioned JSON transcript Peasant owns. Database, WAL, and SHM bytes never
 // enter the returned data.
 func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
+	result, err := a.materializeTranscriptInput(ctx, session, false)
+	return result.Metadata, result.Transcript, err
+}
+
+func (a *OpenCodeAdapter) MaterializeTranscriptWithCursor(ctx context.Context, session DiscoveredSession) (MaterializedTranscript, error) {
+	return a.materializeTranscriptInput(ctx, session, true)
+}
+
+func (a *OpenCodeAdapter) materializeTranscriptInput(ctx context.Context, session DiscoveredSession, captureCursor bool) (MaterializedTranscript, error) {
+	var result MaterializedTranscript
 	if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
-		return a.materializeCurrentTranscript(ctx, session)
+		return a.materializeCurrentTranscriptInput(ctx, session, captureCursor)
 	}
 	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
-		return nil, nil, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
+		return result, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
 	}
 	legacyID, err := NewOpenCodeLegacySessionID(string(session.SessionID))
 	if err != nil {
-		return nil, nil, err
+		return result, err
 	}
 	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
 	if err != nil {
-		return nil, nil, err
+		return result, err
 	}
 	var projection openCodeLegacyProjection
 	var dropped []openCodeDroppedOrphanPart
-	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+	if err := a.withOpenCodeMaterializationSource(ctx, session.SourcePath.String(), captureCursor, func(source OpenCodeSQLiteSource) error {
 		var readErr error
 		projection, dropped, readErr = readOpenCodeLegacyProjectionWithDiagnostics(ctx, source, legacyID, pageSize)
+		if readErr == nil && captureCursor {
+			result.EventSeq, result.Diagnostics, readErr = acquireOpenCodeMaterializationCursor(ctx, source, session)
+		}
 		return readErr
 	}); err != nil {
-		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
+		return MaterializedTranscript{}, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
 	}
-	return a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+	result.Metadata, result.Transcript, err = a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+	if err != nil {
+		return MaterializedTranscript{}, err
+	}
+	return result, nil
 }
 
 // finishLegacyManagedProjection encodes a read legacy projection into the

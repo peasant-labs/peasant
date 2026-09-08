@@ -309,25 +309,33 @@ func (a *OpenCodeAdapter) currentControlOnlySessions(ctx context.Context, source
 	return controlOnly
 }
 
-func (a *OpenCodeAdapter) materializeCurrentTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
+func (a *OpenCodeAdapter) materializeCurrentTranscriptInput(ctx context.Context, session DiscoveredSession, captureCursor bool) (MaterializedTranscript, error) {
+	var result MaterializedTranscript
 	currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
 	if err != nil {
-		return nil, nil, err
+		return result, err
 	}
 	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
 	if err != nil {
-		return nil, nil, err
+		return result, err
 	}
 	var projection openCodeCurrentProjection
 	var unknownControlTypes map[string]int
-	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+	if err := a.withOpenCodeMaterializationSource(ctx, session.SourcePath.String(), captureCursor, func(source OpenCodeSQLiteSource) error {
 		var readErr error
 		projection, unknownControlTypes, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
+		if readErr == nil && captureCursor {
+			result.EventSeq, result.Diagnostics, readErr = acquireOpenCodeMaterializationCursor(ctx, source, session)
+		}
 		return readErr
 	}); err != nil {
-		return nil, nil, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
+		return MaterializedTranscript{}, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading selected session_message rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed current rows in OpenCode and retry", session.SessionID, err)
 	}
-	return a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	result.Metadata, result.Transcript, err = a.finishCurrentManagedProjection(ctx, session, projection, unknownControlTypes)
+	if err != nil {
+		return MaterializedTranscript{}, err
+	}
+	return result, nil
 }
 
 // finishCurrentManagedProjection encodes a read current projection into the

@@ -526,6 +526,7 @@ type OpenCodeSQLiteSourceOptions struct {
 	clock                  OpenCodeSQLiteDeadlineClock
 	cancellationCheckpoint openCodeSQLiteCancellationCheckpoint
 	openConnection         openCodeSQLiteConnectionOpener
+	readSnapshot           bool // private materialization-only read transaction
 }
 
 // openCodeSQLiteConnectionOpener remains package-private so production callers

@@ -760,8 +760,8 @@ func validateOpenCodeBuildTopologyCase(fixtureCase openCodeBuildTopologyCase) er
 		}
 		seenTags[tag] = true
 	}
-	if fixtureCase.ExpectedConfigurations < 0 || fixtureCase.ExpectedConfigurations > 1<<len(fixtureCase.ExpectedCustomTags) || fixtureCase.ExpectedConfigurations > 256 {
-		return fmt.Errorf("OpenCode build-topology case %q configuration count %d exceeds its %d-tag/256-configuration bound", fixtureCase.Name, fixtureCase.ExpectedConfigurations, len(fixtureCase.ExpectedCustomTags))
+	if fixtureCase.ExpectedConfigurations < 0 || fixtureCase.ExpectedConfigurations > 1+(1<<len(fixtureCase.ExpectedCustomTags)) || fixtureCase.ExpectedConfigurations > 257 {
+		return fmt.Errorf("OpenCode build-topology case %q configuration count %d exceeds its %d-tag bound plus one alternate-platform assignment (257 maximum)", fixtureCase.Name, fixtureCase.ExpectedConfigurations, len(fixtureCase.ExpectedCustomTags))
 	}
 	if fixtureCase.ExpectedForbiddenConfigurations < 0 || fixtureCase.ExpectedForbiddenConfigurations > fixtureCase.ExpectedConfigurations {
 		return fmt.Errorf("OpenCode build-topology case %q forbidden configuration count %d is outside 0..%d", fixtureCase.Name, fixtureCase.ExpectedForbiddenConfigurations, fixtureCase.ExpectedConfigurations)
@@ -1099,10 +1099,10 @@ func TestOpenCodePrivateExecutionStatementsMatchFixtureAllowlist(t *testing.T) {
 	for _, configuration := range configurations {
 		statements, extractErr := extractOpenCodePrivateExecutionStatements(configuration.files, configuration.files)
 		if extractErr != nil {
-			t.Fatalf("resolve private OpenCode SQLite execution statements for build tags %v: %v", configuration.tags, extractErr)
+			t.Fatalf("resolve private OpenCode SQLite execution statements for GOOS %s and build tags %v: %v", configuration.goos, configuration.tags, extractErr)
 		}
 		if validationErr := validateOpenCodePrivateExecutionStatements(statements, fixture); validationErr != nil {
-			t.Fatalf("validate private OpenCode SQLite execution statements for build tags %v: %v", configuration.tags, validationErr)
+			t.Fatalf("validate private OpenCode SQLite execution statements for GOOS %s and build tags %v: %v", configuration.goos, configuration.tags, validationErr)
 		}
 
 		for _, mutation := range fixture.QueryGuardMutations {
@@ -1468,6 +1468,7 @@ func ingestProductionFiles(directory string) ([]string, error) {
 }
 
 type openCodePackageConfiguration struct {
+	goos  string
 	tags  []string
 	files []string
 }
@@ -1494,7 +1495,7 @@ func openCodePackageProductionConfigurations(directory string) ([]openCodePackag
 				enabled = append(enabled, tag)
 			}
 		}
-		files, listErr := openCodeGoListProductionFiles(directory, enabled)
+		files, listErr := openCodeGoListProductionFiles(directory, enabled, runtime.GOOS)
 		if listErr != nil {
 			return nil, listErr
 		}
@@ -1506,8 +1507,22 @@ func openCodePackageProductionConfigurations(directory string) ([]openCodePackag
 		for _, filename := range files {
 			coveredFiles[filepath.Clean(filename)] = true
 		}
-		configurations = append(configurations, openCodePackageConfiguration{tags: enabled, files: files})
+		configurations = append(configurations, openCodePackageConfiguration{goos: runtime.GOOS, tags: enabled, files: files})
 	}
+	// One complementary OS assignment covers the advisory-lock fallback without
+	// multiplying the custom-tag matrix across every supported Go platform.
+	alternateGOOS := "windows"
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		alternateGOOS = "linux"
+	}
+	files, listErr := openCodeGoListProductionFiles(directory, nil, alternateGOOS)
+	if listErr != nil {
+		return nil, listErr
+	}
+	for _, filename := range files {
+		coveredFiles[filepath.Clean(filename)] = true
+	}
+	configurations = append(configurations, openCodePackageConfiguration{goos: alternateGOOS, files: files})
 	for _, filename := range production {
 		if !coveredFiles[filepath.Clean(filename)] {
 			return nil, fmt.Errorf("discover ingest build configurations never activated production source %q; its SQLite callable identity cannot be trusted; use satisfiable package build constraints or extend the bounded configuration policy", filename)
@@ -1519,7 +1534,7 @@ func openCodePackageProductionConfigurations(directory string) ([]openCodePackag
 	return configurations, nil
 }
 
-func openCodeGoListProductionFiles(directory string, tags []string) ([]string, error) {
+func openCodeGoListProductionFiles(directory string, tags []string, goos string) ([]string, error) {
 	arguments := []string{"list", "-json"}
 	if len(tags) != 0 {
 		arguments = append(arguments, "-tags="+strings.Join(tags, ","))
@@ -1527,9 +1542,10 @@ func openCodeGoListProductionFiles(directory string, tags []string) ([]string, e
 	arguments = append(arguments, ".")
 	command := exec.Command("go", arguments...)
 	command.Dir = directory
+	command.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+runtime.GOARCH)
 	output, err := command.Output()
 	if err != nil {
-		return nil, fmt.Errorf("resolve non-test ingest package files with go list for build tags %v: %w", tags, err)
+		return nil, fmt.Errorf("resolve non-test ingest package files with go list for GOOS %s and build tags %v: %w", goos, tags, err)
 	}
 	var listed struct {
 		GoFiles  []string
@@ -2125,7 +2141,7 @@ func extractOpenCodePrivateExecutionStatements(typeCheckFiles, inventoryFiles []
 			enclosingIdentity := openCodeReceiverIdentity(enclosing) + "." + enclosing.Name()
 			executorPrepareCount := 0
 			executorExecuteCount := 0
-			initializerExecuteCount := 0
+			initializerStatements := make(map[string][]*ast.CallExpr)
 			parents := make([]ast.Node, 0, 16)
 			ast.Inspect(function.Body, func(node ast.Node) bool {
 				if node == nil {
@@ -2167,8 +2183,6 @@ func extractOpenCodePrivateExecutionStatements(typeCheckFiles, inventoryFiles []
 					executorPrepareCount++
 				case openCodeApprovedExecutorExecute:
 					executorExecuteCount++
-				case openCodeApprovedInitializerExecute:
-					initializerExecuteCount++
 				}
 				if !includeStatement {
 					return true
@@ -2178,14 +2192,18 @@ func extractOpenCodePrivateExecutionStatements(typeCheckFiles, inventoryFiles []
 					err = fmt.Errorf("%s uses a dynamic, formatted, concatenated, or unresolved SQL expression: %w", typed.fileSet.Position(statementExpression.Pos()), resolveErr)
 					return true
 				}
-				statements = append(statements, normalizeOpenCodeQuery(statement))
+				normalized := normalizeOpenCodeQuery(statement)
+				if approvedKind == openCodeApprovedInitializerExecute {
+					initializerStatements[normalized] = append(initializerStatements[normalized], call)
+				}
+				statements = append(statements, normalized)
 				return true
 			})
 			if err == nil && enclosingIdentity == "zombiezenOpenCodeSQLiteSource.executeRowsLocked" && (executorPrepareCount != 1 || executorExecuteCount != 1) {
 				err = fmt.Errorf("%s: exact bounded executor shape has %d direct sqlite.Conn.PrepareTransient and %d direct sqlitex.ExecuteTransient calls, want exactly one of each bound to the exact statement parameter; remove alternate execution paths and restore the single preflight plus execution pair", typed.fileSet.Position(function.Pos()), executorPrepareCount, executorExecuteCount)
 			}
-			if err == nil && enclosingIdentity == "zombiezenOpenCodeSQLiteSource.initialize" && initializerExecuteCount != 2 {
-				err = fmt.Errorf("%s: exact source initializer has %d direct statically inventoried sqlitex.ExecuteTransient calls, want exactly two query_only setup/verification calls; restore the fixed initializer allowlist", typed.fileSet.Position(function.Pos()), initializerExecuteCount)
+			if err == nil && enclosingIdentity == "zombiezenOpenCodeSQLiteSource.initialize" {
+				err = validateOpenCodeInitializerStatements(function, enclosing, initializerStatements, typed.info)
 			}
 		}
 		if err != nil {
@@ -2193,6 +2211,110 @@ func extractOpenCodePrivateExecutionStatements(typeCheckFiles, inventoryFiles []
 		}
 	}
 	return statements, nil
+}
+
+// The privileged initializer is governed by statement membership and the
+// protection sequence, never by how many calls happen to be in its body.
+func validateOpenCodeInitializerStatements(function *ast.FuncDecl, enclosing *types.Func, statements map[string][]*ast.CallExpr, info *types.Info) error {
+	required := map[string]bool{"pragma query_only=on": true, "begin deferred": true, "pragma query_only": true}
+	for statement := range statements {
+		if !required[statement] {
+			return fmt.Errorf("source initializer contains unapproved setup statement %q; keep only query_only setup, optional read snapshot, and verification", statement)
+		}
+	}
+	for statement := range required {
+		if _, present := statements[statement]; !present {
+			return fmt.Errorf("source initializer is missing required setup statement %q", statement)
+		}
+	}
+	signature := enclosing.Type().(*types.Signature)
+	isReceiver := func(expression ast.Expr) bool {
+		identifier, ok := expression.(*ast.Ident)
+		return ok && info.Uses[identifier] == signature.Recv()
+	}
+	isReceiverField := func(expression ast.Expr, name string) bool {
+		selector, ok := expression.(*ast.SelectorExpr)
+		return ok && selector.Sel.Name == name && isReceiver(selector.X)
+	}
+	var authorizer token.Pos
+	var setupErr error
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		selection := info.Selections[selector]
+		if selection == nil {
+			return true
+		}
+		target, ok := selection.Obj().(*types.Func)
+		if !ok || target.Pkg() == nil || target.Pkg().Path() != "zombiezen.com/go/sqlite" || openCodeReceiverIdentity(target) != "Conn" || target.Name() != "SetAuthorizer" {
+			return true
+		}
+		valid := isReceiverField(selector.X, "conn") && len(call.Args) == 1
+		if valid {
+			conversion, ok := call.Args[0].(*ast.CallExpr)
+			valid = ok && len(conversion.Args) == 1
+			if valid {
+				conversionType, ok := info.TypeOf(conversion.Fun).(*types.Named)
+				valid = ok && conversionType.Obj().Pkg() != nil && conversionType.Obj().Pkg().Path() == "zombiezen.com/go/sqlite" && conversionType.Obj().Name() == "AuthorizeFunc"
+			}
+			if valid {
+				authorize, ok := conversion.Args[0].(*ast.SelectorExpr)
+				valid = ok && isReceiver(authorize.X)
+				if valid {
+					method := info.Selections[authorize]
+					valid = method != nil && method.Obj().Name() == "authorizeRead"
+				}
+			}
+		}
+		if !valid {
+			setupErr = fmt.Errorf("source initializer must install its own restrictive authorizeRead method on its native connection")
+		}
+		if authorizer.IsValid() {
+			setupErr = fmt.Errorf("source initializer reconfigures its authorizer; preserve the established restrictive boundary")
+		}
+		authorizer = call.Pos()
+		return true
+	})
+	if setupErr != nil {
+		return setupErr
+	}
+	if !authorizer.IsValid() {
+		return fmt.Errorf("source initializer does not install its restrictive authorizer")
+	}
+	for _, enable := range statements["pragma query_only=on"] {
+		for _, begin := range statements["begin deferred"] {
+			if enable.Pos() >= begin.Pos() || begin.Pos() >= authorizer {
+				return fmt.Errorf("source initializer must enable query_only before beginning its read snapshot, then install the restrictive authorizer")
+			}
+			guarded := false
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				branch, ok := node.(*ast.IfStmt)
+				if !ok || begin.Pos() < branch.Body.Pos() || begin.End() > branch.Body.End() {
+					return true
+				}
+				condition, ok := branch.Cond.(*ast.SelectorExpr)
+				if ok && condition.Sel.Name == "readSnapshot" && isReceiverField(condition.X, "options") {
+					guarded = true
+				}
+				return true
+			})
+			if !guarded {
+				return fmt.Errorf("source initializer read transaction must be guarded by its private readSnapshot option")
+			}
+		}
+	}
+	for _, verify := range statements["pragma query_only"] {
+		if verify.Pos() <= authorizer {
+			return fmt.Errorf("source initializer must verify query_only after installing its restrictive authorizer")
+		}
+	}
+	return nil
 }
 
 func rejectPackageLevelOpenCodeSQLiteCallables(file *ast.File, typed openCodeTypedSource) error {
