@@ -16,7 +16,8 @@ import (
 // SAME way: both call QueryPushCandidates with this query, eliminating the prior
 // divergence where the pipeline handled PushMethodBySource but the wizard did not.
 type PushCandidateQuery struct {
-	// Force selects all pushable sessions regardless of pushed_at (--force).
+	// Force requests an upload attempt even when the authoritative operation
+	// matches the last validated receipt (--force).
 	Force bool
 	// SourceProvider, when non-empty, filters to a single model_harness value.
 	SourceProvider string
@@ -59,25 +60,30 @@ func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandid
 
 	case q.SourceProvider != "":
 		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-		// --source-provider: unpushed sessions for one provider.
-		return store.UnpushedSessionsByProvider(ctx, q.SourceProvider)
+		sessions, err := store.AllPushableSessions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return filterByProvider(sessions, q.SourceProvider), nil
 
 	case q.Method == config.PushMethodBySource:
 		// push.method by-source: iterate over configured providers.
 		var sessions []ingest.PushSessionRow
 		for _, provider := range q.Sources {
 			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-			provSessions, provErr := store.UnpushedSessionsByProvider(ctx, provider)
+			all, provErr := store.AllPushableSessions(ctx)
 			if provErr != nil {
 				return nil, fmt.Errorf("query provider %q: %w", provider, provErr)
 			}
-			sessions = append(sessions, provSessions...)
+			sessions = append(sessions, filterByProvider(all, provider)...)
 		}
 		return sessions, nil
 
 	default:
 		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-		// Default (method=all or empty): all unpushed sessions.
-		return store.UnpushedSessions(ctx)
+		// Canonical receipt comparison happens after current content and metadata
+		// are prepared. A pushed_at clock comparison cannot safely exclude a
+		// locally changed session before that comparison.
+		return store.AllPushableSessions(ctx)
 	}
 }

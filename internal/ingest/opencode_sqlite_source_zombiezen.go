@@ -90,11 +90,12 @@ type zombiezenOpenCodeSQLiteSource struct {
 	conn    *sqlite.Conn
 	permit  chan struct{}
 
-	stateMu      sync.Mutex
-	closing      bool
-	connClosed   bool
-	activeCancel context.CancelFunc
-	denied       string
+	stateMu          sync.Mutex
+	closing          bool
+	connClosed       bool
+	activeCancel     context.CancelFunc
+	denied           string
+	allowTransaction bool
 
 	// Cache the preferred metadata table and column support for this source's
 	// lifetime. An upstream schema change fails its read without switching tables.
@@ -147,6 +148,48 @@ func (s openCodeSessionColumnSupport) extendedAttribution() bool {
 }
 
 var _ OpenCodeSQLiteSource = (*zombiezenOpenCodeSQLiteSource)(nil)
+
+func (s *zombiezenOpenCodeSQLiteSource) withReadTransaction(ctx context.Context, fn func() error) (err error) {
+	select {
+	case <-s.permit:
+	case <-ctx.Done():
+		return fmt.Errorf("begin OpenCode SQLite snapshot for %q: %w", s.path, ctx.Err())
+	}
+	if err = s.beginReadTransactionLocked(ctx); err != nil {
+		s.permit <- struct{}{}
+		return fmt.Errorf("begin OpenCode SQLite snapshot for %q: %w", s.path, err)
+	}
+	s.permit <- struct{}{}
+	defer s.endReadTransaction(ctx, &err)
+	err = fn()
+	return err
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) beginReadTransactionLocked(ctx context.Context) error {
+	s.allowTransaction = true
+	defer func() { s.allowTransaction = false }()
+	return s.executeRowsLocked(ctx, "BEGIN", nil, nil)
+}
+
+func (s *zombiezenOpenCodeSQLiteSource) endReadTransaction(ctx context.Context, operationErr *error) {
+	select {
+	case <-s.permit:
+	case <-ctx.Done():
+		return
+	}
+	defer func() { s.permit <- struct{}{} }()
+	s.allowTransaction = true
+	var endErr error
+	if *operationErr != nil {
+		endErr = s.executeRowsLocked(ctx, "ROLLBACK", nil, nil)
+	} else {
+		endErr = s.executeRowsLocked(ctx, "COMMIT", nil, nil)
+	}
+	s.allowTransaction = false
+	if endErr != nil {
+		*operationErr = errors.Join(*operationErr, endErr)
+	}
+}
 
 // OpenOpenCodeSQLiteSource opens one private zombiezen SQLite connection in
 // read-only URI mode, enables query_only, installs a deny-by-default statement
@@ -229,6 +272,10 @@ func (s *zombiezenOpenCodeSQLiteSource) authorizeRead(action sqlite.Action) sqli
 	switch action.Type() {
 	case sqlite.OpSelect, sqlite.OpRead, sqlite.OpFunction, sqlite.OpRecursive:
 		return sqlite.AuthResultOK
+	case sqlite.OpTransaction:
+		if s.allowTransaction {
+			return sqlite.AuthResultOK
+		}
 	case sqlite.OpPragma:
 		if strings.EqualFold(action.Pragma(), "query_only") && action.PragmaArg() == "" {
 			return sqlite.AuthResultOK

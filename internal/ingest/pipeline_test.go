@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -551,12 +552,19 @@ func TestPipeline_Force(t *testing.T) {
 	}
 }
 
-func TestPipeline_ActiveSessionSkipped(t *testing.T) {
+func TestPipeline_ActiveSessionIngestedByDefault(t *testing.T) {
 	mfs := testutil.NewMemFS()
 	git := testutil.DefaultGitResolver()
 
 	sourcePath := fmt.Sprintf("%s/%s.jsonl", testSourceDir, testSessionID)
 	setupSourceFile(t, mfs, sourcePath)
+	completeSource, err := mfs.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mfs.WriteFile(sourcePath, append(append([]byte(nil), completeSource...), []byte(`{"type":"assistant"`)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	// ModTime is very recent (within staleness threshold).
 	recentModTime := time.Now().Add(-30 * time.Second)
@@ -593,7 +601,7 @@ func TestPipeline_ActiveSessionSkipped(t *testing.T) {
 		t.Errorf("Sessions[0].Status = %v, want DiffActive", result.Sessions[0].Status)
 	}
 
-	// Active sessions should not be ingested.
+	// Activity remains visible in the summary but no longer excludes the session.
 	if result.Summary.Active != 1 {
 		t.Errorf("Summary.Active = %d, want 1", result.Summary.Active)
 	}
@@ -601,11 +609,19 @@ func TestPipeline_ActiveSessionSkipped(t *testing.T) {
 		t.Errorf("Summary.New = %d, want 0", result.Summary.New)
 	}
 
-	// No output files written.
+	// The captured active snapshot is written without a compatibility flag.
 	base := expectedOutputBase(testOutputDir, testSessionID)
 	metaPath := fmt.Sprintf("%s/%s--metadata.json", base, testSessionID)
-	if _, err := mfs.Stat(metaPath); err == nil {
-		t.Errorf("metadata should not be written for active session")
+	if _, err := mfs.Stat(metaPath); err != nil {
+		t.Errorf("metadata should be written for active session: %v", err)
+	}
+	transcriptPath := fmt.Sprintf("%s/%s--transcript.jsonl", base, testSessionID)
+	gotTranscript, err := mfs.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotTranscript, completeSource) {
+		t.Fatalf("active captured transcript included an incomplete trailing record: got %q want %q", gotTranscript, completeSource)
 	}
 }
 

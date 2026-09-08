@@ -1017,7 +1017,13 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			cwd = decoded
 		}
 
-		remoteURL, remoteErr := a.git.RemoteURL(ctx, cwd)
+		branchStr, branchErr := a.git.Branch(ctx, cwd)
+		branch := firstLine.GitBranch
+		if branch == "" && branchErr == nil && branchStr != "" {
+			branch = branchStr
+		}
+		remoteURL, trackingStr := ResolveGitRemote(ctx, a.git, cwd, branch, "")
+		remoteErr := error(nil)
 		// If direct remote check fails, walk up parent directories to find one.
 		// This ensures sessions from decoded slug paths (which may point to a
 		// subdirectory) still resolve the correct git remote for project grouping.
@@ -1027,18 +1033,11 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 				remoteErr = nil
 			}
 		}
-		branchStr, branchErr := a.git.Branch(ctx, cwd)
 		worktreeStr, worktreeErr := a.git.Worktree(ctx, cwd)
-		trackingStr, trackingErr := a.git.TrackingBranch(ctx, cwd)
 
 		// Build GitContext — all fields are nullable.
 		gitInfo := GitContext{}
 
-		// Prefer gitBranch from JSONL over resolved branch.
-		branch := firstLine.GitBranch
-		if branch == "" && branchErr == nil && branchStr != "" {
-			branch = branchStr
-		}
 		if branch != "" {
 			b := branch
 			gitInfo.Branch = &b
@@ -1054,7 +1053,7 @@ func (a *ClaudeAdapter) ExtractMetadata(ctx context.Context, session DiscoveredS
 			gitInfo.Worktree = &w
 		}
 
-		if trackingErr == nil && trackingStr != "" {
+		if trackingStr != "" {
 			tr := trackingStr
 			gitInfo.Tracking = &tr
 		}

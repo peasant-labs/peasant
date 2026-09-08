@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -677,16 +678,8 @@ func (p *Pipeline) Run(ctx context.Context) (*PipelineResult, error) {
 			})
 		case DiffActive:
 			recordDryRun(entry, DiffActive)
-			if !p.config.IncludeActive && !requiredParents[entry.Session.SessionID] {
-				sessionResults = append(sessionResults, SessionResult{
-					SessionID:  entry.Session.SessionID,
-					Harness:    entry.Session.Harness,
-					ParentUUID: entry.Session.ParentUUID,
-					Status:     DiffActive,
-				})
-			} else {
-				toProcessEntries = append(toProcessEntries, entry)
-			}
+			// Activity is diagnostic only; capture a finite source view by default.
+			toProcessEntries = append(toProcessEntries, entry)
 		default: // DiffNew, DiffUpdated
 			recordDryRun(entry, entry.Status)
 			toProcessEntries = append(toProcessEntries, entry)
@@ -1021,8 +1014,10 @@ func (p *Pipeline) drainLoop(
 					})
 					if p.store != nil {
 						storeBatch = append(storeBatch, StoreEntry{
-							Metadata: wr.meta,
-							Session:  sessionFromWorkerResult(wr),
+							Metadata:          wr.meta,
+							Session:           sessionFromWorkerResult(wr),
+							SourceFingerprint: wr.sourceFingerprint,
+							EventSeq:          wr.eventSeq,
 						})
 					}
 				}
@@ -1040,7 +1035,6 @@ func (p *Pipeline) drainLoop(
 						// succeeds so the FK constraint on session_commits(session_id) is satisfied.
 						// Called unconditionally (including empty slice) so that a --force re-ingest
 						// that finds 0 commits deletes stale DB rows, keeping JSON and DB in sync.
-						cursorStore, cursorStoreOK := p.store.(OpenCodeSeqCursorStore)
 						for _, entry := range storeBatch {
 							if err := p.store.UpsertSessionCommits(ctx, entry.Metadata.SessionID, entry.Metadata.Git.Commits); err != nil {
 								slog.Warn("pipeline: upsert session_commits",
@@ -1050,13 +1044,6 @@ func (p *Pipeline) drainLoop(
 							// Record the OpenCode change cursor for a session just ingested,
 							// so a later in-place rewrite that bumps the sequence without
 							// moving a time column re-ingests it. Non-fatal.
-							if cursorStoreOK && entry.Session.Harness == HarnessOpenCode {
-								if err := cursorStore.UpsertOpenCodeSeqCursor(ctx, entry.Metadata.SessionID, entry.Session.EventSeq); err != nil {
-									slog.Warn("pipeline: upsert opencode_session_seq_cursor",
-										"session_id", entry.Metadata.SessionID,
-										"error", err)
-								}
-							}
 						}
 					}
 				})
@@ -1765,29 +1752,18 @@ func pipelineCancellation(ctx context.Context, err error) error {
 //
 // The caller supplies a location whose IngestedMs is set; a session with no
 // store record is DiffNew by definition and never reaches here.
-func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, stalenessThreshold time.Duration) DiffStatus {
-	isActive := stalenessThreshold > 0 && time.Since(session.stalenessSourceTime()) < stalenessThreshold
-
+func ClassifyAgainstStore(session DiscoveredSession, loc SessionLocation, _ time.Duration) DiffStatus {
 	if loc.IngestedMs != nil && *loc.IngestedMs > 0 {
 		// Source modified more recently than DB ingested_ms: re-ingest.
 		if session.ModTime.After(time.UnixMilli(*loc.IngestedMs)) {
-			if isActive {
-				return DiffActive
-			}
 			return DiffUpdated
 		}
 	}
 	// Schema version behind current (DB value): re-ingest.
 	if loc.SchemaVersion < CurrentSchemaVersion {
-		if isActive {
-			return DiffActive
-		}
 		return DiffUpdated
 	}
-	// Staleness check last.
-	if isActive {
-		return DiffActive
-	}
+	// Activity does not make an otherwise unchanged captured source fresh.
 	return DiffUnchanged
 }
 
@@ -1826,6 +1802,24 @@ func (p *Pipeline) classifySession(ctx context.Context, session DiscoveredSessio
 	// This is the primary code path for sessions already in the DB.
 	if loc, ok := p.locationCache[session.SessionID]; ok && loc.IngestedMs != nil {
 		status := ClassifyAgainstStore(session, loc, p.config.StalenessThreshold)
+		if loc.SourceEvidenceSupported && loc.SourceFingerprint == nil && status == DiffUnchanged {
+			if isActive {
+				return DiffActive, nil
+			}
+			return DiffUpdated, nil
+		}
+		if status == DiffUnchanged && p.git != nil {
+			identityPath := session.CWD
+			if session.ProjectWorktree != "" {
+				identityPath = session.ProjectWorktree
+			}
+			if identityPath != "" {
+				expectedRemote, _ := ResolveGitRemote(ctx, p.git, identityPath, session.Branch, "")
+				if expectedRemote != "" && NormalizeRemoteForMatch(expectedRemote) != NormalizeRemoteForMatch(loc.GitRemote) {
+					return DiffUpdated, nil
+				}
+			}
+		}
 		// The change cursor is an additional trigger on top of the clock: a session
 		// the clock reports unchanged is re-ingested when its newest event sequence
 		// moved past the last ingested value, catching an in-place rewrite that
@@ -2043,20 +2037,35 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	if !ok {
 		return fail(fmt.Errorf("no adapter for provider %s", session.Harness))
 	}
-	adapter := factory(p.fs, p.git, p.salt)
-
 	if err := session.TranscriptOrigin.Validate(); err != nil {
 		return fail(fmt.Errorf("prepare transcript for session %s failed before source access: %w; the session was not written or stored; update the discovering adapter to return a supported typed origin", session.SessionID, err))
 	}
 	var rawData []byte
 	var meta *UnifiedMetadata
 	var err error
+	adapterFS := p.fs
+	if session.TranscriptOrigin == TranscriptOriginFile {
+		rawData, err = p.fs.ReadFile(string(session.SourcePath))
+		if err != nil {
+			return fail(fmt.Errorf("capture transcript source for %s: %w; prior stored state remains unchanged; restore source readability and retry", session.SessionID, err))
+		}
+		if session.SourceFormat == SourceFormatJSONL {
+			rawData = completeJSONLPrefix(rawData)
+		}
+		if session.Harness != HarnessOpenCode {
+			adapterFS = capturedSourceFileSystem{FileSystem: p.fs, path: session.SourcePath.String(), data: rawData}
+		}
+	}
+	adapter := factory(adapterFS, p.git, p.salt)
 	if session.TranscriptOrigin != TranscriptOriginFile {
 		materializer, ok := adapter.(TranscriptMaterializer)
 		if !ok {
 			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: typed transcript origin %d requires a managed materializer but adapter %T has none; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, session.TranscriptOrigin, adapter))
 		}
-		meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
+		var captured MaterializedTranscript
+		captured, err = materializer.MaterializeTranscript(ctx, session)
+		meta, rawData = captured.Metadata, captured.Data
+		session.EventSeq = captured.EventSeq
 	} else {
 		meta, err = adapter.ExtractMetadata(ctx, session)
 	}
@@ -2117,16 +2126,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	tmpTranscriptPath := fmt.Sprintf("%s/%s", tmpDir, transcriptFilename)
 	var transcriptData []byte
 
-	if session.TranscriptOrigin == TranscriptOriginFile {
-		rawData, err = p.fs.ReadFile(string(session.SourcePath))
-		if err != nil {
-			result.Error = errors.Join(
-				fmt.Errorf("read transcript for %s: %w", session.SessionID, err),
-				p.fs.RemoveAll(tmpDir),
-			)
-			return workerResult{result: result}
-		}
-	}
+	sourceFingerprint := sha256.Sum256(rawData)
 	if session.Harness == HarnessStrike && session.SourceFormat == SourceFormatJSONL {
 		var diagnostics []DiagnosticEntry
 		rawData, diagnostics = filterStrikeOversizedRecords(rawData, session.SourcePath.String())
@@ -2305,23 +2305,28 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		)
 		return workerResult{result: result}
 	}
-
-	// KNOWN LIMITATION (M11): RemoveAll + renameDir is not atomic. There is a brief
-	// window where the session directory does not exist. For MVP this is acceptable
-	// since ingestion runs as a single sequential process. If concurrent readers are
-	// added, this should use a two-phase approach (rename old to .old, rename new to
-	// final, then remove .old).
-	if _, err := p.fs.Stat(sessionDir); err == nil {
-		if err := p.fs.RemoveAll(sessionDir); err != nil {
-			result.Error = errors.Join(
-				fmt.Errorf("remove old session dir for %s: %w", session.SessionID, err),
-				p.fs.RemoveAll(tmpDir),
-			)
-			return workerResult{result: result}
+	if loc, ok := p.locationCache[session.SessionID]; ok && loc.HostSlug != "" && loc.HostSlug != string(hostSlug) {
+		oldDir := SessionDir(outputDir, loc.HostSlug, session.SessionID.String(), loc.ParentID)
+		if _, oldErr := p.fs.Stat(oldDir); oldErr == nil {
+			if _, destinationErr := p.fs.Stat(sessionDir); destinationErr == nil {
+				result.Error = errors.Join(
+					fmt.Errorf("repair session %s project artifacts: destination %s already contains data; remove the conflicting session directory and retry ingest", session.SessionID, sessionDir),
+					p.fs.RemoveAll(tmpDir),
+				)
+				return workerResult{result: result}
+			}
+			if err := p.renameDir(oldDir, sessionDir); err != nil {
+				result.Error = errors.Join(
+					fmt.Errorf("repair session %s project artifacts from %s to %s: %w", session.SessionID, oldDir, sessionDir, err),
+					p.fs.RemoveAll(tmpDir),
+				)
+				return workerResult{result: result}
+			}
 		}
 	}
 
-	// Atomic rename: move temp dir to final location.
+	// Overlay only this session's newly staged files. Existing nested child
+	// artifacts remain in place when a parent is refreshed or re-attributed.
 	// FileSystem.Rename may not move directory contents recursively (MemFS),
 	// so we use a recursive move implementation.
 	if err := p.renameDir(tmpDir, sessionDir); err != nil {
@@ -2343,6 +2348,8 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	return workerResult{
 		result:               result,
 		meta:                 meta,
+		sourceFingerprint:    sourceFingerprint[:],
+		eventSeq:             session.EventSeq,
 		transcriptData:       transcriptData,
 		outputTranscriptPath: outputTranscriptPath,
 		// Carried from the DISCOVERED session, which is the only place it exists.
@@ -2481,6 +2488,8 @@ func sessionFromWorkerResult(wr workerResult) DiscoveredSession {
 // not its contents. For production (OSFileSystem), os.Rename handles everything.
 // We implement a portable recursive move: create dst dir, move files, remove src dir.
 func (p *Pipeline) renameDir(src, dst string) error {
+	_, destinationStatErr := p.fs.Stat(dst)
+	destinationExisted := destinationStatErr == nil
 	// First, ensure dst parent exists.
 	if err := p.fs.MkdirAll(dst, defaults.PrivateDirPerm); err != nil {
 		return fmt.Errorf("renameDir: mkdir %s: %w", dst, err)
@@ -2511,7 +2520,10 @@ func (p *Pipeline) renameDir(src, dst string) error {
 	})
 
 	if walkErr != nil {
-		return errors.Join(walkErr, p.fs.RemoveAll(dst))
+		if !destinationExisted {
+			return errors.Join(walkErr, p.fs.RemoveAll(dst))
+		}
+		return walkErr
 	}
 
 	// Remove src directory tree.

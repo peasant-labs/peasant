@@ -19,6 +19,19 @@ var repositoryIdentityFailureData []byte
 //go:embed testdata/repository_topology_guards.yaml
 var repositoryTopologyGuardData []byte
 
+//go:embed testdata/git_remote_attribution.yaml
+var gitRemoteAttributionData []byte
+
+type gitRemoteAttributionDocument struct {
+	Cases []struct {
+		Name           string `yaml:"name"`
+		RecordedBranch string `yaml:"recordedBranch"`
+		ExplicitRemote string `yaml:"explicitRemote"`
+		WantRemote     string `yaml:"wantRemote"`
+		WantTracking   string `yaml:"wantTracking"`
+	} `yaml:"cases"`
+}
+
 type repositoryIdentityFailureDocument struct {
 	ExpectedCaseCount int                                `yaml:"expectedCaseCount"`
 	Cases             []repositoryIdentityFailureFixture `yaml:"cases"`
@@ -305,6 +318,36 @@ func TestExecGitResolver_RemoteURL(t *testing.T) {
 	want := "git@github.com:testuser/testrepo.git"
 	if got != want {
 		t.Errorf("RemoteURL = %q, want %q", got, want)
+	}
+}
+
+func TestResolveGitRemoteAttribution(t *testing.T) {
+	var fixtures gitRemoteAttributionDocument
+	if err := yaml.Unmarshal(gitRemoteAttributionData, &fixtures); err != nil {
+		t.Fatalf("load git remote attribution fixtures: %v", err)
+	}
+	repoDir := initTestRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("remote", "add", "canonical", "https://github.com/example/live.git")
+	run("branch", "recorded", "HEAD")
+	run("config", "branch.recorded.remote", "canonical")
+	run("config", "branch.recorded.merge", "refs/heads/develop")
+
+	resolver := &ExecGitResolver{}
+	for _, fixture := range fixtures.Cases {
+		t.Run(fixture.Name, func(t *testing.T) {
+			remote, tracking := ResolveGitRemote(t.Context(), resolver, repoDir, fixture.RecordedBranch, fixture.ExplicitRemote)
+			if remote != fixture.WantRemote || tracking != fixture.WantTracking {
+				t.Fatalf("ResolveGitRemote() = (%q, %q), want (%q, %q)", remote, tracking, fixture.WantRemote, fixture.WantTracking)
+			}
+		})
 	}
 }
 

@@ -1,0 +1,11 @@
+cases:
+  - name: recorded branch tracks non-origin
+    recordedBranch: recorded
+    wantRemote: https://github.com/example/live.git
+    wantTracking: canonical/develop
+  - name: checkout falls back to origin
+    wantRemote: git@github.com:testuser/testrepo.git
+  - name: provider remote remains authoritative
+    recordedBranch: recorded
+    explicitRemote: ssh://git@example.test/provider/repository.git
+    wantRemote: ssh://git@example.test/provider/repository.git

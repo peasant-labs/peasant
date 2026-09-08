@@ -1216,6 +1216,9 @@ func (s *StubPushStore) UnpushedSessionsByProvider(_ context.Context, provider s
 func (s *StubPushStore) AllPushableSessions(_ context.Context) ([]ingest.PushSessionRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.AllSessions == nil {
+		return s.Sessions, s.UnpushedErr
+	}
 	return s.AllSessions, s.UnpushedErr
 }
 

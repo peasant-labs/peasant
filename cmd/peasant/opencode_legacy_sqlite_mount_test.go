@@ -515,7 +515,7 @@ func assertMalformedLegacyMaterializationIsActionable(t testing.TB, databasePath
 		if string(session.SessionID) != targetSession {
 			continue
 		}
-		_, _, err = adapter.MaterializeTranscript(context.Background(), session)
+		_, err = adapter.MaterializeTranscript(context.Background(), session)
 		if err == nil || !strings.Contains(err.Error(), "not valid JSON") || !strings.Contains(err.Error(), "no partial") {
 			t.Fatalf("malformed required row diagnostic=%v, want reason, no-partial meaning, location, and remediation", err)
 		}

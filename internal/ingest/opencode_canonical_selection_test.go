@@ -354,7 +354,9 @@ func TestCanonicalOpenCodeSelectionMountedMatrix(t *testing.T) {
 				entriesMarker, _ = json.Marshal(entries)
 			}
 		} else {
-			metadata, entriesMarker, err = adapter.MaterializeTranscript(t.Context(), session)
+			var captured ingest.MaterializedTranscript
+			captured, err = adapter.MaterializeTranscript(t.Context(), session)
+			metadata, entriesMarker = captured.Metadata, captured.Data
 		}
 		if err != nil {
 			t.Errorf("materialize selected session %q: %v", testCase.SessionID, err)

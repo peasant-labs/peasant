@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,6 +23,33 @@ type FileSystem interface {
 	Remove(path string) error
 	RemoveAll(path string) error
 	CopyFile(src, dst string, perm os.FileMode) error
+}
+
+type capturedSourceFileSystem struct {
+	FileSystem
+	path string
+	data []byte
+}
+
+func (f capturedSourceFileSystem) ReadFile(path string) ([]byte, error) {
+	if path == f.path {
+		return append([]byte(nil), f.data...), nil
+	}
+	return f.FileSystem.ReadFile(path)
+}
+
+func completeJSONLPrefix(data []byte) []byte {
+	if len(data) == 0 || data[len(data)-1] == '\n' {
+		return data
+	}
+	lastComplete := bytes.LastIndexByte(data, '\n')
+	if json.Valid(bytes.TrimSpace(data[lastComplete+1:])) {
+		return data
+	}
+	if lastComplete >= 0 {
+		return data[:lastComplete+1]
+	}
+	return nil
 }
 
 // OSFileSystem is the production implementation wrapping os.* calls.

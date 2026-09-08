@@ -137,31 +137,119 @@ func sqliteContentModTime(filesystem FileSystem, databasePath string) (time.Time
 // MaterializeTranscript reads only the selected detached legacy rows and builds
 // the versioned JSON transcript Peasant owns. Database, WAL, and SHM bytes never
 // enter the returned data.
-func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error) {
+func (a *OpenCodeAdapter) MaterializeTranscript(ctx context.Context, session DiscoveredSession) (MaterializedTranscript, error) {
 	if session.TranscriptOrigin == TranscriptOriginOpenCodeCurrentSQLite {
-		return a.materializeCurrentTranscript(ctx, session)
+		currentID, err := NewOpenCodeCurrentSessionID(string(session.SessionID))
+		if err != nil {
+			return MaterializedTranscript{}, err
+		}
+		pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+		if err != nil {
+			return MaterializedTranscript{}, err
+		}
+		var projection openCodeCurrentProjection
+		var unknown map[string]int
+		if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
+			var readErr error
+			session, readErr = capturedOpenCodeSession(ctx, source, session)
+			if readErr != nil {
+				return readErr
+			}
+			projection, unknown, _, readErr = readOpenCodeCurrentProjectionCore(ctx, source, currentID, pageSize, 0, OpenCodePayloadSize{})
+			return readErr
+		}); err != nil {
+			return MaterializedTranscript{}, fmt.Errorf("materialize current OpenCode SQLite session %q failed while reading one captured source view: %w; no managed state was written; retry after the source is readable", session.SessionID, err)
+		}
+		metadata, data, err := a.finishCurrentManagedProjection(ctx, session, projection, unknown)
+		if err != nil {
+			return MaterializedTranscript{}, err
+		}
+		return newMaterializedTranscript(metadata, data, session.EventSeq), nil
 	}
 	if session.TranscriptOrigin != TranscriptOriginOpenCodeLegacySQLite {
-		return nil, nil, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
+		return MaterializedTranscript{}, fmt.Errorf("materialize OpenCode session %q failed before source access: transcript origin %d is not a supported managed OpenCode SQLite origin; no managed state was written; use the file origin for JSON sessions or return a supported typed SQLite origin from discovery", session.SessionID, session.TranscriptOrigin)
 	}
 	legacyID, err := NewOpenCodeLegacySessionID(string(session.SessionID))
 	if err != nil {
-		return nil, nil, err
+		return MaterializedTranscript{}, err
 	}
 	pageSize, err := NewOpenCodeLegacyPageSize(openCodeLegacyMaterializePage)
 	if err != nil {
-		return nil, nil, err
+		return MaterializedTranscript{}, err
 	}
 	var projection openCodeLegacyProjection
 	var dropped []openCodeDroppedOrphanPart
 	if err := a.withOpenCodeSQLiteSource(ctx, session.SourcePath.String(), func(source OpenCodeSQLiteSource) error {
 		var readErr error
+		session, readErr = capturedOpenCodeSession(ctx, source, session)
+		if readErr != nil {
+			return readErr
+		}
 		projection, dropped, readErr = readOpenCodeLegacyProjectionWithDiagnostics(ctx, source, legacyID, pageSize)
 		return readErr
 	}); err != nil {
-		return nil, nil, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
+		return MaterializedTranscript{}, fmt.Errorf("materialize legacy OpenCode SQLite session %q failed while reading selected message/part rows and closing the bounded source: %w; no partial managed artifact or store row was written; fix malformed required row JSON or retry after source locks clear", session.SessionID, err)
 	}
-	return a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+	metadata, data, err := a.finishLegacyManagedProjection(ctx, session, projection, dropped)
+	if err != nil {
+		return MaterializedTranscript{}, err
+	}
+	return newMaterializedTranscript(metadata, data, session.EventSeq), nil
+}
+
+func capturedOpenCodeSession(ctx context.Context, source OpenCodeSQLiteSource, session DiscoveredSession) (DiscoveredSession, error) {
+	pageSize, err := NewOpenCodeCurrentPageSize(openCodeCurrentMaterializePage)
+	if err != nil {
+		return session, err
+	}
+	var cursor *OpenCodeSessionRecordCursor
+	for {
+		page, readErr := source.SessionRecords(ctx, OpenCodeSessionRecordPageRequest{PageSize: pageSize, After: cursor})
+		if readErr != nil {
+			return session, readErr
+		}
+		for _, record := range page.Records {
+			if record.SessionID.String() != string(session.SessionID) {
+				continue
+			}
+			session.Title, session.CWD, session.Agent = record.Title, record.Directory, record.Agent
+			session.Version, session.Slug, session.Cost = record.Version, record.Slug, record.Cost
+			session.TokensIn = int(record.TokensInput)
+			session.TokensOut = int(record.TokensOutput)
+			if record.TimeCreated > 0 {
+				session.CreatedAt = time.UnixMilli(record.TimeCreated)
+			}
+			if record.TimeUpdated > 0 {
+				session.ModTime = time.UnixMilli(record.TimeUpdated)
+			}
+		}
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+	}
+	sequence, err := source.EventSequenceBySession(ctx)
+	if err != nil {
+		return session, err
+	}
+	if sequence.Present {
+		if capturedSeq, ok := sequence.BySession[string(session.SessionID)]; ok {
+			session.EventSeq = capturedSeq
+		}
+	} else {
+		linkID, linkErr := NewOpenCodeSessionLinkID(string(session.SessionID))
+		if linkErr != nil {
+			return session, linkErr
+		}
+		latest, seqErr := source.MaxEventSeq(ctx, linkID)
+		if seqErr != nil {
+			return session, seqErr
+		}
+		if latest.Present {
+			session.EventSeq = latest.Seq
+		}
+	}
+	return session, nil
 }
 
 // finishLegacyManagedProjection encodes a read legacy projection into the
@@ -761,16 +849,21 @@ func (a *OpenCodeAdapter) metadataFromManagedProjection(ctx context.Context, ses
 	}
 	var gitBranch, gitRemote, gitWorktree, gitTracking *string
 	if workDir != "" {
-		if value, gitErr := a.git.Branch(ctx, workDir); gitErr == nil && value != "" {
+		value := session.Branch
+		if value == "" {
+			value, _ = a.git.Branch(ctx, workDir)
+		}
+		if value != "" {
 			gitBranch = &value
 		}
-		if value, gitErr := a.git.RemoteURL(ctx, workDir); gitErr == nil && value != "" {
+		remote, tracking := ResolveGitRemote(ctx, a.git, workDir, value, "")
+		if value := remote; value != "" {
 			gitRemote = &value
 		}
 		if value, gitErr := a.git.Worktree(ctx, workDir); gitErr == nil && value != "" {
 			gitWorktree = &value
 		}
-		if value, gitErr := a.git.TrackingBranch(ctx, workDir); gitErr == nil && value != "" {
+		if value := tracking; value != "" {
 			gitTracking = &value
 		}
 	}

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -26,7 +27,21 @@ type SourceAdapter interface {
 // legacy OpenCode SQLite, where copying database bytes would not produce a
 // transcript.
 type TranscriptMaterializer interface {
-	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
+	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (MaterializedTranscript, error)
+}
+
+// MaterializedTranscript is one captured source view used for metadata,
+// transcript persistence, and durable freshness evidence.
+type MaterializedTranscript struct {
+	Metadata          *UnifiedMetadata
+	Data              []byte
+	SourceFingerprint []byte
+	EventSeq          int64
+}
+
+func newMaterializedTranscript(metadata *UnifiedMetadata, data []byte, eventSeq int64) MaterializedTranscript {
+	fingerprint := sha256.Sum256(data)
+	return MaterializedTranscript{Metadata: metadata, Data: data, SourceFingerprint: fingerprint[:], EventSeq: eventSeq}
 }
 
 // DiscoveryStatistics is an optional capability. An adapter that can report
