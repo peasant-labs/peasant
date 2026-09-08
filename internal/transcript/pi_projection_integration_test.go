@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/peasant-labs/peasant/internal/api"
 	"github.com/peasant-labs/peasant/internal/config"
@@ -55,17 +56,18 @@ type piProjectionEntry struct {
 	NoOwner   bool    `yaml:"no_owner"`
 }
 type piProjectionCase struct {
-	Name             string              `yaml:"name"`
-	Entries          []piProjectionEntry `yaml:"entries"`
-	WantTurns        int                 `yaml:"want_turns"`
-	WantMetadata     int                 `yaml:"want_metadata"`
-	WantScopes       []string            `yaml:"want_scopes"`
-	WantCompleteness []string            `yaml:"want_completeness"`
-	WantCosts        []string            `yaml:"want_costs"`
-	WantContent      string              `yaml:"want_content"`
-	WantNamespace    *string             `yaml:"want_namespace"`
-	Error            string              `yaml:"error"`
-	ProjectionError  string              `yaml:"projection_error"`
+	Name              string              `yaml:"name"`
+	Entries           []piProjectionEntry `yaml:"entries"`
+	WantTurns         int                 `yaml:"want_turns"`
+	WantMetadata      int                 `yaml:"want_metadata"`
+	WantScopes        []string            `yaml:"want_scopes"`
+	WantCompleteness  []string            `yaml:"want_completeness"`
+	WantCosts         []string            `yaml:"want_costs"`
+	WantContent       string              `yaml:"want_content"`
+	WantNamespace     *string             `yaml:"want_namespace"`
+	WantUTCTimestamps bool                `yaml:"want_utc_timestamps"`
+	Error             string              `yaml:"error"`
+	ProjectionError   string              `yaml:"projection_error"`
 }
 
 func TestPiProjectionSQLiteOutbound(t *testing.T) {
@@ -222,6 +224,9 @@ func TestPiProjectionSQLiteOutbound(t *testing.T) {
 				t.Fatal(err)
 			}
 			localDetail := api.SessionToDetail(local)
+			if c.WantUTCTimestamps && (localDetail.StartTime.Location() != time.UTC || localDetail.EndTime.Location() != time.UTC) {
+				t.Fatalf("wire timestamps are not UTC: start=%s end=%s", localDetail.StartTime.Format(time.RFC3339Nano), localDetail.EndTime.Format(time.RFC3339Nano))
+			}
 			exported, err := export.ExportSession(ctx, db, testutil.NewMemFS(), string(sid))
 			if err != nil {
 				t.Fatal(err)

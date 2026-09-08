@@ -8,6 +8,7 @@ cases:
     want_completeness: [unknown]
     want_costs: ['']
     want_namespace: ''
+    want_utc_timestamps: true
   - name: namespace_without_tool_id_rejected
     entries:
       - {id: a, role: assistant, content: response}
