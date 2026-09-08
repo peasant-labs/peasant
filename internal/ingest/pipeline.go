@@ -1993,13 +1993,23 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 	}
 	var rawData []byte
 	var meta *UnifiedMetadata
+	var acquiredEventSeq *int64
 	var err error
 	if session.TranscriptOrigin != TranscriptOriginFile {
 		materializer, ok := adapter.(TranscriptMaterializer)
 		if !ok {
 			return fail(fmt.Errorf("materialize transcript for session %s failed before source access: typed transcript origin %d requires a managed materializer but adapter %T has none; raw database bytes were not read or copied and no managed state was written; use the production OpenCode adapter", session.SessionID, session.TranscriptOrigin, adapter))
 		}
-		meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
+		if captured, ok := adapter.(CursorTranscriptMaterializer); ok {
+			var materialized MaterializedTranscript
+			materialized, err = captured.MaterializeTranscriptWithCursor(ctx, session)
+			meta, rawData, acquiredEventSeq = materialized.Metadata, materialized.Transcript, materialized.EventSeq
+			for _, diagnostic := range materialized.Diagnostics {
+				p.reportDiagnostic(diagnostic)
+			}
+		} else {
+			meta, rawData, err = materializer.MaterializeTranscript(ctx, session)
+		}
 	} else {
 		meta, err = adapter.ExtractMetadata(ctx, session)
 	}
@@ -2260,7 +2270,7 @@ func (p *Pipeline) processSession(ctx context.Context, entry DiffEntry) workerRe
 		}
 		debugFiles[entry.Name()] = data
 	}
-	publication := ArtifactPublication{Artifact: artifact, Observation: observation, DebugFiles: debugFiles}
+	publication := ArtifactPublication{Artifact: artifact, Observation: observation, DebugFiles: debugFiles, EventSeq: acquiredEventSeq}
 	if session.Origin != "" {
 		origin := session.Origin
 		publication.Origin = &origin

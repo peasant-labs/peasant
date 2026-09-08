@@ -86,6 +86,15 @@ identity does not rewrite metadata or advance `DerivedAt`. Native cursor and
 adapter evidence are preserved, not inferred during replay. Dry-run does not
 enter this mutating boundary, and logs-only recovery opens no database.
 
+Native OpenCode materialization can carry an acquired event sequence from the
+same private read-only SQLite snapshot as its transcript. Targeted session and
+project reads verify the normalized discovery attribution consumed by metadata;
+a changed required input preserves the prior artifact for rediscovery. Missing
+optional cursor evidence remains nil and reports a runtime diagnostic, without
+altering committed metadata or erasing previous progress. Explicit zero remains
+distinct from absence. Bounded detached cleanup releases the source transaction
+even when the caller is cancelled; no raw transaction API is exposed.
+
 ---
 
 ## Stage Reference

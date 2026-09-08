@@ -1,0 +1,23 @@
+requiredNames: [acquired-zero-then-newer, changed-attribution-preserves-artifact, missing-cursor-preserves-progress]
+sourceFixture: native-v2-only
+sessionID: ses_3cd91f52effeXd3QAJ54jOyzn1
+setup: |
+  CREATE TABLE event_sequence (aggregate_id TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+  INSERT INTO event_sequence VALUES ('ses_3cd91f52effeXd3QAJ54jOyzn1', 0);
+  CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT, vcs TEXT, name TEXT);
+  CREATE TABLE project_directory (project_id TEXT, directory TEXT, type TEXT);
+  INSERT INTO project VALUES ('cursor-project', '/fixtures/native-root', 'git', 'cursor project');
+  INSERT INTO project_directory VALUES ('cursor-project', '/fixtures/native-project', 'worktree');
+cases:
+  - name: acquired-zero-then-newer
+    change: UPDATE event_sequence SET seq = 9;
+    wantCursor: 9
+  - name: changed-attribution-preserves-artifact
+    change: UPDATE session_v2 SET tokens_input = 121; UPDATE event_sequence SET seq = 9;
+    wantError: true
+    wantCursor: 0
+  - name: missing-cursor-preserves-progress
+    change: DELETE FROM event_sequence;
+    storedCursor: 77
+    wantCursor: 77
+    wantDiagnostic: true

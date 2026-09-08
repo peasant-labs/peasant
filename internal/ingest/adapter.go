@@ -29,6 +29,21 @@ type TranscriptMaterializer interface {
 	MaterializeTranscript(ctx context.Context, session DiscoveredSession) (*UnifiedMetadata, []byte, error)
 }
 
+// MaterializedTranscript carries optional native progress actually acquired
+// with the materialized input. Diagnostics are runtime warnings, not metadata.
+type MaterializedTranscript struct {
+	Metadata    *UnifiedMetadata
+	Transcript  []byte
+	EventSeq    *int64
+	Diagnostics []DiagnosticEntry
+}
+
+// CursorTranscriptMaterializer is optional; callers without it preserve prior
+// cursor evidence instead of treating discovery's earlier observation as read.
+type CursorTranscriptMaterializer interface {
+	MaterializeTranscriptWithCursor(context.Context, DiscoveredSession) (MaterializedTranscript, error)
+}
+
 // DiscoveryStatistics is an optional capability. An adapter that can report
 // what its last Discover actually did implements it; a caller that cares
 // type-asserts for it, exactly as callers already do for ClaudeEvidenceCaching
