@@ -5068,8 +5068,19 @@ func TestPipeline_CommitDetection_Idempotent_SecondRun(t *testing.T) {
 		t.Fatal("Run 1: UpsertedCommits not populated after first run")
 	}
 	store.UpsertedCommits = nil // reset to detect second-run calls
+	// Model the production store's successful consumed-source persistence.
+	stored := store.InsertedEntries[0]
+	store.LocationsByID = map[ingest.SessionID]ingest.SessionLocation{
+		session.SessionID: {
+			HostSlug:                string(stored.Metadata.HostSlug),
+			IngestedMs:              stored.Metadata.Timestamp.Ingested,
+			SchemaVersion:           stored.Metadata.SchemaVersion,
+			SourceEvidenceSupported: true,
+			SourceFingerprint:       stored.SourceFingerprint,
+		},
+	}
 
-	// Second run: session is Unchanged (same source modtime + schema version),
+	// Second run: session is Unchanged (same captured source + schema version),
 	// so EXTRACT+WRITE is skipped. Metadata on disk must remain unchanged.
 	result2, err := pipeline.Run(context.Background())
 	if err != nil {
