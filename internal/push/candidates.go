@@ -68,13 +68,16 @@ func QueryPushCandidates(ctx context.Context, store CandidateStore, q PushCandid
 
 	case q.Method == config.PushMethodBySource:
 		// push.method by-source: iterate over configured providers.
+		if len(q.Sources) == 0 {
+			return nil, nil
+		}
+		rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
+		all, err := store.AllPushableSessions(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("query provider %q: %w", q.Sources[0], err)
+		}
 		var sessions []ingest.PushSessionRow
 		for _, provider := range q.Sources {
-			rec.Count(perf.CounterPushDBReads, 1, perf.UnitCount, nil)
-			all, provErr := store.AllPushableSessions(ctx)
-			if provErr != nil {
-				return nil, fmt.Errorf("query provider %q: %w", provider, provErr)
-			}
 			sessions = append(sessions, filterByProvider(all, provider)...)
 		}
 		return sessions, nil
