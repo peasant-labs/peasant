@@ -72,7 +72,7 @@ selectionStates:
     # The 8 MiB budget stops at the last complete JSONL line. With 128 KiB
     # content plus JSON envelopes this prefix is just below 8 MiB; the notice
     # deliberately reports whole MiB loaded, not the requested budget.
-    wantContains: ["long source preview", "showing the first 7 MiB", "scroll to the bottom to load more"]
+    wantContains: ["inspect the bounded", "showing the first 7 MiB", "bottom to load more"]
   - key: origin-hidden
     query: ""
     # Every marker here is a PREFIX, because the narrower capture splits its
