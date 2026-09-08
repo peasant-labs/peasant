@@ -2361,7 +2361,7 @@ func indexWithSourceKind(
 		}
 		return readFile()
 	case TranscriptSourceFile:
-		if len(transcriptData) > 0 {
+		if transcriptData != nil {
 			return readBytes()
 		}
 		return readFile()
