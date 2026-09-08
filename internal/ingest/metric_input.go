@@ -54,6 +54,15 @@ func (input *MetricInput) Hash() (string, error) {
 func MetricOutputHash(metrics *SessionMetrics) (string, error) {
 	output := metrics.QualityMetrics
 	output.ComputedAt = nil
+	// These established NOT NULL SQLite columns store absent flags as false.
+	// Hash that stored meaning so empty/minimal computations survive a reread.
+	absent := false
+	if output.M7SpecHasExamples == nil {
+		output.M7SpecHasExamples = &absent
+	}
+	if output.M7SpecHasConstraints == nil {
+		output.M7SpecHasConstraints = &absent
+	}
 	data, err := json.Marshal(output)
 	if err != nil {
 		return "", err
