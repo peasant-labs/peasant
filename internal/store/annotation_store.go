@@ -268,6 +268,7 @@ ORDER BY v.created_at DESC`
 	// rejects unknown or user-defined type_ids.
 	sqlListSystemAnnotations = annotationPushRowBase + `
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
   AND COALESCE(ata.state, 'resolved') = 'resolved'` + annotationPushRowQueryTail
 
 	// sqlListSupersededAnnotations returns system-origin retraction candidates.
@@ -276,7 +277,8 @@ ORDER BY v.created_at DESC`
 	// target-loss path relies on the persisted content hash to retract the exact
 	// annotation Village already stored.
 	sqlListSupersededAnnotations = annotationPushRowBase + `
-  AND (v.superseded_by IS NOT NULL OR ata.state = 'superseded')` + annotationPushRowQueryTail
+  AND (v.superseded_by IS NOT NULL OR ata.state = 'superseded'
+       OR EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL))` + annotationPushRowQueryTail
 
 	// sqlFindExistingSessionAnnotation finds the most recent non-superseded annotation
 	// for a given (annotation_type_id, annotator_id, session_id) triple.
@@ -288,6 +290,7 @@ WHERE a.annotation_type_id = ?
   AND a.annotator_id = ?
   AND ts.session_id = ?
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC
 LIMIT 1`
 
@@ -302,6 +305,7 @@ WHERE a.annotation_type_id = ?
   AND te.session_id = ?
   AND te.entry_index = ?
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC
 LIMIT 1`
 
@@ -313,6 +317,7 @@ WHERE ts.session_id IN (%s)
   AND a.annotation_type_id IN (%s)
   AND a.annotator_id IN (%s)
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC`
 
 	sqlPrefetchExistingEntryAnnotationsFmt = `SELECT a.annotation_type_id, a.annotator_id, te.session_id, te.entry_index,
@@ -323,6 +328,7 @@ WHERE te.session_id IN (%s)
   AND a.annotation_type_id IN (%s)
   AND a.annotator_id IN (%s)
   AND a.superseded_by IS NULL
+  AND a.retired_at IS NULL
 ORDER BY a.created_at DESC`
 
 	// sqlSupersedeAnnotation marks an annotation as superseded by another.
@@ -364,6 +370,7 @@ WHERE id = ?`
 FROM annotations_with_target v
 WHERE v.target_session_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetAssociationAnnotationsForSession resolves a normalized association
@@ -376,6 +383,7 @@ JOIN annotation_target_associations ata ON ata.annotation_id = v.id
 JOIN session_commit_associations sca ON sca.association_id = ata.association_id
 WHERE sca.session_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetAllSessionAnnotations returns every non-superseded session-level
@@ -386,6 +394,7 @@ ORDER BY v.created_at DESC`
 FROM annotations_with_target v
 WHERE v.target_session_id IS NOT NULL
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetEntryAnnotationsForSession returns every non-superseded entry-level
@@ -396,6 +405,7 @@ ORDER BY v.created_at DESC`
 FROM annotations_with_target v
 WHERE v.target_entry_session_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	sqlGetAnnotationsForEntry = `SELECT ` + sqlAnnotationViewCols + `
@@ -403,6 +413,7 @@ FROM annotations_with_target v
 WHERE v.target_entry_session_id = ?
   AND v.target_entry_index = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetAnnotationsForProject returns all non-superseded annotations targeting
@@ -411,6 +422,7 @@ ORDER BY v.created_at DESC`
 FROM annotations_with_target v
 WHERE v.target_project_hash = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY v.created_at DESC`
 
 	// sqlGetEffectiveAnnotation uses priority_override ordering:
@@ -421,6 +433,7 @@ JOIN annotation_types t ON t.id = v.annotation_type_id
 WHERE v.target_session_id = ?
   AND v.type_id = ?
   AND v.superseded_by IS NULL
+  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.id = v.id AND a.retired_at IS NOT NULL)
 ORDER BY
   COALESCE(t.priority_override,
     CASE v.annotator_kind
@@ -1447,7 +1460,13 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	defer s.pool.Put(conn)
 
 	txnErr := error(nil)
-	endFn := sqlitex.Transaction(conn)
+	endFn, err := sqlitex.ImmediateTransaction(conn)
+	if err != nil {
+		for i := range results {
+			results[i].Err = err
+		}
+		return results
+	}
 	txnOpen := true
 	defer func() {
 		if txnOpen {
@@ -1463,6 +1482,19 @@ func (s *Store) applyClassifierAnnotationBatches(ctx context.Context, batches []
 	}
 
 	for i, batch := range batches {
+		if batch.Skipped {
+			continue
+		}
+		if batch.Input != nil {
+			results[i].Results, results[i].Err = s.applyCapturedClassifierBatch(conn, batch, stats)
+			if results[i].Err != nil {
+				results[i].Results = classifierAnnotationFailedResults(len(batch.Writes), results[i].Err)
+			}
+			// A captured pass can retire cached rows or roll back its savepoint.
+			// Subsequent batches must resolve dedup against the resulting database.
+			dedupCache = nil
+			continue
+		}
 		if batch.RunState != nil {
 			if err := s.ValidateIndexFormatsOnConn(conn, []schema.SessionID{batch.SessionID}); err != nil {
 				results[i].Err = err

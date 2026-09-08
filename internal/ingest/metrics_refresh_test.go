@@ -29,6 +29,69 @@ type metricsRefreshStore struct {
 
 var _ ingest.MetricsStore = (*metricsRefreshStore)(nil)
 
+func (s *metricsRefreshStore) SaveMetricsForInput(ctx context.Context, input *ingest.MetricInput, value *ingest.SessionMetrics) error {
+	if s.fail {
+		return errors.New("synthetic metric save failure")
+	}
+	return s.Store.SaveMetricsForInput(ctx, input, value)
+}
+
+func TestPersistentHarvestRetriesStoredDownstreamWithoutIndexing(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "metrics.db"), store.WithPoolSize(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	meta := makeReindexMeta(t, testutil.TestSessionUUID, "/synthetic/unavailable/session.jsonl")
+	meta.Project.Hash = testutil.TestProjectHash
+	sid := meta.SessionID
+	if err := db.InsertSessions(t.Context(), []ingest.StoreEntry{{Metadata: meta}}); err != nil {
+		t.Fatal(err)
+	}
+	entry := schema.SessionEntry{SessionID: sid, Harness: meta.ModelHarness, EntryType: ingest.EntryTypeText, Role: ingest.RoleUser}
+	if err := db.IndexSessionEntries(t.Context(), sid, []schema.SessionEntry{entry}); err != nil {
+		t.Fatal(err)
+	}
+	backing := &metricsRefreshStore{Store: db, fail: true}
+	classifier := &testutil.StubSessionClassifier{Err: errors.New("synthetic classifier failure")}
+	config := makePipelineConfig(testOutputDir)
+	// No native or retained files exist. Discovery selection excludes everything;
+	// previously stored sessions still receive the invoked downstream maintenance.
+	config.SessionFilter = func(ingest.DiscoveredSession) bool { return false }
+	pipeline, err := ingest.NewPipeline(testutil.NewMemFS(), testutil.DefaultGitResolver(),
+		map[ingest.Harness]ingest.AdapterFactory{ingest.HarnessClaudeCode: makeStubAdapter(nil, nil)}, config,
+		ingest.WithStore(db), ingest.WithMetricsStore(db), ingest.WithAnalyzer(metrics.NewEngine(backing)), ingest.WithClassifier(classifier))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := pipeline.Run(t.Context())
+	if err != nil || failed.Summary.Indexed != 0 || failed.Summary.Computed != 0 || len(classifier.Annotated) != 0 {
+		t.Fatalf("failed metrics authorized classification or failed harvest: %+v %v", failed, err)
+	}
+	backing.fail = false
+	retried, err := pipeline.Run(t.Context())
+	if err != nil || retried.Summary.Indexed != 0 || retried.Summary.Computed != 1 || len(classifier.Annotated) != 1 {
+		t.Fatalf("stored-only metrics were not retried: %+v %v", retried, err)
+	}
+	before, err := db.GetMetrics(t.Context(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := db.ReadMetricInput(t.Context(), sid, true)
+	if err != nil || !metrics.MetricsCurrentForInput(input) {
+		t.Fatalf("coherent classifier capture did not recognize current default-engine metrics: %v", err)
+	}
+	classifier.Err = nil
+	current, err := pipeline.Run(t.Context())
+	if err != nil || current.Summary.Computed != 0 || len(classifier.Annotated) != 2 {
+		t.Fatalf("classifier-only retry recomputed metrics or skipped classification: %+v %v", current, err)
+	}
+	after, err := db.GetMetrics(t.Context(), sid)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("classifier retry changed proven-current metrics")
+	}
+}
+
 func (s *metricsRefreshStore) SaveMetrics(ctx context.Context, value *ingest.SessionMetrics) error {
 	if s.fail {
 		return errors.New("synthetic metric save failure")

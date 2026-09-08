@@ -13,7 +13,7 @@ import (
 
 const (
 	sqlGetCurrentSessionEntriesHash = `SELECT session_entries_hash FROM sessions WHERE session_id = ?`
-	sqlGetAnnotationRunState        = `SELECT session_id, session_entries_hash, compute_version, classifier_version, annotated_at FROM annotation_run_state WHERE session_id = ?`
+	sqlGetAnnotationRunState        = `SELECT session_id, session_entries_hash, compute_version, classifier_version, annotated_at, metrics_output_hash FROM annotation_run_state WHERE session_id = ?`
 	sqlGetAnnotationRunInputs       = `SELECT
     s.session_id,
     s.session_entries_hash,
@@ -22,18 +22,20 @@ const (
     ars.session_entries_hash,
     ars.compute_version,
     ars.classifier_version,
-    ars.annotated_at
+    ars.annotated_at,
+    ars.metrics_output_hash
 FROM sessions s
 LEFT JOIN session_metrics sm ON sm.session_id = s.session_id
 LEFT JOIN annotation_run_state ars ON ars.session_id = s.session_id
 WHERE s.session_id = ?`
-	sqlSaveAnnotationRunState = `INSERT INTO annotation_run_state (session_id, session_entries_hash, compute_version, classifier_version, annotated_at)
-VALUES (?, ?, ?, ?, ?)
+	sqlSaveAnnotationRunState = `INSERT INTO annotation_run_state (session_id, session_entries_hash, compute_version, classifier_version, annotated_at, metrics_output_hash)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     session_entries_hash = excluded.session_entries_hash,
     compute_version = excluded.compute_version,
     classifier_version = excluded.classifier_version,
-    annotated_at = excluded.annotated_at`
+    annotated_at = excluded.annotated_at,
+    metrics_output_hash = excluded.metrics_output_hash`
 )
 
 func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.SessionID) (_ *ingest.AnnotationRunInputs, retErr error) {
@@ -70,6 +72,7 @@ func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.Ses
 					ComputeVersion:     stmt.ColumnInt(5),
 					ClassifierVersion:  stmt.ColumnInt(6),
 					AnnotatedAt:        time.UnixMilli(stmt.ColumnInt64(7)),
+					MetricsOutputHash:  stmt.ColumnText(8),
 				}
 			}
 			return nil
@@ -77,6 +80,18 @@ func (s *Store) GetAnnotationRunInputs(ctx context.Context, sessionID ingest.Ses
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: get annotation run inputs for %s: %w", sessionID, err)
+	}
+	if inputs != nil {
+		metrics, err := getMetricsOnConn(conn, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if metrics != nil {
+			inputs.MetricsOutputHash, err = ingest.MetricOutputHash(metrics)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return inputs, nil
 }
@@ -129,6 +144,7 @@ func (s *Store) GetAnnotationRunState(ctx context.Context, sessionID ingest.Sess
 				ComputeVersion:     stmt.ColumnInt(2),
 				ClassifierVersion:  stmt.ColumnInt(3),
 				AnnotatedAt:        time.UnixMilli(stmt.ColumnInt64(4)),
+				MetricsOutputHash:  stmt.ColumnText(5),
 			}
 			return nil
 		},
@@ -166,7 +182,7 @@ func saveAnnotationRunStateOnConn(conn *sqlite.Conn, state ingest.AnnotationRunS
 		annotatedAt = time.Now()
 	}
 	if err := sqlitex.ExecuteTransient(conn, sqlSaveAnnotationRunState, &sqlitex.ExecOptions{
-		Args: []any{string(state.SessionID), state.SessionEntriesHash, state.ComputeVersion, state.ClassifierVersion, annotatedAt.UnixMilli()},
+		Args: []any{string(state.SessionID), state.SessionEntriesHash, state.ComputeVersion, state.ClassifierVersion, annotatedAt.UnixMilli(), nullableString(state.MetricsOutputHash)},
 	}); err != nil {
 		return fmt.Errorf("execute annotation_run_state upsert: %w", err)
 	}
