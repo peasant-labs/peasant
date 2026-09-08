@@ -191,7 +191,7 @@ func TestMigrationV53PiPreservesCurrentStore(t *testing.T) {
 			}
 			// Exact canonical membership is schema-owned, not a copied harness count.
 			for _, h := range schema.Harnesses() {
-				if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET model_harness=? WHERE session_id='fixture-session'`, &sqlitex.ExecOptions{Args: []any{string(h)}}); err != nil {
+				if err := sqlitex.ExecuteTransient(conn, `UPDATE sessions SET model_harness=? WHERE session_id=?`, &sqlitex.ExecOptions{Args: []any{string(h), c.FullParent}}); err != nil {
 					t.Fatalf("sessions rejected %s: %v", h, err)
 				}
 				if err := sqlitex.ExecuteTransient(conn, `INSERT INTO daily_summary_harness(date_utc,model_harness) VALUES ('2026-01-02',?)`, &sqlitex.ExecOptions{Args: []any{string(h)}}); err != nil {
